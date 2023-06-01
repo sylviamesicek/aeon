@@ -1,4 +1,5 @@
 using Aeon
+using Aeon.Space
 using StaticArrays
 
 # Main code
@@ -11,13 +12,13 @@ function main()
     func = zeros(count)
 
     for i in eachindex(domain)
-        position = domain.positions[i]
+        position = domain[i].position
         func[i] = sin(position[1]) + cos(position[2])
     end
 
-    vtk = VtkOutput(domain)
-    attach_function!(vtk, "test", func)
-    write_vtk(vtk, "output")
+    writer = DomainWriter{2, Float64}(domain)
+    attrib!(writer, ScalarAttribute("test", func))
+    write_vtk(writer, "output")
 end
 
 main()
