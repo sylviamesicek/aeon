@@ -29,25 +29,25 @@ which undoes the effects of the original transform.
 Base.inv(trans::Transform) = error("Inverse transformation for $(typeof(trans)) has not been defined.")
 
 """
-    transform_derive(trans::Transform, x)
+    jacobian(trans::Transform, x)
 
 Returns a matrix describing how differential on the parameters of `x` flow through to
 the output of the transformation `trans`
 """
-transform_deriv(trans::Transform, x) = error("Differential matrix of transform $trans with input $x has not been defined.")
+jacobian(trans::Transform, x) = error("Differential matrix of transform $trans with input $x has not been defined.")
 
 ########################
 ## Identity ############
 ########################
 
 """
-An Identity transform which acts similarly to the identity function.
+An identity transform which acts similarly to the identity function.
 """
 struct IdentityTransform <: Transform; end
 
 @inline (::IdentityTransform)(x) = x
 @inline Base.inv(trans::IdentityTransform) = trans
-@inline transform_deriv(::IdentityTransform) = I
+@inline jacobian(::IdentityTransform) = I
 
 #######################
 ## Composition ########
@@ -76,10 +76,10 @@ successively applying `trans2` to the coordinate and then `trans`.
 
 Base.inv(trans::ComposedTransform) = inv(trans.t2) ∘ inv(trans.t1)
 
-function transform_deriv(trans::ComposedTransform, x)
+function jacobian(trans::ComposedTransform, x)
     x2 = trans.t2(x)
-    m1 = transform_deriv(trans.t1, x2)
-    m2 = transform_deriv(trans.t2, x)
+    m1 = jacobian(trans.t1, x2)
+    m2 = jacobian(trans.t2, x)
     m1 * m2
 end
 
@@ -102,7 +102,7 @@ Translate(x, y, z) = Translate(SVector(x, y, z))
 
 (trans::Translate{V})(x) where {V} = x + trans.offset
 Base.inv(trans::Translate) = Translate(-trans.offset)
-transform_deriv(trans::Translate, x) = I 
+jacobian(trans::Translate, x) = I 
 
 ∘(trans1::Translate, trans2::Translate) = Translate(trans1.offset + trans2.offset)
 
@@ -121,7 +121,7 @@ end
 (trans::ScaleTransform{F})(x) where {F<:Number} = trans * x 
 (trans::ScaleTransform{F})(x::Tuple) where {F} = trans(SVector(x))
 Base.inv(trans::ScaleTransform) = ScaleTransform(inv(trans.scale))
-transform_deriv(trans::ScaleTransform, x) = trans.scale
+jacobian(trans::ScaleTransform, x) = trans.scale
 
 ∘(t1::ScaleTransform, t2::ScaleTransform) = ScaleTransform(t1.scale * t2.scale)
 ########################
@@ -143,6 +143,6 @@ Base.show(io::IO, trans::LinearTransform) = print(io, "LinearMap($(trans.linear)
 (trans::LinearTransform{M})(x) where {M} = trans.linear * x
 (trans::LinearTransform{M})(x::Tuple) where {M} = trans(SVector(x))
 Base.inv(trans::LinearTransform) = LinearTransform(inv(trans.linear))
-transform_deriv(trans::LinearTransform, x) = trans.linear
+jacobian(trans::LinearTransform, x) = trans.linear
 
 ∘(t1::LinearTransform, t2::LinearTransform) = LinearTransform(t1.linear * t2.linear)

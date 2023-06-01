@@ -6,7 +6,7 @@ struct Grid{S, F}
     max_bound::SVector{S, F}
     cells::SVector{S, UInt}
 
-    function Grid{S, F}(min::SVector{S, F}, max::SVector{S, F}, cells::SVector{S, UInt}) where {S, F}
+    function Grid(min::SVector{S, F}, max::SVector{S, F}, cells::SVector{S, UInt}) where {S, F}
         if all(min .< max)
             return new{S,F}(min, max, cells)
         end
@@ -24,15 +24,12 @@ end
 function mkdomain(grid::Grid{S, F})::Domain{S, F} where {S, F <: Real}
     coords = [LinRange(grid.min_bound[i], grid.max_bound[i], grid.cells[i]) for i in 1:S]
     positions = vec(collect(map(x -> SVector{S, F}(x), Iterators.product(coords...))))
-    domain = Domain{S, F}(positions)
+    domain = Domain(positions)
 
     for i in eachindex(domain)
-        dir = bdirection(grid.min_bound, grid.max_bound, domain[i].position)
+        dir = bdirection(grid.min_bound, grid.max_bound, domain[i])
         if !iszero(dir)
-            position = copy(domain[i].position)
-            meta = domain_meta!(domain, BoundaryMeta(normalize(dir), zero(UInt)))
-
-            domain[i] = Point(position, boundary, meta)
+            domain_boundary!(domain, i, normalize(dir))
         end
     end
 
