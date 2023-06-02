@@ -1,11 +1,21 @@
 using Aeon
 using Aeon.Space
+using Aeon.Engine
+
 using StaticArrays
 
 # Main code
 function main()
-    grid = Grid(SVector(-1.0, -1.0), SVector(1.0, 1.0), SVector{2, UInt}(100, 100))
-    domain = mkdomain(grid)
+    domain = Domain(Grid(SVector(-1.0, -1.0), SVector(1.0, 1.0), SVector{2, UInt}(3, 3)))
+
+    basis = tensor_basis(2, 3)
+    weight = Gaussian(1.0, 1.0)
+
+    mesh = WLSMesh{4}(domain, basis, weight)
+
+    system = meshmatrix(mesh)
+
+    display(system)
 
     # count = length(domain)
 
@@ -15,9 +25,11 @@ function main()
     #     func[i] = domain[i][1]
     # end
 
-    # writer = DomainWriter{2, Float64}(domain)
+    writer = DomainWriter(domain)
     # attrib!(writer, ScalarAttribute("test", func))
-    # write_vtk(writer, "output")
+    attrib!(writer, NormalAttribute())
+    attrib!(writer, IndexAttribute())
+    write_vtk(writer, "output")
 end
 
 main()

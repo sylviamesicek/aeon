@@ -1,46 +1,55 @@
 # Exports
-export DomainWriter, ScalarAttribute, attrib!, write_vtk
+export DomainWriter, ScalarAttribute, NormalAttribute, IndexAttribute, attrib!, write_vtk
 
 # Dependencies
 using WriteVTK
 
 # Code
 
+struct NormalAttribute end
+struct IndexAttribute end
+
 struct ScalarAttribute{F}
     name::String
     values::Vector{F}
 end
 
-struct DomainWriter{S, F}
-    domain::Domain{S, F}
+mutable struct DomainWriter{D, F}
+    const domain::Domain{D, F}
+    normals::Bool
+    indices::Bool
     scalars::Vector{ScalarAttribute{F}}
 end
 
-DomainWriter{S, F}(domain::Domain{S, F}) where {S, F} = DomainWriter{S, F}(domain, Vector{ScalarAttribute{F}}())
+DomainWriter(domain::Domain{D, F}) where {D, F} = DomainWriter{D, F}(domain, false, false, Vector{ScalarAttribute{F}}())
 
 function attrib!(writer::DomainWriter, attrib::ScalarAttribute)
     push!(writer.scalars, attrib)
 end
 
-function write_vtk(writer::DomainWriter{S, F}, filename) where {S, F}
-    count = length(writer.domain)
+function attrib!(writer::DomainWriter, ::NormalAttribute)
+    writer.normals = true
+end
 
-    # Build points matrix
-    points = reduce(hcat, writer.domain.positions)
+function attrib!(writer::DomainWriter, ::IndexAttribute)
+    writer.indices = true
+end
 
-    # Build normal matrix
-    normals = zeros(count, S)
-
-    for i in eachindex(writer.domain.bounds)
-        boundary = writer.domain.bounds[i]
-        for j in 1:S
-            normals[boundary.prev, j] = boundary.normal[j]
-        end
-    end
+function write_vtk(writer::DomainWriter, filename)
+    points = position_array(writer.domain)
 
     # Produce VTK Grid
     vtk_grid(filename, points, Vector{MeshCell}()) do vtk
-        vtk["normals", VTKPointData()] = normals'
+        if writer.normals
+            normals = normal_array(writer.domain)
+            vtk["normals", VTKPointData()] = normals
+        end
+
+        if writer.indices
+            indices = [i for i in eachindex(writer.domain)]
+            vtk["indices", VTKPointData()] = indices
+        end
+        
         # Scalars
         for i in eachindex(writer.scalars)
             scalar = writer.scalars[i]
