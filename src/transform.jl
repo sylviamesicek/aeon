@@ -2,7 +2,8 @@
 ## Exports #############
 ########################
 
-export Transform, IdentityTransform, ComposedTransform, ∘
+export Transform, IdentityTransform, ComposedTransform, ∘, jacobian
+export Translate, ScaleTransform, LinearTransform
 
 ########################
 ## Transform ###########

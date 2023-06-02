@@ -4,8 +4,8 @@ using LinearAlgebra
 using StaticArrays
 
 # Includes
-include("basis.jl")
 include("transform.jl")
+include("analytic.jl")
 
 # Submodules
 include("Space/Space.jl")
