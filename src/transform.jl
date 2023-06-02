@@ -2,7 +2,7 @@
 ## Exports #############
 ########################
 
-export Transform, IdentityTransform, ComposedTransform, ∘, jacobian
+export Transform, IdentityTransform, ComposedTransform, jacobian
 export Translate, ScaleTransform, LinearTransform
 
 ########################
@@ -68,10 +68,10 @@ end
 Take two transformations and create a new transformation which is equivilent to
 successively applying `trans2` to the coordinate and then `trans`.
 """
-∘(trans1::Transform, trans2::Transform) = ComposedTransform(trans1, trans2)
-∘(trans::IdentityTransform, ::IdentityTransform) = trans
-∘(::IdentityTransform, trans::Transform) = trans
-∘(trans::Transform, ::IdentityTransform) = trans
+Base.:(∘)(trans1::Transform, trans2::Transform) = ComposedTransform(trans1, trans2)
+Base.:(∘)(trans::IdentityTransform, ::IdentityTransform) = trans
+Base.:(∘)(::IdentityTransform, trans::Transform) = trans
+Base.:(∘)(trans::Transform, ::IdentityTransform) = trans
 
 (trans::ComposedTransform)(x) = trans.t1(trans.t2(x))
 

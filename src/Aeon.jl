@@ -5,10 +5,9 @@ using StaticArrays
 
 # Includes
 include("transform.jl")
-include("analytic.jl")
-include("basis.jl")
 
 # Submodules
+include("Analytic/Analytic.jl")
 include("Space/Space.jl")
 include("Engine/Engine.jl")
 include("Refine/Refine.jl")
