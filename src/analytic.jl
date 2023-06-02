@@ -5,6 +5,7 @@
 export AnalyticFunction, AnalyticGradient, AnalyticHessian, Basis, gradient, hessian
 export TransformedFunction, TransformedGradient, TransformedHessian, transform
 export Monomial, MonomialGradient, MonomialHessian, tensor_basis
+export Gaussian
 
 ########################
 ## Core Types ##########
@@ -155,12 +156,12 @@ function hessian(monomial::Monomial{S}) where {S}
     MonomialHessian(coefficients, monomial.powers)
 end
 
-function (hes::MonomialHessian{S})(x::AbstractVector{F}) where {S, F}
+function (hess::MonomialHessian{S})(x::AbstractVector{F}) where {S, F}
     hessian::SMatrix{S, S, F} = @SMatrix zeros(S, S)
 
     for i in 1:S
         for j in 1:S
-            for (x, p) in zip(x, hes.powers)
+            for (x, p) in zip(x, hess.powers)
                 sub = convert(UInt, p == i && p != 0) + convert(UInt, p == j && p != 0)
                 hessian[i, j] += x^(p - sub)
             end
@@ -171,3 +172,14 @@ function (hes::MonomialHessian{S})(x::AbstractVector{F}) where {S, F}
 
     hessian
 end
+
+###########################
+## Gausian ################
+###########################
+
+struct Gaussian{F} <: AnalyticFunction
+    amplitude::F
+    simga::F
+end
+
+(gauss::Gaussian)(x) = e^(-dot(x, x)/(gauss.simga * gauss.simga))

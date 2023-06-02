@@ -125,6 +125,7 @@ Base.inv(trans::ScaleTransform) = ScaleTransform(inv(trans.scale))
 jacobian(trans::ScaleTransform, x) = trans.scale
 
 ∘(t1::ScaleTransform, t2::ScaleTransform) = ScaleTransform(t1.scale * t2.scale)
+
 ########################
 ## Linear Transform ####
 ########################
