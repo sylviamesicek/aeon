@@ -2,9 +2,9 @@
 ## Exports #############
 ########################
 
-export AnalyticFunction, AnalyticGradient, AnalyticHessian, Basis, gradient, hessian
+export AnalyticFunction, AnalyticGradient, AnalyticHessian, gradient, hessian
 export TransformedFunction, TransformedGradient, TransformedHessian, transform
-export Monomial, MonomialGradient, MonomialHessian, tensor_basis
+export Monomial, MonomialGradient, MonomialHessian
 export Gaussian
 
 ########################
@@ -27,16 +27,6 @@ abstract type AnalyticGradient end
 abstract type AnalyticHessian end
 
 (hess::AnalyticHessian)(x) = error("Value of Analytic Hessian $(typeof(hess)) is undefined")
-
-"""
-Represents a set of analytic functions to serve as a basis for a function space. 
-"""
-struct Basis{B <: AnalyticFunction}
-    funcs::Vector{B}
-end
-
-Base.length(basis::Basis) = length(basis.funcs)
-Base.getindex(basis::Basis, i) = getindex(basis.funcs, i)
 
 ########################
 ## Transformations #####
@@ -93,16 +83,6 @@ function (monomial::Monomial)(x::AbstractVector{F})::F where  {F}
     end
 
     result
-end
-
-"""
-    tensor_basis(S, order)
-
-Constructs a set of basis vectors for an `S` dimensional space, covering all permuations of monomials up to the given order.
-"""
-function tensor_basis(S, order)
-    orders = Iterators.product([1:order for _ in 1:S]...)
-    BasisFunctions(vec(collect(map((x) -> Monomial{S}(SVector{S, UInt}(x)), orders))))
 end
 
 """
@@ -177,9 +157,12 @@ end
 ## Gausian ################
 ###########################
 
+"""
+A Gaussian distribution function centered at the origin.
+"""
 struct Gaussian{F} <: AnalyticFunction
     amplitude::F
     simga::F
 end
 
-(gauss::Gaussian)(x) = e^(-dot(x, x)/(gauss.simga * gauss.simga))
+(gauss::Gaussian)(x) = gauss.amplitude * e^(-dot(x, x)/(gauss.simga * gauss.simga))

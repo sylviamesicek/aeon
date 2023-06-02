@@ -6,6 +6,7 @@ using StaticArrays
 # Includes
 include("transform.jl")
 include("analytic.jl")
+include("basis.jl")
 
 # Submodules
 include("Space/Space.jl")
