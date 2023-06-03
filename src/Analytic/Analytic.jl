@@ -20,7 +20,7 @@ using Aeon
 ##################
 
 export AnalyticFunction, AnalyticGradient, AnalyticHessian, AnalyticOperator
-export gradient, hessian
+export gradient, hessian, laplacian, ∇, ∇², Δ
 
 ##################
 ## Core Types ####
@@ -59,6 +59,40 @@ Transforms an analytic function into an analytic hessian.
 hessian(func::AnalyticFunction) = error("Hessian of Analytic Function $(typeof(func)) is undefined")
 
 """
+Alternative symbol for gradient operator.
+"""
+const ∇ = gradient
+
+"""
+Alternative symbol for hessian operator.
+"""
+const ∇² = hessian
+
+##########################
+## Laplacian #############
+##########################
+
+struct Laplacian{H} <: AnalyticFunction
+    hess::H
+end
+
+(func::Laplacian)(x::AbstractVector) = dot(func.hess(x), I)
+
+"""
+Transforms an analytic function into an analytic laplacian.
+"""
+laplacian(func::AnalyticFunction) = Laplacian(hessian(func))
+
+"""
+Alternative symbol for laplacian operator.
+"""
+const Δ = laplacian
+
+##########################
+## Operators #############
+##########################
+
+"""
 An analytic operator is a function of Analytic Functions. That is, when applied to a analytic function, it yields a new analytic function.
 """
 abstract type AnalyticOperator end
@@ -74,8 +108,8 @@ include("identity.jl")
 include("gaussian.jl")
 include("monomial.jl")
 include("combine.jl")
-include("scale.jl")
 include("transform.jl")
+include("directional.jl")
 include("unkown.jl")
 
 end
