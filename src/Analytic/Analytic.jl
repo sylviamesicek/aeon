@@ -110,6 +110,6 @@ include("monomial.jl")
 include("combine.jl")
 include("transform.jl")
 include("directional.jl")
-include("unkown.jl")
+include("magic.jl")
 
 end

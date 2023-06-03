@@ -31,10 +31,3 @@ end
 
 gradient(func::ScaledFunction) = ScaledGradient(func.scale, gradient(func.func))
 hessian(func::ScaledFunction) = ScaledHessian(func.scale, hessian(func.func))
-
-struct ScaleOperator{F} <: AnalyticOperator
-    scale::F
-end
-
-(oper::ScaleOperator)(func::AnalyticFunction) = ScaledFunction(oper.scale, func)
-(oper::ScaleOperator)(func::ScaledFunction) = ScaledFunction(oper.scale ∘ func.scale, func.func)

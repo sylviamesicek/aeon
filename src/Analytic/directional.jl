@@ -2,7 +2,7 @@
 ## Exports #########
 ####################
 
-export ValueOperator, GradientOperator, HessianOperator, LaplacianOperator
+export ValueOperator, DerivativeOperator, CurvatureOperator, LaplacianOperator, Directional
 
 ####################
 ## Direction #######
@@ -34,20 +34,20 @@ end
 """
 Represents the directional derivative of an analytic function.
 """
-struct GradientOperator{F} <: AnalyticOperator
+struct DerivativeOperator{F} <: AnalyticOperator
     direction::F
 end
 
-(oper::GradientOperator)(func::AnalyticFunction) = Directional(oper.direction, gradient(func))
+(oper::DerivativeOperator)(func::AnalyticFunction) = Directional(oper.direction, gradient(func))
 
 """
 Represents the directional hessian of an analytic function.
 """
-struct HessianOperator{F} <: AnalyticOperator
+struct CurvatureOperator{F} <: AnalyticOperator
     direction::F
 end
 
-(oper::HessianOperator)(func::AnalyticFunction) = Directional(oper.direction, hessian(func))
+(oper::CurvatureOperator)(func::AnalyticFunction) = Directional(oper.direction, hessian(func))
 
 """
 Represents applying a flat laplacian to an analytic function

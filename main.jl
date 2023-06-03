@@ -3,6 +3,7 @@ using Aeon.Analytic
 using Aeon.Space
 using Aeon.Engine
 
+using LinearAlgebra
 using StaticArrays
 
 # Main code
@@ -32,7 +33,9 @@ function main()
     # attrib!(writer, IndexAttribute())
     # write_vtk(writer, "output")
 
-    
+    x = unknown()
+
+    display(2x + SVector(1.0, 1.0) ⋅ ∇(x) + Δ(x))
 end
 
 main()
