@@ -12,7 +12,10 @@ using Aeon.Analytic
 using Aeon.Method
 
 ################
-## Core ########
+## Includes ####
 ################
+
+include("cubetree.jl")
+include("mesh.jl")
 
 end

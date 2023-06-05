@@ -5,7 +5,6 @@ using StaticArrays
 
 # Includes
 include("splitarray.jl")
-include("stree.jl")
 include("transform.jl")
 
 # Submodules
