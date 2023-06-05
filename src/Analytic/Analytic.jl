@@ -1,7 +1,8 @@
 export Analytic
 
 """
-Module for manipulating analytic functions.
+A module for manipulating analytic functions and operators. This is used to model partial differential equations in a intuitive and readable syntax.
+Using multiple dispatch, such kernals may then be compiled into efficient and ergonomic code for manipulating basis functions.
 """
 module Analytic
 
@@ -109,7 +110,7 @@ include("gaussian.jl")
 include("monomial.jl")
 include("combine.jl")
 include("transform.jl")
-include("directional.jl")
+include("functional.jl")
 include("magic.jl")
 
 end

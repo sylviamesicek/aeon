@@ -20,7 +20,7 @@ end
 function (monomial::Monomial)(x::AbstractVector{F}) where  {F}
     result = zero(F)
 
-    for (x, p) in zip(x, monomials.powers)
+    for (x, p) in zip(x, monomial.powers)
         result += x ^ p
     end
 
@@ -38,19 +38,20 @@ function gradient(monomial::Monomial)
     MonomialGradient(monomial.powers)
 end
 
+function power(monomial::MonomialGradient{S}, x::AbstractVector{F}, i::Int) where {S, F}
+    result = zero(F)
+
+    for (x, p) in zip(x, monomial.powers)
+        sub = convert(UInt, p == i && p != 0)
+        result += x^(p - sub)
+    end
+
+    result
+end
+
 function (monomial::MonomialGradient{S})(x::AbstractVector{F}) where {S, F}
-    grad::SVector{S, F} = @SVector zeros(S)
-
-    for i in 1:S
-        for (x, p) in zip(x, monomials.powers)
-            sub = convert(UInt, p == i && p != 0)
-            grad[i] += x^(p - sub)
-        end
-    end 
-
-    grad .*= monomial.powers
-
-    grad
+    # Iterate through the powers, and collect this into a staticly sized SVector gradient
+    SVector{S, F}([power(monomial, x, i) for i in 1:S]) .* monomial.powers
 end
 
 """
@@ -61,36 +62,28 @@ struct MonomialHessian{S} <: AnalyticHessian
     powers::SVector{S, UInt}
 end
 
-function hessian(monomial::Monomial{S}) where {S}
-    coefficients::SMatrix{S, S, F} = @SMatrix zeros(S, S)
-
-    for i in 1:S
-        for j in 1:S
-            if i == j
-                power = monomial.powers[i]
-                coefficients[i, i] = power > 1 ? power * (power - 1) : 0
-            else
-                coefficients[i, j] = monomial.powers[i] * monomial.powers[j]
-            end
-        end
+function coefficient(monomial::MonomialHessian{S}, i::Int, j::Int) where {S}
+    if i == j
+        power = monomial.powers[i]
+        return power > 1 ? power * (power - 1) : 0
+    else
+        return monomial.powers[i] * monomial.powers[j]
     end
-
-    MonomialHessian(coefficients, monomial.powers)
 end
 
-function (hess::MonomialHessian{S})(x::AbstractVector{F}) where {S, F}
-    hessian::SMatrix{S, S, F} = @SMatrix zeros(S, S)
+function hessian(monomial::Monomial{S}) where {S}
+    MonomialHessian(StaticArrays.sacollect(SMatrix{S, S, F}, coefficient(monomial, i, j) for i in 1:S, j in 1:S), monomial.powers)
+end
 
-    for i in 1:S
-        for j in 1:S
-            for (x, p) in zip(x, hess.powers)
-                sub = convert(UInt, p == i && p != 0) + convert(UInt, p == j && p != 0)
-                hessian[i, j] += x^(p - sub)
-            end
-        end 
-    end 
+function power(monomial::MonomialHessian{S}, x::AbstractVector{F}, i::Int, j::Int) where {S, F}
+    result = zero(F)
+    for (x, p) in zip(x, monomial.powers)
+        sub = convert(UInt, p == i && p != 0) + convert(UInt, p == j && p != 0)
+        result += x^(p - sub)
+    end
+    result
+end
 
-    hessian .*= hes.coefficients
-
-    hessian
+function (monomial::MonomialHessian{S})(x::AbstractVector{F}) where {S, F}
+    SMatrix{S, S, F}([power(monomial, x, i, j) for i in 1:S, j in 1:S]) .* monomial.coefficients
 end
