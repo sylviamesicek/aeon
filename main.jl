@@ -1,6 +1,5 @@
 using Aeon
 using Aeon.Analytic
-using Aeon.Space
 using Aeon.Method
 
 using LinearAlgebra
