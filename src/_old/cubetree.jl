@@ -1,4 +1,7 @@
-# Exports
+#####################
+## Exports ##########
+#####################
+
 export CubeTree
 export isleaf, children, parent, center, vertices
 export alltrees, allleaves, allparents, findleaf, split!
@@ -9,8 +12,7 @@ export alltrees, allleaves, allparents, findleaf, split!
 
 mutable struct CubeTree{N, T, L, Data}
     origin::SVector{N, T}
-    width::SVector{N, T}
-    center::SVector{N, T}
+    width::T
     data::Data
     children::Union{SplitArray{N, CubeTree{N, T, L, Data}, L}, Nothing}
     parent::Union{CubeTree{N, T, L, Data}, Nothing}
@@ -18,19 +20,19 @@ mutable struct CubeTree{N, T, L, Data}
 end
 
 function CubeTree(origin::SVector{N, T}, width::SVector{N, T}, data::Data) where {N, T, Data}
-    CubeTree{N, T, 2^N, Data}(origin, width, origin + 0.5 * width, data, nothing, 0)
+    CubeTree{N, T, 2^N, Data}(origin, width, data, nothing, 0)
 end
 
 @inline isleaf(tree::CubeTree) = tree.children === nothing
 @inline children(tree::CubeTree) = tree.children
 @inline parent(tree::CubeTree) = tree.parent
-@inline center(tree::CubeTree) = tree.center
+@inline center(tree::CubeTree) = tree.origin .+ tree.width/2
 
 @generated function vertices(tree::CubeTree{N}) where N
     verts = Expr[]
     for I in CartesianIndices(tuple([2 for _ in 1:N]...))
         push!(verts,
-            Expr(:call, :SVector, [I[i] == 1 ? :(tree.origin[$i]) : :(tree.origin[$i] + tree.width[$i]) for i in 1:N]...)
+            Expr(:call, :SVector, [I[i] == 1 ? :(tree.origin[$i]) : :(tree.origin[$i] .+ tree.width[$i]) for i in 1:N]...)
         )
     end
     Expr(:call, :SplitArray, verts...)
@@ -92,10 +94,12 @@ split!(tree::CubeTree, child_data_function::Function) = split!(tree, map_childre
                 return tree
             end
             length(point) == $N || throw(DimensionMismatch("expected a point of length $N"))
-            @inbounds tree = $(Expr(:ref, :tree, [:(ifelse(point[$i] >= tree.center[$i], 2, 1)) for i in 1:N]...))
+            @inbounds tree = $(Expr(:ref, :tree, [:(ifelse(point[$i] >= center(tree)[$i], 2, 1)) for i in 1:N]...))
         end
     end
 end
+
+child_indices(::CubeTree{N, T, L, Data}) where {Data, N, T, L} = child_indices(Val(N))
 
 ##############################
 ## Implementation ############
@@ -107,8 +111,6 @@ end
     )
 end
 
-child_indices(::CubeTree{N, T, L, Data}) where {Data, N, T, L} = child_indices(Val(N))
-
 @generated function child_indices(::Val{N}) where N
     Expr(:call, :SplitArray, 
         Expr(:tuple, [I.I for I in CartesianIndices(ntuple(_ -> 2, Val(N)))]...)
@@ -116,10 +118,10 @@ child_indices(::CubeTree{N, T, L, Data}) where {Data, N, T, L} = child_indices(V
 end
 
 function build_child(tree::CubeTree, indices, data)
-    half_widths = tree.width ./ 2
-    origin = tree.origin .+ (SVector(indices) .- 1) .* half_widths
+    half_width = tree.width / 2
+    origin = tree.origin .+ (SVector(indices) .- 1) .* half_width
 
-    CubeTree(origin, half_widths, data)
+    CubeTree(origin, half_width, data)
 end
 
 function split!_impl(::Type{C}, child_data, ::Val{N}) where {C <: CubeTree, N}
@@ -134,3 +136,4 @@ function split!_impl(::Type{C}, child_data, ::Val{N}) where {C <: CubeTree, N}
         tree
     end
 end
+
