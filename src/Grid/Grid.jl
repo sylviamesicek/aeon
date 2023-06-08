@@ -15,8 +15,7 @@ using Aeon.Method
 ## Includes ####
 ################
 
-include("vertex.jl")
-include("mesh.jl")
-include("writer.jl")
+include("node.jl")
+include("method.jl")
 
 end
