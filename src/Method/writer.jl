@@ -1,5 +1,5 @@
 # Exports
-export MeshWriter, ScalarAttribute, IndexAttribute, attrib!, write_vtk
+export MeshWriter, ScalarAttribute, IndexAttribute, KindAttribute, attrib!, write_vtk
 
 # Dependencies
 using WriteVTK
@@ -8,6 +8,7 @@ using WriteVTK
 
 struct NormalAttribute end
 struct IndexAttribute end
+struct KindAttribute end
 
 struct ScalarAttribute{T}
     name::String
@@ -17,13 +18,14 @@ end
 mutable struct MeshWriter{N, T}
     mesh::Mesh{N, T}
     indices::Bool
+    kinds::Bool
     scalars::Vector{ScalarAttribute{T}}
 end
 
-MeshWriter(mesh::Mesh{N, T}) where {N, T} = MeshWriter{N, T}(mesh, false, Vector{ScalarAttribute{T}}())
+MeshWriter(mesh::Mesh{N, T}) where {N, T} = MeshWriter{N, T}(mesh, false, false, Vector{ScalarAttribute{T}}())
 
 function attrib!(writer::MeshWriter, attrib::ScalarAttribute)
-    if length(attrib.values) != length(writer.level)
+    if length(attrib.values) != length(writer.mesh)
         error("Scalar Attribute length $(length(attrib.values)) does not match with length of Level $(length(writer.level))")
     end
 
@@ -34,14 +36,23 @@ function attrib!(writer::MeshWriter, ::IndexAttribute)
     writer.indices = true
 end
 
+function attrib!(writer::MeshWriter, ::KindAttribute)
+    writer.kinds = true
+end
+
 function write_vtk(writer::MeshWriter, filename)
     positions = position_array(writer.mesh)
 
     # Produce VTK Grid
     vtk_grid(filename, positions, Vector{MeshCell}()) do vtk
         if writer.indices
-            indices = [i for i in eachindex(writer.grid)]
+            indices = [i for i in eachindex(writer.mesh)]
             vtk["builtin:indices", VTKPointData()] = indices
+        end
+
+        if writer.kinds
+            kinds = collect(map(Integer, writer.mesh.kinds))
+            vtk["builtin:kinds", VTKPointData()] = kinds
         end
         
         # Scalars
@@ -53,11 +64,13 @@ function write_vtk(writer::MeshWriter, filename)
 end
 
 function position_array(mesh::Mesh{N, T}) where {N, T}
-    matrix = Matrix{T}(N, length(mesh))
+    matrix = Matrix{T}(undef, N, length(mesh))
 
     for j in eachindex(mesh)
         for i in 1:N
             matrix[i, j] = mesh.positions[j][i]
         end
     end
+
+    matrix
 end

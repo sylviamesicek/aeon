@@ -2,7 +2,9 @@
 ## Exports ##############
 #########################
 
-export NodeKind, Mesh
+export Mesh, kind, nodeindices
+export NodeKind, interior, boundary, ghost, constraint
+
 
 #########################
 ## Mesh #################
@@ -17,7 +19,7 @@ struct Mesh{N, T}
     positions::Vector{SVector{N, T}}
     kinds::Vector{NodeKind}
 
-    function Mesh{N}(positions::Vector{SVector{N, T}}, kinds::Vector{NodeKind}) where{N, T}
+    function Mesh(positions::Vector{SVector{N, T}}, kinds::Vector{NodeKind}) where{N, T}
         if length(positions) ≠ length(kinds)
             error("Position matrix length must equal the length of the kinds vector.")
         end
@@ -30,3 +32,19 @@ Base.length(mesh::Mesh) = length(mesh.positions)
 Base.eachindex(mesh::Mesh) = eachindex(mesh.kinds)
 Base.getindex(mesh::Mesh, i) = mesh.positions[i]
 Base.similar(mesh::Mesh{N, T}) where {N, T} = Vector{T}(undef, length(mesh))
+
+function kind(mesh::Mesh, i)
+    mesh.kinds[i]
+end
+
+function nodeindices(mesh::Mesh, kind::NodeKind)
+    nodes = Vector{Int}()
+
+    for i in eachindex(mesh)
+        if kind(mesh, i) == kind
+            push!(nodes, i)
+        end
+    end
+
+    nodes
+end

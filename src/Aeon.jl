@@ -11,6 +11,5 @@ include("transform.jl")
 include("Analytic/Analytic.jl")
 include("Method/Method.jl")
 include("Grid/Grid.jl")
-include("Refine/Refine.jl")
 
 end
