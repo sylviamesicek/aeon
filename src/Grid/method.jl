@@ -62,7 +62,13 @@ struct GridMethod{N, T}
             if any(I .< supportradius + 1) || any(I .> (dims .+ supportradius))
                 if all((C .== (supportradius + 1)) .|| (C .== (dims .+ supportradius)))
                     # Is on corner
-                    kinds[gi] = constraint
+
+                    off = broadcast(abs, C - I)
+                    if all(off[1] .== off)
+                        kinds[gi] = ghost
+                    else
+                        kinds[gi] = constraint
+                    end
                 else
                     kinds[gi] = ghost
                 end

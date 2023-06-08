@@ -8,10 +8,8 @@ using StaticArrays
 
 # Main code
 function main()
-    method = GridMethod(SVector(0.0, 0.0), 1.0, SVector(4, 4), 2)
+    method = GridMethod(SVector(0.0, 0.0), 1.0, SVector(8, 8), 2)
     mesh = finest(method)
-
-    @show mesh
 
     field = similar(mesh)
 
