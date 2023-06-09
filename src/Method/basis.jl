@@ -2,7 +2,6 @@
 ## Exports #########
 ####################
 
-export Basis, tensor_basis
 
 ####################
 ## Core Types ######

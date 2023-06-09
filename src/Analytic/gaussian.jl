@@ -11,11 +11,28 @@ export Gaussian
 """
 A Gaussian distribution function centered at the origin.
 """
-struct Gaussian{F} <: AnalyticFunction
-    amplitude::F
-    simga::F
+struct Gaussian{N, T} <: AnalyticField{N, T, 0}
+    simga::T
 
-    Gaussian(amplitude::F, sigma::F) where {F} = new{F}(amplitude, sigma)
+    Gaussian{N}(sigma::T) where {N, T} = new{N, T}(sigma)
 end
 
-(gauss::Gaussian)(x::AbstractVector) = gauss.amplitude * ℯ^(-dot(x, x)/(gauss.simga * gauss.simga))
+function (gauss::Gaussian{N, T})(x::SVector{N, T}) where {N, T}
+    power = -dot(x, x)/(gauss.simga * gauss.simga)
+    return ℯ^power
+end
+
+
+struct GaussianGradient{N, T} <: AnalyticField{N, T, 1}
+    simga::T
+
+    GaussianGradient{N}(sigma::T) where {N, T} = new{N, T}(sigma)
+end
+
+(::GradientOperator)(gauss::Gaussian) = GaussianGradient(gauss.simga)
+
+function (gauss::GaussianGradient{N, T})(x::SVector{N, T}) where {N, T}
+    power = -dot(x, x)/(gauss.simga * gauss.simga)
+    scale = 1/(gauss.simga * gauss.simga) * ℯ^power
+    return -scale * x
+end

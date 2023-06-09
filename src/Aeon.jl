@@ -9,7 +9,7 @@ include("transform.jl")
 
 # Submodules
 include("Analytic/Analytic.jl")
-include("Method/Method.jl")
-include("Grid/Grid.jl")
+# include("Method/Method.jl")
+# include("Grid/Grid.jl")
 
 end

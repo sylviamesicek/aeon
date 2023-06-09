@@ -13,11 +13,15 @@ Represents a monomial term, ie a combination of powers of each coordinate. For i
 Each monomial term is an N-Vector containing the power of that component. 
 For instance x z^2 is represented as [1, 0, 2].
 """
-struct Monomial{S} <: AnalyticFunction
-    powers::SVector{S, UInt}
+struct Monomial{N, T} <: AnalyticField{N, T, 0}
+    powers::SVector{N, Int}
+
+    Monomial{T}(powers::SVector{N, Int}) where {N, T} = new{N, T}(powers)
 end
 
-function (monomial::Monomial)(x::AbstractVector{F}) where  {F}
+Monomial{T}(powers::Int...) where T = Monomial{T}(SVector(powers...))
+
+function (monomial::Monomial{N, T})(x::SVector{N, T}) where {N, T}
     result = zero(F)
 
     for (x, p) in zip(x, monomial.powers)
@@ -27,42 +31,47 @@ function (monomial::Monomial)(x::AbstractVector{F}) where  {F}
     result
 end
 
+#######################
+## Gradient ###########
+#######################
+
 """
-`Gradient` applied to a monomial function.
+`GradientOperator` applied to a monomial function.
 """
-struct MonomialGradient{S} <: AnalyticGradient
-    powers::SVector{S, UInt}
+struct MonomialGradient{N, T} <: AnalyticField{N, T, 1}
+    powers::SVector{N, Int}
 end
 
-function gradient(monomial::Monomial)
-    MonomialGradient(monomial.powers)
-end
+(::GradientOperator)(field::Monomial{N, T}) where {N, T} = MonomialGradient{N, T}(field.powers)
 
-function power(monomial::MonomialGradient{S}, x::AbstractVector{F}, i::Int) where {S, F}
+function power(monomial::MonomialGradient{N, T}, x::SVector{N, T}, i::Int) where {N, T}
     result = zero(F)
 
     for (x, p) in zip(x, monomial.powers)
-        sub = convert(UInt, p == i && p != 0)
+        sub = convert(Int, p == i && p != 0)
         result += x^(p - sub)
     end
 
     result
 end
 
-function (monomial::MonomialGradient{S})(x::AbstractVector{F}) where {S, F}
-    # Iterate through the powers, and collect this into a staticly sized SVector gradient
-    SVector{S, F}([power(monomial, x, i) for i in 1:S]) .* monomial.powers
+function (monomial::MonomialGradient{N, T})(x::SVector{N, T}) where {N, T}
+    sacollect(SVector{N, T}, power(monomial, x, i) for i in 1:S)
 end
+
+#########################
+## Hessian ##############
+#########################
 
 """
 `Hessian` applied to a monomial function.
 """
-struct MonomialHessian{S} <: AnalyticHessian
-    coefficients::SMatrix{S, S, UInt}
-    powers::SVector{S, UInt}
+struct MonomialHessian{N, T, S} <: AnalyticField{N, T, 2}
+    coefficients::SMatrix{N, N, Int, S}
+    powers::SVector{N, Int}
 end
 
-function coefficient(monomial::MonomialHessian{S}, i::Int, j::Int) where {S}
+function coefficient(monomial::MonomialHessian, i::Int, j::Int)
     if i == j
         power = monomial.powers[i]
         return power > 1 ? power * (power - 1) : 0
@@ -71,19 +80,17 @@ function coefficient(monomial::MonomialHessian{S}, i::Int, j::Int) where {S}
     end
 end
 
-function hessian(monomial::Monomial{S}) where {S}
-    MonomialHessian(StaticArrays.sacollect(SMatrix{S, S, F}, coefficient(monomial, i, j) for i in 1:S, j in 1:S), monomial.powers)
-end
-
-function power(monomial::MonomialHessian{S}, x::AbstractVector{F}, i::Int, j::Int) where {S, F}
-    result = zero(F)
+function power(monomial::MonomialHessian{N, T}, x::SVector{N, T}, i::Int, j::Int) where {N, T}
+    result = zero(T)
     for (x, p) in zip(x, monomial.powers)
-        sub = convert(UInt, p == i && p != 0) + convert(UInt, p == j && p != 0)
+        sub = convert(Int, p == i && p != 0) + convert(Int, p == j && p != 0)
         result += x^(p - sub)
     end
     result
 end
 
-function (monomial::MonomialHessian{S})(x::AbstractVector{F}) where {S, F}
-    SMatrix{S, S, F}([power(monomial, x, i, j) for i in 1:S, j in 1:S]) .* monomial.coefficients
+(::HessianOperator)(monomial::Monomial{N, T}) where {N, T} = MonomialHessian{N, T}(sacollect(SMatrix{N, N, Int, N*N}, coefficient(monomial, i, j) for i in 1:S, j in 1:S), monomial.powers)
+
+function (monomial::MonomialHessian{N, T})(x::SVector{N, T}) where {N, T}
+    sacollect(SMatrix{N, N, T, N*N}, power(monomial, x, i, j) for i in 1:N, j in 1:N) .* monomial.coefficients
 end
