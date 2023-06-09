@@ -20,9 +20,7 @@ struct Mesh{N, T}
     kinds::Vector{NodeKind}
 
     function Mesh(positions::Vector{SVector{N, T}}, kinds::Vector{NodeKind}) where{N, T}
-        if length(positions) ≠ length(kinds)
-            error("Position matrix length must equal the length of the kinds vector.")
-        end
+        @assert length(positions) == length(kinds)
 
         new{N, T}(positions, kinds)
     end

@@ -1,5 +1,5 @@
 # Exports
-export MeshWriter, ScalarAttribute, IndexAttribute, KindAttribute, attrib!, write_vtk
+export MeshWriter, ScalarAttribute, IndexAttribute, KindAttribute, IntAttribute, attrib!, write_vtk
 
 # Dependencies
 using WriteVTK
@@ -15,14 +15,20 @@ struct ScalarAttribute{T}
     values::Vector{T}
 end
 
+struct IntAttribute
+    name::String
+    values::Vector{Int}
+end
+
 mutable struct MeshWriter{N, T}
     mesh::Mesh{N, T}
     indices::Bool
     kinds::Bool
     scalars::Vector{ScalarAttribute{T}}
+    ints::Vector{IntAttribute}
 end
 
-MeshWriter(mesh::Mesh{N, T}) where {N, T} = MeshWriter{N, T}(mesh, false, false, Vector{ScalarAttribute{T}}())
+MeshWriter(mesh::Mesh{N, T}) where {N, T} = MeshWriter{N, T}(mesh, false, false, Vector{ScalarAttribute{T}}(), Vector{IntAttribute}())
 
 function attrib!(writer::MeshWriter, attrib::ScalarAttribute)
     if length(attrib.values) != length(writer.mesh)
@@ -30,6 +36,14 @@ function attrib!(writer::MeshWriter, attrib::ScalarAttribute)
     end
 
     push!(writer.scalars, attrib)
+end
+
+function attrib!(writer::MeshWriter, attrib::IntAttribute)
+    if length(attrib.values) != length(writer.mesh)
+        error("Scalar Attribute length $(length(attrib.values)) does not match with length of Level $(length(writer.level))")
+    end
+
+    push!(writer.ints, attrib)
 end
 
 function attrib!(writer::MeshWriter, ::IndexAttribute)
@@ -58,6 +72,12 @@ function write_vtk(writer::MeshWriter, filename)
         # Scalars
         for i in eachindex(writer.scalars)
             scalar = writer.scalars[i]
+            vtk[scalar.name, VTKPointData()] = scalar.values
+        end
+
+        # Ints
+        for i in eachindex(writer.ints)
+            scalar = writer.ints[i]
             vtk[scalar.name, VTKPointData()] = scalar.values
         end
     end

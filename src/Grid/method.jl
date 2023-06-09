@@ -13,6 +13,8 @@ struct GridLevel{N, T}
     mesh::Mesh{N, T}
     # A matrix of support indicies. Each column cooresponds to a node in this grid level.
     supports::Matrix{Int}
+    # A Vector of meta values for each node. This is currently used to store the type of constraint.
+    meta::Vector{Int}
     # The scale of each node.
     scales::Vector{T}
     # Nodes 1:prevlevel belong to the previous level of refinement.
@@ -23,12 +25,15 @@ struct GridMethod{N, T}
     levels::Vector{GridLevel{N, T}}
 
     function GridMethod(origin::SVector{N, T}, width::T, dims::SVector{N, Int}, supportradius::Int) where {N, T}
+        @assert N > 0 "Number of dimensions must be greater than 0"
+
         # Increment dims to account for origin row/column
         dims .+ 1
-        supportwidth = supportradius + 1
+        supportwidth = 2supportradius + 1
 
         gdims = Tuple(dims .+ 2supportradius)
         ldims = ([supportwidth for i in 1:N]...,)
+        rdims = ([2supportwidth - 1 for i in 1:N]...,)
 
         ncount = prod(gdims)
         scount = prod(ldims)
@@ -36,53 +41,61 @@ struct GridMethod{N, T}
         positions = Vector{SVector{N, T}}(undef, ncount)
         kinds = Vector{NodeKind}(undef, ncount)
         supports = Matrix{T}(undef, scount, ncount)
+        meta = Vector{Int}(undef, ncount)
+        fill!(meta, 0)
 
         glinear = LinearIndices(gdims)
         llinear = LinearIndices(ldims)
+        rlinear = LinearIndices(rdims)
 
         gcoords = CartesianIndices(gdims)
         lcoords = CartesianIndices(ldims)
 
         for ICart in gcoords
-            I = SVector{N, Int}(Tuple(ICart))
+            gcoord = SVector{N, Int}(Tuple(ICart))
 
             # Clamped Cartesian index
-            C = SVector{N, Int}(map_tuple_with_index(Tuple(I)) do x, i
+            gcoord_clamped = SVector{N, Int}(map_tuple_with_index(Tuple(gcoord)) do x, i
                 clamp(x, supportradius + 1, dims[i] + supportradius)
             end)
 
             # Linear Indices
-            gi::Int = glinear[I...]
+            gi::Int = glinear[gcoord...]
 
-            offset = SVector{N, T}(I .- supportradius .- 1)
+            offset = SVector{N, T}(gcoord .- supportradius .- 1)
 
             # Because of ghost nodes, origin is not the corner of the hyper-rectangle
             positions[gi] = SVector{N, T}(origin + offset * width)
 
-            if any(I .< supportradius + 1) || any(I .> (dims .+ supportradius))
-                if all((C .== (supportradius + 1)) .|| (C .== (dims .+ supportradius)))
-                    # Is on corner
-
-                    off = broadcast(abs, C - I)
+            if any(gcoord .≠ gcoord_clamped)
+                # This is in a ghost region
+                if all((gcoord_clamped .== (supportradius + 1)) .|| (gcoord_clamped .== (dims .+ supportradius)))
+                    # This is on a corner
+                    off = broadcast(abs, gcoord_clamped - gcoord)
                     if all(off[1] .== off)
                         kinds[gi] = ghost
                     else
                         kinds[gi] = constraint
+
+                        coordorigin = gcoord_clamped .- supportradius
+                        rcoord = 2(gcoord - coordorigin) .+ 1
+
+                        meta[gi] = rlinear[rcoord...]
                     end
                 else
                     kinds[gi] = ghost
                 end
-            elseif any(I .== (supportradius + 1)) || any(I .== (dims .+ supportradius))
+            elseif any(gcoord .== (supportradius + 1)) || any(gcoord .== (dims .+ supportradius))
                 kinds[gi] = boundary
             else
                 kinds[gi] = interior
             end
 
-            for SCart in lcoords
-                S = SVector{N, Int}(Tuple(SCart))
-                li = llinear[S...]
-                G = C + S .- (supportradius + 1)
-                supports[li, gi] = glinear[G...]
+            for LCart in lcoords
+                lcoord = SVector{N, Int}(Tuple(LCart))
+                li = llinear[lcoord...]
+                local_to_global_coord = gcoord_clamped + lcoord .- (supportradius + 1)
+                supports[li, gi] = glinear[local_to_global_coord...]
             end
         end
 
@@ -91,7 +104,7 @@ struct GridMethod{N, T}
         scales = Vector{T}(undef, ncount)
         fill!(scales, width)
 
-        level = GridLevel{N, T}(mesh, supports, scales, 0)
+        level = GridLevel{N, T}(mesh, supports, meta, scales, 0)
 
         new{N, T}([level])
     end
