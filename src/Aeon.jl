@@ -1,12 +1,7 @@
 module Aeon
 
-using LinearAlgebra
-using StaticArrays
-
-# Includes
-include("transform.jl")
-
 # Submodules
+include("Coords/Coords.jl")
 include("Analytic/Analytic.jl")
 include("Approx/Approx.jl")
 include("Method/Method.jl")

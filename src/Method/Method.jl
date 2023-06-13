@@ -11,7 +11,7 @@ using LinearAlgebra
 using StaticArrays
 
 # Other Modules
-using Aeon
+using Aeon.Coords
 using Aeon.Analytic
 
 ##########################

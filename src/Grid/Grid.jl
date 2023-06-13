@@ -7,9 +7,9 @@ using LinearAlgebra
 using StaticArrays
 
 # Other Modules
-using Aeon
 using Aeon.Analytic
 using Aeon.Approx
+using Aeon.Coords
 using Aeon.Method
 
 ################

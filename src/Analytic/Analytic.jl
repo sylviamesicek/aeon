@@ -7,7 +7,7 @@ using LinearAlgebra
 using StaticArrays
 
 # Other Modules
-using Aeon
+using Aeon.Coords
 
 # Includes
 include("function.jl")
