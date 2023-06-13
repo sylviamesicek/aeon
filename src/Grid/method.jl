@@ -2,7 +2,7 @@
 ## Export ########
 ##################
 
-export GridLevel, GridMethod, coarsest, finest
+export GridLevel, GridMethod, coarsest, finest, griddomain
 
 ##################
 ## Method ########
@@ -23,6 +23,7 @@ end
 
 struct GridMethod{N, T}
     levels::Vector{GridLevel{N, T}}
+    supportradius::Int
 
     function GridMethod(origin::SVector{N, T}, width::T, dims::SVector{N, Int}, supportradius::Int) where {N, T}
         @assert N > 0 "Number of dimensions must be greater than 0"
@@ -106,12 +107,16 @@ struct GridMethod{N, T}
 
         level = GridLevel{N, T}(mesh, supports, meta, scales, 0)
 
-        new{N, T}([level])
+        new{N, T}([level], supportradius)
     end
 end
 
 coarsest(method::GridMethod) = first(method.levels).mesh
 finest(method::GridMethod) = last(method.levels).mesh
+
+function griddomain(method::GridMethod{N, T}) where {N, T}
+    build_griddomain(Val(N), Val(T), method.supportradius)
+end
 
 map_tuple_with_index_helper(f, t::Tuple, index) = (@inline; (f(t[1], index), map_tuple_with_index_helper(f, Base.tail(t), index + 1)...))
 map_tuple_with_index_helper(f, t::Tuple{Any,}, index) = (@inline; (f(t[1], index)))

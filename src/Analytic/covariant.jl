@@ -1,32 +1,23 @@
 # Exports
 
-export CovariantOperator, DerivativeOperator, CurvatureOperator
-export derivative, curvature
+export ACovariant, ADerivative, ACurvature
+export ∇, ∇²
 
-struct CovariantOperator{N, T, O, L} <: AnalyticOperator{N, T, SArray{NTuple{O, N}, T, O, L}} 
-    CovariantOperator{N, T, O}() where {N, T, O} = new{N, T, O, N^O}()
+# Core
+
+const ACovariant{N, T, O, L} = AFunctional{N, T, Covariant{N, T, O, L}} where {N, T, O, L}
+
+(oper::ACovariant{N, T, O})(func::AFunction{N, T}, ::SVector{N, T}) where {N, T, O} = error("Covariant functional $(typeof(oper)) on $(typeof(func)) is undefined.")
+
+# const AValue{N, T} = ACovariant{N, T, 0, 1}()
+struct ADerivative{N, T} <: ACovariant{N, T, 1, N} end
+
+struct ACurvature{N, T, L} <: ACovariant{N, T, 2, L} 
+    ACurvature{N, T}() where {N, T} = new{N, T, N*N}
 end
 
-# @generated function (operator::CovariantOperator{N, T})(func::Varargs{AnalyticFunction{N, T}, D}) where {N, T, D}
-#     exprs = [:(operator(func[$i])) for i in 1:D]
-#     Expr(:call, CombinedFunction, exprs...)
-# end
 
-# (operator::CovariantOperator{N, T})(func::ScaledFunction{N, T}) where {N, T} = ScaledFunction(func.scale, operator(func))
-# (operator::CovariantOperator{N, T})(func::CombinedFunction{N, T}) where {N, T}= operator(func.inner...)
+∇(::AIdentity{N, T}) where {N, T} = ADerivative{N, T}()
+∇²(::AIdentity{N, T}) where {N, T} = ACurvature{N, T}()
 
-function (operator::CovariantOperator{N, T, O})(func::TransformedFunction{N, T}) where {N, T, O}
-    nfunc = ScaledFunction(jacobian(func.transform)^O, operator(func.inner))
-    TransformedFunction(func.transform, nfunc)
-end
-
-# const ValueOperator{N, T} = CovariantOperator{N, T, 0, }()
-const DerivativeOperator{N, T, L} = CovariantOperator{N, T, 1, L} where {N, T, L}
-const CurvatureOperator{N, T, L} = CovariantOperator{N, T, 2, L} where {N, T, L}
-
-DerivativeOperator{N, T}() where {N, T} = CovariantOperator{N, T, 1}
-CurvatureOperator{N, T}() where {N, T} = CovariantOperator{N, T, 2}
-
-derivative(::IdentityOperator{N, T}) where {N, T} = DerivativeOperator{N, T}()
-curvature(::IdentityOperator{N, T}) where {N, T} = CurvatureOperator{N, T}()
 

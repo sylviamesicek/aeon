@@ -9,13 +9,14 @@ using StaticArrays
 # Other Modules
 using Aeon
 using Aeon.Analytic
+using Aeon.Approx
 using Aeon.Method
 
 ################
 ## Includes ####
 ################
 
-include("node.jl")
+include("domain.jl")
 include("method.jl")
 
 end

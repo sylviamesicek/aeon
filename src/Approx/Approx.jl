@@ -11,10 +11,8 @@ using StaticArrays
 using Aeon
 using Aeon.Analytic
 
-
 # Includes
-include("domain.jl")
-include("covariant.jl")
+include("function.jl")
 include("wls.jl")
 
 end

@@ -2,8 +2,10 @@
 ## Exports #############
 ########################
 
-export Transform, IdentityTransform, ComposedTransform, jacobian
+export Transform, IdentityTransform, ComposedTransform, jacobian, transform
 export Translate, ScaleTransform, LinearTransform
+
+export Covariant, order
 
 ########################
 ## Transform ###########
@@ -17,9 +19,10 @@ abstract type Transform{N, T} end
 """
     trans(position)
 
-Applies a transformation to a given point.
+Applies a transformation to a given point. In order to avoid confusion, this may only be applied to coordinate vectors.
+For transformation of more general objects, see the `transform` function.
 """
-(trans::Transform{N, T})(x::SVector{N, T}) where {N, T} = error("Transformation for $(typeof(trans)) has not been defined.")
+(trans::Transform{N, T})(::SVector{N, T}) where {N, T} = error("Transformation for $(typeof(trans)) has not been defined.")
 
 """
     inv(trans::Transform)
@@ -36,6 +39,14 @@ Returns a matrix describing how differential on the parameters of `x` flow throu
 the output of the transformation `trans`
 """
 jacobian(trans::Transform{N, T}, x::SVector{N, T}) where {N, T} = error("Differential matrix of transform $(typeof(trans)) with input $(typeof(x)) has not been defined.")
+
+"""
+    transform(trans, x, geom)
+
+Transforms a given geometric object which may be dependent on the coordinate system.
+"""
+transform(trans::Transform{N, T}, ::SVector{N, T}, geom) where {N, T} = error("Transformation of object $(typeof(obj)) by $(typeof(trans)) is unimplemented.")
+transform(::Transform{N, T}, ::SVector{N, T}, geom::T) where {N, T} = geom
 
 ########################
 ## Identity ############
@@ -152,3 +163,27 @@ Base.inv(trans::LinearTransform{N, T}) where {N, T} = LinearTransform{N, T}(inv(
 jacobian(trans::LinearTransform{N, T}, ::SVector{N, T}) where {N, T} = trans.linear
 
 Base.:(∘)(t1::LinearTransform{N, T}, t2::LinearTransform{N, T}) where {N, T} = LinearTransform{N, T}(t1.linear * t2.linear)
+
+######################
+## Covariant #########
+######################
+
+"""
+A covariant tensor of a given rank.
+"""
+struct Covariant{N, T, O, L}
+    inner::SArray{NTuple{O, N}, T, O, L}
+
+    Covariant(tensor::SArray{NTuple{O, N}, T, O, L}) where {N, T, O, L} = new{N, T, O, L}(tensor)
+end
+
+
+
+order(::Covariant{N, T, O}) where {N, T, O} = O
+
+transform(::Transform{N, T}, ::SVector{N, T}, tensor::Covariant{N, T, 0}) where {N, T} = tensor
+transform(trans::Transform{N, T}, x::SVector{N, T}, tensor::Covariant{N, T, 1}) where {N, T} = Covariant(jacobian(trans, x) * tensor.inner)
+function transform(trans::Transform{N, T}, x::SVector{N, T}, tensor::Covariant{N, T, 2}) where {N, T} 
+    j = jacobian(trans, x)
+    transpose(j) * tensor.inner * j
+end

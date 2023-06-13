@@ -1,6 +1,6 @@
 # Exports
 
-export AnalyticBasis
+export ABasis
 export monomials
 
 # Core
@@ -8,15 +8,15 @@ export monomials
 """
 Represents a set of analytic functions to serve as a basis for a function space. 
 """
-struct AnalyticBasis{N, T, F}
+struct ABasis{N, T, F}
     inner::Vector{F}
 
-    AnalyticBasis{N, T}(funcs::Vector{F}) where {N, T, F <: AnalyticFunction{N, T}} = new{N, T, F}(funcs)
+    ABasis{N, T}(funcs::Vector{F}) where {N, T, F <: AFunction{N, T}} = new{N, T, F}(funcs)
 end
 
-Base.length(basis::AnalyticBasis) = length(basis.inner)
-Base.eachindex(basis::AnalyticBasis) = eachindex(basis.inner)
-Base.getindex(basis::AnalyticBasis, i) = getindex(basis.inner, i)
+Base.length(basis::ABasis) = length(basis.inner)
+Base.eachindex(basis::ABasis) = eachindex(basis.inner)
+Base.getindex(basis::ABasis, i) = getindex(basis.inner, i)
 
 # Monomials
 
@@ -29,11 +29,11 @@ function monomials(::Val{N}, ::Val{T}, order) where{N, T}
     dims = ntuple(_ -> 0:order, Val(N))
     ocoords = CartesianIndices(dims)
 
-    result = Vector{Monomial{N, T}}(undef, length(ocoords))
+    result = Vector{AMonomial{N, T}}(undef, length(ocoords))
 
     for (i, x) in enumerate(ocoords)
-        result[i] = Monomial{N, T}(SVector(Tuple(x)))
+        result[i] = AMonomial{N, T}(SVector(Tuple(x)))
     end
 
-    AnalyticBasis{N, T}(result)
+    ABasis{N, T}(result)
 end

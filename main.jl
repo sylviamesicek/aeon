@@ -11,6 +11,8 @@ function main()
     method = GridMethod(SVector(0.0, 0.0), 1.0, SVector(8, 8), 2)
     mesh = finest(method)
 
+    @show griddomain(method)
+
     field = similar(mesh)
 
     for i in eachindex(mesh)

@@ -3,6 +3,7 @@ export Analytic
 module Analytic
 
 # Dependencies
+using LinearAlgebra
 using StaticArrays
 
 # Other Modules
@@ -15,12 +16,5 @@ include("covariant.jl")
 include("monomial.jl")
 include("gaussian.jl")
 include("basis.jl")
-
-# Aliases
-
-export ∇, ∇²
-
-const ∇ = derivative
-const ∇² = curvature
 
 end
