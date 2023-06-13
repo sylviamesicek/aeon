@@ -14,7 +14,7 @@ using Aeon.Analytic
 
 # Includes
 include("domain.jl")
-include("operator.jl")
+include("covariant.jl")
 include("wls.jl")
 
 end

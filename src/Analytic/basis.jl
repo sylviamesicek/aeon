@@ -11,7 +11,7 @@ Represents a set of analytic functions to serve as a basis for a function space.
 struct AnalyticBasis{N, T, F}
     inner::Vector{F}
 
-    AnalyticBasis{N, T}(funcs::Vector{F}) where {N, T, F <: AnalyticField{N, T, 0}} = new{N, T, F}(funcs)
+    AnalyticBasis{N, T}(funcs::Vector{F}) where {N, T, F <: AnalyticFunction{N, T}} = new{N, T, F}(funcs)
 end
 
 Base.length(basis::AnalyticBasis) = length(basis.inner)

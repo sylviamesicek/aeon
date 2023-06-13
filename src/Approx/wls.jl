@@ -19,7 +19,7 @@ end
 """
 Uses the Weighted Least Squares method, with a particular weight function and basis to approximate functions on discrete domains.
 """
-function wls(domain::Domain{N, T}, basis::B, weight::AnalyticField{N, T, 0}) where {N, T, B <: AnalyticBasis{N, T}}
+function wls(domain::Domain{N, T}, basis::B, weight::AnalyticFunction{N, T}) where {N, T, B <: AnalyticBasis{N, T}}
     nlength = length(domain)
     blength = length(basis)
 
@@ -37,11 +37,11 @@ function wls(domain::Domain{N, T}, basis::B, weight::AnalyticField{N, T, 0}) whe
     WLS{N, T, B}(lu(matrix), weights, basis)
 end
 
-function approx(wls::WLS{N, T}, operator::AnalyticOperator{N, T, R}, position::SVector{N, T}) where {N, T, R}
+function approx(wls::WLS{N, T}, operator::ApproxCovariant{N, T, O}, position::SVector{N, T}) where {N, T, O}
     blength = length(wls.basis)
     nlength = length(wls.weights)
 
-    tdims = ntuple(_ -> N, Val(R))
+    tdims = ntuple(_ -> N, Val(O))
     tcoords = CartesianIndices(tdims)
 
     rhs = Array(undef, blength, tdims...)
@@ -65,5 +65,5 @@ function approx(wls::WLS{N, T}, operator::AnalyticOperator{N, T, R}, position::S
         sview *= wls.weights
     end
 
-    ApproxOperator{N, T, R}(stencil)
+    ApproxOperator{N, T, O}(stencil)
 end

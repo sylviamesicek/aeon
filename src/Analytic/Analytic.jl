@@ -6,13 +6,12 @@ module Analytic
 using StaticArrays
 
 # Includes
-# include("function.jl")
-include("field.jl")
-include("operator.jl")
-include("basis.jl")
+include("function.jl")
+include("covariant.jl")
 
 include("monomial.jl")
 include("gaussian.jl")
+include("basis.jl")
 
 # Aliases
 

@@ -7,7 +7,7 @@ Represents a monomial term, ie a combination of powers of each coordinate. For i
 Each monomial term is an N-Vector containing the power of that component. 
 For instance x z^2 is represented as [1, 0, 2].
 """
-struct Monomial{N, T} <: AnalyticField{N, T, 0} 
+struct Monomial{N, T} <: AnalyticFunction{N, T} 
     powers::SVector{N, Int}
 end
 
@@ -29,11 +29,11 @@ end
 """
 The gradient of a monomial term.
 """
-struct MonomialGradient{N, T} <: AnalyticField{N, T, 1}
+struct MonomialGradient{N, T} <: AnalyticFunction{N, SVector{N, T}} 
     powers::SVector{N, Int}
 end
 
-(::AnalyticDerivative{N, T})(field::Monomial{N, T}) where {N, T} = MonomialGradient{N, T}(field.powers)
+(::DerivativeOperator{N, T})(field::Monomial{N, T}) where {N, T} = MonomialGradient{N, T}(field.powers)
 
 function power(monomial::MonomialGradient{N, T}, x::SVector{N, T}, i::Int) where {N, T}
     result = zero(F)
@@ -55,12 +55,12 @@ end
 """
 The hessian of a monomial term.
 """
-struct MonomialHessian{N, T, L} <: AnalyticField{N, T, 2}
+struct MonomialHessian{N, T, L} <: AnalyticFunction{N, SMatrix{N, T, L}} 
     coefficients::SMatrix{N, N, Int, L}
     powers::SVector{N, Int}
 end
 
-(::AnalyticCurvature{N, T})(monomial::Monomial{N, T}) where {N, T} = MonomialHessian{N, T}(sacollect(SMatrix{N, N, Int, N*N}, coefficient(monomial, i, j) for i in 1:S, j in 1:S), monomial.powers)
+(::CurvatureOperator{N, T})(monomial::Monomial{N, T}) where {N, T} = MonomialHessian{N, T, N*N}(sacollect(SMatrix{N, N, Int, N*N}, coefficient(monomial, i, j) for i in 1:S, j in 1:S), monomial.powers)
 
 function coefficient(monomial::MonomialHessian, i::Int, j::Int)
     if i == j

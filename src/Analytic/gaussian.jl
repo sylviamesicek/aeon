@@ -11,7 +11,7 @@ export Gaussian, GaussianGradient
 """
 A Gaussian distribution function centered at the origin.
 """
-struct Gaussian{N, T} <: AnalyticField{N, T, 1}
+struct Gaussian{N, T} <: AnalyticFunction{N, T}
     simga::T
 end
 
@@ -25,11 +25,11 @@ end
 """
 The gradient of a gassian distribution.
 """
-struct GaussianGradient{N, T} <: AnalyticField{N, T, 1}
+struct GaussianGradient{N, T} <: AnalyticFunction{N, SVector{N, T}}
     simga::T
 end
 
-(::AnalyticDerivative{N, T})(gauss::Gaussian{N, T}) where {N, T} = GaussianGradient{N, T}(gauss.simga)
+(::DerivativeOperator{N, T})(gauss::Gaussian{N, T}) where {N, T} = GaussianGradient{N, T}(gauss.simga)
 
 function (gauss::GaussianGradient{N, T})(x::SVector{N, T}) where {N, T}
     power = -dot(x, x)/(gauss.simga * gauss.simga)
