@@ -25,5 +25,5 @@ end
 function (::ADerivative{N, T})(gauss::AGaussian{N, T}, position::SVector{N, T}) where {N, T}
     power = -dot(position, position)/(gauss.simga * gauss.simga)
     scale = 1/(gauss.simga * gauss.simga) * ℯ^power
-    return -scale * position
+    return Covariant(-scale * position)
 end

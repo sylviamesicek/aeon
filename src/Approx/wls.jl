@@ -8,6 +8,9 @@ export WLS
 ## WLS ##############
 #####################
 
+"""
+Weighted least squares method/decomposition of a domain.
+"""
 struct WLS{N, T, B}
     matrix::LU{T, Matrix{T}}
     weights::Vector{T}
@@ -37,6 +40,9 @@ function wls(domain::Domain{N, T}, basis::B, weight::AFunction{N, T}) where {N, 
     WLS{N, T, B}(lu(matrix), weights, basis)
 end
 
+"""
+Approximates a simple functional (which transforms preserves type) using WLS. The result is a `ApproxGeneric`.
+"""
 function approx(wls::WLS{N, T}, operator::AFunctional{N, T, T}, position::SVector{N, T}) where {N, T}
     blength = length(wls.basis)
     nlength = length(wls.weights)
@@ -55,6 +61,9 @@ function approx(wls::WLS{N, T}, operator::AFunctional{N, T, T}, position::SVecto
     ApproxGeneric{N, T, T}(stencil)
 end
 
+"""
+Approximates a covariant functional
+"""
 function approx(wls::WLS{N, T}, operator::AFunctional{N, T, Covariant{N, T, O, L}}, position::SVector{N, T}) where {N, T, O, L}
     blength = length(wls.basis)
     nlength = length(wls.weights)

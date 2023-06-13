@@ -24,6 +24,7 @@ Base.getindex(basis::ABasis, i) = getindex(basis.inner, i)
     monomials(N, order)
 
 Constructs a set of basis vectors for a `D` dimensional space, covering all permuations of monomials up to the given order.
+For instance, for `N=2` and `order=2` this produces the monomial terms: `1, x, x², y, xy, x²y, y², xy², x²y²`.
 """
 function monomials(::Val{N}, ::Val{T}, order) where{N, T}
     dims = ntuple(_ -> 0:order, Val(N))
