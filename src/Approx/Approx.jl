@@ -11,7 +11,10 @@ using StaticArrays
 using Aeon
 using Aeon.Analytic
 
+
 # Includes
+include("domain.jl")
 include("operator.jl")
+include("wls.jl")
 
 end

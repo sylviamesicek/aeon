@@ -18,8 +18,6 @@ using Aeon.Analytic
 ## Includes ##############
 ##########################
 
-include("basis.jl")
-include("approx.jl")
 include("mesh.jl")
 include("writer.jl")
 

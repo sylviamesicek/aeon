@@ -1,38 +1,39 @@
-####################
-## Exports #########
-####################
+# Exports
 
-export AnalyticBasis, monomials
+export AnalyticBasis
+export monomials
 
-####################
-## Core ############
-####################
+# Core
 
 """
 Represents a set of analytic functions to serve as a basis for a function space. 
 """
-struct AnalyticBasis{N, T, F, R}
-    funcs::Vector{F}
+struct AnalyticBasis{N, T, F}
+    inner::Vector{F}
 
-    AnalyticBasis(funcs::Vector{AnalyticField{N, T, R}}) where {N, T, R} = new{N, T, eltype(funcs), R}(funcs)
+    AnalyticBasis{N, T}(funcs::Vector{F}) where {N, T, F <: AnalyticField{N, T, 0}} = new{N, T, F}(funcs)
 end
 
-Base.length(basis::AnalyticBasis) = length(basis.funcs)
-Base.eachindex(basis::AnalyticBasis) = eachindex(basis.funcs)
-Base.getindex(basis::AnalyticBasis, i) = getindex(basis.funcs, i)
+Base.length(basis::AnalyticBasis) = length(basis.inner)
+Base.eachindex(basis::AnalyticBasis) = eachindex(basis.inner)
+Base.getindex(basis::AnalyticBasis, i) = getindex(basis.inner, i)
 
-####################
-## Monomial Bases ##
-####################
+# Monomials
 
 """
     monomials(N, order)
 
 Constructs a set of basis vectors for a `D` dimensional space, covering all permuations of monomials up to the given order.
 """
-function monomials(N, T, order)
-    orders = Iterators.product([0:order for _ in 1:N]...)
-    orders = vec(collect(map(Monomial{T}, orders)))
+function monomials(::Val{N}, ::Val{T}, order) where{N, T}
+    dims = ntuple(_ -> 0:order, Val(N))
+    ocoords = CartesianIndices(dims)
 
-    AnalyticBasis{N, T, Monomial{N, T}, 0}(orders)
+    result = Vector{Monomial{N, T}}(undef, length(ocoords))
+
+    for (i, x) in enumerate(ocoords)
+        result[i] = Monomial{N, T}(SVector(Tuple(x)))
+    end
+
+    AnalyticBasis{N, T}(result)
 end

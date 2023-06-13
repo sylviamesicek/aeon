@@ -103,9 +103,9 @@ Translate(x, y, z) = Translate(SVector(x, y, z))
 
 (trans::Translate{V})(x) where {V} = x + trans.offset
 Base.inv(trans::Translate) = Translate(-trans.offset)
-jacobian(trans::Translate, x) = I 
+jacobian(::Translate, x) = I 
 
-∘(trans1::Translate, trans2::Translate) = Translate(trans1.offset + trans2.offset)
+Base.:(∘)(trans1::Translate, trans2::Translate) = Translate(trans1.offset + trans2.offset)
 
 Base.show(io::IO, trans::Translate) = print(io, "Translation$((trans.offset...,))")
 
@@ -124,7 +124,7 @@ end
 Base.inv(trans::ScaleTransform) = ScaleTransform(inv(trans.scale))
 jacobian(trans::ScaleTransform, x) = trans.scale
 
-∘(t1::ScaleTransform, t2::ScaleTransform) = ScaleTransform(t1.scale * t2.scale)
+Base.:(∘)(t1::ScaleTransform, t2::ScaleTransform) = ScaleTransform(t1.scale * t2.scale)
 
 ########################
 ## Linear Transform ####
@@ -140,11 +140,11 @@ struct LinearTransform{M} <: Transform
     linear::M
 end
 
-Base.show(io::IO, trans::LinearTransform) = print(io, "LinearMap($(trans.linear))")
+Base.show(io::IO, trans::LinearTransform) = print(io, "LinearTransform($(trans.linear))")
 
 (trans::LinearTransform{M})(x) where {M} = trans.linear * x
 (trans::LinearTransform{M})(x::Tuple) where {M} = trans(SVector(x))
 Base.inv(trans::LinearTransform) = LinearTransform(inv(trans.linear))
 jacobian(trans::LinearTransform, x) = trans.linear
 
-∘(t1::LinearTransform, t2::LinearTransform) = LinearTransform(t1.linear * t2.linear)
+Base.:(∘)(t1::LinearTransform, t2::LinearTransform) = LinearTransform(t1.linear * t2.linear)

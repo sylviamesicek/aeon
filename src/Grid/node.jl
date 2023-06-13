@@ -1,21 +1,21 @@
 export grid_nodespace, grid_nodespace_center, grid_nodespace_edge, grid_nodespace_corner
 
-function grid_nodespace(N, T, radius::Int)
+function grid_nodespace(::Val{N}, ::Val{T}, radius::Int) where {N, T}
     width = 2radius + 1
-    indices = CartesianIndices(ntuple(i->width, N))
+    coords = CartesianIndices(ntuple(_ -> width, Val(N)))
 
     positions = Vector{SVector{N, T}}(undef, length(indices))
 
     range = LinRange(-one(T), one(T), width)
 
-    for (i, I) in enumerate(indices)
-        positions[i] = SVector([range[I[j]] for j in 1:N]...)
+    for (i, coord) in enumerate(coords)
+        positions[i] = sacollect(SVector{N, T}, range[coord[j]] for j in 1:N)
     end
 
     NodeSpace(positions)
 end
 
-function grid_nodespace_center(N, radius::Int)
+function grid_nodespace_center(::Val{N}, radius::Int) where N
     width = 2radius + 1
     (width^N + 1)/2
 end

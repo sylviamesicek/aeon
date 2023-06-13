@@ -1,27 +1,27 @@
 using Aeon
-# using Aeon.Analytic
-# using Aeon.Method
-# using Aeon.Grid
+using Aeon.Analytic
+using Aeon.Method
+using Aeon.Grid
 
 # using LinearAlgebra
-# using StaticArrays
+using StaticArrays
 
-# # Main code
-# function main()
-#     method = GridMethod(SVector(0.0, 0.0), 1.0, SVector(8, 8), 2)
-#     mesh = finest(method)
+# Main code
+function main()
+    method = GridMethod(SVector(0.0, 0.0), 1.0, SVector(8, 8), 2)
+    mesh = finest(method)
 
-#     field = similar(mesh)
+    field = similar(mesh)
 
-#     for i in eachindex(mesh)
-#         field[i] = mesh[i][1]
-#     end
+    for i in eachindex(mesh)
+        field[i] = mesh[i][1]
+    end
     
-#     writer = MeshWriter(mesh)
-#     attrib!(writer, IndexAttribute())
-#     attrib!(writer, KindAttribute())
-#     attrib!(writer, ScalarAttribute("test", field))
-#     write_vtk(writer, "output")
-# end
+    writer = MeshWriter(mesh)
+    attrib!(writer, IndexAttribute())
+    attrib!(writer, KindAttribute())
+    attrib!(writer, ScalarAttribute("test", field))
+    write_vtk(writer, "output")
+end
 
-# main()
+main()
