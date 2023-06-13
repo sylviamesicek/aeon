@@ -5,6 +5,9 @@ module Analytic
 # Dependencies
 using StaticArrays
 
+# Other Modules
+using Aeon
+
 # Includes
 include("function.jl")
 include("covariant.jl")
