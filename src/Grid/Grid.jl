@@ -9,7 +9,7 @@ using StaticArrays
 # Other Modules
 using Aeon.Analytic
 using Aeon.Approx
-using Aeon.Coords
+using Aeon.Tensor
 using Aeon.Method
 
 ################

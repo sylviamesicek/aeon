@@ -50,7 +50,7 @@ Base.:(∘)(t1::ScaleTransform{N, T}, t2::ScaleTransform{N, T}) where {N, T} = S
     LinearTransform <: Transform
     LinearTransform(M)
 
-A general linear transformation, constructed for any matrix-like object `M` using `LinearTransform(M)`.
+A general linear transformation, constructed for any matrix-like object `M` using `LinearTransform{N, T}(M)`.
 """
 struct LinearTransform{N, T, M} <: Transform{N, T}
     linear::M

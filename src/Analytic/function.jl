@@ -1,6 +1,6 @@
 # Exports
 
-export AFunction, AFunctional
+export AFunction, AFunctional, AScalar
 export AIdentity, AScaled, ACombined, ATransformed
 
 ################
@@ -25,6 +25,11 @@ Computes the value of a functional given a function and a position.
 """
 (operator::AFunctional{N, T, R})(func::AFunction{N, T}, ::SVector{N, T}) where {N, T, R} = error("Application of $(typeof(operator)) on $(typeof(func)) is unimplemented.")
 
+"""
+A scalar functional.
+"""
+const AScalar{N, T} = AFunctional{N, T, T} where {N, T}
+
 ####################
 ## Identity ########
 ####################
@@ -32,7 +37,7 @@ Computes the value of a functional given a function and a position.
 """
 The identity functional. This takes a function and applies it without any modification.
 """
-struct AIdentity{N, T} <: AFunctional{N, T, T} end
+struct AIdentity{N, T} <: AScalar{N, T} end
 
 (operator::AIdentity{N, T})(func::AFunction{N, T}, position::SVector{N, T}) where {N, T} = func(position)
 

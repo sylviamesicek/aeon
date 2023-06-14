@@ -1,7 +1,7 @@
 module Aeon
 
 # Submodules
-include("Coords/Coords.jl")
+include("Tensor/Tensor.jl")
 include("Analytic/Analytic.jl")
 include("Approx/Approx.jl")
 include("Method/Method.jl")

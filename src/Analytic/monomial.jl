@@ -16,11 +16,11 @@ end
 AMonomial{T}(powers::SVector{N, Int}) where {N, T} = AMonomial{N, T}(powers)
 AMonomial{T}(powers::Int...) where T = AMonomial{T}(SVector(powers...))
 
-function (monomials::AMonomial{N, T})(x::SVector{N, T}) where {N, T}
-    result = zero(F)
+function (monomial::AMonomial{N, T})(x::SVector{N, T}) where {N, T}
+    result = one(T)
 
-    for (x, p) in zip(x, monomial.powers)
-        result += x ^ p
+    for p in 1:N
+        result *= x[p]^monomial.powers[p]
     end
 
     result
@@ -31,11 +31,11 @@ end
 #####################
 
 function power(powers::SVector{N, Int}, x::SVector{N, T}, i::Int) where {N, T}
-    result = zero(F)
+    result = powers[i]
 
-    for (x, p) in zip(x, powers)
-        sub = convert(Int, p == i && p != 0)
-        result += x^(p - sub)
+    for p in 1:N
+        sub = ifelse(p == i && powers[p] != 0, 1, 0)
+        result *= x[p]^(powers[p] - sub)
     end
 
     result
@@ -59,12 +59,12 @@ function coefficient(powers::SVector{N, Int}, i::Int, j::Int) where N
 end
 
 function power(powers::SVector{N, Int}, x::SVector{N, T}, i::Int, j::Int) where {N, T}
-    result = zero(T)
-    for (x, p) in zip(x, powers)
-        sub = convert(Int, p == i && p != 0) + convert(Int, p == j && p != 0)
-        result += x^(p - sub)
+    result = coefficient(powers, i, j)
+    for p in 1:N
+        sub = convert(Int, p == i && powers[p] != 0) + convert(Int, p == j && powers[p] != 0)
+        result *= x^(p - sub)
     end
-    result * coefficient(powers, i, j)
+    result
 end
 
 function (::ACurvature{N, T})(func::AMonomial{N, T}, position::SVector{N, T}) where {N, T}
