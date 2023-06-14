@@ -22,7 +22,7 @@ struct ADerivative{N, T} <: ACovariant{N, T, 1, N} end
 A second-order covariant derivative (also known as a hessian).
 """
 struct ACurvature{N, T, L} <: ACovariant{N, T, 2, L} 
-    ACurvature{N, T}() where {N, T} = new{N, T, N*N}
+    ACurvature{N, T}() where {N, T} = new{N, T, N*N}()
 end
 
 """

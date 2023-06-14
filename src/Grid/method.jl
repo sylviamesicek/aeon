@@ -75,6 +75,7 @@ struct GridMethod{N, T}
                     off = broadcast(abs, gcoord_clamped - gcoord)
                     if all(off[1] .== off)
                         kinds[gi] = ghost
+                        meta[gi] = off[1]
                     else
                         kinds[gi] = constraint
 

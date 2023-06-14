@@ -50,19 +50,14 @@ end
 ####################
 
 function coefficient(powers::SVector{N, Int}, i::Int, j::Int) where N
-    if i == j
-        power = powers[i]
-        return power > 1 ? power * (power - 1) : 0
-    else
-        return powers[i] * powers[j]
-    end
+    powers[i] * (powers[j] - ifelse(i == j, 1, 0))
 end
 
 function power(powers::SVector{N, Int}, x::SVector{N, T}, i::Int, j::Int) where {N, T}
     result = coefficient(powers, i, j)
     for p in 1:N
-        sub = convert(Int, p == i && powers[p] != 0) + convert(Int, p == j && powers[p] != 0)
-        result *= x^(p - sub)
+        sub = ifelse(p == i && powers[p] > 1, 1, 0) + ifelse(p == j && powers[p] > 1, 1, 0)
+        result *= x[p]^(powers[p] - sub)
     end
     result
 end

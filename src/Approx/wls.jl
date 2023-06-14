@@ -76,7 +76,7 @@ function approx(engine::WLSEngine{N, T}, operator::ACovariant{N, T, O, L}, posit
         values = operator(engine.basis[i], position)
 
         for coord in tcoords
-            rhs[coord][i] = values[coord]
+            rhs[coord][i] = values.inner[coord]
         end
     end
 
@@ -88,5 +88,5 @@ function approx(engine::WLSEngine{N, T}, operator::ACovariant{N, T, O, L}, posit
         stencil[coord] .*= engine.weights
     end
 
-    ApproxCovariant(stencil)
+    ApproxCovariant(nlength, stencil)
 end

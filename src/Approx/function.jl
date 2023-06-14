@@ -34,13 +34,32 @@ function (oper::ApproxScalar{N, T})(func::ApproxFunction{N, T}) where {N, T}
 end
 
 struct ApproxCovariant{N, T, O, L} <: ApproxFunctional{N, T, Covariant{N, T, O, L}}
-    # SoA storage
-    values::STensor{N, Vector{T}, O, L}
+    stencil::Vector{Covariant{N, T, O, L}}
+end
+
+function ApproxCovariant(scount::Int, stencil::STensor{N, Vector{T}, O, L}) where {N, T, O, L}
+    mstencil = Vector{Covariant{N, T, O, L}}(undef, scount)
+
+    tdims = ntuple(_ -> N, Val(O))
+    tcoords = CartesianIndices(tdims)
+    
+    for i in 1:scount
+        mstencil[i] = Covariant(StaticArrays.sacollect(STensor{N, T, O, L}, stencil[coord][i] for coord in tcoords))
+    end
+
+    ApproxCovariant{N, T, O, L}(mstencil)
 end
 
 # Optimize with generated functions
 function (oper::ApproxCovariant{N, T, O, L})(func::ApproxFunction{N, T}) where {N, T, O, L}
-    tdims = ntuple(_ -> N, Val(O))
-    tcoords = CartesianIndices(tdims)
-    Covariant(StaticArrays.sacollect(STensor{N, Vector{T}, O, L}, dot(func.values, oper.values[coord]) for coord in tcoords))
+    # tdims = ntuple(_ -> N, Val(O))
+    # tcoords = CartesianIndices(tdims)
+    # Covariant(StaticArrays.sacollect(STensor{N, Vector{T}, O, L}, dot(func.values, oper.values[coord]) for coord in tcoords))
+    @assert length(oper.stencil) == length(func.values)
+
+    result = zero(STensor{N, T, O, L})
+    for i in 1:length(oper.stencil)
+        result += func.values[i] * oper.stencil[i].inner
+    end
+    Covariant(result)
 end

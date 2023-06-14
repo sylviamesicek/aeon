@@ -2,7 +2,7 @@
 ## Exports ##############
 #########################
 
-export Mesh, kind, nodeindices
+export Mesh, nodeindices
 export NodeKind, interior, boundary, ghost, constraint
 
 
@@ -31,15 +31,11 @@ Base.eachindex(mesh::Mesh) = eachindex(mesh.kinds)
 Base.getindex(mesh::Mesh, i) = mesh.positions[i]
 Base.similar(mesh::Mesh{N, T}) where {N, T} = Vector{T}(undef, length(mesh))
 
-function kind(mesh::Mesh, i)
-    mesh.kinds[i]
-end
-
 function nodeindices(mesh::Mesh, kind::NodeKind)
     nodes = Vector{Int}()
 
     for i in eachindex(mesh)
-        if kind(mesh, i) == kind
+        if mesh.kinds[i] == kind
             push!(nodes, i)
         end
     end
