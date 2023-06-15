@@ -2,36 +2,34 @@
 ## Exports ##############
 #########################
 
-export Mesh, nodeindices
-export NodeKind, interior, boundary, ghost, constraint
-
+export Mesh, filterindices
 
 #########################
 ## Mesh #################
 #########################
 
-@enum NodeKind interior = 0 boundary = 1 ghost = 2 constraint = 3
-
 """
-A `Mesh` is simply a matrix of node positions along with a node kind. Additional context/data is provided by the individual `Method`
+A `Mesh` is simply a vector of points: consisting of a position, a kind, and a tag. It stores data in a SoA format for maximal cache efficiency.
 """
 struct Mesh{N, T}
     positions::Vector{SVector{N, T}}
-    kinds::Vector{NodeKind}
+    kinds::Vector{Int}
+    tags::Vector{Int}
 
-    function Mesh(positions::Vector{SVector{N, T}}, kinds::Vector{NodeKind}) where{N, T}
-        @assert length(positions) == length(kinds)
-
-        new{N, T}(positions, kinds)
+    function Mesh(positions::Vector{SVector{N, T}}, kinds::Vector{Int}, tags::Vector{Int}) where{N, T}
+        @assert length(positions) == length(kinds) == length(tags)
+        new{N, T}(positions, kinds, tags)
     end
 end
 
 Base.length(mesh::Mesh) = length(mesh.positions)
 Base.eachindex(mesh::Mesh) = eachindex(mesh.kinds)
-Base.getindex(mesh::Mesh, i) = mesh.positions[i]
 Base.similar(mesh::Mesh{N, T}) where {N, T} = Vector{T}(undef, length(mesh))
 
-function nodeindices(mesh::Mesh, kind::NodeKind)
+"""
+Filters the points in a `Mesh` by its kind. This returns a vector which can be iterated to yield to 
+"""
+function filterindices(mesh::Mesh, kind::Int)
     nodes = Vector{Int}()
 
     for i in eachindex(mesh)

@@ -1,5 +1,8 @@
 export Grid
 
+"""
+Utilities for building and refining grid-like meshs.
+"""
 module Grid
 
 # Dependencies
@@ -17,6 +20,6 @@ using Aeon.Method
 ################
 
 include("domain.jl")
-include("method.jl")
+include("mesh.jl")
 
 end

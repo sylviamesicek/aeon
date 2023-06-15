@@ -81,7 +81,6 @@ function approx(engine::SquareEngine{N, T}, operator::ACovariant{N, T, O, L}, po
     stencil = StaticArrays.sacollect(STensor{N, Vector{T}, O, L}, Vector{T}(undef, blength) for _ in tcoords)
 
     for coord in tcoords
-
         ldiv!(stencil[coord], engine.matrix, rhs[coord])
     end
 

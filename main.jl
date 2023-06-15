@@ -11,43 +11,41 @@ using IterativeSolvers
 
 # Main code
 function main()
-    method = GridMethod(SVector(-5.0, -5.0), 0.1, SVector(100, 100), 1)
+    # Generic Settings
+    supportradius = 2
+    basisorder = 4
 
-    domain = griddomain(method)
-    basis = monomials(Val(2), Val(Float64), 2)
-    # weight = AGaussian{2, Float64}(1.0)
+    # Build root of mesh
+    grid = hypercube(Val(2), -5.0, 5.0, 100, supportradius)
+
+    domain = griddomain(Val(2), Val(Float64), supportradius)
+    basis = monomials(Val(2), Val(Float64), basisorder)
     engine = SquareEngine(domain, basis)
 
-    level = last(method.levels)
+    interior = filterindices(grid.mesh, gridinterior)
+    boundary = filterindices(grid.mesh, gridboundary)
+    ghost = filterindices(grid.mesh, gridghost)
+    constraint = filterindices(grid.mesh, gridconstraint)
 
-    interiornodes = nodeindices(level.mesh, interior)
-    boundarynodes = nodeindices(level.mesh, boundary)
-    ghostnodes = nodeindices(level.mesh, ghost)
-    constrainednodes = nodeindices(level.mesh, constraint)
+    pointcount = length(grid.mesh)
 
-    nodecount = length(level.mesh)
-    supportcount = size(level.supports)[1]
+    # Analytic Operators
+    curvop = ACurvature{2, Float64}()
 
-    origin = zero(SVector{2, Float64})
+    # Approximations at origin
+    supportorigin = zero(SVector{2, Float64})
+    curv = approx(engine, curvop, supportorigin)
 
-    valueop::AIdentity{2, Float64} = AIdentity{2, Float64}()
-    curvop::ACurvature{2, Float64} = ∇²(valueop)
-    
-    # value = approx(engine, valueop, origin)
-    curv = approx(engine, curvop, origin)
-
-    @show curv
-
-    operator = LinearMap(nodecount) do y, x
+    operator = LinearMap(pointcount) do y, x
         fill!(y, 0)
 
-        for (_, gi) in enumerate(interiornodes)
-            position = level.mesh[gi]
-            scale = level.scales[gi]
+        for (_, gi) in enumerate(interior)
+            position = grid.mesh.positions[gi]
+            scale = grid.scales[gi]
             trans = ScaleTransform{2, Float64}(scale)
 
-            for si in 1:supportcount
-                gsi = level.supports[si, gi]
+            for si in eachindex(domain)
+                gsi = grid.supports[si, gi]
                 stencil = transform(trans, position, curv.stencil[si])
                 Δ = dot(stencil.inner, I)
 
@@ -55,43 +53,45 @@ function main()
             end
         end
 
-        for (_, gi) in enumerate(boundarynodes)
+        for (_, gi) in enumerate(boundary)
             # Dirichlet
             y[gi] = x[gi]
         end
 
-        for (_, gi) in enumerate(constrainednodes)
+        for (_, gi) in enumerate(constraint)
             # Dirichlet
             y[gi] = x[gi]
         end
 
-        for (_, gi) in enumerate(ghostnodes)
+        for (_, gi) in enumerate(ghost)
             # Dirichlet
             y[gi] = x[gi]
         end
     end
 
-    rhs = Vector{Float64}(undef, nodecount)
+    rhs = Vector{Float64}(undef, pointcount)
 
     fill!(rhs, 0)
 
-    for gi in eachindex(level.mesh)
-        position = level.mesh[gi]
+    for gi in eachindex(grid.mesh)
+        position = grid.mesh.positions[gi]
 
         rhs[gi] = ℯ^(-dot(position, position)/2)
     end
-
-    sol = zeros(Float64, nodecount)
-
-    # Solve Using BiCGStab
-    bicgstabl!(sol, operator, rhs, 2; max_mv_products = 1000)
     
-    writer = MeshWriter(level.mesh)
+    # Solve Using BiCGStab
+    sol, ch = bicgstabl(operator, rhs, 2; max_mv_products = 1000, log = true)
+
+    @show ch
+    
+    writer = MeshWriter(grid.mesh)
     attrib!(writer, IndexAttribute())
     attrib!(writer, KindAttribute())
+    attrib!(writer, TagAttribute())
     attrib!(writer, ScalarAttribute("rhs", rhs))
     attrib!(writer, ScalarAttribute("sol", sol))
     write_vtk(writer, "output")
 end
 
+# Execute
 main()

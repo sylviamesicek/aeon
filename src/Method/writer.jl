@@ -1,21 +1,35 @@
 # Exports
-export MeshWriter, ScalarAttribute, IndexAttribute, KindAttribute, IntAttribute, attrib!, write_vtk
+export MeshWriter, ScalarAttribute, IndexAttribute, KindAttribute, IntegerAttribute, TagAttribute, attrib!, write_vtk
 
 # Dependencies
 using WriteVTK
 
 # Code
 
-struct NormalAttribute end
+"""
+Adds `builtin::indices` data to VTK file.
+"""
 struct IndexAttribute end
+
+"""
+Adds `builtin::kinds` data to VTK file.
+"""
 struct KindAttribute end
 
+"""
+Adds `builtin::tags` data to VTK file.
+"""
+struct TagAttribute end
+
+"""
+Adds a scalar field of the given name to 
+"""
 struct ScalarAttribute{T}
     name::String
     values::Vector{T}
 end
 
-struct IntAttribute
+struct IntegerAttribute
     name::String
     values::Vector{Int}
 end
@@ -24,26 +38,27 @@ mutable struct MeshWriter{N, T}
     mesh::Mesh{N, T}
     indices::Bool
     kinds::Bool
+    tags::Bool
     scalars::Vector{ScalarAttribute{T}}
-    ints::Vector{IntAttribute}
+    integers::Vector{IntegerAttribute}
 end
 
-MeshWriter(mesh::Mesh{N, T}) where {N, T} = MeshWriter{N, T}(mesh, false, false, Vector{ScalarAttribute{T}}(), Vector{IntAttribute}())
+MeshWriter(mesh::Mesh{N, T}) where {N, T} = MeshWriter{N, T}(mesh, false, false, false, Vector{ScalarAttribute{T}}(), Vector{IntegerAttribute}())
 
 function attrib!(writer::MeshWriter, attrib::ScalarAttribute)
     if length(attrib.values) != length(writer.mesh)
-        error("Scalar Attribute length $(length(attrib.values)) does not match with length of Level $(length(writer.level))")
+        error("Scalar Attribute length $(length(attrib.values)) does not match with length of mesh $(length(writer.mesh))")
     end
 
     push!(writer.scalars, attrib)
 end
 
-function attrib!(writer::MeshWriter, attrib::IntAttribute)
+function attrib!(writer::MeshWriter, attrib::IntegerAttribute)
     if length(attrib.values) != length(writer.mesh)
-        error("Scalar Attribute length $(length(attrib.values)) does not match with length of Level $(length(writer.level))")
+        error("Integer Attribute length $(length(attrib.values)) does not match with length of mesh $(length(writer.mesh))")
     end
 
-    push!(writer.ints, attrib)
+    push!(writer.integers, attrib)
 end
 
 function attrib!(writer::MeshWriter, ::IndexAttribute)
@@ -52,6 +67,10 @@ end
 
 function attrib!(writer::MeshWriter, ::KindAttribute)
     writer.kinds = true
+end
+
+function attrib!(writer::MeshWriter, ::TagAttribute)
+    writer.tags = true
 end
 
 function write_vtk(writer::MeshWriter, filename)
@@ -65,20 +84,23 @@ function write_vtk(writer::MeshWriter, filename)
         end
 
         if writer.kinds
-            kinds = collect(map(Integer, writer.mesh.kinds))
-            vtk["builtin:kinds", VTKPointData()] = kinds
+            vtk["builtin:kinds", VTKPointData()] = writer.mesh.kinds
+        end
+
+        if writer.tags
+            vtk["builtin:tags", VTKPointData()] = writer.mesh.tags
         end
         
         # Scalars
         for i in eachindex(writer.scalars)
             scalar = writer.scalars[i]
-            vtk[scalar.name, VTKPointData()] = scalar.values
+            vtk["scalar:$(scalar.name)", VTKPointData()] = scalar.values
         end
 
-        # Ints
-        for i in eachindex(writer.ints)
-            scalar = writer.ints[i]
-            vtk[scalar.name, VTKPointData()] = scalar.values
+        # Integers
+        for i in eachindex(writer.integers)
+            integers = writer.integers[i]
+            vtk["integer:$(integers.name)", VTKPointData()] = integers.values
         end
     end
 end

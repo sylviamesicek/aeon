@@ -1,7 +1,7 @@
 export Method
 
 """
-Contains functions and types common to all methods. Including Meshs, Fields, IO, Function Basis, and stencil approximation.
+Contains functions and types common to all methods. Including Meshs and IO
 """
 module Method
 
