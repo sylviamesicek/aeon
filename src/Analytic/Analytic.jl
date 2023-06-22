@@ -7,7 +7,7 @@ using LinearAlgebra
 using StaticArrays
 
 # Other Modules
-using Aeon.Tensor
+using Aeon.Geometry
 
 # Includes
 include("function.jl")

@@ -8,7 +8,7 @@ using LinearAlgebra
 using StaticArrays
 
 # Modules
-using Aeon.Tensor
+using Aeon.Geometry
 using Aeon.Analytic
 
 # Includes

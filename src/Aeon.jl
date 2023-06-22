@@ -1,10 +1,12 @@
 module Aeon
 
+include("utils.jl")
+
 # Submodules
-include("Tensor/Tensor.jl")
-include("Analytic/Analytic.jl")
-include("Approx/Approx.jl")
-include("Method/Method.jl")
-include("Grid/Grid.jl")
+include("Geometry/Geometry.jl")
+include("Operators/Operators.jl")
+
+include("Methods/Methods.jl")
+
 
 end

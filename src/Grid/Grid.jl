@@ -10,9 +10,10 @@ using LinearAlgebra
 using StaticArrays
 
 # Other Modules
+using Aeon
 using Aeon.Analytic
 using Aeon.Approx
-using Aeon.Tensor
+using Aeon.Geometry
 using Aeon.Method
 
 ################

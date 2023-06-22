@@ -69,7 +69,7 @@ function hyperrectangle(origin::SVector{N, T}, dims::SVector{N, Int}, width::T, 
         gi::Int = globallinear[gcoord...]
 
         # Clamped point (to enable centered stencils)
-        gcoord_clamped = map_tuple_with_index(gcoord) do x, i
+        gcoord_clamped = map_tuple_with_index(gcoord) do i, x
             clamp(x, supportradius + 1, pointdims[i] + supportradius)
         end
 
@@ -137,10 +137,3 @@ function hypercube(::Val{N}, start::T, finish::T, divisions::Int, supportradius:
 
     hyperrectangle(origin, dims, width, supportradius)
 end
-
-
-map_tuple_with_index_helper(f, t::Tuple, index) = (@inline; (f(t[1], index), map_tuple_with_index_helper(f, Base.tail(t), index + 1)...))
-map_tuple_with_index_helper(f, t::Tuple{Any,}, index) = (@inline; (f(t[1], index)))
-map_tuple_with_index_helper(f, ::Tuple{}, index) = ()
-
-map_tuple_with_index(f, t::Tuple) = map_tuple_with_index_helper(f, t, 1)

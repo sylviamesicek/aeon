@@ -1,6 +1,6 @@
 # Exports
 
-export Translate, ScaleTransform, LinearTransform
+export Translate, UniformScaleTransform, LinearTransform
 
 
 #########################
@@ -30,17 +30,17 @@ Base.show(io::IO, trans::Translate) = print(io, "Translation$((trans.offset...,)
 ## Scale Transform #####
 ########################
 
-struct ScaleTransform{N, T} <: Transform{N, T}
+struct UniformScaleTransform{N, T} <: Transform{N, T}
     scale::UniformScaling{T}
 
-    ScaleTransform{N, T}(f::T) where {N, T} = new{N, T}(UniformScaling(f))
+    UniformScaleTransform{N, T}(f::T) where {N, T} = new{N, T}(UniformScaling(f))
 end
 
-(trans::ScaleTransform{N, T})(x::SVector{N, T}) where {N, T} = trans * x 
-Base.inv(trans::ScaleTransform{N, T}) where {N, T} = ScaleTransform{N, T}(inv(trans.scale))
-jacobian(trans::ScaleTransform{N, T}, ::SVector{N, T}) where {N, T} = trans.scale
+(trans::UniformScaleTransform{N, T})(x::SVector{N, T}) where {N, T} = trans * x 
+Base.inv(trans::UniformScaleTransform{N, T}) where {N, T} = UniformScaleTransform{N, T}(inv(trans.scale))
+jacobian(trans::UniformScaleTransform{N, T}, ::SVector{N, T}) where {N, T} = trans.scale
 
-Base.:(∘)(t1::ScaleTransform{N, T}, t2::ScaleTransform{N, T}) where {N, T} = ScaleTransform{N, T}(t1.scale * t2.scale)
+Base.:(∘)(t1::UniformScaleTransform{N, T}, t2::UniformScaleTransform{N, T}) where {N, T} = UniformScaleTransform{N, T}(t1.scale * t2.scale)
 
 ########################
 ## Linear Transform ####
@@ -50,15 +50,13 @@ Base.:(∘)(t1::ScaleTransform{N, T}, t2::ScaleTransform{N, T}) where {N, T} = S
     LinearTransform <: Transform
     LinearTransform(M)
 
-A general linear transformation, constructed for any matrix-like object `M` using `LinearTransform{N, T}(M)`.
+A general linear transformation.
 """
-struct LinearTransform{N, T, M} <: Transform{N, T}
-    linear::M
-
-    LinearTransform{N, T}(linear::M) where {N, T, M} = new{N, T, M}(linear)
+struct LinearTransform{N, T, L} <: Transform{N, T}
+    linear::SMatrix{N, N, T, L}
 end
 
-LinearTransform(linear::SMatrix{N, N, T, L}) where {N, T, L} = LinearTransform{N, T}(linear)
+LinearTransform(linear::SMatrix{N, N, T, L}) where {N, T, L} = LinearTransform{N, T, L}(linear)
 
 Base.show(io::IO, trans::LinearTransform) = print(io, "LinearTransform($(trans.linear))")
 
