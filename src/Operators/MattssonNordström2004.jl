@@ -40,17 +40,20 @@ function mattson_derivative(::Val{T}, ::Val{1}, ::Val{2}) where {T}
 	SBPDerivative(left_block, right_block, central_coefs)
 end
 
-function sbpoperator(::Val{T}, ::Val{1}, source::MattssonNordström2004) where {T}
+function SBPOperator{T, 1}(source::MattssonNordström2004) where {T}
 	left_weights = SVector{1, T}(1//2)
 	central_weight = T(1//1)
 	right_weights = SVector{1, T}(1//2)
 
-	SBPOperator{T, 1}(left_weights, central_weight, right_weights, source)
-end
+	left_derivatives = (SVector{3, T}(3//2, -2//1, 1//2),)
+	right_derivatives = map(reverse, left_derivatives)
 
-function sbpboundaryderivatives(::SBPOperator{T, 1, MattssonNordström2004}) where {T}
-	stencil = SVector{3, T}(3//2, -2//1, 1//2)
-	(SBPBoundaryDerivative{T, 1}(stencil, reverse(stencil)),)
+	derivatives = (
+		mattson_derivative(Val(T), Val(1), Val(1)),
+		mattson_derivative(Val(T), Val(1), Val(2))
+	)
+
+	SBPOperator{T, 1}(left_weights, central_weight, right_weights, left_derivatives, right_derivatives, derivatives, source)
 end
 
 #######################
@@ -87,26 +90,18 @@ function mattson_derivative(::Val{T}, ::Val{2}, ::Val{2}) where {T}
 	SBPDerivative(left_block, right_block, central_coefs)
 end
 
-function sbpoperator(::Val{T}, ::Val{2}, source::MattssonNordström2004) where {T}
+function SBPOperator{T, 2}(source::MattssonNordström2004) where {T}
 	left_weights = SVector{4, T}(17//48, 59//48, 43/48, 49/48)
 	central_weight = T(1)
 	right_weights = reverse(right_weights)
 
-	SBPCoefficients{T, 2}(left_weights, central_weight, right_weights, source)
-end
+	left_derivatives = (SVector{4, T}(11//6, -3, 3//2, -1//3),)
+	right_derivatives = map(reverse, left_derivatives)
 
-function sbpboundaryderivatives(::SBPOperator{T, 2, MattssonNordström2004}) where {T}
-	stencil = SVector{4, T}(11//6, -3, 3//2, -1//3)
-	(SBPBoundaryDerivative{T, 1}(stencil, reverse(stencil)),)
-end
-
-###################
-## Generic ########
-###################
-
-function sbpderivatives(::SBPOperator{T, O, MattssonNordström2004}) where {T, O}
-	return (
-		mattson_derivative(Val(T), Val(O), Val(1)),
-		mattson_derivative(Val(T), Val(O), Val(2))
+	derivatives = (
+		mattson_derivative(Val(T), Val(2), Val(1)),
+		mattson_derivative(Val(T), Val(2), Val(2))
 	)
+
+	SBPOperator{T, 1}(left_weights, central_weight, right_weights, left_derivatives, right_derivatives, derivatives, source)
 end

@@ -12,10 +12,8 @@ using StaticArrays
 # Core Exports
 
 export CoefficientSource
-export SBPDerivative, SBPBoundaryDerivative, SBPOperator
-export SBPDerivatives, SBPBoundaryDerivatives
-export sbpoperator, sbpderivatives,sbpboundaryderivatives
-export left_boundary_weight, right_boundary_weight
+export SBPDerivative, SBPOperator
+export left_boundary_weight, right_boundary_weight, derivative_left, derivative_right, derivative
 
 # Core
 
@@ -38,31 +36,17 @@ struct SBPDerivative{T, O, Block, Central}
 end
 
 """
-Represents stencils for lower-rank derivatives on boundaries, used to enforce nuemann conditions
-for instance.
-"""
-struct SBPBoundaryDerivative{T, O, L1, L2} 
-    left::SVector{L1, T}
-    right::SVector{L2, T}
-end
-
-"""
-A set of SBP derivative operators, indexed by rank of derivative.
-"""
-const SBPDerivatives{T, O, L} = NTuple{L, SBPDerivative{T, O}} where {T, O, L}
-
-"""
-A set of SBP boundary derivative operators, indexed by rank of derivative
-"""
-const SBPBoundaryDerivatives{T, O, L} = NTuple{L, SBPBoundaryDerivative{T, O}} where {T, O, L}
-
-"""
 Represents a collection of dervative operators, as well as their coefficients.
 """
-struct SBPOperator{T, O, Source <: CoefficientSource, Weights <: AbstractVector}
+struct SBPOperator{T, O, Source <: CoefficientSource, Weights <: AbstractVector, LeftDerivatives, RightDerivatives, Derivatives}
     left_weights::Weights
     central_weight::T
     right_weights::Weights
+
+    left_derivatives::LeftDerivatives
+    right_derivatives::RightDerivatives
+
+    derivatives::Derivatives
 
     source::Source
 end
@@ -77,9 +61,13 @@ Returns the rightmost boundary weight of the mass matrix.
 """
 right_boundary_weight(oper::SBPOperator) = oper.right_weights[end]
 
-sbpoperator(::Val{T}, ::Val{O}, source::CoefficientSource) where {T, O} = error("Unimplemented")
-sbpderivatives(::SBPOperator) = error("Unimplemented")
-sbpboundaryderivatives(::SBPOperator) = error("Unimplemented")
+# Base.length(oper::SBPOperator) = length(oper.derivatives)
+# Base.eachindex(oper::SBPOperator) = eachindex(oper.derivatives)
+# Base.getindex(oper::SBPOperator, rank::Int) = oper.derivatives[rank]
+
+derivative_left(oper::SBPOperator, rank::Int) = oper.left_derivatives[rank]
+derivative_right(oper::SBPOperator, rank::Int) = oper.right_derivatives[rank]
+derivative(oper::SBPOperator, rank::Int) = oper.derivatives[rank]
 
 # Includes
 include("MattssonNordström2004.jl")

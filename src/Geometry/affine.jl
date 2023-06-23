@@ -52,6 +52,8 @@ struct ScaleTransform{N, T} <: Transform{N, T}
     ScaleTransform(scales::Vararg{T, N}) where {N, T} = ScaleTrasform(SVector(scales)) 
 end
 
+Base.show(io::IO, scale::ScaleTransform) = print(io, "Scale($(scale.scales.diag))")
+
 (trans::ScaleTransform{N, T})(x::SVector{N, T}) where {N, T} = trans.scales * x 
 Base.inv(trans::ScaleTransform{N, T}) where {N, T} = ScaleTransform{N, T}(inv(trans.scales))
 jacobian(trans::ScaleTransform{N, T}, ::SVector{N, T}) where {N, T} = trans.scales

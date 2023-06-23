@@ -1,5 +1,5 @@
 # Exports
-export MeshWriter, ScalarAttribute, IndexAttribute, KindAttribute, TagAttribute, attrib!, write_vtk
+export MeshWriter, ScalarAttribute, IndexAttribute, CellAttribute, TagAttribute, attrib!, write_vtk
 
 # Dependencies
 using WriteVTK
@@ -11,6 +11,11 @@ Adds `builtin::indices` data to VTK file.
 """
 struct IndexAttribute end
 
+"""
+Adds `builtin::cells` data to VTK file.
+"""
+struct CellAttribute end
+
 # """
 # Adds `builtin::kinds` data to VTK file.
 # """
@@ -21,16 +26,17 @@ Adds a scalar field of the given name to
 """
 struct ScalarAttribute{N, T}
     name::String
-    fields::Vector{Field{N, T}}
+    field::Vector{T}
 end
 
 mutable struct MeshWriter{N, T}
     mesh::Mesh{N, T}
     indices::Bool
+    cells::Bool
     scalars::Vector{ScalarAttribute{N, T}}
 end
 
-MeshWriter(mesh::Mesh{N, T}) where {N, T} = MeshWriter{N, T}(mesh, false, Vector{ScalarAttribute{N, T}}())
+MeshWriter(mesh::Mesh{N, T}) where {N, T} = MeshWriter{N, T}(mesh, false, false, Vector{ScalarAttribute{N, T}}())
 
 function attrib!(writer::MeshWriter, attrib::ScalarAttribute)
     if length(attrib.values) != length(writer.mesh)
@@ -44,6 +50,10 @@ function attrib!(writer::MeshWriter, ::IndexAttribute)
     writer.indices = true
 end
 
+function attrib!(writer::MeshWriter, ::CellAttribute)
+    writer.cells = true
+end
+
 function write_vtk(writer::MeshWriter, filename)
     positions = position_array(writer.mesh)
 
@@ -52,31 +62,31 @@ function write_vtk(writer::MeshWriter, filename)
         if writer.indices
             vtk["builtin:indices", VTKPointData()] = indices_array(writer.mesh)
         end
+
+        if writer.cells
+            vtk["builtin:cells", VTKPointData()] = cells_array(writer.mesh)
+        end
         
         # Scalars
         for i in eachindex(writer.scalars)
-            scalar = writer.scalars[i]
-            vtk["scalar:$(scalar.name)", VTKPointData()] = scalar_array(writer.mesh, scalar)
+            vtk["scalar:$(scalar.name)", VTKPointData()] = writer.scalars[i].field
         end
     end
 end
 
 function position_array(mesh::Mesh{N, T}) where {N, T}
-    totaldofs = sum(map(length, mesh.cells))
-    matrix = Matrix{T}(undef, N, totaldofs)
+    matrix = Matrix{T}(undef, N, mesh.doftotal)
 
-    offset = 1
+    for cell in eachindex(mesh)
+        # @show mesh[cell], length(mesh[cell])
+        for point in eachindex(mesh[cell])
+            pos = position(mesh[cell], point)
+            ptr = local_to_global(mesh[cell], point)
 
-    for cindex in eachindex(mesh)
-        cell = mesh[cindex]
-        for pindex in eachindex(cell)
-            pos = position(cell, pindex)
 
             for i in 1:N
-                matrix[i, offset] = pos[i]
+                matrix[i, ptr] = pos[i]
             end
-
-            offset += 1
         end
     end
 
@@ -84,37 +94,27 @@ function position_array(mesh::Mesh{N, T}) where {N, T}
 end
 
 function indices_array(mesh::Mesh{N, T}) where {N, T}
-    totaldofs = sum(map(length, mesh.cells))
-    vector = Vector{T}(undef, totaldofs)
+    vector = Vector{T}(undef, mesh.doftotal)
 
-    offset = 1
+    for cell in eachindex(mesh)
+        linear = LinearIndices(Tuple(mesh[cell].dofs))
+        for point in eachindex(mesh[cell])
+            ptr = local_to_global(mesh[cell], point)
 
-    for cindex in eachindex(mesh)
-        cell = mesh[cindex]
-
-        linear = LinearIndices(Tuple(cell.dofs))
-
-        for point in eachindex(cell)
-            vector[offset] = linear[point]
-            offset += 1
+            vector[ptr] = linear[point]
         end
     end
 
     vector
 end
 
-function scalar_array(mesh::Mesh{N, T}, attribute::ScalarAttribute{N, T}) where {N, T}
-    totaldofs = sum(map(length, mesh.cells))
-    vector = Vector{T}(undef, totaldofs)
+function cells_array(mesh::Mesh{N, T}) where {N, T}
+    vector = Vector{T}(undef, mesh.doftotal)
 
-    offset = 1
-
-    for cindex in eachindex(mesh)
-        cell = mesh[cindex]
-        field = attribute.fields[cindex]
-        for point in eachindex(cell)
-            vector[offset] = value(cell, point, field)
-            offset += 1
+    for cell in eachindex(mesh)
+        for point in eachindex(mesh[cell])
+            ptr = local_to_global(mesh[cell], point)
+            vector[ptr] = cell
         end
     end
 
