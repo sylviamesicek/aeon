@@ -1,41 +1,9 @@
-export Cell, Face, Mesh
-export cellface, boundaryface
-export hyperprism
+export Mesh, hyperprism
 
 """
-A face between two `Cell`s.
-"""
-const cellface::Int = 0
-"""
-A face between a `Cell` and boundary.
-"""
-const boundaryface::Int = 1
-
-"""
-A face in a mesh.
-"""
-struct Face
-    # Indicates what type of face this is.
-    kind::Int
-    # An index, either into the boundary array or the cell vector
-    index::Int
-end
-
-"""
-Represents a cell in a mesh. Eventually this will be extended to arbitrary 
-hyper-quadralaterials, but for now it is simply a hyperrectangle with a certain
-width and origin.
-"""
-struct Cell{N, T} 
-    bounds::HyperBox{N, T}
-    faces::NTuple{N, NTuple{2, Face}}
-end
-
-"""
-The overall topology of a domain, unconnected to any DoFs or interpretation. The mesh class
-provides a Method-agnostic means of discretizing, building, and manpulating numerical domains.
-It can be iterated to yield the individual cells of the mesh. `Mesh`s are usually passed to
-individual `Method`s which handle DoFs, refinement, ect.
+The overall topology of a domain. The mesh class
+provides a means of discretizing, building, and manpulating numerical domains.
+It can be iterated to yield the individual cells of the mesh. 
 """
 struct Mesh{N, T}
     cells::Vector{Cell{N, T}}
@@ -51,7 +19,7 @@ Base.getindex(mesh::Mesh, i::Int) = getindex(mesh.cells, i)
 Builds a mesh consisting of coordinate aligned cells of the given width. This starts at the origin,
 and extends by a number of cells (given by the `cells` vector) in each direction.
 """
-function hyperprism(origin::SVector{N, T}, cells::SVector{Int, T}, width::T) where {N, T}
+function hyperprism(origin::SVector{N, T}, cells::SVector{N, Int}, widths::SVector{N, T}, dofs::SVector{N, Int}) where {N, T}
     @assert N > 0
 
     # Indexing objects
@@ -66,7 +34,7 @@ function hyperprism(origin::SVector{N, T}, cells::SVector{Int, T}, width::T) whe
         # Convert to linear index
         linearindex = carttolinear[i]
         # Compute position of origin
-        position = origin + SVector{N, T}((cartindex .- 1) .* width)
+        position = origin + SVector{N, T}((cartindex .- 1) .* widths)
         # Compute face tuple
         faces = ntuple(Val(N)) do dim
             if cartindex[dim] == 1
@@ -88,7 +56,7 @@ function hyperprism(origin::SVector{N, T}, cells::SVector{Int, T}, width::T) whe
             (negface, posface)
         end
         # Add cell to mesh
-        meshcells[linearindex] = Cell(HyperBox(position, width), faces)
+        meshcells[linearindex] = Cell(HyperBox(position, widths), faces, dofs)
     end
 
     Mesh{N, T}(meshcells)

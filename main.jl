@@ -3,13 +3,12 @@ using Aeon.Geometry
 using Aeon.Methods
 using Aeon.Operators
 
-using LinearAlgebra
-using LinearMaps
 using StaticArrays
-using IterativeSolvers
 
 # Main code
 function main()
+    mesh = hyperprism(SA[0.0, 0.0], SA[10, 10], SA[1.0, 1.0], SA[10, 10])
+
     # # Generic Settings
     # supportradius = 2
     # basisorder = 4
@@ -83,13 +82,9 @@ function main()
 
     # @show ch
     
-    # writer = MeshWriter(grid.mesh)
-    # attrib!(writer, IndexAttribute())
-    # attrib!(writer, KindAttribute())
-    # attrib!(writer, TagAttribute())
-    # attrib!(writer, ScalarAttribute("rhs", rhs))
-    # attrib!(writer, ScalarAttribute("sol", sol))
-    # write_vtk(writer, "output")
+    writer = MeshWriter(mesh)
+    attrib!(writer, IndexAttribute())
+    write_vtk(writer, "output")
 end
 
 # Execute

@@ -1,7 +1,6 @@
 # Exports
 
-export Translate, UniformScaleTransform, LinearTransform
-
+export Translate, UniformScaleTransform, LinearTransform, ScaleTransform
 
 #########################
 ## Translation ##########
@@ -30,17 +29,34 @@ Base.show(io::IO, trans::Translate) = print(io, "Translation$((trans.offset...,)
 ## Scale Transform #####
 ########################
 
+# Uniform
+
 struct UniformScaleTransform{N, T} <: Transform{N, T}
     scale::UniformScaling{T}
 
     UniformScaleTransform{N, T}(f::T) where {N, T} = new{N, T}(UniformScaling(f))
 end
 
-(trans::UniformScaleTransform{N, T})(x::SVector{N, T}) where {N, T} = trans * x 
+(trans::UniformScaleTransform{N, T})(x::SVector{N, T}) where {N, T} = trans.scale * x 
 Base.inv(trans::UniformScaleTransform{N, T}) where {N, T} = UniformScaleTransform{N, T}(inv(trans.scale))
 jacobian(trans::UniformScaleTransform{N, T}, ::SVector{N, T}) where {N, T} = trans.scale
 
 Base.:(∘)(t1::UniformScaleTransform{N, T}, t2::UniformScaleTransform{N, T}) where {N, T} = UniformScaleTransform{N, T}(t1.scale * t2.scale)
+
+# Non-uniform
+
+struct ScaleTransform{N, T} <: Transform{N, T}
+    scales::Diagonal{T, SVector{N, T}}
+
+    ScaleTransform(scales::SVector{N, T}) where {N, T} = new{N, T}(Diagonal(scales))
+    ScaleTransform(scales::Vararg{T, N}) where {N, T} = ScaleTrasform(SVector(scales)) 
+end
+
+(trans::ScaleTransform{N, T})(x::SVector{N, T}) where {N, T} = trans.scales * x 
+Base.inv(trans::ScaleTransform{N, T}) where {N, T} = ScaleTransform{N, T}(inv(trans.scales))
+jacobian(trans::ScaleTransform{N, T}, ::SVector{N, T}) where {N, T} = trans.scales
+
+Base.:(∘)(t1::ScaleTransform{N, T}, t2::ScaleTransform{N, T}) where {N, T} = UniformScaleTransform{N, T}(t1.scales * t2.scales)
 
 ########################
 ## Linear Transform ####
@@ -55,8 +71,6 @@ A general linear transformation.
 struct LinearTransform{N, T, L} <: Transform{N, T}
     linear::SMatrix{N, N, T, L}
 end
-
-LinearTransform(linear::SMatrix{N, N, T, L}) where {N, T, L} = LinearTransform{N, T, L}(linear)
 
 Base.show(io::IO, trans::LinearTransform) = print(io, "LinearTransform($(trans.linear))")
 
