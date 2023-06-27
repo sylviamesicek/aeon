@@ -1,23 +1,37 @@
 ## Exports
 
-export Operator, evaluate
+export Operator, product, nproduct
 export MassOperator, CenteredOperator, BoundaryOperator
 export ProlongationOperator, RestrictionOperator
+export IdentityOperator
 
 """
 Represents an abstract numeric `Operator`. These can be applied to multivariate functions at nodal points.
 """
 abstract type Operator{T, O} end
 
-"""
-Evaluates an operator at a point, taking the tensor product along the given axes.
-"""
-evaluate(point::CartesianIndex{N}, oper::Operator{T}, func::AbstractArray{T, N}, axes::Int...) where {N, T} = error("Evaluation of $(typeof(oper)) is unimplemented.")
+product(point::CartesianIndex{N}, opers::NTuple{N, Operator{T, O}}, func::AbstractArray{T, N}) where {N, T, O} = product_rec(point, (), func, opers...)
+
+# Common alias
+nproduct(point::CartesianIndex{N}, oper::Op, func::AbstractArray{T, N}) where {N, T, Op <: Operator{T}} = product(point, ntuple(i -> oper, Val(N)), func)
 
 """
-Recursive base case for evaluation products.
+Recursive base case for evaluating operator products.
 """
-evaluate_rec(point::CartesianIndex, ::Operator{T}, func::AbstractArray{T, N}, stencils::NTuple{L, Stencil{T}}) = stencil_product(point, func, stencils)
+product_rec(point::CartesianIndex{N}, stencils::NTuple{N, Stencil{T}}, func::AbstractArray{T, N}) where {N, T} = product(point, stencils, func)
+
+
+###################
+## Identity #######
+###################
+
+struct IdentityOperator{T, O} <: Operator{T, O} end
+
+function product_rec(point::CartesianIndex{N}, stencils::NTuple{L, Stencil{T}}, func::AbstractArray{T, N}, ::IdentityOperator{T, O}, opers::Operator{T, O}...) where {N, T, L, O}
+    stencil = IdentityStencil{T}()
+
+    product_rec(point, (stencils..., stencil), func, opers...)
+end
 
 ###################
 ## Mass ###########
@@ -32,26 +46,27 @@ struct MassOperator{T, O, L} <: Operator{T, O}
     MassOperator{O}(weights::SVector{L, T}) where {L, O, T} = new{T, O, L}(weights)
 end
 
-function evaluate(point::CartesianIndex{N}, oper::MassOperator{T, O}, func::AbstractArray{T, N}, axes::Int...) where {N, T, O}
-    weights = ntuple(Val(length(axes))) do adim
-        axis = axes[adim]
+function product_rec(point::CartesianIndex{N}, stencils::NTuple{L, Stencil{T}}, func::AbstractArray{T, N}, oper::MassOperator{T, O}, opers::Operator{T, O}...) where {N, T, L, O}
+    axis = L + 1
+    index = point[axis]
+    total = size(func)[axis]
 
-        index = point[axis]
-        total = size(func)[axis]
+    leftend = length(oper.boundary)
+    rightbegin = total - length(oper.boundary)
 
-        leftend = length(oper.left)
-        rightbegin = total - length(oper.right)
+    if index ≤ leftend
+        stencil = ValueStencil(oper.weights[index])
 
-        if index ≤ leftend
-            return oper.left[index]
-        elseif index > rightbegin
-            return oper.right[index_from_right(total, index)]
-        else
-            return T(1)
-        end
+        return product_rec(point, (stencils..., stencil), func, opers...)
+    elseif index > rightbegin
+        stencil = ValueStencil(oper.boundary[index_from_right(total, index)])
+
+        return product_rec(point, (stencils..., stencil), func, opers...)
+    else
+        stencil = IdentityStencil{T}()
+
+        return product_rec(point, (stencils..., stencil), func, opers...)
     end
-
-    prod(weights)
 end
 
 """
@@ -70,14 +85,11 @@ struct CenteredOperator{T, O, CL, BP, BL} <: Operator{T, O}
     boundary::SVector{BP, SVector{BL, T}}
     central::SVector{CL, T}
 
-    CenteredOperator{O}(boundary::SVector{BP, SVector{BL, T}}, central::SVector{CL, T}) where {T, BP, BL, CL} = new{T, O, CL, BP, BL}(boundary, central)
+    CenteredOperator{O}(boundary::SVector{BP, SVector{BL, T}}, central::SVector{CL, T}) where {T, O, BP, BL, CL} = new{T, O, CL, BP, BL}(boundary, central)
 end
 
-evaluate(point::CartesianIndex{N}, oper::CenteredOperator{T}, func::AbstractArray{T, N}, axes::Int...) = evaluate_rec(point, oper, func, (), axes...)
-
-function evaluate_rec(point::CartesianIndex{N}, oper::CenteredOperator{T}, func::AbstractArray{T, N}, stencils::NTuple{L, Stencil{T}}, remaining::Int...) where {N, T, L}
-    axis = first(remaining)
-
+function product_rec(point::CartesianIndex{N}, stencils::NTuple{L, Stencil{T}}, func::AbstractArray{T, N}, oper::CenteredOperator{T, O}, opers::Operator{T, O}...) where {N, T, L, O}
+    axis = L + 1
     index = point[axis]
     total = size(func)[axis]
 
@@ -85,17 +97,17 @@ function evaluate_rec(point::CartesianIndex{N}, oper::CenteredOperator{T}, func:
     rightbegin = total - length(oper.boundary)
 
     if index ≤ leftend
-        stencil = LeftStencil(oper.boundary[index], axis)
+        stencil = LeftStencil(oper.boundary[index])
 
-        return evaluate_rec(point, oper, func, (stencils..., stencil), Base.tail(remaining)...)
+        return product_rec(point, (stencils..., stencil), func, opers...)
     elseif index > rightbegin
-        stencil = RightStencil(oper.boundary[index_from_right(total, index)], axis, total)
+        stencil = RightStencil(oper.boundary[index_from_right(total, index)], total)
 
-        return evaluate_rec(point, oper, func, (stencils..., stencil), Base.tail(remaining)...)
+        return product_rec(point, (stencils..., stencil), func, opers...)
     else
-        stencil = CenteredStencil(oper.central, axis)
+        stencil = CenteredStencil(oper.central)
 
-        return evaluate_rec(point, oper, func, (stencils..., stencil), Base.tail(remaining)...)
+        return product_rec(point, (stencils..., stencil), func, opers...)
     end
 end
 
@@ -107,14 +119,11 @@ struct ProlongationOperator{T, O, CL, BP, BL} <: Operator{T, O}
     boundary::SVector{BP, SVector{BL, T}}
     central::SVector{CL, T}
 
-    ProlongationOperator{O}(boundary::SVector{BP, SVector{BL, T}}, central::SVector{CL, T}) where {T, BP, BL, CL} = new{T, O, CL, BP, BL}(boundary, central)
+    ProlongationOperator{O}(boundary::SVector{BP, SVector{BL, T}}, central::SVector{CL, T}) where {T, O, BP, BL, CL} = new{T, O, CL, BP, BL}(boundary, central)
 end
 
-evaluate(point::CartesianIndex{N}, oper::ProlongationOperator{T}, func::AbstractArray{T, N}, axes::Int...) = product_rec(point, oper, func, (), axes...)
-
-function evaluate_rec(point::CartesianIndex{N}, oper::ProlongationOperator{T}, func::AbstractArray{T, N}, stencils::NTuple{L, Stencil{T}}, remaining::Int...) where {N, T, L}
-    axis = first(remaining)
-
+function product_rec(point::CartesianIndex{N}, stencils::NTuple{L, Stencil{T}}, func::AbstractArray{T, N}, oper::ProlongationOperator{T, O}, opers::Operator{T, O}...) where {N, T, L, O}
+    axis = L + 1
     index = point[axis]
     total = size(func)[axis]
 
@@ -124,21 +133,21 @@ function evaluate_rec(point::CartesianIndex{N}, oper::ProlongationOperator{T}, f
     rightbegin = coarse_to_refined(total) - length(oper.boundary)
 
     if index ≤ leftend
-        stencil = LeftStencil(oper.boundary[index], axis)
+        stencil = LeftStencil(oper.boundary[index])
 
-        return evaluate_rec(point, oper, func, (stencils..., stencil), Base.tail(remaining)...)
+        return product_rec(point, (stencils..., stencil), func, opers...)
     elseif index > rightbegin
-        stencil = RightStencil(oper.boundary[index_from_right(coarse_to_refined(total), index)], axis, total)
+        stencil = RightStencil(oper.boundary[index_from_right(coarse_to_refined(total), index)], total)
 
-        return evaluate_rec(point, oper, func, (stencils..., stencil), Base.tail(remaining)...)
-    elseif index % 2
-        stencil = ProlongedEvenStencil(oper.central, axis)
+        return product_rec(point, (stencils..., stencil), func, opers...)
+    elseif index % 2 == 0
+        stencil = ProlongedEvenStencil(oper.central)
 
-        return evaluate_rec(point, oper, func, (stencils..., stencil), Base.tail(remaining)...)
+        return product_rec(point, (stencils..., stencil), func, opers...)
     else
-        stencil = ProlongedOddStencil(axis)
+        stencil = ProlongedOddStencil{T}()
 
-        return evaluate_rec(point, oper, func, (stencils..., stencil), Base.tail(remaining)...)
+        return product_rec(point, (stencils..., stencil), func, opers...)
     end
 end
 
@@ -150,14 +159,11 @@ struct RestrictionOperator{T, O, CL, BP, BL} <: Operator{T, O}
     boundary::SVector{BP, SVector{BL, T}}
     central::SVector{CL, T}
 
-    RestrictionOperator{O}(boundary::SVector{BP, SVector{BL, T}}, central::SVector{CL, T}) where {T, BP, BL, CL} = new{T, O, CL, BP, BL}(boundary, central)
+    RestrictionOperator{O}(boundary::SVector{BP, SVector{BL, T}}, central::SVector{CL, T}) where {T, O, BP, BL, CL} = new{T, O, CL, BP, BL}(boundary, central)
 end
 
-evaluate(point::CartesianIndex{N}, oper::RestrictionOperator{T}, func::AbstractArray{T, N}, axes::Int...) = product_rec(point, oper, func, (), axes...)
-
-function evaluate_rec(point::CartesianIndex{N}, oper::RestrictionOperator{T}, func::AbstractArray{T, N}, stencils::NTuple{L, Stencil{T}}, remaining::Int...) where {N, T, L}
-    axis = first(remaining)
-
+function product_rec(point::CartesianIndex{N}, stencils::NTuple{L, Stencil{T}}, func::AbstractArray{T, N}, oper::RestrictionOperator{T, O}, opers::Operator{T, O}...) where {N, T, L, O}
+    axis = L + 1
     index = point[axis]
     total = size(func)[axis]
 
@@ -167,17 +173,17 @@ function evaluate_rec(point::CartesianIndex{N}, oper::RestrictionOperator{T}, fu
     rightbegin = refined_to_coarse(total) - length(oper.boundary)
 
     if index ≤ leftend
-        stencil = LeftStencil(oper.left[index], axis)
+        stencil = LeftStencil(oper.left[index])
 
-        return evaluate_rec(point, oper, func, (stencils..., stencil), Base.tail(remaining)...)
+        return product_rec(point, (stencils..., stencil), func, opers...)
     elseif index > rightbegin
-        stencil = RightStencil(oper.right[index_from_right(refined_to_coarse(total), index)], axis, total)
+        stencil = RightStencil(oper.right[index_from_right(refined_to_coarse(total), index)], total)
 
-        return evaluate_rec(point, oper, func, (stencils..., stencil), Base.tail(remaining)...)
+        return product_rec(point, (stencils..., stencil), func, opers...)
     else
-        stencil = RestrictedStencil(oper.central, axis)
+        stencil = RestrictedStencil(oper.central)
 
-        return evaluate_rec(point, oper, func, (stencils..., stencil), Base.tail(remaining)...)
+        return product_rec(point, (stencils..., stencil), func, opers...)
     end
 end
 
@@ -192,20 +198,17 @@ struct BoundaryOperator{T, O, L} <: Operator{T, O}
     boundary::SVector{L, T}
 end
 
-evaluate(point::CartesianIndices{N}, oper::BoundaryOperator{T, O}, func::AbstractArray{T, N}, axes::Int...) where {N, T, O} = evaluate_rec(oper, func, point, (), axes...)
-
-function evaluate_rec(point::CartesianIndex{N}, oper::BoundaryOperator{T, O}, func::AbstractArray{T, N}, stencils::NTuple{L, Stencil{T}}, remaining::Int...) where {N, T, O, L}
-    axis = first(remaining)
-
+function product_rec(point::CartesianIndex{N}, stencils::NTuple{L, Stencil{T}}, func::AbstractArray{T, N}, oper::BoundaryOperator{T, O}, opers::Operator{T, O}...) where {N, T, L, O}
+    axis = L + 1
     index = point[axis]
     total = size(func)[axis]
 
     if index == 1
-        stencil = LeftStencil(oper.boundary, axis)
-        return evaluate_rec(point, oper, func, (stencils..., stencil), Base.tail(remaining)...)
+        stencil = LeftStencil(oper.boundary)
+        return product_rec(point, (stencils..., stencil), func , opers...)
     elseif index == total
-        stencil = RightStencil(oper.boundary, axis, total)
-        return evaluate_rec(point, oper, func, (stencils..., stencil), Base.tail(remaining)...)
+        stencil = RightStencil(oper.boundary, total)
+        return product_rec(point, (stencils..., stencil), func, opers...)
     else
         return 0
     end

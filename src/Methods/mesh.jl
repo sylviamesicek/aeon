@@ -72,6 +72,10 @@ function hyperprism(origin::SVector{N, T}, cells::SVector{N, Int}, widths::SVect
     Mesh{N, T}(meshcells, baserefine, dofoffset)
 end
 
+"""
+Refine a mesh using a refinement vector. For each `true` in the `shouldrefine` vector, the number of dofs on the corresponding cell is doubled along each
+axis.
+"""
 function refine!(mesh::Mesh, shouldrefine::Vector{Bool})
     smooth = false
     while !smooth
@@ -97,11 +101,17 @@ function refine!(mesh::Mesh, shouldrefine::Vector{Bool})
     mesh.doftotal = dofoffset
 end
 
+"""
+Refines a mesh based on a functional predicate.
+"""
 function refine!(pred::Function, mesh::Mesh)
     shouldrefine = [pred(mesh[cell]) for cell in eachindex(mesh)]
     refine!(mesh, shouldrefine)
 end
 
+"""
+Smooths the `shouldrefine` vector. Returns true if the vector is already smooth.
+"""
 function smoothrefine!(mesh::Mesh, shouldrefine::Vector{Bool})
     smooth = true
 

@@ -48,14 +48,14 @@ function boundary_derivative_operator(::MattssonNordström2004{T, 1}, ::Val{1}) 
 	BoundaryOperator{1}(boundary)
 end
 
-function prologation_operator(::MattssonNordström2004{T, 1}) where {T}
+function prolongation_operator(::MattssonNordström2004{T, 1}) where {T}
 	boundary = SVector{0, SVector{0, T}}()
 	central = SVector{2, T}(1//2, 1//2)
 
 	ProlongationOperator{1}(boundary, central)
 end
 
-function restriction_operator(::MattssonNordström2004{T, 1})
+function restriction_operator(::MattssonNordström2004{T, 1}) where {T}
 	boundary = SA[
 		SVector{2, T}(1, 1)
 	]
@@ -104,7 +104,7 @@ function boundary_derivative_operator(::MattssonNordström2004{T, 2}, ::Val{1}) 
 	BoundaryOperator{2}(boundary)
 end
 
-function prologation_operator(::MattssonNordström2004{T, 2}) where {T}
+function prolongation_operator(::MattssonNordström2004{T, 2}) where {T}
 	boundary = SA[
 		SVector{7, T}(1, 0, 0, 0, 0, 0, 0),
 		SVector{7, T}(429//944, 279//472, -43//944, 0, 0, 0, 0),
@@ -122,7 +122,7 @@ function prologation_operator(::MattssonNordström2004{T, 2}) where {T}
 	ProlongationOperator{2}(boundary, central)
 end
 
-function restriction_operator(::MattssonNordström2004{T, 2})
+function restriction_operator(::MattssonNordström2004{T, 2}) where {T}
 	boundary = SA[
 		SVector{10, T}(1//2, 429//544, 0, -103//544, -5//34, -27//544, 1//17, 23//544, 0, -1//272),
 		SVector{10, T}(0, 279//944, 43//118, 549//1888, 5//59, 15//1888, -3//118, -37//1888, 0, 3//1888)
