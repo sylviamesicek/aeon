@@ -85,7 +85,7 @@ function faces(cell::Cell{N, T}) where {N, T}
     end
 end
 
-faceonaxisindex(cell::Cell{N, T}, face::Face) where {N, T} =  face.side ? cell.dofs[face.axis] : 1
+axis_face_index(cell::Cell{N, T}, face::Face) where {N, T} =  face.side ? cell.dofs[face.axis] : 1
 
 """
 Iterates the points that lie on a given face of the cell.
@@ -97,11 +97,9 @@ function eachindexface(cell::Cell{N, T}, face::Face) where {N, T}
 
     faceindices = CartesianIndices(facedofs)
 
-    onaxis = faceonaxisindex(cell, face)
-
     Iterators.map(faceindices) do index
         fullindex = ntuple(Val(N)) do dim
-            dim == axis ? onaxis : index[dim - (dim > axis)]
+            dim == axis ? axis_face_index(cell, face) : index[dim - (dim > axis)]
         end
 
         CartesianIndex(fullindex)
@@ -271,7 +269,7 @@ end
 ## Interfaces ############
 ##########################
 
-function smooth_interfaces!(result::AbstractVector{T}, x::AbstractVector{T}, mesh::Mesh{N, T}, cell::Cell{N, T}, strength) where {N, T}
+function smooth_interfaces!(result::AbstractVector{T}, x::AbstractVector{T}, mesh::Mesh{N, T}, cell::Cell{N, T}, strength::T) where {N, T}
     for face in faces(cell)
         if !isinterface(cell, face)
             continue
@@ -281,43 +279,43 @@ function smooth_interfaces!(result::AbstractVector{T}, x::AbstractVector{T}, mes
 
         if cell.refinement == other.refinement
             for faceindex in eachindexface(cell, face)
-                otherindex = ntuple(Val(N)) do dim
-                    dim == face.axis ? faceonaxisindex(other, -face) : faceindex[dim]
-                end
+                # Other index is the same with a reflected face.
+                otherindex = CartesianIndex(ntuple(Val(N)) do dim
+                    dim == face.axis ? axis_face_index(other, -face) : faceindex[dim]
+                end)
+
+                cellptr = local_to_global(cell, faceindex)
+                otherptr = local_to_global(other, otherindex)
+
+                # Diritchlet interface conditions
+                result[cellptr] += strength * (x[cellptr] - x[otherptr])
             end
+        elseif cell.refinement < other.refinement
+            for faceindex in eachindexface(cell, face)
+                # Other index is scaled
+                otherindex = CartesianIndex(ntuple(Val(N)) do dim
+                    dim == face.axis ? axis_face_index(other, -face) : 2faceindex[dim] - 1
+                end)
+
+                cellptr = local_to_global(cell, faceindex)
+                otherptr = local_to_global(other, otherindex)
+
+                # Diritchlet interface conditions
+                result[cellptr] += strength * (x[cellptr] - x[otherptr])
+            end
+        else
+            # for faceindex in eachindexface(cell, face)
+            #     # Other index is scaled
+            #     otherindex = CartesianIndex(ntuple(Val(N)) do dim
+            #         dim == face.axis ? axis_face_index(other, -face) : 2faceindex[dim] - 1
+            #     end)
+
+            #     cellptr = local_to_global(cell, faceindex)
+            #     otherptr = local_to_global(other, otherindex)
+
+            #     # Diritchlet interface conditions
+            #     result[cellptr] += strength * (x[cellptr] - x[otherptr])
+            # end
         end
-    end
-end
-
-function smooth_interface(mesh::Mesh{N, T}, cell::Cell{N, T}, axis::Int, side::Int, strengh::T) where {N, T}
-    facedofs = ntuple(Val(N - 1)) do dim
-        cell.dofs[dim + (dim ≥ axis)]
-    end
-
-    faceindices = CartesianIndices(facedofs)
-
-    if cell.refinement == neighbor.refinement
-        cellonaxis = side > 1 ? cell.dofs[axis] : 1
-        neighboronaxis = side > 1 ? 1 : neighbor.dofs[axis]
-
-        for faceindex in faceindices
-            cellindex = ntuple(Val(N)) do dim
-                dim == axis ? cellonaxis : faceindex[dim - (dim > axis)]
-            end
-
-            neighborindex = ntuple(Val(N)) do dim
-                dim == axis ? neighboronaxis : faceindex[dim - (dim > axis)]
-            end
-
-            cellptr = local_to_global(cell, cellindex)
-            neighborptr = local_to_global(neighbor, neighborindex)
-
-
-        end
-
-    elseif cell.refinement > neighbor.refinement
-    
-    else
-
     end
 end
