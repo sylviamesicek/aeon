@@ -1,84 +1,187 @@
-export Stencil, LeftStencil, RightStencil, CenteredStencil, ProlongedStencil
+export Stencil, LeftStencil, RightStencil, CenteredStencil
+export ProlongedOddStencil, ProlongedEvenStencil, RestrictedStencil
 export stencil_product
 
+####################
+## Stencil #########
+####################
 
+"""
+Represents a stencil. Aka, a slice of coefficient values along an axis, with a method to convert from
+"stencil indices" to global indices. 
+"""
 abstract type Stencil{T} end
 
-struct LeftStencil{T, BL} <: Stencil{T}
-    values::SVector{T, BL}
-end
+"""
+Returns the number of non-zero coefficients in stencil
+"""
+function stencil_length end
 
-stencil_length(point::Int, left::LeftStencil) = length(left.values)
-stencil_indices(point::Int, left::LeftStencil) = eachindex(left.values)
-stencil_value(point::Int, left::LeftStencil, index::Int) = left.values[index]
-stencil_to_global(point::Int, left::LeftStencil, total::Int, index::Int) = index
+"""
+Returns an iterator over the indices of a stencil
+"""
+function stencil_indices end
 
-struct RightStencil{T, BL} <: Stencil{T}
-    values::SVector{T, BL}
-end
+"""
+Returns the value of a stencil at a specific index
+"""
+function stencil_value end
 
-stencil_length(point::Int,right::RightStencil) = length(right.values)
-stencil_indices(point::Int,right::RightStencil) = eachindex(right.values)
-stencil_value(point::Int, right::RightStencil, index::Int) = right.values[index]
-stencil_to_global(point::Int, right::RightStencil, total::Int, index::Int) = total - length(right.values) + index
+"""
+Converts a stencil index to a global index, given a global row index, and the total number of columns along that axis.
+"""
+function stencil_to_global end
 
-struct CenteredStencil{T, O, L} <: Stencil{T}
+"""
+The axis on which a stencil is defined.
+"""
+function stencil_axis end
+
+###############################
+## Helpers ####################
+###############################
+
+"""
+Converts the length of a centered stencil to its correct offset, regardless of whether it is odd or even.
+"""
+centered_offset(length) = (length + 1) ÷ 2
+
+"""
+Converts a coarse index to its corresponding refined index
+"""
+coarse_to_refined(n) = 2n - 1
+
+"""
+Converts a refined index to its corresponding coarse index. If n is even, this function treats it as if it is an odd index one lower.
+"""
+refined_to_coarse(n) = (n + 1) ÷ 2
+
+###############################
+## Left #######################
+###############################
+
+"""
+A stencil on the left side of a numerical domain.
+"""
+struct LeftStencil{T, L} <: Stencil{T}
     values::SVector{T, L}
+    axis::Int
 
-    function CenteredStencil{T, O}(values::SVector{T, L}) where {T, O, L}
-        @assert 2O + 1 == L
-        new{T, O, L}(values)
-    end
-
-    function CenteredStencil{T}(values::SVector{T, L}) where {T, L}
-        @assert L % 2 == 1
-        new{T, (L - 1)/2, L}(values)
+    function LeftStencil(values::SVector{L, T}, axis::Int) where {T, L}
+        new{T, L}(values, axis)
     end
 end
 
-stencil_length(point::Int, center::CenteredStencil) = length(center.values)
-stencil_indices(point::Int, center::CenteredStencil) = eachindex(center.values)
-stencil_value(point::Int, center::CenteredStencil, index::Int) = center.values[index]
-stencil_to_global(point::Int, center::CenteredStencil{T, O}, total::Int, index::Int) where {T, O} = point - O + index
+stencil_length(left::LeftStencil) = length(left.values)
+stencil_indices(left::LeftStencil) = eachindex(left.values)
+stencil_value(left::LeftStencil, index::Int) = left.values[index]
+stencil_to_global(left::LeftStencil, row::Int, total::Int, index::Int) = index
+stencil_axis(left::LeftStencil) = left.axis
 
-struct IdentityStencil{T} <: Stencil{T} end
+"""
+A stencil on the right side of a numerical domain.
+"""
+struct RightStencil{T, L} <: Stencil{T}
+    values::SVector{L, T}
+    axis::Int
 
-stencil_length(point::Int, ::IdentityStencil) = 1
-stencil_indices(point::Int, ::IdentityStencil) = 1:1
-stencil_value(point::Int, ::IdentityStencil, index::Int) where T = T(1)
-stencil_to_global(point::Int, ::IdentityStencil{T}, total::Int, index::Int) where {T} = point
+    function RightStencil(values::SVector{L, T}, axis::Int) where {T, L}
+        new{T, L}(values, axis)
+    end
+end
 
-struct ProlongedStencil{T, O, L} <: Stencil{T}
+stencil_length(right::RightStencil) = length(right.values)
+stencil_indices(right::RightStencil) = eachindex(right.values)
+stencil_value(right::RightStencil, index::Int) = right.values[index]
+stencil_to_global(right::RightStencil, row::Int, total::Int, index::Int) = total - length(right.values) + index
+stencil_axis(stencil::RightStencil) = stencil.axis
+
+"""
+A stencil with equal numbers of support points on each side, that may be used on the interior of a domain.
+"""
+struct CenteredStencil{T, L} <: Stencil{T}
     values::SVector{T, L}
+    axis::Int
 
-    function ProlongedStencil{T, O}(values::SVector{T, L}) where {T, O, L}
-        @assert 2O + 1 == L
-        new{T, O, L}(values)
-    end
-
-    function ProlongedStencil{T}(values::SVector{T, L}) where {T, L}
+    function CenteredStencil(values::SVector{T, L}, axis::Int) where {T, L}
         @assert L % 2 == 1
-        new{T, (L - 1)/2, L}(values)
+        new{T, O, L}(values, axis)
     end
 end
 
-stencil_length(point::Int, prol::ProlongedStencil) = point % 2 ? length(prol.values) : 1
-stencil_indices(point::Int, prol::ProlongedStencil) = point % 2  ? eachindex(prol.values) : 1:1
-stencil_value(point::Int, prol::ProlongedStencil{T}, index::Int) where T= point % 2  ? prol.values[index] : T(1)
-stencil_to_global(point::Int, prol::ProlongedStencil{T, O}, total::Int, index::Int) where {T, O} = (point + 1) ÷ 2 - O + index
+stencil_length(center::CenteredStencil) = length(center.values)
+stencil_indices(center::CenteredStencil) = eachindex(center.values)
+stencil_value(center::CenteredStencil, index::Int) = center.values[index]
+stencil_to_global(::CenteredStencil{T, L}, row::Int, total::Int, index::Int) where {T, L} = row - centered_offset(L) + index
+stencil_axis(stencil::CenteredStencil) = stencil.axis
 
-function stencil_product(point::CartesianIndex{N}, func::AbstractArray{T, N}, stencils::NTuple{L, Tuple{Stencil{T}, Int}}) where {N, T, L}
+"""
+A prolonged stencil on an odd point (a point which exists on both the coarse and refined grid). Essentially
+an identity stencil that does some manipulation to find the appropiate column to apply the stencil to.
+"""
+struct ProlongedOddStencil{T} <: Stencil{T} 
+    axis::Int
+
+    ProlongedOddStencil{T}(axis::Int) where T = new{T}(axis)
+end
+
+stencil_length(::ProlongedOddStencil) = 1
+stencil_indices(::ProlongedOddStencil) = 1:1
+stencil_value(::ProlongedOddStencil{T}, index::Int) where T = T(1)
+stencil_to_global(:ProlongedOddStencil{T}, row::Int, total::Int, index::Int) where {T} = refined_to_coarse(row)
+stencil_axis(stencil::ProlongedOddStencil) = stencil.axis
+
+"""
+A prolonged stencil on an even point (a point which only exists on the refined mesh).
+"""
+struct ProlongedEvenStencil{T, L} <: Stencil{T}
+    values::SVector{L, T}
+    axis::Int
+
+    function ProlongedEvenStencil(values::SVector{L, T}, axis::Int) where {T, L}
+        @assert L % 2 == 0
+        new{T, L}(values, axis)
+    end
+end
+
+stencil_length(prol::ProlongedEvenStencil) = length(prol.values) 
+stencil_indices(prol::ProlongedEvenStencil) = eachindex(prol.values)
+stencil_value(prol::ProlongedEvenStencil, index::Int) = prol.values[index]
+stencil_to_global(::ProlongedEvenStencil{T, L}, row::Int, total::Int, index::Int) where {T, L} = refined_to_coarse(row) - centered_offset(L) + index
+stencil_axis(stencil::ProlongedEvenStencil) = stencil.axis
+
+struct RestrictedStencil{T, L} <: Stencil{T}
+    values::SVector{L, T}
+    axis::Int
+
+    function RestrictedStencil(values::SVector{L, T}, axis::Int) where {T, L}
+        @assert L % 2 == 1
+        new{T, L}(values, axis)
+    end
+end
+
+stencil_length(stencil::RestrictedStencil) = length(stencil.values) 
+stencil_indices(stencil::RestrictedStencil) = eachindex(stencil.values)
+stencil_value(stencil::RestrictedStencil, index::Int) = stencil.values[index]
+stencil_to_global(::RestrictedStencil{T, L}, row::Int, total::Int, index::Int) where {T, L} = coarse_to_refined(row) - centered_offset(L) + index
+stencil_axis(stencil::RestrictedStencil) = stencil.axis
+
+####################
+## Product #########
+####################
+
+function stencil_product(point::CartesianIndex{N}, func::AbstractArray{T, N}, stencils::NTuple{L, Stencil{T}}) where {N, T, L}
     # Cache tuple from full to stencil dimensions
     full_to_stencil = ntuple(i -> 0, Val(L))
 
-    for dim in 1:L
-        full_to_stencil = setindex(full_to_stencil, stencils[dim][2], dim)
+    for sdim in 1:L
+        full_to_stencil = setindex(full_to_stencil, sdim, stencil_axis(stencils[sdim]))
     end
 
     # Get local dims
-    localdims = ntuple(Val(L)) do dim
-        axis = stencils[dim][2]
-        stencil_length(point[axis], stencils[dim][1])
+    localdims = ntuple(Val(L)) do sdim
+        axis = stencil_axis(stencils[sdim])
+        stencil_length(stencils[sdim])
     end
 
     # Accumulate result
@@ -87,16 +190,16 @@ function stencil_product(point::CartesianIndex{N}, func::AbstractArray{T, N}, st
     for localindex in CartesianIndices(localdims)
         coefficient = one(T)
 
-        for dim in 1:L
-            axis = stencils[dim][2]
-            coefficient *= stencil_value(point[axis], stencils[dim][1], localindex[dim])
+        for sdim in 1:L
+            axis = stencil_axis(stencils[sdim])
+            coefficient *= stencil_value(stencils[sdim], localindex[sdim])
         end
 
         # Get global index into function
         globals = ntuple(Val(N)) do dim
             sdim = full_to_stencil[dim]
-            if full_to_stencil[dim] > 0
-                stencil_to_global(point[dim], stencils[sdim][1], size(func)[dim], localindex[sdim])
+            if sdim > 0
+                stencil_to_global(stencils[sdim], point[dim], size(func)[dim], localindex[sdim])
             else
                 point[dim]
             end
