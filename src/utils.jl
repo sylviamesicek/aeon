@@ -1,7 +1,8 @@
-export map_tuple_with_index
+export tuple_project_on_axis, tuple_splice_on_axis
+export index_project_on_axis, index_splice_on_axis
 
-map_tuple_with_index_helper(f, t::Tuple, index) = (@inline; (f(index, t[1]), map_tuple_with_index_helper(f, Base.tail(t), index + 1)...))
-map_tuple_with_index_helper(f, t::Tuple{Any,}, index) = (@inline; (f(index, t[1])))
-map_tuple_with_index_helper(f, ::Tuple{}, index) = ()
+tuple_project_on_axis(t::Tuple, ::Val{A}) where A = tuple(t[begin:(A-1)]..., t[(A + 1):end]...)
+tuple_splice_on_axis(t::Tuple, ::Val{A}, value) where A = tuple(t[begin:(A-1)]..., value, t[(A + 1):end]...)
 
-map_tuple_with_index(f, t::Tuple) = map_tuple_with_index_helper(f, t, 1)
+index_project_on_axis(i::CartesianIndex, ::Val{A}) where A = CartesianIndex(tuple_project_on_axis(i.I, Val(A)))
+index_splice_on_axis(i::CartesianIndex, ::Val{A}, value::Int) where A = CartesianIndex(tuple_splice_on_axis(i.I, Val(A), value))

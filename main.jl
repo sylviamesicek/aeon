@@ -8,7 +8,7 @@ using StaticArrays
 
 # Main code
 function main()
-    # mesh = hyperprism(SA[0.0, 0.0], SA[4, 4], SA[1.0, 1.0], SA[3, 3])
+    # mesh = hyperprism(SA[0.0, 0.0], SA[1.0, 1.0], SA[4, 4], 3)
     
     # @show mesh.doftotal
 
@@ -36,7 +36,7 @@ function main()
 
     point = CartesianIndex(50, 50)
 
-    product(point, (prolong, prolong), field)
+    product(point, (derivative, prolong), field)
 end
 
 # Execute

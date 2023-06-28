@@ -7,7 +7,7 @@ It can be iterated to yield the individual cells of the mesh.
 """
 mutable struct Mesh{N, T}
     cells::Vector{Cell{N, T}}
-    baserefine::SVector{N, Int}
+    celldims::NTuple{N, Int}
     doftotal::Int
 end
 
@@ -22,12 +22,12 @@ Base.setindex!(mesh::Mesh, cell::Cell, i::Int) = setindex!(mesh.cells, cell, i)
 Builds a mesh consisting of coordinate aligned cells of the given width. This starts at the origin,
 and extends by a number of cells (given by the `cells` vector) in each direction.
 """
-function hyperprism(origin::SVector{N, T}, cells::SVector{N, Int}, widths::SVector{N, T}, baserefine::SVector{N, Int}) where {N, T}
+function hyperprism(origin::SVector{N, T}, widths::SVector{N, T}, celldims::NTuple{N, Int}, baserefinement::Int) where {N, T}
     @assert N > 0
 
     # Indexing objects
-    cellindices = CartesianIndices(Tuple(cells))
-    carttolinear = LinearIndices(Tuple(cells))
+    cellindices = CartesianIndices(celldims)
+    carttolinear = LinearIndices(celldims)
     
     # Vector of final cells for the mesh.
     meshcells = Vector{Cell{N, T}}(undef, length(cellindices))
@@ -40,36 +40,15 @@ function hyperprism(origin::SVector{N, T}, cells::SVector{N, Int}, widths::SVect
         linearindex = carttolinear[i]
         # Compute position of origin
         position = origin + SVector{N, T}((cartindex .- 1) .* widths)
-        # Compute face tuple
-        faces = ntuple(Val(N)) do dim
-            if cartindex[dim] == 1
-                negface = 0
-            else
-                negcoord = cartindex .- ntuple(i -> i == dim, Val(N))
-                negface = carttolinear[negcoord...]
-                # negface = Face(cellface, negindex)
-            end
-
-            if cartindex[dim] == cells[dim]
-                # posface = Face(boundaryface, 1)
-                posface = 0
-            else
-                poscoord = cartindex .+ ntuple(i -> i == dim, Val(N))
-                posface = carttolinear[poscoord...]
-                # posface = Face(cellface, posindex)
-            end
-
-            (negface, posface)
-        end
-
-        cell = Cell(HyperBox(position, widths), faces, baserefine, 0, dofoffset)
+        # Build cell
+        cell = Cell(HyperBox(position, widths), baserefinement, dofoffset)
         # Increment offset
         dofoffset += length(cell)
         # Add cell to mesh
         meshcells[linearindex] = cell
     end
 
-    Mesh{N, T}(meshcells, baserefine, dofoffset)
+    Mesh{N, T}(meshcells, celldims, dofoffset)
 end
 
 """
@@ -89,10 +68,10 @@ function refine!(mesh::Mesh, shouldrefine::Vector{Bool})
     for cell in eachindex(mesh)
         if shouldrefine[cell]
             c = mesh[cell]
-            mesh[cell] = Cell(c.bounds, c.faces, mesh.baserefine, c.refinement + 1, dofoffset)
+            mesh[cell] = Cell(c.bounds, c.refinement + 1, dofoffset)
         else
             c = mesh[cell]
-            mesh[cell] = Cell(c.bounds, c.faces, mesh.baserefine, c.refinement, dofoffset)
+            mesh[cell] = Cell(c.bounds, c.refinement, dofoffset)
         end
 
         dofoffset += length(mesh[cell])
@@ -112,24 +91,31 @@ end
 """
 Smooths the `shouldrefine` vector. Returns true if the vector is already smooth.
 """
-function smoothrefine!(mesh::Mesh, shouldrefine::Vector{Bool})
+function smoothrefine!(mesh::Mesh{N, T}, shouldrefine::Vector{Bool}) where {N, T}
     smooth = true
 
-    for cell in eachindex(mesh)
-        if shouldrefine[cell]
-            for face in mesh[cell].faces
-                # Left case
-                left = face[1]
-                if left > 0 && !shouldrefine[left] && mesh[left].refinement < mesh[cell].refinement
+    cellindices = CartesianIndices(mesh.celldims)
+    carttolinear = LinearIndices(mesh.celldims)
+
+    for cell in cellindices
+        celllinear = carttolinear[cell]
+
+        if shouldrefine[celllinear]
+            for dim in 1:N
+                left = CartesianIndex(index.I .- ntuple(i -> i == dim, Val(N)))
+                leftlinear = carttolinear[left]
+
+                if left[dim] > 0 && !shouldrefine[leftlinear] && mesh[leftlinear].refinement < mesh[celllinear].refinement
                     smooth = false
-                    shouldrefine[left] = true
+                    shouldrefine[leftlinear] = true
                 end
 
-                # Right case
-                right = face[2]
-                if right > 0 && !shouldrefine[right] && mesh[right].refinement < mesh[cell].refinement
+                right = CartesianIndex(index.I .+ ntuple(i -> i == dim, Val(N)))
+                rightlinear = carttolinear[right]
+
+                if right[dim] > 0 && !shouldrefine[rightlinear] && mesh[rightlinear].refinement < mesh[celllinear].refinement
                     smooth = false
-                    shouldrefine[right] = true
+                    shouldrefine[rightlinear] = true
                 end
             end
         end

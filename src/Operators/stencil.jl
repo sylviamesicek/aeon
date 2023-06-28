@@ -177,6 +177,7 @@ function product(point::CartesianIndex{N}, stencils::NTuple{N, Stencil{T}}, func
 
     ## Testing
     # kernal = Array{T, N}(undef, localdims...)
+    # positions = Array{NTuple{N, T}, N}(undef, localdims...)
 
     for localindex in CartesianIndices(localdims)
         coefs = ntuple(Val(N)) do dim
@@ -190,9 +191,11 @@ function product(point::CartesianIndex{N}, stencils::NTuple{N, Stencil{T}}, func
         result += prod(coefs) * func[globals...]
 
         # kernal[localindex] = prod(coefs)
+        # positions[localindex] = globals
     end
 
     # display(kernal)
+    # display(positions)
 
     result
 end
