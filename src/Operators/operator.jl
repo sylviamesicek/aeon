@@ -173,11 +173,11 @@ function product_rec(point::CartesianIndex{N}, stencils::NTuple{L, Stencil{T}}, 
     rightbegin = refined_to_coarse(total) - length(oper.boundary)
 
     if index ≤ leftend
-        stencil = LeftStencil(oper.left[index])
+        stencil = LeftStencil(oper.boundary[index])
 
         return product_rec(point, (stencils..., stencil), func, opers...)
     elseif index > rightbegin
-        stencil = RightStencil(oper.right[index_from_right(refined_to_coarse(total), index)], total)
+        stencil = RightStencil(oper.boundary[index_from_right(refined_to_coarse(total), index)], total)
 
         return product_rec(point, (stencils..., stencil), func, opers...)
     else

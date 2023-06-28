@@ -6,15 +6,14 @@ provides a means of discretizing, building, and manpulating numerical domains.
 It can be iterated to yield the individual cells of the mesh. 
 """
 mutable struct Mesh{N, T}
-    cells::Vector{Cell{N, T}}
-    celldims::NTuple{N, Int}
+    cells::Array{Cell{N, T}, N}
     doftotal::Int
 end
 
 Base.length(mesh::Mesh) = length(mesh.cells)
 Base.eachindex(mesh::Mesh) = eachindex(mesh.cells)
-Base.getindex(mesh::Mesh, i::Int) = getindex(mesh.cells, i)
-Base.setindex!(mesh::Mesh, cell::Cell, i::Int) = setindex!(mesh.cells, cell, i)
+Base.getindex(mesh::Mesh, i) = getindex(mesh.cells, i)
+Base.setindex!(mesh::Mesh, cell::Cell, i) = setindex!(mesh.cells, cell, i)
 
 """
     hyperprism(origin, cells, width)
@@ -25,37 +24,30 @@ and extends by a number of cells (given by the `cells` vector) in each direction
 function hyperprism(origin::SVector{N, T}, widths::SVector{N, T}, celldims::NTuple{N, Int}, baserefinement::Int) where {N, T}
     @assert N > 0
 
-    # Indexing objects
-    cellindices = CartesianIndices(celldims)
-    carttolinear = LinearIndices(celldims)
-    
-    # Vector of final cells for the mesh.
-    meshcells = Vector{Cell{N, T}}(undef, length(cellindices))
+    # Array of final cells for the mesh.
+    meshcells = Array{Cell{N, T}, N}(undef, celldims...)
 
     dofoffset = 0
 
-    for i in cellindices
-        cartindex = Tuple(i)
-        # Convert to linear index
-        linearindex = carttolinear[i]
+    for index in CartesianIndices(celldims)
         # Compute position of origin
-        position = origin + SVector{N, T}((cartindex .- 1) .* widths)
+        position = origin + SVector{N, T}((index.I .- 1) .* widths)
         # Build cell
         cell = Cell(HyperBox(position, widths), baserefinement, dofoffset)
         # Increment offset
         dofoffset += length(cell)
         # Add cell to mesh
-        meshcells[linearindex] = cell
+        meshcells[index] = cell
     end
 
-    Mesh{N, T}(meshcells, celldims, dofoffset)
+    Mesh{N, T}(meshcells, dofoffset)
 end
 
 """
 Refine a mesh using a refinement vector. For each `true` in the `shouldrefine` vector, the number of dofs on the corresponding cell is doubled along each
 axis.
 """
-function refine!(mesh::Mesh, shouldrefine::Vector{Bool})
+function refine!(mesh::Mesh{N}, shouldrefine::Array{Bool, N}) where N
     smooth = false
     while !smooth
         smooth = smoothrefine!(mesh, shouldrefine)
@@ -84,38 +76,36 @@ end
 Refines a mesh based on a functional predicate.
 """
 function refine!(pred::Function, mesh::Mesh)
-    shouldrefine = [pred(mesh[cell]) for cell in eachindex(mesh)]
+    shouldrefine = Array{Bool}(undef, size(mesh.cells)...)
+
+    for cell in eachindex(shouldrefine)
+        shouldrefine[cell] = pred(cell)
+    end
+
     refine!(mesh, shouldrefine)
 end
 
 """
 Smooths the `shouldrefine` vector. Returns true if the vector is already smooth.
 """
-function smoothrefine!(mesh::Mesh{N, T}, shouldrefine::Vector{Bool}) where {N, T}
+function smoothrefine!(mesh::Mesh{N, T}, shouldrefine::Array{Bool, N}) where {N, T}
     smooth = true
 
-    cellindices = CartesianIndices(mesh.celldims)
-    carttolinear = LinearIndices(mesh.celldims)
-
-    for cell in cellindices
-        celllinear = carttolinear[cell]
-
-        if shouldrefine[celllinear]
+    for cell in CartesianIndices(size(mesh.cells))
+        if shouldrefine[cell]
             for dim in 1:N
-                left = CartesianIndex(index.I .- ntuple(i -> i == dim, Val(N)))
-                leftlinear = carttolinear[left]
+                left = CartesianIndex(cell.I .- ntuple(i -> i == dim, Val(N)))
 
-                if left[dim] > 0 && !shouldrefine[leftlinear] && mesh[leftlinear].refinement < mesh[celllinear].refinement
+                if left[dim] > 0 && !shouldrefine[left] && mesh[left].refinement < mesh[cell].refinement
                     smooth = false
-                    shouldrefine[leftlinear] = true
+                    shouldrefine[left] = true
                 end
 
-                right = CartesianIndex(index.I .+ ntuple(i -> i == dim, Val(N)))
-                rightlinear = carttolinear[right]
+                right = CartesianIndex(cell.I .+ ntuple(i -> i == dim, Val(N)))
 
-                if right[dim] > 0 && !shouldrefine[rightlinear] && mesh[rightlinear].refinement < mesh[celllinear].refinement
+                if right[dim] > 0 && !shouldrefine[right] && mesh[right].refinement < mesh[cell].refinement
                     smooth = false
-                    shouldrefine[rightlinear] = true
+                    shouldrefine[right] = true
                 end
             end
         end

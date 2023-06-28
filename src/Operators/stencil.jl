@@ -65,7 +65,7 @@ struct LeftStencil{T, L} <: Stencil{T}
     values::SVector{L, T}
 
     function LeftStencil(values::SVector{L, T}) where {T, L}
-        new{T, L}(values, axis)
+        new{T, L}(values)
     end
 end
 
@@ -80,7 +80,7 @@ struct RightStencil{T, L} <: Stencil{T}
     values::SVector{L, T}
     total::Int
 
-    function RightStencil(values::SVector{L, T},  total::Int) where {T, L}
+    function RightStencil(values::SVector{L, T}, total::Int) where {T, L}
         new{T, L}(values, total)
     end
 end

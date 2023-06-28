@@ -1,5 +1,5 @@
 # Exports
-export System, apply_operator!, compute_rhs!
+export System
 
 # Interface
 abstract type System{N, T} end

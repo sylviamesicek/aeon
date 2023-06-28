@@ -91,9 +91,9 @@ function derivative_operator(::MattssonNordström2004{T, 2}, ::Val{2}) where {T}
 			SVector{6, T}(2, -5, 4, -1, 0, 0),
 			SVector{6, T}(1, -2, 1, 0, 0, 0),
 			SVector{6, T}(-4//43, 59//43, -110//43, 59//43, -4//43, 0),
-			SVector{6, T}(-1//49, 0, 59//49, -118//49, 64//49, -4//43)
+			SVector{6, T}(-1//49, 0, 59//49, -118//49, 64//49, -4//49)
 		]
-	central = SVector{5, T}(-1//12, 4//3, -5//2, 4//3, 1//12)
+	central = SVector{5, T}(-1//12, 4//3, -5//2, 4//3, -1//12)
 
 	CenteredOperator{2}(boundary, central)
 end
@@ -113,11 +113,11 @@ function prolongation_operator(::MattssonNordström2004{T, 2}) where {T}
 		SVector{7, T}(-5//48, 5//24, 43//48, 0, 0, 0, 0),
 		SVector{7, T}(-9//256, 5//256, 129//256, 147//256, -1//16, 0, 0),
 		SVector{7, T}(1//24, -1//16, 0, 49//48, 0, 0, 0),
-		SVector{7, T}(23//768, -37//768, -43//768, 147//256, 9//16, -1//16),
+		SVector{7, T}(23//768, -37//768, -43//768, 147//256, 9//16, -1//16, 0),
 		SVector{7, T}(0, 0, 0, 0, 1, 0, 0),
 		SVector{7, T}(-1//384, 1//256, 0, -49//768, 9//16, 9/16, -1//16),
 	]
-	central = SVector{2, T}(-1//16, 9//16, 9//16, -1//16)
+	central = SVector{4, T}(-1//16, 9//16, 9//16, -1//16)
 
 	ProlongationOperator{2}(boundary, central)
 end

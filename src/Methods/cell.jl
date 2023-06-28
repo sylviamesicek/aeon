@@ -3,7 +3,7 @@
 ###############
 
 # export Face, cellface, boundaryface
-export Cell, position, jacobian
+export Cell, position, jacobian, cellfield, local_to_global, celldofs
 
 ###############
 ## Cells ######
@@ -26,7 +26,7 @@ struct Cell{N, T}
     dofoffset::Int
 
     function Cell(bounds::HyperBox{N, T}, refinement::Int, dofoffset::Int) where {N, T}
-        scales::SVector{N, T} = bounds.widths ./ (dofs .- 1)
+        scales = SVector(ntuple(i -> bounds.widths[i] / 2^refinement, Val(N)))
         local_to_global = Translate(bounds.origin) ∘ ScaleTransform(scales)
 
         new{N, T}(bounds, local_to_global, refinement, dofoffset)
@@ -47,14 +47,28 @@ Produces a view into a field, reinterpreted as a multidimensional array.
 function cellfield(cell::Cell{N, T}, field::AbstractVector{T}) where {N, T}
     total = length(cell)
 
-    subfield = @view field[1:total .+ cell.dofoffset]
+    subfield = @view field[(1:total) .+ cell.dofoffset]
 
     reshape(subfield, celldofs(cell))
 end
 
-function cell_indices_on_axis(cell::Cell{N, T}, ::Val{A}) where {N, T, A}
-    CartesianIndices(tuple_project_on_axis(celldofs(cell), Val(A)))
+"""
+Computes the global dof index of a point.
+"""
+function local_to_global(cell::Cell{N, T}, point::CartesianIndex{N}) where {N, T}
+    linear = LinearIndices(celldofs(cell))
+    cell.dofoffset + linear[point]
 end
+
+# Helper function
+function local_to_global(cell::Cell{N, T}, point::NTuple{N, Int}) where {N, T}
+    linear = LinearIndices(celldofs(cell))
+    cell.dofoffset + linear[point...]
+end
+
+# function cell_indices_on_axis(cell::Cell{N, T}, ::Val{A}) where {N, T, A}
+#     CartesianIndices(tuple_project_on_axis(celldofs(cell), Val(A)))
+# end
 
 """
 Computes the global position of a point in a cell.
@@ -64,71 +78,90 @@ position(cell::Cell{N, T}, point::CartesianIndex{N}) where {N, T} = cell.local_t
 """
 Computes the jacobian at the point in a cell.
 """
-jacobian(cell::Cell{N, T}, point::CartesianIndex{N}) where {N, T} = jacobian(cell.local_to_global, SVector{N, T}(Tuple(point) .- 1))
+jacobian(cell::Cell{N, T}, point::CartesianIndex{N}) where {N, T} = Aeon.Geometry.jacobian(cell.local_to_global, SVector{N, T}(Tuple(point) .- 1))
 
 
 ##########################
 ## Interfaces ############
 ##########################
 
-function smooth_interface!(result::AbstractVector{T}, prolong::ProlongationOperator{T}, restrict::RestrictionOperator{T}, x::AbstractVector{T}, 
-    left::Cell{N, T}, ::Val{A}, right::Cell{N, T}, strength::T) where {N, T, A}
+struct Interface{N, T, A} 
+    left::Cell{N, T}
+    right::Cell{N, T}
 
+    Interface{A}(left::Cell{N, T}, right::Cell{N, T}) where {N, T, A} = new{N, T, A}(left, right)
+end
+
+struct SmoothOperators{T, O, P, R, B}
+    prolong::P
+    restrict::R
+    boundary::B
+
+    SmoothOperators(prolong::ProlongationOperator{T, O}, restrict::RestrictionOperator{T, O}, boundary::Operator{T, O}) where {T, O} = new{T, O, typeof(prolong), typeof(restrict), typeof(boundary)}(prolong, restrict, boundary)
+end
+
+function smooth_interface!(result::AbstractVector{T}, opers::SmoothOperators{T}, x::AbstractVector{T}, interface::Interface{N, T, A}, strength::T) where {N, T, A}
     # Compute views into functions
-    leftx = cellfield(left, x)
-    rightx = cellfield(right, x)
-    leftresult = cellfield(left, result)
-    rightresult = cellfield(right, result)
+    leftx = cellfield(interface.left, x)
+    rightx = cellfield(interface.right, x)
+    leftresult = cellfield(interface.left, result)
+    rightresult = cellfield(interface.right, result)
 
-    if left.refinement == right.refinement
-        for index in cell_indices_on_axis(left, Val(A))
-            leftindex = index_splice_on_axis(index, Val(A), left.dofs[A])
+    # Compute operator tuples
+    opers_identity = ntuple(dim -> dim == a ? oper.boundary : IdentityOperator(), Val(N))
+    opers_prolong = ntuple(dim -> dim == a ? oper.boundary : opers.prolong, Val(N))
+    opers_restrict = ntuple(dim -> dim == a ? oper.boundary : opers.restrict, Val(N))
+
+    if interface.left.refinement == interface.right.refinement
+        for index in cell_indices_on_axis(interface.left, Val(A))
+            leftindex = index_splice_on_axis(index, Val(A), interface.left.dofs[A])
             rightindex = index_splice_on_axis(index, Val(A), 1)
 
-            leftresult[leftindex] += strength * (leftx[leftindex] - rightx[rightindex])
-            rightresult[rightindex] += strength * (rightx[rightindex] - leftx[leftindex])
+            leftvalue = product(leftindex, opers_identity, leftx)
+            rightvalue = product(rightindex, opers_identity, rightx)
+
+            leftresult[leftindex] += strength * (leftvalue - rightvalue)
+            rightresult[rightindex] += strength * (rightvalue - leftvalue)
         end
-    elseif left.refinement > right.refinement
-        diritchlet_prolong = ntuple(dim -> dim == A ? prolong : IdentityOperator(), Val(N))
-        diritchlet_restrict = ntuple(dim -> dim == A ? restrict : IdentityOperator(), Val(N))
-
-        for index in face_indices(left, Val(A))
-            leftindex = index_splice_on_axis(index, Val(A), left.dofs[A])
+    elseif interface.left.refinement > interface.right.refinement
+        for index in cell_indices_on_axis(interface.left, Val(A))
+            leftindex = index_splice_on_axis(index, Val(A), interface.left.dofs[A])
             rightindex = index_splice_on_axis(index, Val(A), 1)
 
-            value = product(rightindex, diritchlet_prolong, rightx)
+            leftvalue = product(leftindex, opers_identity, leftx)
+            rightvalue = product(rightindex, opers_prolong, rightx)
 
-            leftresult[leftindex] += strength * (leftx[leftindex] - value)
+            leftresult[leftindex] += strength * (leftvalue - rightvalue)
         end 
 
-        for index in face_indices(right, Val(A))
-            leftindex = index_splice_on_axis(index, Val(A), left.dofs[A])
+        for index in cell_indices_on_axis(interface.right, Val(A))
+            leftindex = index_splice_on_axis(index, Val(A), interface.left.dofs[A])
             rightindex = index_splice_on_axis(index, Val(A), 1)
             
-            value = product(leftindex, diritchlet_restrict, leftx)
+            leftvalue = product(leftindex, opers_restrict, leftx)
+            rightvalue = product(rightindex, opers_identity, rightx)
 
-            rightresult[rightindex] += strength * (rightx[rightindex] - value)
+            rightresult[rightindex] += strength * (rightvalue - leftvalue)
         end
     else
-        diritchlet_prolong = ntuple(dim -> dim == A ? prolong : IdentityOperator(), Val(N))
-        diritchlet_restrict = ntuple(dim -> dim == A ? restrict : IdentityOperator(), Val(N))
-
-        for index in face_indices(right, Val(A))
-            leftindex = index_splice_on_axis(index, Val(A), left.dofs[A])
+        for index in cell_indices_on_axis(interface.right, Val(A))
+            leftindex = index_splice_on_axis(index, Val(A), interface.left.dofs[A])
             rightindex = index_splice_on_axis(index, Val(A), 1)
 
-            value = product(leftindex, diritchlet_prolong, leftx)
+            leftvalue = product(leftindex, opers_prolong, leftx)
+            rightvalue = product(rightindex, opers_identity, rightx)
 
-            rightresult[rightindex] += strength * (rightx[rightindex] - value)
+            rightresult[rightindex] += strength * (rightvalue - leftvalue)
         end 
 
-        for index in face_indices(left, Val(A))
-            leftindex = index_splice_on_axis(index, Val(A), left.dofs[A])
+        for index in cell_indices_on_axis(interface.left, Val(A))
+            leftindex = index_splice_on_axis(index, Val(A), interface.left.dofs[A])
             rightindex = index_splice_on_axis(index, Val(A), 1)
 
-            value = product(rightindex, diritchlet_restrict, rightx)
+            leftvalue = product(leftindex, opers_identity, leftx)
+            rightvalue = product(rightindex, opers_restrict, rightx)
 
-            leftresult[leftindex] += strength * (leftx[leftindex] - value)
+            leftresult[leftindex] += strength * (leftvalue - rightvalue)
         end
     end
 end
