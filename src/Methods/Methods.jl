@@ -15,9 +15,8 @@ using Aeon.Geometry
 using Aeon.Operators
 
 # Includes
-include("cell.jl")
 include("mesh.jl")
-include("system.jl")
+include("dofs.jl")
 include("writer.jl")
 
     

@@ -14,7 +14,6 @@ using StaticArrays
 include("stencil.jl")
 include("operator.jl")
 include("derivative.jl")
-include("interface.jl")
 
 include("coefficients.jl")
 include("MattssonNordström2004.jl")

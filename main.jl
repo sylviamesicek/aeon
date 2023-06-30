@@ -6,33 +6,48 @@ using Aeon.Operators
 using LinearAlgebra
 using StaticArrays
 
-struct Poisson{N, T} end
+# Main code
+function main()
+    ##########################
+    ## Build mesh ############
+    ##########################
 
-function apply_operator!(result::AbstractArray{T, N}, cell::Cell{N, T}, func::AbstractArray{T, N}) where {N, T}
-    source = MattssonNordström2004{T, 2}()
+    mesh = TreeMesh(HyperBox(SA[0.0, 0.0], SA[1.0, 1.0]), 5)
 
-    d1 = derivative_operator(source, Val(1))
-    d2 = derivative_operator(source, Val(2))
-
-    # prolong = prolongation_operator(source)
-    # restrict = restriction_operator(source)
-
-    hessian = Hessian{N}(d1, d2)
-
-    trans = celltransform(cell)
-
-    for point in cellpoints(cell)
-        pos =  pointposition(cell, point)
-        hess = pointhessian(cell, point, hessian, func)
-        j =    jacobian(trans, pos)
-        result[point] = j' * hess * j
+    for _ in 1:3
+        refine!(mesh) do node, _
+            norm(mesh.bounds[node].origin) < 0.1
+        end
     end
-end
 
-function apply_operator!(result::AbstractVector{T}, x::AbstractVector{T}, mesh::Mesh{N, T}, ::Poisson{N, T}) where {N, T}
-    fill!(result, 0)
+    ###########################
+    ## Build refined level ####
+    ###########################
 
-    source = MattssonNordström2004{T, 2}()
+    dofs = DoFManager(mesh)
+
+    @show dofs.total
+
+    # Build field
+    field = Vector{Float64}(undef, dofs.total)
+
+    for active in dofs.active
+        trans = nodetransform(mesh, active)
+        nfield = nodefield(mesh, dofs, active, field)
+
+        for point in nodepoints(mesh, active)
+            lpos = pointposition(mesh, active, point)
+            gpos = trans(lpos)
+
+            nfield[point] = sum(gpos .^ 2)
+        end
+    end
+
+    ###############################
+    ## Build numerical operators ##
+    ###############################
+
+    source = MattssonNordström2004{Float64, 2}()
 
     d1 = derivative_operator(source, Val(1))
     d2 = derivative_operator(source, Val(2))
@@ -40,128 +55,123 @@ function apply_operator!(result::AbstractVector{T}, x::AbstractVector{T}, mesh::
     prolong = prolongation_operator(source)
     restrict = restriction_operator(source)
 
-    hessian = Hessian{N}(d1, d2)
+    hessian = Hessian{2}(d1, d2)
 
-    interface_strength = 0
+    ###############################
+    ## Apply operator to field ####
+    ###############################
+    # TEMP
+
+    interface_strength = -1
     boundary_strength = 0
 
-    # Main equation
-    for cell in CartesianIndices(size(mesh.cells))
-        # Subfields
-        cellx = cellfield(mesh[cell], x)
-        cellresult = cellfield(mesh[cell], result)
-        # Operator
-        for point in eachindex(mesh[cell])
-            j = Aeon.Methods.jacobian(mesh[cell], point)
-            hess = transform_hessian(j, evaluate(point, hessian, cellx))
-            # Main Equation
-            cellresult[point] += hess[1, 1] + hess[2, 2]
+    result = Vector{Float64}(undef, dofs.total)
 
-            # Boundary/Interface Conditions
-            for axis in 1:N
-                if !(point[axis] == 1 || point[axis] == size(cellx)[axis])
+    for active in dofs.active
+        trans = nodetransform(mesh, active)
+        dims = nodedims(mesh, active)
+
+        nfield = nodefield(mesh, dofs, active, field)
+        nresult = nodefield(mesh, dofs, active, result)
+
+        for point in nodepoints(mesh, active)
+            lpos = pointposition(mesh, active, point)
+            j = jacobian(trans, lpos)
+            # gpos = trans(lpos)
+            
+            lhess = pointhessian(mesh, active, point, hessian, nfield)
+            ghess = j' * lhess * j
+
+            nresult[point] = ghess[1, 1] + ghess[2, 2] # Laplacian
+
+            value = nfield[point]
+
+            for face in 1:4
+                # Decode face
+                side = faceside(face, Val(2))
+                axis = faceaxis(face, Val(2))
+                edge = ifelse(side, dims[axis], 1)
+
+                # Only continue if point is along face
+                if point[axis] != edge
                     continue
                 end
 
-                direction = ifelse(point[axis] == 1, -1, 1)
+                # Get neighbor
+                neighbor = mesh.neighbors[active][face]
 
-                # oper_identity = ntuple(dim -> IdentityOperator{T, 2}(), Val(N))
-                oper_prolong = ntuple(dim -> dim == axis ? IdentityOperator{T, 2}() : prolong, Val(N))
-                oper_restrict = ntuple(dim -> dim == axis ? IdentityOperator{T, 2}() : restrict, Val(N))
+                # Enforce boundary conditions
+                if neighbor < 0
+                    nresult[point] += boundary_strength * (value - 0)
 
-                other = CartesianIndex(ntuple(Val(N)) do dim
-                    ifelse(dim == axis, cell[axis] + direction, cell[dim])
-                end)
-
-                if other[axis] > 0 && other[axis] < size(mesh.cells)[axis]
-                    # Interface Conditions
-                    otherx = cellfield(mesh[other], x)
-                    otheredge = point[axis] == 1 ? size(otherx)[axis] : 1
-                    otherpoint = CartesianIndex(ntuple(dim -> ifelse(dim == axis, otheredge, point[dim]), Val(N)))
-
-                    value = cellx[point]
-
-                    if mesh[cell].refinement == mesh[other].refinement
-                        othervalue = otherx[otherpoint]
-                    elseif mesh[cell].refinement < mesh[other].refinement
-                        othervalue = product(otherpoint, oper_restrict, otherx)
-                    else
-                        othervalue = product(otherpoint, oper_prolong, otherx)
-                    end
-
-                    cellresult[point] += interface_strength * (value - othervalue)
-                else
-                    value = cellx[point]
-                    # Boundary Condition
-                    cellresult[point] += boundary_strength * value
+                    continue
                 end
+
+                edge_neighbor = ifelse(side, 1, dims[axis])
+
+                # Enforce interface conditions
+                if neighbor > 0 && mesh.children[neighbor] == 0
+                    # Neighbor is on same level
+                    nfield_neighbor = nodefield(mesh, dofs, neighbor, field)
+                    point_neighbor = CartesianIndex(ntuple(dim -> ifelse(dim == axis, edge_neighbor, point[dim]), Val(2)))
+                    value_neighbor = nfield_neighbor[point_neighbor]
+                elseif neighbor > 0 
+                    # Neighbor is more refined, restrict it to find boundary values
+                    restrict_opers = ntuple(dim -> dim == axis ? IdentityOperator{Float64, 2}() : restrict, Val(2))
+
+                    value_neighbor = 0
+                    
+                    for linear in 1:4
+                        cart = split_linear_to_cart(linear, Val(2))
+
+                        point_offset = cart .* (refined_to_coarse.(dims) .- 1)
+                        point_child = CartesianIndex(ntuple(dim -> ifelse(dim == axis, edge_neighbor, point[dim] - point_offset[dim]), Val(2)))
+
+                        child_shares_face = cart[axis] == side
+
+                        for dim in 1:2
+                            child_shares_face &= dim == axis || point_child[dim] > 0
+                            child_shares_face &= dim == axis || point_child[dim] ≤ refined_to_coarse(dims[dim])
+                        end
+
+                        # Check that child is touching the current point
+                        if !child_shares_face
+                            continue
+                        end
+
+                        child = mesh.children[neighbor] + linear
+                        nfield_child = nodefield(mesh, dofs, child, field)
+
+                        value_neighbor += evaluate(point_child, restrict_opers, nfield_child)
+                    end
+                else
+                    prolong_opers = ntuple(dim -> dim == axis ? IdentityOperator{Float64, 2}() : prolong, Val(2))
+
+                    # Neighbor is less refined, prolong it to find boundary values
+                    parent = mesh.parents[active]
+
+                    neighbor = mesh.neighbors[parent][face]
+                    nfield_neighbor = nodefield(mesh, dofs, neighbor, field)
+
+                    linear = active - mesh.children[parent]
+                    cart = split_linear_to_cart(linear, Val(2))
+
+                    point_neighbor = CartesianIndex(ntuple(dim -> ifelse(dim == axis, edge_neighbor, point[dim] + cart[dim] * (dims[dim] - 1)), Val(2)))
+
+                    value_neighbor = evaluate(point_neighbor, prolong_opers, nfield_neighbor)
+                end
+
+                nresult[point] += interface_strength * (value - value_neighbor)
             end
         end
     end
-end
-
-function compute_rhs(rhs::AbstractVector{T}, ::Mesh{N, T}, ::Poisson{N, T}) where {N, T}
-    fill!(rhs, 0)
-end
-
-# Main code
-function main()
-    mesh = hyperprism(SA[0.0, 0.0], SA[1.0, 1.0], (4, 4), 4)
-    
-    @show mesh.doftotal
-
-    for _ in 1:3
-        refine!(mesh) do cell
-            cent = center(mesh[cell].bounds)
-            norm(cent) ≤ 1.0
-        end
-    end
-
-    @show mesh.doftotal
-
-    field = Vector{Float64}(undef, mesh.doftotal)
-    result = Vector{Float64}(undef, mesh.doftotal)
-
-    for cell in CartesianIndices(size(mesh.cells))
-        cellf = cellfield(mesh[cell], field)
-
-        for point in eachindex(mesh[cell])
-            pos = Aeon.Methods.position(mesh[cell], point)
-            cellf[point] = sum(pos .^ 2)
-        end
-    end
-
-    # source = MattssonNordström2004{Float64, 2}()
-    # d2 = derivative_operator(source, Val(2))
-    # laplace = Laplacian{2}(d2)
-
-    # for cell in CartesianIndices(size(mesh.cells))
-    #     # Subfields
-    #     cellf = cellfield(mesh[cell], field)
-    #     cellresult = cellfield(mesh[cell], result)
-    #     # Operator
-    #     for point in eachindex(mesh[cell])
-    #         cellresult[point] = evaluate(point, laplace, cellf)
-    #     end
-    # end
-
-    apply_operator!(result, field, mesh, Poisson{2, Float64}())
-
-    # source = MattssonNordström2004{Float64, 2}()
-
-    # d1 = derivative_operator(source, Val(1))
-    # d2 = derivative_operator(source, Val(2))
-
-    # laplace = Laplacian{1}(d2)
-
-    # @show value = evaluate(CartesianIndex(20), laplace, field)
 
     writer = MeshWriter(mesh)
     attrib!(writer, IndexAttribute())
     attrib!(writer, CellAttribute())
     attrib!(writer, ScalarAttribute{2}("field", field))
     attrib!(writer, ScalarAttribute{2}("result", result))
-    write_vtk(writer, "output")
+    write_vtk(writer, dofs, "output")
 end
 
 # Execute

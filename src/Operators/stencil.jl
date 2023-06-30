@@ -1,3 +1,5 @@
+export refined_to_coarse, coarse_to_refined
+
 ####################
 ## Stencil #########
 ####################

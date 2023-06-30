@@ -32,19 +32,15 @@ struct ScalarAttribute{N, T}
 end
 
 mutable struct MeshWriter{N, T}
-    mesh::Mesh{N, T}
+    mesh::TreeMesh{N, T}
     indices::Bool
     cells::Bool
     scalars::Vector{ScalarAttribute{N, T}}
 end
 
-MeshWriter(mesh::Mesh{N, T}) where {N, T} = MeshWriter{N, T}(mesh, false, false, Vector{ScalarAttribute{N, T}}())
+MeshWriter(mesh::TreeMesh{N, T}) where {N, T} = MeshWriter{N, T}(mesh, false, false, Vector{ScalarAttribute{N, T}}())
 
 function attrib!(writer::MeshWriter, attrib::ScalarAttribute)
-    if length(attrib.field) != writer.mesh.doftotal
-        error("Scalar Attribute length $(length(attrib.field)) does not match with length of mesh $(writer.mesh.doftotal)")
-    end
-
     push!(writer.scalars, attrib)
 end
 
@@ -56,68 +52,60 @@ function attrib!(writer::MeshWriter, ::CellAttribute)
     writer.cells = true
 end
 
-function write_vtk(writer::MeshWriter, filename)
-    positions = position_array(writer.mesh)
+function write_vtk(writer::MeshWriter{N, T}, dofs::DoFManager{N, T}, filename::String) where {N, T}
+    mesh = writer.mesh
 
-    # Produce VTK Grid
-    vtk_grid(filename, positions, Vector{MeshCell}()) do vtk
-        if writer.indices
-            vtk["builtin:indices", VTKPointData()] = indices_array(writer.mesh)
-        end
+    positions = Matrix{T}(undef, N, dofs.total)
 
-        if writer.cells
-            vtk["builtin:cells", VTKPointData()] = cells_array(writer.mesh)
-        end
-        
-        # Scalars
-        for i in eachindex(writer.scalars)
-            vtk["scalar:$(writer.scalars[i].name)", VTKPointData()] = writer.scalars[i].field
-        end
-    end
-end
+    for active in dofs.active
+        trans = nodetransform(mesh, active)
+        offset = dofs.offsets[active]
 
-function position_array(mesh::Mesh{N, T}) where {N, T}
-    matrix = Matrix{T}(undef, N, mesh.doftotal)
+        for (i, point) in enumerate(nodepoints(mesh, active))
+            lpos = pointposition(mesh, active, point)
+            gpos = trans(lpos)
 
-    for cell in eachindex(mesh)
-        # @show mesh[cell], length(mesh[cell])
-        for point in eachindex(mesh[cell])
-            pos = position(mesh[cell], point)
-            ptr = local_to_global(mesh[cell], point)
-
-            for i in 1:N
-                matrix[i, ptr] = pos[i]
+            for dim in 1:N
+                positions[dim, i + offset] = gpos[dim]
             end
         end
     end
 
-    matrix
-end
+    # Produce VTK Grid
+    vtk_grid(filename, positions, Vector{MeshCell}()) do vtk
+        if writer.indices
+            indices = Vector{T}(undef, dofs.total)
 
-function indices_array(mesh::Mesh{N, T}) where {N, T}
-    vector = Vector{T}(undef, mesh.doftotal)
+            for active in dofs.active
+                offset = dofs.offsets[active]
 
-    for cell in eachindex(mesh)
-        linear = LinearIndices(celldims(mesh[cell]))
-        for point in eachindex(mesh[cell])
-            ptr = local_to_global(mesh[cell], point)
+                for (i, _) in enumerate(nodepoints(mesh, active))
+                    indices[offset + i] = i
+                end
+            end
 
-            vector[ptr] = linear[point]
+            vtk["builtin:indices", VTKPointData()] = indices
+        end
+
+        if writer.cells
+            cells = Vector{T}(undef, dofs.total)
+
+            for active in dofs.active
+                offset = dofs.offsets[active]
+
+                for (i, _) in enumerate(nodepoints(mesh, active))
+                    cells[offset + i] = active
+                end
+            end
+
+            vtk["builtin:cells", VTKPointData()] = cells
+        end
+        
+        # Scalars
+        for i in eachindex(writer.scalars)
+            @assert length(writer.scalars[i].field) == dofs.total
+
+            vtk["scalar:$(writer.scalars[i].name)", VTKPointData()] = writer.scalars[i].field
         end
     end
-
-    vector
-end
-
-function cells_array(mesh::Mesh{N, T}) where {N, T}
-    vector = Vector{T}(undef, mesh.doftotal)
-
-    for cell in eachindex(mesh)
-        for point in eachindex(mesh[cell])
-            ptr = local_to_global(mesh[cell], point)
-            vector[ptr] = cell
-        end
-    end
-
-    vector
 end

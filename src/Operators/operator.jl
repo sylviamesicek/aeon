@@ -135,6 +135,7 @@ function product_rec(point::CartesianIndex{N}, stencils::NTuple{L, Stencil{T}}, 
 
         return product_rec(point, (stencils..., stencil), func, opers...)
     elseif index > rightbegin
+        @show index, total, coarse_to_refined(total)
         stencil = RightStencil(oper.boundary[index_from_right(coarse_to_refined(total), index)], total)
 
         return product_rec(point, (stencils..., stencil), func, opers...)

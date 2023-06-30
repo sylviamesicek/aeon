@@ -20,7 +20,7 @@ end
 function evaluate(point::CartesianIndex{N}, oper::Gradient{N, T}, func::AbstractArray{T, N}) where {N, T}
     grad = ntuple(Val(N)) do dim
         opers = ntuple(i -> i == dim ? oper.d1 : IdentityOperator{T, O}, Val(N))
-        product(point, opers, func)
+        evaluate(point, opers, func)
     end
 
     SVector(grad)
@@ -45,10 +45,10 @@ function evaluate(point::CartesianIndex{N}, oper::Hessian{N, T, O}, func::Abstra
         ntuple(Val(N)) do j
             if i == j
                 opers = ntuple(k -> k == i ? oper.d2 : IdentityOperator{T, O}(), Val(N))
-                product(point, opers, func)
+                evaluate(point, opers, func)
             else
                 opers = ntuple(k -> k == i || k == j ? oper.d1 : IdentityOperator{T, O}(), Val(N))
-                product(point, opers, func)
+                evaluate(point, opers, func)
             end
         end
     end
