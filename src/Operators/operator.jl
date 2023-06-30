@@ -1,6 +1,6 @@
 ## Exports
 
-export Operator, product, nproduct
+export Operator, evaluate
 export MassOperator, CenteredOperator, BoundaryOperator
 export ProlongationOperator, RestrictionOperator
 export IdentityOperator
@@ -10,10 +10,8 @@ Represents an abstract numeric `Operator`. These can be applied to multivariate 
 """
 abstract type Operator{T, O} end
 
-product(point::CartesianIndex{N}, opers::NTuple{N, Operator{T, O}}, func::AbstractArray{T, N}) where {N, T, O} = product_rec(point, (), func, opers...)
-
-# Common alias
-nproduct(point::CartesianIndex{N}, oper::Op, func::AbstractArray{T, N}) where {N, T, Op <: Operator{T}} = product(point, ntuple(i -> oper, Val(N)), func)
+evaluate(point::CartesianIndex{N}, opers::NTuple{N, Operator{T, O}}, func::AbstractArray{T, N}) where {N, T, O} = product_rec(point, (), func, opers...)
+evaluate(point::CartesianIndex{N}, oper::Operator{T}, func::AbstractArray{T, N}) where {N, T} = product_rec(point, (), func, ntuple(i -> oper, Val(N))...)
 
 """
 Recursive base case for evaluating operator products.

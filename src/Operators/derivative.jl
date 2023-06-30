@@ -4,7 +4,6 @@
 
 export Gradient, Hessian, Laplacian, evaluate
 
-
 #######################
 ## Gradient ###########
 #######################
@@ -55,23 +54,4 @@ function evaluate(point::CartesianIndex{N}, oper::Hessian{N, T, O}, func::Abstra
     end
     
     StaticArrays.sacollect(SMatrix{N, N}, hessian[i][j] for i in 1:N, j in 1:N)
-end
-
-#######################
-## Laplacian ##########
-#######################
-
-struct Laplacian{N, T, O, D2} <: Operator{T, O} 
-    d2::D2
-
-    Laplacian{N}(d2::CenteredOperator{T, O}) where {N, T, O} = new{N, T, O, typeof(d2)}(d2)
-end
-
-function evaluate(point::CartesianIndex{N}, oper::Laplacian{N, T, O}, func::AbstractArray{T, N}) where {N, T, O}
-    lap = ntuple(Val(N)) do dim
-        opers = ntuple(i -> i == dim ? oper.d2 : IdentityOperator{T, O}(), Val(N))
-        product(point, opers, func)
-    end
-
-    sum(lap)
 end

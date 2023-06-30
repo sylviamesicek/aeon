@@ -98,7 +98,7 @@ function indices_array(mesh::Mesh{N, T}) where {N, T}
     vector = Vector{T}(undef, mesh.doftotal)
 
     for cell in eachindex(mesh)
-        linear = LinearIndices(celldofs(mesh[cell]))
+        linear = LinearIndices(celldims(mesh[cell]))
         for point in eachindex(mesh[cell])
             ptr = local_to_global(mesh[cell], point)
 

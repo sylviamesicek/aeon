@@ -8,6 +8,27 @@ using StaticArrays
 
 struct Poisson{N, T} end
 
+function apply_operator!(result::AbstractArray{T, N}, cell::Cell{N, T}, func::AbstractArray{T, N}) where {N, T}
+    source = MattssonNordström2004{T, 2}()
+
+    d1 = derivative_operator(source, Val(1))
+    d2 = derivative_operator(source, Val(2))
+
+    # prolong = prolongation_operator(source)
+    # restrict = restriction_operator(source)
+
+    hessian = Hessian{N}(d1, d2)
+
+    trans = celltransform(cell)
+
+    for point in cellpoints(cell)
+        pos =  pointposition(cell, point)
+        hess = pointhessian(cell, point, hessian, func)
+        j =    jacobian(trans, pos)
+        result[point] = j' * hess * j
+    end
+end
+
 function apply_operator!(result::AbstractVector{T}, x::AbstractVector{T}, mesh::Mesh{N, T}, ::Poisson{N, T}) where {N, T}
     fill!(result, 0)
 
