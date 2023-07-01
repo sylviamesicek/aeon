@@ -17,9 +17,9 @@ struct Gradient{N, T, O, D1}
     Gradient{N}(d1::CenteredOperator{T, O}) where {N, T, O} = new{N, T, O, typeof(d1)}(d1)
 end
 
-function evaluate(point::CartesianIndex{N}, oper::Gradient{N, T}, func::AbstractArray{T, N}) where {N, T}
+function evaluate(point::CartesianIndex{N}, oper::Gradient{N, T, O}, func::AbstractArray{T, N}) where {N, T, O}
     grad = ntuple(Val(N)) do dim
-        opers = ntuple(i -> i == dim ? oper.d1 : IdentityOperator{T, O}, Val(N))
+        opers = ntuple(i -> i == dim ? oper.d1 : IdentityOperator{T, O}(), Val(N))
         evaluate(point, opers, func)
     end
 

@@ -45,13 +45,13 @@ nodepoints(mesh::TreeMesh, node::Int)  = CartesianIndices(nodedims(mesh, node))
 ## Points ##################
 ############################
 
-pointposition(mesh::TreeMesh{N, T}, ::Int, point::CartesianIndex{N}) where {N, T} = SVector{N, T}((point.I .- 1) .// 2^mesh.refinement)
+pointposition(mesh::TreeMesh{N, T}, ::Int, point::CartesianIndex{N}) where {N, T} = SVector{N, T}((point.I .- 1) ./ 2^mesh.refinement)
 
 pointvalue(::TreeMesh{N}, ::Int, point::CartesianIndex{N}, func::AbstractArray{T, N}) where {N, T} = func[point]
 
-pointgradient(mesh::TreeMesh{N}, ::Int, point::CartesianIndex{N}, grad::Gradient{N, T}, func::AbstractArray{T, N}) where {N, T} = evaluate(point, grad, func) ./ 2^mesh.refinement
+pointgradient(mesh::TreeMesh{N}, ::Int, point::CartesianIndex{N}, grad::Gradient{N, T}, func::AbstractArray{T, N}) where {N, T} = evaluate(point, grad, func) .* 2^mesh.refinement
 
-pointhessian(mesh::TreeMesh{N}, ::Int, point::CartesianIndex{N}, hess::Hessian{N, T}, func::AbstractArray{T, N}) where {N, T} = evaluate(point, hess, func) ./ 4^mesh.refinement
+pointhessian(mesh::TreeMesh{N}, ::Int, point::CartesianIndex{N}, hess::Hessian{N, T}, func::AbstractArray{T, N}) where {N, T} = evaluate(point, hess, func) .* 4^mesh.refinement
 
 ############################
 ## Faces ###################

@@ -17,6 +17,8 @@ using Aeon.Operators
 # Includes
 include("mesh.jl")
 include("dofs.jl")
+include("interface.jl")
+
 include("writer.jl")
 
     
