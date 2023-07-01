@@ -97,16 +97,15 @@ end
 
 function allactive(f::Function, tree::TreeMesh, maxdepth::Int)
     allnodes(tree) do node, depth
-        f(node, depth)
+        if tree.children[node] == 0 || depth == maxdepth
+            f(node, depth)
+        end
+        
         depth < maxdepth
     end
 end
 
-allleaves(f::Function, tree::TreeMesh) = allactive(tree, tree.maxdepth) do node, depth
-    if tree.children[node] == 0
-        f(node, depth)
-    end
-end
+allleaves(f::Function, tree::TreeMesh) = allactive(f, tree, tree.maxdepth)
 
 ##############################
 ## Refinement ################

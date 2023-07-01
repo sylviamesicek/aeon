@@ -1,5 +1,5 @@
 # Exports
-export MeshWriter, ScalarAttribute, IndexAttribute, CellAttribute, TagAttribute, attrib!, write_vtk
+export MeshWriter, ScalarAttribute, IndexAttribute, CellAttribute, TagAttribute, attrib!, write_vtu
 
 # Dependencies
 using WriteVTK
@@ -52,27 +52,66 @@ function attrib!(writer::MeshWriter, ::CellAttribute)
     writer.cells = true
 end
 
-function write_vtk(writer::MeshWriter{N, T}, dofs::DoFManager{N, T}, filename::String) where {N, T}
+function write_vtu(writer::MeshWriter{N, T}, dofs::DoFManager{N, T}, filename::String) where {N, T}
     mesh = writer.mesh
 
     positions = Matrix{T}(undef, N, dofs.total)
+    cells = MeshCell[]
 
     for active in dofs.active
         trans = nodetransform(mesh, active)
         offset = dofs.offsets[active]
+        dims = nodedims(mesh, active)
 
-        for (i, point) in enumerate(nodepoints(mesh, active))
+        tolinear = LinearIndices(dims)
+        points_full = CartesianIndices(dims)
+        points_cell = CartesianIndices(dims .- 1)
+
+        for point in points_full
             lpos = pointposition(mesh, active, point)
             gpos = trans(lpos)
 
             for dim in 1:N
-                positions[dim, i + offset] = gpos[dim]
+                positions[dim, tolinear[point] + offset] = gpos[dim]
             end
         end
+
+        if N == 1
+            for point in points_cell
+                p = point.I
+                v1 = tolinear[p...]
+                v2 = tolinear[(p .+ 1)...]
+                push!(cells, MeshCell(VTKCellTypes.VTK_LINE, (v1, v2) .+ offset))
+            end 
+        elseif N == 2
+            for point in points_cell
+                p = point.I
+                v1 = tolinear[p...]
+                v2 = tolinear[(p .+ (0, 1))...]
+                v3 = tolinear[(p .+ (1, 1))...]
+                v4 = tolinear[(p .+ (1, 0))...]
+                push!(cells, MeshCell(VTKCellTypes.VTK_QUAD, (v1, v2, v3, v4) .+ offset))
+            end 
+        elseif N == 3
+            for point in points_cell
+                p = point.I
+                v1 = tolinear[p...]
+                v2 = tolinear[(p .+ (0, 1, 0))...]
+                v3 = tolinear[(p .+ (1, 1, 0))...]
+                v4 = tolinear[(p .+ (1, 0, 0))...]
+                v5 = tolinear[(p .+ (1, 0, 1))...]
+                v6 = tolinear[(p .+ (0, 0, 1))...]
+                v7 = tolinear[(p .+ (0, 1, 1))...]
+                v8 = tolinear[(p .+ (1, 1, 1))...]
+                push!(cells, MeshCell(VTKCellTypes.VTK_HEXAHEDRON, (v1, v2, v3, v4, v5, v6, v7, v8) .+ offset))
+            end
+        else
+            error("N must be ≤ 3.")
+        end          
     end
 
     # Produce VTK Grid
-    vtk_grid(filename, positions, Vector{MeshCell}()) do vtk
+    vtk_grid(filename, positions, cells) do vtk
         if writer.indices
             indices = Vector{T}(undef, dofs.total)
 

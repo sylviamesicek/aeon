@@ -134,6 +134,7 @@ function restriction_operator(::MattssonNordström2004{T, 2}) where {T}
 		SVector{10, T}(0, 279//944, 43//118, 549//1888, 5//59, 15//1888, -3//118, -37//1888, 0, 3//1888)
 	]
 	central = SVector{7, T}(-1//32, 0, 9//32, 1//2, 9//32, 0, -1//32)
+	# central = SVector{1, T}(1)
 
 	RestrictionOperator{2}(boundary, central)
 end

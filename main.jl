@@ -12,7 +12,7 @@ function main()
     ## Build mesh ############
     ##########################
 
-    mesh = TreeMesh(HyperBox(SA[0.0, 0.0], SA[1.0, 1.0]), 5)
+    mesh = TreeMesh(HyperBox(SA[0.0, 0.0], SA[4π, 4π]), 4)
 
     for _ in 1:3
         refine!(mesh) do node, _
@@ -27,6 +27,7 @@ function main()
     dofs = DoFManager(mesh)
 
     @show dofs.total
+    @show dofs.active
 
     # Build field
     field = Vector{Float64}(undef, dofs.total)
@@ -39,7 +40,8 @@ function main()
             lpos = pointposition(mesh, active, point)
             gpos = trans(lpos)
 
-            nfield[point] = gpos.x^2 + (1 - gpos.y)
+            # nfield[point] = cos(gpos.x) + cos(gpos.y)
+            nfield[point] = gpos.x^2 + gpos.y^2
         end
     end
 
@@ -61,6 +63,7 @@ function main()
     ###############################
     ## Apply operator to field ####
     ###############################
+
     # TEMP
 
     interface_strength = -1
@@ -86,10 +89,7 @@ function main()
             nresult[point] = ghess[1, 1] + ghess[2, 2] # Laplacian
 
             value = nfield[point]
-            nresult[point] = 0
-
             
-
             for face in 1:4
                 # Decode face
                 side = faceside(face, Val(2))
@@ -107,15 +107,9 @@ function main()
                     continue
                 end
 
-                # if neighbor > 0 && mesh.children[neighbor] == 0
-                    
-
-                   
-                # end
-
                 value_neighbor = smooth_interface(mesh, dofs, active, face, point, prolong, restrict, field)
 
-                nresult[point] = value_neighbor
+                nresult[point] += interface_strength * (value - value_neighbor)
             end
         end
     end
@@ -125,7 +119,7 @@ function main()
     attrib!(writer, CellAttribute())
     attrib!(writer, ScalarAttribute{2}("field", field))
     attrib!(writer, ScalarAttribute{2}("result", result))
-    write_vtk(writer, dofs, "output")
+    write_vtu(writer, dofs, "output")
 end
 
 # Execute

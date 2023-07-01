@@ -8,7 +8,7 @@ function smooth_interface(mesh::TreeMesh{N}, dofs::DoFManager{N, T}, node::Int, 
     # Decode face
     side = faceside(face, Val(N))
     axis = faceaxis(face, Val(N))
-    edge = ifelse(side, dims[axis], 1)
+    # edge = ifelse(side, dims[axis], 1)
 
     # Get neighbor
     neighbor = mesh.neighbors[node][face]
@@ -25,34 +25,43 @@ function smooth_interface(mesh::TreeMesh{N}, dofs::DoFManager{N, T}, node::Int, 
         # Restrict
         opers = ntuple(dim -> dim == axis ? IdentityOperator{T, O}() : restrict, Val(N))
 
-        value_neighbor = 0
+        value_neighbor = T(0)
+        number_faces = 0
 
         for linear in 1:2^N
             cart = split_linear_to_cart(linear, Val(N))
-    
+
+            # Face does not touch child
+            if cart[axis] == side
+                continue
+            end
+
             child = mesh.children[neighbor] + linear
     
             dims_child = nodedims(mesh, child)
             edge_child = ifelse(side, 1, dims_child[axis])
-            point_child = CartesianIndex(ntuple(dim -> ifelse(dim == axis, edge_child, point[dim] - cart[dim] * (dims_child[dim] - 1) ÷ 2), Val(N)))
-    
-            child_shares_face = cart[axis] == side
-    
+
+            point_child_refined = coarse_to_refined.(point.I) .- cart .* (dims_child .- 1)
+
+            point_touches_child = true
+
             for dim in 1:N
-                child_shares_face &= dim == axis || point_child[dim] > 0
-                child_shares_face &= dim == axis || point_child[dim] ≤ refined_to_coarse(dims_child[dim])
+                point_touches_child &= axis == dim || (point_child_refined[dim] ≥ 1 && point_child_refined[dim] ≤ dims_child[dim])
             end
-    
-            if !child_shares_face
+
+            # Point does not touch child
+            if !point_touches_child
                 continue
             end
 
             nfield_child = nodefield(mesh, dofs, child, func)
-            
+            point_child = CartesianIndex(ntuple(dim -> ifelse(dim == axis, edge_child, refined_to_coarse(point_child_refined[dim])), Val(N)))
+
             value_neighbor += evaluate(point_child, opers, nfield_child)
+            number_faces += 1
         end
 
-        return value_neighbor
+        return value_neighbor/number_faces
     else
         # Prolongation
         opers = ntuple(dim -> dim == axis ? IdentityOperator{T, O}() : prolong, Val(N))
