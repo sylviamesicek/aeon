@@ -8,7 +8,7 @@ function smooth_interface(mesh::TreeMesh{N}, dofs::DoFManager{N, T}, node::Int, 
     # Decode face
     side = faceside(face, Val(N))
     axis = faceaxis(face, Val(N))
-    # edge = ifelse(side, dims[axis], 1)
+    edge = ifelse(side, dims[axis], 1)
 
     # Get neighbor
     neighbor = mesh.neighbors[node][face]
@@ -18,10 +18,7 @@ function smooth_interface(mesh::TreeMesh{N}, dofs::DoFManager{N, T}, node::Int, 
         dims_neighbor = nodedims(mesh, neighbor)
         edge_neighbor = ifelse(side, 1, dims_neighbor[axis])
         point_neighbor = CartesianIndex(ntuple(dim -> ifelse(dim == axis, edge_neighbor, point[dim]), Val(N)))
-        nfield_neighbor = nodefield(mesh, dofs, node, func)
-
-        # @show point, point_neighbor
-        # @show nfield_neighbor[point_neighbor]
+        nfield_neighbor = nodefield(mesh, dofs, neighbor, func)
 
         return nfield_neighbor[point_neighbor]
     elseif neighbor > 0 

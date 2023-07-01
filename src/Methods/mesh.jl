@@ -208,8 +208,8 @@ function _refine!(tree::TreeMesh{N, T, F}, shouldrefine::Vector{Bool}) where {N,
             elseif tree.neighbors[node][face] == 0
                 # Neighbor is on coarser level
                 neighbor = tree.neighbors[parent][face]
-                # I don't think this will ever be true
-                if !shouldrefine[neighbor]
+                # I don't think this will ever be true as it would indicate a violation of the 2->1 rule.
+                if tree.children[neighbor] == 0
                     continue
                 end
 
@@ -232,7 +232,7 @@ function _refine!(tree::TreeMesh{N, T, F}, shouldrefine::Vector{Bool}) where {N,
                 # Neighbor is on equal or refined level
                 neighbor = tree.neighbors[node][face]
                 # Only update if necessary
-                if !shouldrefine[neighbor]
+                if tree.children[neighbor] == 0
                     continue
                 end
 

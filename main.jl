@@ -39,7 +39,7 @@ function main()
             lpos = pointposition(mesh, active, point)
             gpos = trans(lpos)
 
-            nfield[point] = gpos[1]
+            nfield[point] = gpos.x^2 + (1 - gpos.y)
         end
     end
 
@@ -75,25 +75,20 @@ function main()
         nfield = nodefield(mesh, dofs, active, field)
         nresult = nodefield(mesh, dofs, active, result)
 
-        # orig = SVector(ntuple(i -> Float64(0), Val(2)))
-
-        # @show active, trans
-        # @show jacobian(trans, orig)
-
         for point in nodepoints(mesh, active)
             lpos = pointposition(mesh, active, point)
-            j = jacobian(trans, lpos)
-            # gpos = trans(lpos)
-
-            lgrad = pointgradient(mesh, active, point, gradient, nfield)
-            nresult[point] = (j * lgrad)[1]
+            j = inv(jacobian(trans, lpos))
+            gpos = trans(lpos)
             
-            # lhess = pointhessian(mesh, active, point, hessian, nfield)
-            # # ghess = j' * lhess * j
+            lhess = pointhessian(mesh, active, point, hessian, nfield)
+            ghess = j' * lhess * j
 
-            # nresult[point] = lhess[1, 1] + lhess[2, 2] # Laplacian
+            nresult[point] = ghess[1, 1] + ghess[2, 2] # Laplacian
 
             value = nfield[point]
+            nresult[point] = 0
+
+            
 
             for face in 1:4
                 # Decode face
@@ -112,9 +107,15 @@ function main()
                     continue
                 end
 
+                # if neighbor > 0 && mesh.children[neighbor] == 0
+                    
+
+                   
+                # end
+
                 value_neighbor = smooth_interface(mesh, dofs, active, face, point, prolong, restrict, field)
 
-                # nresult[point] += interface_strength * (value - value_neighbor)
+                nresult[point] = value_neighbor
             end
         end
     end

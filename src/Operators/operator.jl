@@ -57,7 +57,7 @@ function product_rec(point::CartesianIndex{N}, stencils::NTuple{L, Stencil{T}}, 
 
         return product_rec(point, (stencils..., stencil), func, opers...)
     elseif index > rightbegin
-        stencil = ValueStencil(oper.boundary[index_from_right(total, index)])
+        stencil = ValueStencil(oper.weights[index_from_right(total, index)])
 
         return product_rec(point, (stencils..., stencil), func, opers...)
     else
@@ -80,10 +80,11 @@ Base.inv(oper::MassOperator{T, O}) where {T, O} = MassOperator{T, O}(T(1) ./ ope
 A operator given by a central difference in the interior of the domain, and a one-sided difference along the boundary of a domain.
 """
 struct CenteredOperator{T, O, CL, BP, BL} <: Operator{T, O}
-    boundary::SVector{BP, SVector{BL, T}}
+    left::SVector{BP, SVector{BL, T}}
+    right::SVector{BP, SVector{BL, T}}
     central::SVector{CL, T}
 
-    CenteredOperator{O}(boundary::SVector{BP, SVector{BL, T}}, central::SVector{CL, T}) where {T, O, BP, BL, CL} = new{T, O, CL, BP, BL}(boundary, central)
+    CenteredOperator{O}(left::SVector{BP, SVector{BL, T}}, right::SVector{BP, SVector{BL, T}}, central::SVector{CL, T}) where {T, O, BP, BL, CL} = new{T, O, CL, BP, BL}(left, right, central)
 end
 
 function product_rec(point::CartesianIndex{N}, stencils::NTuple{L, Stencil{T}}, func::AbstractArray{T, N}, oper::CenteredOperator{T, O}, opers::Operator{T, O}...) where {N, T, L, O}
@@ -91,15 +92,15 @@ function product_rec(point::CartesianIndex{N}, stencils::NTuple{L, Stencil{T}}, 
     index = point[axis]
     total = size(func)[axis]
 
-    leftend = length(oper.boundary)
-    rightbegin = total - length(oper.boundary)
+    leftend = length(oper.left)
+    rightbegin = total - length(oper.right)
 
     if index ≤ leftend
-        stencil = LeftStencil(oper.boundary[index])
+        stencil = LeftStencil(oper.left[index])
 
         return product_rec(point, (stencils..., stencil), func, opers...)
     elseif index > rightbegin
-        stencil = RightStencil(oper.boundary[index_from_right(total, index)], total)
+        stencil = RightStencil(oper.right[index_from_right(total, index)], total)
 
         return product_rec(point, (stencils..., stencil), func, opers...)
     else
@@ -193,7 +194,10 @@ end
 A operator only defined on the vertices of a numerical domain. 
 """
 struct BoundaryOperator{T, O, L} <: Operator{T, O}
-    boundary::SVector{L, T}
+    left::SVector{L, T}
+    right::SVector{L, T}
+
+    BoundaryOperator{O}(left::SVector{L, T}, right::SVector{L, T}) where {T, O, L} = new{T, O, L}(left, right)
 end
 
 function product_rec(point::CartesianIndex{N}, stencils::NTuple{L, Stencil{T}}, func::AbstractArray{T, N}, oper::BoundaryOperator{T, O}, opers::Operator{T, O}...) where {N, T, L, O}
@@ -202,10 +206,10 @@ function product_rec(point::CartesianIndex{N}, stencils::NTuple{L, Stencil{T}}, 
     total = size(func)[axis]
 
     if index == 1
-        stencil = LeftStencil(oper.boundary)
+        stencil = LeftStencil(oper.left)
         return product_rec(point, (stencils..., stencil), func , opers...)
     elseif index == total
-        stencil = RightStencil(oper.boundary, total)
+        stencil = RightStencil(oper.right, total)
         return product_rec(point, (stencils..., stencil), func, opers...)
     else
         return 0

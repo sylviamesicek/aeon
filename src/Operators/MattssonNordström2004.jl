@@ -29,23 +29,26 @@ function mass_operator(::MattssonNordström2004{T, 1}) where {T}
 end
 
 function derivative_operator(::MattssonNordström2004{T, 1}, ::Val{1}) where {T}
-	boundary = SA[SVector{2, T}(-1//1, 1//1)]
+	left = SA[SVector{2, T}(-1//1, 1//1)]
+	right = map((-), left)
 	central = SVector{3, T}(-1//2, 0, 1//2)
 
-	CenteredOperator{1}(boundary, central)
+	CenteredOperator{1}(left, right, central)
 end
 
 function derivative_operator(::MattssonNordström2004{T, 1}, ::Val{2}) where {T}
-	boundary = SA[SVector{3, T}(1, -2, 1)]
+	left = SA[SVector{3, T}(1, -2, 1)]
+	right = left
 	central = SVector{3, T}(1, -2, 1)
 
-	CenteredOperator{1}(boundary, central)
+	CenteredOperator{1}(left, right, central)
 end
 
 function boundary_derivative_operator(::MattssonNordström2004{T, 1}, ::Val{1}) where {T} 
-	boundary = SVector{3, T}(3//2, -2//1, 1//2)
+	left = SVector{3, T}(3//2, -2//1, 1//2)
+	right = -left
 	
-	BoundaryOperator{1}(boundary)
+	BoundaryOperator{1}(left, right)
 end
 
 function prolongation_operator(::MattssonNordström2004{T, 1}) where {T}
@@ -75,33 +78,36 @@ function mass_operator(::MattssonNordström2004{T, 2}) where {T}
 end
 
 function derivative_operator(::MattssonNordström2004{T, 2}, ::Val{1}) where {T}
-	boundary = SA[
+	left = SA[
 			SVector{6, T}(-24//17, 59//34, -4//17, -3//34, 0, 0),
 			SVector{6, T}(-1//2, 0, 1//2, 0, 0, 0),
 			SVector{6, T}(4//43, -59//86, 0, 59//86, -4//43, 0),
 			SVector{6, T}(3//98, 0,-59//98, 0, 32//49, -4//49),
 		]
+	right = map((-), left)
 	central = SVector{5, T}(1//12, -2//3, 0, 2//3, -1//12)
 
-	CenteredOperator{2}(boundary, central)
+	CenteredOperator{2}(left, right, central)
 end
 
 function derivative_operator(::MattssonNordström2004{T, 2}, ::Val{2}) where {T}
-	boundary = SA[
+	left = SA[
 			SVector{6, T}(2, -5, 4, -1, 0, 0),
 			SVector{6, T}(1, -2, 1, 0, 0, 0),
 			SVector{6, T}(-4//43, 59//43, -110//43, 59//43, -4//43, 0),
 			SVector{6, T}(-1//49, 0, 59//49, -118//49, 64//49, -4//49)
 		]
+	right = left
 	central = SVector{5, T}(-1//12, 4//3, -5//2, 4//3, -1//12)
 
-	CenteredOperator{2}(boundary, central)
+	CenteredOperator{2}(left, right, central)
 end
 
 function boundary_derivative_operator(::MattssonNordström2004{T, 2}, ::Val{1}) where {T} 
-	boundary = SVector{4, T}(11//6, -3, 3//2, -1//3)
+	left = SVector{4, T}(11//6, -3, 3//2, -1//3)
+	right = -left
 
-	BoundaryOperator{2}(boundary)
+	BoundaryOperator{2}(left, right)
 end
 
 function prolongation_operator(::MattssonNordström2004{T, 2}) where {T}
