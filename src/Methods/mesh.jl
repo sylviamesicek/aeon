@@ -34,26 +34,22 @@ end
 meshroot(tree::TreeMesh) = 1
 
 ############################
-## Nodes ###################
+## Blocks ##################
 ############################
 
-nodedims(mesh::TreeMesh{N}, ::Int) where {N} = ntuple(i -> 2^mesh.refinement + 1, Val(N))
-
-nodetransform(mesh::TreeMesh, node::Int) = Translate(mesh.bounds[node].origin) ∘ ScaleTransform(mesh.bounds[node].widths)
-
-nodepoints(mesh::TreeMesh, node::Int)  = CartesianIndices(nodedims(mesh, node))
+blockwidths(mesh::TreeMesh, block::Int) = mesh.bounds[block].widths
+blockorigin(mesh::TreeMesh, block::Int) = mesh.bounds[block].origin
+blockneighbor(mesh::TreeMesh, block::Int, face::Int) = mesh.neighbors[block][face]
+blockcells(mesh::TreeMesh{N}, ::Int) where {N} = ntuple(i -> 2^mesh.refinement, Val(N))
+blocktransform(mesh::TreeMesh, block::Int) = Translate(mesh.bounds[block].origin) ∘ ScaleTransform(mesh.bounds[block].widths)
 
 ############################
-## Points ##################
+## Cells ###################
 ############################
 
-pointposition(mesh::TreeMesh{N, T}, ::Int, point::CartesianIndex{N}) where {N, T} = SVector{N, T}((point.I .- 1) ./ 2^mesh.refinement)
-
-pointvalue(::TreeMesh{N}, ::Int, point::CartesianIndex{N}, func::AbstractArray{T, N}) where {N, T} = func[point]
-
-pointgradient(mesh::TreeMesh{N}, ::Int, point::CartesianIndex{N}, grad::Gradient{N, T}, func::AbstractArray{T, N}) where {N, T} = evaluate(point, grad, func) .* 2^mesh.refinement
-
-pointhessian(mesh::TreeMesh{N}, ::Int, point::CartesianIndex{N}, hess::Hessian{N, T}, func::AbstractArray{T, N}) where {N, T} = evaluate(point, hess, func) .* 4^mesh.refinement
+cellindices(mesh::TreeMesh, block::Int)  = CartesianIndices(blockcells(mesh, block))
+cellwidths(mesh::TreeMesh, block::Int) = blockwidths(mesh, block) ./ blockcells(mesh, block)
+cellcenter(mesh::TreeMesh{N, T}, block::Int, index::CartesianIndex{N}) where {N, T} = SVector{N, T}((index.I .- T(1//2)) ./ blockcells(mesh, block))
 
 ############################
 ## Faces ###################
