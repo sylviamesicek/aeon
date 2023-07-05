@@ -1,5 +1,6 @@
 # Exports
-export HyperBox, center, contains, split
+export HyperBox, center, contains, splitbox
+export HyperFaces, nfaces
 
 # Code
 
@@ -28,8 +29,30 @@ contains(box::HyperBox{N, T}, x::SVector{N, T}) where {N, T} = all(box.origin .โ
 """
 Computes the subbox built by subdividing a hyperbox in half in each dimension.
 """
-function split(box::HyperBox, i::CartesianIndex)
+function splitbox(box::HyperBox{N}, index::SplitIndex{N}) where N
     halfwidths = box.widths ./ 2
-
-    HyperBox(box.origin .+ SVector(Tuple(i) .- 1) .* halfwidths, halfwidths)
+    HyperBox(box.origin .+ SVector(Tuple(index)) .* halfwidths, halfwidths)
 end
+
+"""
+Stores data for each face of a hyperbox.
+"""
+struct HyperFaces{N, T, F}
+    inner::NTuple{F, T}
+
+    function HyperFaces{N}(faces::NTuple{F, T}) where {N, T, F}
+        @assert 2*N == F
+        new{N, T, F}(faces)
+    end
+end
+
+HyperFaces(faces::NTuple{F, T}) where {F, T} = HyperFaces{F รท 2}(faces)
+
+Base.length(faces::HyperFaces) = length(faces.inner)
+Base.eachindex(::HyperFaces{N}) where N = faceindices(Val(N))
+Base.getindex(faces::HyperFaces{N}, index::FaceIndex{N}) where {N} = faces.inner[index.linear]
+function Base.setindex!(faces::HyperFaces{N, T, F}, val::T, index::FaceIndex{N}) where {N, T, F}
+    faces = HyperFaces(ntuple(face -> ifelse(face == index.linear, val, faces.inner[face]), Val(F)))
+end
+
+nfaces(f::Function, ::Val{N}) where N = HyperFaces(ntuple(face -> f(FaceIndex(face)), Val(2*N)))
