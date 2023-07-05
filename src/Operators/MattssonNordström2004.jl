@@ -60,9 +60,9 @@ end
 
 function restriction_operator(::MattssonNordström2004{T, 1}) where {T}
 	boundary = SA[
-		SVector{2, T}(1, 1)
+		SVector{2, T}(1//2, 1//2)
 	]
-	central = SVector{3, T}(1//2, 1, 1//2)
+	central = SVector{3, T}(1//4, 1//2, 1//4)
 
 	RestrictionOperator{1}(boundary, central)
 end

@@ -1,7 +1,7 @@
 export smooth_interface
 
 function smooth_interface(mesh::TreeMesh{N}, dofs::DoFManager{N, T}, node::Int, face::Int, point::CartesianIndex{N}, 
-    prolong::ProlongationOperator{T, O}, restrict::RestrictionOperator{T, O}, func::AbstractVector{T}) where {N, T, O}
+    prolong::ProlongationOperator{T, O}, restrict::RestrictionOperator{T, O}, boundary::Operator{T, O}, func::AbstractVector{T}) where {N, T, O}
 
     dims = nodedims(mesh, node)
 
@@ -9,6 +9,12 @@ function smooth_interface(mesh::TreeMesh{N}, dofs::DoFManager{N, T}, node::Int, 
     side = faceside(face, Val(N))
     axis = faceaxis(face, Val(N))
     # edge = ifelse(side, dims[axis], 1)
+
+    nfield = nodefield(mesh, dofs, node, func)
+
+    opers_identity = ntuple(dim -> dim == axis ? boundary : IdentityOperator{T, O}(), Val(N))
+
+    value = evaluate(point, opers_identity, nfield)
 
     # Get neighbor
     neighbor = mesh.neighbors[node][face]
@@ -20,10 +26,12 @@ function smooth_interface(mesh::TreeMesh{N}, dofs::DoFManager{N, T}, node::Int, 
         point_neighbor = CartesianIndex(ntuple(dim -> ifelse(dim == axis, edge_neighbor, point[dim]), Val(N)))
         nfield_neighbor = nodefield(mesh, dofs, neighbor, func)
 
-        return nfield_neighbor[point_neighbor]
+        return value - evaluate(point_neighbor, opers_identity, nfield_neighbor)
     elseif neighbor > 0 
+
+        @show "Restriction"
         # Restrict
-        opers = ntuple(dim -> dim == axis ? IdentityOperator{T, O}() : restrict, Val(N))
+        opers_restrict = ntuple(dim -> dim == axis ? boundary : restrict, Val(N))
 
         value_neighbor = T(0)
         number_faces = 0
@@ -57,14 +65,15 @@ function smooth_interface(mesh::TreeMesh{N}, dofs::DoFManager{N, T}, node::Int, 
             nfield_child = nodefield(mesh, dofs, child, func)
             point_child = CartesianIndex(ntuple(dim -> ifelse(dim == axis, edge_child, refined_to_coarse(point_child_refined[dim])), Val(N)))
 
-            value_neighbor += evaluate(point_child, opers, nfield_child)
+            value_neighbor += evaluate(point_child, opers_restrict, nfield_child)
             number_faces += 1
         end
 
-        return value_neighbor/number_faces
+        return value - value_neighbor/number_faces
     else
+        @show "Prolongation"
         # Prolongation
-        opers = ntuple(dim -> dim == axis ? IdentityOperator{T, O}() : prolong, Val(N))
+        opers_prolong = ntuple(dim -> dim == axis ? boundary : prolong, Val(N))
 
         parent = mesh.parents[node]
         neighbor = mesh.neighbors[parent][face]
@@ -78,6 +87,6 @@ function smooth_interface(mesh::TreeMesh{N}, dofs::DoFManager{N, T}, node::Int, 
         point_neighbor = CartesianIndex(ntuple(dim -> ifelse(dim == axis, edge_neighbor, point[dim] + cart[dim] * (dims[dim] - 1)), Val(N)))
         nfield_neighbor = nodefield(mesh, dofs, neighbor, func)
 
-        return evaluate(point_neighbor, opers, nfield_neighbor)
+        return value - evaluate(point_neighbor, opers_prolong, nfield_neighbor)
     end
 end

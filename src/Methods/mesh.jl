@@ -1,4 +1,4 @@
-export TreeMesh, allnodes, allactive, allleaves
+export TreeMesh, allnodes, allactive, allleaves, meshroot
 export TreeNode, nodedims, nodepoints, nodetransform
 export pointposition, pointgradient, pointhessian, pointvalue
 export facereverse, faceside, faceaxis
@@ -30,6 +30,8 @@ mutable struct TreeMesh{N, T, F}
         new{N, T, 2*N}(bounds, parents, children, neighbors, 1, refinement)
     end
 end
+
+meshroot(tree::TreeMesh) = 1
 
 ############################
 ## Nodes ###################

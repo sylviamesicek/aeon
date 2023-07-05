@@ -15,6 +15,8 @@ include("stencil.jl")
 include("operator.jl")
 include("derivative.jl")
 
+include("lagrange.jl")
+
 include("coefficients.jl")
 include("MattssonNordström2004.jl")
 
