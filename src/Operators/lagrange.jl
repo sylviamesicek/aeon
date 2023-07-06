@@ -1,79 +1,91 @@
-export lagrange
+export lagrange, lagrange_derivative, lagrange_derivative_2
+export boundary_value_left, boundary_value_right
+export boundary_derivative_left, boundary_derivative_right
 
-function lagrange(positions::AbstractVector{T}, point::T) where T
-    coefficients = similar(positions)
-
-    for j in eachindex(positions)
-        result = one(T)
-
-        for i in eachindex(positions)
-            if i != j
-                result *= (point - positions[i]) / (positions[j] - positions[i])
-            end
+lagrange(grid::NTuple{N, T}, point::T) where {N, T} = ntuple(Val(N)) do i
+    r1 = ntuple(Val(N)) do j
+        if i != j
+            return (point - grid[j]) / (grid[i] - grid[j])
+        else
+            return one(T)
         end
-
-        coefficients[j] = result
     end
 
-    coefficients
+    prod(r1)
 end
 
-function lagrange_derivative(positions::AbstractVector{T}, point::T) where T
-    coefficients = similar(positions)
-
-    for j in eachindex(positions)
-        r1 = zero(T)
-
-        for l in eachindex(positions)
-            if l != j
-                r2 = one(T)
-
-                for m in eachindex(positions)
-                    if m != l && m != j
-                        r2 *= (point - positions[m]) / (positions[j] - positions[m])
-                    end
+lagrange_derivative(grid::NTuple{N, T}, point::T) where {N, T} = ntuple(Val(N)) do i
+    r1 = ntuple(Val(N)) do j
+        if i != j
+            r2 = ntuple(Val(N)) do k
+                if k != i && k != j
+                    return (point - grid[k]) / (grid[i] - grid[k])
+                else
+                    return one(T)
                 end
-
-                r1 += 1/(positions[j] - positions[l]) * r2
             end
-        end
 
-        coefficients[j] = r1
+            return  1/(grid[i] - grid[j]) * prod(r2)
+        else
+            return zero(T)
+        end
     end
 
-    coefficients
+    sum(r1)
 end
 
-function lagrange_derivative_2(positions::AbstractVector{T}, point::T) where T
-    coefficients = similar(positions)
-
-    for j in eachindex(positions)
-        r1 = zero(T)
-
-        for l in eachindex(positions)
-            if l != j
-                r2 = zero(T)
-
-                for m in eachindex(positions)
-                    if m != l && m != j
-                        r3 = one(T)
-
-                        for k in eachindex(positions)
-                            if k != j && k != l && k != m
-                                r3 *= (point - positions[k])/(positions[j] - positions[k])
-                            end
+lagrange_derivative_2(grid::NTuple{N, T}, point::T) where {N, T} = ntuple(Val(N)) do i
+    r1 = ntuple(Val(N)) do j
+        if i != j
+            r2 = ntuple(Val(N)) do k
+                if k != i && k != j
+                    r3 = ntuple(Val(N)) do l
+                        if l != i && l != j && l != k
+                            return (point - grid[l])/(grid[i] - grid[l])
+                        else
+                            return one(T)
                         end
-
-                        r2 += r3 * 1/(positions[j] - positions[m])
                     end
+
+                    return 1/(grid[i] - grid[k]) * prod(r3)
+                else
+                    return zero(T)
                 end
-
-                r1 += r2 * 1/(positions[j] - positions[l])
             end
-        end
 
-        coefficients[j] = r1
+            return  1/(grid[i] - grid[j]) * sum(r2)
+        else
+            return zero(T)
+        end
     end
 
-    coefficients
+    sum(r1)
+end
+
+boundary_grid_left(::Val{L}, ::Val{O}) where {L, O} = ntuple(Val(L)) do l
+    ntuple(Val(O + l)) do i
+        i - l - 1//2
+    end
+end
+
+boundary_grid_right(::Val{L}, ::Val{O}) where {L, O} = ntuple(Val(L)) do l
+    ntuple(Val(O + l)) do i
+        i - O - 1//2
+    end
+end
+
+boundary_value_left(::Val{T}, ::Val{L}, ::Val{O}) where {T, L, O} = map(boundary_grid_left(Val(L), Val(O))) do grid
+    map(T, lagrange(grid, 0//1))
+end
+
+boundary_value_right(::Val{T}, ::Val{L}, ::Val{O}) where {T, L, O} = map(boundary_grid_right(Val(L), Val(O))) do grid
+    map(T, lagrange(grid, 0//1))
+end
+
+boundary_derivative_left(::Val{T}, ::Val{L}, ::Val{O}) where {T, L, O} = map(boundary_grid_left(Val(L), Val(O))) do grid
+    map(T, lagrange_derivative(grid, 0//1))
+end
+
+boundary_derivative_right(::Val{T}, ::Val{L}, ::Val{O}) where {T, L, O} = map(boundary_grid_right(Val(L), Val(O))) do grid
+    map(T, lagrange_derivative(grid, 0//1))
 end
