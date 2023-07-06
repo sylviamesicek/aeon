@@ -1,6 +1,4 @@
 export lagrange, lagrange_derivative, lagrange_derivative_2
-export boundary_value_left, boundary_value_right
-export boundary_derivative_left, boundary_derivative_right
 
 lagrange(grid::NTuple{N, T}, point::T) where {N, T} = ntuple(Val(N)) do i
     r1 = ntuple(Val(N)) do j
@@ -60,32 +58,4 @@ lagrange_derivative_2(grid::NTuple{N, T}, point::T) where {N, T} = ntuple(Val(N)
     end
 
     sum(r1)
-end
-
-boundary_grid_left(::Val{L}, ::Val{O}) where {L, O} = ntuple(Val(L)) do l
-    ntuple(Val(O + l)) do i
-        i - l - 1//2
-    end
-end
-
-boundary_grid_right(::Val{L}, ::Val{O}) where {L, O} = ntuple(Val(L)) do l
-    ntuple(Val(O + l)) do i
-        i - O - 1//2
-    end
-end
-
-boundary_value_left(::Val{T}, ::Val{L}, ::Val{O}) where {T, L, O} = map(boundary_grid_left(Val(L), Val(O))) do grid
-    map(T, lagrange(grid, 0//1))
-end
-
-boundary_value_right(::Val{T}, ::Val{L}, ::Val{O}) where {T, L, O} = map(boundary_grid_right(Val(L), Val(O))) do grid
-    map(T, lagrange(grid, 0//1))
-end
-
-boundary_derivative_left(::Val{T}, ::Val{L}, ::Val{O}) where {T, L, O} = map(boundary_grid_left(Val(L), Val(O))) do grid
-    map(T, lagrange_derivative(grid, 0//1))
-end
-
-boundary_derivative_right(::Val{T}, ::Val{L}, ::Val{O}) where {T, L, O} = map(boundary_grid_right(Val(L), Val(O))) do grid
-    map(T, lagrange_derivative(grid, 0//1))
 end

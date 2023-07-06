@@ -11,6 +11,7 @@ using Aeon.Geometry
 
 # Includes
 include("lagrange.jl")
+include("stencil.jl")
 include("block.jl")
 include("lagrange.jl")
 

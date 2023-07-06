@@ -1,43 +1,13 @@
+############################
+## Exports #################
+############################
+
 export Block, blockcells, cellindices, cellwidths, cellcenter
-export Field, evaluate, interface
-export Stencil, CellStencil, VertexStencil, Coefficients
+export evaluate, interface, evaluate_point
 
-abstract type Stencil{T} end
-
-"""
-A stencil centered on a cell
-"""
-struct CellStencil{T, O} <: Stencil{T}
-    left::SVector{O, T}
-    central::T
-    right::SVector{O, T}
-end
-
-stencilmaxleft(::CellStencil{T, O}, index::Int) where {T, O} = min(O, index - 1)
-stencilmaxright(::CellStencil{T, O}, index::Int, total::Int) where {T, O} = min(O, total - index)
-stencilsupport(::CellStencil{T, O}) where {T, O} = O
-
-"""
-A stencil centered on a vertex (but still using a cell)
-"""
-struct VertexStencil{T, O} <: Stencil{T}
-    left::SVector{O, T}
-    right::SVector{O, T}
-end
-
-stencilmaxleft(::VertexStencil{T, O}, index::Int) where {T, O} = min(O, index - 1)
-stencilmaxright(::CellStencil{T, O}, index::Int, total::Int) where {T, O} = min(O, total - index + 1)
-stencilsupport(::CellStencil{T, O}) where {T, O} = O
-
-struct Coefficients{T, L, O}
-    values::NTuple{L, T}
-
-    Coefficients{O}(values::NTuple{L, T}) where {T, L, O} = new{T, L, O}(values)
-end
-
-Base.length(coefs::Coefficients) = length(coefs.values)
-Base.eachindex(coefs::Coefficients) = eachindex(coefs.values)
-Base.getindex(coefs::Coefficients, i::Int) = coefs.values[i]
+############################
+## Block ###################
+############################
 
 """
 An abstract domain on which an operator may be applied
@@ -51,96 +21,147 @@ cellwidths(block::Block{N, T}) where {N, T} = SVector{N, T}(1 ./ blockcells(bloc
 cellcenter(block::Block{N, T}, cell::CartesianIndex{N}) where {N, T} = SVector{N, T}((cell.I .- T(1//2)) ./ blockcells(block))
 
 """
-A field defined over a domain (including the current block)
-"""
-abstract type Field{N, T} end
-
-"""
-Evaluates the operation of a stencil on a field in a certain block at a certain cell.
-"""
-function evaluate(point::CartesianIndex{N}, block::Block{N, T}, stencils::NTuple{N, Stencil{T}}, field::BlockField{N, T}) where {N, T}
-    return evaluate(point, block, field, stencils...)
-end
-
-"""
 Evaluates the value of a field at a cell in a block.
 """
-evaluate(point::CartesianIndex{N}, block::Block{N, T}, field::Field{N, T}) where {N, T} = error("Evaluation unimplemented")
+evaluate(cell::CartesianIndex{N}, block::Block{N, T}, field::Field{N, T}) where {N, T} = error("Evaluation unimplemented")
 
 """
 Extends a centered stencil out of an interface of a block.
 """
-interface(point::CartesianIndex{N}, block::Block{N, T}, field::Field{N, T}, face::FaceIndex{N}, coefficients::Coefficients{T}, rest::Stencil{T}...) where {N, T} = error("Interface evaluation unimplemented.")
+interface(point::CartesianIndex{N}, block::Block{N, T}, field::Field{N, T}, face::FaceIndex{N}, coefs::InterfaceCoefs{T}, operator::Operator{T}, rest::Operator{T}...) where {N, T} = error("Interface evaluation unimplemented.")
 
 """
-Recursive function for evaluating the tensor product of a stencil
+A field defined over a domain (including the current block)
 """
-function evaluate(point::CartesianIndex{N}, block::Block{N, T}, field::Field{N, T}, stencil::CellStencil{T}, rest::Stencil{T}...) where {N, T}
-    result = stencil.central * evaluate(point, block, field, rest...)
-    result += evaluate_left(point, block, field, false, stencil.left, rest...)
-    result += evaluate_right(point, block, field, false, stencil.right, rest...)
-    return result
+abstract type Field{N, T} end
+
+############################
+## Point ###################
+############################
+
+cell_to_point(cell::Int) = 4cell - 1
+cell_to_point(cell::CartesianIndex) = CartesianIndex(cell_to_point.(cell.I))
+
+point_to_cell(point) = (point + 1) ÷ 4
+point_to_cell(point::CartesianIndex) = CartesianIndex(point_to_cell.(cell.I))
+
+cell_total_to_points(total::Int) = 4total + 1
+
+is_point_cell(point::Int) = point % 4 == 3
+is_point_cell_left(point::Int) = point % 4 == 2
+is_point_cell_right(point::Int) = point % 4 == 0
+is_point_vertex(point::Int) = point % 4 == 1
+
+############################
+## Evaluation ##############
+############################
+
+function evaluate(cell::CartesianIndex{N}, block::Block{N, T}, operators::NTuple{N, Operator{T}}, field::BlockField{N, T}) where {N, T}
+    evaluate_point(cell_to_point(cell), block, operators, field)
 end
 
-function evaluate(point::CartesianIndex{N}, block::Block{N, T}, field::Field{N, T}, stencil::VertexStencil{T}, rest::Stencil{T}...) where {N, T}
-    result = zero(T)
-    result += evaluate_left(point, block, field, true, stencil.left, rest...)
-    result += evaluate_right(point, block, field, true, stencil.right, rest...)
-    return result
+function evaluate_point(point::CartesianIndex{N}, block::Block{N, T}, field::BlockField{N, T}) where {N, T}
+    evaluate(point_to_cell(point), block, field)
 end
 
-function evaluate_left(point::CartesianIndex{N}, block::Block{N, T}, field::Field{N, T}, parity::Bool, stencil::NTuple{O, T}, rest::Stencil{T}...) where {N, T, O}
+function evaluate_point(point::CartesianIndex{N}, block::Block{N, T}, operators::NTuple{N, Operator{T}}, field::BlockField{N, T}) where {N, T}
+    evaluate_point(point, block, field, operators...)
+end
+
+"""
+Recursive function for evaluating the tensor product of a stencil at a point
+"""
+function evaluate_point(point::CartesianIndex{N}, block::Block{N, T}, field::Field{N, T}, operator::Operator{T}, rest::Operator{T}...) where {N, T}
     axis = N - length(rest)
     index = point[axis]
+    
+    if is_point_vertex(index)
+        stencil = vertex_stencil(operator)
+        return evaluate_vertex(point, block, field, stencil,operator, rest...)
+    elseif is_point_cell(index)
+        stencil = cell_stencil(operator)
+        return evaluate_cell(point, block, field, stencil, operator, rest...)
+    elseif is_point_cell_left(index)
+        stencil = cell_left_stencil(operator)
+        return evaluate_cell(point, block, field, stencil, operator, rest...)
+    else
+        stencil = cell_right_stencil(operator)
+        return evaluate_cell(point, block, field, stencil, operator, rest...)
+    end
+end
 
-    maxleft = min(O, index - 1)
+function evaluate_cell(point::CartesianIndex{N}, block::Block{N, T}, field::Field{N, T}, stencil::CellStencil{N, T}, operator::Operator{T}, rest::Operator{T}...) where {N, T}
+    axis = N - length(rest)
+    index = point[axis]
+    # Total number of cells
+    ctotal = blockcells(block)[axis]
+    # Cell either on, or to the left of the current point
+    cindex = point_to_cell(index)
 
-    result = zero(T)
+    O = order(stencil)
+    result = stencil.center * evaluate_point(point, block, field, rest...)
 
-    # Iterate all left points in block
-    for loff in 1:maxleft
-        offsetpoint = CartesianIndex(setindex(point.I, index - loff, axis))
-        result += stencil[loff] * evaluate(offsetpoint, block, field, rest...)
+    maxleft = min(O, cindex)
+    for off in 1:maxleft
+        offpoint = CartesianIndex(setindex(point.I, cell_to_point(cindex - off), axis))
+        result += stencil.left[off] * evaluate_point(offpoint, block, field, rest...)
     end
 
-    # If there are left points out of block, we call interface function on the remaining coefficients
+    maxright = min(O, ctotal - cindex)
+    for off in 1:maxright
+        offpoint = CartesianIndex(setindex(point.I, cell_to_point(cindex + off), axis))
+        result += stencil.cright[off] * evaluate_point(offpoint, block, field, rest...)
+    end
+
     if maxleft < O
         face = FaceIndex{N}(axis, false)
+        coefs = InterfaceCoefs(stencil, false, O - maxleft)
+        result += interface(point, block, field, face, coefs, operator,  rest...)
+    end
 
-        coefs = Coefficients{O}(ntuple(O - maxleft) do i
-            stencil[maxleft + i]
-        end)
-
-        result += interface(point, block, field, face, coefs, rest...)
+    if maxright < O
+        face = FaceIndex{N}(axis, true)
+        coefs = InterfaceCoefs(stencil, true, O - maxright)
+        result += interface(point, block, field, face, coefs, operator, rest...)
     end
 
     return result
 end
 
-function evaluate_right(point::CartesianIndex{N}, block::Block{N, T}, field::Field{N, T}, parity::Bool, stencil::NTuple{O, T}, rest::Stencil{T}...) where {N, T, O}
+
+function evaluate_vertex(point::CartesianIndex{N}, block::Block{N, T}, field::Field{N, T}, stencil::VertexStencil{N, T}, operator::Operator{T}, rest::Operator{T}...) where {N, T}
     axis = N - length(rest)
     index = point[axis]
-    total = blockcells(block)[axis]
+    # Total number of cells
+    ctotal = blockcells(block)[axis]
+    # Cell either on, or to the left of the current point
+    cindex = point_to_cell(index)
 
-    maxright = min(O, total - index + parity)
-
+    O = order(stencil)
     result = zero(T)
 
-    # Iterate all left points in block
-    for roff in 1:maxright
-        offsetpoint = CartesianIndex(setindex(point.I, index - roff, axis))
-        result += stencil[roff] * evaluate(offsetpoint, block, field, rest...)
+    maxleft = min(O, cindex)
+    for off in 1:maxleft
+        offpoint = CartesianIndex(setindex(point.I, cell_to_point(cindex - off + 1), axis))
+        result += stencil.left[off] * evaluate_point(offpoint, block, field, rest...)
     end
 
-    # If there are left points out of block, we call interface function on the remaining coefficients
+    maxright = min(O, ctotal - cindex)
+    for off in 1:maxright
+        offpoint = CartesianIndex(setindex(point.I, cell_to_point(cindex + off), axis))
+        result += stencil.cright[off] * evaluate_point(offpoint, block, field, rest...)
+    end
+
+    if maxleft < O
+        face = FaceIndex{N}(axis, false)
+        coefs = InterfaceCoefs(stencil, false, O - maxleft)
+        result += interface(point, block, field, face, coefs, operator, rest...)
+    end
+
     if maxright < O
         face = FaceIndex{N}(axis, true)
-
-        coefs = Coefficients{O}(ntuple(O - maxright) do i
-            stencil[maxright + i]
-        end)
-
-        result += interface(point, block, field, face, coefs, rest...)
+        coefs = InterfaceCoefs(stencil, true, O - maxright)
+        result += interface(point, block, field, face, O - maxright, coefs, operator, rest...)
     end
 
     return result
