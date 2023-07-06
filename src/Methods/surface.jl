@@ -1,4 +1,5 @@
 export TreeSurface, TreeField, TreeBlock
+export setfieldvalue!
 
 struct TreeSurface{N, T} 
     tree::TreeMesh{N, T}
@@ -36,6 +37,8 @@ struct TreeSurface{N, T}
     end
 end
 
+TreeSurface(tree::TreeMesh{N, T}) where {N, T} = TreeSurface(tree, tree.maxdepth)
+
 struct TreeField{N, T} <: Field{N, T}
     values::Vector{T}
 end
@@ -47,9 +50,21 @@ struct TreeBlock{N, T} <: Block{N, T}
     node::Int
 end
 
+function setfieldvalue!(cell::CartesianIndex{N}, block::TreeBlock{N, T}, field::TreeField{N, T}, value::T) where {N, T}
+    # Find offset 
+    offset = block.surface.offsets[block.node]
+    # Build map to linear
+    linear = LinearIndices(nodecells(block.surface.tree))
+    # Get global ptr
+    ptr = linear[cell] + offset
+    # Access value
+    field.values[ptr] = value
+end
+
 Operators.blockcells(block::TreeBlock) = nodecells(block.surface.tree)
+Operators.blockbounds(block::TreeBlock) = block.surface.tree.bounds[block.node]
  
-function Operators.evaluate(point::CartesianIndex{N}, block::TreeBlock{N, T}, field::TreeField{N, T})
+function Operators.evaluate(point::CartesianIndex{N}, block::TreeBlock{N, T}, field::TreeField{N, T}) where {N, T}
     # Find offset 
     offset = block.surface.offsets[block.node]
     # Build map to linear
@@ -57,7 +72,7 @@ function Operators.evaluate(point::CartesianIndex{N}, block::TreeBlock{N, T}, fi
     # Get global ptr
     ptr = linear[point] + offset
     # Access value
-    return field[ptr]
+    return field.values[ptr]
 end
 
 function Operators.interface(point::CartesianIndex{N}, block::TreeBlock{N, T}, field::TreeField{N, T}, face::FaceIndex{N}, coefs::InterfaceCoefs{T, L, O}, operator::Operator{T}, rest::Operator{T}...) where {N, T, L, O}

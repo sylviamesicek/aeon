@@ -16,7 +16,7 @@ struct SplitIndex{N}
 end
 
 Base.length(::SplitIndex{N}) where N = N
-Base.getindex(split::SplitIndex{N}) where N = (UInt(split.linear - 1) & UInt(1 << (dim - 1))) > 0
+Base.getindex(split::SplitIndex{N}, dim::Int) where N = (UInt(split.linear - 1) & UInt(1 << (dim - 1))) > 0
 
 SplitIndex{N}(linear::UInt) where N = SplitIndex{N}(Int(linear))
 

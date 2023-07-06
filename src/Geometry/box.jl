@@ -55,4 +55,4 @@ function Base.setindex!(faces::HyperFaces{N, T, F}, val::T, index::FaceIndex{N})
     faces = HyperFaces(ntuple(face -> ifelse(face == index.linear, val, faces.inner[face]), Val(F)))
 end
 
-nfaces(f::Function, ::Val{N}) where N = HyperFaces(ntuple(face -> f(FaceIndex(face)), Val(2*N)))
+nfaces(f::Function, ::Val{N}) where N = HyperFaces(ntuple(face -> f(FaceIndex{N}(face)), Val(2*N)))

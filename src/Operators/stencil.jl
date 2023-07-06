@@ -15,7 +15,7 @@ struct CellStencil{T, O}
     center::T
     right::NTuple{O, T}
 
-    CellStencil(left::NTuple{O, T}, center::T, right::NTuple{O, T}) where {O, T} = new{O, T}(left, center, right)
+    CellStencil(left::NTuple{O, T}, center::T, right::NTuple{O, T}) where {O, T} = new{T, O}(left, center, right)
 end
 
 order(::CellStencil{T, O}) where {T, O} = O
@@ -144,17 +144,17 @@ end
 
 struct LagrangeValue{T, O} <: LagrangeOperator{T, O} end
 
-function cell_stencil(::LagrangeValue{T})
-    CellStencil((), one(T), ())
+function cell_stencil(::LagrangeValue{T}) where T
+    CellStencil(NTuple{0, T}(), one(T), NTuple{0, T}())
 end
 
-function cell_left_stencil(::LagrangeValue{T}) where {T}
+function cell_left_stencil(::LagrangeValue{T, O}) where {T, O}
     grid = cell_centered_grid(O, O)
     stencil = map(T, lagrange(grid, -1//2))
     lagrange_cell_stencil(stencil)
 end
 
-function cell_right_stencil(::LagrangeValue{T}) where {T}
+function cell_right_stencil(::LagrangeValue{T, O}) where {T, O}
     grid = cell_centered_grid(O, O)
     stencil = map(T, lagrange(grid, 1//2))
     lagrange_cell_stencil(stencil)
@@ -172,19 +172,19 @@ end
 
 struct LagrangeDerivative{T, O} <: LagrangeOperator{T, O} end
 
-function cell_stencil(::LagrangeDerivative{T}) where {T}
+function cell_stencil(::LagrangeDerivative{T, O}) where {T, O}
     grid = cell_centered_grid(O, O)
     stencil = map(T, lagrange_derivative(grid, 0//1))
     lagrange_cell_stencil(stencil)
 end
 
-function cell_left_stencil(::LagrangeDerivative{T}) where {T}
+function cell_left_stencil(::LagrangeDerivative{T, O}) where {T, O}
     grid = cell_centered_grid(O, O)
     stencil = map(T, lagrange_derivative(grid, -1//2))
     lagrange_cell_stencil(stencil)
 end
 
-function cell_right_stencil(::LagrangeDerivative{T}) where {T}
+function cell_right_stencil(::LagrangeDerivative{T, O}) where {T, O}
     grid = cell_centered_grid(O, O)
     stencil = map(T, lagrange_derivative(grid, 1//2))
     lagrange_cell_stencil(stencil)
@@ -202,19 +202,19 @@ end
 
 struct LagrangeDerivative2{T, O} <: LagrangeOperator{T, O} end
 
-function cell_stencil(::LagrangeDerivative2{T}) where {T}
+function cell_stencil(::LagrangeDerivative2{T, O}) where {T, O}
     grid = cell_centered_grid(O, O)
     stencil = lagrange_derivative_2(grid, 0//1)
     lagrange_cell_stencil(stencil)
 end
 
-function cell_left_stencil(::LagrangeDerivative2{T}) where {T}
+function cell_left_stencil(::LagrangeDerivative2{T, O}) where {T, O}
     grid = cell_centered_grid(O, O)
     stencil = map(T, lagrange_derivative_2(grid, -1//2))
     lagrange_cell_stencil(stencil)
 end
 
-function cell_right_stencil(::LagrangeDerivative2{T}) where {T}
+function cell_right_stencil(::LagrangeDerivative2{T, O}) where {T, O}
     grid = cell_centered_grid(O, O)
     stencil = map(T, lagrange_derivative_2(grid, 1//2))
     lagrange_cell_stencil(stencil)
@@ -224,11 +224,4 @@ function vertex_stencil(::LagrangeDerivative2{T, O}) where {T, O}
     grid = vertex_centered_grid(O + 1, O + 1)
     stencil = lagrange_derivative_2(grid, 0//1)
     lagrange_vertex_stencil(stencil)
-end
-
-function prolong_stencil(::LagrangeDerivative2{T, O}) where {T, O}
-    grid = cell_centered_grid(O, O)
-    left = lagrange_derivative_2(grid, -1//2)
-    right = lagrange_derivative_2(grid, 1//2)
-    ProlongStencil(lagrange_cell_stencil(left), lagrange_cell_stencil(right))
 end

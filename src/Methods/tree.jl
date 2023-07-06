@@ -97,7 +97,7 @@ function prepare_and_execute_refinement!(tree::TreeMesh)
     execute_refinement!(tree)
 end
 
-function execute_refinement!(tree::TreeMesh)
+function execute_refinement!(tree::TreeMesh{N}) where N
     newmaxdepth = tree.maxdepth + 1
 
     oldtree = length(tree.refineflags)
@@ -208,7 +208,7 @@ function execute_refinement!(tree::TreeMesh)
     end
 end
 
-function prepare_refinement!(tree::TreeMesh{N, T}) where {N, T}
+function prepare_refinement!(tree::TreeMesh{N}) where {N}
     # Track smoothness
     smooth = false
 
