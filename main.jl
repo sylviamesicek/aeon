@@ -7,7 +7,7 @@ using StaticArrays
 
 # Main code
 function main()
-    mesh = TreeMesh(HyperBox(SA[0.0, 0.0], SA{Float64}[π, π]), 6)
+    mesh = TreeMesh(HyperBox(SA[0.0, 0.0], SA{Float64}[π, π]), 7)
 
     # mark_global_refine!(mesh)
     # prepare_and_execute_refinement!(mesh)

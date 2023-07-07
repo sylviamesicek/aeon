@@ -104,8 +104,8 @@ and derivatives.
 abstract type LagrangeOperator{T, O} <: Operator{T} end
 
 function interface_value_stencil(::LagrangeOperator{T, O}, E::Int, side::Bool) where {T, O}
-    L = ifelse(side, O, E)
-    R = ifelse(side, E, O)
+    L = ifelse(side, 2O, E)
+    R = ifelse(side, E, 2O)
 
     grid = vertex_centered_grid(L, R)
     stencil = lagrange(grid, 0//1)
@@ -115,7 +115,7 @@ function interface_value_stencil(::LagrangeOperator{T, O}, E::Int, side::Bool) w
 
     if side
         interior = left
-        exterior = ntuple(i -> right[i], L - 1)
+        exterior = ntuple(i -> right[i], R - 1)
         edge = right[end]
         return InterfaceStencil(interior, exterior, edge)
     else
@@ -127,8 +127,8 @@ function interface_value_stencil(::LagrangeOperator{T, O}, E::Int, side::Bool) w
 end
 
 function interface_derivative_stencil(::LagrangeOperator{T, O}, E::Int, side::Bool) where {T, O}
-    L = ifelse(side, O, E)
-    R = ifelse(side, E, O)
+    L = ifelse(side, 2O, E)
+    R = ifelse(side, E, 2O)
 
     grid = vertex_centered_grid(L, R)
     stencil = lagrange_derivative(grid, 0//1)
@@ -138,7 +138,7 @@ function interface_derivative_stencil(::LagrangeOperator{T, O}, E::Int, side::Bo
 
     if side
         interior = left
-        exterior = ntuple(i -> right[i], L - 1)
+        exterior = ntuple(i -> right[i], R - 1)
         edge = right[end]
         return InterfaceStencil(interior, exterior, edge)
     else
