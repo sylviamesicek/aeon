@@ -64,116 +64,90 @@ end
 Operators.blockcells(block::TreeBlock) = nodecells(block.surface.tree)
 Operators.blockbounds(block::TreeBlock) = block.surface.tree.bounds[block.node]
  
-function Operators.evaluate(point::CartesianIndex{N}, block::TreeBlock{N, T}, field::TreeField{N, T}) where {N, T}
+function Operators.evaluate(cell::CartesianIndex{N}, block::TreeBlock{N, T}, field::TreeField{N, T}) where {N, T}
     # Find offset 
     offset = block.surface.offsets[block.node]
     # Build map to linear
-    linear = LinearIndices(nodecells(block.surface.tree))
+    linear = LinearIndices(blockcells(block))
     # Get global ptr
-    ptr = linear[point] + offset
+    ptr = linear[cell] + offset
     # Access value
     return field.values[ptr]
 end
 
-function Operators.interface(point::CartesianIndex{N}, block::TreeBlock{N, T}, field::TreeField{N, T}, face::FaceIndex{N}, coefs::InterfaceCoefs{T, L, O}, operator::Operator{T}, rest::Operator{T}...) where {N, T, L, O}
+function Operators.interface(point::CartesianIndex{N}, block::TreeBlock{N, T}, field::TreeField{N, T}, inter::Interface{T, F, E}, operator::Operator{T}, rest::Operator{T}...) where {N, T, F, E}
     surface = block.surface
     tree = surface.tree
     node = block.node
 
-    axis = faceaxis(face)
-    side = faceside(face)
-    total = nodecells(tree)[axis]
+    side = faceside(F)
 
-    neighbor = tree.neighbors[node][face]
+    neighbor = tree.neighbors[node][F]
 
     if neighbor < 0
         # Handle boundary conditions
-        unknown = ntuple(i -> zero(T), Val(L))
+        unknowns = ntuple(i -> zero(T), Val(E))
 
-        for num in 1:L
-            valuecoefs = boundary_value_coefs(operator, num, side)
+        for extent in 1:E
+            stencil = interface_value_stencil(operator, extent, side)
+            valuerhs = -evaluate_interface_interior(point, block, field, F, stencil, rest...)
 
-            valuerhs = zero(T)
-
-            for i in 1:O
-                if side
-                    offpoint = CartesianIndex(setindex(point, cell_to_point(i), axis))
-                else
-                    offpoint = CartesianIndex(setindex(point, cell_to_point(total + 1 - i), axis))
-                end
-
-                value = evaluate_point(offpoint, block, field, rest...)
-                valuerhs -= valuecoefs.interior[i] * value
+            for i in eachindex(stencil.exterior)
+                valuerhs -= stencil.exterior[i] * unknowns[i]
             end
 
-            for i in 1:(num - 1)
-                value = unknown[i]
-                valuerhs -= valuecoefs.exterior[i] * value
-            end
-
-            unknown = setindex(unknown, valuerhs / value.exterior[end], num) 
+            unknowns = setindex(unknowns, valuerhs / stencil.edge, extent) 
         end
 
-        return sum(coefs.values .* unknowns)
+        return sum(inter.coefficients .* unknowns)
     end
 
     # Get leftblock and rightblock
     @assert neighbor > 0 && surface.nodes[neighbor] > 0
 
-    # Block to the left of the boundary
-    leftblock = side ? block : TreeBlock(surface, neighbor)
-    # Block to the right of the boundary
-    rightblock = side ? TreeBlock(surface, neighbor) : block
-
-    # Also set leftpoint and rightpoint
-    leftpoint = point.I
-    rightpoint = point.I
+    otherblock = TreeBlock(surface, neighbor)
+    otherF = facereverse(F)
 
     # Everything else should be independent
-    unknownleft = ntuple(i -> zero(T), Val(L))
-    unknownright = ntuple(i -> zero(T), Val(L))
+    unknowns = ntuple(i -> zero(T), Val(E))
+    otherunknowns = ntuple(i -> zero(T), Val(E))
 
-    for num in 1:L
-        valuerhs = zero(T)
-        derivativerhs = zero(T)
+    for extent in 1:E
+        valuestencil = interface_value_stencil(operator, extent, side)
+        derivativestencil = interface_value_stencil(operator, extent, side)
+        othervaluestencil = interface_value_stencil(operator, extent, !side)
+        otherderivativestencil = interface_value_stencil(operator, extent, !side)
 
-        valuecoefsleft = boundary_value_coefs(operator, num, false)
-        valuecoefsright = boundary_value_coefs(operator, num, true)
-        derivativecoefsleft = boundary_derivative_coefs(operator, num, false)
-        derivativecoefsright = boundary_derivative_coefs(operator, num, true)
+        valuerhs = -evaluate_interface_interior(point, block, field, F, valuestencil, rest...) + evaluate_interface_interior(point, otherblock, field, otherF, othervaluestencil, rest...)
+        derivativerhs = -evaluate_interface_interior(point, block, field, F, derivativestencil, rest...) + evaluate_interface_interior(point, otherblock, field, otherF, otherderivativestencil, rest...)
 
-        # For each value on their own domain
-        for i in 1:O
-           rightvalue = evaluate_point(CartesianIndex(setindex(rightpoint, cell_to_point(i), axis)), rightblock, field, rest...)
-           valuerhs += valuecoefsleft.interior[i] * rightvalue
-           derivativerhs += derivativecoefsleft.interior[i] * rightvalue
-
-           leftvalue = evaluate(CartesianIndex(setindex(leftpoint, cell_to_point(total + 1 - i), axis)), leftblock, field, rest...)
-           valuerhs -= valuecoefsright.interior[i] * leftvalue
-           derivativerhs -= derivativecoefsright.interior[i] * leftvalue
+        for i in eachindex(valuestencil.exterior)
+            valuerhs -= valuestencil.exterior[i]*unknowns[i]
         end
 
-        # For each known value in the on the other domain 
-        for i in 1:(num - 1)
-            leftvalue = unknownleft[i]
-            valuerhs += valuecoefsleft.exterior[i] * leftvalue
-            derivativerhs += derivativecoefsleft.exterior[i] * leftvalue
-
-            rightvalue = unknownright[i]
-            valuerhs -= valuecoefsright.exterior[i] * rightvalue
-            derivativerhs -= derivativecoefsright.exterior[i] * rightvalue
+        for i in eachindex(derivativestencil.exterior)
+            derivativerhs -= derivativestencil.exterior[i]*unknowns[i]
         end
 
-        matrix = SA[-valuecoefsleft.exterior[end] valuecoefsright.exterior[end]; 
-                    -derivativecoefsleft.exterior[end]  derivativecoefsright.exterior[end]]
+        for i in eachindex(othervaluestencil.exterior)
+            valuerhs += othervaluestencil.exterior[i]*otherunknowns[i]
+        end
+
+        for i in eachindex(otherderivativestencil.exterior)
+            derivativerhs += otherderivativestencil.exterior[i]*otherunknowns[i]
+        end
+
+        matrix = SA[
+            valuestencil.edge  (-othervaluestencil.edge); 
+            derivativestencil.edge  (-otherderivativestencil.edge)
+        ]
+
         rhs = SA[valuerhs, derivativerhs]
         result = matrix \ rhs
 
-        unknownleft = setindex(unknownleft, result[1], num)
-        unknownright = setindex(unknownright, result[2], num)
+        unknowns = setindex(unknowns, result[1], extent)
+        otherunknowns = setindex(otherunknowns, result[2], extent)
     end
 
-    unknowns = side ? unknownright : unknownleft
-
-    return sum(coefs.values .* unknowns)
+    return sum(inter.coefficients .* unknowns)
 end

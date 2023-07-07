@@ -7,10 +7,10 @@ using StaticArrays
 
 # Main code
 function main()
-    mesh = TreeMesh(HyperBox(SA[0.0, 0.0], SA{Float64}[π, π]), 4)
+    mesh = TreeMesh(HyperBox(SA[0.0, 0.0], SA{Float64}[π, π]), 6)
 
-    mark_global_refine!(mesh)
-    prepare_and_execute_refinement!(mesh)
+    # mark_global_refine!(mesh)
+    # prepare_and_execute_refinement!(mesh)
 
     surface = TreeSurface(mesh)
 
@@ -30,7 +30,10 @@ function main()
 
     field2 = similar(surface)
 
-    opers = (LagrangeDerivative{Float64, 2}(), LagrangeValue{Float64, 2}())
+    value = LagrangeValue{Float64, 2}()
+    derivative = LagrangeDerivative{Float64, 2}()
+
+    opers = (derivative, value)
 
     for active in surface.active
         block = TreeBlock(surface, active)
@@ -38,7 +41,7 @@ function main()
 
         for cell in cellindices(block)
             lpos = cellcenter(block, cell)
-            gpos = trans(lpos)
+            j = jacobian(trans, lpos)
 
             value = evaluate(cell, block, opers, field1)
 
@@ -48,8 +51,8 @@ function main()
 
     writer = MeshWriter(surface)
     attrib!(writer, BlockAttribute())
-    attrib!(writer, ScalarAttribute("field1", field1))
-    attrib!(writer, ScalarAttribute("field2", field2))
+    attrib!(writer, ScalarAttribute("function", field1))
+    attrib!(writer, ScalarAttribute("derivative", field2))
     write_vtu(writer, "output")
 end
 

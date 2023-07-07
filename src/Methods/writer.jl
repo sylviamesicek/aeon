@@ -115,7 +115,7 @@ function write_vtu(writer::MeshWriter{N, T}, filename::String) where {N, T}
                 end
             end
 
-            vtk["builtin:blockid", VTKCellData()] = blocks
+            vtk["builtin:blocks", VTKCellData()] = blocks
         end
         
         # Scalars
