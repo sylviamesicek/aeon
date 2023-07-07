@@ -3,18 +3,21 @@ using Aeon.Geometry
 using Aeon.Operators
 using Aeon.Methods
 
+using IterativeSolvers
+using LinearMaps
 using StaticArrays
 
 # Main code
 function main()
-    mesh = TreeMesh(HyperBox(SA[0.0, 0.0], SA{Float64}[π, π]), 6)
+    mesh = TreeMesh(HyperBox(SA[0.0, 0.0], SA{Float64}[π, π]), 5)
 
-    mark_global_refine!(mesh)
-    prepare_and_execute_refinement!(mesh)
+    # mark_global_refine!(mesh)
+    # prepare_and_execute_refinement!(mesh)
 
     surface = TreeSurface(mesh)
 
-    field = similar(surface)
+    # Right hand side
+    rhs = similar(surface)
 
     for active in surface.active
         block = TreeBlock(surface, active)
@@ -24,46 +27,69 @@ function main()
             lpos = cellcenter(block, cell)
             gpos = trans(lpos)
 
-            fun = sin(gpos.x)* sin(gpos.y)
+            fun = -2sin(gpos.x)sin(gpos.y)
 
-            setfieldvalue!(cell, block, field, fun)
+            setfieldvalue!(cell, block, rhs, fun)
         end
     end
 
-    numeric = similar(surface)
+    # Set analytic solution
     analytic = similar(surface)
-    diff = similar(surface)
+
+    for active in surface.active
+        block = TreeBlock(surface, active)
+        trans = blocktransform(block)
+
+        for cell in cellindices(block)
+            lpos = cellcenter(block, cell)
+            gpos = trans(lpos)
+
+            ana = sin(gpos.x) * sin(gpos.y)
+            setfieldvalue!(cell, block, analytic, ana)
+        end
+    end
 
     value = LagrangeValue{Float64, 2}()
     derivative = LagrangeDerivative{Float64, 2}()
+    derivative2 = LagrangeDerivative2{Float64, 2}()
 
-    for active in surface.active
-        block = TreeBlock(surface, active)
-        trans = blocktransform(block)
+    hessian = HessianFunctional{2}(value, derivative, derivative2)
 
-        for cell in cellindices(block)
-            lpos = cellcenter(block, cell)
-            gpos = trans(lpos)
-            j = inv(jacobian(trans, lpos))
+    operator = LinearMap(surface.total) do y, x
+        yfield = TreeField{2}(y)
+        xfield = TreeField{2}(x)
 
-            lgrad = gradient(cell, block, value, derivative, field)
-            ggrad = j * lgrad
+        for active in surface.active
+            block = TreeBlock(surface, active)
+            trans = blocktransform(block)
 
-            num = ggrad.x
-            ana = cos(gpos.x) * sin(gpos.y)
+            for cell in cellindices(block)
+                lpos = cellcenter(block, cell)
+                # gpos = trans(lpos)
+                j = inv(jacobian(trans, lpos))
 
-            setfieldvalue!(cell, block, numeric, num)
-            setfieldvalue!(cell, block, analytic, ana)
-            setfieldvalue!(cell, block, diff, num - ana)
+                lhess = evaluate(cell, block, hessian, xfield)
+                ghess = j' * lhess * j
+
+                setfieldvalue!(cell, block, yfield, ghess[1, 1] + ghess[2, 2])
+            end
         end
     end
 
+    solvalues, history = bicgstabl(operator, rhs.values, 2; log=true)
+    # solvalues = operator * analytic.values
+    solution = TreeField{2}(solvalues)
+
+    @show history
+
+    error = TreeField{2}(solution.values .- analytic.values)
+
     writer = MeshWriter(surface)
     attrib!(writer, BlockAttribute())
-    attrib!(writer, ScalarAttribute("function", field))
-    attrib!(writer, ScalarAttribute("numeric", numeric))
-    attrib!(writer, ScalarAttribute("analytic", analytic))
-    attrib!(writer, ScalarAttribute("error", diff))
+    attrib!(writer, ScalarAttribute("right-hand-side", rhs))
+    attrib!(writer, ScalarAttribute("sol-numeric", solution))
+    attrib!(writer, ScalarAttribute("sol-analytic", analytic))
+    attrib!(writer, ScalarAttribute("error", error))
     write_vtu(writer, "output")
 end
 

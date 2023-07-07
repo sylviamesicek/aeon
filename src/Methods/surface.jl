@@ -39,11 +39,13 @@ end
 
 TreeSurface(tree::TreeMesh{N, T}) where {N, T} = TreeSurface(tree, tree.maxdepth)
 
-struct TreeField{N, T} <: Field{N, T}
-    values::Vector{T}
+struct TreeField{N, T, S <: AbstractVector{T}} <: Field{N, T}
+    values::S
 end
 
-Base.similar(surface::TreeSurface{N, T}) where {N, T} = TreeField{N, T}(Vector{T}(undef, surface.total))
+TreeField{N}(values::AbstractVector{T}) where {N, T} = TreeField{N, T, typeof(values)}(values)
+
+Base.similar(surface::TreeSurface{N, T}) where {N, T} = TreeField{N}(Vector{T}(undef, surface.total))
 
 struct TreeBlock{N, T} <: Block{N, T}
     surface::TreeSurface{N, T}

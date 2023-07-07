@@ -244,7 +244,7 @@ struct LagrangeDerivative2{T, O} <: LagrangeOperator{T, O} end
 
 function cell_stencil(::LagrangeDerivative2{T, O}) where {T, O}
     grid = cell_centered_grid(O, O)
-    stencil = lagrange_derivative_2(grid, 0//1)
+    stencil = map(T, lagrange_derivative_2(grid, 0//1))
     lagrange_cell_stencil(stencil)
 end
 
@@ -262,6 +262,6 @@ end
 
 function vertex_stencil(::LagrangeDerivative2{T, O}) where {T, O}
     grid = vertex_centered_grid(O + 1, O + 1)
-    stencil = lagrange_derivative_2(grid, 0//1)
+    stencil = map(T, lagrange_derivative_2(grid, 0//1))
     lagrange_vertex_stencil(stencil)
 end
