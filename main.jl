@@ -14,7 +14,7 @@ function main()
 
     surface = TreeSurface(mesh)
 
-    field1 = similar(surface)
+    field = similar(surface)
 
     for active in surface.active
         block = TreeBlock(surface, active)
@@ -24,16 +24,22 @@ function main()
             lpos = cellcenter(block, cell)
             gpos = trans(lpos)
 
-            setfieldvalue!(cell, block, field1, sin(gpos.x)*sin(gpos.y) )
+            fun = sin(gpos.x)* sin(gpos.y)
+
+            setfieldvalue!(cell, block, field, fun)
         end
     end
 
-    field2 = similar(surface)
+    numeric = similar(surface)
+    analytic = similar(surface)
+    diff = similar(surface)
 
     value = LagrangeValue{Float64, 2}()
     derivative = LagrangeDerivative{Float64, 2}()
 
-    opers = (derivative, value)
+    @show cell_stencil(value)
+    @show interface_value_stencil(value, 2, false)
+    @show cell_stencil(derivative)
 
     for active in surface.active
         block = TreeBlock(surface, active)
@@ -41,18 +47,27 @@ function main()
 
         for cell in cellindices(block)
             lpos = cellcenter(block, cell)
-            j = jacobian(trans, lpos)
+            gpos = trans(lpos)
+            j = inv(jacobian(trans, lpos))
 
-            value = evaluate(cell, block, opers, field1)
+            lgrad = gradient(cell, block, value, derivative, field)
+            ggrad = j * lgrad
 
-            setfieldvalue!(cell, block, field2, value)
+            num = ggrad.x
+            ana = cos(gpos.x) * sin(gpos.y)
+
+            setfieldvalue!(cell, block, numeric, num)
+            setfieldvalue!(cell, block, analytic, ana)
+            setfieldvalue!(cell, block, diff, num - ana)
         end
     end
 
     writer = MeshWriter(surface)
     attrib!(writer, BlockAttribute())
-    attrib!(writer, ScalarAttribute("function", field1))
-    attrib!(writer, ScalarAttribute("derivative", field2))
+    attrib!(writer, ScalarAttribute("function", field))
+    attrib!(writer, ScalarAttribute("numeric", numeric))
+    attrib!(writer, ScalarAttribute("analytic", analytic))
+    attrib!(writer, ScalarAttribute("error", diff))
     write_vtu(writer, "output")
 end
 
