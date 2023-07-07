@@ -133,7 +133,7 @@ function interface_derivative_stencil(::LagrangeOperator{T, O}, E::Int, side::Bo
     grid = vertex_centered_grid(L, R)
     stencil = lagrange_derivative(grid, 0//1)
 
-    left = reverse(ntuple(L -> T(stencil[i]), L))
+    left = reverse(ntuple(i -> T(stencil[i]), L))
     right = ntuple(i -> T(stencil[L + i]), R)
 
     if side

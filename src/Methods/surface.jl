@@ -114,27 +114,28 @@ function Operators.interface(point::CartesianIndex{N}, block::TreeBlock{N, T}, f
 
     for extent in 1:E
         valuestencil = interface_value_stencil(operator, extent, side)
-        derivativestencil = interface_value_stencil(operator, extent, side)
+        derivativestencil = interface_derivative_stencil(operator, extent, side)
+
         othervaluestencil = interface_value_stencil(operator, extent, !side)
-        otherderivativestencil = interface_value_stencil(operator, extent, !side)
+        otherderivativestencil = interface_derivative_stencil(operator, extent, !side)
 
         valuerhs = -evaluate_interface_interior(point, block, field, F, valuestencil, rest...) + evaluate_interface_interior(point, otherblock, field, otherF, othervaluestencil, rest...)
         derivativerhs = -evaluate_interface_interior(point, block, field, F, derivativestencil, rest...) + evaluate_interface_interior(point, otherblock, field, otherF, otherderivativestencil, rest...)
 
         for i in eachindex(valuestencil.exterior)
-            valuerhs -= valuestencil.exterior[i]*unknowns[i]
+            valuerhs -= valuestencil.exterior[i] * unknowns[i]
         end
 
         for i in eachindex(derivativestencil.exterior)
-            derivativerhs -= derivativestencil.exterior[i]*unknowns[i]
+            derivativerhs -= derivativestencil.exterior[i] * unknowns[i]
         end
 
         for i in eachindex(othervaluestencil.exterior)
-            valuerhs += othervaluestencil.exterior[i]*otherunknowns[i]
+            valuerhs += othervaluestencil.exterior[i] * otherunknowns[i]
         end
 
         for i in eachindex(otherderivativestencil.exterior)
-            derivativerhs += otherderivativestencil.exterior[i]*otherunknowns[i]
+            derivativerhs += otherderivativestencil.exterior[i] * otherunknowns[i]
         end
 
         matrix = SA[

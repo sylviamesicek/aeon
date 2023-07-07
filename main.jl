@@ -7,10 +7,10 @@ using StaticArrays
 
 # Main code
 function main()
-    mesh = TreeMesh(HyperBox(SA[0.0, 0.0], SA{Float64}[π, π]), 7)
+    mesh = TreeMesh(HyperBox(SA[0.0, 0.0], SA{Float64}[π, π]), 6)
 
-    # mark_global_refine!(mesh)
-    # prepare_and_execute_refinement!(mesh)
+    mark_global_refine!(mesh)
+    prepare_and_execute_refinement!(mesh)
 
     surface = TreeSurface(mesh)
 
@@ -36,10 +36,6 @@ function main()
 
     value = LagrangeValue{Float64, 2}()
     derivative = LagrangeDerivative{Float64, 2}()
-
-    @show cell_stencil(value)
-    @show interface_value_stencil(value, 2, false)
-    @show cell_stencil(derivative)
 
     for active in surface.active
         block = TreeBlock(surface, active)
