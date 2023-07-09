@@ -160,16 +160,13 @@ function evaluate_point(point::CartesianIndex{N}, block::Block{N, T}, operators:
 end
 
 """
-Evaluates the value of a field in a block at a certain point. This point must be on a cell.
-"""
-function evaluate_point(point::CartesianIndex{N}, block::Block{N, T}, field::Field{N, T}, ::NTuple{0, Operator{T}}) where {N, T}
-    evaluate(point_to_cell(point), block, field)
-end
-
-"""
 Recursive function for evaluating the tensor product of a stencil at a point
 """
 function evaluate_point(point::CartesianIndex{N}, block::Block{N, T}, field::Field{N, T}, opers::NTuple{L, Operator{T}}) where {N, T, L}
+    if L == 0
+        return evaluate(point_to_cell(point), block, field)
+    end
+
     index = point[L]
 
     # Call the appropriate evaluate function depending on the type of the stencil
@@ -212,13 +209,13 @@ function evaluate_cell(point::CartesianIndex{N}, block::Block{N, T}, field::Fiel
         result += stencil.right[off] * evaluate_point(offpoint, block, field, remaining)
     end
 
-    # if left_cells < O
-    #     result += interface(Val(false), point, block, field, stencil.left, left_cells, remaining)  
-    # end
+    if left_cells < O
+        result += interface(Val(false), point, block, field, stencil.left, left_cells, opers)  
+    end
 
-    # if right_cells < O
-    #     result += interface(Val(true), point, block, field, stencil.right, right_cells, remaining)  
-    # end
+    if right_cells < O
+        result += interface(Val(true), point, block, field, stencil.right, right_cells, opers)  
+    end
 
     return result
 end
@@ -246,13 +243,13 @@ function evaluate_vertex(point::CartesianIndex{N}, block::Block{N, T}, field::Fi
         result += stencil.right[off] * evaluate_point(offpoint, block, field, remaining)
     end
 
-    # if left_cells < O
-    #     result += interface(Val(false), point, block, field, stencil.left, left_cells, remaining)  
-    # end
+    if left_cells < O
+        result += interface(Val(false), point, block, field, stencil.left, left_cells, opers)  
+    end
 
-    # if right_cells < O
-    #     result += interface(Val(true), point, block, field, stencil.right, right_cells, remaining)  
-    # end
+    if right_cells < O
+        result += interface(Val(true), point, block, field, stencil.right, right_cells, opers)  
+    end
 
     return result
 end

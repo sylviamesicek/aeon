@@ -93,54 +93,52 @@ function main()
     write_vtu(writer, "output")
 end
 
-using Profile
-using BenchmarkTools
+# # Main code
+# function run_profile()
+#     mesh = TreeMesh(HyperBox(SA[0.0, 0.0], SA{Float64}[π, π]), 3)
 
-# Main code
-function run_profile()
-    mesh = TreeMesh(HyperBox(SA[0.0, 0.0], SA{Float64}[π, π]), 3)
+#     mark_global_refine!(mesh)
+#     prepare_and_execute_refinement!(mesh)
 
-    mark_global_refine!(mesh)
-    prepare_and_execute_refinement!(mesh)
+#     surface = TreeSurface(mesh)
 
-    surface = TreeSurface(mesh)
+#     # Right hand side
+#     analytic_laplacian = similar(surface)
+#     analytic_value = similar(surface)
 
-    # Right hand side
-    analytic_laplacian = similar(surface)
-    analytic_value = similar(surface)
+#     for active in surface.active
+#         block = TreeBlock(surface, active)
+#         trans = blocktransform(block)
 
-    for active in surface.active
-        block = TreeBlock(surface, active)
-        trans = blocktransform(block)
+#         for cell in cellindices(block)
+#             lpos = cellcenter(block, cell)
+#             gpos = trans(lpos)
 
-        for cell in cellindices(block)
-            lpos = cellcenter(block, cell)
-            gpos = trans(lpos)
+#             ana = sin(gpos.x) * sin(gpos.y)
+#             fun = -2sin(gpos.x)sin(gpos.y)
 
-            ana = sin(gpos.x) * sin(gpos.y)
-            fun = -2sin(gpos.x)sin(gpos.y)
+#             setfieldvalue!(cell, block, analytic_value, ana)
+#             setfieldvalue!(cell, block, analytic_laplacian, fun)
+#         end
+#     end
 
-            setfieldvalue!(cell, block, analytic_value, ana)
-            setfieldvalue!(cell, block, analytic_laplacian, fun)
-        end
-    end
+#     # _precomp = laplacian * analytic_value.values
 
-    # _precomp = laplacian * analytic_value.values
+#     # @show length(_precomp)
 
-    # @show length(_precomp)
+#     value = LagrangeValue{Float64, 2}()
+#     derivative = LagrangeDerivative{Float64, 2}()
+#     derivative2 = LagrangeDerivative2{Float64, 2}()
+#     hessian = HessianFunctional{2}(value, derivative, derivative2)
+#     block = TreeBlock(surface, 2)
 
-    value = LagrangeValue{Float64, 2}()
-    derivative = LagrangeDerivative{Float64, 2}()
-    derivative2 = LagrangeDerivative2{Float64, 2}()
-    hessian = HessianFunctional{2}(value, derivative, derivative2)
-    block = TreeBlock(surface, 2)
+#     evaluate(CartesianIndex(4, 4), block, analytic_value)
+#     evaluate(CartesianIndex(4, 4), block, (derivative, derivative), analytic_value)
+#     allocated = @allocated evaluate(CartesianIndex(4, 4), block, (derivative, derivative), analytic_value)
+#     println(allocated)
+# end
 
-    evaluate(CartesianIndex(4, 4), block, analytic_value)
+# run_profile()
 
-    @allocated evaluate(CartesianIndex(4, 4), block, (derivative, derivative), analytic_value)
-end
-
-run_profile()
-
-# # Execute
-# main()
+# Execute
+main()
