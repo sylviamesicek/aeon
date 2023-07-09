@@ -5,7 +5,7 @@
 export Block, blockcells, blockbounds, blocktransform
 export cellindices, cellwidths, cellcenter
 export Field, evaluate, evaluate_point, interface
-export Interface, evaluate_interface_interior
+export Interface, evaluate_interface_interior, evaluate_interface_exterior
 
 ############################
 ## Block ###################
@@ -90,20 +90,18 @@ struct Interface{T, F, E}
     Interface{F}(coefs::NTuple{E, T}) where {T, F, E} = new{T, F, E}(coefs)
 end
 
-function evaluate_interface_interior(point::CartesianIndex{N}, block::Block{N, T}, field::Field{N, T}, face::FaceIndex{N}, stencil::InterfaceStencil{T, I, E}, rest::Operator{T}...) where{N, T, I, E}
-    @debug @assert extent ≤ E
+function evaluate_interface_interior(::Val{S}, point::CartesianIndex{N}, block::Block{N, T}, field::Field{N, T}, stencil::InterfaceStencil{T, I, E}, opers::NTuple{L, Operator{T}}) where{N, T, I, E, S, L}
+    total_cells::Int = blockcells(block)[L]
 
-    axis = faceaxis(face)
-    side = faceside(face)
+    remaining = ntuple(i -> opers[i], Val(L - 1))
 
-    total_cells = blockcells(block)[axis]
-
-    if side
+    if S
         result = zero(T)
         # Right side
         for i in 1:I
-            offpoint = snap_point_on_axis(point, total_cells + 1 - i, axis)
-            result += stencil.interior[i] * evaluate_point(offpoint, block, field, rest...)
+            offpoint = snap_point_on_axis(point, total_cells + 1 - i, L)
+            value = evaluate_point(offpoint, block, field, remaining)
+            result += stencil.interior[i] * value
         end
 
         return result
@@ -111,12 +109,21 @@ function evaluate_interface_interior(point::CartesianIndex{N}, block::Block{N, T
         result = zero(T)
         # Left side
         for i in 1:I
-            offpoint = snap_point_on_axis(point, i, axis)
-            result += stencil.interior[i] * evaluate_point(offpoint, block, field, rest...)
+            offpoint = snap_point_on_axis(point, i, L)
+            value = evaluate_point(offpoint, block, field, remaining)
+            result += stencil.interior[i] * value
         end
 
         return result
     end
+end
+
+function evaluate_interface_exterior(stencil::InterfaceStencil{T, I, E}, unknowns::NTuple{O, T}, i::Int) where{T, I, E, O}
+    result = zero(T)
+    for j in 1:i
+        result += stencil.exterior[i] * unknowns[i]
+    end
+    result
 end
 
 ############################
@@ -131,7 +138,7 @@ evaluate(cell::CartesianIndex{N}, block::Block{N, T}, field::Field{N, T}) where 
 """
 Extends a centered stencil out of an interface of a block.
 """
-interface(point::CartesianIndex{N}, block::Block{N, T}, field::Field{N, T}, interface::Interface{N, T}, operator::Operator{T}, rest::Operator{T}...) where {N, T} = error("Interface evaluation unimplemented.")
+interface(::Val{S}, point::CartesianIndex{N}, block::Block{N, T}, field::Field{N, T}, coefs::NTuple{O, T}, extent::Int, opers::NTuple{L, Operator{T}}) where {N, T, O, S, L} = error("Interface evaluation unimplemented.")
 
 
 ############################
@@ -146,40 +153,34 @@ function evaluate(cell::CartesianIndex{N}, block::Block{N, T}, operators::NTuple
 end
 
 """
-Evaluates the value of a field in a block at a certain point. This point must be on a cell.
-"""
-function evaluate_point(point::CartesianIndex{N}, block::Block{N, T}, field::Field{N, T}) where {N, T}
-    @debug @assert is_point_cell(point)
-    evaluate(point_to_cell(point), block, field)
-end
-
-"""
 Evaluates the action of a tensor product of operators on a field in a block at an arbitray point.
 """
 function evaluate_point(point::CartesianIndex{N}, block::Block{N, T}, operators::NTuple{N, Operator{T}}, field::Field{N, T}) where {N, T}
-    evaluate_point(point, block, field, operators...)
+    evaluate_point(point, block, field, operators)
+end
+
+"""
+Evaluates the value of a field in a block at a certain point. This point must be on a cell.
+"""
+function evaluate_point(point::CartesianIndex{N}, block::Block{N, T}, field::Field{N, T}, ::NTuple{0, Operator{T}}) where {N, T}
+    evaluate(point_to_cell(point), block, field)
 end
 
 """
 Recursive function for evaluating the tensor product of a stencil at a point
 """
-function evaluate_point(point::CartesianIndex{N}, block::Block{N, T}, field::Field{N, T}, operator::Operator{T}, rest::Operator{T}...) where {N, T}
-    axis = N - length(rest)
-    index = point[axis]
-    
+function evaluate_point(point::CartesianIndex{N}, block::Block{N, T}, field::Field{N, T}, opers::NTuple{L, Operator{T}}) where {N, T, L}
+    index = point[L]
+
     # Call the appropriate evaluate function depending on the type of the stencil
-    if is_point_vertex(index)
-        stencil = vertex_stencil(operator)
-        return evaluate_vertex(point, block, field, stencil,operator, rest...)
-    elseif is_point_cell(index)
-        stencil = cell_stencil(operator)
-        return evaluate_cell(point, block, field, stencil, operator, rest...)
+    if is_point_cell(index)
+        return evaluate_cell(point, block, field, cell_stencil(opers[L]), opers)
+    elseif is_point_vertex(index)
+        return evaluate_vertex(point, block, field, vertex_stencil(opers[L]), opers)
     elseif is_point_cell_left(index)
-        stencil = cell_left_stencil(operator)
-        return evaluate_cell(point, block, field, stencil, operator, rest...)
+        return evaluate_cell(point, block, field, cell_left_stencil(opers[L]), opers)
     else
-        stencil = cell_right_stencil(operator)
-        return evaluate_cell(point, block, field, stencil, operator, rest...)
+        return evaluate_cell(point, block, field, cell_right_stencil(opers[L]), opers)
     end
 end
 
@@ -187,83 +188,71 @@ end
 ## Helper ###############
 #########################
 
-function evaluate_cell(point::CartesianIndex{N}, block::Block{N, T}, field::Field{N, T}, stencil::CellStencil{T, O}, operator::Operator{T}, rest::Operator{T}...) where {N, T, O}
-    axis = N - length(rest)
-    index = point[axis]
+function evaluate_cell(point::CartesianIndex{N}, block::Block{N, T}, field::Field{N, T}, stencil::CellStencil{T, O}, opers::NTuple{L, Operator{T}}) where {N, T, O, L}
+    index = point[L]
     # Total number of cells
-    total_cells = blockcells(block)[axis]
-    central_cell = point_to_cell(index)
+    total_cells::Int = blockcells(block)[L]
+    central_cell::Int = point_to_cell(index)
 
-    result = stencil.center * evaluate_point(point, block, field, rest...)
+    remaining = ntuple(i -> opers[i], Val(L - 1))
+    
+    result = stencil.center * evaluate_point(point, block, field, remaining)
 
     # Number of cells on left
-    left_cells = min(O, central_cell - 1)
+    left_cells::Int = min(O, central_cell - 1)
     for off in 1:left_cells
-        offpoint = snap_point_on_axis(point, central_cell - off, axis)
-        result += stencil.left[off] * evaluate_point(offpoint, block, field, rest...)
+        offpoint = snap_point_on_axis(point, central_cell - off, L)
+        result += stencil.left[off] * evaluate_point(offpoint, block, field, remaining)
     end
 
     # Number of cells on right
-    right_cells = min(O, total_cells - central_cell)
+    right_cells::Int = min(O, total_cells - central_cell)
     for off in 1:right_cells
-        offpoint = snap_point_on_axis(point, central_cell + off, axis)
-        result += stencil.right[off] * evaluate_point(offpoint, block, field, rest...)
+        offpoint = snap_point_on_axis(point, central_cell + off, L)
+        result += stencil.right[off] * evaluate_point(offpoint, block, field, remaining)
     end
 
-    L = O - left_cells
-    R = O - right_cells
+    # if left_cells < O
+    #     result += interface(Val(false), point, block, field, stencil.left, left_cells, remaining)  
+    # end
 
-    if L > 0
-        face = FaceIndex{N}(axis, false)
-        coefs = ntuple(i -> stencil.left[left_cells + i], L)
-        result += interface(point, block, field, Interface{face}(coefs), operator, rest...)    
-    end
-
-    if R > 0
-        face = FaceIndex{N}(axis, true)
-        coefs = ntuple(i -> stencil.right[right_cells + i], R)
-        result += interface(point, block, field, Interface{face}(coefs), operator, rest...)    
-    end
+    # if right_cells < O
+    #     result += interface(Val(true), point, block, field, stencil.right, right_cells, remaining)  
+    # end
 
     return result
 end
 
-function evaluate_vertex(point::CartesianIndex{N}, block::Block{N, T}, field::Field{N, T}, stencil::VertexStencil{T, O}, operator::Operator{T}, rest::Operator{T}...) where {N, T, O}
-    axis = N - length(rest)
-    index = point[axis]
+function evaluate_vertex(point::CartesianIndex{N}, block::Block{N, T}, field::Field{N, T}, stencil::VertexStencil{T, O}, opers::NTuple{L, Operator{T}}) where {N, T, O, L}
+    index = point[L]
     # Total number of cells
-    total_cells = blockcells(block)[axis]
+    total_cells::Int = blockcells(block)[L]
     # Cell to the left of the current point
-    central_cell = point_to_cell(index)
+    central_cell::Int = point_to_cell(index)
+
+    remaining = ntuple(i -> opers[i], Val(L - 1))
 
     result = zero(T)
 
-    left_cells = min(O, central_cell)
+    left_cells::Int = min(O, central_cell)
     for off in 1:left_cells
-        offpoint = snap_point_on_axis(point, central_cell - off + 1, axis)
-        result += stencil.left[off] * evaluate_point(offpoint, block, field, rest...)
+        offpoint = snap_point_on_axis(point, central_cell - off + 1, L)
+        result += stencil.left[off] * evaluate_point(offpoint, block, field, remaining)
     end
 
-    right_cells = min(O, total_cells - central_cell)
+    right_cells::Int = min(O, total_cells - central_cell)
     for off in 1:right_cells
-        offpoint = snap_point_on_axis(point, central_cell + off, axis)
-        result += stencil.right[off] * evaluate_point(offpoint, block, field, rest...)
+        offpoint = snap_point_on_axis(point, central_cell + off, L)
+        result += stencil.right[off] * evaluate_point(offpoint, block, field, remaining)
     end
 
-    L = O - left_cells
-    R = O - right_cells
+    # if left_cells < O
+    #     result += interface(Val(false), point, block, field, stencil.left, left_cells, remaining)  
+    # end
 
-    if L > 0
-        face = FaceIndex{N}(axis, false)
-        coefs = ntuple(i -> stencil.left[left_cells + i], L)
-        result += interface(point, block, field, Interface{face}(coefs), operator, rest...)    
-    end
-
-    if R > 0
-        face = FaceIndex{N}(axis, true)
-        coefs = ntuple(i -> stencil.right[right_cells + i], R)
-        result += interface(point, block, field, Interface{face}(coefs), operator, rest...)    
-    end
+    # if right_cells < O
+    #     result += interface(Val(true), point, block, field, stencil.right, right_cells, remaining)  
+    # end
 
     return result
 end

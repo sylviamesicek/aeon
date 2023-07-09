@@ -30,7 +30,10 @@ end
 
 meshroot(::TreeMesh) = 1
 
-nodecells(tree::TreeMesh{N}) where N = ntuple(dim -> 2^tree.refinement, Val(N))
+function nodecells(tree::TreeMesh{N}) where {N} 
+    refinement = tree.refinement 
+    ntuple(dim -> 2^refinement, Val(N))
+end
 
 Base.length(tree::TreeMesh) = length(tree.bounds)
 Base.eachindex(tree::TreeMesh) = eachindex(tree.bounds)

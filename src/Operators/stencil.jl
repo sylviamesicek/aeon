@@ -3,7 +3,8 @@
 #############################
 
 export CellStencil, VertexStencil, InterfaceStencil
-export Operator, cell_stencil, vertex_stencil, cell_left_stencil, cell_right_stencil, interface_value_stencil, interface_derivative_stencil
+export Operator, cell_stencil, vertex_stencil, cell_left_stencil, cell_right_stencil
+export interface_value_stencils, interface_derivative_stencils
 export LagrangeOperator, LagrangeValue, LagrangeDerivative, LagrangeDerivative2
 
 ##############################
@@ -72,8 +73,8 @@ Builds the vertex stencil for a given operator.
 """
 vertex_stencil(::Operator) = error("Unimplemented")
 
-interface_value_stencil(::Operator, L::Int, side::Bool) = error("Unimplemented")
-interface_derivative_stencil(::Operator, L::Int, side::Bool) = error("Unimplemented")
+interface_value_stencils(::Operator, ::Val{S}) where S = error("Unimplemented")
+interface_derivative_stencils(::Operator, ::Val{S}) where S = error("Unimplemented")
 
 ############################
 ## Generic #################
@@ -103,52 +104,44 @@ and derivatives.
 """
 abstract type LagrangeOperator{T, O} <: Operator{T} end
 
-function interface_value_stencil(::LagrangeOperator{T, O}, E::Int, side::Bool) where {T, O}
+function interface_stencil(f::Function, ::LagrangeOperator{T, O}, E::Int, side::Bool) where {T, O}
     L = ifelse(side, 2O, E)
     R = ifelse(side, E, 2O)
 
     grid = vertex_centered_grid(L, R)
-    stencil = lagrange(grid, 0//1)
+    stencil = f(grid, 0//1)
 
     left = reverse(ntuple(i -> T(stencil[i]), L))
     right = ntuple(i -> T(stencil[L + i]), R)
 
     if side
         interior = left
-        exterior = ntuple(i -> right[i], R - 1)
+        exterior = ntuple(i -> i ≤ R-1 ? right[i] : zero(T), Val(O - 1))
         edge = right[end]
         return InterfaceStencil(interior, exterior, edge)
     else
         interior = right
-        exterior = ntuple(i -> left[i], L - 1)
+        exterior = ntuple(i -> i ≤ L-1 ? left[i] : zero(T), Val(O - 1))
         edge = left[end]
         return InterfaceStencil(interior, exterior, edge)
     end
 end
 
-function interface_derivative_stencil(::LagrangeOperator{T, O}, E::Int, side::Bool) where {T, O}
-    L = ifelse(side, 2O, E)
-    R = ifelse(side, E, 2O)
-
-    grid = vertex_centered_grid(L, R)
-    stencil = lagrange_derivative(grid, 0//1)
-
-    left = reverse(ntuple(i -> T(stencil[i]), L))
-    right = ntuple(i -> T(stencil[L + i]), R)
-
-    if side
-        interior = left
-        exterior = ntuple(i -> right[i], R - 1)
-        edge = right[end]
-        return InterfaceStencil(interior, exterior, edge)
-    else
-        interior = right
-        exterior = ntuple(i -> left[i], L - 1)
-        edge = left[end]
-        return InterfaceStencil(interior, exterior, edge)
+function interface_value_stencils(opers::LagrangeOperator{T, O}, ::Val{S}) where {T, O, S}
+    result::NTuple{O, InterfaceStencil{T, 2O, O-1}} = ntuple(Val(O)) do i
+        interface_stencil(lagrange, opers, i, S)
     end
+
+    result
 end
 
+function interface_derivative_stencils(opers::LagrangeOperator{T, O}, ::Val{S}) where {T, O, S}
+    result::NTuple{O, InterfaceStencil{T, 2O, O-1}} = ntuple(Val(O)) do i
+        interface_stencil(lagrange_derivative, opers, i, S)
+    end
+
+    result
+end
 
 # Helpers
 function lagrange_cell_stencil(stencil::NTuple{L, T}) where {L, T}
