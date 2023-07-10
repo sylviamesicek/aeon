@@ -33,17 +33,18 @@ end
 function evaluate(cell::CartesianIndex{N}, block::Block{N, T}, fal::HessianFunctional{N, T}, field::Field{N, T}) where {N, T}
     cells = blockcells(block)
 
-    hess = ntuple(Val(N)) do i
-        ntuple(Val(N)) do j
-            if i == j
-                opers = ntuple(dim -> ifelse(i == dim, fal.derivative2, fal.value), Val(N))
-                return evaluate(cell, block, opers, field) * cells[i]^2
-            else
-                opers = ntuple(dim -> ifelse(i == dim || j == dim, fal.derivative, fal.value), Val(N))
-                return evaluate(cell, block, opers, field) * cells[i] * cells[j]
-            end
+    hess = ntuple(Val(N * N)) do index
+        i = (index - 1) ÷ N + 1
+        j = (index - 1) % N + 1
+
+        if i == j
+            opers = ntuple(dim -> ifelse(i == dim, fal.derivative2, fal.value), Val(N))
+            return evaluate(cell, block, opers, field) * cells[i]^2
+        else
+            opers = ntuple(dim -> ifelse(i == dim || j == dim, fal.derivative, fal.value), Val(N))
+            return evaluate(cell, block, opers, field) * cells[i] * cells[j]
         end
     end
 
-    StaticArrays.sacollect(SMatrix{N, N, T}, hess[i][j] for i in 1:N, j in 1:N)
+    SMatrix{N, N, T}(hess)
 end

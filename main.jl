@@ -7,55 +7,46 @@ using IterativeSolvers
 using LinearMaps
 using StaticArrays
 
+function gunlach_seed(pos::SVector{2, T}, a::T, b::Int, c::Int, σᵨ::T, σᵣ::T) where T
+    r = sqrt(pos[1]^2 + pos[2]^2)
+
+    ρ_term = (pos[1]/σᵨ)^b
+    r_term = ℯ^(-(r/σᵣ)^c)
+
+    return a * ρ_term * r_term / 4
+end
+
 # Main code
 function main()
-    mesh = TreeMesh(HyperBox(SA[0.0, 0.0], SA{Float64}[π, π]), 4)
-
-    mark_global_refine!(mesh)
-    prepare_and_execute_refinement!(mesh)
-
-    surface = TreeSurface(mesh)
-
-    # Right hand side
-    rhs = similar(surface)
-
-    for active in surface.active
-        block = TreeBlock(surface, active)
-        trans = blocktransform(block)
-
-        for cell in cellindices(block)
-            lpos = cellcenter(block, cell)
-            gpos = trans(lpos)
-
-            fun = -2sin(gpos.x)sin(gpos.y)
-
-            setfieldvalue!(cell, block, rhs, fun)
-        end
-    end
-
-    # Set analytic solution
-    analytic = similar(surface)
-
-    for active in surface.active
-        block = TreeBlock(surface, active)
-        trans = blocktransform(block)
-
-        for cell in cellindices(block)
-            lpos = cellcenter(block, cell)
-            gpos = trans(lpos)
-
-            ana = sin(gpos.x) * sin(gpos.y)
-            setfieldvalue!(cell, block, analytic, ana)
-        end
-    end
-
     value = LagrangeValue{Float64, 2}()
     derivative = LagrangeDerivative{Float64, 2}()
     derivative2 = LagrangeDerivative2{Float64, 2}()
-
     hessian = HessianFunctional{2}(value, derivative, derivative2)
 
-    operator = LinearMap(surface.total) do y, x
+    mesh = TreeMesh(HyperBox(SA[0.0, 0.0], SA{Float64}[4.0, 4.0]), 7)
+
+    # mark_global_refine!(mesh)
+    # prepare_and_execute_refinement!(mesh)
+
+    surface = TreeSurface(mesh)
+
+    seed = similar(surface)
+
+    for active in surface.active
+        block = TreeBlock(surface, active)
+        trans = blocktransform(block)
+
+        for cell in cellindices(block)
+            lpos = cellcenter(block, cell)
+            gpos = trans(lpos)
+
+            value = gunlach_seed(gpos, 1.0, 2, 2, 1.0, 1.0)
+
+            setfieldvalue!(cell, block, seed, value)
+        end
+    end
+
+    laplacian = LinearMap(surface.total) do y, x
         yfield = TreeField{2}(y)
         xfield = TreeField{2}(x)
 
@@ -76,20 +67,65 @@ function main()
         end
     end
 
-    solvalues, history = bicgstabl(operator, rhs.values, 2; log=true)
-    # solvalues = operator * analytic.values
-    solution = TreeField{2}(solvalues)
+    rhs = TreeField{2}(laplacian * seed.values)
+
+    # # Right hand side
+    # rhs = similar(surface)
+
+    # for active in surface.active
+    #     block = TreeBlock(surface, active)
+
+    #     for cell in cellindices(block)
+    #         setfieldvalue!(cell, block, rhs, 0.0)
+    #     end
+    # end
+
+    hemholtz = LinearMap(surface.total) do y, x
+        yfield = TreeField{2}(y)
+        xfield = TreeField{2}(x)
+
+        for active in surface.active
+            block = TreeBlock(surface, active)
+            trans = blocktransform(block)
+
+            for cell in cellindices(block)
+                lpos = cellcenter(block, cell)
+                # gpos = trans(lpos)
+                j = inv(jacobian(trans, lpos))
+
+                lhess = evaluate(cell, block, hessian, xfield)
+                ghess = j' * lhess * j
+
+                gvalue = evaluate(cell, block, xfield)
+                seed_scale = evaluate(cell, block, rhs)
+
+                glap = ghess[1, 1] + ghess[2, 2]
+
+                setfieldvalue!(cell, block, yfield, glap - gvalue * seed_scale)
+            end
+        end
+    end
+
+    Ψ = similar(surface)
+
+    for active in surface.active
+        block = TreeBlock(surface, active)
+        for cell in cellindices(block)
+            setfieldvalue!(cell, block, Ψ, 0.0)
+        end
+    end
+
+    println("Solving")
+
+    _, history = bicgstabl!(Ψ.values, hemholtz, rhs.values, 2; log=true, max_mv_products=4000)
 
     @show history
 
-    error = TreeField{2}(solution.values .- analytic.values)
-
     writer = MeshWriter(surface)
     attrib!(writer, BlockAttribute())
-    attrib!(writer, ScalarAttribute("right-hand-side", rhs))
-    attrib!(writer, ScalarAttribute("sol-numeric", solution))
-    attrib!(writer, ScalarAttribute("sol-analytic", analytic))
-    attrib!(writer, ScalarAttribute("error", error))
+    attrib!(writer, ScalarAttribute("seed", seed))
+    attrib!(writer, ScalarAttribute("seed-laplacian", rhs))
+    attrib!(writer, ScalarAttribute("Ψ", Ψ))
     write_vtu(writer, "output")
 end
 

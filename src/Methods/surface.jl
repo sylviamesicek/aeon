@@ -84,7 +84,8 @@ end
 
 function Operators.interface(::Val{S}, point::CartesianIndex{N}, block::TreeBlock{N, T}, field::TreeField{N, T}, coefs::NTuple{O, T}, extent::Int, opers::NTuple{L, Operator{T}}) where {N, T, O, S, L}
     face = FaceIndex{N}(L, S)
-    remaining = ntuple(i -> opers[i], Val(L - 1))
+    index = point[L]
+    cell_total = blockcells(block)[L]
 
     surface = block.surface
     tree = surface.tree
@@ -100,21 +101,42 @@ function Operators.interface(::Val{S}, point::CartesianIndex{N}, block::TreeBloc
         boundary_unknowns::NTuple{O, T} = ntuple(i -> zero(T), Val(O))
         boundary_result = zero(T)
 
-        for i in 1:(O - extent)
-            valuestencil = valuestencils[i]
-            valuerhs = -evaluate_interface_interior(Val(S), point, block, field, valuestencil, opers)
-            valuerhs -= evaluate_interface_exterior(valuestencil, boundary_unknowns, i - 1)
-
-            unknown = valuerhs / valuestencil.edge
-            boundary_unknowns = setindex(boundary_unknowns, unknown, i) 
-            boundary_result += coefs[extent + i] * unknown
+        if face == FaceIndex{N}(1, false) || face == FaceIndex{N}(2, false)
+            for i in 1:(O - extent)
+                stencil = derivativestencils[i]
+                rhs = zero(T)
+                rhs -= evaluate_interface_interior(Val(S), point, block, field, stencil, opers)
+                rhs -= evaluate_interface_exterior(stencil, boundary_unknowns, i - 1)
+    
+                unknown = rhs / stencil.edge
+                boundary_unknowns = setindex(boundary_unknowns, unknown, i) 
+                boundary_result += coefs[extent + i] * unknown
+            end
+        else
+            for i in 1:(O - extent)
+                stencil = valuestencils[i]
+                rhs = zero(T)
+                rhs -= evaluate_interface_interior(Val(S), point, block, field, stencil, opers)
+                rhs -= evaluate_interface_exterior(stencil, boundary_unknowns, i - 1)
+    
+                unknown = rhs / stencil.edge
+                boundary_unknowns = setindex(boundary_unknowns, unknown, i) 
+                boundary_result += coefs[extent + i] * unknown
+            end
         end
+        
+        
 
         return boundary_result
     end
 
     # Get leftblock and rightblock
     # @assert neighbor > 0 && surface.nodes[neighbor] > 0
+
+    # if neighbor > 0 && tree.children[neighbor] > 0
+    #     # We are coarse and the neighbor is more refined. 
+    #     cell_index = point_to_cell(index)
+    # end
 
     otherS = !S
     otherblock = TreeBlock(surface, neighbor)
