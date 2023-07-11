@@ -2,7 +2,7 @@ module Aeon
 
 # Submodules
 include("Geometry/Geometry.jl")
-include("Bases/Bases.jl")
+include("Operators/Operators.jl")
 include("Methods/Methods.jl")
 
 end
