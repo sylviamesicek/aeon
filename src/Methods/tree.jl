@@ -42,7 +42,6 @@ Base.eachindex(tree::TreeMesh) = eachindex(tree.bounds)
 ## Tree Iterations ##############
 #################################
 
-
 function allnodes(f::Function, tree::TreeMesh{N, T}) where {N, T}
     stack = [1]
     newstack = []

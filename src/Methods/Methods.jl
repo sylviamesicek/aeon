@@ -11,6 +11,7 @@ using Aeon.Operators
 
 include("tree.jl")
 include("surface.jl")
+include("block.jl")
 include("writer.jl")
 
 end
