@@ -121,7 +121,7 @@ function vertex_derivative_stencil(::LagrangeBasis{T}, ::Val{L}, ::Val{R}) where
 end
 
 function value_stencil(::LagrangeBasis{T}, ::Val{O}, ::Val{0}) where {T, O}
-    lagrange_cell_stencil(lagrange_value, Val(T), O, O, 0//1)
+    lagrange_cell_stencil(lagrange_value, Val(T), 0, 0, 0//1)
 end
 
 function value_stencil(::LagrangeBasis{T}, ::Val{O}, ::Val{1}) where {T, O}
