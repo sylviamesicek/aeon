@@ -76,7 +76,7 @@ end
 ## Lagrange Basis ######
 ########################
 
-struct LagrangeBasis{T} <: Basis{T} end
+struct LagrangeBasis{T} <: AbstractBasis{T} end
 
 # Helpers
 function lagrange_cell_stencil(f::Function, ::Val{T}, L, R, point) where T

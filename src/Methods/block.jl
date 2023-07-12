@@ -1,3 +1,8 @@
+#####################
+## Block ############
+#####################
+
+export TreeBlock
 
 struct TreeBlock{N, T} <: Block{N, T}
     surface::TreeSurface{N, T}
@@ -10,15 +15,41 @@ function Operators.blockcells(block::TreeBlock{N, T}) where {N, T}
 end
 
 Operators.blockbounds(block::TreeBlock) = block.surface.tree.bounds[block.node]
- 
-struct TreeField{N, T, S <: AbstractVector{T}} <: Field{N, T}
-    values::S
+
+######################
+## Boundary ##########
+######################
+
+export BoundaryKind, BoundaryCondition
+
+@enum BoundaryKind begin
+    HomogenousDiritchlet = 1
+    HomogenousNuemann = 2
+    AsymptoticFlatness = 3
 end
 
-TreeField{N}(values::AbstractVector{T}) where {N, T} = TreeField{N, T, typeof(values)}(values)
+struct BoundaryCondition{T} 
+    kind::BoundaryKind
+    coef::T
 
-Base.similar(surface::TreeSurface{N, T}) where {N, T} = TreeField{N}(Vector{T}(undef, surface.total))
+    BoundaryCondition(kind::BoundaryKind, coef::T) where T = new{T}(kind, coef)
+end
 
+######################
+## Tree Field ########
+######################
+
+export TreeField
+ 
+struct TreeField{N, T, F} <: Field{N, T}
+    values::Vector{T}
+    boundaries::HyperBox{N, T, F}
+end
+
+TreeField(values::Vector{T}, boundaries::HyperBox{N, T}) where {N, T} = TreeField{N, T, 2N}(values, boundaries)
+TreeField(::UndefInitializer, surface::TreeSurface{N, T}, boundaries::HyperBox{N, T}) where {N, T} = TreeField(Vector{T}(undef, surface.total), boundaries)
+
+# Necessary for Operators implementation as field
 function Operators.value(field::TreeField{N, T}, block::TreeBlock{N, T}, cell::CartesianIndex{N, T}) where {N, T}
     # Find offset 
     offset = block.surface.offsets[block.node]
@@ -41,6 +72,15 @@ function Operators.setvalue!(field::TreeField{N, T}, value::T, block::TreeBlock{
     # Access value
     field.values[ptr] = value
 end
+
+# Necessary for implementation as AbstractArray
+
+Base.size(field::TreeField) = size(field.values)
+Base.length(field::TreeField) = length(field.values)
+Base.getindex(field::TreeField, i::Int) = field.values[i]
+Base.setindex!(field::TreeField{N, T}, v::T, i::Int) = setindex!(field.values, v, i)
+Base.eachindex(field::TreeField) = eachindex(field.values)
+Base.IndexStyle(field::TreeField) = IndexStyle(field.values)
 
 # function Operators.interface(::Val{S}, point::CartesianIndex{N}, block::TreeBlock{N, T}, field::TreeField{N, T}, coefs::NTuple{O, T}, extent::Int, opers::NTuple{L, Operator{T}}) where {N, T, O, S, L}
 #     face = FaceIndex{N}(L, S)

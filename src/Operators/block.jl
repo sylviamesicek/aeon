@@ -104,23 +104,23 @@ setvalue!(field::Field{N, T}, value::T, block::Block{N, T}, cell::CartesianIndex
 """
 Performs prolongation within a block, to the given order.
 """
-function blockprolong(field::Field{N, T}, block::Block{N, T}, point::NTuple{N, PointIndex}, basis::Basis{T}, ::Val{O}) where {N, T, O}
+function blockprolong(field::Field{N, T}, block::Block{N, T}, point::NTuple{N, PointIndex}, basis::AbstractBasis{T}, ::Val{O}) where {N, T, O}
     _prolong_product(field, block, basis, Val(O), (), point...)
 end
 
-function blockprolong(field::Field{N, T}, block::Block{N, T}, cell::NTuple{N, CellIndex}, ::Basis{T}, ::Val{O}) where {N, T, O}
+function blockprolong(field::Field{N, T}, block::Block{N, T}, cell::NTuple{N, CellIndex}, ::AbstractBasis{T}, ::Val{O}) where {N, T, O}
     value(field, block, CartesianIndex(map(i -> i.inner, cell)))
 end
 
-function _prolong_product(field::Field{N, T}, block::Block{N, T}, basis::Basis{T}, ::Val{O}, cell::NTuple{N, CellIndex}) where {N, T, O}
+function _prolong_product(field::Field{N, T}, block::Block{N, T}, basis::AbstractBasis{T}, ::Val{O}, cell::NTuple{N, CellIndex}) where {N, T, O}
     blockprolong(field, block, cell, basis, Val(O))
 end
 
-function _prolong_product(field::Field{N, T}, block::Block{N, T}, basis::Basis{T}, ::Val{O}, cell::NTuple{M, CellIndex}, index::CellIndex, rest::Vararg{PointIndex, L}) where {N, T, L, M, O}
+function _prolong_product(field::Field{N, T}, block::Block{N, T}, basis::AbstractBasis{T}, ::Val{O}, cell::NTuple{M, CellIndex}, index::CellIndex, rest::Vararg{PointIndex, L}) where {N, T, L, M, O}
     _prolong_product(field, block, basis, Val(O), (cell..., index), rest...)
 end
 
-@generated function _prolong_product(field::Field{N, T}, block::Block{N, T}, basis::Basis{T}, ::Val{O}, cell::NTuple{M, CellIndex}, index::VertexIndex, rest::Vararg{PointIndex, L}) where {N, T, L, M, O}
+@generated function _prolong_product(field::Field{N, T}, block::Block{N, T}, basis::AbstractBasis{T}, ::Val{O}, cell::NTuple{M, CellIndex}, index::VertexIndex, rest::Vararg{PointIndex, L}) where {N, T, L, M, O}
     quote
         ctotal = blockcells(block)[$L]
         cindex = vertex_to_cell(index)
@@ -151,7 +151,7 @@ end
     end
 end
 
-@generated function _prolong_product(field::Field{N, T}, block::Block{N, T}, basis::Basis{T}, ::Val{O}, cell::NTuple{M, CellIndex}, index::SubCellIndex, rest::Vararg{PointIndex, L}) where {N, T, L, M, O}
+@generated function _prolong_product(field::Field{N, T}, block::Block{N, T}, basis::AbstractBasis{T}, ::Val{O}, cell::NTuple{M, CellIndex}, index::SubCellIndex, rest::Vararg{PointIndex, L}) where {N, T, L, M, O}
     side_expr = side -> quote
         # Left side
         if leftcells < $O
@@ -191,7 +191,7 @@ end
 """
 Applies a vertex stencil to a field in a block such that `_prolong_product` is recursively called for the remaining indices.
 """
-function _prolong_vertex(field::Field{N, T}, block::Block{N, T}, stencil::VertexStencil{T}, basis::Basis{T}, ::Val{O}, cell::NTuple{M, CellIndex}, index::VertexIndex, rest::Vararg{PointIndex, L}) where {N, T, L, M, O}
+function _prolong_vertex(field::Field{N, T}, block::Block{N, T}, stencil::VertexStencil{T}, basis::AbstractBasis{T}, ::Val{O}, cell::NTuple{M, CellIndex}, index::VertexIndex, rest::Vararg{PointIndex, L}) where {N, T, L, M, O}
     result = zero(T)
 
     cindex = vertex_to_cell(index)
@@ -212,7 +212,7 @@ end
 """
 Applies a subcell stencil to a field in a block such that `_prolong_product` is recursively called for the remaining indices.
 """
-function _prolong_subcell(field::Field{N, T}, block::Block{N, T}, stencil::SubCellStencil{T}, basis::Basis{T}, ::Val{O}, cell::NTuple{M, CellIndex}, index::SubCellIndex, rest::Vararg{PointIndex, L}) where {N, T, L, M, O}
+function _prolong_subcell(field::Field{N, T}, block::Block{N, T}, stencil::SubCellStencil{T}, basis::AbstractBasis{T}, ::Val{O}, cell::NTuple{M, CellIndex}, index::SubCellIndex, rest::Vararg{PointIndex, L}) where {N, T, L, M, O}
     cindex = subcell_to_cell(index)
     result = stencil.center * _prolong_product(field, block, basis, Val(O), (cell..., cindex), rest...)
 
@@ -250,25 +250,25 @@ domainvalue(domain::Domain{N, T}, cell::CartesianIndex{N, T}) where {N, T} = dom
 """
 Performs prolongation for a full domain.
 """
-function domainprolong(domain::Domain{N, T, O}, point::NTuple{N, PointIndex}, basis::Basis{T}) where {N, T, O}
+function domainprolong(domain::Domain{N, T, O}, point::NTuple{N, PointIndex}, basis::AbstractBasis{T}) where {N, T, O}
     _prolong_product(domain, basis, (), point...)
 end
 
-function domainprolong(domain::Domain{N, T, O}, cell::NTuple{N, CellIndex}, ::Basis{T}) where {N, T, O}
+function domainprolong(domain::Domain{N, T, O}, cell::NTuple{N, CellIndex}, ::AbstractBasis{T}) where {N, T, O}
     domainvalue(domain, CartesianIndex(map(i -> i.inner, cell .+ O)))
 end
 
-function domainprolong(domain::Domain{N, T, O}, cell::CartesianIndex{N}, ::Basis{T}) where {N, T, O}
+function domainprolong(domain::Domain{N, T, O}, cell::CartesianIndex{N}, ::AbstractBasis{T}) where {N, T, O}
     domainvalue(domain, map(CellIndex, cell.I))
 end
 
 # Product
 
-function _prolong_product(domain::Domain{N, T, O}, basis::Basis{T}, cell::NTuple{N, CellIndex}, index::CellIndex, rest::Vararg{PointIndex, L}) where {N, T, L}
+function _prolong_product(domain::Domain{N, T, O}, basis::AbstractBasis{T}, cell::NTuple{N, CellIndex}, index::CellIndex, rest::Vararg{PointIndex, L}) where {N, T, L}
     _prolong_product(domain, basis, (cell..., index), rest)
 end
 
-function _prolong_product(domain::Domain{N, T, O}, basis::Basis{T}, cell::NTuple{N, CellIndex}, index::VertexIndex, rest::Vararg{PointIndex, L}) where {N, T, L}
+function _prolong_product(domain::Domain{N, T, O}, basis::AbstractBasis{T}, cell::NTuple{N, CellIndex}, index::VertexIndex, rest::Vararg{PointIndex, L}) where {N, T, L}
     cindex = vertex_to_cell(index)
     stencil = vertex_value_stencil(basis, Val(O + 1), Val(O + 1))
     result = zero(T)
@@ -286,7 +286,7 @@ function _prolong_product(domain::Domain{N, T, O}, basis::Basis{T}, cell::NTuple
     return result
 end
 
-function _prolong_product(domain::Domain{N, T, O}, basis::Basis{T}, cell::NTuple{N, CellIndex}, index::SubCellIndex, rest::Vararg{PointIndex, L}) where {N, T, L}
+function _prolong_product(domain::Domain{N, T, O}, basis::AbstractBasis{T}, cell::NTuple{N, CellIndex}, index::SubCellIndex, rest::Vararg{PointIndex, L}) where {N, T, L}
     cindex = subcell_to_cell(index)
 
     if subcell_side(index)
@@ -315,17 +315,17 @@ end
 """
 Evaluates the tensor product of the given operators on a domain
 """
-function domainevaluate(domain::Domain{N, T, O}, cell::NTuple{N, CellIndex}, basis::Basis{T}, opers::NTuple{N, Operator}) where {N, T, O}
+function domainevaluate(domain::Domain{N, T, O}, cell::NTuple{N, CellIndex}, basis::AbstractBasis{T}, opers::NTuple{N, AbstractOperator}) where {N, T, O}
     _evaluate_product(domain, cell, basis, opers...)
 end
 
-function domainevaluate(domain::Domain{N, T, O}, cell::CartesianIndex{N}, basis::Basis{T}, opers::NTuple{N, Operator}) where {N, T, O}
+function domainevaluate(domain::Domain{N, T, O}, cell::CartesianIndex{N}, basis::AbstractBasis{T}, opers::NTuple{N, AbstractOperator}) where {N, T, O}
     domainevaluate(domain, map(CellIndex, cell.I), basis, opers)
 end
 
 # Product
 
-function _evaluate_product(domain::Domain{N, T, O}, cell::NTuple{N, CellIndex}, basis::Basis{T}, oper::Operator, rest::Vararg{Operator, L}) where {N, T, O, L}
+function _evaluate_product(domain::Domain{N, T, O}, cell::NTuple{N, CellIndex}, basis::AbstractBasis{T}, oper::AbstractOperator, rest::Vararg{AbstractOperator, L}) where {N, T, O, L}
     stencil = operator_stencil(basis, Val(O), oper)
     
     result = stencil.center * _evaluate_product(domain, cell, basis, rest...)
@@ -350,7 +350,7 @@ end
 """
 Computes the gradient at a cell on a domain.
 """
-function domaingradient(domain::Domain{N, T, O}, cell::CartesianIndex{N}, basis::Basis{T}) where {N, T, O}
+function domaingradient(domain::Domain{N, T, O}, cell::CartesianIndex{N}, basis::AbstractBasis{T}) where {N, T, O}
     cells = size(domain.inner) .- 2O
 
     SVector(
@@ -364,7 +364,7 @@ end
 """
 Computes the hessian at a cell on a domain.
 """
-function domainhessian(domain::Domain{N, T, O}, cell::CartesianIndex{N}, basis::Basis{T}) where {N, T, O}
+function domainhessian(domain::Domain{N, T, O}, cell::CartesianIndex{N}, basis::AbstractBasis{T}) where {N, T, O}
     cells = size(domain.inner) .- 2O
 
     hess = ntuple(Val(N * N)) do index
