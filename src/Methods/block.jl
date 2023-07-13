@@ -82,6 +82,94 @@ Base.setindex!(field::TreeField{N, T}, v::T, i::Int) = setindex!(field.values, v
 Base.eachindex(field::TreeField) = eachindex(field.values)
 Base.IndexStyle(field::TreeField) = IndexStyle(field.values)
 
+
+#########################
+## Evaluation ###########
+#########################
+
+function Operators.extend_block(field::TreeField{N, T}, block::TreeBlock{N, T}, cell::CartesianIndex{N}, basis::AbstractBasis{T}, ::Val{O}) where {N, T, O}
+    axis = 1
+
+    interior = ntuple(Val(2O)) do v
+        offcell = CartesianIndex(setindex(cell.I, cell[axis] - v, axis))
+        blockprolong(field, block, offcell, basis, Val(O))
+    end
+end
+
+function Operators.interface_condition(field::Field{N, T}, block::Block{N, T}, cell::CartesianIndex{N}, basis::AbstractBasis{T}, ::Val{O}, vertex::NTuple{N, Int}) where {N, T, O}
+    @inline _interface_product(field, block, cell, basis, Val(O), vertex...)
+end
+
+function _interface_product(field::Field{N, T}, block::Block{N, T}, cell::CartesianIndex{N}, basis::AbstractBasis{T}, ::Val{O}) where {N, T, O, L}
+    blockprolong(field, block, cell, basis, Val(O))
+end
+
+function _interface_product(field::Field{N, T}, block::Block{N, T}, cell::CartesianIndex{N}, basis::AbstractBasis{T}, ::Val{O}, dir::Int, rest::Vararg{Int, L}) where {N, T, O, L}    
+    if dir == 0
+        _interface_product(field, block, cell, basis, Val(O), rest...)
+    else
+        axis = N - L
+        interior_dir = ifelse(dir > 0, -1, 1) 
+
+        # Fill interior
+        interior::NTuple{2O, T} = ntuple(Val(2O)) do i
+            offcell = CartesianIndex(setindex(cell.I, cell[axis] + interior_dir * i, axis))
+            _interface_product(field, block, offcell, basis, Val(O), rest...)
+        end
+
+        # Fill unknowns
+        unknowns::NTuple{O, T} = ntuple(i -> zero(T), Val(O))
+
+        for i in 1:O
+            if dir > 0
+                stencil = cell_value_stencil(basis, 2O, i)
+                interior_stencil = stencil.left
+                exterior_stencil = stencil.right
+            else
+                stencil = cell_value_stencil(basis, i, 2O)
+                interior_stencil = stencil.right
+                exterior_stencil = stencil.left
+            end
+
+            rhs = zero(T)
+
+            for j in eachindex(interior_stencil)
+                rhs += interior_stencil[j] * interior[j]
+            end
+
+            for j in 1:(i-1)
+                rhs += exterior_stencil[j] * unknowns[j]
+            end
+
+            v = (-rhs)/exterior_stencil[end]
+            unknowns = setindex(unknowns, v, i)
+        end
+
+        if dir > 0
+            stencil = cell_value_stencil(basis, 2O, O)
+            interior_stencil = stencil.left
+            exterior_stencil = stencil.right
+        else
+            stencil = cell_value_stencil(basis, O, 2O)
+            interior_stencil = stencil.right
+            exterior_stencil = stencil.left
+        end
+
+        result = zero(T)
+
+        for j in eachindex(interior_stencil)
+            result += interior_stencil[j] * interior[j]
+        end
+
+        for j in eachindex(exterior_stencil)
+            result += exterior_stencil[j] * unknowns[j]
+        end
+
+        return result
+    end
+end
+
+
 # function Operators.interface(::Val{S}, point::CartesianIndex{N}, block::TreeBlock{N, T}, field::TreeField{N, T}, coefs::NTuple{O, T}, extent::Int, opers::NTuple{L, Operator{T}}) where {N, T, O, S, L}
 #     face = FaceIndex{N}(L, S)
 #     index = point[L]

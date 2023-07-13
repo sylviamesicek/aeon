@@ -97,7 +97,7 @@ function lagrange_vertex_stencil(f::Function, ::Val{T}, L, R) where T
 end
 
 function cell_value_stencil(::LagrangeBasis{T}, ::Val{L}, ::Val{R}) where {T, L, R} 
-    lagrange_cell_stencil(lagrange_value, Val(T), 0, 0, 0//1)
+    lagrange_cell_stencil(lagrange_value, Val(T), L, R, 0//1)
 end
 
 function subcell_value_stencil(::LagrangeBasis{T}, ::Val{S}, ::Val{L}, ::Val{R}) where {S, T, L, R}

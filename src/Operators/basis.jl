@@ -13,10 +13,12 @@ export AbstractOperator, ValueOperator, operator_stencil
 ## Stencils ################
 ############################
 
+abstract type AbstractStencil{T} end
+
 """
 Represents a cell centered stencil.
 """
-struct CellStencil{T, L, R} 
+struct CellStencil{T, L, R} <: AbstractStencil{T}
     left::NTuple{L, T}
     center::T
     right::NTuple{R, T}
@@ -27,7 +29,7 @@ end
 """
 Represents a vertex centered stencil.
 """
-struct VertexStencil{T, L, R} 
+struct VertexStencil{T, L, R} <: AbstractStencil{T}
     left::NTuple{L, T}
     right::NTuple{R, T}
 
