@@ -74,7 +74,7 @@ end
 """
 Iterates the indices of a given block.
 """
-cellindices(block::Block) = CartesianIndices(domaincells(block))
+cellindices(block::Block) = CartesianIndices(blockcells(block))
 cellwidths(block::Block{N, T}) where {N, T} = SVector{N, T}(1 ./ blockcells(block))
 cellcenter(block::Block{N, T}, cell::CartesianIndex{N}) where {N, T} = SVector{N, T}((cell.I .- T(1//2)) ./ blockcells(block))
 
@@ -103,10 +103,10 @@ setvalue!(field::Field{N, T}, value::T, block::Block{N, T}, cell::CartesianIndex
 Apply the tensor product of a set of stencils at a point on a block.
 """
 function block_stencil_product(field::Field{N, T}, block::Block{N, T}, cell::CartesianIndex{N}, stencils::NTuple{N, AbstractStencil{T}}) where {N, T}
-    _block_stencil_product(domain, cell, stencils...)
+    _block_stencil_product(field, block, cell, stencils...)
 end
 
-function _block_stencil_product(field::Field{N, T}, block::Block{N, T}, cell::CartesianIndex{N}) where {N, T, L}
+function _block_stencil_product(field::Field{N, T}, block::Block{N, T}, cell::CartesianIndex{N}) where {N, T}
     value(field, block, cell)
 end
 
@@ -148,7 +148,7 @@ end
 Performs prolongation within a block, to the given order.
 """
 function blockprolong(field::Field{N, T}, block::Block{N, T}, point::NTuple{N, PointIndex}, basis::AbstractBasis{T}, ::Val{O}) where {N, T, O}
-    _blockprolong(field, block, basis, (), (), point...)
+    _blockprolong(field, block, basis, Val(O), (), (), point...)
 end
 
 function _blockprolong(field::Field{N, T}, block::Block{N, T}, ::AbstractBasis{T}, ::Val{O}, cell::NTuple{N, Int}, stencils::NTuple{N, AbstractStencil}) where {N, T, O}
@@ -157,13 +157,13 @@ end
 
 function _blockprolong(field::Field{N, T}, block::Block{N, T}, basis::AbstractBasis{T}, ::Val{O}, cell::NTuple{L, Int}, stencils::NTuple{L, AbstractStencil}, index::CellIndex, rest::Vararg{PointIndex, M}) where {N, T, O, L, M}
     stencil = cell_value_stencil(basis, Val(0), Val(0))
-    _blockprolong(field, block, basis, Val(O), (cell..., index), (stencils..., stencil), rest...)
+    _blockprolong(field, block, basis, Val(O), (cell..., index.inner), (stencils..., stencil), rest...)
 end
 
 @generated function _blockprolong(field::Field{N, T}, block::Block{N, T}, basis::AbstractBasis{T}, ::Val{O}, cell::NTuple{L, Int}, stencils::NTuple{L, AbstractStencil}, index::VertexIndex, rest::Vararg{PointIndex, M}) where {N, T, O, L, M}
     quote
         ctotal = blockcells(block)[$L]
-        cindex = vertex_to_cell(index)
+        cindex = point_to_cell(index).inner
 
         leftcells = min($O, cindex)
         rightcells = min($O, total - cindex)
@@ -202,7 +202,7 @@ end
 @generated function _blockprolong(field::Field{N, T}, block::Block{N, T}, basis::AbstractBasis{T}, ::Val{O}, cell::NTuple{L, Int}, stencils::NTuple{L, AbstractStencil}, index::SubCellIndex, rest::Vararg{PointIndex, M}) where {N, T, O, L, M}
     side_expr = side -> quote
         ctotal = blockcells(block)[$L]
-        cindex = vertex_to_cell(index)
+        cindex = point_to_cell(index).inner
 
         leftcells = min($O, cindex)
         rightcells = min($O, total - cindex)
@@ -250,20 +250,25 @@ end
 ## Domain ###############
 #########################
 
-export Domain, domainvalue, domainevaluate, domaingradient, domainhessian
+export Domain, domaincells, domainvalue, domainevaluate, domaingradient, domainhessian
 
 """
 A block with fictious nodes filled.
 """
 struct Domain{N, T, O}
     inner::Array{T, N}
-
-    Domain{O}(inner::Array{T, N}) where {N, T, O} = new{N, T, O}(inner)
 end
 
+Domain{N, T, O}(::UndefInitializer) where {N, T, O} = Domain{N, T, O}(Array{T, N}(undef, ntuple(i -> 0, Val(N)))) 
+Domain{O}(::UndefInitializer, block::Block{N, T}) where {N, T, O} = Domain{N, T, O}(Array{T, N}(undef, (blockcells(block) .+ 2O)...))
+
 domaincells(domain::Domain{N, T, O}) where {N, T, O} = size(domain.inner) .- 2O
-domainvalue(domain::Domain{N, T}, cell::CartesianIndex{N, T}) where {N, T} = domain.inner[CartesianIndex(cell.I .+ O)]
-setdomainvalue!(domain::Domain{N, T}, value::T, cell::CartesianIndex{N, T}) where {N, T} = domain.inner[CartesianIndex(cell.I .+ O)] = value
+domainvalue(domain::Domain{N, T, O}, cell::CartesianIndex{N}) where {N, T, O} = domain.inner[CartesianIndex(cell.I .+ O)]
+
+Base.fill!(domain::Domain{N, T}, v::T) where {N, T}= fill!(domain.inner, v)
+
+# Helper
+setdomainvalue!(domain::Domain{N, T, O}, value::T, cell::CartesianIndex{N}) where {N, T, O} = domain.inner[CartesianIndex(cell.I .+ O)] = value
 
 """
 Apply the tensor product of a set of stencils at a point on a numerical domain
@@ -272,7 +277,7 @@ function domain_stencil_product(domain::Domain{N, T}, cell::CartesianIndex{N}, s
     _domain_stencil_product(domain, cell, stencils...)
 end
 
-function _domain_stencil_product(domain::Domain{N, T}, cell::CartesianIndex{N}) where {N, T, L}
+function _domain_stencil_product(domain::Domain{N, T}, cell::CartesianIndex{N}) where {N, T}
     domainvalue(domain, cell)
 end
 
@@ -396,30 +401,18 @@ export transfer_block_to_domain!, fill_interface!, interface_condition
 """
 Computes the value the boundary should take at the cell and specific vertex
 """
-interface_condition(::Field{N, T}, ::Block{N, T}, ::CartesianIndex{N}, ::AbstractBasis{T}, ::Val{O}, ::Val{I}) where {N, T} = error("Unimplemented")
+interface_condition(::Field{N, T}, ::Block{N, T}, ::CartesianIndex{N}, ::AbstractBasis{T}, ::Val{O}, ::Val{I}) where {N, T, O, I} = error("Unimplemented")
 
 """
 Fills a subdomain of the boundary of a domain. Either this function can be overridden directly, or `interface_condition` can be used.
 """
-function fill_interface!(domain::Domain{N, T, O}, field::Field{N, T}, block::Block{N, T}, cell::CartesianIndex{T}, basis::AbstractBasis{T}, ::Val{I}) where {N, T, O, I}
+@generated function fill_interface!(domain::Domain{N, T, O}, field::Field{N, T}, block::Block{N, T}, cell::CartesianIndex{N}, basis::AbstractBasis{T}, ::Val{I}) where {N, T, O, I}
     exteriorcells = ntuple(i -> ifelse(I[i] ≠ 0, O, 1), Val(N))
 
-    interface_value = interface_condition(field, block, cell, basis, Val(O), Val(I))
+    exterior_exprs = Expr[]
 
-    for exterior in exteriorcells
-        stencils = ntuple(Val(N)) do i
-            if I[i] == 0
-                return vertex_value_stencil(basis, Val(0), Val(0))
-            elseif I[i] == -1
-                return vertex_value_stencil(basis, exterior[i], Val(2O))
-            else
-                return vertex_value_stencil(basis, Val(2O), exterior[i])
-            end
-        end
-
-        svalue = domain_stencil_product(domain, cell, stencils)
-
-        target = cell.I .+ ntuple(Val(N)) do i
+    for exterior in CartesianIndices(exteriorcells)
+        cell_offset = ntuple(Val(N)) do i
             if I[i] == -1
                 return 1 - exterior[i]
             elseif I[i] == 1
@@ -429,8 +422,30 @@ function fill_interface!(domain::Domain{N, T, O}, field::Field{N, T}, block::Blo
             end
         end
 
-        setdomainvalue!(domain, interface_value - svalue, CartesianIndex(target))
-    end 
+        expr = quote
+            stencils = Base.@ntuple $N i -> begin
+                if $(I)[i] == 0
+                    return vertex_value_stencil(basis, Val(0), Val(0))
+                elseif $(I)[i] == -1
+                    return vertex_value_stencil(basis, Val($(exterior)[i]), Val($(2O)))
+                else
+                    return vertex_value_stencil(basis, Val($(2O)), Val($(exterior)[i]))
+                end
+            end
+
+            svalue = domain_stencil_product(domain, cell, stencils)
+            target = cell.I .+ $(cell_offset)
+            # TODO account for scaling of value stencil
+            setdomainvalue!(domain, interface_value - svalue, CartesianIndex(target))
+        end
+
+        push!(exterior_exprs, expr)
+    end
+
+    quote
+        interface_value = interface_condition(field, block, cell, basis, Val($O), Val($I))
+        $(exterior_exprs...)
+    end
 end
 
 function _fill_interface!(domain::Domain{N, T, O}, field::Field{N, T}, block::Block{N, T}, basis::AbstractBasis{T}, ::Val{I}) where {N, T, O, I}
@@ -449,7 +464,7 @@ function _fill_interface!(domain::Domain{N, T, O}, field::Field{N, T}, block::Bl
             end
         end
 
-        fill_interface!(domain, field, block, cell, basis, Val(I))
+        fill_interface!(domain, field, block, CartesianIndex(cell), basis, Val(I))
     end
 end
 
@@ -458,14 +473,9 @@ Transfers the data of a field on a block to a domain. This is essentally a prepr
 all subsequent operations on the domain to be much cheaper.
 """
 function transfer_block_to_domain!(domain::Domain{N, T, O}, field::Field{N, T}, block::Block{N, T}, basis::AbstractBasis{T}) where {N, T, O}
-    # Meta data
-    cells = blockcells(block)
+    @assert domaincells(domain) == blockcells(block)
 
-    # Resize domain if necessary
-    domaincells = cells .+ 2O
-    if size(domain) != domaincells
-        domain = Domain{N, T, O}(Array{T}(undef, domaincells...))
-    end
+    fill!(domain, zero(T))
 
     # Fill interior values 
     for cell in cellindices(block)
@@ -482,9 +492,9 @@ end
     subdomain_exprs = i -> begin
         sub_exprs = Expr[]
         
-        for subdomain in CartesianIndex(ntuple(_ -> 3, i))
+        for subdomain in CartesianIndices(ntuple(_ -> 3, Val(N)))
             if sum(subdomain.I .== 1 .|| subdomain.I .== 3) == i
-                push!(sub_exprs, :(fill_interface!(domain, field, block, basis, Val($(subdomain.I .- 2)))))
+                push!(sub_exprs, :(_fill_interface!(domain, field, block, basis, Val($(subdomain.I .- 2)))))
             end
         end
 
@@ -498,5 +508,7 @@ end
         append!(exprs, subdomain_exprs(i))
     end
 
-    exprs
+    quote
+        $(exprs...)
+    end
 end

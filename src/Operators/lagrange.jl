@@ -79,25 +79,25 @@ end
 struct LagrangeBasis{T} <: AbstractBasis{T} end
 
 # Helpers
-function lagrange_cell_stencil(f::Function, ::Val{T}, L, R, point) where T
+function lagrange_cell_stencil(f::Function, ::Val{T}, ::Val{L}, ::Val{R}, point) where {T, L, R}
     grid = cell_centered_grid(L, R)
     stencil = f(grid, point)
-    left = map(T, ntuple(i -> stencil[L + 1 - i], L))
-    right = map(T, ntuple(i -> stencil[L + 1 + i], R))
+    left = map(T, ntuple(i -> stencil[L + 1 - i], Val(L)))
+    right = map(T, ntuple(i -> stencil[L + 1 + i], Val(R)))
     center = T(stencil[L + 1])
     CellStencil(left, center, right)
 end
 
-function lagrange_vertex_stencil(f::Function, ::Val{T}, L, R) where T
+function lagrange_vertex_stencil(f::Function, ::Val{T}, ::Val{L}, ::Val{R}) where {T, L, R}
     grid = vertex_centered_grid(L, R)
     stencil = f(grid, 0//1)
-    left = map(T, ntuple(i -> stencil[L + 1 - i], L))
-    right = map(T, ntuple(i -> stencil[L + i], R))
-    VertexStencil(left, right)
+    left::NTuple{L, T} = map(T, ntuple(i -> stencil[L + 1 - i], Val(L)))
+    right::NTuple{R, T}  = map(T, ntuple(i -> stencil[L + i], Val(R)))
+    VertexStencil{T}(left, right)
 end
 
 function cell_value_stencil(::LagrangeBasis{T}, ::Val{L}, ::Val{R}) where {T, L, R} 
-    lagrange_cell_stencil(lagrange_value, Val(T), L, R, 0//1)
+    lagrange_cell_stencil(lagrange_value, Val(T), Val(L), Val(R), 0//1)
 end
 
 function subcell_value_stencil(::LagrangeBasis{T}, ::Val{S}, ::Val{L}, ::Val{R}) where {S, T, L, R}
@@ -121,13 +121,13 @@ function vertex_derivative_stencil(::LagrangeBasis{T}, ::Val{L}, ::Val{R}) where
 end
 
 function value_stencil(::LagrangeBasis{T}, ::Val{O}, ::Val{0}) where {T, O}
-    lagrange_cell_stencil(lagrange_value, Val(T), 0, 0, 0//1)
+    lagrange_cell_stencil(lagrange_value, Val(T), Val(0), Val(0), 0//1)
 end
 
 function value_stencil(::LagrangeBasis{T}, ::Val{O}, ::Val{1}) where {T, O}
-    lagrange_cell_stencil(lagrange_derivative, Val(T), O, O, 0//1)
+    lagrange_cell_stencil(lagrange_derivative, Val(T), Val(O), Val(O), 0//1)
 end
 
 function value_stencil(::LagrangeBasis{T}, ::Val{O}, ::Val{2}) where {T, O}
-    lagrange_cell_stencil(lagrange_derivative_2, Val(T), O, O, 0//1)
+    lagrange_cell_stencil(lagrange_derivative_2, Val(T), Val(O), Val(O), 0//1)
 end

@@ -33,7 +33,7 @@ struct VertexStencil{T, L, R} <: AbstractStencil{T}
     left::NTuple{L, T}
     right::NTuple{R, T}
 
-    CellStencil(left::NTuple{L, T}, right::NTuple{R, T}) where {T, L, R} = new{T, L, R}(left, right)
+    VertexStencil{T}(left::NTuple{L, T}, right::NTuple{R, T}) where {T, L, R} = new{T, L, R}(left, right)
 end
 
 ########################
@@ -92,10 +92,10 @@ vertex_derivative_stencil(::AbstractBasis, ::Val{L}, ::Val{R}) where {L, R} = er
 """
 Returns the cell-centered, balanced stencil for computing the `R`-th covariant derivative.
 """
-value_stencil(::AbstractBasis, ::Val{O}, ::Val{R}) = error("Unimplemented")
+value_stencil(::AbstractBasis, ::Val{O}, ::Val{R}) where {O, R} = error("Unimplemented")
 
 
-operator_stencil(::AbstractBasis, ::Val{O}, ::AbstractOperator) = error("Unimplemented")
+operator_stencil(::AbstractBasis, ::Val{O}, ::AbstractOperator) where {O} = error("Unimplemented")
 operator_stencil(basis::AbstractBasis, ::Val{O}, ::ValueOperator{R}) where {O, R} = value_stencil(basis, Val(O), Val(R))
 
 # stencil(basis::Basis, ::CellValueOperator{L, R}) where {L, R} = cell_value_stencil(basis, Val(L), Val(R))

@@ -47,6 +47,7 @@ struct HyperFaces{N, T, F}
 end
 
 HyperFaces(faces::NTuple{F, T}) where {F, T} = HyperFaces{F ÷ 2}(faces)
+HyperFaces(faces::T...) where T = HyperFaces(tuple(faces...))
 
 Base.length(faces::HyperFaces) = length(faces.inner)
 Base.eachindex(::HyperFaces{N}) where N = faceindices(Val(N))
