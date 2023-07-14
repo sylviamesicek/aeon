@@ -422,21 +422,30 @@ Fills a subdomain of the boundary of a domain. Either this function can be overr
             end
         end
 
-        expr = quote
-            stencils = Base.@ntuple $N i -> begin
-                if $(I)[i] == 0
-                    return vertex_value_stencil(basis, Val(0), Val(0))
-                elseif $(I)[i] == -1
-                    return vertex_value_stencil(basis, Val($(exterior)[i]), Val($(2O)))
-                else
-                    return vertex_value_stencil(basis, Val($(2O)), Val($(exterior)[i]))
-                end
-            end
+        left_supports = ntuple(i -> ifelse(I[i] ≠ 0, ifelse(I[i] == 1, 2O, exterior[i]), 0), Val(N))
+        right_supports = ntuple(i -> ifelse(I[i] ≠ 0, ifelse(I[i] == 1, exterior[i], 2O), 0), Val(N))
 
-            svalue = domain_stencil_product(domain, cell, stencils)
-            target = cell.I .+ $(cell_offset)
-            # TODO account for scaling of value stencil
-            setdomainvalue!(domain, interface_value - svalue, CartesianIndex(target))
+        stencil_exprs = ntuple(i -> :(vertex_value_stencil(basis, Val($(left_supports[i])), Val($(right_supports[i])))), Val(N))
+        coef_exprs = ntuple(Val(N)) do i
+            if I[i] == -1
+                :(coefs *= stencils[$i].left[end])
+            elseif I[i] == 1
+                :(coefs *= stencils[$i].right[end])
+            else
+                :()
+            end
+        end
+
+        expr = quote
+            let stencils = tuple($(stencil_exprs...)),
+                coefs = one($T),
+                svalue = domain_stencil_product(domain, cell, stencils)
+                target = cell.I .+ $(cell_offset)
+
+                $(coef_exprs...)
+
+                setdomainvalue!(domain, (interface_value - svalue), CartesianIndex(target))
+            end
         end
 
         push!(exterior_exprs, expr)

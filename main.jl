@@ -68,7 +68,6 @@ function main()
                 domain = Domain{2}(undef, block)
             end
 
-            @show "Transfering"
             transfer_block_to_domain!(domain, xfield, block, basis)
 
             for cell in cellindices(block)
@@ -100,12 +99,12 @@ function main()
 
     println("Solving")
 
-    # _, history = bicgstabl!(Ψ.values, hemholtz, seed.values, 2; log=true, max_mv_products=4000)
+    _, history = bicgstabl!(Ψ.values, hemholtz, seed.values, 2; log=true, max_mv_products=4000)
 
-    testvalues = hemholtz * seed.values
-    Ψ = TreeField(testvalues, boundary)
+    # testvalues = hemholtz * seed.values
+    # Ψ = TreeField(testvalues, boundary)
     
-    # @show history
+    @show history
 
     writer = MeshWriter(surface)
     attrib!(writer, BlockAttribute())
