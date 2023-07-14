@@ -408,24 +408,21 @@ Fills a subdomain of the boundary of a domain. Either this function can be overr
 """
 @generated function fill_interface!(domain::Domain{N, T, O}, field::Field{N, T}, block::Block{N, T}, cell::CartesianIndex{N}, basis::AbstractBasis{T}, ::Val{I}) where {N, T, O, I}
     exteriorcells = ntuple(i -> ifelse(I[i] ≠ 0, O, 1), Val(N))
-
     exterior_exprs = Expr[]
 
     for exterior in CartesianIndices(exteriorcells)
-        cell_offset = ntuple(Val(N)) do i
-            if I[i] == -1
-                return 1 - exterior[i]
-            elseif I[i] == 1
-                return exterior[i]
+        cell_offset = exterior.I .* I
+
+        stencil_exprs = ntuple(Val(N)) do i
+            if I[i] == 0
+                return :(vertex_value_stencil(basis, Val(0), Val(0)))
+            elseif I[i] == -1
+                return :(vertex_value_stencil(basis, Val($(exterior[i])), Val($(2O))))
             else
-                0
+                return :(vertex_value_stencil(basis, Val($(2O)), Val($(exterior[i]))))
             end
         end
 
-        left_supports = ntuple(i -> ifelse(I[i] ≠ 0, ifelse(I[i] == 1, 2O, exterior[i]), 0), Val(N))
-        right_supports = ntuple(i -> ifelse(I[i] ≠ 0, ifelse(I[i] == 1, exterior[i], 2O), 0), Val(N))
-
-        stencil_exprs = ntuple(i -> :(vertex_value_stencil(basis, Val($(left_supports[i])), Val($(right_supports[i])))), Val(N))
         coef_exprs = ntuple(Val(N)) do i
             if I[i] == -1
                 :(coefs *= stencils[$i].left[end])
@@ -437,14 +434,14 @@ Fills a subdomain of the boundary of a domain. Either this function can be overr
         end
 
         expr = quote
-            let stencils = tuple($(stencil_exprs...)),
-                coefs = one($T),
+            let stencils = tuple($(stencil_exprs...))
+                coefs = one(T)
+                $(coef_exprs...)
+
                 svalue = domain_stencil_product(domain, cell, stencils)
                 target = cell.I .+ $(cell_offset)
 
-                $(coef_exprs...)
-
-                setdomainvalue!(domain, (interface_value - svalue), CartesianIndex(target))
+                setdomainvalue!(domain, (interface_value - svalue)/coefs, CartesianIndex(target))
             end
         end
 
@@ -454,26 +451,6 @@ Fills a subdomain of the boundary of a domain. Either this function can be overr
     quote
         interface_value = interface_condition(field, block, cell, basis, Val($O), Val($I))
         $(exterior_exprs...)
-    end
-end
-
-function _fill_interface!(domain::Domain{N, T, O}, field::Field{N, T}, block::Block{N, T}, basis::AbstractBasis{T}, ::Val{I}) where {N, T, O, I}
-    cells = blockcells(block)
-
-    facecells = ntuple(i -> ifelse(I[i] == 0, 2:(cells[i] - 1), 1:1), Val(N))
-
-    for facecell in CartesianIndices(facecells)
-        cell = ntuple(Val(N)) do i
-            if I[i] == 1
-                cells[i]
-            elseif I[i] == -1
-                1
-            else
-                facecell[i]
-            end
-        end
-
-        fill_interface!(domain, field, block, CartesianIndex(cell), basis, Val(I))
     end
 end
 
@@ -519,5 +496,27 @@ end
 
     quote
         $(exprs...)
+    end
+end
+
+@generated function _fill_interface!(domain::Domain{N, T, O}, field::Field{N, T}, block::Block{N, T}, basis::AbstractBasis{T}, ::Val{I}) where {N, T, O, I}
+    facecells_exprs = ntuple(i -> ifelse(I[i] == 0, :(2:cells[$i] - 1), :(1:1)), Val(N))
+    facecell_exprs = ntuple(Val(N)) do i
+        if I[i] == 1
+            :(cells[$i])
+        elseif I[i] == -1
+            :(1)
+        else
+            :(facecell[$i])
+        end
+    end
+
+    quote
+        cells = blockcells(block)
+
+        for facecell in CartesianIndices(tuple($(facecells_exprs...)))
+            cell = CartesianIndex(tuple($(facecell_exprs...)))
+            fill_interface!(domain, field, block, cell, basis, Val($I))
+        end
     end
 end

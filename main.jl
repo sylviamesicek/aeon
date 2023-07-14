@@ -33,7 +33,7 @@ function main()
 
     # Boundary conditions
 
-    boundary = HyperFaces(BC(Nuemann, 0.0), BC(Nuemann, 0.0), BC(Flatness, -1.0), BC(Flatness, -1.0))
+    boundary = HyperFaces(BC(Nuemann, 0.0), BC(Nuemann, 0.0), BC(Nuemann, 0.0), BC(Nuemann, 0.0))
 
     # Seed function
 
