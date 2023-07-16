@@ -30,12 +30,12 @@ end
 
 struct BoundaryCondition{T} 
     kind::BoundaryKind
-    coef::T
+    homogenous::T
 
-    BoundaryCondition(kind::BoundaryKind, coef::T) where T = new{T}(kind, coef)
+    BoundaryCondition(kind::BoundaryKind, homogenous::T) where T = new{T}(kind, homogenous)
 end
 
-BC(kind::BoundaryKind, coef) = BoundaryCondition(kind, coef)
+BC(kind::BoundaryKind, homogenous) = BoundaryCondition(kind, homogenous)
 
 ######################
 ## Tree Field ########
@@ -90,162 +90,214 @@ Base.IndexStyle(field::TreeField) = IndexStyle(field.values)
 ## Evaluation ###########
 #########################
 
-function Operators.interface_condition(field::TreeField{N, T}, block::TreeBlock{N, T}, cell::CartesianIndex{N}, basis::AbstractBasis{T}, ::Val{O}, ::Val{I}) where {N, T, O, I}
-    _interface_product(field, block, cell, basis, Val(O), map(Val, I)...)
-end
+function Operators.interface_value(field::TreeField{N, T}, ::TreeBlock{N, T}, ::CartesianIndex{N}, ::AbstractBasis{T}, ::Val{O}, ::Val{I}) where {N, T, O, I}
+    value = zero(T)
 
-function _interface_product(field::Field{N, T}, block::Block{N, T}, cell::CartesianIndex{N}, basis::AbstractBasis{T}, ::Val{O}) where {N, T, O}
-    blockprolong(field, block, map(CellIndex, cell.I), basis, Val(O))
-end
-
-function _interface_product(field::Field{N, T}, block::Block{N, T}, cell::CartesianIndex{N}, basis::AbstractBasis{T}, ::Val{O}, ::Val{0}, rest::Vararg{Val, L}) where {N, T, O, L}  
-    _interface_product(field, block, cell, basis, Val(O), rest...)
-end
-
-function _interface_product(field::Field{N, T}, block::Block{N, T}, cell::CartesianIndex{N}, basis::AbstractBasis{T}, ::Val{O}, ::Val{E}, rest::Vararg{Val, L}) where {N, T, O, L, E}    
-    condition = field.boundaries[FaceIndex{N}(N - L, E > 0)]
-
-    if condition.kind == Diritchlet
-        _interface_diritchlet(condition.coef, field, block, cell, basis, Val(O), Val(E), rest...)
-    elseif condition.kind == Nuemann
-        _interface_nuemann(condition.coef, field, block, cell, basis, Val(O), Val(E), rest...)
-    else
-        _interface_flatness(condition.coef, field, block, cell, basis, Val(O), Val(E), rest...)
-    end
-end
-
-@generated function _interface_diritchlet(coef::T, field::Field{N, T}, block::Block{N, T}, cell::CartesianIndex{N}, basis::AbstractBasis{T}, ::Val{O}, ::Val{E}, rest::Vararg{Val, L}) where {N, T, O, E, L}
-    quote
-        interior = compute_interior(field, block, cell, basis, Val($O), Val($E), rest...)
-        exterior = Base.@ntuple $O i -> zero($T)
-
-        Base.@nexprs $O i -> begin
-            stencil_i = interface_value_stencil(basis, Val($(2O)), Val(i), Val($(E > 0)))
-            rhs_i = coef - interface_apply_stencil(interior, exterior, stencil_i, Val($(E > 0)))
-            edge_i = interface_edge_stencil(stencil_i, Val($(E > 0)))
-
-            exterior = setindex(exterior, rhs_i/edge_i, i)
+    for axis in 1:N
+        if I[axis] == 0
+            continue
         end
 
-        stencil = interface_value_stencil(basis, Val($(2O)), Val($O), Val($(E > 0)))
-        interface_apply_stencil(interior, exterior, stencil, Val($(E > 0)))
+        boundary = field.boundaries[FaceIndex{N}(axis, I[axis] > 0)]
+
+        if boundary.kind == Diritchlet
+            value += one(T)
+        end
     end
+
+    value
 end
 
-@generated function _interface_nuemann(coef::T, field::Field{N, T}, block::Block{N, T}, cell::CartesianIndex{N}, basis::AbstractBasis{T}, ::Val{O}, ::Val{E}, rest::Vararg{Val, L}) where {N, T, O, E, L}
-    axis = N - L
-    quote
-        interior = compute_interior(field, block, cell, basis, Val($O), Val($E), rest...)
-        exterior = Base.@ntuple $O i -> zero($T)
+function Operators.interface_gradient(field::TreeField{N, T}, ::TreeBlock{N, T}, ::CartesianIndex{N}, ::AbstractBasis{T}, ::Val{O}, ::Val{I}) where {N, T, O, I}
+    SVector(ntuple(Val(N)) do axis
+        if I[axis] == 0
+            return zero(T)
+        end
 
-        h⁻¹ = blockcells(block)[$axis] / blockbounds(block).widths[$axis]
+        value = zero(T)
 
-        Base.@nexprs $O i -> begin
-            stencil_i = interface_derivative_stencil(basis, Val($(2O)), Val(i), Val($(E > 0)))
-            rhs_i = coef - interface_apply_stencil(interior, exterior, stencil_i, Val($(E > 0))) * h⁻¹
-            edge_i = interface_edge_stencil(stencil_i, Val($(E > 0))) * h⁻¹
+        boundary = field.boundaries[FaceIndex{N}(axis, I[axis] > 0)]
 
-            exterior = setindex(exterior, rhs_i/edge_i, i)
+        if boundary.kind == Nuemann
+            value += one(T)
         end
         
-        stencil = interface_value_stencil(basis, Val($(2O)), Val($O), Val($(E > 0)))
-        interface_apply_stencil(interior, exterior, stencil, Val($(E > 0)))
-    end
+        value
+    end)
 end
 
-@generated function _interface_flatness(coef::T, field::Field{N, T}, block::Block{N, T}, cell::CartesianIndex{N}, basis::AbstractBasis{T}, ::Val{O}, ::Val{E}, rest::Vararg{Val, L}) where {N, T, O, E, L}
-    axis = N - L
-    quote
-        interior = compute_interior(field, block, cell, basis, Val($O), Val($E), rest...)
-        exterior = Base.@ntuple $O i -> zero($T)
+function Operators.interface_homogenous(field::TreeField{N, T}, ::TreeBlock{N, T}, ::CartesianIndex{N}, ::AbstractBasis{T}, ::Val{O}, ::Val{I}) where {N, T, O, I}
+    homogenous = zero(T)
 
-        trans = blocktransform(block)
-        center = cellcenter(block, cell)
-        r = norm(trans(center)) # Compute distance
-
-        h⁻¹ = blockcells(block)[$axis] / blockbounds(block).widths[$axis]
-
-        Base.@nexprs $O i -> begin
-            valuestencil_i = interface_value_stencil(basis, Val($(2O)), Val(i), Val($(E > 0)))
-            valuerhs_i = interface_apply_stencil(interior, exterior, valuestencil_i, Val($(E > 0))) * h⁻¹
-            valueedge_i = interface_edge_stencil(valuestencil_i, Val($(E > 0))) * h⁻¹
-
-            derivstencil_i = interface_derivative_stencil(basis, Val($(2O)), Val(i), Val($(E > 0)))
-            derivrhs_i = interface_apply_stencil(interior, exterior, derivstencil_i, Val($(E > 0))) * h⁻¹
-            derivedge_i = interface_edge_stencil(derivstencil_i, Val($(E > 0))) * h⁻¹
-
-            rhs_i = (coef + valuerhs_i) / r - derivrhs_i
-            edge_i = derivedge_i - valueedge_i / r 
-
-            exterior = setindex(exterior, rhs_i/edge_i, i)
+    for axis in 1:N
+        if I[axis] == 0
+            continue
         end
 
-        stencil = interface_value_stencil(basis, Val($(2O)), Val($O), Val($(E > 0)))
-        interface_apply_stencil(interior, exterior, stencil, Val($(E > 0)))
-    end
-end
-
-#############################
-## Helpers ##################
-#############################
-
-function interface_value_stencil(basis::AbstractBasis{T}, ::Val{I}, ::Val{E}, ::Val{S}) where {T, E, S, I}
-    if S 
-        vertex_value_stencil(basis, Val(I), Val(E))
-    else
-        vertex_value_stencil(basis, Val(E), Val(I))
-    end
-end
-
-function interface_derivative_stencil(basis::AbstractBasis{T}, ::Val{I}, ::Val{E}, ::Val{S}) where {T, E, S, I}
-    if S 
-        vertex_derivative_stencil(basis, Val(I), Val(E))
-    else
-        vertex_derivative_stencil(basis, Val(E), Val(I))
-    end
-end
-
-function interface_apply_stencil(interior::NTuple{I, T}, exterior::NTuple{E, T}, stencil::VertexStencil{T}, ::Val{S}) where {T, I, E, S}
-    result = zero(T)
-
-    if S
-        for j in eachindex(stencil.left)
-            result += stencil.left[j] * interior[j]
-        end
-
-        for j in eachindex(stencil.right)
-            result += stencil.right[j] * exterior[j]
-        end
-    else
-        for j in eachindex(stencil.right)
-            result += stencil.right[j] * interior[j]
-        end
-
-        for j in eachindex(stencil.left)
-            result += stencil.left[j] * exterior[j]
-        end
+        homogenous += field.boundaries[FaceIndex{N}(axis, I[axis] > 0)].homogenous
     end
 
-    return result
+    homogenous
 end
 
-function interface_edge_stencil(stencil::VertexStencil{T}, ::Val{S}) where {T, S}
-    if S
-        return stencil.right[end]
-    else
-        return stencil.left[end]
-    end
-end
 
-function compute_interior(field::Field{N, T}, block::Block{N, T}, cell::CartesianIndex{N}, basis::AbstractBasis{T}, ::Val{O}, ::Val{E}, rest::Vararg{Val, L}) where {N, T, O, E, L}
-    axis = N - L
 
-    # Fill interior
-    return ntuple(Val(2O)) do i
-        offcell = CartesianIndex(setindex(cell.I, cell[axis] - E * i, axis))
-        _interface_product(field, block, offcell, basis, Val(O), rest...)
-    end
-end
+# function Operators.interface_condition(field::TreeField{N, T}, block::TreeBlock{N, T}, cell::CartesianIndex{N}, basis::AbstractBasis{T}, ::Val{O}, ::Val{I}) where {N, T, O, I}
+#     _interface_product(field, block, cell, basis, Val(O), map(Val, I)...)
+# end
+
+# function _interface_product(field::Field{N, T}, block::Block{N, T}, cell::CartesianIndex{N}, basis::AbstractBasis{T}, ::Val{O}) where {N, T, O}
+#     blockprolong(field, block, map(CellIndex, cell.I), basis, Val(O))
+# end
+
+# function _interface_product(field::Field{N, T}, block::Block{N, T}, cell::CartesianIndex{N}, basis::AbstractBasis{T}, ::Val{O}, ::Val{0}, rest::Vararg{Val, L}) where {N, T, O, L}  
+#     _interface_product(field, block, cell, basis, Val(O), rest...)
+# end
+
+# function _interface_product(field::Field{N, T}, block::Block{N, T}, cell::CartesianIndex{N}, basis::AbstractBasis{T}, ::Val{O}, ::Val{E}, rest::Vararg{Val, L}) where {N, T, O, L, E}    
+#     condition = field.boundaries[FaceIndex{N}(N - L, E > 0)]
+
+#     if condition.kind == Diritchlet
+#         _interface_diritchlet(condition.coef, field, block, cell, basis, Val(O), Val(E), rest...)
+#     elseif condition.kind == Nuemann
+#         _interface_nuemann(condition.coef, field, block, cell, basis, Val(O), Val(E), rest...)
+#     else
+#         _interface_flatness(condition.coef, field, block, cell, basis, Val(O), Val(E), rest...)
+#     end
+# end
+
+# @generated function _interface_diritchlet(coef::T, field::Field{N, T}, block::Block{N, T}, cell::CartesianIndex{N}, basis::AbstractBasis{T}, ::Val{O}, ::Val{E}, rest::Vararg{Val, L}) where {N, T, O, E, L}
+#     quote
+#         interior = compute_interior(field, block, cell, basis, Val($O), Val($E), rest...)
+#         exterior = Base.@ntuple $O i -> zero($T)
+
+#         Base.@nexprs $O i -> begin
+#             stencil_i = interface_value_stencil(basis, Val($(2O)), Val(i), Val($(E > 0)))
+#             rhs_i = coef - interface_apply_stencil(interior, exterior, stencil_i, Val($(E > 0)))
+#             edge_i = interface_edge_stencil(stencil_i, Val($(E > 0)))
+
+#             exterior = setindex(exterior, rhs_i/edge_i, i)
+#         end
+
+#         stencil = interface_value_stencil(basis, Val($(2O)), Val($O), Val($(E > 0)))
+#         interface_apply_stencil(interior, exterior, stencil, Val($(E > 0)))
+#     end
+# end
+
+# @generated function _interface_nuemann(coef::T, field::Field{N, T}, block::Block{N, T}, cell::CartesianIndex{N}, basis::AbstractBasis{T}, ::Val{O}, ::Val{E}, rest::Vararg{Val, L}) where {N, T, O, E, L}
+#     axis = N - L
+#     quote
+#         interior = compute_interior(field, block, cell, basis, Val($O), Val($E), rest...)
+#         exterior = Base.@ntuple $O i -> zero($T)
+
+#         h⁻¹ = blockcells(block)[$axis] / blockbounds(block).widths[$axis]
+
+#         Base.@nexprs $O i -> begin
+#             stencil_i = interface_derivative_stencil(basis, Val($(2O)), Val(i), Val($(E > 0)))
+#             rhs_i = coef - interface_apply_stencil(interior, exterior, stencil_i, Val($(E > 0))) * h⁻¹
+#             edge_i = interface_edge_stencil(stencil_i, Val($(E > 0))) * h⁻¹
+
+#             exterior = setindex(exterior, rhs_i/edge_i, i)
+#         end
+        
+#         stencil = interface_value_stencil(basis, Val($(2O)), Val($O), Val($(E > 0)))
+#         interface_apply_stencil(interior, exterior, stencil, Val($(E > 0)))
+#     end
+# end
+
+# @generated function _interface_flatness(coef::T, field::Field{N, T}, block::Block{N, T}, cell::CartesianIndex{N}, basis::AbstractBasis{T}, ::Val{O}, ::Val{E}, rest::Vararg{Val, L}) where {N, T, O, E, L}
+#     axis = N - L
+#     quote
+#         interior = compute_interior(field, block, cell, basis, Val($O), Val($E), rest...)
+#         exterior = Base.@ntuple $O i -> zero($T)
+
+#         trans = blocktransform(block)
+#         center = cellcenter(block, cell)
+#         r = norm(trans(center)) # Compute distance
+
+#         h⁻¹ = blockcells(block)[$axis] / blockbounds(block).widths[$axis]
+
+#         Base.@nexprs $O i -> begin
+#             valuestencil_i = interface_value_stencil(basis, Val($(2O)), Val(i), Val($(E > 0)))
+#             valuerhs_i = interface_apply_stencil(interior, exterior, valuestencil_i, Val($(E > 0))) * h⁻¹
+#             valueedge_i = interface_edge_stencil(valuestencil_i, Val($(E > 0))) * h⁻¹
+
+#             derivstencil_i = interface_derivative_stencil(basis, Val($(2O)), Val(i), Val($(E > 0)))
+#             derivrhs_i = interface_apply_stencil(interior, exterior, derivstencil_i, Val($(E > 0))) * h⁻¹
+#             derivedge_i = interface_edge_stencil(derivstencil_i, Val($(E > 0))) * h⁻¹
+
+#             rhs_i = (coef + valuerhs_i) / r - derivrhs_i
+#             edge_i = derivedge_i - valueedge_i / r 
+
+#             exterior = setindex(exterior, rhs_i/edge_i, i)
+#         end
+
+#         stencil = interface_value_stencil(basis, Val($(2O)), Val($O), Val($(E > 0)))
+#         interface_apply_stencil(interior, exterior, stencil, Val($(E > 0)))
+#     end
+# end
+
+# #############################
+# ## Helpers ##################
+# #############################
+
+# function interface_value_stencil(basis::AbstractBasis{T}, ::Val{I}, ::Val{E}, ::Val{S}) where {T, E, S, I}
+#     if S 
+#         vertex_value_stencil(basis, Val(I), Val(E))
+#     else
+#         vertex_value_stencil(basis, Val(E), Val(I))
+#     end
+# end
+
+# function interface_derivative_stencil(basis::AbstractBasis{T}, ::Val{I}, ::Val{E}, ::Val{S}) where {T, E, S, I}
+#     if S 
+#         vertex_derivative_stencil(basis, Val(I), Val(E))
+#     else
+#         vertex_derivative_stencil(basis, Val(E), Val(I))
+#     end
+# end
+
+# function interface_apply_stencil(interior::NTuple{I, T}, exterior::NTuple{E, T}, stencil::VertexStencil{T}, ::Val{S}) where {T, I, E, S}
+#     result = zero(T)
+
+#     if S
+#         for j in eachindex(stencil.left)
+#             result += stencil.left[j] * interior[j]
+#         end
+
+#         for j in eachindex(stencil.right)
+#             result += stencil.right[j] * exterior[j]
+#         end
+#     else
+#         for j in eachindex(stencil.right)
+#             result += stencil.right[j] * interior[j]
+#         end
+
+#         for j in eachindex(stencil.left)
+#             result += stencil.left[j] * exterior[j]
+#         end
+#     end
+
+#     return result
+# end
+
+# function interface_edge_stencil(stencil::VertexStencil{T}, ::Val{S}) where {T, S}
+#     if S
+#         return stencil.right[end]
+#     else
+#         return stencil.left[end]
+#     end
+# end
+
+# function compute_interior(field::Field{N, T}, block::Block{N, T}, cell::CartesianIndex{N}, basis::AbstractBasis{T}, ::Val{O}, ::Val{E}, rest::Vararg{Val, L}) where {N, T, O, E, L}
+#     axis = N - L
+
+#     # Fill interior
+#     return ntuple(Val(2O)) do i
+#         offcell = CartesianIndex(setindex(cell.I, cell[axis] - E * i, axis))
+#         _interface_product(field, block, offcell, basis, Val(O), rest...)
+#     end
+# end
 
 
 # function Operators.interface(::Val{S}, point::CartesianIndex{N}, block::TreeBlock{N, T}, field::TreeField{N, T}, coefs::NTuple{O, T}, extent::Int, opers::NTuple{L, Operator{T}}) where {N, T, O, S, L}

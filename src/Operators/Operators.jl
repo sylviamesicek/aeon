@@ -17,5 +17,6 @@ using Aeon.Geometry
 include("basis.jl")
 include("lagrange.jl")
 include("block.jl")
+include("domain.jl")
 
 end
