@@ -94,7 +94,6 @@ function lagrange_vertex_stencil(f::Function, ::Val{T}, ::Val{L}, ::Val{R}, ::Va
     left = map(T, ntuple(i -> stencil[L + S - i], Val(L - !S)))
     right = map(T, ntuple(i -> stencil[L + S + i], Val(R - S)))
     Stencil(left, T(stencil[L + S]), right)
-    
 end
 
 # Values 

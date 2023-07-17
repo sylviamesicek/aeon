@@ -165,9 +165,9 @@ Fills a subdomain of the boundary of a domain.
             if I[i] == 0
                 return :(cell_value_stencil(basis, Val(0), Val(0)))
             elseif I[i] == 1
-                return :(vertex_value_stencil(basis, Val($(2O)), Val($(exterior[i])), Val(false)))
+                return :(vertex_value_stencil(basis, Val($(2O + 1)), Val($(exterior[i])), Val(false)))
             else
-                return :(vertex_value_stencil(basis, Val($(exterior[i])), Val($(2O)), Val(true)))
+                return :(vertex_value_stencil(basis, Val($(exterior[i])), Val($(2O + 1)), Val(true)))
             end
         end
 
@@ -196,7 +196,7 @@ Fills a subdomain of the boundary of a domain.
                     elseif I[i] == 1
                         return :(vertex_derivative_stencil(basis, Val($(2O)), Val($(exterior[i])), Val(false)))
                     else
-                        return :(-vertex_derivative_stencil(basis, Val($(exterior[i])), Val($(2O)), Val(true)))
+                        return :(vertex_derivative_stencil(basis, Val($(exterior[i])), Val($(2O)), Val(true)))
                     end
                 else
                     if I[i] == 0
@@ -227,8 +227,8 @@ Fills a subdomain of the boundary of a domain.
                 expr = quote
                     let 
                         derivative_stencils = tuple($(gradient_stencil(axis)...))
-                        result += boundary_gradient[$axis] * domain_stencil_product(domain, cell, derivative_stencils)
-                        coefs += *(boundary_gradient[$axis], $(derivative_coefs_exprs...))
+                        result += boundary_gradient[$axis] * $(I[axis]) * domain_stencil_product(domain, cell, derivative_stencils)
+                        coefs += *(boundary_gradient[$axis], $(I[axis]), $(derivative_coefs_exprs...))
                     end
                 end
 
@@ -243,11 +243,11 @@ Fills a subdomain of the boundary of a domain.
                 result = zero(T)
 
                 $(value_stencil_expr)
-                $(gradient_stencil_exprs...)
+                # $(gradient_stencil_exprs...)
 
                 target = cell.I .+ $(cell_offset)
-
-                setdomainvalue!(domain, (homogenous - result) / coefs, CartesianIndex(target))
+                
+                setdomainvalue!(domain, (homogenous - result)/coefs, CartesianIndex(target))
             end
         end
 
@@ -256,12 +256,12 @@ Fills a subdomain of the boundary of a domain.
 
     # Final result
     quote
-        boundary_value = interface_value(field, block, cell, basis, Val($O), Val($I))
-        boundary_gradient = interface_gradient(field, block, cell, basis, Val($O), Val($I))
-        homogenous = interface_homogenous(field, block, cell, basis, Val($O), Val($I))
-        # boundary_value = zero($T)
-        # boundary_gradient = zero(SVector{$N, $T}) .+ one(T)
-        # homogenous = zero($T)
+        # boundary_value = interface_value(field, block, cell, basis, Val($O), Val($I))
+        # boundary_gradient = interface_gradient(field, block, cell, basis, Val($O), Val($I))
+        # homogenous = interface_homogenous(field, block, cell, basis, Val($O), Val($I))
+        boundary_value = one($T)
+        boundary_gradient = zero(SVector{$N, $T})
+        homogenous = zero($T)
 
         $(exterior_exprs...)
     end
@@ -313,7 +313,7 @@ end
 end
 
 @generated function _fill_interface!(domain::Domain{N, T, O}, field::Field{N, T}, block::Block{N, T}, basis::AbstractBasis{T}, ::Val{I}) where {N, T, O, I}
-    facecells_exprs = ntuple(i -> ifelse(I[i] == 0, :(2:cells[$i] - 1), :(1:1)), Val(N))
+    facecells_exprs = ntuple(i -> ifelse(I[i] == 0, :(1:cells[$i]), :(1:1)), Val(N))
     facecell_exprs = ntuple(Val(N)) do i
         if I[i] == 1
             :(cells[$i])
