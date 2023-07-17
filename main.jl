@@ -33,7 +33,7 @@ function main()
 
     # Boundary conditions
 
-    boundary = HyperFaces(BC(Nuemann, 0.0), BC(Nuemann, 0.0), BC(Nuemann, 0.0), BC(Nuemann, 0.0))
+    boundary = HyperFaces(BC(Nuemann, 0.0), BC(Nuemann, 0.0), BC(Flatness, 0.0), BC(Flatness, 0.0))
 
     # Seed function
 
@@ -70,10 +70,16 @@ function main()
 
             transfer_block_to_domain!(domain, xfield, block, basis)
 
+            # subdomain = domain.inner[1:5, end-5:end]
+            # display(subdomain)
+
             for cell in cellindices(block)
                 lpos = cellcenter(block, cell)
-                # gpos = trans(lpos)
+                gpos = trans(lpos)
                 j = inv(jacobian(trans, lpos))
+
+                lgrad = domaingradient(domain, cell, basis)
+                ggrad = j * lgrad
 
                 lhess = domainhessian(domain, cell, basis)
                 ghess = j' * lhess * j
@@ -81,7 +87,9 @@ function main()
                 gvalue = domainvalue(domain, cell)
                 scale = value(seed, block, cell)
 
-                setvalue!(yfield,  ghess[1, 1] + ghess[2, 2] + gvalue * scale, block, cell)
+                lap = ghess[1, 1] + ghess[2, 2] + ggrad[1]/gpos[1]
+
+                setvalue!(yfield, -lap - gvalue * scale, block, cell)
             end
         end
     end
@@ -99,12 +107,12 @@ function main()
 
     println("Solving")
 
-    # _, history = bicgstabl!(Ψ.values, hemholtz, seed.values, 2; log=true, max_mv_products=4000)
+    _, history = bicgstabl!(Ψ.values, hemholtz, seed.values, 2; log=true, max_mv_products=4000)
 
-    testvalues = hemholtz * seed.values
-    Ψ = TreeField(testvalues, boundary)
+    # testvalues = hemholtz * seed.values
+    # Ψ = TreeField(testvalues, boundary)
     
-    # @show history
+    @show history
 
     writer = MeshWriter(surface)
     attrib!(writer, BlockAttribute())
@@ -121,12 +129,12 @@ function main2()
 
     # Mesh
 
-    mesh = TreeMesh(HyperBox(SA[0.0, 0.0], SA{Float64}[2π, 2π]), 8)
+    mesh = TreeMesh(HyperBox(SA[0.0, 0.0], SA{Float64}[2π, 2π]), 7)
     surface = TreeSurface(mesh)
 
     # Boundary conditions
 
-    boundary = HyperFaces(BC(Diritchlet, 0.0), BC(Diritchlet, 0.0), BC(Diritchlet, 0.0), BC(Diritchlet, 0.0))
+    boundary = HyperFaces(BC(Nuemann, -1.0), BC(Nuemann, -1.0), BC(Nuemann, 1.0), BC(Nuemann, 1.0))
 
     # Seed function
     func = TreeField(undef, surface, boundary)
@@ -140,17 +148,17 @@ function main2()
             lpos = cellcenter(block, cell)
             gpos = trans(lpos)
 
-            # v = cos(gpos.x) + cos(gpos.y)
-            # setvalue!(func, v, block, cell)
-
-            # v = -cos(gpos.x) - cos(gpos.y)
-            # setvalue!(analytic, v, block, cell)
-
-            v = sin(gpos.x) * sin(gpos.y)
+            v = sin(gpos.x) + sin(gpos.y)
             setvalue!(func, v, block, cell)
 
-            v = -2sin(gpos.x)*sin(gpos.y)
+            v = -sin(gpos.x) - sin(gpos.y)
             setvalue!(analytic, v, block, cell)
+
+            # v = sin(gpos.x) * sin(gpos.y)
+            # setvalue!(func, v, block, cell)
+
+            # v = -2sin(gpos.x)*sin(gpos.y)
+            # setvalue!(analytic, v, block, cell)
         end
     end
 
@@ -172,8 +180,8 @@ function main2()
 
             transfer_block_to_domain!(domain, xfield, block, basis)
 
-            subdomain = domain.inner[1:5, 1:5]
-            display(subdomain)
+            # subdomain = domain.inner[1:5, 1:5]
+            # display(subdomain)
 
             # sten1 = vertex_value_stencil(basis, Val(2), Val(2), Val(true))
             # sten2 = vertex_value_stencil(basis, Val(2), Val(2), Val(true))
@@ -191,7 +199,7 @@ function main2()
                 # gvalue = domainvalue(domain, cell)
                 # scale = value(seed, block, cell)
 
-                setvalue!(yfield,  ghess[1, 1] + ghess[2, 2], block, cell)
+                setvalue!(yfield, ghess[1, 1] + ghess[2, 2], block, cell)
 
                 # if cell[1] < 5 && cell[2] < 5
                 #     @show cell
@@ -227,4 +235,4 @@ function main2()
 end
 
 # Execute
-main2()
+main()

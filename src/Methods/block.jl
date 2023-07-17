@@ -90,7 +90,7 @@ Base.IndexStyle(field::TreeField) = IndexStyle(field.values)
 ## Evaluation ###########
 #########################
 
-function Operators.interface_value(field::TreeField{N, T}, ::TreeBlock{N, T}, ::CartesianIndex{N}, ::AbstractBasis{T}, ::Val{O}, ::Val{I}) where {N, T, O, I}
+function Operators.interface_value(field::TreeField{N, T}, block::TreeBlock{N, T}, cell::CartesianIndex{N}, ::AbstractBasis{T}, ::Val{O}, ::Val{I}) where {N, T, O, I}
     value = zero(T)
 
     for axis in 1:N
@@ -102,13 +102,18 @@ function Operators.interface_value(field::TreeField{N, T}, ::TreeBlock{N, T}, ::
 
         if boundary.kind == Diritchlet
             value += one(T)
+        elseif boundary.kind == Flatness
+            center = cellcenter(block, cell)
+            trans = blocktransform(block)
+            r = norm(trans(center))
+            value += one(T) / r
         end
     end
 
     value
 end
 
-function Operators.interface_gradient(field::TreeField{N, T}, ::TreeBlock{N, T}, ::CartesianIndex{N}, ::AbstractBasis{T}, ::Val{O}, ::Val{I}) where {N, T, O, I}
+function Operators.interface_gradient(field::TreeField{N, T}, block::TreeBlock{N, T}, ::CartesianIndex{N}, ::AbstractBasis{T}, ::Val{O}, ::Val{I}) where {N, T, O, I}
     SVector(ntuple(Val(N)) do axis
         if I[axis] == 0
             return zero(T)
@@ -118,15 +123,17 @@ function Operators.interface_gradient(field::TreeField{N, T}, ::TreeBlock{N, T},
 
         boundary = field.boundaries[FaceIndex{N}(axis, I[axis] > 0)]
 
-        if boundary.kind == Nuemann
-            value += one(T)
+        h⁻¹ = blockcells(block)[axis] / blockbounds(block).widths[axis]
+
+        if boundary.kind == Nuemann || boundary.kind == Flatness
+            value += one(T) * h⁻¹
         end
         
         value
     end)
 end
 
-function Operators.interface_homogenous(field::TreeField{N, T}, ::TreeBlock{N, T}, ::CartesianIndex{N}, ::AbstractBasis{T}, ::Val{O}, ::Val{I}) where {N, T, O, I}
+function Operators.interface_homogenous(field::TreeField{N, T}, block::TreeBlock{N, T}, cell::CartesianIndex{N}, ::AbstractBasis{T}, ::Val{O}, ::Val{I}) where {N, T, O, I}
     homogenous = zero(T)
 
     for axis in 1:N
@@ -134,7 +141,16 @@ function Operators.interface_homogenous(field::TreeField{N, T}, ::TreeBlock{N, T
             continue
         end
 
-        homogenous += field.boundaries[FaceIndex{N}(axis, I[axis] > 0)].homogenous
+        boundary = field.boundaries[FaceIndex{N}(axis, I[axis] > 0)]
+
+        if boundary.kind == Diritchlet || boundary.kind == Nuemann
+            homogenous += boundary.homogenous
+        elseif boundary.kind == Flatness
+            center = cellcenter(block, cell)
+            trans = blocktransform(block)
+            r = norm(trans(center))
+            homogenous += boundary.homogenous / r
+        end
     end
 
     homogenous

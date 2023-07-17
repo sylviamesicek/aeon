@@ -243,7 +243,7 @@ Fills a subdomain of the boundary of a domain.
                 result = zero(T)
 
                 $(value_stencil_expr)
-                # $(gradient_stencil_exprs...)
+                $(gradient_stencil_exprs...)
 
                 target = cell.I .+ $(cell_offset)
                 
@@ -256,12 +256,12 @@ Fills a subdomain of the boundary of a domain.
 
     # Final result
     quote
-        # boundary_value = interface_value(field, block, cell, basis, Val($O), Val($I))
-        # boundary_gradient = interface_gradient(field, block, cell, basis, Val($O), Val($I))
-        # homogenous = interface_homogenous(field, block, cell, basis, Val($O), Val($I))
-        boundary_value = one($T)
-        boundary_gradient = zero(SVector{$N, $T})
-        homogenous = zero($T)
+        boundary_value = interface_value(field, block, cell, basis, Val($O), Val($I))
+        boundary_gradient = interface_gradient(field, block, cell, basis, Val($O), Val($I))
+        homogenous = interface_homogenous(field, block, cell, basis, Val($O), Val($I))
+        # boundary_value = one($T)
+        # boundary_gradient = zero(SVector{$N, $T})
+        # homogenous = zero($T)
 
         $(exterior_exprs...)
     end
