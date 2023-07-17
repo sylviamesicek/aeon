@@ -9,9 +9,11 @@ struct TreeBlock{N, T} <: Block{N, T}
     node::Int
 end
 
-function Operators.blockcells(block::TreeBlock{N, T}) where {N, T}
-    refinement::Int = block.surface.tree.refinement
-    ntuple(i -> 2^refinement, Val(N))
+@generated function Operators.blockcells(block::TreeBlock{N}) where {N}
+    quote
+        refinement::Int = block.surface.tree.refinement
+        Base.@ntuple $N i -> 2^refinement
+    end
 end
 
 Operators.blockbounds(block::TreeBlock) = block.surface.tree.bounds[block.node]

@@ -234,5 +234,48 @@ function main2()
     write_vtu(writer, "output")
 end
 
+
+# Main code
+function main3()
+    # Function basis
+    basis = LagrangeBasis{Float64}()
+
+    # Mesh
+
+    mesh = TreeMesh(HyperBox(SA[0.0, 0.0], SA{Float64}[2π, 2π]), 7)
+    surface = TreeSurface(mesh)
+
+    # Boundary conditions
+
+    boundary = HyperFaces(BC(Diritchlet, 0.0), BC(Diritchlet, 0.0), BC(Diritchlet, 0.0), BC(Diritchlet, 0.0))
+
+    # Seed function
+    func = TreeField(undef, surface, boundary)
+
+    for active in surface.active
+        block = TreeBlock(surface, active)
+        trans = blocktransform(block)
+
+        for cell in cellindices(block)
+            lpos = cellcenter(block, cell)
+            gpos = trans(lpos)
+
+            v = sin(gpos.x) + sin(gpos.y)
+            setvalue!(func, v, block, cell)
+        end
+    end
+
+    block = TreeBlock(surface, 1)
+    domain = Domain{2}(undef, block)
+
+    transfer_block_to_domain!(domain, func, block, basis)
+
+    v = domainhessian(domain, CartesianIndex(7, 7), basis)
+    @show v
+
+    @time domainhessian(domain, CartesianIndex(7, 7), basis)
+end
+
+
 # Execute
 main()

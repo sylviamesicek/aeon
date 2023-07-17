@@ -76,37 +76,42 @@ end
 """
 Computes the gradient at a cell on a domain.
 """
-function domaingradient(domain::Domain{N, T, O}, cell::CartesianIndex{N}, basis::AbstractBasis{T}) where {N, T, O}
-    cells = size(domain.inner) .- 2O
+@generated function domaingradient(domain::Domain{N, T, O}, cell::CartesianIndex{N}, basis::AbstractBasis{T}) where {N, T, O}
+    quote 
+        cells = size(domain.inner) .- 2O
 
-    SVector(
-        ntuple(Val(N)) do i
-            opers = ntuple(dim -> ifelse(i == dim, ValueOperator{1}(), ValueOperator{0}()), Val(N))
-            return domainevaluate(domain, cell, basis, opers) * cells[i]
+        grad = Base.@ntuple $N i -> begin
+            opers = Base.@ntuple $N dim -> ifelse(i == dim, ValueOperator{1}(), ValueOperator{0}())
+            domainevaluate(domain, cell, basis, opers) * cells[i]
         end
-    ) 
+
+        SVector(grad) 
+    end
 end
 
 """
 Computes the hessian at a cell on a domain.
 """
-function domainhessian(domain::Domain{N, T, O}, cell::CartesianIndex{N}, basis::AbstractBasis{T}) where {N, T, O}
-    cells = size(domain.inner) .- 2O
+@generated function domainhessian(domain::Domain{N, T, O}, cell::CartesianIndex{N}, basis::AbstractBasis{T}) where {N, T, O}
+    quote
+        cells = size(domain.inner) .- $(2O)
 
-    hess = ntuple(Val(N * N)) do index
-        i = (index - 1) ÷ N + 1
-        j = (index - 1) % N + 1
+        hess = Base.@ntuple $(N*N) index -> begin
+            i = (index - 1) ÷ $N + 1
+            j = (index - 1) % $N + 1
+            if i == j
+                opers = Base.@ntuple $N dim -> ifelse(i == dim, ValueOperator{2}(), ValueOperator{0}())
+                result = domainevaluate(domain, cell, basis, opers) * cells[i]^2
+            else
+                opers = Base.@ntuple $N dim -> ifelse(i == dim || j == dim, ValueOperator{1}(), ValueOperator{0}())
+                result = domainevaluate(domain, cell, basis, opers) * cells[i] * cells[j]
+            end
 
-        if i == j
-            opers = ntuple(dim -> ifelse(i == dim, ValueOperator{2}(), ValueOperator{0}()), Val(N))
-            return domainevaluate(domain, cell, basis, opers) * cells[i]^2
-        else
-            opers = ntuple(dim -> ifelse(i == dim || j == dim, ValueOperator{1}(), ValueOperator{0}()), Val(N))
-            return domainevaluate(domain, cell, basis, opers) * cells[i] * cells[j]
+            result
         end
+        
+        SMatrix{$N, $N, $T}(hess)
     end
-
-    SMatrix{N, N, T}(hess)
 end
 
 #############################
