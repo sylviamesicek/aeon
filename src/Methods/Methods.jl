@@ -7,11 +7,10 @@ using LinearAlgebra
 
 using Aeon
 using Aeon.Geometry
-using Aeon.Operators
+using Aeon.Blocks
 
-include("tree.jl")
-include("surface.jl")
-include("block.jl")
+include("mesh.jl")
+include("dofs.jl")
 include("writer.jl")
 
 end

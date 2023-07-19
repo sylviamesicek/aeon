@@ -4,6 +4,9 @@
 
 export TreeBlock
 
+"""
+A block of a tree mesh.
+"""
 struct TreeBlock{N, T} <: Block{N, T}
     surface::TreeSurface{N, T}
     node::Int
@@ -45,6 +48,9 @@ BC(kind::BoundaryKind, homogenous) = BoundaryCondition(kind, homogenous)
 
 export TreeField
  
+"""
+A field defined over a tree mesh.
+"""
 struct TreeField{N, T, V <: AbstractVector{T}, F} <: Field{N, T}
     values::V
     boundaries::HyperFaces{N, BoundaryCondition{T}, F}
@@ -78,7 +84,7 @@ function Operators.setvalue!(field::TreeField{N, T}, value::T, block::TreeBlock{
     field.values[ptr] = value
 end
 
-# Necessary for implementation as AbstractArray
+# Abstract Array Implementation
 
 Base.size(field::TreeField) = size(field.values)
 Base.length(field::TreeField) = length(field.values)
@@ -86,7 +92,6 @@ Base.getindex(field::TreeField, i::Int) = field.values[i]
 Base.setindex!(field::TreeField, v, i::Int) = setindex!(field.values, v, i)
 Base.eachindex(field::TreeField) = eachindex(field.values)
 Base.IndexStyle(field::TreeField) = IndexStyle(field.values)
-
 
 #########################
 ## Evaluation ###########
@@ -115,27 +120,27 @@ function Operators.interface_value(field::TreeField{N, T}, block::TreeBlock{N, T
     value
 end
 
-function Operators.interface_gradient(field::TreeField{N, T}, block::TreeBlock{N, T}, ::CartesianIndex{N}, ::AbstractBasis{T}, ::Val{O}, ::Val{I}) where {N, T, O, I}
+function Operators.interface_gradient(field::TreeField{N, T}, ::TreeBlock{N, T}, ::CartesianIndex{N}, ::AbstractBasis{T}, ::Val{O}, ::Val{I}) where {N, T, O, I}
     SVector(ntuple(Val(N)) do axis
         if I[axis] == 0
             return zero(T)
         end
 
+        # Accumulate value
         value = zero(T)
-
+        # Find boundary
         boundary = field.boundaries[FaceIndex{N}(axis, I[axis] > 0)]
-
-        h⁻¹ = blockcells(block)[axis] / blockbounds(block).widths[axis]
-
+        # If Nuemann or Flatness, add normal derivative
         if boundary.kind == Nuemann || boundary.kind == Flatness
-            value += one(T) * h⁻¹
+            value += one(T)
         end
-        
+        # Return gradient component
         value
     end)
 end
 
 function Operators.interface_homogenous(field::TreeField{N, T}, block::TreeBlock{N, T}, cell::CartesianIndex{N}, ::AbstractBasis{T}, ::Val{O}, ::Val{I}) where {N, T, O, I}
+    # Accumulate value
     homogenous = zero(T)
 
     for axis in 1:N
@@ -148,13 +153,17 @@ function Operators.interface_homogenous(field::TreeField{N, T}, block::TreeBlock
         if boundary.kind == Diritchlet || boundary.kind == Nuemann
             homogenous += boundary.homogenous
         elseif boundary.kind == Flatness
+            # Get position of cell
             center = cellcenter(block, cell)
+            # Get transform
             trans = blocktransform(block)
+            # Find global position and distance
             r = norm(trans(center))
+            # Scale coefficient by r⁻¹
             homogenous += boundary.homogenous / r
         end
     end
-
+    # Return homogenous coefficients
     homogenous
 end
 

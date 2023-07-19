@@ -112,20 +112,25 @@ function _block_stencil_product(field::Field{N, T}, block::Block{N, T}, cell::Ca
 end
 
 function _block_stencil_product(field::Field{N, T}, block::Block{N, T}, cell::CartesianIndex{N}, stencils::NTuple{L, Stencil{T}}) where {N, T, L}
+    # Get remaining stencils for recursion
     remaining = ntuple(i -> stencils[i], Val(L - 1))
 
+    # Result after scaling by center of stencil
     result = stencil[L].center * _block_stencil_product(field, block, cell, remaining)
 
+    # Iterate left support
     for (i, left) in enumerate(stencil[L].left)
         offcell = CartesianIndex(setindex(cell, cell[L] - i, L))
         result += left * _block_stencil_product(field, block, offcell, remaining)
     end
 
+    # Iterate right support
     for (i, right) in enumerate(stencil[L].right)
         offcell = CartesianIndex(setindex(cell, cell[L] + i, L))
         result += right * _block_stencil_product(field, block, offcell, remaining)
     end
 
+    # Return
     result
 end
 
@@ -145,7 +150,7 @@ function blockprolong(field::Field{N, T}, block::Block{N, T}, point::NTuple{N, P
     block_stencil_product(field, block, cell, stencils)
 end
 
-function _point_to_prolong_stencil(index::CellIndex, ::Int, basis::AbstractBasis{T}, ::Val{O}) where {T, O}
+function _point_to_prolong_stencil(::CellIndex, ::Int, basis::AbstractBasis{T}, ::Val{O}) where {T, O}
     cell_value_stencil(basis, Val(0), Val(0))
 end
 

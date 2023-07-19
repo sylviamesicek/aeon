@@ -15,10 +15,20 @@ end
 Domain{N, T, O}(::UndefInitializer) where {N, T, O} = Domain{N, T, O}(Array{T, N}(undef, ntuple(i -> 0, Val(N)))) 
 Domain{O}(::UndefInitializer, block::Block{N, T}) where {N, T, O} = Domain{N, T, O}(Array{T, N}(undef, (blockcells(block) .+ 2O)...))
 
+"""
+Returns the number of block cells in this domain.
+"""
 domaincells(domain::Domain{N, T, O}) where {N, T, O} = size(domain.inner) .- 2O
+
+"""
+Returns the value of the domain at the given cell.
+"""
 domainvalue(domain::Domain{N, T, O}, cell::CartesianIndex{N}) where {N, T, O} = domain.inner[CartesianIndex(cell.I .+ O)]
 
-Base.fill!(domain::Domain{N, T}, v::T) where {N, T}= fill!(domain.inner, v)
+"""
+Fills a domain with a certain value
+"""
+Base.fill!(domain::Domain{N, T}, v::T) where {N, T} = fill!(domain.inner, v)
 
 # Helper
 setdomainvalue!(domain::Domain{N, T, O}, value::T, cell::CartesianIndex{N}) where {N, T, O} = domain.inner[CartesianIndex(cell.I .+ O)] = value
@@ -76,25 +86,25 @@ end
 """
 Computes the gradient at a cell on a domain.
 """
-@generated function domaingradient(domain::Domain{N, T, O}, cell::CartesianIndex{N}, basis::AbstractBasis{T}) where {N, T, O}
+@generated function domaingradient(domain::Domain{N, T}, cell::CartesianIndex{N}, basis::AbstractBasis{T}) where {N, T}
     quote 
-        cells = size(domain.inner) .- 2O
+        cells = domaincells(domain)
 
         grad = Base.@ntuple $N i -> begin
             opers = Base.@ntuple $N dim -> ifelse(i == dim, ValueOperator{1}(), ValueOperator{0}())
             domainevaluate(domain, cell, basis, opers) * cells[i]
         end
 
-        SVector(grad) 
+        SVector{$N, $T}(grad) 
     end
 end
 
 """
 Computes the hessian at a cell on a domain.
 """
-@generated function domainhessian(domain::Domain{N, T, O}, cell::CartesianIndex{N}, basis::AbstractBasis{T}) where {N, T, O}
+@generated function domainhessian(domain::Domain{N, T}, cell::CartesianIndex{N}, basis::AbstractBasis{T}) where {N, T}
     quote
-        cells = size(domain.inner) .- $(2O)
+        cells = domaincells(domain)
 
         hess = Base.@ntuple $(N*N) index -> begin
             i = (index - 1) ÷ $N + 1
@@ -232,8 +242,8 @@ Fills a subdomain of the boundary of a domain.
                 expr = quote
                     let 
                         derivative_stencils = tuple($(gradient_stencil(axis)...))
-                        result += boundary_gradient[$axis] * $(I[axis]) * domain_stencil_product(domain, cell, derivative_stencils)
-                        coefs += *(boundary_gradient[$axis], $(I[axis]), $(derivative_coefs_exprs...))
+                        result += boundary_gradient[$axis] * domain_stencil_product(domain, cell, derivative_stencils)
+                        coefs += *(boundary_gradient[$axis], $(derivative_coefs_exprs...))
                     end
                 end
 
@@ -262,11 +272,9 @@ Fills a subdomain of the boundary of a domain.
     # Final result
     quote
         boundary_value = interface_value(field, block, cell, basis, Val($O), Val($I))
-        boundary_gradient = interface_gradient(field, block, cell, basis, Val($O), Val($I))
+        boundary_gradient = interface_gradient(field, block, cell, basis, Val($O), Val($I)) 
+        boundary_gradient = boundary_gradient .* blockcells(block) ./ blockbounds(block).widths .* $I
         homogenous = interface_homogenous(field, block, cell, basis, Val($O), Val($I))
-        # boundary_value = one($T)
-        # boundary_gradient = zero(SVector{$N, $T})
-        # homogenous = zero($T)
 
         $(exterior_exprs...)
     end
