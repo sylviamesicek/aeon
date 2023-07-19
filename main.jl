@@ -29,31 +29,31 @@ function main()
 
     # Mesh
 
-    mesh = Mesh(HyperBox(SA[0.0, 0.0], SA{Float64}[4.0, 4.0]), 6)
+    mesh = Mesh(HyperBox(SA[0.0, 0.0], SA{Float64}[π, π]), 9)
 
-    mark_refine_global!(mesh)
+    # mark_refine_global!(mesh)
 
-    prepare_and_execute_refinement!(mesh)
+    # prepare_and_execute_refinement!(mesh)
     
-    for _ in 1:1
-        for level in eachindex(mesh)
-            for node in eachleafnode(mesh, level)
-                bounds = nodebounds(mesh, level, node)
+    # for _ in 1:1
+    #     for level in eachindex(mesh)
+    #         for node in eachleafnode(mesh, level)
+    #             bounds = nodebounds(mesh, level, node)
 
-                if norm(bounds.origin) ≤ 2.0
-                    mark_refine!(mesh, level, node)
-                end
-            end
-        end
+    #             if norm(bounds.origin) ≤ 2.0
+    #                 mark_refine!(mesh, level, node)
+    #             end
+    #         end
+    #     end
 
-        prepare_and_execute_refinement!(mesh)
-    end
+    #     prepare_and_execute_refinement!(mesh)
+    # end
 
     dofs = DoFHandler(mesh)
+    total = dofstotal(dofs)
 
     @show mesh
-
-    total = dofstotal(dofs)
+    @show total
 
     seed = Vector{Float64}(undef, total)
 
@@ -66,14 +66,67 @@ function main()
                 lpos = cellposition(mesh, cell)
                 gpos = transform(lpos)
 
-                seed[offset + i] = gunlach_laplacian(gpos, 1.0, 1.0)
+                # seed[offset + i] = gunlach_laplacian(gpos, 1.0, 1.0)
+                seed[offset + i] = sin(gpos.x)*sin(gpos.y)
+                # seed[offset + i] = 1.0
             end
         end
     end
 
+    block = Block{Float64, 2}(undef, nodecells(mesh)...)
+
+    hemholtz = LinearMap(total) do y, x
+        for level in eachindex(mesh)
+            for node in eachleafnode(mesh, level)
+                offset = nodeoffset(dofs, level, node)
+                transform = nodetransform(mesh, level, node)
+                
+                # Fill Interior
+                fill_interior_from_linear!(block) do i
+                    x[offset + i]
+                end
+
+                # Apply boundary conditions
+                block_boundary(block) do boundary
+                    # lpos = cellposition(block, cell)
+                    # gpos = transform(lpos)
+                    # j = inv(jacobian(transform, lpos))
+
+                    # value = 0.0
+                    # coefficient = 0.0
+
+                    # gradient = SVector(ntuple(Val(2)) do i
+                        
+                    # end)
+
+                    block_diritchlet!(block, boundary, basis, 1.0, 0.0)
+                end
+
+                for (i, cell) in enumerate(cellindices(block))
+                    lpos = cellposition(block, cell)
+                    j = inv(jacobian(transform, lpos))
+
+                    # gpos = transform(lpos)
+
+                    lhess = blockhessian(block, cell, basis)
+                    ghess = j' * lhess * j
+
+                    y[offset + i] = -(ghess[1, 1] + ghess[2, 2])
+                end
+            end
+        end
+    end
+
+    solution, history = bicgstabl(hemholtz, seed, 2; log=true, max_mv_products=8000)
+
+    @show history
+
+    # solution = hemholtz * seed
+
     writer = MeshWriter{2, Float64}()
-    attrib!(writer, BlockAttribute())
+    attrib!(writer, NodeAttribute())
     attrib!(writer, ScalarAttribute("seed", seed))
+    attrib!(writer, ScalarAttribute("solution", solution))
     write_vtu(writer, mesh, dofs, "output")
 end
 

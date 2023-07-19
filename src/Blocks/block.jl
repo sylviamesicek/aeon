@@ -11,7 +11,7 @@ struct Block{N, T, O}
     Block{O}(values::Array{T, N}) where {N, T, O} = new{N, T, O}(values)
 end
 
-Block{T, O}(::UndefInitializer, dims::Vararg{Int, N}) where {N, T, O} = Block{O}(Array{T, N}(undef, dims...))  
+Block{T, O}(::UndefInitializer, dims::Vararg{Int, N}) where {N, T, O} = Block{O}(Array{T, N}(undef, (dims .+ 2O)...))  
 Block{N, T, O}(::UndefInitializer) where {N, T, O} = Block{T, O}(undef, ntuple(i -> 2O + 1, Val(N))...)
 
 Base.size(block::Block) = size(block.values)
@@ -19,10 +19,10 @@ Base.fill!(block::Block{N, T}, v::T) where {N, T} = fill!(block.values, v)
 
 blocktotal(block::Block) = size(block.values)
 blockcells(block::Block{N, T, O}) where {N, T, O} = size(block.values) .- 2O
-blockvalue(block::Block{N, T, O}, cell::CartesianIndex{N}) where {N, T, O} = block.value[CartesianIndex(cell.I .+ O)]
+blockvalue(block::Block{N, T, O}, cell::CartesianIndex{N}) where {N, T, O} = block.values[CartesianIndex(cell.I .+ O)]
 setblockvalue!(block::Block{N, T, O}, value::T, cell::CartesianIndex{N}) where {N, T, O} = block.values[CartesianIndex(cell.I .+ O)] = value
 
-cellindices(block::Block) = CartesianIndex(blockcells(block))
+cellindices(block::Block) = CartesianIndices(blockcells(block))
 cellwidths(block::Block{N, T}) where {N, T} = SVector{N, T}(1 ./ blockcells(block))
 cellposition(block::Block{N, T}, cell::CartesianIndex{N}) where {N, T} = SVector{N, T}((cell.I .- T(1//2)) ./ blockcells(block))
 
@@ -65,12 +65,12 @@ end
 ## Derivatives ########
 #######################
 
-export block_gradient, block_hessian
+export blockgradient, blockhessian
 
 """
 Computes the gradient at a cell on a domain.
 """
-@generated function block_gradient(block::Block{N, T, O}, cell::CartesianIndex{N}, basis::AbstractBasis{T}) where {N, T, O}
+@generated function blockgradient(block::Block{N, T, O}, cell::CartesianIndex{N}, basis::AbstractBasis{T}) where {N, T, O}
     quote 
         cells = blockcells(block)
 
@@ -86,7 +86,7 @@ end
 """
 Computes the hessian at a cell on a domain.
 """
-@generated function block_hessian(block::Block{N, T, O}, cell::CartesianIndex{N}, basis::AbstractBasis{T}) where {N, T, O}
+@generated function blockhessian(block::Block{N, T, O}, cell::CartesianIndex{N}, basis::AbstractBasis{T}) where {N, T, O}
     quote
         cells = blockcells(block)
 
@@ -269,7 +269,6 @@ end
 #############################
 
 export fill_interior!, fill_interior_from_linear!
-export block_surfaces, block_boundary
 
 """
 Fills the interior of a block by calling `f` once for each interior cell (where the argument is a cartesian cell index).
@@ -284,11 +283,11 @@ end
 Fills the interior of a block by calling `f` once for each interior cell (where the argument is a linear cell index).
 """
 function fill_interior_from_linear!(f::F, block::Block) where {F <: Function}
-    interior = blockinterior(block)
-    linear = LinearIndices(interior)
+    cells = blockcells(block)
+    linear = LinearIndices(cells)
 
-    for cell in CartesianIndices(interior)
-        setblockvalue!(block, f(linear[cell]), cell)
+    for (i, cell) in enumerate(CartesianIndices(cells))
+        setblockvalue!(block, f(i), cell)
     end
 end
 
@@ -296,17 +295,33 @@ end
 ## Boundary ################
 ############################
 
+export BoundaryCell, block_surfaces, block_boundary, block_robin!, block_diritchlet!, block_nuemann!
+export is_boundary_on_face
+
 struct BoundaryCell{N, I}
     cell::CartesianIndex{N}
 
     BoundaryCell{I}(cell::CartesianIndex{N}) where {N, I} = new{N, I}(cell)
 end
 
+function is_boundary_on_face(::BoundaryCell{N, I}, face::FaceIndex) where {N, I}
+    side = faceside(face)
+    axis = faceaxis(face)
+
+    if I[axis] == 1
+        return side
+    elseif I[axis] == -1
+        return !side
+    else
+        return false
+    end
+end
+
 """
 Iterates the subsurfaces of an `N`- dimensional block. The argument `Val(I)` is passed to `f`, where
 `I` is an N-tuple of integers. 
 """
-@generated function block_surfaces(f::F, ::Val{N}) where {N, F <: Function}
+@generated function block_surfaces(f::F, ::Block{N, T, O}) where {N, T, O, F <: Function}
     # For a given i, find all subdomains with that number of edges.
     subdomain_exprs = i -> begin
         sub_exprs = Expr[]
@@ -335,8 +350,8 @@ end
 """
 Calls `f` for each boundary cell.
 """
-@generated function block_boundary(f::F, block::Block{N, T, O}) where {N, T, O, F <: Function}
-    @inline block_surfaces(i -> _block_boundary(f, block, i), Val(N))
+function block_boundary(f::F, block::Block{N, T, O}) where {N, T, O, F <: Function}
+    block_surfaces(i -> _block_boundary(f, block, i), block)
 end
 
 @generated function _block_boundary(f::F, block::Block{N, T, O}, ::Val{I}) where {N, T, O, I, F <: Function}
@@ -356,7 +371,7 @@ end
 
         for facecell in CartesianIndices(tuple($(facecells_exprs...)))
             cell = CartesianIndex(tuple($(facecell_exprs...)))
-            f(block, BoundaryCell{$I}(cell))
+            f(BoundaryCell{$I}(cell))
         end
     end
 end
@@ -409,7 +424,7 @@ function _stencil_edge_coefs_expr(I::NTuple{N, Int}, stencil::Symbol) where N
     :(*($(coefs...)))
 end
 
-@generated function block_robin!(block::Block{N, T, O}, boundary::BoundaryCell{N, I}, α::T, β::SVector{N, T}, c::T) where {N, T, O, I}
+@generated function block_robin!(block::Block{N, T, O}, boundary::BoundaryCell{N, I}, basis::AbstractBasis{T}, α::T, β::SVector{N, T}, c::T) where {N, T, O, I}
     exterior_cells = ntuple(i -> ifelse(I[i] ≠ 0, O, 1), Val(N))
     exterior_exprs = Expr[]
 
@@ -417,7 +432,7 @@ end
         cell_offset = exterior.I .* I
 
         # Value stencil
-        value_stencil = _value_stencil_exprs(O, exterior, I)
+        value_stencil = _value_stencil_exprs(O, exterior.I, I)
         value_coefs = _stencil_edge_coefs_expr(I, :value_stencils)
 
         value_stencil_expr = quote
@@ -430,7 +445,7 @@ end
 
         for axis in 1:N
             if I[axis] ≠ 0
-                gradient_stencil = _gradient_stencil_exprs(O, exterior, I, axis)
+                gradient_stencil = _gradient_stencil_exprs(O, exterior.I, I, axis)
                 gradient_coefs = _stencil_edge_coefs_expr(I, :gradient_stencils)
 
                 expr = quote
@@ -448,13 +463,15 @@ end
         # Final expresion for this exterior point
         expr = quote
             let 
-                coefs = zero(T)
-                result = zero(T)
+                target = cell.I .+ $(cell_offset)
 
+                setblockvalue!(block, zero($T), CartesianIndex(target))
+
+                coefs = zero($T)
+                result = zero($T)
+                
                 $(value_stencil_expr)
                 $(gradient_stencil_exprs...)
-
-                target = cell.I .+ $(cell_offset)
                 
                 setblockvalue!(block, (homogenous - result)/coefs, CartesianIndex(target))
             end
@@ -476,5 +493,5 @@ end
     end
 end
 
-block_diritchlet!(block::Block{N, T}, boundary::BoundaryCell{N}, α::T, c::T) where {N, T} = block_robin!(block, boundary, α, zero(SVector{N, T}), c)
-block_nuemann!(block::Block{N, T}, boundary::BoundaryCell{N}, β::SVector{N, T}, c::T) where {N, T} = block_robin!(block, boundary, zero(T), β, c)
+block_diritchlet!(block::Block{N, T}, boundary::BoundaryCell{N}, basis::AbstractBasis{T}, α::T, c::T) where {N, T} = block_robin!(block, boundary, basis, α, zero(SVector{N, T}), c)
+block_nuemann!(block::Block{N, T}, boundary::BoundaryCell{N}, basis::AbstractBasis{T}, β::SVector{N, T}, c::T) where {N, T} = block_robin!(block, boundary, basis, zero(T), β, c)

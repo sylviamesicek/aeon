@@ -1,12 +1,12 @@
 ## Exports
-export BlockAttribute, ScalarAttribute, MeshWriter, attrib!, write_vtu
+export NodeAttribute, ScalarAttribute, MeshWriter, attrib!, write_vtu
 
 using WriteVTK
 
 """
-Adds `builtin::blockid` data to VTK file.
+Adds `builtin::node` data to VTK file.
 """
-struct BlockAttribute end
+struct NodeAttribute end
 
 struct ScalarAttribute{T}
     name::String
@@ -26,7 +26,7 @@ function attrib!(writer::MeshWriter, attrib::ScalarAttribute)
     push!(writer.fields, attrib)
 end
 
-function attrib!(writer::MeshWriter, ::BlockAttribute)
+function attrib!(writer::MeshWriter, ::NodeAttribute)
     writer.blocks = true
 end
 
