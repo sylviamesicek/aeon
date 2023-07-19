@@ -131,6 +131,11 @@ function nodetransform(mesh::Mesh, level::Int, node::Int)
     Translate(bounds.origin) ∘ ScaleTransform(bounds.widths)
 end
 
+Blocks.cellindices(mesh::Mesh) = CartesianIndices(nodecells(mesh))
+Blocks.cellwidths(mesh::Mesh{N, T}) where {N, T} = SVector{N, T}(1 ./ nodecells(mesh))
+Blocks.cellposition(mesh::Mesh{N, T}, cell::CartesianIndex{N}) where {N, T} = SVector{N, T}((cell.I .- T(1//2)) ./ nodecells(mesh))
+
+
 ###############################
 ## Refinement #################
 ###############################
@@ -272,14 +277,14 @@ function execute_refinement!(mesh::Mesh{N, T, F}) where {N, T, F}
                     child = SplitIndex{N}(node - nodechildren(mesh, level-1, parent))
                     # Find child on opposite side of face
                     other = splitreverse(child, axis)
-                    # Set neighbor
-                    coarse.neighbors[node][face] = nodechildren(mesh, level-1, neighbor) + other.linear
+                    # Set neighbors
+                    coarse.neighbors[node] = setindex(coarse.neighbors[node], nodechildren(mesh, level-1, neighbor) + other.linear, face)
                 end
 
                 # By this point, neighbor should not be 0
                 neighbor = coarse.neighbors[node][face]
 
-                if neighbor ≤ 0
+                if neighbor < 0
                     # Do not touch boundaries
                     continue
                 end
@@ -289,7 +294,7 @@ function execute_refinement!(mesh::Mesh{N, T, F}) where {N, T, F}
                     for child in splitindices(Val(N))
                         if child[axis] == side
                             childnode = coarse.children[node] + child.linear
-                            refined.neighbors[childnode][face] = 0
+                            refined.neighbors[childnode] = setindex(refined.neighbors[childnode], 0, face)
                         end
                     end
                 else
@@ -297,8 +302,8 @@ function execute_refinement!(mesh::Mesh{N, T, F}) where {N, T, F}
                     for child in splitindices(Val(N))
                         if child[axis] == side
                             childnode = coarse.children[node] + child.linear
-                            othernode = coarse.children[node] + splitreverse(child, axis).linear
-                            refined.neighbors[childnode][face] = othernode
+                            othernode = coarse.children[neighbor] + splitreverse(child, axis).linear
+                            refined.neighbors[childnode] = setindex(refined.neighbors[childnode], othernode, face)
                         end
                     end
                 end

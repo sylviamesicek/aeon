@@ -3,7 +3,7 @@
 ########################
 
 export Transform, IdentityTransform, ComposedTransform
-export jacobian, transform
+export jacobian
 
 
 ########################
@@ -39,13 +39,13 @@ the output of the transformation `trans`
 """
 jacobian(trans::Transform{N, T}, x::SVector{N, T}) where {N, T} = error("Differential matrix of transform $(typeof(trans)) with input $(typeof(x)) has not been defined.")
 
-"""
-    transform(trans, x, geom)
+# """
+#     transform(trans, x, geom)
 
-Transforms a given geometric object which may be dependent on the coordinate system.
-"""
-transform(trans::Transform{N, T}, ::SVector{N, T}, geom) where {N, T} = error("Transformation of object $(typeof(obj)) by $(typeof(trans)) is unimplemented.")
-transform(::Transform{N, T}, ::SVector{N, T}, geom::T) where {N, T} = geom
+# Transforms a given geometric object which may be dependent on the coordinate system.
+# """
+# transform(trans::Transform{N, T}, ::SVector{N, T}, geom) where {N, T} = error("Transformation of object $(typeof(obj)) by $(typeof(trans)) is unimplemented.")
+# transform(::Transform{N, T}, ::SVector{N, T}, geom::T) where {N, T} = geom
 
 ########################
 ## Identity ############

@@ -123,9 +123,9 @@ function write_vtu(writer::MeshWriter{N, T}, mesh::Mesh{N, T}, dofs::DoFHandler{
             name = writer.fields[i].name
             field = writer.fields[i].field
 
-            @assert length(field.values) == total
+            @assert length(field) == total
 
-            vtk["scalar:$(name)", VTKCellData()] = field.values
+            vtk["scalar:$(name)", VTKCellData()] = field
         end
     end
 end

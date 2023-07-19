@@ -11,7 +11,8 @@ struct Block{N, T, O}
     Block{O}(values::Array{T, N}) where {N, T, O} = new{N, T, O}(values)
 end
 
-Block{N, T, O}(::UndefInitializer) where {N, T, O} = new{N, T, O}(Array{T, N}(undef, ntuple(i -> 2O + 1, Val(N))))
+Block{T, O}(::UndefInitializer, dims::Vararg{Int, N}) where {N, T, O} = Block{O}(Array{T, N}(undef, dims...))  
+Block{N, T, O}(::UndefInitializer) where {N, T, O} = Block{T, O}(undef, ntuple(i -> 2O + 1, Val(N))...)
 
 Base.size(block::Block) = size(block.values)
 Base.fill!(block::Block{N, T}, v::T) where {N, T} = fill!(block.values, v)
@@ -291,6 +292,16 @@ function fill_interior_from_linear!(f::F, block::Block) where {F <: Function}
     end
 end
 
+############################
+## Boundary ################
+############################
+
+struct BoundaryCell{N, I}
+    cell::CartesianIndex{N}
+
+    BoundaryCell{I}(cell::CartesianIndex{N}) where {N, I} = new{N, I}(cell)
+end
+
 """
 Iterates the subsurfaces of an `N`- dimensional block. The argument `Val(I)` is passed to `f`, where
 `I` is an N-tuple of integers. 
@@ -345,7 +356,125 @@ end
 
         for facecell in CartesianIndices(tuple($(facecells_exprs...)))
             cell = CartesianIndex(tuple($(facecell_exprs...)))
-            f(block, cell, Val($I))
+            f(block, BoundaryCell{$I}(cell))
         end
     end
 end
+
+function _value_stencil_exprs(O, exterior::NTuple{N, Int}, I::NTuple{N, Int}) where N
+    ntuple(Val(N)) do i
+        if I[i] == 0
+            return :(cell_value_stencil(basis, Val(0), Val(0)))
+        elseif I[i] == 1
+            return :(vertex_value_stencil(basis, Val($(2O + 1)), Val($(exterior[i])), Val(false)))
+        else
+            return :(vertex_value_stencil(basis, Val($(exterior[i])), Val($(2O + 1)), Val(true)))
+        end
+    end
+end
+
+function _gradient_stencil_exprs(O, exterior::NTuple{N, Int}, I::NTuple{N, Int}, axis::Int) where N
+    ntuple(Val(N)) do i
+        if i == axis
+            if I[i] == 0
+                return :(cell_derivative_stencil(basis, Val($O), Val($O)))
+            elseif I[i] == 1
+                return :(vertex_derivative_stencil(basis, Val($(2O)), Val($(exterior[i])), Val(false)))
+            else
+                return :(vertex_derivative_stencil(basis, Val($(exterior[i])), Val($(2O)), Val(true)))
+            end
+        else
+            if I[i] == 0
+                return :(cell_value_stencil(basis, Val(0), Val(0)))
+            elseif I[i] == 1
+                return :(vertex_value_stencil(basis, Val($(2O)), Val($(exterior[i])), Val(false)))
+            else
+                return :(vertex_value_stencil(basis, Val($(exterior[i])), Val($(2O)), Val(true)))
+            end
+        end
+    end
+end
+
+function _stencil_edge_coefs_expr(I::NTuple{N, Int}, stencil::Symbol) where N
+    coefs = Expr[]
+
+    for i in 1:N
+        if I[i] == -1
+            push!(coefs, :($(stencil)[$i].left[end]))
+        elseif I[i] == 1
+            push!(coefs, :($(stencil)[$i].right[end]))
+        end
+    end
+
+    :(*($(coefs...)))
+end
+
+@generated function block_robin!(block::Block{N, T, O}, boundary::BoundaryCell{N, I}, α::T, β::SVector{N, T}, c::T) where {N, T, O, I}
+    exterior_cells = ntuple(i -> ifelse(I[i] ≠ 0, O, 1), Val(N))
+    exterior_exprs = Expr[]
+
+    for exterior in CartesianIndices(exterior_cells)
+        cell_offset = exterior.I .* I
+
+        # Value stencil
+        value_stencil = _value_stencil_exprs(O, exterior, I)
+        value_coefs = _stencil_edge_coefs_expr(I, :value_stencils)
+
+        value_stencil_expr = quote
+            value_stencils = tuple($(value_stencil...))
+            result += value_scale * block_stencil_product(block, cell, value_stencils)
+            coefs += value_scale * $value_coefs
+        end
+
+        gradient_stencil_exprs = Expr[]
+
+        for axis in 1:N
+            if I[axis] ≠ 0
+                gradient_stencil = _gradient_stencil_exprs(O, exterior, I, axis)
+                gradient_coefs = _stencil_edge_coefs_expr(I, :gradient_stencils)
+
+                expr = quote
+                    let 
+                        gradient_stencils = tuple($(gradient_stencil...))
+                        result += gradient_scale[$axis] * block_stencil_product(block, cell, gradient_stencils)
+                        coefs += gradient_scale[$axis] * $gradient_coefs
+                    end
+                end
+
+                push!(gradient_stencil_exprs, expr)
+            end
+        end
+
+        # Final expresion for this exterior point
+        expr = quote
+            let 
+                coefs = zero(T)
+                result = zero(T)
+
+                $(value_stencil_expr)
+                $(gradient_stencil_exprs...)
+
+                target = cell.I .+ $(cell_offset)
+                
+                setblockvalue!(block, (homogenous - result)/coefs, CartesianIndex(target))
+            end
+        end
+
+        push!(exterior_exprs, expr)
+    end
+
+    # Final result
+    quote
+        # Alias
+        cell = boundary.cell
+        
+        value_scale = α
+        gradient_scale = β .* blockcells(block) .* $I   
+        homogenous = c
+
+        $(exterior_exprs...)
+    end
+end
+
+block_diritchlet!(block::Block{N, T}, boundary::BoundaryCell{N}, α::T, c::T) where {N, T} = block_robin!(block, boundary, α, zero(SVector{N, T}), c)
+block_nuemann!(block::Block{N, T}, boundary::BoundaryCell{N}, β::SVector{N, T}, c::T) where {N, T} = block_robin!(block, boundary, zero(T), β, c)

@@ -31,12 +31,16 @@ function main()
 
     mesh = Mesh(HyperBox(SA[0.0, 0.0], SA{Float64}[4.0, 4.0]), 6)
 
-    for _ in 1:3
+    mark_refine_global!(mesh)
+
+    prepare_and_execute_refinement!(mesh)
+    
+    for _ in 1:1
         for level in eachindex(mesh)
             for node in eachleafnode(mesh, level)
                 bounds = nodebounds(mesh, level, node)
 
-                if norm(bounds.origin) < 2.0
+                if norm(bounds.origin) ≤ 2.0
                     mark_refine!(mesh, level, node)
                 end
             end
@@ -49,8 +53,27 @@ function main()
 
     @show mesh
 
+    total = dofstotal(dofs)
+
+    seed = Vector{Float64}(undef, total)
+
+    for level in eachindex(mesh)
+        for node in eachleafnode(mesh, level)
+            transform = nodetransform(mesh, level, node)
+            offset = nodeoffset(dofs, level, node)
+
+            for (i, cell) in enumerate(cellindices(mesh))
+                lpos = cellposition(mesh, cell)
+                gpos = transform(lpos)
+
+                seed[offset + i] = gunlach_laplacian(gpos, 1.0, 1.0)
+            end
+        end
+    end
+
     writer = MeshWriter{2, Float64}()
     attrib!(writer, BlockAttribute())
+    attrib!(writer, ScalarAttribute("seed", seed))
     write_vtu(writer, mesh, dofs, "output")
 end
 

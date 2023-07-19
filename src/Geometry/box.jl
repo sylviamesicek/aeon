@@ -52,8 +52,9 @@ HyperFaces(faces::T...) where T = HyperFaces(tuple(faces...))
 Base.length(faces::HyperFaces) = length(faces.inner)
 Base.eachindex(::HyperFaces{N}) where N = faceindices(Val(N))
 Base.getindex(faces::HyperFaces{N}, index::FaceIndex{N}) where {N} = faces.inner[index.linear]
-function Base.setindex!(faces::HyperFaces{N, T, F}, val::T, index::FaceIndex{N}) where {N, T, F}
-    faces = HyperFaces(ntuple(face -> ifelse(face == index.linear, val, faces.inner[face]), Val(F)))
+
+function StaticArrays.setindex(faces::HyperFaces{N, T, F}, val::T, index::FaceIndex{N}) where {N, T, F}
+    HyperFaces(ntuple(face -> ifelse(face == index.linear, val, faces.inner[face]), Val(F)))
 end
 
 """
