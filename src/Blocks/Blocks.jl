@@ -19,5 +19,6 @@ include("lagrange.jl")
 # Block
 include("point.jl")
 include("block.jl")
+include("boundary.jl")
 
 end

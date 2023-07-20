@@ -29,7 +29,7 @@ function main()
 
     # Mesh
 
-    mesh = Mesh(HyperBox(SA[0.0, 0.0], SA{Float64}[π, π]), 9)
+    mesh = Mesh(HyperBox(SA[0.0, 0.0], SA[4.0, 4.0]), 7)
 
     # mark_refine_global!(mesh)
 
@@ -66,8 +66,8 @@ function main()
                 lpos = cellposition(mesh, cell)
                 gpos = transform(lpos)
 
-                # seed[offset + i] = gunlach_laplacian(gpos, 1.0, 1.0)
-                seed[offset + i] = sin(gpos.x)*sin(gpos.y)
+                seed[offset + i] = gunlach_laplacian(gpos, 1.0, 1.0)
+                # seed[offset + i] = sin(gpos.x)*sin(gpos.y)
                 # seed[offset + i] = 1.0
             end
         end
@@ -87,35 +87,42 @@ function main()
                 end
 
                 # Apply boundary conditions
-                block_boundary(block) do boundary
-                    # lpos = cellposition(block, cell)
-                    # gpos = transform(lpos)
-                    # j = inv(jacobian(transform, lpos))
+                block_boundary_conditions!(block, basis, transform) do boundary, axis
+                    if boundary_edge(boundary, axis) > 0
+                        # Robin Conditions
+                        lpos = cellposition(block, boundary.cell)
+                        gpos = transform(lpos)
+                        r = norm(gpos)
 
-                    # value = 0.0
-                    # coefficient = 0.0
-
-                    # gradient = SVector(ntuple(Val(2)) do i
-                        
-                    # end)
-
-                    block_diritchlet!(block, boundary, basis, 1.0, 0.0)
+                        robin(1.0/r, 1.0, 0.0)
+                    else
+                        # Nuemann Conditions
+                        nuemann(1.0, 0.0)
+                    end
                 end
 
                 for (i, cell) in enumerate(cellindices(block))
                     lpos = cellposition(block, cell)
+                    gpos = transform(lpos)
+
                     j = inv(jacobian(transform, lpos))
 
-                    # gpos = transform(lpos)
+                    lgrad = blockgradient(block, cell, basis)
+                    ggrad = j * lgrad
 
                     lhess = blockhessian(block, cell, basis)
                     ghess = j' * lhess * j
 
-                    y[offset + i] = -(ghess[1, 1] + ghess[2, 2])
+                    glap = ghess[1, 1] + ghess[2, 2] + ggrad[1]/gpos[1]
+                    gval = blockvalue(block, cell)
+
+                    y[offset + i] = -glap - seed[offset + i] * gval
                 end
             end
         end
     end
+
+    println("Solving")
 
     solution, history = bicgstabl(hemholtz, seed, 2; log=true, max_mv_products=8000)
 
