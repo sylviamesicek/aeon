@@ -16,6 +16,8 @@ struct HyperBox{N, T}
     end
 end
 
+Base.show(io::IO, box::HyperBox) = print(io, "HyperBox($(box.origin), $(box.widths))")
+
 """
 Computes the center point of a `HyperBox`.
 """
@@ -52,6 +54,7 @@ HyperFaces(faces::T...) where T = HyperFaces(tuple(faces...))
 Base.length(faces::HyperFaces) = length(faces.inner)
 Base.eachindex(::HyperFaces{N}) where N = faceindices(Val(N))
 Base.getindex(faces::HyperFaces{N}, index::FaceIndex{N}) where {N} = faces.inner[index.linear]
+Base.show(io::IO, faces::HyperFaces) = print(io, "HyperFaces$(tuple(faces.inner...))")
 
 function StaticArrays.setindex(faces::HyperFaces{N, T, F}, val::T, index::FaceIndex{N}) where {N, T, F}
     HyperFaces(ntuple(face -> ifelse(face == index.linear, val, faces.inner[face]), Val(F)))

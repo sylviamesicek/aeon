@@ -13,7 +13,7 @@ struct Translate{N, T} <: Transform{N, T}
     offset::SVector{N, T}
 end
 
-Translate(x::Tuple) = Translate(SVector(x))
+Translate(x) = Translate(SVector(x))
 Translate(x, y) = Translate(SVector(x, y))
 Translate(x, y, z) = Translate(SVector(x, y, z))
 
@@ -31,6 +31,9 @@ Base.show(io::IO, trans::Translate) = print(io, "Translation$((trans.offset...,)
 
 # Uniform
 
+"""
+A uniform scaling of a coordinate system in each direction.
+"""
 struct UniformScaleTransform{N, T} <: Transform{N, T}
     scale::UniformScaling{T}
 
@@ -45,6 +48,9 @@ Base.:(∘)(t1::UniformScaleTransform{N, T}, t2::UniformScaleTransform{N, T}) wh
 
 # Non-uniform
 
+"""
+A transform which arbitrarily scales each axis by some value.
+"""
 struct ScaleTransform{N, T} <: Transform{N, T}
     scales::Diagonal{T, SVector{N, T}}
 

@@ -5,7 +5,7 @@
 export Level, Mesh, nodecells
 
 """
-A single Level of a Mesh.
+A single level of a mesh.
 """
 struct Level{N, T, F}
     # Bounds for each node on this level

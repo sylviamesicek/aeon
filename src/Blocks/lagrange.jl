@@ -76,6 +76,10 @@ end
 ## Lagrange Basis ######
 ########################
 
+"""
+A set of Lagrange polynomial basis functions. The computed coefficients can almost always be
+inlined into their respective functions.
+"""
 struct LagrangeBasis{T} <: AbstractBasis{T} end
 
 # Helpers

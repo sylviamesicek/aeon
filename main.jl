@@ -29,11 +29,10 @@ function main()
 
     # Mesh
 
-    mesh = Mesh(HyperBox(SA[0.0, 0.0], SA[4.0, 4.0]), 7)
+    mesh = Mesh(HyperBox(SA[0.0, 0.0], SA[4.0, 4.0]), 6)
 
-    # mark_refine_global!(mesh)
-
-    # prepare_and_execute_refinement!(mesh)
+    mark_refine_global!(mesh)
+    prepare_and_execute_refinement!(mesh)
     
     # for _ in 1:1
     #     for level in eachindex(mesh)
@@ -55,39 +54,20 @@ function main()
     @show mesh
     @show total
 
-    seed = Vector{Float64}(undef, total)
-
-    for level in eachindex(mesh)
-        for node in eachleafnode(mesh, level)
-            transform = nodetransform(mesh, level, node)
-            offset = nodeoffset(dofs, level, node)
-
-            for (i, cell) in enumerate(cellindices(mesh))
-                lpos = cellposition(mesh, cell)
-                gpos = transform(lpos)
-
-                seed[offset + i] = gunlach_laplacian(gpos, 1.0, 1.0)
-                # seed[offset + i] = sin(gpos.x)*sin(gpos.y)
-                # seed[offset + i] = 1.0
-            end
-        end
+    seed = project(mesh, dofs) do pos
+        gunlach_laplacian(pos, 1.0, 1.0)
     end
 
-    block = Block{Float64, 2}(undef, nodecells(mesh)...)
+    block = ArrayBlock{Float64, 2}(undef, nodecells(mesh)...)
 
     hemholtz = LinearMap(total) do y, x
         for level in eachindex(mesh)
             for node in eachleafnode(mesh, level)
                 offset = nodeoffset(dofs, level, node)
                 transform = nodetransform(mesh, level, node)
-                
-                # Fill Interior
-                fill_interior_from_linear!(block) do i
-                    x[offset + i]
-                end
 
-                # Apply boundary conditions
-                block_boundary_conditions!(block, basis, transform) do boundary, axis
+                # Transfer data to block
+                transfer_to_block!(block, basis, mesh, dofs, level, node, x) do boundary, axis
                     if boundary_edge(boundary, axis) > 0
                         # Robin Conditions
                         lpos = cellposition(block, boundary.cell)
@@ -100,7 +80,7 @@ function main()
                         nuemann(1.0, 0.0)
                     end
                 end
-
+                
                 for (i, cell) in enumerate(cellindices(block))
                     lpos = cellposition(block, cell)
                     gpos = transform(lpos)
@@ -128,8 +108,6 @@ function main()
 
     @show history
 
-    # solution = hemholtz * seed
-
     writer = MeshWriter{2, Float64}()
     attrib!(writer, NodeAttribute())
     attrib!(writer, ScalarAttribute("seed", seed))
@@ -137,5 +115,93 @@ function main()
     write_vtu(writer, mesh, dofs, "output")
 end
 
+
+# Main code
+function main2()
+    # Function basis
+    basis = LagrangeBasis{Float64}()
+
+    # Mesh
+
+    mesh = Mesh(HyperBox(SA[0.0, 0.0], SA{Float64}[π, π]), 7)
+
+    mark_refine_global!(mesh)
+    prepare_and_execute_refinement!(mesh)
+
+    dofs = DoFHandler(mesh)
+    total = dofstotal(dofs)
+
+    @show mesh
+    @show total
+
+    seed = project(mesh, dofs) do pos
+        sin(pos.x)*sin(pos.y)
+    end
+
+    analytic = project(mesh, dofs) do pos
+        sin(pos.x)*sin(pos.y)/2
+    end
+
+    block = ArrayBlock{Float64, 2}(undef, nodecells(mesh)...)
+
+    mv_product = 1
+
+    hemholtz = LinearMap(total) do y, x
+        println("MV Product: $mv_product")
+        mv_product += 1
+
+        for level in eachindex(mesh)
+            for node in eachleafnode(mesh, level)
+                offset = nodeoffset(dofs, level, node)
+                transform = nodetransform(mesh, level, node)
+
+                # Transfer data to block
+                transfer_to_block!(block, basis, mesh, dofs, level, node, x) do boundary, axis
+                    diritchlet(1.0)
+                end
+
+                # if node == 1
+                #     println("Bottom-left")
+                #     display(block.values[1:6, 1:6])
+                #     println("Bottom-right")
+                #     display(block.values[end-5:end, 1:6])
+                #     println("Top-left")
+                #     display(block.values[1:6, end-5:end])
+                #     println("Top-right")
+                #     display(block.values[ end-5:end, end-5:end])
+                # end
+
+                for (i, cell) in enumerate(cellindices(block))
+                    lpos = cellposition(block, cell)
+                    j = inv(jacobian(transform, lpos))
+
+                    lhess = blockhessian(block, cell, basis)
+                    ghess = j' * lhess * j
+
+                    glap = ghess[1, 1] + ghess[2, 2]
+
+                    y[offset + i] = -glap
+                end
+            end
+        end
+    end
+
+    println("Solving")
+
+    solution, history = bicgstabl(hemholtz, seed, 2; log=true, max_mv_products=8000)
+
+    @show history
+
+    # solution = hemholtz * analytic
+
+    writer = MeshWriter{2, Float64}()
+    attrib!(writer, NodeAttribute())
+    attrib!(writer, ScalarAttribute("seed", seed))
+    attrib!(writer, ScalarAttribute("analytic", analytic))
+    attrib!(writer, ScalarAttribute("solution", solution))
+    attrib!(writer, ScalarAttribute("error", solution .- analytic))
+    write_vtu(writer, mesh, dofs, "output")
+end
+
 # Execute
-main()
+main2()

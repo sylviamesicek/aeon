@@ -59,3 +59,32 @@ leveltotal(dofs::DoFHandler, level::Int) = dofs.levels[level].total
 Returns the total number of dofs of a mesh, including the most refined level.
 """
 dofstotal(dofs::DoFHandler) = leveltotal(dofs, length(dofs.levels))
+
+#############################
+## Projection ###############
+#############################
+
+export project, project!
+
+function project(f::Function, mesh::Mesh{N, T}, dofs::DoFHandler{N, T}) where {N, T} 
+    total = dofstotal(dofs)
+    v = Vector{T}(undef, total)
+    project!(f, mesh, dofs, v)
+    return v
+end
+
+function project!(f::Function, mesh::Mesh{N, T}, dofs::DoFHandler{N, T}, v::AbstractVector{T}) where {N, T}
+    for level in eachindex(mesh)
+        for node in eachleafnode(mesh, level)
+            transform = nodetransform(mesh, level, node)
+            offset = nodeoffset(dofs, level, node)
+
+            for (i, cell) in enumerate(cellindices(mesh))
+                lpos = cellposition(mesh, cell)
+                gpos = transform(lpos)
+
+                v[offset + i] = f(gpos)
+            end
+        end
+    end
+end

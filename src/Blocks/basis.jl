@@ -29,6 +29,9 @@ Base.:(-)(stencil::Stencil) = Stencil(.-stencil.left, -stencil.center, .-stencil
 ## Diagonal ###################
 ###############################
 
+"""
+Computes the diagnol element of a stencil product.
+"""
 function stencil_diagonal(stencils::NTuple{N, Stencil{T}}) where {N, T}
     prod(map(s -> s.center, stencils))
 end
