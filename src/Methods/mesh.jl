@@ -23,11 +23,6 @@ struct Level{N, T, F}
     flags::Vector{Bool}
 end
 
-function Level(bounds::HyperBox{N, T}) where {N, T}
-    neighbors = nfaces(f -> -1, Val(N))
-    Level{N, T, 2N}([bounds], [0], [-1], [neighbors], [false])
-end
-
 Base.length(level::Level) = length(level.bounds)
 Base.eachindex(level::Level) = eachindex(level.bounds)
 
@@ -37,9 +32,25 @@ A `Mesh` based on a quadtree.
 struct Mesh{N, T, F} 
     levels::Vector{Level{N, T, F}}
     refinement::Int
+    base::Int
 
-    function Mesh(bounds::HyperBox{N, T}, refinement::Int) where {N, T}
-        new{N, T, 2N}([Level(bounds)], refinement)
+    function Mesh(bounds::HyperBox{N, T}, refinement::Int, base::Int = 3) where {N, T}
+        @assert refinement ≥ base
+
+        levels = Level{N, T, 2N}[]
+
+        neighbors = nfaces(f -> -1, Val(N))
+
+        for l in base:refinement
+            if l > base
+                levels[end].children[begin] = 0
+                push!(levels, Level{N, T, 2N}([bounds], [1], [-1], [neighbors], [false]))
+            else
+                push!(levels, Level{N, T, 2N}([bounds], [0], [-1], [neighbors], [false]))
+            end
+        end
+
+        new{N, T, 2N}(levels, refinement, base)
     end
 end
 
@@ -58,9 +69,11 @@ function Base.show(io::IO, mesh::Mesh{N, T}) where {N, T}
     end
 end
 
-@generated function nodecells(mesh::Mesh{N}) where N
+@generated function nodecells(mesh::Mesh{N}, level::Int) where N
     quote
-        Base.@ntuple $N i -> 2^mesh.refinement
+        l = mesh.refinement - mesh.base + 1
+        v = 2^(mesh.refinement + min(0, level - l))
+        Base.@ntuple $N i -> v
     end
 end
 
@@ -75,12 +88,19 @@ function Base.foreach(f::Function, mesh::Mesh)
     end
 end
 
+"""
+Returns the number of levels with only one node.
+"""
+function baselevels(mesh::Mesh)
+    mesh.refinement - mesh.base + 1
+end
+
 ###############################
 ## Node Access ################
 ###############################
 
 export eachnode, nodebounds, nodeparent, nodechildren, nodeneighbors, nodeflag
-export leafnodes, nodetransform, eachleafnode
+export leafnodes, nodetransform, eachleafnode, foreachleafnode
 
 """
 An iterator over every node index on a level.
@@ -90,11 +110,29 @@ function eachnode(mesh::Mesh, level::Int)
 end
 
 """
-An iterator over every leaf node index on a level.
+An iterator over every leaf node up to the maxlevel.
 """
-function eachleafnode(mesh::Mesh, level::Int)
-    Iterators.filter(eachindex(mesh.levels[level])) do node
-        nodechildren(mesh, level, node) == -1
+function eachleafnode(mesh::Mesh, maxlevel::Int = length(mesh))
+    Iterators.flatmap(1:maxlevel) do level
+        nodes = Iterators.filter(eachindex(mesh.levels[level])) do node
+            level == maxlevel || nodechildren(mesh, level, node) == -1
+        end
+
+        Iterators.map(n -> (level, n), nodes)
+    end
+end
+
+function foreachleafnode(f::F, mesh::Mesh, maxlevel::Int = length(mesh)) where {F <: Function}
+    for level in 1:(maxlevel - 1)
+        for node in eachindex(mesh.levels[level])
+            if nodechildren(mesh, level, node) == -1
+                f(level, node)
+            end
+        end
+    end
+
+    for node in eachindex(mesh.levels[maxlevel])
+        f(maxlevel, node)
     end
 end
 
@@ -131,9 +169,9 @@ function nodetransform(mesh::Mesh, level::Int, node::Int)
     Translate(bounds.origin) ∘ ScaleTransform(bounds.widths)
 end
 
-Blocks.cellindices(mesh::Mesh) = CartesianIndices(nodecells(mesh))
-Blocks.cellwidths(mesh::Mesh{N, T}) where {N, T} = SVector{N, T}(1 ./ nodecells(mesh))
-Blocks.cellposition(mesh::Mesh{N, T}, cell::CartesianIndex{N}) where {N, T} = SVector{N, T}((cell.I .- T(1//2)) ./ nodecells(mesh))
+Blocks.cellindices(mesh::Mesh, level::Int) = CartesianIndices(nodecells(mesh, level))
+Blocks.cellwidths(mesh::Mesh{N, T}, level::Int) where {N, T} = SVector{N, T}(1 ./ nodecells(mesh, level::Int))
+Blocks.cellposition(mesh::Mesh{N, T}, cell::CartesianIndex{N}, level::Int) where {N, T} = SVector{N, T}((cell.I .- T(1//2)) ./ nodecells(mesh, level))
 
 
 ###############################
@@ -161,7 +199,7 @@ function prepare_refinement!(mesh::Mesh{N}) where N
     while !smooth
         smooth = true
 
-        for level in eachindex(mesh)
+        for level in (baselevels(mesh) + 1):length(mesh)
             for node in eachnode(mesh, level)
                 if !nodeflag(mesh, level, node)
                     continue
@@ -171,11 +209,6 @@ function prepare_refinement!(mesh::Mesh{N}) where N
 
                 parent = nodeparent(mesh, level, node)
                 neighbors = nodeneighbors(mesh, level, node)
-
-                if parent == 0
-                    # Root
-                    continue
-                end
 
                 for face in faceindices(Val(N))
                     # Neighbor is coarser and should also be marked for refinement
@@ -203,7 +236,7 @@ function execute_refinement!(mesh::Mesh{N, T, F}) where {N, T, F}
     end
 
     # Add children to each level
-    for level in 1:length(mesh) - 1
+    for level in baselevels(mesh):(length(mesh) - 1)
         coarse = mesh.levels[level]
         refined = mesh.levels[level + 1]
 
@@ -248,7 +281,7 @@ function execute_refinement!(mesh::Mesh{N, T, F}) where {N, T, F}
     end
 
     # Update exterior neighbors
-    for level in 1:length(mesh) - 1
+    for level in baselevels(mesh):(length(mesh) - 1)
         coarse = mesh.levels[level]
         refined = mesh.levels[level + 1]
 

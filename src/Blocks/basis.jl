@@ -1,15 +1,23 @@
 ############################
-## Exports #################
-############################
-
-export Stencil, stencil_diagonal
-export AbstractBasis, cell_value_stencil, subcell_value_stencil, vertex_value_stencil
-export cell_derivative_stencil, subcell_derivative_stencil, vertex_derivative_stencil
-export value_stencil
-
-############################
 ## Stencils ################
 ############################
+
+export AbstractStencil, CellValue, VertexValue, SubCellValue, CellDerivative, VertexDerivative, SubCellDerivative, ValueOperator
+export Stencil, stencil_diagonal
+
+
+abstract type AbstractStencil{L, R} end
+
+struct CellValue{L, R} <: AbstractStencil{L, R} end
+struct VertexValue{L, R, S} <: AbstractStencil{L, R} end
+struct SubCellValue{L, R, S} <: AbstractStencil{L, R} end
+
+struct CellDerivative{L, R} <: AbstractStencil{L, R} end
+struct VertexDerivative{L, R, S} <: AbstractStencil{L, R} end
+struct SubCellDerivative{L, R, S} <: AbstractStencil{L, R} end
+
+struct ValueOperator{O, R} <: AbstractStencil{O, O} end
+
 
 """
 Represents a stencil to be applied to a uniform grid
@@ -40,42 +48,14 @@ end
 ## Basis ######################
 ###############################
 
+export AbstractBasis
+
 """
 An abstract function basis for a numerical domain.
 """
 abstract type AbstractBasis{T} end
 
 """
-Returns the cell-centered stencil for computing the value at a cell.
+Returns the stencil which applies the operator in the given basis.
 """
-cell_value_stencil(::AbstractBasis, ::Val{L}, ::Val{R}) where {L, R} = error("Unimplemented")
-
-"""
-Returns the cell-centered stencil for computing the value at a subcell.
-"""
-subcell_value_stencil(::AbstractBasis, ::Val{L}, ::Val{R}, ::Val{S}) where {S, L, R} = error("Unimplemented")
-
-"""
-Returns the vertex-centered stencil for computing the value on a vertex.
-"""
-vertex_value_stencil(::AbstractBasis, ::Val{L}, ::Val{R}, ::Val{S}) where {L, R, S} = error("Unimplemented")
-
-"""
-Returns the cell-centered stencil for computing the derivative at a cell.
-"""
-cell_derivative_stencil(::AbstractBasis, ::Val{L}, ::Val{R}) where {L, R} = error("Unimplemented")
-
-"""
-Returns the cell-centered stencil for computing the derivative at a subcell.
-"""
-subcell_derivative_stencil(::AbstractBasis, ::Val{L}, ::Val{R}, ::Val{S}) where {S, L, R} = error("Unimplemented")
-
-"""
-Returns the vertex-centered stencil for computing the derivative on a vertex.
-"""
-vertex_derivative_stencil(::AbstractBasis, ::Val{L}, ::Val{R}, ::Val{S}) where {S, L, R} = error("Unimplemented")
-
-"""
-Returns the cell-centered, balanced stencil for computing the `R`-th covariant derivative.
-"""
-value_stencil(::AbstractBasis, ::Val{O}, ::Val{R}) where {O, R} = error("Unimplemented")
+Stencil(basis::AbstractBasis, operator::AbstractStencil) = error("Stencil is unimplemented for $(typeof(basis)) and $(typeof(operator))")

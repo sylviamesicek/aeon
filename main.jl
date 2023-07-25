@@ -29,7 +29,7 @@ function main()
 
     # Mesh
 
-    mesh = Mesh(HyperBox(SA[0.0, 0.0], SA[4.0, 4.0]), 6)
+    mesh = Mesh(HyperBox(SA[0.0, 0.0], SA[4.0, 4.0]), 7)
 
     mark_refine_global!(mesh)
     prepare_and_execute_refinement!(mesh)
@@ -60,7 +60,12 @@ function main()
 
     block = ArrayBlock{Float64, 2}(undef, nodecells(mesh)...)
 
+    mv_product = 1
+
     hemholtz = LinearMap(total) do y, x
+        println("MV Product: $mv_product")
+        mv_product += 1
+
         for level in eachindex(mesh)
             for node in eachleafnode(mesh, level)
                 offset = nodeoffset(dofs, level, node)
@@ -104,9 +109,11 @@ function main()
 
     println("Solving")
 
-    solution, history = bicgstabl(hemholtz, seed, 2; log=true, max_mv_products=8000)
+    # solution, history = bicgstabl(hemholtz, seed, 2; log=true, max_mv_products=8000)
 
-    @show history
+    # @show history
+
+    solution = hemholtz * seed
 
     writer = MeshWriter{2, Float64}()
     attrib!(writer, NodeAttribute())
@@ -115,6 +122,162 @@ function main()
     write_vtu(writer, mesh, dofs, "output")
 end
 
+struct PoissonOperator{N, T, O} <: AbstractOperator{T}
+    mesh::Mesh{N, T}
+    dofs::DoFManager{N, T}
+    blocks::BlockManager{N, T, O}
+end
+
+function operator_apply!(y::AbstractVector{T}, oper::PoissonOperator{N, T}, x::AbstractVector{T}, maxlevel::Int) where T
+    basis = LagrangeBasis{T}()
+
+    foreachleafnode(mesh, maxlevel) do level, node
+        offset = nodeoffset(oper.dofs, level, node)
+        transform = nodetransform(oper.mesh, level, node)
+        block = oper.blocks[level]
+
+        # Transfer data to block
+        transfer_to_block!(block, basis, oper.mesh, oper.dofs, level, node, x) do boundary, axis
+            diritchlet(1.0, 0.0)
+        end
+
+        for (i, cell) in enumerate(cellindices(block))
+            lpos = cellposition(block, cell)
+            j = inv(jacobian(transform, lpos))
+
+            lhess = blockhessian(oper.block, cell, basis)
+            ghess = j' * lhess * j
+
+            glap = ghess[1, 1] + ghess[2, 2]
+
+            y[offset + i] = -glap
+        end
+    end
+end
+
+function operator_diagonal!(y::AbstractVector{T}, oper::PoissonOperator{N, T}, maxlevel::Int) where T
+    basis = LagrangeBasis{T}()
+
+    foreachleafnode(mesh, maxlevel) do level, node
+        offset = nodeoffset(oper.dofs, level, node)
+        transform = nodetransform(oper.mesh, level, node)
+        block = oper.blocks[level]
+
+        for (i, cell) in enumerate(cellindices(block))
+            lpos = cellposition(block, cell)
+            j = inv(jacobian(transform, lpos))
+
+            lhess = hessian_diagonal(Val(N), basis)
+            ghess = j' * lhess * j
+
+            glap = ghess[1, 1] + ghess[2, 2]
+
+            y[offset + i] = -glap
+        end
+    end
+end
+
+
+function operator_restrict!(y::AbstractVector{T}, oper::AbstractOperator{T}, x::AbstractVector{T}, maxlevel::Int) where T
+    basis = LagrangeBasis{T}()
+
+    if maxlevel == 1
+        return
+    end
+
+    for level in 1:(maxlevel - 1)
+        for node in eachnode(oper.mesh, level)
+            if nodechildren(oper.mesh, level) == -1
+                offset = nodeoffset(oper.dofs, level, node)
+                block = oper.blocks[level]
+
+                for (i, cell) in enumerate(cellindices(block))
+                    y[offset + i] = x[offset + i]
+                end
+
+            end
+        end
+    end
+
+    if maxlevel ≤ baselevels(oper.mesh)
+        # Restrict to single parent
+        for node in eachnode(oper.mesh, maxlevel)
+            parent = nodeparent(oper.mesh, maxlevel, node)
+            poffset = nodeoffset(oper.dofs, maxlevel-1, parent)
+            block = oper.blocks[maxlevel]
+
+            transfer_to_block!(block, basis, oper.mesh, oper.dofs, level, node, x) do boundary, axis
+                diritchlet(1.0, 0.0)
+            end
+
+            for (i, pcell) in enumerate(CartesianIndices(blockcells(block) ./ 2))
+                vertex = map(VertexIndex, pcell.I .* 2)
+                y[poffset + i] = block_prolong(block, vertex, basis)
+            end
+        end
+        
+    else
+        # Restrict to subcell of parent
+        error("Restriction to node parents is unimplemented")
+    end
+
+    for node in eachnode(oper.mesh, maxlevel)
+        
+    end
+
+    foreachleafnode(mesh, maxlevel) do level, node
+        parent = nodeparent(oper.mesh, node, level)
+
+        if parent == 0
+            # Root
+            return
+        end
+
+        offset = nodeoffset(oper.dofs, level, node)
+        transform = nodetransform(oper.mesh, level, node)
+        block = oper.blocks[level]
+        
+        if level < maxlevel - 1
+            # Fill with identity
+            for (i, _) in enumerate(cellindices(block))
+                y[offset + i] = x[offset + i]
+            end
+            # Finish
+            return
+        end
+
+        
+
+        # Transfer data to block
+        transfer_to_block!(block, basis, oper.mesh, oper.dofs, level, node, x) do boundary, axis
+            diritchlet(1.0, 0.0)
+        end
+
+        
+
+        if level ≤ baselevels(oper.mesh)
+            offset = nodeoff
+        else
+
+        end
+
+        for (i, cell) in enumerate(cellindices(block))
+            lpos = cellposition(block, cell)
+            j = inv(jacobian(transform, lpos))
+
+            lhess = blockhessian(oper.block, cell, basis)
+            ghess = j' * lhess * j
+
+            glap = ghess[1, 1] + ghess[2, 2]
+
+            y[offset + i] = -glap
+        end
+    end
+end
+
+function operator_prolong!(y::AbstractVector{T}, oper::AbstractOperator{T}, x::AbstractVector{T}, maxlevel::Int) where T
+
+end
 
 # Main code
 function main2()
@@ -123,10 +286,12 @@ function main2()
 
     # Mesh
 
-    mesh = Mesh(HyperBox(SA[0.0, 0.0], SA{Float64}[π, π]), 7)
+    mesh = Mesh(HyperBox(SA[0.0, 0.0], SA{Float64}[1.0, 1.0]), 4)
 
     mark_refine_global!(mesh)
     prepare_and_execute_refinement!(mesh)
+    # mark_refine_global!(mesh)
+    # prepare_and_execute_refinement!(mesh)
 
     dofs = DoFHandler(mesh)
     total = dofstotal(dofs)
@@ -135,12 +300,19 @@ function main2()
     @show total
 
     seed = project(mesh, dofs) do pos
-        sin(pos.x)*sin(pos.y)
+        #sin(pos.x)*sin(pos.y)
+        1.0
     end
 
     analytic = project(mesh, dofs) do pos
-        sin(pos.x)*sin(pos.y)/2
+        #2sin(pos.x)*sin(pos.y)
+        0.0
     end
+
+    # analytic = project(mesh, dofs) do pos
+    #     # sin(pos.x)*sin(pos.y)/2
+    #     1.0
+    # end
 
     block = ArrayBlock{Float64, 2}(undef, nodecells(mesh)...)
 
@@ -157,7 +329,7 @@ function main2()
 
                 # Transfer data to block
                 transfer_to_block!(block, basis, mesh, dofs, level, node, x) do boundary, axis
-                    diritchlet(1.0)
+                    diritchlet(1.0, 0.0)
                 end
 
                 # if node == 1
@@ -186,20 +358,20 @@ function main2()
         end
     end
 
-    println("Solving")
+    println("Application")
 
-    solution, history = bicgstabl(hemholtz, seed, 2; log=true, max_mv_products=8000)
+    solution, history = bicgstabl(hemholtz, seed, 2; log=true, max_mv_products=1000)
 
     @show history
 
-    # solution = hemholtz * analytic
+    application = hemholtz * seed
 
     writer = MeshWriter{2, Float64}()
     attrib!(writer, NodeAttribute())
     attrib!(writer, ScalarAttribute("seed", seed))
-    attrib!(writer, ScalarAttribute("analytic", analytic))
     attrib!(writer, ScalarAttribute("solution", solution))
-    attrib!(writer, ScalarAttribute("error", solution .- analytic))
+    attrib!(writer, ScalarAttribute("application", application))
+    attrib!(writer, ScalarAttribute("error", application .- analytic))
     write_vtu(writer, mesh, dofs, "output")
 end
 

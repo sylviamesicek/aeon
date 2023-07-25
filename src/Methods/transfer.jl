@@ -4,7 +4,7 @@
 
 export transfer_to_block!
 
-function transfer_to_block!(f::F, block::AbstractBlock{N, T, O}, basis::AbstractBasis{T}, mesh::Mesh{N, T}, dofs::DoFHandler{N, T}, level::Int, node::Int, values::AbstractVector{T}) where {N, T, O, F <: Function}
+function transfer_to_block!(f::F, block::AbstractBlock{N, T, O}, basis::AbstractBasis{T}, mesh::Mesh{N, T}, dofs::DoFManager{N, T}, level::Int, node::Int, values::AbstractVector{T}) where {N, T, O, F <: Function}
     cells = blockcells(block)
     dofs_per_block = prod(cells)
 
@@ -46,7 +46,8 @@ function transfer_to_block!(f::F, block::AbstractBlock{N, T, O}, basis::Abstract
             value = block_interior_prolong(block, Val(O), point, basis)
             neighbor_value = block_interior_prolong(neighbor_view, Val(O), neighbor_point, basis)
 
-            return diritchlet(T(1), value)
+            return diritchlet(T(1), (value + neighbor_value)/2)
+            # return diritchlet(T(1), value)
         else
             # Neighbor is more refined
             return diritchlet(T(1))

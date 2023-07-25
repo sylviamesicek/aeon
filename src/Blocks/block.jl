@@ -75,7 +75,7 @@ Computes the gradient at a cell on a domain.
         cells = blockcells(block)
 
         grad = Base.@ntuple $N i -> begin
-            stencils = Base.@ntuple $N dim -> ifelse(i == dim, value_stencil(basis, Val(O), Val(1)), value_stencil(basis, Val(O), Val(0)))
+            stencils = Base.@ntuple $N dim -> ifelse(i == dim, Stencil(basis, ValueOperator{O, 1}()), Stencil(basis, ValueOperator{O, 0}()))
             block_stencil_product(block, cell, stencils) * cells[i]
         end
 
@@ -94,10 +94,10 @@ Computes the hessian at a cell on a domain.
             i = (index - 1) ÷ $N + 1
             j = (index - 1) % $N + 1
             if i == j
-                stencils = Base.@ntuple $N dim -> ifelse(i == dim, value_stencil(basis, Val(O), Val(2)), value_stencil(basis, Val(O), Val(0)))
+                stencils = Base.@ntuple $N dim -> ifelse(i == dim, Stencil(basis, ValueOperator{O, 2}()), Stencil(basis, ValueOperator{O, 0}()))
                 result = block_stencil_product(block, cell, stencils) * cells[i]^2
             else
-                stencils = Base.@ntuple $N dim -> ifelse(i == dim || j == dim, value_stencil(basis, Val(O), Val(1)), value_stencil(basis, Val(O), Val(0)))
+                stencils = Base.@ntuple $N dim -> ifelse(i == dim || j == dim, Stencil(basis, ValueOperator{O, 1}()), Stencil(basis, ValueOperator{O, 0}()))
                 result = block_stencil_product(block, cell, stencils) * cells[i] * cells[j]
             end
 
@@ -123,7 +123,7 @@ end
         cells = blockcells(block)
 
         grad = Base.@ntuple $N i -> begin
-            stencils = Base.@ntuple $N dim -> ifelse(i == dim, value_stencil(basis, Val(O), Val(1)), value_stencil(basis, Val(O), Val(0)))
+            stencils = Base.@ntuple $N dim -> ifelse(i == dim, Stencil(basis, ValueOperator{O, 1}()), Stencil(basis, ValueOperator{O, 0}()))
             stencil_diagonal(stencils) * cells[i]
         end
 
@@ -139,10 +139,10 @@ end
             i = (index - 1) ÷ $N + 1
             j = (index - 1) % $N + 1
             if i == j
-                stencils = Base.@ntuple $N dim -> ifelse(i == dim, value_stencil(basis, Val(O), Val(2)), value_stencil(basis, Val(O), Val(0)))
+                stencils = Base.@ntuple $N dim -> ifelse(i == dim, Stencil(basis, ValueOperator{O, 2}()), Stencil(basis, ValueOperator{O, 0}()))
                 result = stencil_diagonal(stencils) * cells[i]^2
             else
-                stencils = Base.@ntuple $N dim -> ifelse(i == dim || j == dim, value_stencil(basis, Val(O), Val(1)), value_stencil(basis, Val(O), Val(0)))
+                stencils = Base.@ntuple $N dim -> ifelse(i == dim || j == dim, Stencil(basis, ValueOperator{O, 1}()), Stencil(basis, ValueOperator{O, 0}()))
                 result = stencil_diagonal(stencils) * cells[i] * cells[j]
             end
 

@@ -217,29 +217,14 @@ struct BoundaryCondition{T}
 end
 
 """
-Homogenous diritchlet boundary condition.
-"""
-diritchlet(value::T) where T = diritchlet(value, zero(T))
-
-"""
 Inhomogenous diritchlet boundary condition.
 """
 diritchlet(value::T, rhs::T) where T = BoundaryCondition(value, zero(T), rhs)
 
 """
-Homogenous nuemann boundary condition.
-"""
-nuemann(normal::T) where T = nuemann(normal, zero(T))
-
-"""
 Inhomogenous nuemann boundary condition.
 """
 nuemann(normal::T, rhs::T) where T = BoundaryCondition(zero(T), normal, rhs)
-
-"""
-Homogenous robin boundary condition.
-"""
-robin(value::T, normal::T) where T = robin(value, normal, zero(T))
 
 """
 Inhomogenous robin boundary condition.
@@ -274,3 +259,4 @@ function block_boundary_conditions!(f::F, block::AbstractBlock{N, T, O}, basis::
         block_boundary_condition!(block, boundary, basis, α, β, c)
     end
 end
+

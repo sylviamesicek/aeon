@@ -59,22 +59,22 @@ function block_prolong(block::AbstractBlock{N, T, O}, point::NTuple{N, PointInde
 end
 
 function _point_to_prolong_stencil(::CellIndex, basis::AbstractBasis{T}, ::Val{O}) where {T, O}
-    cell_value_stencil(basis, Val(0), Val(0))
+    Stencil(basis, CellValue{0, 0}())
 end
 
 function _point_to_prolong_stencil(index::VertexIndex, basis::AbstractBasis{T}, ::Val{O}) where {T, O}
     if vertex_side(index)
-        return vertex_value_stencil(basis, Val(O + 1), Val(O + 1), Val(true))
+        return Stencil(basis, VertexValue{O + 1, O + 1, true}())
     else
-        return vertex_value_stencil(basis, Val(O + 1), Val(O + 1), Val(false))
+        return Stencil(basis, VertexValue{O + 1, O + 1, false}())
     end
 end
 
 function _point_to_prolong_stencil(index::SubCellIndex, basis::AbstractBasis{T}, ::Val{O}) where {T, O}
     if subcell_side(index)
-        return subcell_value_stencil(basis, Val(O), Val(O), Val(true))
+        return Stencil(basis, SubCellValue{O, O, true}())
     else
-        return subcell_value_stencil(basis, Val(O), Val(O), Val(false))
+        return Stencil(basis, SubCellValue{O, O, false}())
     end
 end
 
@@ -95,7 +95,7 @@ function block_interior_prolong(block::AbstractBlock{N, T}, ::Val{O},  point::NT
 end
 
 function _point_to_prolong_stencil_interior(::CellIndex, ::Int, basis::AbstractBasis{T}, ::Val{O}) where {T, O}
-    cell_value_stencil(basis, Val(0), Val(0))
+    Stencil(basis, CellValue{0, 0}())
 end
 
 @generated function _point_to_prolong_stencil_interior(index::VertexIndex, total::Int, basis::AbstractBasis{T}, ::Val{O}) where {T, O}
@@ -106,12 +106,12 @@ end
         # Left side
         if leftcells ≤ $O
             if leftcells == 0
-                return vertex_value_stencil(basis, Val(0), Val($(2O + 1)), Val(true))
+                return Stencil(basis, VertexValue{O, $(2O + 1), true}())
             end
 
             Base.@nexprs $O i -> begin
                 if leftcells == i
-                    return vertex_value_stencil(basis, Val(i), Val($(2O + 1)), Val(false))
+                    return Stencil(basis, VertexValue{i, $(2O + 1), false}())
                 end
             end
         end
@@ -119,17 +119,17 @@ end
         # Right side
         if rightcells ≤ $O
             if rightcells == 0
-                return vertex_value_stencil(basis, Val($(2O + 1)), Val(0), Val(false))
+                return Stencil(basis, VertexValue{$(2O + 1), 0, false}())
             end
 
             Base.@nexprs $O i -> begin
                 if rightcells == i
-                    return vertex_value_stencil(basis, Val($(2O + 1)), Val(i), Val(false))
+                    return Stencil(basis, VertexValue{$(2O + 1), i, false}())
                 end
             end
         end
 
-        return vertex_value_stencil(basis, Val($(O + 1)), Val($(O + 1)), Val(false))
+        return Stencil(basis, VertexValue{$(O + 1), $(O + 1), false}())
     end
 end
 
@@ -162,6 +162,7 @@ end
     end
 
     quote 
+        error("Fix subcell interior prolongation")
         if subcell_side(index)
             $(side_expr(true))
         else
