@@ -77,12 +77,29 @@ end
 ########################
 
 """
-A set of Lagrange polynomial basis functions. The computed coefficients can almost always be
+A set of Lagrange polynomial basis functions. The computed coefficients can always be
 inlined into their respective functions.
 """
 struct LagrangeBasis{T} <: AbstractBasis{T} end
 
-# Helpers
+# Values 
+Stencil(::LagrangeBasis{T}, ::CellValue{L, R}) where {T, L, R} = lagrange_cell_stencil(lagrange_value, Val(T), Val(L), Val(R), 0//1)
+Stencil(::LagrangeBasis{T}, ::SubCellValue{L, R, S}) where {T, L, R, S} = lagrange_cell_stencil(lagrange_value, Val(T), Val(L), Val(R), ifelse(S, 1//2, -1//2))
+Stencil(::LagrangeBasis{T}, ::VertexValue{L, R, S}) where {T, L, R, S} = lagrange_vertex_stencil(lagrange_value, Val(T), Val(L), Val(R), Val(S))
+
+# Derivative
+Stencil(::LagrangeBasis{T}, ::CellDerivative{L, R}) where {T, L, R} = lagrange_cell_stencil(lagrange_derivative, Val(T), Val(L), Val(R), 0//1)
+Stencil(::LagrangeBasis{T}, ::SubCellDerivative{L, R, S}) where {T, L, R, S} = lagrange_cell_stencil(lagrange_derivative, Val(T), Val(L), Val(R), ifelse(S, 1//2, -1//2))
+Stencil(::LagrangeBasis{T}, ::VertexDerivative{L, R, S}) where {T, L, R, S} = lagrange_vertex_stencil(lagrange_derivative, Val(T), Val(L), Val(R), Val(S))
+
+# Centered Covariant derivatives
+Stencil(::LagrangeBasis{T}, ::CovariantDerivative{O, 0}) where {T, O} = lagrange_cell_stencil(lagrange_value, Val(T), Val(0), Val(0), 0//1)
+Stencil(::LagrangeBasis{T}, ::CovariantDerivative{O, 1}) where {T, O} = lagrange_cell_stencil(lagrange_derivative, Val(T), Val(O), Val(O), 0//1)
+Stencil(::LagrangeBasis{T}, ::CovariantDerivative{O, 2}) where {T, O} = lagrange_cell_stencil(lagrange_derivative_2, Val(T), Val(O), Val(O), 0//1)
+
+########################
+## Helpers #############
+########################
 
 """
 Builds the cell-centered lagrange stencil approximating the given operator at a point, with `L` left supports
@@ -106,43 +123,4 @@ function lagrange_vertex_stencil(f::Function, ::Val{T}, ::Val{L}, ::Val{R}, ::Va
     left = map(T, ntuple(i -> stencil[L + S - i], Val(L - !S)))
     right = map(T, ntuple(i -> stencil[L + S + i], Val(R - S)))
     Stencil(left, T(stencil[L + S]), right)
-end
-
-# Values 
-function Stencil(::LagrangeBasis{T}, ::CellValue{L, R}) where {T, L, R}
-    lagrange_cell_stencil(lagrange_value, Val(T), Val(L), Val(R), 0//1)
-end
-
-function Stencil(::LagrangeBasis{T}, ::SubCellValue{L, R, S}) where {T, L, R, S}
-    lagrange_cell_stencil(lagrange_value, Val(T), Val(L), Val(R), ifelse(S, 1//2, -1//2))
-end
-
-function Stencil(::LagrangeBasis{T}, ::VertexValue{L, R, S}) where {T, L, R, S}
-    lagrange_vertex_stencil(lagrange_value, Val(T), Val(L), Val(R), Val(S))
-end
-
-# Derivative
-function Stencil(::LagrangeBasis{T}, ::CellDerivative{L, R}) where {T, L, R} 
-    lagrange_cell_stencil(lagrange_derivative, Val(T), Val(L), Val(R), 0//1)
-end
-
-function Stencil(::LagrangeBasis{T}, ::SubCellDerivative{L, R, S}) where {S, T, L, R}
-    lagrange_cell_stencil(lagrange_derivative, Val(T), Val(L), Val(R), ifelse(S, 1//2, -1//2))
-end
-
-function Stencil(::LagrangeBasis{T}, ::VertexDerivative{L, R, S}) where {T, L, R, S} 
-    lagrange_vertex_stencil(lagrange_derivative, Val(T), Val(L), Val(R), Val(S))
-end
-
-# General cell centered stencils
-function Stencil(::LagrangeBasis{T}, ::ValueOperator{O, 0}) where {T, O}
-    lagrange_cell_stencil(lagrange_value, Val(T), Val(O), Val(O), 0//1)
-end
-
-function Stencil(::LagrangeBasis{T}, ::ValueOperator{O, 1}) where {T, O}
-    lagrange_cell_stencil(lagrange_derivative, Val(T), Val(O), Val(O), 0//1)
-end
-
-function Stencil(::LagrangeBasis{T}, ::ValueOperator{O, 2}) where {T, O}
-    lagrange_cell_stencil(lagrange_derivative_2, Val(T), Val(O), Val(O), 0//1)
 end

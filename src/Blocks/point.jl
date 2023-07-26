@@ -144,7 +144,7 @@ end
         if leftcells < $O
             Base.@nexprs $O i -> begin
                 if leftcells == i - 1
-                    return subcell_value_stencil(basis, Val(i - 1), Val($(2O)), Val($side))
+                    return subcell_value_stencil(basis, Val(i - 1), Val($(2O + 1)), Val($side))
                 end
             end
         end
@@ -153,7 +153,7 @@ end
         if rightcells < $O
             Base.@nexprs $O i -> begin
                 if rightcells == i - 1
-                    return subcell_value_stencil(basis, Val($(2O), Val(i - 1)), Val($side))
+                    return subcell_value_stencil(basis, Val($(2O + 1), Val(i - 1)), Val($side))
                 end
             end
         end
@@ -162,7 +162,6 @@ end
     end
 
     quote 
-        error("Fix subcell interior prolongation")
         if subcell_side(index)
             $(side_expr(true))
         else

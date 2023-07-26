@@ -14,33 +14,25 @@ boundary_edges(::BoundaryCell{N, I}) where {N, I} = I
 boundary_edge(::BoundaryCell{N, I}, axis::Int) where {N, I} = I[axis]
 
 ############################
-## Boundary ################
+## Boundary Iterators ######
 ############################
 
 export block_surfaces, block_boundary
+
 """
-Iterates the subsurfaces of an `N`- dimensional block. The argument `Val(I)` is passed to `f`, where
+Iterates the buffer regions of an `N`- dimensional block. The argument `Val(I)` is passed to `f`, where
 `I` is an N-tuple of integers. 
 """
-@generated function block_surfaces(f::F, ::AbstractBlock{N, T, O}) where {N, T, O, F <: Function}
-    # For a given i, find all subdomains with that number of edges.
-    subdomain_exprs = i -> begin
-        sub_exprs = Expr[]
-        
-        for subdomain in CartesianIndices(ntuple(_ -> 3, Val(N)))
-            if sum(subdomain.I .== 1 .|| subdomain.I .== 3) == i
-                push!(sub_exprs, :(f(Val($(subdomain.I .- 2)))))
-            end
-        end
-
-        sub_exprs
-    end
-
-    # Build the final set of exprs
+@generated function block_buffers(f::F, ::AbstractBlock{N, T, O}) where {N, T, O, F <: Function}
     exprs = Expr[]
 
-    for i in 1:O
-        append!(exprs, subdomain_exprs(i))
+    for i in 1:N
+        # For a given i, find all buffer regions with that number of edges.
+        for subdomain in CartesianIndices(ntuple(_ -> 3, Val(N)))
+            if sum(subdomain.I .== 1 .|| subdomain.I .== 3) == i
+                push!(exprs, :(f(Val($(subdomain.I .- 2)))))
+            end
+        end
     end
 
     quote
@@ -52,36 +44,36 @@ end
 Calls `f` for each boundary cell.
 """
 function block_boundary(f::F, block::AbstractBlock{N, T, O}) where {N, T, O, F <: Function}
-    block_surfaces(i -> _block_boundary(f, block, i), block)
+    block_buffers(i -> _block_boundary(f, block, i), block)
 end
 
 @generated function _block_boundary(f::F, block::AbstractBlock{N, T, O}, ::Val{I}) where {N, T, O, I, F <: Function}
-    facecells_exprs = ntuple(i -> ifelse(I[i] == 0, :(1:cells[$i]), :(1:1)), Val(N))
-    facecell_exprs = ntuple(Val(N)) do i
+    cell_indices_expr = ntuple(i -> ifelse(I[i] == 0, :(1:cells[$i]), :(1:1)), Val(N))
+    cell_expr = ntuple(Val(N)) do i
         if I[i] == 1
             :(cells[$i])
         elseif I[i] == -1
             :(1)
         else
-            :(facecell[$i])
+            :(boundarycell[$i])
         end
     end
 
     quote
         cells = blockcells(block)
 
-        for facecell in CartesianIndices(tuple($(facecells_exprs...)))
-            cell = CartesianIndex(tuple($(facecell_exprs...)))
+        for boundarycell in CartesianIndices(tuple($(cell_indices_expr...)))
+            cell = CartesianIndex(tuple($(cell_expr...)))
             f(BoundaryCell{$I}(cell))
         end
     end
 end
 
 #################################
-## Specific Boundary Conditions #
+## Physical Boundary ############
 #################################
 
-export block_boundary_condition!
+export block_physical_boundary!
 
 function _value_stencil_exprs(O, exterior::NTuple{N, Int}, I::NTuple{N, Int}) where N
     ntuple(Val(N)) do i
@@ -131,7 +123,7 @@ function _stencil_edge_coefs_expr(I::NTuple{N, Int}, stencil::Symbol) where N
     :(*($(coefs...)))
 end
 
-@generated function block_boundary_condition!(block::AbstractBlock{N, T, O}, boundary::BoundaryCell{N, I}, basis::AbstractBasis{T}, α::T, β::SVector{N, T}, c::T) where {N, T, O, I}
+@generated function block_physical_boundary!(block::AbstractBlock{N, T, O}, boundary::BoundaryCell{N, I}, basis::AbstractBasis{T}, α::T, β::SVector{N, T}, c::T) where {N, T, O, I}
     exterior_cells = ntuple(i -> ifelse(I[i] ≠ 0, O, 1), Val(N))
     exterior_exprs = Expr[]
 
@@ -205,7 +197,7 @@ end
 ##############################
 
 export BoundaryCondition, diritchlet, nuemann, robin
-export block_boundary_conditions!
+export block_physical_boundaries!
 
 """
 Represents an arbitray robin boundary condition, including a value coefficient, a normal coefficient, and a right-hand-side.
@@ -234,12 +226,12 @@ robin(value::T, normal::T, rhs::T) where T = BoundaryCondition(value, normal, rh
 """
 Accumulates boundary condition using an identity transform for the normal vector
 """
-block_boundary_conditions!(f::F, block::AbstractBlock{N, T}, basis::AbstractBasis{T}) where {N, T, F<: Function} = block_boundary_conditions!(f, block, basis, IdentityTransform{N, T}())
+block_physical_boundaries!(f::F, block::AbstractBlock{N, T}, basis::AbstractBasis{T}) where {N, T, F<: Function} = block_physical_boundaries!(f, block, basis, IdentityTransform{N, T}())
 
 """
 Accumulates boundary conditions for each face of a block, and fills the corresponding ghost cells.
 """
-function block_boundary_conditions!(f::F, block::AbstractBlock{N, T, O}, basis::AbstractBasis{T}, block_to_global::Transform{N, T}) where {N, T, O, F <: Function}
+function block_physical_boundaries!(f::F, block::AbstractBlock{N, T, O}, basis::AbstractBasis{T}, block_to_global::Transform{N, T}) where {N, T, O, F <: Function}
     block_boundary(block) do boundary
         lpos = cellposition(block, boundary.cell)
         j = jacobian(block_to_global, lpos)
@@ -256,7 +248,7 @@ function block_boundary_conditions!(f::F, block::AbstractBlock{N, T, O}, basis::
         β = j * SVector(map(v -> v.normal, values))
         c = sum(map(v -> v.rhs, values))
 
-        block_boundary_condition!(block, boundary, basis, α, β, c)
+        block_physical_boundary!(block, boundary, basis, α, β, c)
     end
 end
 

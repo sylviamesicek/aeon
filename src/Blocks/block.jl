@@ -6,6 +6,9 @@ export AbstractBlock
 export blocktotal, blockcells, blockvalue, setblockvalue!
 export cellindices, cellwidths, cellposition
 
+"""
+Represents an abstract block of function data including a buffer region with width `O`.
+"""
 abstract type AbstractBlock{N, T, O} end
 
 Base.size(block::AbstractBlock) = error("Unimplemented")
@@ -29,7 +32,7 @@ cellposition(block::AbstractBlock{N, T}, cell::CartesianIndex{N}) where {N, T} =
 export block_stencil_product
 
 """
-Apply the tensor product of a set of stencils at a point on a numerical domain
+Apply the tensor product of a set of stencils at a cell on an `AbstractBlock`.
 """
 function block_stencil_product(block::AbstractBlock{N, T}, cell::CartesianIndex{N}, stencils::NTuple{N, Stencil{T}}) where {N, T}
     _block_stencil_product(block, cell, stencils)
@@ -58,98 +61,6 @@ end
         end
 
         result
-    end
-end
-
-#######################
-## Derivatives ########
-#######################
-
-export blockgradient, blockhessian
-
-"""
-Computes the gradient at a cell on a domain.
-"""
-@generated function blockgradient(block::AbstractBlock{N, T, O}, cell::CartesianIndex{N}, basis::AbstractBasis{T}) where {N, T, O}
-    quote 
-        cells = blockcells(block)
-
-        grad = Base.@ntuple $N i -> begin
-            stencils = Base.@ntuple $N dim -> ifelse(i == dim, Stencil(basis, ValueOperator{O, 1}()), Stencil(basis, ValueOperator{O, 0}()))
-            block_stencil_product(block, cell, stencils) * cells[i]
-        end
-
-        SVector{$N, $T}(grad) 
-    end
-end
-
-"""
-Computes the hessian at a cell on a domain.
-"""
-@generated function blockhessian(block::AbstractBlock{N, T, O}, cell::CartesianIndex{N}, basis::AbstractBasis{T}) where {N, T, O}
-    quote
-        cells = blockcells(block)
-
-        hess = Base.@ntuple $(N*N) index -> begin
-            i = (index - 1) ÷ $N + 1
-            j = (index - 1) % $N + 1
-            if i == j
-                stencils = Base.@ntuple $N dim -> ifelse(i == dim, Stencil(basis, ValueOperator{O, 2}()), Stencil(basis, ValueOperator{O, 0}()))
-                result = block_stencil_product(block, cell, stencils) * cells[i]^2
-            else
-                stencils = Base.@ntuple $N dim -> ifelse(i == dim || j == dim, Stencil(basis, ValueOperator{O, 1}()), Stencil(basis, ValueOperator{O, 0}()))
-                result = block_stencil_product(block, cell, stencils) * cells[i] * cells[j]
-            end
-
-            result
-        end
-        
-        SMatrix{$N, $N, $T}(hess)
-    end
-end
-
-#######################
-## Diagonals ##########
-#######################
-
-export value_diagonal, gradient_diagonal, hessian_diagonal
-
-function value_diagonal(::Val{N}, ::AbstractBasis{T}) where {N, T}
-    one(T)
-end
-
-@generated function gradient_diagonal(::Val{N}, basis::AbstractBasis{T}) where {N, T}
-    quote 
-        cells = blockcells(block)
-
-        grad = Base.@ntuple $N i -> begin
-            stencils = Base.@ntuple $N dim -> ifelse(i == dim, Stencil(basis, ValueOperator{O, 1}()), Stencil(basis, ValueOperator{O, 0}()))
-            stencil_diagonal(stencils) * cells[i]
-        end
-
-        SVector{$N, $T}(grad) 
-    end
-end
-
-@generated function hessian_diagonal(::Val{N}, basis::AbstractBasis{T}) where {N, T}
-    quote
-        cells = blockcells(block)
-
-        hess = Base.@ntuple $(N*N) index -> begin
-            i = (index - 1) ÷ $N + 1
-            j = (index - 1) % $N + 1
-            if i == j
-                stencils = Base.@ntuple $N dim -> ifelse(i == dim, Stencil(basis, ValueOperator{O, 2}()), Stencil(basis, ValueOperator{O, 0}()))
-                result = stencil_diagonal(stencils) * cells[i]^2
-            else
-                stencils = Base.@ntuple $N dim -> ifelse(i == dim || j == dim, Stencil(basis, ValueOperator{O, 1}()), Stencil(basis, ValueOperator{O, 0}()))
-                result = stencil_diagonal(stencils) * cells[i] * cells[j]
-            end
-
-            result
-        end
-        
-        SMatrix{$N, $N, $T}(hess)
     end
 end
 
@@ -183,6 +94,10 @@ end
 
 export ArrayBlock
 
+"""
+A block backed by a multidimensional `Array`. This should provide the fastest (cpu) access to resources, 
+and is prefered for complex computations.
+"""
 struct ArrayBlock{N, T, O} <: AbstractBlock{N, T, O}
     values::Array{T, N}
 
@@ -203,9 +118,16 @@ Base.setindex!(block::ArrayBlock{N, T}, v::T, i::CartesianIndex{N}) where {N, T}
 
 export ViewBlock
 
+"""
+A block backed by an arbitrary abstract array. This allows blocks to be built from views into linear arrays,
+which is the standard way for functional data to be stored.
+"""
 struct ViewBlock{N, T, O, A} <: AbstractBlock{N, T, O}
     values::A
 
+    """
+    Constructs a ViewBlock from an abstract array.
+    """
     ViewBlock{O}(values::AbstractArray{T, N}) where {N, T, O} = new{N, T, O, typeof(values)}(values)
 end
 
@@ -218,4 +140,7 @@ Base.setindex!(block::ViewBlock{N, T}, v::T, i::CartesianIndex{N}) where {N, T} 
 ## Helpers #################
 ############################
 
+"""
+Helper function for extracting the support widths of a stencil type.
+"""
 _stencil_supports(::Type{Stencil{T, L, R}}) where {T, L, R} = (L, R)

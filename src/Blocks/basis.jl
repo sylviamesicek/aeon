@@ -2,10 +2,12 @@
 ## Stencils ################
 ############################
 
-export AbstractStencil, CellValue, VertexValue, SubCellValue, CellDerivative, VertexDerivative, SubCellDerivative, ValueOperator
+export AbstractStencil, CellValue, VertexValue, SubCellValue, CellDerivative, VertexDerivative, SubCellDerivative, CovariantDerivative
 export Stencil, stencil_diagonal
 
-
+"""
+A stencil defined independently of basis.
+"""
 abstract type AbstractStencil{L, R} end
 
 struct CellValue{L, R} <: AbstractStencil{L, R} end
@@ -16,7 +18,7 @@ struct CellDerivative{L, R} <: AbstractStencil{L, R} end
 struct VertexDerivative{L, R, S} <: AbstractStencil{L, R} end
 struct SubCellDerivative{L, R, S} <: AbstractStencil{L, R} end
 
-struct ValueOperator{O, R} <: AbstractStencil{O, O} end
+struct CovariantDerivative{O, R} <: AbstractStencil{O, O} end
 
 
 """
@@ -27,6 +29,9 @@ struct Stencil{T, L, R}
     center::T
     right::NTuple{R, T}
 
+    """
+    Builds a concrete stencil from a set of coefficients.
+    """
     Stencil(left::NTuple{L, T}, center::T, right::NTuple{R, T}) where {T, L, R} = new{T, L, R}(left, center, right)
 end
 
@@ -38,11 +43,9 @@ Base.:(-)(stencil::Stencil) = Stencil(.-stencil.left, -stencil.center, .-stencil
 ###############################
 
 """
-Computes the diagnol element of a stencil product.
+Computes the diagonal element of a stencil product.
 """
-function stencil_diagonal(stencils::NTuple{N, Stencil{T}}) where {N, T}
-    prod(map(s -> s.center, stencils))
-end
+stencil_diagonal(stencils::NTuple{N, Stencil{T}}) where {N, T} = prod(map(s -> s.center, stencils))
 
 ###############################
 ## Basis ######################
@@ -59,3 +62,27 @@ abstract type AbstractBasis{T} end
 Returns the stencil which applies the operator in the given basis.
 """
 Stencil(basis::AbstractBasis, operator::AbstractStencil) = error("Stencil is unimplemented for $(typeof(basis)) and $(typeof(operator))")
+
+###############################
+## Helpers ####################
+###############################
+
+export value_stencils, gradient_stencils, hessian_stencils
+
+@generated function value_stencils(basis::AbstractBasis, ::Val{N}) where {N}
+    :(Base.@ntuple $N dim -> Stencil(basis, CovariantDerivative{O, 0}()))
+end
+
+@generated function gradient_stencils(basis::AbstractBasis, ::Val{N}, i) where {N}
+    :(Base.@ntuple $N dim -> ifelse(i == dim, Stencil(basis, CovariantDerivative{O, 1}()), Stencil(basis, CovariantDerivative{O, 0}())))
+end
+
+@generated function hessian_stencils(basis::AbstractBasis, ::Val{N}, i, j) where {N}
+    quote
+        if i == j
+            Base.@ntuple $N dim -> ifelse(i == dim, Stencil(basis, CovariantDerivative{O, 2}()), Stencil(basis, CovariantDerivative{O, 0}()))
+        else
+            Base.@ntuple $N dim -> ifelse(i == dim || j == dim, Stencil(basis, CovariantDerivative{O, 1}()), Stencil(basis, CovariantDerivative{O, 0}()))
+        end
+    end
+end

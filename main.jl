@@ -220,59 +220,6 @@ function operator_restrict!(y::AbstractVector{T}, oper::AbstractOperator{T}, x::
         # Restrict to subcell of parent
         error("Restriction to node parents is unimplemented")
     end
-
-    for node in eachnode(oper.mesh, maxlevel)
-        
-    end
-
-    foreachleafnode(mesh, maxlevel) do level, node
-        parent = nodeparent(oper.mesh, node, level)
-
-        if parent == 0
-            # Root
-            return
-        end
-
-        offset = nodeoffset(oper.dofs, level, node)
-        transform = nodetransform(oper.mesh, level, node)
-        block = oper.blocks[level]
-        
-        if level < maxlevel - 1
-            # Fill with identity
-            for (i, _) in enumerate(cellindices(block))
-                y[offset + i] = x[offset + i]
-            end
-            # Finish
-            return
-        end
-
-        
-
-        # Transfer data to block
-        transfer_to_block!(block, basis, oper.mesh, oper.dofs, level, node, x) do boundary, axis
-            diritchlet(1.0, 0.0)
-        end
-
-        
-
-        if level ≤ baselevels(oper.mesh)
-            offset = nodeoff
-        else
-
-        end
-
-        for (i, cell) in enumerate(cellindices(block))
-            lpos = cellposition(block, cell)
-            j = inv(jacobian(transform, lpos))
-
-            lhess = blockhessian(oper.block, cell, basis)
-            ghess = j' * lhess * j
-
-            glap = ghess[1, 1] + ghess[2, 2]
-
-            y[offset + i] = -glap
-        end
-    end
 end
 
 function operator_prolong!(y::AbstractVector{T}, oper::AbstractOperator{T}, x::AbstractVector{T}, maxlevel::Int) where T

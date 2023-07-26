@@ -1,8 +1,8 @@
 #######################
-## Mesh ###############
+## Level ##############
 #######################
 
-export Level, Mesh, nodecells
+export Level
 
 """
 A single level of a mesh.
@@ -23,8 +23,19 @@ struct Level{N, T, F}
     flags::Vector{Bool}
 end
 
+function Level(bounds::HyperBox{N, T}, parent::Int) where {N, T}
+    neighbors = nfaces(f -> -1, Val(N))
+    push!(levels, Level{N, T, 2N}([bounds], [parent], [-1], [neighbors], [false]))
+end
+
 Base.length(level::Level) = length(level.bounds)
 Base.eachindex(level::Level) = eachindex(level.bounds)
+
+###########################
+## Mesh ###################
+###########################
+
+export Mesh, nodecells
 
 """
 A `Mesh` based on a quadtree.
@@ -34,20 +45,16 @@ struct Mesh{N, T, F}
     refinement::Int
     base::Int
 
-    function Mesh(bounds::HyperBox{N, T}, refinement::Int, base::Int = 3) where {N, T}
-        @assert refinement ≥ base
+    function Mesh(bounds::HyperBox{N, T}, refinement::Int, base::Int) where {N, T}
+        @assert refinement > base
 
-        levels = Level{N, T, 2N}[]
+        levels = [Level(bounds, 0)]
 
-        neighbors = nfaces(f -> -1, Val(N))
-
-        for l in base:refinement
-            if l > base
-                levels[end].children[begin] = 0
-                push!(levels, Level{N, T, 2N}([bounds], [1], [-1], [neighbors], [false]))
-            else
-                push!(levels, Level{N, T, 2N}([bounds], [0], [-1], [neighbors], [false]))
-            end
+        # Add base levels
+        for _ in 1:base
+            # Update previous child
+            levels[end].children[begin] = 0
+            push!(levels, Level(bounds, 1))
         end
 
         new{N, T, 2N}(levels, refinement, base)
@@ -71,8 +78,7 @@ end
 
 @generated function nodecells(mesh::Mesh{N}, level::Int) where N
     quote
-        l = mesh.refinement - mesh.base + 1
-        v = 2^(mesh.refinement + min(0, level - l))
+        v = 2^(mesh.refinement + min(0, level - mesh.base - 1))
         Base.@ntuple $N i -> v
     end
 end
@@ -86,13 +92,6 @@ function Base.foreach(f::Function, mesh::Mesh)
             f(level, node)
         end
     end
-end
-
-"""
-Returns the number of levels with only one node.
-"""
-function baselevels(mesh::Mesh)
-    mesh.refinement - mesh.base + 1
 end
 
 ###############################
@@ -122,6 +121,10 @@ function eachleafnode(mesh::Mesh, maxlevel::Int = length(mesh))
     end
 end
 
+"""
+Calls the given function once for each leaf node of the mesh, passing in the arguments
+of level and node index.
+"""
 function foreachleafnode(f::F, mesh::Mesh, maxlevel::Int = length(mesh)) where {F <: Function}
     for level in 1:(maxlevel - 1)
         for node in eachindex(mesh.levels[level])
@@ -173,7 +176,6 @@ Blocks.cellindices(mesh::Mesh, level::Int) = CartesianIndices(nodecells(mesh, le
 Blocks.cellwidths(mesh::Mesh{N, T}, level::Int) where {N, T} = SVector{N, T}(1 ./ nodecells(mesh, level::Int))
 Blocks.cellposition(mesh::Mesh{N, T}, cell::CartesianIndex{N}, level::Int) where {N, T} = SVector{N, T}((cell.I .- T(1//2)) ./ nodecells(mesh, level))
 
-
 ###############################
 ## Refinement #################
 ###############################
@@ -181,18 +183,28 @@ Blocks.cellposition(mesh::Mesh{N, T}, cell::CartesianIndex{N}, level::Int) where
 export mark_refine!, mark_refine_global!
 export prepare_refinement!, execute_refinement!, prepare_and_execute_refinement!
 
+"""
+Flags a node for refinement (assuming it has no children).
+"""
 function mark_refine!(mesh::Mesh, level::Int, node::Int)
     if mesh.levels[level].children[node] == -1
         mesh.levels[level].flags[node] = true
     end
 end
 
+"""
+Flags every leaf node for refinement.
+"""
 function mark_refine_global!(mesh::Mesh)
     foreach(mesh) do level, node
         mark_refine!(mesh, level, node)
     end
 end
 
+"""
+Preprocesses the nodes of mesh, and flags additional nodes to preserve
+grading.
+"""
 function prepare_refinement!(mesh::Mesh{N}) where N
     smooth = false
 
@@ -226,6 +238,9 @@ function prepare_refinement!(mesh::Mesh{N}) where N
     end
 end
 
+"""
+Refines a mesh based on set refinement flags.
+"""
 function execute_refinement!(mesh::Mesh{N, T, F}) where {N, T, F}
     # Determine if we have to add a new level to the mesh
     for node in eachnode(mesh, length(mesh))
@@ -349,6 +364,9 @@ function execute_refinement!(mesh::Mesh{N, T, F}) where {N, T, F}
     end
 end
 
+"""
+Prepares and executes the refinement routine. 
+"""
 function prepare_and_execute_refinement!(mesh::Mesh)
     prepare_refinement!(mesh)
     execute_refinement!(mesh)

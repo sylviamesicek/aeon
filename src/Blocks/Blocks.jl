@@ -18,6 +18,8 @@ include("lagrange.jl")
 
 # Block
 include("block.jl")
+include("derivative.jl")
+
 include("boundary.jl")
 include("point.jl")
 

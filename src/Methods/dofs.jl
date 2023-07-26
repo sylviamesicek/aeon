@@ -11,7 +11,6 @@ Stores per level dof offsets for a mesh.
 """
 struct DoFManager{N, T} 
     levels::Vector{DoFLevel{N, T}}
-    # DoFHandler(levels::Vector{DoFLevel{N, T}}, refinement::Int, coarserefinement) where {N, T} = new{N, T}(levels, refinement)
 end
 
 function DoFManager(mesh::Mesh{N, T}) where {N, T}
@@ -69,14 +68,20 @@ dofstotal(dofs::DoFManager) = leveltotal(dofs, length(dofs.levels))
 
 export project, project!
 
+"""
+The same as `project!` but allocates an appropriately sized vector. 
+"""
 function project(f::Function, mesh::Mesh{N, T}, dofs::DoFManager{N, T}) where {N, T} 
     total = dofstotal(dofs)
     v = Vector{T}(undef, total)
-    project!(f, mesh, dofs, v)
+    project!(f, v, mesh, dofs)
     return v
 end
 
-function project!(f::Function, mesh::Mesh{N, T}, dofs::DoFManager{N, T}, v::AbstractVector{T}) where {N, T}
+"""
+Projects an analytic function into a numerical vector `v` using the given mesh and dofs manager.
+"""
+function project!(f::Function, v::AbstractVector{T}, mesh::Mesh{N, T}, dofs::DoFManager{N, T},) where {N, T}
     foreachleafnode(mesh) do level, node
         transform = nodetransform(mesh, level, node)
         offset = nodeoffset(dofs, level, node)
@@ -93,17 +98,22 @@ end
 ##############################
 export BlockManager
 
+"""
+Associates an appropriately sized `ArrayBlock` for each level of a mesh. 
+"""
 struct BlockManager{N, T, O} 
     block::ArrayBlock{N, T, O}
     base::Vector{ArrayBlock{N, T, O}}
-end
 
-function BlockManager{O}(mesh::Mesh{N, T}) where {N, T, O}
-    b = baselevels(mesh)
-    block = ArrayBlock{T, O}(nodecells(mesh, b)...)
-    base = [ArrayBlock{T, O}(nodecells(mesh, c)...) for c in 1:(b - 1)]
-
-    BlockManager{N, T, O}(block, base)
+    """
+    Constructs a block manager compatible with the given mesh.
+    """
+    function BlockManager{O}(mesh::Mesh{N, T}) where {N, T, O}
+        block = ArrayBlock{T, O}(nodecells(mesh, b)...)
+        base = [ArrayBlock{T, O}(nodecells(mesh, c)...) for c in 1:mesh.base]
+    
+        new{N, T, O}(block, base)
+    end
 end
 
 Base.getindex(blocks::BlockManager, i::Int) = i ≤ length(block.base) ? blocks.base[i] : blocks.block
