@@ -39,6 +39,7 @@ function write_vtu(writer::MeshWriter{N, T}, mesh::Mesh{N, T}, dofs::DoFManager{
     point_offset = 0
 
     foreachleafnode(mesh) do level, leaf
+        dims = nodecells(mesh, level)
         trans = nodetransform(mesh, level, leaf)
 
         tolinear = LinearIndices(dims .+ 1)
@@ -104,6 +105,7 @@ function write_vtu(writer::MeshWriter{N, T}, mesh::Mesh{N, T}, dofs::DoFManager{
             blocks = Vector{T}(undef, total)
 
             foreachleafnode(mesh) do level, leaf
+                dims = nodecells(mesh, leaf)
                 offset = nodeoffset(dofs, level, leaf)
                 for (i, _) in enumerate(CartesianIndices(dims))
                     blocks[offset + i] = leaf

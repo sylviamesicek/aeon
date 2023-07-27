@@ -128,7 +128,7 @@ struct PoissonOperator{N, T, O} <: AbstractOperator{T}
     blocks::BlockManager{N, T, O}
 end
 
-function operator_apply!(y::AbstractVector{T}, oper::PoissonOperator{N, T}, x::AbstractVector{T}, maxlevel::Int) where T
+function operator_apply!(y::AbstractVector{T}, oper::PoissonOperator{N, T}, x::AbstractVector{T}, maxlevel::Int) where {N, T}
     basis = LagrangeBasis{T}()
 
     foreachleafnode(mesh, maxlevel) do level, node
@@ -155,7 +155,7 @@ function operator_apply!(y::AbstractVector{T}, oper::PoissonOperator{N, T}, x::A
     end
 end
 
-function operator_diagonal!(y::AbstractVector{T}, oper::PoissonOperator{N, T}, maxlevel::Int) where T
+function operator_diagonal!(y::AbstractVector{T}, oper::PoissonOperator{N, T}, maxlevel::Int) where {N, T}
     basis = LagrangeBasis{T}()
 
     foreachleafnode(mesh, maxlevel) do level, node
@@ -178,7 +178,7 @@ function operator_diagonal!(y::AbstractVector{T}, oper::PoissonOperator{N, T}, m
 end
 
 
-function operator_restrict!(y::AbstractVector{T}, oper::AbstractOperator{T}, x::AbstractVector{T}, maxlevel::Int) where T
+function operator_restrict!(y::AbstractVector{T}, oper::PoissonOperator{N, T}, x::AbstractVector{T}, maxlevel::Int) where {N, T}
     basis = LagrangeBasis{T}()
 
     if maxlevel == 1
@@ -222,9 +222,9 @@ function operator_restrict!(y::AbstractVector{T}, oper::AbstractOperator{T}, x::
     end
 end
 
-function operator_prolong!(y::AbstractVector{T}, oper::AbstractOperator{T}, x::AbstractVector{T}, maxlevel::Int) where T
+# function operator_prolong!(y::AbstractVector{T}, oper::AbstractOperator{T}, x::AbstractVector{T}, maxlevel::Int) where {N, T}
 
-end
+# end
 
 # Main code
 function main2()
@@ -233,27 +233,27 @@ function main2()
 
     # Mesh
 
-    mesh = Mesh(HyperBox(SA[0.0, 0.0], SA{Float64}[1.0, 1.0]), 4)
+    mesh = Mesh(HyperBox(SA[0.0, 0.0], SA{Float64}[π, π]), 7, 0)
 
-    mark_refine_global!(mesh)
-    prepare_and_execute_refinement!(mesh)
+    # mark_refine_global!(mesh)
+    # prepare_and_execute_refinement!(mesh)
     # mark_refine_global!(mesh)
     # prepare_and_execute_refinement!(mesh)
 
-    dofs = DoFHandler(mesh)
+    dofs = DoFManager(mesh)
     total = dofstotal(dofs)
 
     @show mesh
     @show total
 
     seed = project(mesh, dofs) do pos
-        #sin(pos.x)*sin(pos.y)
-        1.0
+        sin(pos.x)*sin(pos.y)
+        # 1.0
     end
 
     analytic = project(mesh, dofs) do pos
-        #2sin(pos.x)*sin(pos.y)
-        0.0
+        2sin(pos.x)*sin(pos.y)
+        # 0.0
     end
 
     # analytic = project(mesh, dofs) do pos
@@ -261,7 +261,7 @@ function main2()
     #     1.0
     # end
 
-    block = ArrayBlock{Float64, 2}(undef, nodecells(mesh)...)
+    blocks = BlockManager{2}(mesh)
 
     mv_product = 1
 
@@ -269,43 +269,29 @@ function main2()
         println("MV Product: $mv_product")
         mv_product += 1
 
-        for level in eachindex(mesh)
-            for node in eachleafnode(mesh, level)
-                offset = nodeoffset(dofs, level, node)
-                transform = nodetransform(mesh, level, node)
+        foreachleafnode(mesh) do level, node
+            block = blocks[level]
+            offset = nodeoffset(dofs, level, node)
+            transform = nodetransform(mesh, level, node)
 
-                # Transfer data to block
-                transfer_to_block!(block, basis, mesh, dofs, level, node, x) do boundary, axis
-                    diritchlet(1.0, 0.0)
-                end
-
-                # if node == 1
-                #     println("Bottom-left")
-                #     display(block.values[1:6, 1:6])
-                #     println("Bottom-right")
-                #     display(block.values[end-5:end, 1:6])
-                #     println("Top-left")
-                #     display(block.values[1:6, end-5:end])
-                #     println("Top-right")
-                #     display(block.values[ end-5:end, end-5:end])
-                # end
-
-                for (i, cell) in enumerate(cellindices(block))
-                    lpos = cellposition(block, cell)
-                    j = inv(jacobian(transform, lpos))
-
-                    lhess = blockhessian(block, cell, basis)
-                    ghess = j' * lhess * j
-
-                    glap = ghess[1, 1] + ghess[2, 2]
-
-                    y[offset + i] = -glap
-                end
+            fill!(block, 0.0)
+            # Transfer data to block
+            transfer_to_block!(block, x, mesh, dofs, basis, level, node) do boundary, axis
+                diritchlet(1.0, 0.0)
+            end
+            
+            for (i, cell) in enumerate(cellindices(block))
+                lpos = cellposition(block, cell)
+                j = inv(jacobian(transform, lpos))
+                lhess = block_hessian(block, cell, basis)
+                ghess = j' * lhess * j
+                glap = ghess[1, 1] + ghess[2, 2]
+                y[offset + i] = -glap
             end
         end
     end
 
-    println("Application")
+    println("Solving")
 
     solution, history = bicgstabl(hemholtz, seed, 2; log=true, max_mv_products=1000)
 

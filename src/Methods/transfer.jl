@@ -1,130 +1,194 @@
-##############################
-## Transfer ##################
-##############################
+############################
+## Transfer ################
+############################
 
 export transfer_to_block!
 
-function transfer_to_block!(f::F, block::AbstractBlock{N, T, O}, values::AbstractVector{T}, mesh::Mesh{N, T}, dofs::DoFManager{N, T}, basis::AbstractBasis{T}, level::Int, node::Int) where {N, T, O, F <: Function}
-    cells = blockcells(block)
-    dofs_per_block = prod(cells)
-
+function transfer_to_block!(f::F, block::AbstractBlock{N, T, O}, values::AbstractVector{T}, basis::AbstractBasis{T}, mesh::Mesh{N, T}, dofs::DoFManager{N, T}, level::Int, node::Int) where {N, T, O, F <: Function}
+    # Fill interior 
     offset = nodeoffset(dofs, level, node)
-    transform = nodetransform(mesh, level, node)
-    neighbors = nodeneighbors(mesh, level, node)
 
-    # Fill Interior
     fill_interior_from_linear!(block) do i
         values[offset + i]
     end
 
-    block_boundary_conditions!(block, basis, transform) do boundary, axis
-        edge = boundary_edge(boundary, axis)
-        face = FaceIndex{N}(axis, edge > 0)
-        neighbor = neighbors[face]
+    # Fill boundaries
+    fill_boundaries!(block, basis) do cell, i
+        @inline _compute_boundary_for_block(f, values, TransferContext{O, i}(basis, mesh, dofs), level, node, cell)
+    end
+end
 
-        # If on boundary, use provided boundary conditions
+struct TransferContext{N, T, O, I, B, M, D}
+    basis::B
+    mesh::M
+    dofs::D
+
+    TransferContext{O, I}(basis::AbstractBasis{T}, mesh::Mesh{N, T}, dofs::DoFManager{N, T}) where {N, T, O, I} = new{N, T, O, I, typeof(basis), typeof(mesh), typeof(dofs)}(basis, mesh, dofs)
+end
+
+# A god awful monstrosity of a function
+@generate function _compute_boundary_for_block(f::F, alues::AbstractVector{T}, ctx::TransferContext{N, T, O, I}, level::Int, node::int, cell::CartesianIndex{N}) where {N, T, O, I, F <: Function}
+    size = ntuple(i -> ifelse(I[i] ≠ 0, O, 1), N)
+    len = prod(size)
+    quote
+        boundary = _compute_boundary_for_block(f, values, ctx, level, node, cell, map(Val, reverse(I))...)
+        SArray{$size, $T, $N, $len}(boundary)
+    end
+end
+
+function _compute_boundary_for_block(f::F, values::AbstractVector{T}, ctx::TransferContext{N, T}, level::Int, node::Int, cell::CartesianIndex{N}) where {N, T, F <: Function}
+    # The base case in the recursion
+    cells = nodecells(ctx.mesh, level)
+    offset = nodeoffset(ctx.dofs, level, node)
+    linear = LienarIndices(cells)
+    return values[offset + linear[cell]]
+end
+
+function _compute_boundary_for_block(f::F, values::AbstractVector{T}, ctx::TransferContext{N, T}, level::Int, node::Int, cell::CartesianIndex{N}, ::Val{0}, rest::Vararg{Val, M}) where {N, T, M, F <: Function}
+    # This axis does not need to be extended
+    _compute_boundary_for_block(f, values, ctx, level, node, cell, rest...)
+end
+
+@generated function _compute_boundary_for_block(f::F, values::AbstractVector{T}, ctx::TransferContext{N, T, O, G}, level::Int, node::Int, cell::CartesianIndex{N}, ::Val{I}, rest::Vararg{Val, M}) where {N, T, O, I, G, M, F <: Function}
+    axis = M + 1
+    side = I > 0
+    face = FaceIndex{N}(axis, side)
+
+    quote
+        cells = nodecells(ctx.mesh, level)
+        neighbor = nodeneighbors(ctx.mesh, level, node)[$face]
+        transform = nodetransform(ctx.mesh, level, node)
+        position = cellposition(ctx.mesh, level, cell)
+        offset = nodeoffset(ctx.dofs, level, node)
+
         if neighbor < 0
-            return f(boundary, axis)
-        end
+            gpos = transform(position .+ G .* 1 ./ (2 .* cells))
+            condition = f(gpos, face)
 
-        # Otherwise we are using some manner of diritchlet boundary conditions to enforce
-        # continuity between nodes.
-
-        if neighbor == 0
+            _physical_boundary(condition, ctx, node, level, cell, Val($face)) do level, node, cell
+                _compute_boundary_for_block(f, values, ctx, level, node, cell, rest...)
+            end
+        elseif neighbor == 0
             # Neighbor is coarser
-            return diritchlet(T(1), T(0))
-        elseif nodechildren(mesh, level, neighbor) == -1
+            error("Coarse neighbor unimplemented")
+        elseif nodechildren(ctx.mesh, level, neighbor) == -1
             # Neighbor is same level
-            # neighbor_offset = nodeoffset(dofs, level, neighbor)
-
-            # offset_view = @view values[(1:dofs_per_block) .+ neighbor_offset]
-            # neighbor_view = ViewBlock{0}(reshape(offset_view, cells...))
-
-            # point = _boundary_to_point(block, boundary)
-            # neighbor_point = _boundary_to_reverse_point(block, boundary, axis)
-
-            # value = block_interior_prolong(block, Val(O), point, basis)
-            # neighbor_value = block_interior_prolong(neighbor_view, Val(O), neighbor_point, basis)
-
-            # return diritchlet(T(1), (value + neighbor_value)/2)
-            return diritchlet(T(1), T(0))
+            _identity_interface(ctx, node, level, cell, Val($face)) do level, node, cell
+                _compute_boundary_for_block(f, values, ctx, level, node, cell, rest...)
+            end
         else
             # Neighbor is more refined
-            return diritchlet(T(1), T(0))
+            error("Refined  neighbor unimplemented")
         end
     end
 end
 
-function _boundary_to_point(block::AbstractBlock{N}, boundary::BoundaryCell{N, I}) where {N, I}
-    cells = blockcells(block)
+@generated function _physical_boundary(f::F, condition::BoundaryCondition{T}, ctx::TransferContext{N, T, O}, node::Int, level::Int, cell::CartesianIndex{N}, ::Val{Face}) where {N, T, O, Face, F <: Function}
+    axis = faceaxis(Face)
+    side = faceside(Face)
+   
+    quote
+        total = nodecells(ctx.mesh, level)[$axis]
+        width = nodebounds(ctx.mesh, level, node).widths[$axis]
+
+        center = f(level, node, CartesianIndex(setindex(cell.I, $side ? total : 1, $axis)))
+        interior = Base.@ntuple $(2O) j -> begin
+            f(level, node, CartesianIndex(setindex(cell.I, $side ? total - j : 1 + j, $axis)))
+        end
+
+        Base.@nexprs $O i -> begin
+            # Value
+            vstencil_i = Stencil(ctx.basis, $side ? VertexValue{$(2O + 1), i, false}() : VertexValue{i, $(2O + 1), true}())
+            vresult_i = tuple_mul(vstencil_i.center, center)
+
+            interior_vstencil_i = $side ? vstencil_i.left : vstencil_i.right
+            exterior_vstencil_i = $side ? vstencil_i.right : vstencil_i.left
+
+            Base.@nexprs $(2O) j -> vresult_i = tuple_add(vresult_i, tuple_mul(interior_vstencil_i[j], interior[j]))
+            Base.@nexprs (i - 1) j -> vresult_i = tuple_add(vresult_i, tuple_mul(exterior_vstencil_i[j], unknown_j))
+
+            # Derivative
+            dstencil_i = Stencil(ctx.basis, $side ? VertexDerivative{$(2O + 1), i, false}() : VertexDerivative{i, $(2O + 1), true}())
+            dresult_i = tuple_mul(dstencil_i.center, center)
+
+            interior_dstencil_i = $side ? dstencil_i.left : dstencil_i.right
+            exterior_dstencil_i = $side ? dstencil_i.right : dstencil_i.left
+
+            Base.@nexprs $(2O) j -> dresult_i = tuple_add(dresult_i, tuple_mul(interior_dstencil_i[j], interior[j]))
+            Base.@nexprs (i - 1) j -> dresult_i = tuple_add(dresult_i, tuple_mul(exterior_dstencil_i[j], unknown_j))
+
+            # Transform target derivative
+            # TODO generalize this
+            vtarget = condition.value
+            dtarget = condition.normal / total * width
+
+            unknown_i = tuple_mul(-1/vstencil_i.right[end], tuple_add(-condition.rhs, 
+                tuple_add(tuple_mul(vtarget, vresult_i), tuple_mul(dtarget, dresult_i)))
+            )
+
+            vapplied_i = tuple_add(vresult_i, tuple_mul(exterior_vstencil_i[end], unknown_i))
+        end
+
+        return Base.@ntuple $O i -> vapplied_i
+    end
+end
+
+@generated function _identity_interface(f::F, ctx::TransferContext{N, T, O}, node::Int, level::Int, cell::CartesianIndex{N},::Val{Face}) where {N, T, O, Face, F <: Function}
+    axis = faceaxis(Face)
+    side = faceside(Face)
     
-    ntuple(Val(N)) do i
-        if I[i] == 1
-            VertexIndex(cells[i] + 1)
-        elseif I[i] == -1
-            VertexIndex(1)
-        else
-            CellIndex(boundary.cell[i])
+    quote
+        neighbor = nodeneighbors(ctx.mesh, level, node)[$Face]
+        total = nodecells(ctx.mesh, level)[$axis]
+
+        center = f(level, node, CartesianIndex(setindex(cell.I, $side ? total : 1, $axis)))
+        interior = Base.@ntuple $(2O) j -> begin
+            f(level, node, CartesianIndex(setindex(cell.I, $side ? total - j : 1 + j, $axis)))
+        end
+
+        exterior = Base.@ntuple $(O) j -> begin
+            f(level, neighbor, CartesianIndex(setindex(cell, $side ? j : total + 1- j, $axis)))
+        end
+
+        return Base.@ntuple $O i -> begin
+            stencil = Stencil(ctx.basis, $side ? VertexValue{$(2O + 1), i, false}() : VertexValue{i, $(2O + 1), true}())
+
+            interior_stencil = $side ? stencil.left : stencil.right
+            exterior_stencil = $side ? stencil.right : stencil.left
+
+            result = tuple_mul(stencil.center, center)
+
+            Base.@nexprs $(2O) j -> result = tuple_add(result, tuple_mul(interior_stencil[j], interior[j]))
+            Base.@nexprs $(O) j -> result = tuple_add(result, tuple_mul(exterior_stencil[j], exterior[j]))
+
+            result
         end
     end
 end
 
-function _boundary_to_reverse_point(block::AbstractBlock{N}, boundary::BoundaryCell{N, I}, axis::Int) where {N, I}
-    cells = blockcells(block)
+#######################
+## Tuple Helpers ######
+#######################
 
-    ntuple(Val(N)) do i
-        if I[i] == 1
-            ifelse(i == axis, VertexIndex(1), VertexIndex(cells[i] + 1))
-        elseif I[i] == -1
-            ifelse(i == axis, VertexIndex(cells[i] + 1), VertexIndex(1))
-        else
-            CellIndex(boundary.cell[i])
-        end
+# Nested tuple multiplication
+tuple_mul(t1::T, t2::T) where T = t1 * t2
+tuple_mul(t1::T, t2::T) where T <: Tuple = tuple_mul.(t1, t2)
+tuple_mul(v::T, t::Tuple) where T = tuple_mul.(v, t)
+tuple_mul(t::Tuple, v::T) where T = tuple_mul.(v, t)
+
+# Nested tuple addition
+tuple_add(t1::T, t2::T) where T = t1 + t2
+tuple_add(t1::T, t2::T) where T <: Tuple = tuple_add.(t1, t2)
+tuple_add(v::T, t::Tuple) where T = tuple_add.(v, t)
+tuple_add(t::Tuple, v::T) where T = tuple_add.(v, t)
+
+# Flatten a nested tuple
+tuple_flatten(t::NTuple{N, T}) where {N, T} = t
+
+@generated tuple_flatten(t::NTuple{N, NTuple{M, T}}) where {N, M, T} = :(
+    Base.@ntuple $(N*M) index -> begin
+        i = (index - 1) ÷ N + 1
+        j = (index - 1) % M + 1
+        t[i][j]
     end
-end
-
-###################################
-## Restriction ####################
-###################################
-
-function restrict!(f::F, y::AbstractVector{T}, x::AbstractVector{T}, mesh::Mesh{N, T}, dofs::DoFManager{N, T}, blocks::BlockManager{N, T}, basis::AbstractBasis{T}, maxlevel::Int) where {N, T, F <: Function}
-    if maxlevel == 1
-        # This is root, there is no smaller level
-        return
-    end
-
-    for level in 1:(maxlevel - 1)
-        # All lower levels are identity mapped.
-        for node in eachnode(mesh, level)
-            if nodechildren(mesh, level, node) == -1
-                offset = nodeoffset(dofs, level, node)
-                block = blocks[level]
-
-                for (i, _) in enumerate(cellindices(block))
-                    y[offset + i] = x[offset + i]
-                end
-
-            end
-        end
-    end
-
-    if maxlevel ≤ mesh.base + 1
-        # Restrict to single parent
-        for node in eachnode(mesh, maxlevel)
-            parent = nodeparent(mesh, maxlevel, node)
-            poffset = nodeoffset(dofs, maxlevel-1, parent)
-            block = blocks[maxlevel]
-
-            transfer_to_block!(f, block, x, mesh, dofs, basis, level, node)
-
-            for (i, pcell) in enumerate(CartesianIndices(blockcells(block) ./ 2))
-                vertex = map(VertexIndex, pcell.I .* 2)
-                y[poffset + i] = block_prolong(block, vertex, basis)
-            end
-        end
-        
-    else
-        # Restrict to subcell of parent
-        error("Restriction to node parents is unimplemented")
-    end
-end
+)

@@ -17,7 +17,7 @@ Computes the gradient at a cell on a domain.
         cells = blockcells(block)
 
         grad = Base.@ntuple $N i -> begin
-            block_stencil_product(block, cell, gradient_stencils(basis, Val(N), i)) * cells[i]
+            block_stencil_product(block, cell, gradient_stencils(basis, Val($N), Val($O), i)) * cells[i]
         end
 
         SVector{$N, $T}(grad) 
@@ -34,7 +34,7 @@ Computes the hessian at a cell on a domain.
         hess = Base.@ntuple $(N*N) index -> begin
             i = (index - 1) ÷ $N + 1
             j = (index - 1) % $N + 1
-            block_stencil_product(block, cell, hessian_stencils(basis, Val(N), i, j)) * cells[i] * cells[j]
+            block_stencil_product(block, cell, hessian_stencils(basis, Val($N), Val($O), i, j)) * cells[i] * cells[j]
         end
         
         SMatrix{$N, $N, $T}(hess)
@@ -51,24 +51,24 @@ function value_diagonal(::AbstractBasis{T}, ::Val{N}) where {N, T}
     one(T)
 end
 
-@generated function gradient_diagonal(basis::AbstractBasis{T}, ::Val{N}) where {N, T}
+@generated function gradient_diagonal(basis::AbstractBasis{T}, ::Val{N}, ::Val{O}) where {N, T, O}
     quote 
         cells = blockcells(block)
 
-        grad = Base.@ntuple $N i -> stencil_diagonal(gradient_stencils(basis, Val(N), i)) * cells[i]
+        grad = Base.@ntuple $N i -> stencil_diagonal(gradient_stencils(basis,  Val($N), Val($O), i)) * cells[i]
 
         SVector{$N, $T}(grad) 
     end
 end
 
-@generated function hessian_diagonal(::Val{N}, basis::AbstractBasis{T}) where {N, T}
+@generated function hessian_diagonal(basis::AbstractBasis{T}, ::Val{N}, ::Val{O}) where {N, T, O}
     quote
         cells = blockcells(block)
 
         hess = Base.@ntuple $(N*N) index -> begin
             i = (index - 1) ÷ $N + 1
             j = (index - 1) % $N + 1
-            stencil_diagonal(hessian_stencils(basis, Val(N), i, j)) * cells[i] * cells[j]
+            stencil_diagonal(hessian_stencils(basis, Val($N), Val($O), i, j)) * cells[i] * cells[j]
         end
         
         SMatrix{$N, $N, $T}(hess)

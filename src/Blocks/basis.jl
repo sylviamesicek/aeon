@@ -69,15 +69,15 @@ Stencil(basis::AbstractBasis, operator::AbstractStencil) = error("Stencil is uni
 
 export value_stencils, gradient_stencils, hessian_stencils
 
-@generated function value_stencils(basis::AbstractBasis, ::Val{N}) where {N}
+@generated function value_stencils(basis::AbstractBasis, ::Val{N}, ::Val{O}) where {N, O}
     :(Base.@ntuple $N dim -> Stencil(basis, CovariantDerivative{O, 0}()))
 end
 
-@generated function gradient_stencils(basis::AbstractBasis, ::Val{N}, i) where {N}
+@generated function gradient_stencils(basis::AbstractBasis, ::Val{N}, ::Val{O},  i) where {N, O}
     :(Base.@ntuple $N dim -> ifelse(i == dim, Stencil(basis, CovariantDerivative{O, 1}()), Stencil(basis, CovariantDerivative{O, 0}())))
 end
 
-@generated function hessian_stencils(basis::AbstractBasis, ::Val{N}, i, j) where {N}
+@generated function hessian_stencils(basis::AbstractBasis, ::Val{N}, ::Val{O}, i, j) where {N, O}
     quote
         if i == j
             Base.@ntuple $N dim -> ifelse(i == dim, Stencil(basis, CovariantDerivative{O, 2}()), Stencil(basis, CovariantDerivative{O, 0}()))

@@ -25,7 +25,7 @@ end
 
 function Level(bounds::HyperBox{N, T}, parent::Int) where {N, T}
     neighbors = nfaces(f -> -1, Val(N))
-    push!(levels, Level{N, T, 2N}([bounds], [parent], [-1], [neighbors], [false]))
+    Level{N, T, 2N}([bounds], [parent], [-1], [neighbors], [false])
 end
 
 Base.length(level::Level) = length(level.bounds)
@@ -174,7 +174,7 @@ end
 
 Blocks.cellindices(mesh::Mesh, level::Int) = CartesianIndices(nodecells(mesh, level))
 Blocks.cellwidths(mesh::Mesh{N, T}, level::Int) where {N, T} = SVector{N, T}(1 ./ nodecells(mesh, level::Int))
-Blocks.cellposition(mesh::Mesh{N, T}, cell::CartesianIndex{N}, level::Int) where {N, T} = SVector{N, T}((cell.I .- T(1//2)) ./ nodecells(mesh, level))
+Blocks.cellposition(mesh::Mesh{N, T}, level::Int, cell::CartesianIndex{N}) where {N, T} = SVector{N, T}((cell.I .- T(1//2)) ./ nodecells(mesh, level))
 
 ###############################
 ## Refinement #################
@@ -211,7 +211,7 @@ function prepare_refinement!(mesh::Mesh{N}) where N
     while !smooth
         smooth = true
 
-        for level in (baselevels(mesh) + 1):length(mesh)
+        for level in (mesh.base + 2):length(mesh)
             for node in eachnode(mesh, level)
                 if !nodeflag(mesh, level, node)
                     continue
@@ -251,7 +251,7 @@ function execute_refinement!(mesh::Mesh{N, T, F}) where {N, T, F}
     end
 
     # Add children to each level
-    for level in baselevels(mesh):(length(mesh) - 1)
+    for level in (mesh.base + 1):(length(mesh) - 1)
         coarse = mesh.levels[level]
         refined = mesh.levels[level + 1]
 
@@ -296,7 +296,7 @@ function execute_refinement!(mesh::Mesh{N, T, F}) where {N, T, F}
     end
 
     # Update exterior neighbors
-    for level in baselevels(mesh):(length(mesh) - 1)
+    for level in (mesh.base + 1):(length(mesh) - 1)
         coarse = mesh.levels[level]
         refined = mesh.levels[level + 1]
 

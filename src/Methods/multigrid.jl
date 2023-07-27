@@ -10,11 +10,17 @@ end
 
 MultiGridLevel{T}(total::Int) where T = MultiGridLevel{T}(Vector{T}(undef, total), Vector{T}(undef, total), Vector{T}(undef, total), Vector{T}(undef, total))
 
+"""
+Associates multigrid scratch data with each level of a mesh.
+"""
 struct MultiGridManager{N, T}
     levels::Vector{MultiGridLevel{T}}
     smoothing::Int
 end
 
+"""
+Constructs a `MultiGridManager` from a DoFManager.
+"""
 function MultiGridManager(dofs::DoFManager{N, T}, smoothing::Int = 10) where {N, T}
     levels = MultiGridLevel[]
 
@@ -25,6 +31,9 @@ function MultiGridManager(dofs::DoFManager{N, T}, smoothing::Int = 10) where {N,
     MultiGridManager(levels, smoothing)
 end
 
+"""
+Performs a multigrid solve using an `AbstractOperator`.
+"""
 function multigrid!(x::AbstractVector{T}, A::AbstractOperator{T}, b::AbstractVector{T}, manager::MultiGridManager{N, T}) where {N, T}
     scratch = last(manager.scratch)
 

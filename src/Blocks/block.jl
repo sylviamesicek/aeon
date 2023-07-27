@@ -64,27 +64,59 @@ end
     end
 end
 
-#############################
-## Transfer #################
-#############################
+#########################
+## Iteration ############
+#########################
 
-export fill_interior!, fill_interior_from_linear!
+export foreach_buffer, foreach_boundary
 
 """
-Fills the interior of a block by calling `f` once for each interior cell (where the argument is a cartesian cell index).
+Iterates the buffer regions of an `N` - dimensional block.
 """
-function fill_interior!(f::F, block::AbstractBlock) where {F <: Function}
-    for cell in cellindices(block)
-        setblockvalue!(block, f(cell), cell)
+@generated function foreach_buffer(f::F, ::AbstractBlock{N}) where {N, F <: Function}
+    exprs = Expr[]
+
+    for i in 1:N
+        for subdomain in CartesianIndices(ntuple(_ -> 3, Val(N)))
+            if sum(subdomain.I .== 1 .|| subdomain.I .== 3) == i
+                push!(exprs, :(f(Val($(subdomain.I .- 2)))))
+            end
+        end
+    end
+
+    quote
+        $(exprs...)
     end
 end
 
 """
-Fills the interior of a block by calling `f` once for each interior cell (where the argument is a linear cell index).
+Iterates each boundary cell, along with associated buffer region.
 """
-function fill_interior_from_linear!(f::F, block::AbstractBlock) where {F <: Function}
-    for (i, cell) in enumerate(cellindices(block))
-        setblockvalue!(block, f(i), cell)
+function foreach_boundary(f::F, block::AbstractBlock{N, T, O}) where {N, T, O, F <: Function}
+    foreach_buffer(block) do i
+        _foreach_boundary(f, block, Val(i))
+    end
+end
+
+@generated function _foreach_boundary(f::F, block::AbstractBlock{N, T, O}, ::Val{I}) where {N, T, O, I, F <: Function}
+    cell_indices_expr = ntuple(i -> ifelse(I[i] == 0, :(1:cells[$i]), :(1:1)), Val(N))
+    cell_expr = ntuple(Val(N)) do i
+        if I[i] == 1
+            :(cells[$i])
+        elseif I[i] == -1
+            :(1)
+        else
+            :(boundarycell[$i])
+        end
+    end
+
+    quote
+        cells = blockcells(block)
+
+        for boundarycell in CartesianIndices(tuple($(cell_indices_expr...)))
+            cell = CartesianIndex(tuple($(cell_expr...)))
+            f(cell, Val($I))
+        end
     end
 end
 

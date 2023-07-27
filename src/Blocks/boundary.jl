@@ -78,11 +78,11 @@ export block_physical_boundary!
 function _value_stencil_exprs(O, exterior::NTuple{N, Int}, I::NTuple{N, Int}) where N
     ntuple(Val(N)) do i
         if I[i] == 0
-            return :(cell_value_stencil(basis, Val(0), Val(0)))
+            return :(Stencil(basis, CellValue{$O, $O}()))
         elseif I[i] == 1
-            return :(vertex_value_stencil(basis, Val($(2O + 1)), Val($(exterior[i])), Val(false)))
+            return :(Stencil(basis, VertexValue{$(2O), $(exterior[i]), false}()))
         else
-            return :(vertex_value_stencil(basis, Val($(exterior[i])), Val($(2O + 1)), Val(true)))
+            return :(Stencil(basis, VertexValue{$(exterior[i]), $(2O), true}()))
         end
     end
 end
@@ -91,19 +91,19 @@ function _gradient_stencil_exprs(O, exterior::NTuple{N, Int}, I::NTuple{N, Int},
     ntuple(Val(N)) do i
         if i == axis
             if I[i] == 0
-                return :(cell_derivative_stencil(basis, Val($O), Val($O)))
+                return :(Stencil(basis, CellDerivative{$O, $O}()))
             elseif I[i] == 1
-                return :(vertex_derivative_stencil(basis, Val($(2O)), Val($(exterior[i])), Val(false)))
+                return :(Stencil(basis, VertexDerivative{$(2O), $(exterior[i]), false}()))
             else
-                return :(vertex_derivative_stencil(basis, Val($(exterior[i])), Val($(2O)), Val(true)))
+                return :(Stencil(basis, VertexDerivative{$(exterior[i]), $(2O), true}()))
             end
         else
             if I[i] == 0
-                return :(cell_value_stencil(basis, Val(0), Val(0)))
+                return :(Stencil(basis, CellValue{$O, $O}()))
             elseif I[i] == 1
-                return :(vertex_value_stencil(basis, Val($(2O)), Val($(exterior[i])), Val(false)))
+                return :(Stencil(basis, VertexValue{$(2O), $(exterior[i]), false}()))
             else
-                return :(vertex_value_stencil(basis, Val($(exterior[i])), Val($(2O)), Val(true)))
+                return :(Stencil(basis, VertexValue{$(exterior[i]), $(2O), true}()))
             end
         end
     end
