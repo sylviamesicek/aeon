@@ -109,8 +109,8 @@ struct BlockManager{N, T, O}
     Constructs a block manager compatible with the given mesh.
     """
     function BlockManager{O}(mesh::Mesh{N, T}) where {N, T, O}
-        block = ArrayBlock{T, O}(undef, nodecells(mesh, mesh.base + 1)...)
-        base = [ArrayBlock{T, O}(undef, nodecells(mesh, c)...) for c in 1:mesh.base]
+        block = ArrayBlock{T, O}(nodecells(mesh, mesh.base + 1)...)
+        base = [ArrayBlock{T, O}(nodecells(mesh, c)...) for c in 1:mesh.base]
     
         new{N, T, O}(block, base)
     end

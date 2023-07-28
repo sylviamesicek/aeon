@@ -10,10 +10,7 @@ Transfers data from vector to block a block, with the given order of accuracy.
 function transfer_to_block!(f::F, block::AbstractBlock{N, T, O}, values::AbstractVector{T}, basis::AbstractBasis{T}, mesh::Mesh{N, T}, dofs::DoFManager{N, T}, level::Int, node::Int) where {N, T, O, F <: Function}
     # Fill interior 
     offset = nodeoffset(dofs, level, node)
-
-    # TEMPORARY Fix, I do not know why it doesn't already work.
-    fill!(block, one(T))
-
+    
     fill_interior_from_linear!(block) do i
         values[offset + i]
     end

@@ -168,7 +168,7 @@ function main()
         end
     end
 
-    println("Application")
+    println("Solving")
 
     solution, history = bicgstabl(hemholtz, seed, 2; log=true, max_mv_products=1000)
 

@@ -136,8 +136,8 @@ struct ArrayBlock{N, T, O} <: AbstractBlock{N, T, O}
     ArrayBlock{O}(values::Array{T, N}) where {N, T, O} = new{N, T, O}(values)
 end
 
-ArrayBlock{T, O}(::UndefInitializer, dims::Vararg{Int, N}) where {N, T, O} = ArrayBlock{O}(Array{T, N}(undef, (dims .+ 2O)...))  
-ArrayBlock{N, T, O}(::UndefInitializer) where {N, T, O} = ArrayBlock{T, O}(undef, ntuple(i -> 2O + 1, Val(N))...)
+ArrayBlock{T, O}(dims::Vararg{Int, N}) where {N, T, O} = ArrayBlock{O}(zeros(T, (dims .+ 2O)...))  
+ArrayBlock{N, T, O}() where {N, T, O} = ArrayBlock{T, O}(ntuple(i -> 2O + 1, Val(N))...)
 
 Base.size(block::ArrayBlock) = size(block.values)
 Base.fill!(block::ArrayBlock{N, T}, v::T) where {N, T} = fill!(block.values, v)
