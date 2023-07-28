@@ -152,7 +152,6 @@ function main()
             offset = nodeoffset(dofs, level, node)
             transform = nodetransform(mesh, level, node)
 
-            fill!(block, 0.0)
             # Transfer data to block
             transfer_to_block!(block, x, basis, mesh, dofs, level, node) do pos, face
                 nuemann(1.0, 0.0)
@@ -171,16 +170,16 @@ function main()
 
     println("Application")
 
-    # solution, history = bicgstabl(hemholtz, seed, 2; log=true, max_mv_products=1000)
+    solution, history = bicgstabl(hemholtz, seed, 2; log=true, max_mv_products=1000)
 
-    # @show history
+    @show history
 
     application = hemholtz * seed
 
     writer = MeshWriter{2, Float64}()
     attrib!(writer, NodeAttribute())
     attrib!(writer, ScalarAttribute("seed", seed))
-    # attrib!(writer, ScalarAttribute("solution", solution))
+    attrib!(writer, ScalarAttribute("solution", solution))
     attrib!(writer, ScalarAttribute("application", application))
     attrib!(writer, ScalarAttribute("error", application .- analytic))
     write_vtu(writer, mesh, dofs, "output")

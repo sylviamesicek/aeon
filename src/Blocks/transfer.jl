@@ -30,7 +30,7 @@ end
 
 export fill_boundaries!
 
-function fill_boundaries!(f::F, block::AbstractBlock{N, T}, basis::AbstractBasis{T}) where {N, T, F <: Function}
+function fill_boundaries!(f::F, block::AbstractBlock{N, T}, basis::AbstractBasis{T}) where {N, T, F <: Function}    
     foreach_boundary(block) do cell, i
         _fill_boundary!(f, block, basis, cell, i)
     end
@@ -64,7 +64,7 @@ end
             end
         end
 
-        expr = quote
+        push!(exprs, quote
             let 
                 target = cell.I .+ $(cell_offset)
                 # Avoid having to fill block with 0.0 beforehand
@@ -77,9 +77,7 @@ end
 
                 setblockvalue!(block, (value - result) / coef, CartesianIndex(target))
             end
-        end
-
-        push!(exprs, expr)
+        end)
     end
 
     quote

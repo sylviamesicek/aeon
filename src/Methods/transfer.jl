@@ -11,6 +11,9 @@ function transfer_to_block!(f::F, block::AbstractBlock{N, T, O}, values::Abstrac
     # Fill interior 
     offset = nodeoffset(dofs, level, node)
 
+    # TEMPORARY Fix, I do not know why it doesn't already work.
+    fill!(block, one(T))
+
     fill_interior_from_linear!(block) do i
         values[offset + i]
     end
@@ -125,7 +128,7 @@ end
             Base.@nexprs (i - 1) j -> dresult_i = tuple_add(dresult_i, tuple_mul(exterior_dstencil_i[j], unknown_j))
 
             # Transform normal derivative
-            normal_to_global = -I * total / width
+            normal_to_global = I * total / width
 
             vnumerator = tuple_mul(condition.value, vresult_i)
             dnumerator = tuple_mul(condition.normal, tuple_mul(normal_to_global, dresult_i))

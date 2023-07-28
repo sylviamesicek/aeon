@@ -29,7 +29,7 @@ function main()
 
     # Mesh
 
-    mesh = Mesh(HyperBox(SA[0.0, 0.0], SA[4.0, 4.0]), 7)
+    mesh = Mesh(HyperBox(SA[0.0, 0.0], SA[4.0, 4.0]), 7, 0)
 
     mark_refine_global!(mesh)
     prepare_and_execute_refinement!(mesh)
@@ -48,7 +48,8 @@ function main()
     #     prepare_and_execute_refinement!(mesh)
     # end
 
-    dofs = DoFHandler(mesh)
+    dofs = DoFManager(mesh)
+    blocks = BlockManager{2}(mesh)
     total = dofstotal(dofs)
 
     @show mesh
@@ -58,62 +59,55 @@ function main()
         gunlach_laplacian(pos, 1.0, 1.0)
     end
 
-    block = ArrayBlock{Float64, 2}(undef, nodecells(mesh)...)
-
     mv_product = 1
 
     hemholtz = LinearMap(total) do y, x
         println("MV Product: $mv_product")
         mv_product += 1
 
-        for level in eachindex(mesh)
-            for node in eachleafnode(mesh, level)
-                offset = nodeoffset(dofs, level, node)
-                transform = nodetransform(mesh, level, node)
+        foreachleafnode(mesh) do level, node
+            offset = nodeoffset(dofs, level, node)
+            transform = nodetransform(mesh, level, node)
 
-                # Transfer data to block
-                transfer_to_block!(block, basis, mesh, dofs, level, node, x) do boundary, axis
-                    if boundary_edge(boundary, axis) > 0
-                        # Robin Conditions
-                        lpos = cellposition(block, boundary.cell)
-                        gpos = transform(lpos)
-                        r = norm(gpos)
+            block = blocks[level]
 
-                        robin(1.0/r, 1.0, 0.0)
-                    else
-                        # Nuemann Conditions
-                        nuemann(1.0, 0.0)
-                    end
+            # Transfer data to block
+            transfer_to_block!(block, x, basis, mesh, dofs, level, node) do pos, face
+                if faceside(face)
+                    r = norm(pos)
+                    return robin(1.0/r, 1.0, 0.0)
+                else
+                    return nuemann(1.0, 0.0)
                 end
-                
-                for (i, cell) in enumerate(cellindices(block))
-                    lpos = cellposition(block, cell)
-                    gpos = transform(lpos)
+            end
+            
+            for (i, cell) in enumerate(cellindices(block))
+                lpos = cellposition(block, cell)
+                gpos = transform(lpos)
 
-                    j = inv(jacobian(transform, lpos))
+                j = inv(jacobian(transform, lpos))
 
-                    lgrad = blockgradient(block, cell, basis)
-                    ggrad = j * lgrad
+                lgrad = block_gradient(block, cell, basis)
+                ggrad = j * lgrad
 
-                    lhess = blockhessian(block, cell, basis)
-                    ghess = j' * lhess * j
+                lhess = block_hessian(block, cell, basis)
+                ghess = j' * lhess * j
 
-                    glap = ghess[1, 1] + ghess[2, 2] + ggrad[1]/gpos[1]
-                    gval = blockvalue(block, cell)
+                glap = ghess[1, 1] + ghess[2, 2] + ggrad[1]/gpos[1]
+                gval = block_value(block, cell)
 
-                    y[offset + i] = -glap - seed[offset + i] * gval
-                end
+                y[offset + i] = -glap - seed[offset + i] * gval
             end
         end
     end
 
     println("Solving")
 
-    # solution, history = bicgstabl(hemholtz, seed, 2; log=true, max_mv_products=8000)
+    solution, history = bicgstabl(hemholtz, seed, 2; log=true, max_mv_products=8000)
 
-    # @show history
+    @show history
 
-    solution = hemholtz * seed
+    # solution = hemholtz * seed
 
     writer = MeshWriter{2, Float64}()
     attrib!(writer, NodeAttribute())
