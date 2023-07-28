@@ -16,6 +16,8 @@ Base.fill!(block::AbstractBlock, v) = error("Unimplemented")
 Base.getindex(block::AbstractBlock{N}, i::CartesianIndex{N}) where N = error("Unimplemented")
 Base.setindex!(block::AbstractBlock{N, T}, v::T, i::CartesianIndex{N}) where {N, T} = error("Unimplemented")
 
+blockbuffer(block::AbstractBlock) = error("Unimplemented")
+
 blocktotal(block::AbstractBlock) = size(block)
 blockcells(block::AbstractBlock{N, T, O}) where {N, T, O} = blocktotal(block) .- 2O
 blockvalue(block::AbstractBlock{N, T, O}, cell::CartesianIndex{N}) where {N, T, O} = block[CartesianIndex(cell.I .+ O)]
@@ -53,11 +55,11 @@ end
         result = stencil.center * _block_stencil_product(block, cell, rest)
         
         Base.@nexprs $L i -> begin
-            result += stencil.left[i] * _block_stencil_product(block, CartesianIndex(setindex(cell, cell[$M] - i, $M)), rest)
+            result += stencil.left[i] * _block_stencil_product(block, CartesianIndex(setindex(cell.I, cell[$M] - i, $M)), rest)
         end
 
         Base.@nexprs $R i -> begin
-            result += stencil.right[i] * _block_stencil_product(block, CartesianIndex(setindex(cell, cell[$M] + i, $M)), rest)
+            result += stencil.right[i] * _block_stencil_product(block, CartesianIndex(setindex(cell.I, cell[$M] + i, $M)), rest)
         end
 
         result
@@ -151,22 +153,33 @@ Base.setindex!(block::ArrayBlock{N, T}, v::T, i::CartesianIndex{N}) where {N, T}
 export ViewBlock
 
 """
-A block backed by an arbitrary abstract array. This allows blocks to be built from views into linear arrays,
-which is the standard way for functional data to be stored.
+A block basked by a linear array.
 """
-struct ViewBlock{N, T, O, A} <: AbstractBlock{N, T, O}
+struct ViewBlock{N, T, A} <: AbstractBlock{N, T, 0} 
     values::A
+    offset::Int
+    dims::NTuple{N, Int}
 
-    """
-    Constructs a ViewBlock from an abstract array.
-    """
-    ViewBlock{O}(values::AbstractArray{T, N}) where {N, T, O} = new{N, T, O, typeof(values)}(values)
+    ViewBlock(values::AbstractVector{T}, offset::Int, dims::NTuple{N, Int}) where {N, T} = new{N, T, typeof(values)}(values, offset, dims)
 end
 
-Base.size(block::ViewBlock) = size(block.values)
-Base.fill!(block::ViewBlock{N, T}, v::T) where {N, T} = fill!(block.values, v)
-Base.getindex(block::ViewBlock{N}, i::CartesianIndex{N}) where N = block.values[i]
-Base.setindex!(block::ViewBlock{N, T}, v::T, i::CartesianIndex{N}) where {N, T} = block.values[i] = v
+Base.size(block::ViewBlock) = block.dims
+
+function Base.fill!(block::ViewBlock{N, T}, v::T) where {N, T}
+    total = prod(block.dims)
+    view = @view block.values[(1:total) .+ block.offset]
+    fill!(view, v)
+end    
+
+function Base.getindex(block::ViewBlock{N}, i::CartesianIndex{N}) where N
+    linear = LinearIndices(block.dims)
+    block.values[bloc.offset + linear[i]]
+end
+
+function Base.setindex!(block::ViewBlock{N, T}, v::T, i::CartesianIndex{N}) where {N, T}
+    linear = LinearIndices(block.dims)
+    block.values[bloc.offset + linear[i]] = v
+end
 
 ############################
 ## Helpers #################

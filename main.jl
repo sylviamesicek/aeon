@@ -102,12 +102,8 @@ function main()
     end
 
     println("Solving")
-
     solution, history = bicgstabl(hemholtz, seed, 2; log=true, max_mv_products=8000)
-
     @show history
-
-    # solution = hemholtz * seed
 
     writer = MeshWriter{2, Float64}()
     attrib!(writer, NodeAttribute())

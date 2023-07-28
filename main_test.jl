@@ -160,9 +160,11 @@ function main()
             for (i, cell) in enumerate(cellindices(block))
                 lpos = cellposition(block, cell)
                 j = inv(jacobian(transform, lpos))
+
                 lhess = block_hessian(block, cell, basis)
                 ghess = j' * lhess * j
                 glap = ghess[1, 1] + ghess[2, 2]
+                
                 y[offset + i] = -glap
             end
         end

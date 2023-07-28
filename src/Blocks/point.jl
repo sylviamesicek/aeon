@@ -82,7 +82,7 @@ end
 ## Interior Prolong ##
 ######################
 
-export block_interior_prolong
+export block_interior_prolong, interior_prolong_stencil
 
 """
 Performs prolongation within a block, to the given order.
@@ -90,15 +90,15 @@ Performs prolongation within a block, to the given order.
 function block_interior_prolong(block::AbstractBlock{N, T}, ::Val{O},  point::NTuple{N, PointIndex}, basis::AbstractBasis{T}) where {N, T, O}
     cells = blockcells(block)
     cell = CartesianIndex(map(point_to_cell, point))
-    stencils = ntuple(i ->  _point_to_prolong_stencil_interior(point[i], cells[i], basis, Val(O)), Val(N))
+    stencils = ntuple(i ->  interior_prolong_stencil(point[i], cells[i], basis, Val(O)), Val(N))
     block_stencil_product(block, cell, stencils)
 end
 
-function _point_to_prolong_stencil_interior(::CellIndex, ::Int, basis::AbstractBasis{T}, ::Val{O}) where {T, O}
+function interior_prolong_stencil(::CellIndex, ::Int, basis::AbstractBasis{T}, ::Val{O}) where {T, O}
     Stencil(basis, CellValue{0, 0}())
 end
 
-@generated function _point_to_prolong_stencil_interior(index::VertexIndex, total::Int, basis::AbstractBasis{T}, ::Val{O}) where {T, O}
+@generated function interior_prolong_stencil(index::VertexIndex, total::Int, basis::AbstractBasis{T}, ::Val{O}) where {T, O}
     quote 
         leftcells = min($(O + 1), index.inner - 1)
         rightcells = min($(O + 1), total - index.inner + 1)
@@ -106,7 +106,7 @@ end
         # Left side
         if leftcells ≤ $O
             if leftcells == 0
-                return Stencil(basis, VertexValue{O, $(2O + 1), true}())
+                return Stencil(basis, VertexValue{0, $(2O + 2), true}())
             end
 
             Base.@nexprs $O i -> begin
@@ -119,7 +119,7 @@ end
         # Right side
         if rightcells ≤ $O
             if rightcells == 0
-                return Stencil(basis, VertexValue{$(2O + 1), 0, false}())
+                return Stencil(basis, VertexValue{$(2O + 2), 0, false}())
             end
 
             Base.@nexprs $O i -> begin
@@ -133,7 +133,7 @@ end
     end
 end
 
-@generated function _point_to_prolong_stencil_interior(index::SubCellIndex, total::Int, basis::AbstractBasis{T}, ::Val{O}) where {T, O}
+@generated function interior_prolong_stencil(index::SubCellIndex, total::Int, basis::AbstractBasis{T}, ::Val{O}) where {T, O}
     side_expr = side -> quote 
         cindex = point_to_cell(index)
 

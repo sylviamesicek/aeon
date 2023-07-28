@@ -73,13 +73,13 @@ end
             gpos = transform(position .+ G .* 1 ./ (2 .* cells))
             condition = f(gpos, $face)
 
-            return _physical_boundary(f, values, condition, ctx, node, level, cell, Val(I), rest...)
+            return _physical_boundary(f, values, condition, ctx, level, node, cell, Val(I), rest...)
         elseif neighbor == 0
             # Neighbor is coarser
             error("Coarse neighbor unimplemented")
         elseif nodechildren(ctx.mesh, level, neighbor) == -1
             # Neighbor is same level
-            return _identity_interface(f, values, ctx, node, level, cell, Val(I), rest...)
+            return _identity_interface(f, values, ctx, level, node, cell, Val(I), rest...)
         else
             # Neighbor is more refined
             error("Refined  neighbor unimplemented")
@@ -87,7 +87,7 @@ end
     end
 end
 
-@generated function _physical_boundary(f::F, values::AbstractVector{T}, condition::BoundaryCondition{T}, ctx::TransferContext{N, T, O}, node::Int, level::Int, cell::CartesianIndex{N}, ::Val{I}, rest::Vararg{Val, M}) where {N, T, O, I, M, F <: Function}
+@generated function _physical_boundary(f::F, values::AbstractVector{T}, condition::BoundaryCondition{T}, ctx::TransferContext{N, T, O}, level::Int, node::Int, cell::CartesianIndex{N}, ::Val{I}, rest::Vararg{Val, M}) where {N, T, O, I, M, F <: Function}
     axis = M + 1
     side = I > 0
    
@@ -143,7 +143,7 @@ end
     end
 end
 
-@generated function _identity_interface(f::F, values::AbstractVector{T}, ctx::TransferContext{N, T, O}, node::Int, level::Int, cell::CartesianIndex{N}, ::Val{I}, rest::Vararg{Val, M}) where {N, T, O, I, M, F <: Function}
+@generated function _identity_interface(f::F, values::AbstractVector{T}, ctx::TransferContext{N, T, O}, level::Int, node::Int, cell::CartesianIndex{N}, ::Val{I}, rest::Vararg{Val, M}) where {N, T, O, I, M, F <: Function}
     axis = M + 1
     side = I > 0
     face = FaceIndex{N}(axis, side)
@@ -179,6 +179,64 @@ end
             result
         end
     end
+end
+
+@generated function _prolong_interface(f::F, values::AbstractVector{T}, ctx::TransferContext{N, T, O, G}, level::Int, node::Int, cell::CartesianIndex{N}, ::Val{I}, rest::Vararg{Val, M}) where {N, T, O, I, M, G, F <: Function}
+    axis = M + 1
+    side = I > 0
+    face = FaceIndex{N}(axis, side)
+
+    # We are not computing along this axis
+    Gnew = setindex(G, 0, axis)
+
+    quote
+        ctxnew = TransferContext{$O}(ctx.basis, ctx.mesh, ctx.dofs, Val($Gnew))
+
+        
+    end
+end
+
+#######################
+## Stencil Product ####
+#######################
+
+function boundary_stencil_product(f::F, values::AbstractVector{T}, ctx::TransferContext{N, T}, level::Int, node::Int, cell::CartesianIndex{N}, stencils::NTuple{N, Stencil{T}}) where {N, T, F <: Function}
+    _boundary_stencil_product(f, values, ctx, level, node, cell.I, reverse(stencils)...)
+end
+
+function _boundary_stencil_product(f::F, values::AbstractVector{T}, ctx::TransferContext{N, T}, level::Int, node::Int, cell::NTuple{N, Int}) where {N, T, F <: Function}
+    _compute_boundary_for_block(f, values, ctx, level, node, CartesianIndex(cell))
+end
+
+function _boundary_stencil_product(f::F, values::AbstractVector{T}, ctx::TransferContext{N, T}, level::Int, node::Int, cell::NTuple{N, Int}, stencil::Stencil{T, L, R}, rest::Vararg{Stencil{T}, M}) where {N, T, L, R, M, F <: Function}
+    axis = M + 1
+
+    result = stencil.center * _block_stencil_product(block, cell, rest)
+
+    result = tuple_mul(stencil.center, _boundary_stencil_product(f, values, ctx, level, node, cell, rest...))
+        
+    Base.@nexprs $L i -> begin
+        lcell_i = setindex(cell, cell[axis] - i, axis)
+        result = tuple_add(result,  _boundary_stencil_product(f, values, ctx, level, node, lcell_i, rest...))
+    end
+
+    Base.@nexprs $R i -> begin
+        rcell_i = setindex(cell, cell[axis] + i, axis)
+        result = tuple_add(result,  _boundary_stencil_product(f, values, ctx, level, node, rcell_i, rest...))
+    end
+
+    result
+end
+
+#######################
+## Prolongation #######
+#######################
+
+function prolong_boundary_block(f::F, values::AbstractVector{T}, ctx::TransferContext{N, T, O}, level::Int, node::Int, point::NTuple{N, PointIndex}) where {N, T, F <: Function}
+    cells = nodecells(ctx.mesh, level)
+    cell = CartesianIndex(map(point_to_cell, point))
+    stencils = ntuple(i ->  interior_prolong_stencil(point[i], cells[i], basis, Val(O)), Val(N))
+    boundary_stencil_product(f, values, ctx, level, node, cell, stencils)
 end
 
 #######################
