@@ -48,15 +48,15 @@ end
             if I[i] == 0
                 return :(Stencil(basis, CellValue{$O, $O}()))
             elseif I[i] == 1
-                return :(Stencil(basis, VertexValue{$(2O), $(exterior[i]), false}()))
+                return :(Stencil(basis, VertexValue{$(2O + 1), $(exterior[i]), false}()))
             else
-                return :(Stencil(basis, VertexValue{$(exterior[i]), $(2O), true}()))
+                return :(Stencil(basis, VertexValue{$(exterior[i]), $(2O + 1), true}()))
             end
         end
 
         value_coefs = ntuple(N) do i
             if I[i] == 0
-                return 1
+                return one(T)
             elseif I[i] == 1
                 return :(stencils[$i].right[end])
             else
@@ -73,9 +73,9 @@ end
                 value = values[$exterior]
                 stencils = tuple($(value_stencil...))
                 result = block_stencil_product(block, cell, stencils)
-                coef = prod($(value_coefs...))
+                coef = prod(tuple($(value_coefs...)))
 
-                setblockvalue!(block, (value - result) / coef, target)
+                setblockvalue!(block, (value - result) / coef, CartesianIndex(target))
             end
         end
 

@@ -4,6 +4,9 @@
 
 export transfer_to_block!
 
+"""
+Transfers data from vector to block a block, with the given order of accuracy.
+"""
 function transfer_to_block!(f::F, block::AbstractBlock{N, T, O}, values::AbstractVector{T}, basis::AbstractBasis{T}, mesh::Mesh{N, T}, dofs::DoFManager{N, T}, level::Int, node::Int) where {N, T, O, F <: Function}
     # Fill interior 
     offset = nodeoffset(dofs, level, node)
@@ -14,7 +17,7 @@ function transfer_to_block!(f::F, block::AbstractBlock{N, T, O}, values::Abstrac
 
     # Fill boundaries
     fill_boundaries!(block, basis) do cell, i
-        @inline _compute_boundary_for_block(f, values, TransferContext{O, i}(basis, mesh, dofs), level, node, cell)
+        @inline compute_boundary_for_block(f, values, TransferContext{O}(basis, mesh, dofs, i), level, node, cell)
     end
 end
 
@@ -23,16 +26,21 @@ struct TransferContext{N, T, O, I, B, M, D}
     mesh::M
     dofs::D
 
-    TransferContext{O, I}(basis::AbstractBasis{T}, mesh::Mesh{N, T}, dofs::DoFManager{N, T}) where {N, T, O, I} = new{N, T, O, I, typeof(basis), typeof(mesh), typeof(dofs)}(basis, mesh, dofs)
+    TransferContext{O}(basis::AbstractBasis{T}, mesh::Mesh{N, T}, dofs::DoFManager{N, T}, ::Val{I}) where {N, T, O, I} = new{N, T, O, I, typeof(basis), typeof(mesh), typeof(dofs)}(basis, mesh, dofs)
 end
 
-# A god awful monstrosity of a function
-@generate function _compute_boundary_for_block(f::F, alues::AbstractVector{T}, ctx::TransferContext{N, T, O, I}, level::Int, node::int, cell::CartesianIndex{N}) where {N, T, O, I, F <: Function}
+"""
+A god awful monstrosity of a function which computes target values for each exterior cell.
+"""
+@generated function compute_boundary_for_block(f::F, values::AbstractVector{T}, ctx::TransferContext{N, T, O, I}, level::Int, node::Int, cell::CartesianIndex{N}) where {N, T, O, I, F <: Function}
     size = ntuple(i -> ifelse(I[i] ≠ 0, O, 1), N)
     len = prod(size)
+
+    reversed::Tuple = map(Val, reverse(I))
+
     quote
-        boundary = _compute_boundary_for_block(f, values, ctx, level, node, cell, map(Val, reverse(I))...)
-        SArray{$size, $T, $N, $len}(boundary)
+        boundary = _compute_boundary_for_block(f, values, ctx, level, node, cell, $(reversed...))
+        SArray{Tuple{$(size...)}, $T, $N, $len}(tuple_flatten(boundary))
     end
 end
 
@@ -40,7 +48,7 @@ function _compute_boundary_for_block(f::F, values::AbstractVector{T}, ctx::Trans
     # The base case in the recursion
     cells = nodecells(ctx.mesh, level)
     offset = nodeoffset(ctx.dofs, level, node)
-    linear = LienarIndices(cells)
+    linear = LinearIndices(cells)
     return values[offset + linear[cell]]
 end
 
@@ -63,19 +71,15 @@ end
 
         if neighbor < 0
             gpos = transform(position .+ G .* 1 ./ (2 .* cells))
-            condition = f(gpos, face)
+            condition = f(gpos, $face)
 
-            _physical_boundary(condition, ctx, node, level, cell, Val($face)) do level, node, cell
-                _compute_boundary_for_block(f, values, ctx, level, node, cell, rest...)
-            end
+            return _physical_boundary(f, values, condition, ctx, node, level, cell, Val(I), rest...)
         elseif neighbor == 0
             # Neighbor is coarser
             error("Coarse neighbor unimplemented")
         elseif nodechildren(ctx.mesh, level, neighbor) == -1
             # Neighbor is same level
-            _identity_interface(ctx, node, level, cell, Val($face)) do level, node, cell
-                _compute_boundary_for_block(f, values, ctx, level, node, cell, rest...)
-            end
+            return _identity_interface(f, values, ctx, node, level, cell, Val(I), rest...)
         else
             # Neighbor is more refined
             error("Refined  neighbor unimplemented")
@@ -83,17 +87,20 @@ end
     end
 end
 
-@generated function _physical_boundary(f::F, condition::BoundaryCondition{T}, ctx::TransferContext{N, T, O}, node::Int, level::Int, cell::CartesianIndex{N}, ::Val{Face}) where {N, T, O, Face, F <: Function}
-    axis = faceaxis(Face)
-    side = faceside(Face)
+@generated function _physical_boundary(f::F, values::AbstractVector{T}, condition::BoundaryCondition{T}, ctx::TransferContext{N, T, O}, node::Int, level::Int, cell::CartesianIndex{N}, ::Val{I}, rest::Vararg{Val, M}) where {N, T, O, I, M, F <: Function}
+    axis = M + 1
+    side = I > 0
    
     quote
         total = nodecells(ctx.mesh, level)[$axis]
         width = nodebounds(ctx.mesh, level, node).widths[$axis]
 
-        center = f(level, node, CartesianIndex(setindex(cell.I, $side ? total : 1, $axis)))
+        ccell = CartesianIndex(setindex(cell.I, $side ? total : 1, $axis))
+        center = _compute_boundary_for_block(f, values, ctx, level, node, ccell, rest...)
+
         interior = Base.@ntuple $(2O) j -> begin
-            f(level, node, CartesianIndex(setindex(cell.I, $side ? total - j : 1 + j, $axis)))
+            icell_j = CartesianIndex(setindex(cell.I, $side ? total - j : 1 + j, $axis))
+            _compute_boundary_for_block(f, values, ctx, level, node, icell_j, rest...)
         end
 
         Base.@nexprs $O i -> begin
@@ -117,14 +124,17 @@ end
             Base.@nexprs $(2O) j -> dresult_i = tuple_add(dresult_i, tuple_mul(interior_dstencil_i[j], interior[j]))
             Base.@nexprs (i - 1) j -> dresult_i = tuple_add(dresult_i, tuple_mul(exterior_dstencil_i[j], unknown_j))
 
-            # Transform target derivative
-            # TODO generalize this
-            vtarget = condition.value
-            dtarget = condition.normal / total * width
+            # Transform normal derivative
+            normal_to_global = -I * total / width
 
-            unknown_i = tuple_mul(-1/vstencil_i.right[end], tuple_add(-condition.rhs, 
-                tuple_add(tuple_mul(vtarget, vresult_i), tuple_mul(dtarget, dresult_i)))
-            )
+            vnumerator = tuple_mul(condition.value, vresult_i)
+            dnumerator = tuple_mul(condition.normal, tuple_mul(normal_to_global, dresult_i))
+            rnumerator = -condition.rhs
+
+            vdenominator = condition.value * exterior_vstencil_i[end]
+            ddenominator = condition.normal * normal_to_global * exterior_dstencil_i[end] 
+
+            unknown_i = tuple_mul(-1/(vdenominator + ddenominator), tuple_add(tuple_add(vnumerator, dnumerator), rnumerator))
 
             vapplied_i = tuple_add(vresult_i, tuple_mul(exterior_vstencil_i[end], unknown_i))
         end
@@ -133,21 +143,26 @@ end
     end
 end
 
-@generated function _identity_interface(f::F, ctx::TransferContext{N, T, O}, node::Int, level::Int, cell::CartesianIndex{N},::Val{Face}) where {N, T, O, Face, F <: Function}
-    axis = faceaxis(Face)
-    side = faceside(Face)
+@generated function _identity_interface(f::F, values::AbstractVector{T}, ctx::TransferContext{N, T, O}, node::Int, level::Int, cell::CartesianIndex{N}, ::Val{I}, rest::Vararg{Val, M}) where {N, T, O, I, M, F <: Function}
+    axis = M + 1
+    side = I > 0
+    face = FaceIndex{N}(axis, side)
     
     quote
-        neighbor = nodeneighbors(ctx.mesh, level, node)[$Face]
+        neighbor = nodeneighbors(ctx.mesh, level, node)[$face]
         total = nodecells(ctx.mesh, level)[$axis]
 
-        center = f(level, node, CartesianIndex(setindex(cell.I, $side ? total : 1, $axis)))
+        ccell = CartesianIndex(setindex(cell.I, $side ? total : 1, $axis))
+        center = _compute_boundary_for_block(f, values, ctx, level, node, ccell, rest...)
+
         interior = Base.@ntuple $(2O) j -> begin
-            f(level, node, CartesianIndex(setindex(cell.I, $side ? total - j : 1 + j, $axis)))
+            icell_j = CartesianIndex(setindex(cell.I, $side ? total - j : 1 + j, $axis))
+            _compute_boundary_for_block(f, values, ctx, level, node, icell_j, rest...)
         end
 
         exterior = Base.@ntuple $(O) j -> begin
-            f(level, neighbor, CartesianIndex(setindex(cell, $side ? j : total + 1- j, $axis)))
+            ecell_j = CartesianIndex(setindex(cell, $side ? j : total + 1 - j, $axis))
+            _compute_boundary_for_block(f, values, ctx, level, neighbor, ecell_j, rest...)
         end
 
         return Base.@ntuple $O i -> begin
@@ -159,7 +174,7 @@ end
             result = tuple_mul(stencil.center, center)
 
             Base.@nexprs $(2O) j -> result = tuple_add(result, tuple_mul(interior_stencil[j], interior[j]))
-            Base.@nexprs $(O) j -> result = tuple_add(result, tuple_mul(exterior_stencil[j], exterior[j]))
+            Base.@nexprs i j -> result = tuple_add(result, tuple_mul(exterior_stencil[j], exterior[j]))
 
             result
         end

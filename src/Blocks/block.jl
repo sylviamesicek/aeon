@@ -94,7 +94,7 @@ Iterates each boundary cell, along with associated buffer region.
 """
 function foreach_boundary(f::F, block::AbstractBlock{N, T, O}) where {N, T, O, F <: Function}
     foreach_buffer(block) do i
-        _foreach_boundary(f, block, Val(i))
+        _foreach_boundary(f, block, i)
     end
 end
 
