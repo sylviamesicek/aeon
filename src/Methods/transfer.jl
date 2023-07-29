@@ -33,9 +33,9 @@ struct TransferBlock{N, T, O, I, F, V, B} <: AbstractBlock{N, T, O}
     TransferBlock{O}(f::Function, values::AbstractVector{T}, basis::AbstractBasis{T}, mesh::Mesh{N, T}, dofs::DoFManager{N, T}, level::Int, node::Int, ::Val{I}) where {N, T, O, I} = new{N, T, O, I, typeof(f), typeof(values), typeof(basis)}(values, f, basis, mesh, dofs, level, node)
 end
 
-blocktotal(block::TransferBlock) = nodecells(block.mesh, block.level)
-blockcells(block::TransferBlock) = nodecells(block.mesh, block.level)
-blockvalue(block::TransferBlock{N}, cell::CartesianIndex{N}) where N = compute_block_boundary(block, cell)
+Blocks.blocktotal(block::TransferBlock) = nodecells(block.mesh, block.level)
+Blocks.blockcells(block::TransferBlock) = nodecells(block.mesh, block.level)
+Blocks.blockvalue(block::TransferBlock{N}, cell::CartesianIndex{N}) where N = compute_block_boundary(block, cell)
 
 setblocknode(block::TransferBlock{N, T, O}, level::Int, node::Int, ::Val{I}) where {N, T, O, I} = TransferBlock{O}(block.f, block.values, block.basis, block.mesh, block.dofs, level, node, Val(I))
 
@@ -86,13 +86,13 @@ end
             return tuple_flatten(_physical_boundary(condition, block, cell, Val(I), rest...))
         elseif neighbor == 0
             # Neighbor is coarser
-            error("Coarse neighbor unimplemented")
+            tuple_flatten(_coarse_interface(block, cell, Val($face)))
         elseif nodechildren(block.mesh, block.level, neighbor) == -1
             # Neighbor is same level
             return tuple_flatten(_identity_interface(block, cell, Val(I), rest...))
         else
             # Neighbor is more refined
-            return tuple_flatten(_prolong_interface(block, cell, Val($face)))
+            return tuple_flatten(_refined_interface(block, cell, Val($face)))
         end
     end
 end
@@ -191,69 +191,44 @@ end
     end
 end
 
-@generated function _prolong_interface(block::TransferBlock{N, T, O, I}, cell::NTuple{N, Int}, ::Val{Face}) where {N, T, O, I, Face}
+@generated function _prolong_interface(oblock::TransferBlock{N, T, O, I}, cell::NTuple{N, Int}, nlevel::Int, nnode::Int, npoint::NTuple{N, PointIndex}, ::Val{Face}, ::Val{S}) where {N, T, O, I, Face, S}
     axis = faceaxis(Face)
     side = faceside(Face)
 
     I_rest = ntuple(i -> ifelse(i < axis, I[axis], 0), N)
 
     quote
-        cells = nodecells(block.mesh, block.level)
-        neighbor = nodeneighbors(block.mesh, block.level, block.node)[$Face]
-        
-        total = cells[$axis]
-
-        # Determine refined point
-
-        halfcells = cells ./ 2
-
-        child = cell .> halfcells
-        # Set child to appropriate side
-        child = setindex(child, !$side, $axis)
-
-        refinednode = nodechildren(block.mesh, block.level, block.node) + child.linear
-        refinedlevel = block.level
-
-        refinedvertex = 2 .* (cell .- child .* halfcells)
-        refinedpoint = Base.@ntuple $N i -> begin
-            if i == $axis
-                # Fill with invalid data currently
-                return CellIndex(0)
-            else
-                return VertexIndex(refinedvertex[i])
-            end
-        end
+        total = nodecells(oblock.mesh, nlevel)[$axis]
 
         # Fill interior of this cell
-        mblock = setblocknode(block, block.level, block.node, Val($I_rest))
+        block = setblocknode(oblock, oblock.level, oblock.node, Val($I_rest))
 
         ccell = CartesianIndex(setindex(cell, $side ? total : 1, $axis))
-        center = compute_block_boundary(mblock, cell)
+        center = compute_block_boundary(block, ccell)
 
         interior = Base.@ntuple $(2O) j -> begin
             icell_j = CartesianIndex(setindex(cell, $side ? total - j : 1 + j, $axis))
-            compute_block_boundary(mblock, icell_j)
+            compute_block_boundary(block, icell_j)
         end
 
         # Fill interior of child block
-        rblock = setblocknode(block, refinedlevel, refinednode, Val($I_rest))
+        nblock = setblocknode(oblock, nlevel, nnode, Val($I_rest))
 
-        rcpoint = setindex(refinedpoint, $side ? 1 : total, $axis)
-        rcenter = block_prolong(rblock, rcpoint, rblock.basis)
+        ncpoint = setindex(npoint, CellIndex($side ? 1 : total), $axis)
+        ncenter = block_prolong(nblock, ncpoint, nblock.basis)
 
-        rinterior = Base.@ntuple $(2O) j -> begin
-            ripoint_j = CartesianIndex(setindex(refinedpoint, $side ? 1 + j : total - j, $axis))
-            block_prolong(rblock, ripoint_j, rblock.basis)
+        ninterior = Base.@ntuple $(2O) j -> begin
+            nipoint_j = setindex(npoint, CellIndex($side ? 1 + j : total - j), $axis)
+            block_prolong(nblock, nipoint_j, nblock.basis)
         end
 
         # Solve for unknowns
-
         Base.@nexprs $O i -> begin
-            vstencil_i = Stencil(rblock.basis, $side ? VertexValue{i, $(2O + 1), false}() : VertexValue{$(2O + 1), i, true}())
-            dstencil_i = Stencil(rblock.basis, $side ? VertexDerivative{i, $(2O + 1), false}() : VertexDerivative{$(2O + 1), i, true}())
+            vstencil_i = Stencil(block.basis, $side ? VertexValue{$(2O + 1), i, false}() : VertexValue{i, $(2O + 1), true}())
+            dstencil_i = Stencil(block.basis, $side ? VertexDerivative{$(2O + 1), i, false}() : VertexDerivative{i, $(2O + 1), true}())
 
-            rvstencil_i = Stencil(rblock.basis, $!side ? VertexValue{i, $(2O + 1), false}() : VertexValue{$(2O + 1), i, true}())
-            rdstencil_i = Stencil(rblock.basis, $!side ? VertexDerivative{i, $(2O + 1), false}() : VertexDerivative{$(2O + 1), i, true}())
+            nvstencil_i = Stencil(nblock.basis, $(!side) ? VertexValue{$(2O + 1), i, false}() : VertexValue{i, $(2O + 1), true}())
+            ndstencil_i = Stencil(nblock.basis, $(!side) ? VertexDerivative{$(2O + 1), i, false}() : VertexDerivative{i, $(2O + 1), true}())
 
             # This cell
             interior_vstencil_i = $side ? vstencil_i.left : vstencil_i.right
@@ -275,41 +250,85 @@ end
             end
 
             # Refined cell
-            interior_rvstencil_i = $side ? rvstencil_i.left : rstencil_i.right
-            exterior_rvstencil_i = $side ? rvstencil_i.right : rstencil_i.left
-            interior_rdstencil_i = $side ? rdstencil_i.left : rstencil_i.right
-            exterior_rdstencil_i = $side ? rdstencil_i.right : rstencil_i.left
+            interior_nvstencil_i = $side ? nvstencil_i.left : nvstencil_i.right
+            exterior_nvstencil_i = $side ? nvstencil_i.right : nvstencil_i.left
+            interior_ndstencil_i = $side ? ndstencil_i.left : nvstencil_i.right
+            exterior_ndstencil_i = $side ? ndstencil_i.right : nvstencil_i.left
 
-            rvresult_i = rvstencil_i.center .* rcenter
-            rdresult_i = rdstencil_i.center .* rcenter
+            nvresult_i = nvstencil_i.center .* ncenter
+            ndresult_i = ndstencil_i.center .* ncenter
 
             Base.@nexprs $(2O) j -> begin 
-                rvresult_i = rvresult_i .+ interior_rvstencil_i[j] .* rinterior[j]
-                rdresult_i = rdresult_i .+ interior_rdstencil_i[j] .* rinterior[j]
+                nvresult_i = nvresult_i .+ interior_nvstencil_i[j] .* ninterior[j]
+                ndresult_i = ndresult_i .+ interior_ndstencil_i[j] .* ninterior[j]
             end
 
             Base.@nexprs (i - 1) j -> begin
-                rvresult_i = rvresult_i .+ rexterior_vstencil_i[j] .* runknown_j
-                rdresult_i = rdresult_i .+ rexterior_dstencil_i[j] .* runknown_j
+                nvresult_i = nvresult_i .+ nexterior_vstencil_i[j] .* nunknown_j
+                ndresult_i = ndresult_i .+ nexterior_dstencil_i[j] .* nunknown_j
             end
 
             # Solve
             smatrix_i = 
                 SA[
-                    exterior_vstencil_i[end] (-exterior_rvstencil_i[end]);
-                    exterior_dstencil_i[end] (-exterior_rdstencil_i[end] / 2)
+                    exterior_vstencil_i[end] (-exterior_nvstencil_i[end]);
+                    exterior_dstencil_i[end] (-exterior_ndstencil_i[end] * S)
                 ]
-            srhs_i = SVector(SVector(rvresult_i .- vresult_i), SVector(rdresult_i  ./ 2 .- dresult_i))
+            srhs_i = SVector(SVector(nvresult_i .- vresult_i), SVector(ndresult_i  .* S .- dresult_i))
             sx_i = smatrix_i \ srhs_i
 
             # Update unknowns
             unknown_i = Tuple(sx_i[1])
-            runknown_i = Tuple(sx_i[2])
+            nunknown_i = Tuple(sx_i[2])
 
             vapplied_i = vresult_i .+ exterior_vstencil_i[end] .* unknown_i
         end
 
         return Base.@ntuple $O i -> vapplied_i
+    end
+end
+
+@generated function _refined_interface(block::TransferBlock{N, T, O, I}, cell::NTuple{N, Int}, ::Val{Face}) where {N, T, O, I, Face}
+    axis = faceaxis(Face)
+    side = faceside(Face)
+
+    quote
+        cells = nodecells(block.mesh, block.level)
+        neighbor = nodeneighbors(block.mesh, block.level, block.node)[$Face]
+
+        # Determine refined point
+
+        halfcells = cells ./ 2
+
+        # Find corresponding child of neighbor
+        child = SplitIndex(setindex(cell .> halfcells, !$side, $axis))
+        
+        refinednode = nodechildren(block.mesh, block.level, neighbor) + child.linear
+
+        refinedvertex = 2 .* (cell .- Tuple(child) .* halfcells)
+        refinedpoint = Base.@ntuple $N i -> ifelse(i == $axis, CellIndex(0), VertexIndex(refinedvertex[i]))
+
+        _prolong_interface(block, cell, block.level + 1, refinednode, refinedpoint, Val($Face), Val(1//2))
+    end
+end
+
+
+@generated function _coarse_interface(block::TransferBlock{N, T, O, I}, cell::NTuple{N, Int}, ::Val{Face}) where {N, T, O, I, Face}
+    axis = faceaxis(Face)
+
+    quote
+        cells = nodecells(block.mesh, block.level)
+
+        parent = nodeparent(block.mesh, block.level, block.node)
+        children = nodechildren(block.mesh, block.level - 1, parent)
+        child = SplitIndex{$N}(node - children)
+
+        coarsesubcell = cell .+ cells .* Tuple(child)
+        coarsepoint = Base.@ntuple $N i -> ifelse(i == $axis, CellIndex(0), SubCellValue(coarsesubcell[i]))
+
+        coarsenode = nodeneighbors(block.mesh, block.level - 1, parent)[$Face]
+
+        _prolong_interface(block, cell, block.level - 1, coarsenode, coarsepoint, Val($Face), Val(2))
     end
 end
 
