@@ -18,9 +18,10 @@ include("lagrange.jl")
 
 # Block
 include("block.jl")
+include("point.jl")
 include("derivative.jl")
 
-include("transfer.jl")
-include("point.jl")
+# ArrayBlock
+include("array.jl")
 
 end

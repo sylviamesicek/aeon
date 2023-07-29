@@ -62,27 +62,3 @@ abstract type AbstractBasis{T} end
 Returns the stencil which applies the operator in the given basis.
 """
 Stencil(basis::AbstractBasis, operator::AbstractStencil) = error("Stencil is unimplemented for $(typeof(basis)) and $(typeof(operator))")
-
-###############################
-## Helpers ####################
-###############################
-
-export value_stencils, gradient_stencils, hessian_stencils
-
-@generated function value_stencils(basis::AbstractBasis, ::Val{N}, ::Val{O}) where {N, O}
-    :(Base.@ntuple $N dim -> Stencil(basis, CovariantDerivative{O, 0}()))
-end
-
-@generated function gradient_stencils(basis::AbstractBasis, ::Val{N}, ::Val{O},  i) where {N, O}
-    :(Base.@ntuple $N dim -> ifelse(i == dim, Stencil(basis, CovariantDerivative{O, 1}()), Stencil(basis, CovariantDerivative{O, 0}())))
-end
-
-@generated function hessian_stencils(basis::AbstractBasis, ::Val{N}, ::Val{O}, i, j) where {N, O}
-    quote
-        if i == j
-            Base.@ntuple $N dim -> ifelse(i == dim, Stencil(basis, CovariantDerivative{O, 2}()), Stencil(basis, CovariantDerivative{O, 0}()))
-        else
-            Base.@ntuple $N dim -> ifelse(i == dim || j == dim, Stencil(basis, CovariantDerivative{O, 1}()), Stencil(basis, CovariantDerivative{O, 0}()))
-        end
-    end
-end

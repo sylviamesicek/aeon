@@ -43,26 +43,27 @@ point_to_cell(v::CellIndex) = v.inner
 point_to_cell(v::SubCellIndex) = (v.inner + 1) ÷ 2
 point_to_cell(v::VertexIndex) = v.inner - ifelse(v.inner > 1, 1, 0)
 
-#######################
-## Prolongation #######
-#######################
+##############################
+## Prolongation Total ########
+##############################
 
-export block_prolong
+export block_prolong_total
 
-"""
-Performs prolongation for a full domain.
-"""
-function block_prolong(block::AbstractBlock{N, T, O}, point::NTuple{N, PointIndex}, basis::AbstractBasis{T}) where {N, T, O}
+function block_prolong_total(block::AbstractBlock{N, T, O}, point::NTuple{N, PointIndex}, basis::AbstractBasis{T}) where {N, T, O}
     cell = CartesianIndex(map(point_to_cell, point))
-    stencils = map(i -> _point_to_prolong_stencil(i, basis, Val(O)), point) 
+    stencils = prolong_total_stencils(block, point, basis)
     block_stencil_product(block, cell, stencils)
 end
 
-function _point_to_prolong_stencil(::CellIndex, basis::AbstractBasis{T}, ::Val{O}) where {T, O}
+function prolong_total_stencils(::AbstractBlock{N, T, O}, point::NTuple{N, PointIndex}, basis::AbstractBasis{T}) where {N, T, O}
+    map(p -> _prolong_total_stencil(p, basis, Val(O)), point)
+end
+
+function _prolong_total_stencil(::CellIndex, basis::AbstractBasis{T}, ::Val{O}) where {T, O}
     Stencil(basis, CellValue{0, 0}())
 end
 
-function _point_to_prolong_stencil(index::VertexIndex, basis::AbstractBasis{T}, ::Val{O}) where {T, O}
+function _prolong_total_stencil(index::VertexIndex, basis::AbstractBasis{T}, ::Val{O}) where {T, O}
     if vertex_side(index)
         return Stencil(basis, VertexValue{O + 1, O + 1, true}())
     else
@@ -70,7 +71,7 @@ function _point_to_prolong_stencil(index::VertexIndex, basis::AbstractBasis{T}, 
     end
 end
 
-function _point_to_prolong_stencil(index::SubCellIndex, basis::AbstractBasis{T}, ::Val{O}) where {T, O}
+function _prolong_total_stencil(index::SubCellIndex, basis::AbstractBasis{T}, ::Val{O}) where {T, O}
     if subcell_side(index)
         return Stencil(basis, SubCellValue{O, O, true}())
     else
@@ -78,27 +79,28 @@ function _point_to_prolong_stencil(index::SubCellIndex, basis::AbstractBasis{T},
     end
 end
 
-######################
-## Interior Prolong ##
-######################
+#######################
+## Prolongation #######
+#######################
 
-export block_interior_prolong, interior_prolong_stencil
+export block_prolong
 
-"""
-Performs prolongation within a block, to the given order.
-"""
-function block_interior_prolong(block::AbstractBlock{N, T}, ::Val{O},  point::NTuple{N, PointIndex}, basis::AbstractBasis{T}) where {N, T, O}
-    cells = blockcells(block)
+function block_prolong(block::AbstractBlock{N, T, O}, point::NTuple{N, PointIndex}, basis::AbstractBasis{T}) where {N, T, O}
     cell = CartesianIndex(map(point_to_cell, point))
-    stencils = ntuple(i ->  interior_prolong_stencil(point[i], cells[i], basis, Val(O)), Val(N))
+    stencils = prolong_stencils(block, point, basis)
     block_stencil_product(block, cell, stencils)
 end
 
-function interior_prolong_stencil(::CellIndex, ::Int, basis::AbstractBasis{T}, ::Val{O}) where {T, O}
+function prolong_stencils(block::AbstractBlock{N, T, O}, point::NTuple{N, PointIndex}, basis::AbstractBasis{T}) where {N, T, O}
+    cells = blockcells(block)
+    ntuple(i -> _prolong_stencil(point[i], cells[i], basis, Val(O)), Val(N))
+end
+
+function _prolong_stencil(::CellIndex, ::Int, basis::AbstractBasis{T}, ::Val{O}) where {T, O}
     Stencil(basis, CellValue{0, 0}())
 end
 
-@generated function interior_prolong_stencil(index::VertexIndex, total::Int, basis::AbstractBasis{T}, ::Val{O}) where {T, O}
+@generated function _prolong_stencil(index::VertexIndex, total::Int, basis::AbstractBasis{T}, ::Val{O}) where {T, O}
     quote 
         leftcells = min($(O + 1), index.inner - 1)
         rightcells = min($(O + 1), total - index.inner + 1)
@@ -133,7 +135,7 @@ end
     end
 end
 
-@generated function interior_prolong_stencil(index::SubCellIndex, total::Int, basis::AbstractBasis{T}, ::Val{O}) where {T, O}
+@generated function _prolong_stencil(index::SubCellIndex, total::Int, basis::AbstractBasis{T}, ::Val{O}) where {T, O}
     side_expr = side -> quote 
         cindex = point_to_cell(index)
 

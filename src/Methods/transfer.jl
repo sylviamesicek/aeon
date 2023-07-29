@@ -7,7 +7,7 @@ export transfer_to_block!
 """
 Transfers data from vector to block a block, with the given order of accuracy.
 """
-function transfer_to_block!(f::F, block::AbstractBlock{N, T, O}, values::AbstractVector{T}, basis::AbstractBasis{T}, mesh::Mesh{N, T}, dofs::DoFManager{N, T}, level::Int, node::Int) where {N, T, O, F <: Function}
+function transfer_to_block!(f::F, block::ArrayBlock{N, T, O}, values::AbstractVector{T}, basis::AbstractBasis{T}, mesh::Mesh{N, T}, dofs::DoFManager{N, T}, level::Int, node::Int) where {N, T, O, F <: Function}
     # Fill interior 
     offset = nodeoffset(dofs, level, node)
     
@@ -19,6 +19,15 @@ function transfer_to_block!(f::F, block::AbstractBlock{N, T, O}, values::Abstrac
     fill_boundaries!(block, basis) do cell, i
         @inline compute_boundary_for_block(f, values, TransferContext{O}(basis, mesh, dofs, i), level, node, cell)
     end
+end
+
+struct TransferBlock{N, T, O, I, F <: Function, V, M, D} <: AbstractBlock{N, T, O} 
+    values::V
+    f::F
+    mesh::M
+    dofs::D
+    level::Int
+    node::Int
 end
 
 struct TransferContext{N, T, O, I, B, M, D}
