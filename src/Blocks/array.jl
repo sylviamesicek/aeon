@@ -78,30 +78,6 @@ end
     end
 end
 
-##########################
-## Interior ##############
-##########################
-
-export fill_interior!, fill_interior_from_linear!
-
-"""
-Fills the interior of a block by calling `f` once for each interior cell (where the argument is a cartesian cell index).
-"""
-function fill_interior!(f::F, block::ArrayBlock) where {F <: Function}
-    for cell in cellindices(block)
-        setblockvalue!(block, f(cell), cell)
-    end
-end
-
-"""
-Fills the interior of a block by calling `f` once for each interior cell (where the argument is a linear cell index).
-"""
-function fill_interior_from_linear!(f::F, block::ArrayBlock) where {F <: Function}
-    for (i, cell) in enumerate(cellindices(block))
-        setblockvalue!(block, f(i), cell)
-    end
-end
-
 
 ########################
 ## Boundary ############

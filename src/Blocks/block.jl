@@ -46,10 +46,10 @@ export block_stencil_product
 Apply the tensor product of a set of stencils at a cell on an `AbstractBlock`.
 """
 function block_stencil_product(block::AbstractBlock{N, T}, cell::CartesianIndex{N}, stencils::NTuple{N, Stencil{T}}) where {N, T}
-    _block_stencil_product(block, cell.I, stencils)
+    _block_stencil_product(block, cell.I, reverse(stencils)...)
 end
 
-function _block_stencil_product(block::AbstractBlock{N, T}, cell::NTuple{N, Int}, ::NTuple{0, Stencil{T}}) where {N, T}
+function _block_stencil_product(block::AbstractBlock{N, T}, cell::NTuple{N, Int}) where {N, T}
     blockvalue(block, CartesianIndex(cell))
 end
 
@@ -60,14 +60,39 @@ end
         result = stencil.center .* _block_stencil_product(block, cell, rest...)
 
         Base.@nexprs $L i -> begin
-            result = result .+ stencil.left[i] .* _block_stencil_product(block, setindex(cell.I, cell[$axis] - i, $axis), rest...)
+            result = result .+ stencil.left[i] .* _block_stencil_product(block, setindex(cell, cell[$axis] - i, $axis), rest...)
         end
 
         Base.@nexprs $R i -> begin
-            result = result .+ stencil.right[i] .* _block_stencil_product(block, setindex(cell.I, cell[$axis] + i, $axis), rest...)
+            result = result .+ stencil.right[i] .* _block_stencil_product(block, setindex(cell, cell[$axis] + i, $axis), rest...)
         end
 
         result
+    end
+end
+
+
+##########################
+## Interior ##############
+##########################
+
+export fill_interior!, fill_interior_from_linear!
+
+"""
+Fills the interior of a block by calling `f` once for each interior cell (where the argument is a cartesian cell index).
+"""
+function fill_interior!(f::F, block::AbstractBlock) where {F <: Function}
+    for cell in cellindices(block)
+        setblockvalue!(block, f(cell), cell)
+    end
+end
+
+"""
+Fills the interior of a block by calling `f` once for each interior cell (where the argument is a linear cell index).
+"""
+function fill_interior_from_linear!(f::F, block::AbstractBlock) where {F <: Function}
+    for (i, cell) in enumerate(cellindices(block))
+        setblockvalue!(block, f(i), cell)
     end
 end
 
