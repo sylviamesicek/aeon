@@ -29,9 +29,12 @@ function main()
 
     # Mesh
 
-    mesh = Mesh(HyperBox(SA[0.0, 0.0], SA[4.0, 4.0]), 7, 0)
+    mesh = Mesh(HyperBox(SA[0.0, 0.0], SA[4.0, 4.0]), 6, 0)
 
     mark_refine_global!(mesh)
+    prepare_and_execute_refinement!(mesh)
+
+    mark_refine!(mesh, 2, 1)
     prepare_and_execute_refinement!(mesh)
     
     # for _ in 1:1

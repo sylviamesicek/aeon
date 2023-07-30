@@ -84,12 +84,12 @@ struct LagrangeBasis{T} <: AbstractBasis{T} end
 
 # Values 
 Stencil(::LagrangeBasis{T}, ::CellValue{L, R}) where {T, L, R} = lagrange_cell_stencil(lagrange_value, Val(T), Val(L), Val(R), 0//1)
-Stencil(::LagrangeBasis{T}, ::SubCellValue{L, R, S}) where {T, L, R, S} = lagrange_cell_stencil(lagrange_value, Val(T), Val(L), Val(R), ifelse(S, 1//2, -1//2))
+Stencil(::LagrangeBasis{T}, ::SubCellValue{L, R, S}) where {T, L, R, S} = lagrange_cell_stencil(lagrange_value, Val(T), Val(L), Val(R), ifelse(S, 1//4, -1//4))
 Stencil(::LagrangeBasis{T}, ::VertexValue{L, R, S}) where {T, L, R, S} = lagrange_vertex_stencil(lagrange_value, Val(T), Val(L), Val(R), Val(S))
 
 # Derivative
 Stencil(::LagrangeBasis{T}, ::CellDerivative{L, R}) where {T, L, R} = lagrange_cell_stencil(lagrange_derivative, Val(T), Val(L), Val(R), 0//1)
-Stencil(::LagrangeBasis{T}, ::SubCellDerivative{L, R, S}) where {T, L, R, S} = lagrange_cell_stencil(lagrange_derivative, Val(T), Val(L), Val(R), ifelse(S, 1//2, -1//2))
+Stencil(::LagrangeBasis{T}, ::SubCellDerivative{L, R, S}) where {T, L, R, S} = lagrange_cell_stencil(lagrange_derivative, Val(T), Val(L), Val(R), ifelse(S, 1//4, -1//4))
 Stencil(::LagrangeBasis{T}, ::VertexDerivative{L, R, S}) where {T, L, R, S} = lagrange_vertex_stencil(lagrange_derivative, Val(T), Val(L), Val(R), Val(S))
 
 # Centered Covariant derivatives

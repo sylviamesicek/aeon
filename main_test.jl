@@ -114,12 +114,12 @@ function main()
 
     # Mesh
 
-    mesh = Mesh(HyperBox(SA[0.0, 0.0], SA{Float64}[π, π]), 3, 0)
+    mesh = Mesh(HyperBox(SA[0.0, 0.0], SA{Float64}[π, π]), 7, 0)
 
     mark_refine_global!(mesh)
     prepare_and_execute_refinement!(mesh)
 
-    mark_refine!(mesh, 2, 2)
+    mark_refine!(mesh, 2, 1)
     prepare_and_execute_refinement!(mesh)
     # mark_refine_global!(mesh)
     # prepare_and_execute_refinement!(mesh)
@@ -134,6 +134,8 @@ function main()
         sin(pos.x)*sin(pos.y)
         # cos(pos.x) + cos(pos.y)
         # 1.0
+        # sin(pos.x)
+        # sin(pos.x)
     end
 
     analytic = project(mesh, dofs) do pos
@@ -159,10 +161,6 @@ function main()
             transfer_to_block!(block, x, basis, mesh, dofs, level, node) do pos, face
                 diritchlet(1.0, 0.0)
             end
-
-            if level == 3 && node == 1
-                display(block.values[1:6, 1:10])
-            end
             
             for (i, cell) in enumerate(cellindices(block))
                 lpos = cellposition(block, cell)
@@ -179,16 +177,16 @@ function main()
 
     println("Solving")
 
-    # solution, history = bicgstabl(hemholtz, seed, 2; log=true, max_mv_products=1000)
+    solution, history = bicgstabl(hemholtz, seed, 2; log=true, max_mv_products=1000)
 
-    # @show history
+    @show history
 
     application = hemholtz * seed
 
     writer = MeshWriter{2, Float64}()
     attrib!(writer, NodeAttribute())
     attrib!(writer, ScalarAttribute("seed", seed))
-    # attrib!(writer, ScalarAttribute("solution", solution))
+    attrib!(writer, ScalarAttribute("solution", solution))
     attrib!(writer, ScalarAttribute("application", application))
     attrib!(writer, ScalarAttribute("error", application .- analytic))
     write_vtu(writer, mesh, dofs, "output")

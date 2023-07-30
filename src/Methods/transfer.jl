@@ -64,7 +64,7 @@ end
             cells = nodecells(block.mesh, block.level)
             offset = nodeoffset(block.dofs, block.level, block.node)
             linear = LinearIndices(cells)
-            return block.values[offset + linear[cell...]]
+            return tuple(block.values[offset + linear[cell...]])
         end
     end
 
@@ -182,19 +182,21 @@ end
             _compute_block_boundary(TransferBlock(nblock), ecell_j)
         end
 
-        return Base.@ntuple $O i -> begin
-            stencil = Stencil(block.basis, $side ? VertexValue{$(2O + 1), i, false}() : VertexValue{i, $(2O + 1), true}())
+        Base.@nexprs $O i -> begin
+            stencil_i = Stencil(block.basis, $side ? VertexValue{$(2O + 1), i, false}() : VertexValue{i, $(2O + 1), true}())
 
-            interior_stencil = $side ? stencil.left : stencil.right
-            exterior_stencil = $side ? stencil.right : stencil.left
+            interior_stencil_i = $side ? stencil_i.left : stencil_i.right
+            exterior_stencil_i = $side ? stencil_i.right : stencil_i.left
 
-            result = stencil.center .* center
+            result_i = stencil_i.center .* center
 
-            Base.@nexprs $(2O) j -> result = result .+ interior_stencil[j] .* interior[j]
-            Base.@nexprs i j -> result = result .+ exterior_stencil[j] .* exterior[j]
+            Base.@nexprs $(2O) j -> result_i = result_i .+ interior_stencil_i[j] .* interior[j]
+            Base.@nexprs i j -> result_i = result_i .+ exterior_stencil_i[j] .* exterior[j]
 
-            result
+            result_i
         end
+
+        return Base.@ntuple $O i -> result_i
     end
 end
 
@@ -217,23 +219,20 @@ end
         # Fill interior of child block
         nblock = setblocknode(block, nlevel, nnode)
 
-        ncpoint = setindex(npoint, CellIndex($side ? 1 : total), $axis)
+        ncpoint::NTuple{N, PointIndex} = setindex(npoint, CellIndex($side ? 1 : total), $axis)
         ncenter = block_prolong(TransferBlock(nblock), ncpoint, nblock.basis)
 
         ninterior = Base.@ntuple $(2O) j -> begin
-            nipoint_j = setindex(npoint, CellIndex($side ? 1 + j : total - j), $axis)
+            nipoint_j::NTuple{N, PointIndex} = setindex(npoint, CellIndex($side ? 1 + j : total - j), $axis)
             block_prolong(TransferBlock(nblock), nipoint_j, nblock.basis)
         end
 
         # Solve for unknowns
         Base.@nexprs $O i -> begin
+            # This cell
             vstencil_i = Stencil(block.basis, $side ? VertexValue{$(2O + 1), i, false}() : VertexValue{i, $(2O + 1), true}())
             dstencil_i = Stencil(block.basis, $side ? VertexDerivative{$(2O + 1), i, false}() : VertexDerivative{i, $(2O + 1), true}())
 
-            nvstencil_i = Stencil(nblock.basis, $(!side) ? VertexValue{$(2O + 1), i, false}() : VertexValue{i, $(2O + 1), true}())
-            ndstencil_i = Stencil(nblock.basis, $(!side) ? VertexDerivative{$(2O + 1), i, false}() : VertexDerivative{i, $(2O + 1), true}())
-
-            # This cell
             interior_vstencil_i = $side ? vstencil_i.left : vstencil_i.right
             exterior_vstencil_i = $side ? vstencil_i.right : vstencil_i.left
             interior_dstencil_i = $side ? dstencil_i.left : dstencil_i.right
@@ -253,6 +252,9 @@ end
             end
 
             # Refined cell
+            nvstencil_i = Stencil(nblock.basis, $(!side) ? VertexValue{$(2O + 1), i, false}() : VertexValue{i, $(2O + 1), true}())
+            ndstencil_i = Stencil(nblock.basis, $(!side) ? VertexDerivative{$(2O + 1), i, false}() : VertexDerivative{i, $(2O + 1), true}())
+
             interior_nvstencil_i = $(!side) ? nvstencil_i.left : nvstencil_i.right
             exterior_nvstencil_i = $(!side) ? nvstencil_i.right : nvstencil_i.left
             interior_ndstencil_i = $(!side) ? ndstencil_i.left : ndstencil_i.right
@@ -309,7 +311,15 @@ end
         refinednode = nodechildren(block.mesh, block.level, neighbor) + child.linear
 
         refinedvertex = 2 .* (cell .- Tuple(child) .* halfcells)
-        refinedpoint = Base.@ntuple $N i -> ifelse(i == $axis, CellIndex(0), VertexIndex(refinedvertex[i]))
+        # refinedpoint = Base.@ntuple $N i -> ifelse(i == $axis, CellIndex(0), VertexIndex(refinedvertex[i]))
+
+        refinedpoint = Base.@ntuple $N i -> begin 
+            if i ≤ $axis
+                ifelse($I[i] ≠ 0, ifelse($I[i] == 1, CellIndex(1), CellIndex(cells[i])), VertexIndex(refinedvertex[i]))
+            else
+                VertexIndex(refinedvertex[i])
+            end
+        end
 
         _prolong_interface(block, cell, block.level + 1, refinednode, refinedpoint, Val(1//2))
     end
@@ -327,19 +337,17 @@ end
         children = nodechildren(block.mesh, block.level - 1, parent)
         child = SplitIndex{$N}(block.node - children)
         coarsenode = nodeneighbors(block.mesh, block.level - 1, parent)[$face]
-
+        
         coarsesubcell = cell .+ cells .* Tuple(child)
-        # coarsepoint = Base.@ntuple $N i -> begin 
-        #     if $(G)[i] == 1
-        #         return CellIndex(1)
-        #     elseif $(G)[i] == -1
-        #         return CellIndex(cells[i])
-        #     else
-        #         return SubCellIndex(coarsesubcell[i])
-        #     end
-        # end
+        coarsepoint = Base.@ntuple $N i -> begin 
+            if i ≤ $axis
+                ifelse($I[i] ≠ 0, ifelse($I[i] == 1, CellIndex(1), CellIndex(cells[i])), SubCellIndex(coarsesubcell[i]))
+            else
+                SubCellIndex(coarsesubcell[i])
+            end
+        end
 
-        coarsepoint = Base.@ntuple $N i -> ifelse(i == $axis, CellIndex(0), SubCellIndex(coarsesubcell[i]))
+        # coarsepoint = Base.@ntuple $N i -> ifelse(i == $axis, CellIndex(0), SubCellIndex(coarsesubcell[i]))
 
         _prolong_interface(block, cell, block.level - 1, coarsenode, coarsepoint, Val(2))
     end
@@ -350,7 +358,7 @@ end
 #######################
 
 # Flatten a nested tuple
-tuple_flatten(t::NTuple{N, T}) where {N, T} = t
+# tuple_flatten(t::NTuple{N, T}) where {N, T} = t
 
 @generated tuple_flatten(t::NTuple{N, NTuple{M, T}}) where {N, M, T} = :(
     Base.@ntuple $(N*M) index -> begin

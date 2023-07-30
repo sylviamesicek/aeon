@@ -146,7 +146,7 @@ end
         if leftcells < $O
             Base.@nexprs $O i -> begin
                 if leftcells == i - 1
-                    return Stencil(basis, SubCellValue{i - 1, $(2O + 1), $side}())
+                    return Stencil(basis, SubCellValue{i - 1, $(2O), $side}())
                 end
             end
         end
@@ -155,7 +155,7 @@ end
         if rightcells < $O
             Base.@nexprs $O i -> begin
                 if rightcells == i - 1
-                    return Stencil(basis, SubCellValue{$(2O + 1), i - 1, $side}())
+                    return Stencil(basis, SubCellValue{$(2O), i - 1, $side}())
                 end
             end
         end
