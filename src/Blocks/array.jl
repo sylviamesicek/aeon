@@ -125,10 +125,10 @@ end
                 # Avoid having to fill block with 0.0 beforehand
                 setblockvalue!(block, zero($T), CartesianIndex(target))
 
-                value = values[$exterior]
+                value::$T = values[$exterior]
                 stencils = tuple($(value_stencil...))
-                result = block_stencil_product(block, cell, stencils)
-                coef = prod(tuple($(value_coefs...)))
+                result::$T = block_stencil_product(block, cell, stencils)
+                coef::$T = prod(tuple($(value_coefs...)))
 
                 setblockvalue!(block, (value - result) / coef, CartesianIndex(target))
             end

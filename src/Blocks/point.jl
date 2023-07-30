@@ -23,7 +23,7 @@ end
 """
 Computes the side of this subcells subdivision
 """
-subcell_side(v::SubCellIndex) = v.inner % 2 == 1
+subcell_side(v::SubCellIndex) = v.inner % 2 == 0
 
 """
 A vertex index.
@@ -146,7 +146,7 @@ end
         if leftcells < $O
             Base.@nexprs $O i -> begin
                 if leftcells == i - 1
-                    return subcell_value_stencil(basis, Val(i - 1), Val($(2O + 1)), Val($side))
+                    return Stencil(basis, SubCellValue{i - 1, $(2O + 1), $side}())
                 end
             end
         end
@@ -155,12 +155,12 @@ end
         if rightcells < $O
             Base.@nexprs $O i -> begin
                 if rightcells == i - 1
-                    return subcell_value_stencil(basis, Val($(2O + 1), Val(i - 1)), Val($side))
+                    return Stencil(basis, SubCellValue{$(2O + 1), i - 1, $side}())
                 end
             end
         end
 
-        return subcell_value_stencil(basis, Val($(O)), Val($(O)), Val($side))
+        return Stencil(basis, SubCellValue{$O, $O, $side}())
     end
 
     quote 
