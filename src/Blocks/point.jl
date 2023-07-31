@@ -91,9 +91,11 @@ function block_prolong(block::AbstractBlock{N, T, O}, point::NTuple{N, PointInde
     block_stencil_product(block, cell, stencils)
 end
 
-function prolong_stencils(block::AbstractBlock{N, T, O}, point::NTuple{N, PointIndex}, basis::AbstractBasis{T}) where {N, T, O}
-    cells = blockcells(block)
-    ntuple(i -> _prolong_stencil(point[i], cells[i], basis, Val(O)), Val(N))
+@generated function prolong_stencils(block::AbstractBlock{N, T, O}, point::NTuple{N, PointIndex}, basis::AbstractBasis{T}) where {N, T, O}
+    quote
+        cells = blockcells(block)
+        Base.@ntuple $N i -> _prolong_stencil(point[i], cells[i], basis, Val(O))
+    end
 end
 
 function _prolong_stencil(::CellIndex, ::Int, basis::AbstractBasis{T}, ::Val{O}) where {T, O}
@@ -139,28 +141,28 @@ end
     side_expr = side -> quote 
         cindex = point_to_cell(index)
 
-        leftcells = min($O, cindex - 1)
-        rightcells = min($O, total - cindex)
+        leftcells = min($(O + 1), cindex - 1)
+        rightcells = min($(O + 1), total - cindex)
 
         # Left side
-        if leftcells < $O
-            Base.@nexprs $O i -> begin
+        if leftcells < $(O + 1)
+            Base.@nexprs $(O + 1) i -> begin
                 if leftcells == i - 1
-                    return Stencil(basis, SubCellValue{i - 1, $(2O), $side}())
+                    return Stencil(basis, SubCellValue{i - 1, $(2O + 1), $side}())
                 end
             end
         end
 
         # Right side
-        if rightcells < $O
-            Base.@nexprs $O i -> begin
+        if rightcells < $(O + 1)
+            Base.@nexprs $(O + 1) i -> begin
                 if rightcells == i - 1
-                    return Stencil(basis, SubCellValue{$(2O), i - 1, $side}())
+                    return Stencil(basis, SubCellValue{$(2O + 1), i - 1, $side}())
                 end
             end
         end
 
-        return Stencil(basis, SubCellValue{$O, $O, $side}())
+        return Stencil(basis, SubCellValue{$(O + 1), $(O + 1), $side}())
     end
 
     quote 

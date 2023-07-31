@@ -11,7 +11,7 @@ function transfer_to_block!(f::F, block::ArrayBlock{N, T, O}, values::AbstractVe
     # Fill interior 
     offset = nodeoffset(dofs, level, node)
     
-    fill_interior_from_linear!(block) do i
+    @allocated fill_interior_from_linear!(block) do i
         values[offset + i]
     end
 
@@ -219,11 +219,11 @@ end
         # Fill interior of child block
         nblock = setblocknode(block, nlevel, nnode)
 
-        ncpoint::NTuple{N, PointIndex} = setindex(npoint, CellIndex($side ? 1 : total), $axis)
+        ncpoint = setindex(npoint, CellIndex($side ? 1 : total), $axis)
         ncenter = block_prolong(TransferBlock(nblock), ncpoint, nblock.basis)
 
         ninterior = Base.@ntuple $(2O) j -> begin
-            nipoint_j::NTuple{N, PointIndex} = setindex(npoint, CellIndex($side ? 1 + j : total - j), $axis)
+            nipoint_j = setindex(npoint, CellIndex($side ? 1 + j : total - j), $axis)
             block_prolong(TransferBlock(nblock), nipoint_j, nblock.basis)
         end
 
@@ -339,6 +339,8 @@ end
         coarsenode = nodeneighbors(block.mesh, block.level - 1, parent)[$face]
         
         coarsesubcell = cell .+ cells .* Tuple(child)
+        # coarsepoint = Base.@ntuple $N i -> ifelse(i == $axis, CellIndex(0), SubCellIndex(coarsesubcell[i]))
+
         coarsepoint = Base.@ntuple $N i -> begin 
             if i ≤ $axis
                 ifelse($I[i] ≠ 0, ifelse($I[i] == 1, CellIndex(1), CellIndex(cells[i])), SubCellIndex(coarsesubcell[i]))
@@ -347,8 +349,7 @@ end
             end
         end
 
-        # coarsepoint = Base.@ntuple $N i -> ifelse(i == $axis, CellIndex(0), SubCellIndex(coarsesubcell[i]))
-
+        
         _prolong_interface(block, cell, block.level - 1, coarsenode, coarsepoint, Val(2))
     end
 end
