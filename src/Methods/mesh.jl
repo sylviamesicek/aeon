@@ -76,7 +76,7 @@ function Base.show(io::IO, mesh::Mesh{N, T}) where {N, T}
     end
 end
 
-@generated function nodecells(mesh::Mesh{N}, level::Int) where N
+@generated function nodecells(mesh::Mesh{N}, level::Int)::NTuple{N, Int} where N
     quote
         v = 2^(mesh.refinement + min(0, level - mesh.base - 1))
         Base.@ntuple $N i -> v

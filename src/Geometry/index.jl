@@ -23,21 +23,19 @@ SplitIndex{N}(linear::UInt) where N = SplitIndex{N}(Int(linear))
 """
 Converts a tuple of booleans into a split index.
 """
-function SplitIndex(cart::NTuple{N, Bool}) where N
-    inner = 0x0
-
-    for dim in 1:N
-        inner |= UInt(cart[dim] << (dim - 1))
+@generated function SplitIndex(cart::NTuple{N, Bool}) where N
+    quote
+        inner = 0x0
+        Base.@nexprs $N i -> inner |= UInt(cart[i] << (i - 1))
+        SplitIndex{N}(inner + 1)
     end
-
-    SplitIndex{N}(inner + 1)
 end
 
 """
 Transforms a split index into a tuple of booleans. 
 """
-function Tuple(split::SplitIndex{N}) where N 
-    ntuple(dim -> split[dim], Val(N))
+@generated function Tuple(split::SplitIndex{N}) where N 
+    :(Base.@ntuple $N dim -> split[dim])
 end
 
 """

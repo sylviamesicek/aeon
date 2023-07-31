@@ -43,7 +43,6 @@ struct HyperFaces{N, T, F}
     inner::NTuple{F, T}
 
     function HyperFaces{N}(faces::NTuple{F, T}) where {N, T, F}
-        @assert 2*N == F
         new{N, T, F}(faces)
     end
 end
@@ -56,11 +55,19 @@ Base.eachindex(::HyperFaces{N}) where N = faceindices(Val(N))
 Base.getindex(faces::HyperFaces{N}, index::FaceIndex{N}) where {N} = faces.inner[index.linear]
 Base.show(io::IO, faces::HyperFaces) = print(io, "HyperFaces$(tuple(faces.inner...))")
 
-function StaticArrays.setindex(faces::HyperFaces{N, T, F}, val::T, index::FaceIndex{N}) where {N, T, F}
-    HyperFaces(ntuple(face -> ifelse(face == index.linear, val, faces.inner[face]), Val(F)))
+@generated function StaticArrays.setindex(faces::HyperFaces{N, T, F}, val::T, index::FaceIndex{N}) where {N, T, F}
+    quote
+        HyperFaces(Base.@ntuple $(2N) i -> begin
+            if i == index.linear
+                val
+            else
+                faces.inner[i]
+            end
+        end)
+    end
 end
 
 """
 Constructs an `N` dimensional hyperfaces object from a function (analgous to the `ntuple` function for tuples).
 """
-nfaces(f::Function, ::Val{N}) where N = HyperFaces(ntuple(face -> f(FaceIndex{N}(face)), Val(2*N)))
+@generated nfaces(f::Function, ::Val{N}) where N = :(HyperFaces(Base.@ntuple $(2N) i -> f(FaceIndex{$N}(i))))

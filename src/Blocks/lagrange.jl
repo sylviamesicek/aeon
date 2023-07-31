@@ -105,22 +105,27 @@ Stencil(::LagrangeBasis{T}, ::CovariantDerivative{O, 2}) where {T, O} = lagrange
 Builds the cell-centered lagrange stencil approximating the given operator at a point, with `L` left supports
 and `R` right supports.
 """
-function lagrange_cell_stencil(f::Function, ::Val{T}, ::Val{L}, ::Val{R}, point) where {T, L, R}
-    grid = cell_centered_grid(L, R)
-    stencil = f(grid, point)
-    left = map(T, ntuple(i -> stencil[L + 1 - i], Val(L)))
-    right = map(T, ntuple(i -> stencil[L + 1 + i], Val(R)))
-    center = T(stencil[L + 1])
-    Stencil(left, center, right)
+@generated function lagrange_cell_stencil(f::Function, ::Val{T}, ::Val{L}, ::Val{R}, point) where {T, L, R}
+    quote
+        grid = cell_centered_grid($L, $R)
+        stencil = f(grid, point)
+        left = Base.@ntuple $L i -> $T(stencil[$L + 1 - i])
+        right = Base.@ntuple $R i -> $T(stencil[$L + 1 + i])
+        center = $T(stencil[$L + 1])
+        Stencil(left, center, right)
+    end
 end
 
 """
 Builds the vertex-centered lagrange stencil approximating the given operator between points.
 """
-function lagrange_vertex_stencil(f::Function, ::Val{T}, ::Val{L}, ::Val{R}, ::Val{S}) where {T, L, R, S}
-    grid = vertex_centered_grid(L, R)
-    stencil = f(grid, 0//1)
-    left = map(T, ntuple(i -> stencil[L + S - i], Val(L - !S)))
-    right = map(T, ntuple(i -> stencil[L + S + i], Val(R - S)))
-    Stencil(left, T(stencil[L + S]), right)
+@generated function lagrange_vertex_stencil(f::Function, ::Val{T}, ::Val{L}, ::Val{R}, ::Val{S}) where {T, L, R, S}
+    quote
+        grid = vertex_centered_grid($L, $R)
+        stencil = f(grid, 0//1)
+        left = Base.@ntuple $(L - !S) i -> $T(stencil[$L + $S - i])
+        right = Base.@ntuple $(R - S) i -> $T(stencil[$L + $S + i])
+
+        Stencil(left, $T(stencil[L + S]), right)
+    end
 end

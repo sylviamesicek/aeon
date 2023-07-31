@@ -22,6 +22,19 @@ function gunlach_laplacian(pos::SVector{2, T}, A::T, σ::T) where T
     2A*(2ρ^4 - 6ρ^2*σ^2 + σ^4 + 2ρ^2 * z^2) * ℯ^(-(ρ^2 + z^2) / σ^2) / σ^6
 end
 
+function scalar_field(pos::SVector{2, T}, A::T, σ::T, mass::T) where T
+    ρ = pos[1]
+    z = pos[2]
+
+
+    r² = ρ^2 + z^2
+    ϕ = A * ℯ^(-r² / σ^2)
+    
+    mass^2 * (ϕ^2 + ϕ) / 2
+end
+
+initial_data(pos::SVector{2, T}, Aₕ::T, σₕ::T, Aₛ::T, σₛ::T, mass::T) where T = (gunlach_laplacian(pos, Aₕ, σₕ) + scalar_field(pos, Aₛ, σₛ, mass)) / 4
+
 # Main code
 function main()
     # Function basis
@@ -29,13 +42,39 @@ function main()
 
     # Mesh
 
-    mesh = Mesh(HyperBox(SA[0.0, 0.0], SA[4.0, 4.0]), 6, 0)
+    mesh = Mesh(HyperBox(SA[0.0, 0.0], SA[6.0, 6.0]), 9, 0)
 
-    mark_refine_global!(mesh)
-    prepare_and_execute_refinement!(mesh)
+    # for i in 1:2
+    #     mark_refine_global!(mesh)
+    #     prepare_and_execute_refinement!(mesh)
+    # end
 
-    mark_refine!(mesh, 2, 1)
-    prepare_and_execute_refinement!(mesh)
+    # for _ in 1:3
+    #     foreachleafnode(mesh) do level, node
+    #         origin = nodebounds(mesh, level, node).origin
+
+    #         if norm(origin) < 1.0
+    #             mark_refine!(mesh, level, node)
+    #         end
+    #     end
+
+    #     prepare_and_execute_refinement!(mesh)
+    # end
+
+    # mark_refine_global!(mesh)
+    # prepare_and_execute_refinement!(mesh)
+
+    # mark_refine_global!(mesh)
+    # prepare_and_execute_refinement!(mesh)
+
+    # mark_refine!(mesh, 2, 1)
+    # prepare_and_execute_refinement!(mesh)
+
+    # mark_refine_global!(mesh)
+    # prepare_and_execute_refinement!(mesh)
+
+    # mark_refine!(mesh, 4, 1)
+    # prepare_and_execute_refinement!(mesh)
     
     # for _ in 1:1
     #     for level in eachindex(mesh)
@@ -59,7 +98,7 @@ function main()
     @show total
 
     seed = project(mesh, dofs) do pos
-        gunlach_laplacian(pos, 1.0, 1.0)
+        initial_data(pos, 1.0, 1.0, 0.0, 0.0, 0.0)
     end
 
     mv_product = 1
@@ -105,7 +144,7 @@ function main()
     end
 
     println("Solving")
-    solution, history = bicgstabl(hemholtz, seed, 2; log=true, max_mv_products=8000)
+    solution, history = bicgstabl(hemholtz, seed, 2; log=true, max_mv_products=16000)
     @show history
 
     writer = MeshWriter{2, Float64}()
