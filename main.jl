@@ -35,6 +35,66 @@ end
 
 initial_data(pos::SVector{2, T}, Aₕ::T, σₕ::T, Aₛ::T, σₛ::T, mass::T) where T = (gunlach_laplacian(pos, Aₕ, σₕ) + scalar_field(pos, Aₛ, σₛ, mass)) / 4
 
+function solve_nth_order(mesh::Mesh{N, T}, dofs::DoFManager{N, T}, basis::AbstractBasis{T}, amp::T, ::Val{O}) where {N, T, O}
+    seed = project(mesh, dofs) do pos
+        initial_data(pos, amp, one(T), zero(T), zero(T), zero(T))
+    end
+
+    blocks = BlockManager{O}(mesh)
+    total = dofstotal(dofs)
+
+    # mv_product = 1
+
+    println("Solving to order $(O)")
+
+    hemholtz = LinearMap(total) do y, x
+        # println("MV Product: $mv_product")
+        # mv_product += 1
+
+        foreachleafnode(mesh) do level, node
+            offset = nodeoffset(dofs, level, node)
+            transform = nodetransform(mesh, level, node)
+
+            block = blocks[level]
+
+            # Transfer data to block
+            transfer_to_block!(block, x, basis, mesh, dofs, level, node) do pos, face
+                if faceside(face)
+                    r = norm(pos)
+                    return robin(one(T)/r, one(T), zero(T))
+                else
+                    return nuemann(one(T), zero(T))
+                end
+            end
+            
+            for (i, cell) in enumerate(cellindices(block))
+                lpos = cellposition(block, cell)
+                gpos = transform(lpos)
+
+                j = inv(jacobian(transform, lpos))
+
+                lgrad = block_gradient(block, cell, basis)
+                ggrad = j * lgrad
+
+                lhess = block_hessian(block, cell, basis)
+                ghess = j' * lhess * j
+
+                glap = ghess[1, 1] + ghess[2, 2] + ggrad[1]/gpos[1]
+                gval = block_value(block, cell)
+
+                y[offset + i] = -glap - seed[offset + i] * gval
+            end
+        end
+    end
+
+    solution, history = bicgstabl(hemholtz, seed, 2; log=true, max_mv_products=16000 * O)
+    @show history
+
+    return solution
+end
+
+using DelimitedFiles
+
 # Main code
 function main()
     # Function basis
@@ -42,7 +102,33 @@ function main()
 
     # Mesh
 
-    mesh = Mesh(HyperBox(SA[0.0, 0.0], SA[6.0, 6.0]), 9, 0)
+    ratios = Vector{Tuple{Float64, Float64}}()
+
+    Threads.@threads for A in 1.0:.1:2.0
+        coarsemesh = Mesh(HyperBox(SA[0.0, 0.0], SA[4.0, 4.0]), 4, 0)
+        refinedmesh = Mesh(HyperBox(SA[0.0, 0.0], SA[4.0, 4.0]), 5, 0)
+
+        coarsedofs = DoFManager(coarsemesh)
+        refinedofs = DoFManager(refinedmesh)
+
+        println("A = $A")
+        coarsesol4 = solve_nth_order(coarsemesh, coarsedofs, basis, A, Val(2))
+        coarsesol8 = solve_nth_order(coarsemesh, coarsedofs, basis, A, Val(4))
+
+        refinedsol4 = solve_nth_order(refinedmesh, refinedofs, basis, A, Val(2))
+        refinedsol8 = solve_nth_order(refinedmesh, refinedofs, basis, A, Val(4))
+
+        coarseerror = maximum(coarsesol4 .- coarsesol8)
+        refinederror = maximum(refinedsol4 .- refinedsol8)
+
+        ratio = refinederror / coarseerror
+
+        push!(ratios, (ratio, A))
+    end
+
+    writedlm("ratios.csv",  ratios, ',')
+
+    println("Ratio: {ratios}")
 
     # for i in 1:2
     #     mark_refine_global!(mesh)
@@ -90,68 +176,26 @@ function main()
     #     prepare_and_execute_refinement!(mesh)
     # end
 
-    dofs = DoFManager(mesh)
-    blocks = BlockManager{2}(mesh)
-    total = dofstotal(dofs)
+    # dofs = DoFManager(mesh)
+    # total = dofstotal(dofs)
 
-    @show mesh
-    @show total
+    # @show mesh
+    # @show total
 
-    seed = project(mesh, dofs) do pos
-        initial_data(pos, 1.0, 1.0, 0.0, 0.0, 0.0)
-    end
+    # seed = project(mesh, dofs) do pos
+    #     initial_data(pos, 1.0, 1.0, 0.0, 0.0, 0.0)
+    # end
 
-    mv_product = 1
+    # sol4 = solve_nth_order(mesh, dofs, basis, Val(2))
+    # sol8 = solve_nth_order(mesh, dofs, basis, Val(4))
 
-    hemholtz = LinearMap(total) do y, x
-        println("MV Product: $mv_product")
-        mv_product += 1
-
-        foreachleafnode(mesh) do level, node
-            offset = nodeoffset(dofs, level, node)
-            transform = nodetransform(mesh, level, node)
-
-            block = blocks[level]
-
-            # Transfer data to block
-            transfer_to_block!(block, x, basis, mesh, dofs, level, node) do pos, face
-                if faceside(face)
-                    r = norm(pos)
-                    return robin(1.0/r, 1.0, 0.0)
-                else
-                    return nuemann(1.0, 0.0)
-                end
-            end
-            
-            for (i, cell) in enumerate(cellindices(block))
-                lpos = cellposition(block, cell)
-                gpos = transform(lpos)
-
-                j = inv(jacobian(transform, lpos))
-
-                lgrad = block_gradient(block, cell, basis)
-                ggrad = j * lgrad
-
-                lhess = block_hessian(block, cell, basis)
-                ghess = j' * lhess * j
-
-                glap = ghess[1, 1] + ghess[2, 2] + ggrad[1]/gpos[1]
-                gval = block_value(block, cell)
-
-                y[offset + i] = -glap - seed[offset + i] * gval
-            end
-        end
-    end
-
-    println("Solving")
-    solution, history = bicgstabl(hemholtz, seed, 2; log=true, max_mv_products=16000)
-    @show history
-
-    writer = MeshWriter{2, Float64}()
-    attrib!(writer, NodeAttribute())
-    attrib!(writer, ScalarAttribute("seed", seed))
-    attrib!(writer, ScalarAttribute("solution", solution))
-    write_vtu(writer, mesh, dofs, "output")
+    # writer = MeshWriter{2, Float64}()
+    # attrib!(writer, NodeAttribute())
+    # attrib!(writer, ScalarAttribute("seed", seed))
+    # attrib!(writer, ScalarAttribute("solution-4th", sol4))
+    # attrib!(writer, ScalarAttribute("solution-8th", sol8))
+    # attrib!(writer, ScalarAttribute("solution-diff", sol4 .- sol8))
+    # write_vtu(writer, mesh, dofs, "output")
 end
 
 main()
