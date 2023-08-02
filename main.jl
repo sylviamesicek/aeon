@@ -45,7 +45,7 @@ function solve_nth_order(mesh::Mesh{N, T}, dofs::DoFManager{N, T}, basis::Abstra
 
     # mv_product = 1
 
-    println("Solving to order $(O)")
+    # println("Solving to order $(O)")
 
     hemholtz = LinearMap(total) do y, x
         # println("MV Product: $mv_product")
@@ -57,6 +57,7 @@ function solve_nth_order(mesh::Mesh{N, T}, dofs::DoFManager{N, T}, basis::Abstra
 
             block = blocks[level]
 
+            # v = @allocated begin
             # Transfer data to block
             transfer_to_block!(block, x, basis, mesh, dofs, level, node) do pos, face
                 if faceside(face)
@@ -66,6 +67,10 @@ function solve_nth_order(mesh::Mesh{N, T}, dofs::DoFManager{N, T}, basis::Abstra
                     return nuemann(one(T), zero(T))
                 end
             end
+
+            # end
+
+            # @show v
             
             for (i, cell) in enumerate(cellindices(block))
                 lpos = cellposition(block, cell)
@@ -98,37 +103,39 @@ using DelimitedFiles
 # Main code
 function main()
     # Function basis
-    basis = LagrangeBasis{Float64}()
 
     # Mesh
 
     ratios = Vector{Tuple{Float64, Float64}}()
 
-    Threads.@threads for A in 1.0:.1:2.0
-        coarsemesh = Mesh(HyperBox(SA[0.0, 0.0], SA[4.0, 4.0]), 4, 0)
-        refinedmesh = Mesh(HyperBox(SA[0.0, 0.0], SA[4.0, 4.0]), 5, 0)
+    Threads.@threads for A in 1.0:.01:10.0
+        println("Solving for A = $A")
+
+        basis = LagrangeBasis{Float64}()
+        coarsemesh = Mesh(HyperBox(SA[0.0, 0.0], SA[4.0, 4.0]), 5, 0)
+        refinedmesh = Mesh(HyperBox(SA[0.0, 0.0], SA[4.0, 4.0]), 6, 0)
 
         coarsedofs = DoFManager(coarsemesh)
         refinedofs = DoFManager(refinedmesh)
 
-        println("A = $A")
         coarsesol4 = solve_nth_order(coarsemesh, coarsedofs, basis, A, Val(2))
-        coarsesol8 = solve_nth_order(coarsemesh, coarsedofs, basis, A, Val(4))
+        coarsesol8 = solve_nth_order(coarsemesh, coarsedofs, basis, A, Val(3))
 
         refinedsol4 = solve_nth_order(refinedmesh, refinedofs, basis, A, Val(2))
-        refinedsol8 = solve_nth_order(refinedmesh, refinedofs, basis, A, Val(4))
+        refinedsol8 = solve_nth_order(refinedmesh, refinedofs, basis, A, Val(3))
 
         coarseerror = maximum(coarsesol4 .- coarsesol8)
         refinederror = maximum(refinedsol4 .- refinedsol8)
 
         ratio = refinederror / coarseerror
 
+        println("Ratio for $A: $ratio")
+        # println("What the hell")
+
         push!(ratios, (ratio, A))
     end
 
     writedlm("ratios.csv",  ratios, ',')
-
-    println("Ratio: {ratios}")
 
     # for i in 1:2
     #     mark_refine_global!(mesh)

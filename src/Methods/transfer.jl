@@ -63,23 +63,33 @@ end
 
     if axis == 0
         return quote
+            # v = @allocated begin
             # The base case in the recursion
             cells = nodecells(block.mesh, block.level)
             offset = nodeoffset(block.dofs, block.level, block.node)
             linear = LinearIndices(cells)
-            return tuple(block.values[offset + linear[cell...]])::NTuple{$len, $T}
+            t = tuple(block.values[offset + linear[cell...]])::NTuple{$len, $T}
+            # end; @assert v == 0
+            return t
         end
     end
 
+    rlen = length(I) > 1 ? count_tuple_length(O, Base.front(I)) : 1
     side = I[axis] > 0
 
     if I[axis] == 0
-        return :(_compute_block_boundary(TransferBlock(block), cell)::NTuple{$len, $T})
+        return quote
+            # v = @allocated begin 
+                t::NTuple{$len, $T} = _compute_block_boundary(TransferBlock(block), cell)
+            # end; @assert v == 0
+            return t
+        end
     end
     
     face = FaceIndex{N}(axis, side)
 
     quote
+        # v = @allocated begin
         # Cache fields for some reason
         mesh::Mesh{$N, $T, $(2N)} = block.mesh
         dofs::DoFManager{$N, $T} = block.dofs
@@ -92,21 +102,25 @@ end
         position = cellposition(mesh, level, CartesianIndex(cell))
         offset = nodeoffset(dofs, level, node)
 
-        if neighbor < 0
-            gpos = transform(position .+ G .* 1 ./ (2 .* cells))
-            condition = block.f(gpos, $face)
+        # if neighbor < 0
+        gpos = transform(position .+ G .* 1 ./ (2 .* cells))
+        condition = block.f(gpos, $face)
 
-            return tuple_flatten(_physical_boundary(condition, block, cell))::NTuple{$len, $T}
-        elseif neighbor == 0
-            # Neighbor is coarser
-            return tuple_flatten(_coarse_interface(block, cell))::NTuple{$len, $T}
-        elseif nodechildren(mesh, level, neighbor) == -1
-            # Neighbor is same level
-            return tuple_flatten(_identity_interface(block, cell))::NTuple{$len, $T}
-        else
-            # Neighbor is more refined
-            return tuple_flatten(_refined_interface(block, cell))::NTuple{$len, $T}
-        end
+        # end; @assert v == 0
+
+        b::NTuple{$O, NTuple{$rlen, $T}} = _physical_boundary(condition, block, cell)
+
+        return tuple_flatten(b)::NTuple{$len, $T}
+        # elseif neighbor == 0
+        #     # Neighbor is coarser
+        #     return tuple_flatten(_coarse_interface(block, cell))::NTuple{$len, $T}
+        # elseif nodechildren(mesh, level, neighbor) == -1
+        #     # Neighbor is same level
+        #     return tuple_flatten(_identity_interface(block, cell))::NTuple{$len, $T}
+        # else
+        #     # Neighbor is more refined
+        #     return tuple_flatten(_refined_interface(block, cell))::NTuple{$len, $T}
+        # end
 
     end
 end
@@ -117,7 +131,12 @@ end
 
     rlen = count_tuple_length(O, Base.front(I))
 
+    vstencils = ntuple(i -> Stencil(LagrangeBasis{T}(), side ? VertexValue{2O + 1, i, false}() : VertexValue{i, 2O + 1, true}()), O)
+    dstencils = ntuple(i -> Stencil(LagrangeBasis{T}(), side ? VertexDerivative{2O + 1, i, false}() : VertexDerivative{i, 2O + 1, true}()), O)
+
     quote
+        # v = @allocated begin
+
         mesh::Mesh{$N, $T, $(2N)} = block.mesh
         level::Int = block.level
         node::Int = block.node
@@ -126,35 +145,34 @@ end
         width::$T = nodebounds(mesh, level, node).widths[$axis]
 
         ccell::NTuple{$N, Int} = setindex(cell, $side ? total : 1, $axis)
-        center::NTuple{$rlen, $T} = _compute_block_boundary(TransferBlock(block), ccell)
+        icell = Base.@ntuple $(2O) j -> setindex(cell, $side ? total - j : 1 + j, $axis)
 
-        interior::NTuple{$(2O), NTuple{$rlen, $T}} = Base.@ntuple $(2O) j -> begin
-            icell_j = setindex(cell, $side ? total - j : 1 + j, $axis)
-            _compute_block_boundary(TransferBlock(block), icell_j)
-        end
+        # end; @assert v == 0
+
+        center::NTuple{$rlen, $T} = _compute_block_boundary(TransferBlock(block), ccell)
+        interior::NTuple{$(2O), NTuple{$rlen, $T}} = Base.@ntuple $(2O) j -> _compute_block_boundary(TransferBlock(block), icell[j]) 
+
+        # v = @allocated begin
 
         # Transform normal derivative
         normal_to_global::$T = $(I[axis]) * total / width
 
-        Base.@nexprs $O i -> begin
-            # Value
-            vstencil_i = Stencil(block.basis, $side ? VertexValue{$(2O + 1), i, false}() : VertexValue{i, $(2O + 1), true}())
-            
-            vresult_i::NTuple{$rlen, $T} = vstencil_i.center .* center
+        vstencils = $(vstencils)
+        dstencils = $(dstencils)
 
-            interior_vstencil_i::NTuple{$(2O), $T} = $side ? vstencil_i.left : vstencil_i.right
-            exterior_vstencil_i::NTuple{i, $T} = $side ? vstencil_i.right : vstencil_i.left
+        Base.@nexprs $O i -> begin            
+            vresult_i::NTuple{$rlen, $T} = vstencils[i].center .* center
+
+            interior_vstencil_i::NTuple{$(2O), $T} = $side ? vstencils[i].left : vstencils[i].right
+            exterior_vstencil_i::NTuple{i, $T} = $side ? vstencils[i].right : vstencils[i].left
 
             Base.@nexprs $(2O) j -> vresult_i = vresult_i .+ interior_vstencil_i[j] .* interior[j]
             Base.@nexprs (i - 1) j -> vresult_i = vresult_i .+ exterior_vstencil_i[j] .* unknown_j
 
-            # Derivative
-            dstencil_i = Stencil(block.basis, $side ? VertexDerivative{$(2O + 1), i, false}() : VertexDerivative{i, $(2O + 1), true}())
-            
-            dresult_i::NTuple{$rlen, $T} = dstencil_i.center .* center
+            dresult_i::NTuple{$rlen, $T} = dstencils[i].center .* center
 
-            interior_dstencil_i::NTuple{$(2O), $T} = $side ? dstencil_i.left : dstencil_i.right
-            exterior_dstencil_i::NTuple{i, $T} = $side ? dstencil_i.right : dstencil_i.left
+            interior_dstencil_i::NTuple{$(2O), $T} = $side ? dstencils[i].left : dstencils[i].right
+            exterior_dstencil_i::NTuple{i, $T} = $side ? dstencils[i].right : dstencils[i].left
 
             Base.@nexprs $(2O) j -> dresult_i = dresult_i .+ interior_dstencil_i[j] .* interior[j]
             Base.@nexprs (i - 1) j -> dresult_i = dresult_i .+ exterior_dstencil_i[j] .* unknown_j
@@ -170,6 +188,8 @@ end
 
             vapplied_i::NTuple{$rlen, $T} = vresult_i .+ exterior_vstencil_i[end] .* unknown_i
         end
+
+        # end; @assert v == 0
 
         return Base.@ntuple $O i -> vapplied_i
     end
