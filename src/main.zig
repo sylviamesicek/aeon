@@ -1,7 +1,10 @@
 const std = @import("std");
 const vtkio = @import("vtkio.zig");
+const VtkCellType = vtkio.VtkCellType;
+const VtkGrid = vtkio.VtkGrid;
 
 pub fn main() !void {
+    // Setup Allocator
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer {
         const deinit_status = gpa.deinit();
@@ -13,12 +16,10 @@ pub fn main() !void {
 
     const allocator = gpa.allocator();
 
-    var vec = std.ArrayList(f64).init(allocator);
-    defer vec.deinit();
+    // Setup vtk grid object
+    var grid = VtkGrid.init(allocator);
+    defer grid.deinit();
 
-    try vec.append(10.0);
-    try vec.append(20.0);
-    try vec.append(30.0);
-
-    std.debug.print("{}", .{vec});
+    const stdout = std.io.getStdOut().writer();
+    try grid.write_unstructured(.quad, &[_]f64{}, &[_]i64{}, stdout);
 }
