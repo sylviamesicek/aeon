@@ -1,7 +1,14 @@
 const std = @import("std");
+const basis = @import("basis/basis.zig");
+const geometry = @import("geometry/geometry.zig");
 const vtkio = @import("vtkio.zig");
+
+// Aliases
+
 const VtkCellType = vtkio.VtkCellType;
-const VtkGrid = vtkio.VtkGrid;
+const VtkUnstructuredGrid = vtkio.VtkUnstructuredGrid;
+
+// Main function
 
 pub fn main() !void {
     // Setup Allocator
@@ -17,9 +24,16 @@ pub fn main() !void {
     const allocator = gpa.allocator();
 
     // Setup vtk grid object
-    var grid = VtkGrid.init(allocator);
+    var grid = try VtkUnstructuredGrid.init(allocator, .{ .cell_type = .quad, .points = &[_]f64{}, .vertices = &[_]i64{} });
+
     defer grid.deinit();
 
     const stdout = std.io.getStdOut().writer();
-    try grid.write_unstructured(.quad, &[_]f64{}, &[_]i64{}, stdout);
+    try grid.write(stdout);
+}
+
+test {
+    _ = geometry;
+    _ = basis;
+    _ = vtkio;
 }
