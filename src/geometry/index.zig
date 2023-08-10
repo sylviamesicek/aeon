@@ -50,6 +50,57 @@ pub fn IndexSpace(comptime N: usize) type {
 
             return result;
         }
+
+        /// An iterator over the cartesian indices of the index space.
+        pub const CartesianIterator = struct {
+            size: [N]usize,
+            cursor: [N]usize,
+
+            pub fn next(self: *CartesianIterator) ?[N]usize {
+                // Last index was incremented, iteration is complete.
+                if (self.cursor[0] == self.size[0]) {
+                    return null;
+                }
+
+                // Store current cursor value (this is what we will return).
+                var result = self.cursor;
+
+                // Set an increment array. In 3d this looks like [false, false, true].
+                var increment = [1]bool{false} ** N;
+                increment[N - 1] = true;
+
+                // Loop over axes in reverse order.
+                for (0..N) |i| {
+                    const axis = N - 1 - i;
+
+                    if (increment[axis]) {
+                        // If we need to increment this axis, we add to the cursor value.
+                        self.cursor[axis] += 1;
+                        // If cursor is equal to the size, we need to perform wrapping.
+                        // However, if we have reached the final axis, this indicates we
+                        // are at the end of iteration, and will return null on the next
+                        // call to next.
+                        if (self.cursor[axis] == self.size[axis]) {
+                            if (axis != 0) {
+                                self.cursor[axis] = 0;
+                                increment[axis - 1] = true;
+                            }
+                        }
+                    }
+                }
+
+                // Return old cursor position.
+                return result;
+            }
+        };
+
+        /// Iterates the cartesian indices of an index space.
+        pub fn cartesianIndices(self: Self) CartesianIterator {
+            return .{
+                .size = self.size,
+                .cursor = [1]usize{0} ** N,
+            };
+        }
     };
 }
 
@@ -57,10 +108,21 @@ test "index space" {
     const std = @import("std");
     const expect = std.testing.expect;
     const eql = std.mem.eql;
+
     const space: IndexSpace(3) = .{
-        .size = [3]usize{ 10, 10, 10 },
+        .size = [3]usize{ 2, 1, 3 },
     };
 
-    try expect(space.cartesianToLinear([_]usize{ 4, 4, 4 }) == 444);
-    try expect(eql(usize, &space.linearToCartesian(444), &[_]usize{ 4, 4, 4 }));
+    try expect(space.cartesianToLinear([_]usize{ 1, 0, 2 }) == 5);
+    try expect(eql(usize, &space.linearToCartesian(5), &[_]usize{ 1, 0, 2 }));
+
+    var iterator = space.cartesianIndices();
+
+    try expect(eql(usize, &iterator.next().?, &[_]usize{ 0, 0, 0 }));
+    try expect(eql(usize, &iterator.next().?, &[_]usize{ 0, 0, 1 }));
+    try expect(eql(usize, &iterator.next().?, &[_]usize{ 0, 0, 2 }));
+    try expect(eql(usize, &iterator.next().?, &[_]usize{ 1, 0, 0 }));
+    try expect(eql(usize, &iterator.next().?, &[_]usize{ 1, 0, 1 }));
+    try expect(eql(usize, &iterator.next().?, &[_]usize{ 1, 0, 2 }));
+    try expect(iterator.next() == null);
 }
