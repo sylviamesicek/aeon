@@ -1,6 +1,6 @@
 /// Describes an abstract index space, ie an N-dimensional space with
 /// size[i] discrete cells on each axis. Contains helpers for converting
-/// between cartesian and linear indices.
+/// between cartesian and linear indices, as well as iterator over the space.
 pub fn IndexSpace(comptime N: usize) type {
     return struct {
         size: [N]usize,
@@ -49,6 +49,18 @@ pub fn IndexSpace(comptime N: usize) type {
             }
 
             return result;
+        }
+
+        pub fn longestAxis(self: Self) usize {
+            var axis: usize = 0;
+
+            for (1..N) |i| {
+                if (self.size[i] > self.size[axis]) {
+                    axis = i;
+                }
+            }
+
+            return axis;
         }
 
         /// An iterator over the cartesian indices of the index space.
@@ -101,6 +113,34 @@ pub fn IndexSpace(comptime N: usize) type {
                 .cursor = [1]usize{0} ** N,
             };
         }
+
+        /// An iterator over the cartesian indices of a slice of the index space.
+        pub const CartesianSliceIterator = struct {
+            indices: CartesianIterator,
+            axis: usize,
+            slice: usize,
+
+            pub fn next(self: *CartesianSliceIterator) ?[N]usize {
+                var index = self.indices.next() orelse return null;
+                index[self.axis] = self.slice;
+                return index;
+            }
+        };
+
+        /// Iterates the cartesian indices of a slice of the index space.
+        pub fn cartesianSliceIndices(self: Self, axis: usize, slice: usize) CartesianSliceIterator {
+            var size = self.size;
+            size[axis] = 1;
+
+            return .{
+                .indices = .{
+                    .size = size,
+                    .cursor = [1]usize{0} ** N,
+                },
+                .axis = axis,
+                .slice = slice,
+            };
+        }
     };
 }
 
@@ -117,7 +157,6 @@ test "index space" {
     try expect(eql(usize, &space.linearToCartesian(5), &[_]usize{ 1, 0, 2 }));
 
     var iterator = space.cartesianIndices();
-
     try expect(eql(usize, &iterator.next().?, &[_]usize{ 0, 0, 0 }));
     try expect(eql(usize, &iterator.next().?, &[_]usize{ 0, 0, 1 }));
     try expect(eql(usize, &iterator.next().?, &[_]usize{ 0, 0, 2 }));
@@ -125,4 +164,10 @@ test "index space" {
     try expect(eql(usize, &iterator.next().?, &[_]usize{ 1, 0, 1 }));
     try expect(eql(usize, &iterator.next().?, &[_]usize{ 1, 0, 2 }));
     try expect(iterator.next() == null);
+
+    var iterator_slice = space.cartesianSliceIndices(0, 1);
+    try expect(eql(usize, &iterator_slice.next().?, &[_]usize{ 1, 0, 0 }));
+    try expect(eql(usize, &iterator_slice.next().?, &[_]usize{ 1, 0, 1 }));
+    try expect(eql(usize, &iterator_slice.next().?, &[_]usize{ 1, 0, 2 }));
+    try expect(iterator_slice.next() == null);
 }

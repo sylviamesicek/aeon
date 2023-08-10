@@ -70,43 +70,8 @@ pub fn Box(comptime N: usize, comptime T: type) type {
 
             return result;
         }
-
-        // pub fn split(self: Self, index: SplitIndex(N)) Self {
-        //     const cart: [N]bool = index.toCartesian();
-
-        //     var widths: [N]T = undefined;
-        //     var origin: [N]T = undefined;
-
-        //     for (0..N) |i| {
-        //         widths[i] = self.widths[i] / @as(T, 2);
-        //         if (cart[i]) {
-        //             origin[i] = self.origin[i] + widths[i];
-        //         } else {
-        //             origin[i] = self.origin[i];
-        //         }
-        //     }
-
-        //     return .{
-        //         .widths = widths,
-        //         .origin = origin,
-        //     };
-        // }
     };
 }
-
-// test "split index" {
-//     const expect = std.testing.expect;
-//     const eql = std.mem.eql;
-//     const SplitIndex3 = SplitIndex(3);
-
-//     const index = SplitIndex3.fromCartesian([_]bool{ false, true, false });
-//     const cartesian = index.toCartesian();
-//     const linear = index.linear;
-
-//     try expect(linear == 2);
-//     try expect(eql(bool, &cartesian, &[_]bool{ false, true, false }));
-//     try expect(index.reverseAxis(1).linear == 0);
-// }
 
 test "box" {
     const expect = std.testing.expect;
@@ -119,12 +84,4 @@ test "box" {
 
     try expect(eql(unit.center(), [2]f64{ 0.5, 0.5 }));
     try expect(unit.contains([2]f64{ 0.5, 0.5 }));
-
-    //     const index = SplitIndex(2).fromCartesian([_]bool{ false, true });
-    //     const subunit: RealBox(2) = unit.split(index);
-
-    //     try expect(eql(subunit, .{
-    //         .origin = [2]f64{ 0.0, 0.5 },
-    //         .widths = [2]f64{ 0.5, 0.5 },
-    //     }));
 }

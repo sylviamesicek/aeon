@@ -1,15 +1,15 @@
 const std = @import("std");
+
+// Subdirectories
 const basis = @import("basis/basis.zig");
 const geometry = @import("geometry/geometry.zig");
 const vtkio = @import("vtkio.zig");
 
 // Aliases
-
 const VtkCellType = vtkio.VtkCellType;
 const VtkUnstructuredGrid = vtkio.VtkUnstructuredGrid;
 
 // Main function
-
 pub fn main() !void {
     // Setup Allocator
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
