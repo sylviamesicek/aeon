@@ -1,8 +1,11 @@
 const std = @import("std");
 
+const block = @import("block.zig");
+
 pub const IndexSpace = @import("index.zig").IndexSpace;
 pub const Box = @import("box.zig").Box;
-pub const Block = @import("block.zig").Block;
+pub const Block = block.Block;
+pub const Signatures = block.Signatures;
 
 /// Represents one level of a mesh. This includes an array of
 /// rectangular blocks that make up that particular level (which needs
@@ -55,96 +58,8 @@ pub fn Geometry(comptime N: usize) type {
             _ = config;
             self.cells = tagged.size;
 
-            var signatures = Signatures(N).init(self.allocator, tagged);
+            var signatures = Signatures(3).initCapacity(self.allocator, tagged.size);
             defer signatures.deinit();
-        }
-
-        fn compute_efficiency(tagged: Block(N, bool), part: Box(N, usize)) f64 {
-            const space = IndexSpace(N){ .size = part.widths };
-
-            const offset = part.origin;
-            var indices = space.cartesianIndices();
-
-            var n_tagged: usize = 0;
-            var linear: usize = 0;
-
-            while (indices.next()) |local| {
-                var global: [N]usize = undefined;
-
-                for (0..N) |i| {
-                    global[i] = offset[i] + local[i];
-                }
-
-                if (tagged.data[linear]) {
-                    n_tagged += 1;
-                }
-
-                linear += 1;
-            }
-
-            const n_total = space.total();
-
-            const f_tagged: f64 = @floatFromInt(n_tagged);
-            const f_total: f64 = @floatFromInt(n_total);
-
-            return f_tagged / f_total;
-        }
-    };
-}
-
-pub fn Signatures(comptime N: usize) type {
-    return struct {
-        axes: [N]std.ArrayListUnmanaged(usize),
-
-        const Self = @This();
-
-        fn init(allocator: std.mem.Allocator, tagged: Block(N, bool)) !Self {
-            const space = IndexSpace(N){ .size = tagged.size };
-
-            // Allocate signatures
-            var signatures: [N]std.ArrayListUnmanaged(usize) = undefined;
-
-            for (0..N) |axis| {
-                signatures[axis] = std.ArrayListUnmanaged(usize){};
-            }
-
-            errdefer {
-                for (0..N) |axis| {
-                    signatures[axis].deinit(allocator);
-                }
-            }
-
-            for (0..N) |axis| {
-                try signatures[axis].ensureTotalCapacity(allocator, tagged.size[axis]);
-            }
-
-            // Fill signatures
-            for (0..N) |axis| {
-                for (0..space.size[axis]) |i| {
-                    var signature: usize = 0;
-
-                    var iterator = space.cartesianSliceIndices(axis, i);
-
-                    while (iterator.next()) |cart| {
-                        const linear = space.cartesianToLinear(cart);
-                        if (tagged.data.items[linear]) {
-                            signature += 1;
-                        }
-                    }
-
-                    signatures[axis].appendAssumeCapacity(signature);
-                }
-            }
-
-            return .{
-                .axes = signatures,
-            };
-        }
-
-        fn deinit(self: *Self, allocator: std.mem.Allocator) void {
-            for (0..N) |axis| {
-                self.axes[axis].deinit(allocator);
-            }
         }
     };
 }
@@ -153,32 +68,6 @@ test {
     _ = @import("block.zig");
     _ = @import("box.zig");
     _ = @import("index.zig");
-}
-
-test "signatures" {
-    const expect = std.testing.expect;
-    const eql = std.mem.eql;
-
-    const space = IndexSpace(3){ .size = [3]usize{ 5, 5, 5 } };
-
-    var tagged: Block(3, bool) = try Block(3, bool).init(std.testing.allocator, space.size);
-    defer tagged.deinit();
-
-    // Fill tagging data.
-    for (tagged.data.items) |*tag| {
-        tag.* = false;
-    }
-
-    tagged.data.items[space.cartesianToLinear([3]usize{ 0, 0, 0 })] = true;
-    tagged.data.items[space.cartesianToLinear([3]usize{ 3, 2, 1 })] = true;
-    tagged.data.items[space.cartesianToLinear([3]usize{ 0, 1, 3 })] = true;
-
-    var signatures = try Signatures(3).init(std.testing.allocator, tagged);
-    defer signatures.deinit(std.testing.allocator);
-
-    try expect(eql(usize, signatures.axes[0].items, &[5]usize{ 2, 0, 0, 1, 0 }));
-    try expect(eql(usize, signatures.axes[1].items, &[5]usize{ 1, 1, 1, 0, 0 }));
-    try expect(eql(usize, signatures.axes[2].items, &[5]usize{ 1, 1, 0, 1, 0 }));
 }
 
 test "geometry" {

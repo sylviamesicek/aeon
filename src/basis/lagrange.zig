@@ -1,23 +1,5 @@
 const std = @import("std");
 
-fn basis_filtered(comptime T: type, grid: []const T, i: usize, filter: []const usize, point: T) T {
-    var result = @as(T, 1);
-
-    for (0..grid.len) |idx| {
-        var matches = i == idx;
-
-        for (filter) |f| {
-            matches = matches or f == idx;
-        }
-
-        if (!matches) {
-            result *= (point - grid[idx]) / (grid[i] - grid[idx]);
-        }
-    }
-
-    return result;
-}
-
 /// Computes the interpolation stencil given a grid and a point.
 pub fn value_stencil(comptime T: type, comptime L: usize, grid: [L]T, point: T) [L]T {
     var stencil: [L]T = undefined;
