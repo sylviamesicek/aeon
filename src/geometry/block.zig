@@ -10,14 +10,13 @@ pub fn Block(comptime N: usize, comptime T: type) type {
 
         const Self = @This();
 
-        pub fn init(allocator: std.mem.Allocator, size: [N]usize) !Self {
+        pub fn init(allocator: std.mem.Allocator, size: [N]usize, value: T) !Self {
             const space = IndexSpace(N){ .size = size };
             const total = space.total();
 
-            var data = std.ArrayList(T).init(allocator);
+            var data = try std.ArrayList(T).initCapacity(allocator, total);
+            data.appendNTimesAssumeCapacity(value, total);
             errdefer data.deinit();
-
-            try data.resize(total);
 
             return .{
                 .size = size,
@@ -92,6 +91,11 @@ pub fn Signatures(comptime N: usize) type {
         }
 
         pub fn computeAssumeCapacity(self: *Self, block: Block(N, bool), subblock: Box(N, usize)) void {
+            // Clear existing data
+            for (0..N) |axis| {
+                self.axes[axis].clearRetainingCapacity();
+            }
+
             // Build space and subspace
             const subspace = IndexSpace(N){ .size = subblock.widths };
             const space = IndexSpace(N){ .size = block.size };
@@ -136,17 +140,20 @@ test "block" {
 
     const space = IndexSpace(3){ .size = [3]usize{ 5, 5, 5 } };
 
-    var tagged: Block(3, bool) = try Block(3, bool).init(std.testing.allocator, space.size);
+    var tagged: Block(3, bool) = try Block(3, bool).init(std.testing.allocator, space.size, false);
     defer tagged.deinit();
 
     // Fill tagging data.
-    for (tagged.data.items) |*tag| {
-        tag.* = false;
-    }
 
-    tagged.data.items[space.cartesianToLinear([3]usize{ 0, 0, 0 })] = true;
-    tagged.data.items[space.cartesianToLinear([3]usize{ 3, 2, 1 })] = true;
-    tagged.data.items[space.cartesianToLinear([3]usize{ 0, 1, 3 })] = true;
+    const tag_array = [_][3]usize{
+        [_]usize{ 0, 0, 0 },
+        [_]usize{ 3, 2, 1 },
+        [_]usize{ 0, 1, 3 },
+    };
+
+    for (tag_array) |cart| {
+        tagged.data.items[space.cartesianToLinear(cart)] = true;
+    }
 
     var signatures = try Signatures(3).initCapacity(std.testing.allocator, [3]usize{ 5, 5, 5 });
     defer signatures.deinit(std.testing.allocator);
