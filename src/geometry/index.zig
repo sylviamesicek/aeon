@@ -8,7 +8,7 @@ pub fn IndexSpace(comptime N: usize) type {
         const Self = @This();
 
         /// Converts a cartesian index to a linear index.
-        pub fn cartesianToLinear(self: Self, cartesian: [N]usize) usize {
+        pub fn linearFromCartesian(self: Self, cartesian: [N]usize) usize {
             var stride: usize = 1;
             var linear: usize = 0;
 
@@ -25,7 +25,7 @@ pub fn IndexSpace(comptime N: usize) type {
 
         /// Converts a linear index to a cartesian index (as a rule of thumb, this is much
         /// slower than the opposite conversion).
-        pub fn linearToCartesian(self: Self, linear: usize) [N]usize {
+        pub fn cartesianFromLinear(self: Self, linear: usize) [N]usize {
             var cartesian: [N]usize = undefined;
             var index = linear;
 
@@ -153,8 +153,8 @@ test "index space" {
         .size = [3]usize{ 2, 1, 3 },
     };
 
-    try expect(space.cartesianToLinear([_]usize{ 1, 0, 2 }) == 5);
-    try expect(eql(usize, &space.linearToCartesian(5), &[_]usize{ 1, 0, 2 }));
+    try expect(space.linearFromCartesian([_]usize{ 1, 0, 2 }) == 5);
+    try expect(eql(usize, &space.cartesianFromLinear(5), &[_]usize{ 1, 0, 2 }));
 
     var iterator = space.cartesianIndices();
     try expect(eql(usize, &iterator.next().?, &[_]usize{ 0, 0, 0 }));
