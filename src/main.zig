@@ -3,6 +3,7 @@ const std = @import("std");
 // Subdirectories
 const basis = @import("basis/basis.zig");
 const geometry = @import("geometry/geometry.zig");
+const mesh = @import("mesh/mesh.zig");
 const vtkio = @import("vtkio.zig");
 
 // Aliases
@@ -33,7 +34,8 @@ pub fn main() !void {
 }
 
 test {
-    _ = geometry;
     _ = basis;
+    _ = geometry;
+    _ = mesh;
     _ = vtkio;
 }

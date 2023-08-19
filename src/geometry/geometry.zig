@@ -10,7 +10,32 @@ const maxInt = std.math.maxInt;
 pub const IndexSpace = @import("index.zig").IndexSpace;
 pub const Box = @import("box.zig").Box;
 pub const Tiles = @import("tiles.zig").Tiles;
-pub const Partitioner = @import("tiles.zig").Partitioner;
+pub const Partitions = @import("tiles.zig").Partitions;
+
+/// Represents the numerical domain of a given problem, as well as
+/// shared settings for intepreting coordinates, index space, tile width,
+/// ghost regions, etc.
+pub fn Domain(comptime N: usize) type {
+    return struct {
+        /// The physical bounds of the problem domain.
+        physical_bounds: Box(N, f64),
+        /// The size of the problem domain in index space.
+        index_size: [N]usize,
+        /// The number of cells on the edge of each tile.
+        tile_width: usize,
+        /// The number of additional ghost cells around each block.
+        ghost_width: usize,
+
+        pub fn check(domain: Domain(N)) void {
+            assert(domain.tile_width >= 1);
+            assert(domain.tile_width >= domain.ghost_width);
+            for (0..N) |i| {
+                assert(domain.index_size[i] > 0);
+                assert(domain.physical_bounds.widths[i] > 0.0);
+            }
+        }
+    };
+}
 
 /// Stores data for the geometry of a problem on one level. A domain is uniformly
 /// divided into a number of tiles determined by `index_size`. A tile can be active
@@ -39,7 +64,7 @@ pub fn Geometry(comptime N: usize) type {
         patches: MultiArrayList(Patch),
         /// A list of blocks on this level.
         blocks: MultiArrayList(Block),
-        /// An array mapping positions in patches to the block
+        /// An array mapping tiles in patches to the block
         /// that contains that tile. `intMax(usize)` indicates
         /// that there is no block that contains that tile.
         tiles_to_blocks: ArrayListUnmanaged(usize),
@@ -86,22 +111,20 @@ pub fn Geometry(comptime N: usize) type {
             bounds: IndexBox,
             /// Patch this block is in.
             patch: usize,
-            /// Offset into an array of active tiles.
-            offset_tiles: usize,
-            /// Offset into an array of active cells.
-            offset_cells: usize,
+            /// Offset into an array of cells.
+            offset: usize,
         };
 
         // Methods
 
-        pub fn init(gpa: Allocator, config: Config) Self {
-            config.check();
+        pub fn init(gpa: Allocator, domain: Domain(N)) Self {
+            domain.check();
             return .{
                 .gpa = gpa,
-                .physical_bounds = config.physical_bounds,
-                .index_size = config.index_size,
-                .tile_width = config.tile_width,
-                .ghost_width = config.ghost_width,
+                .physical_bounds = domain.physical_bounds,
+                .index_size = domain.index_size,
+                .tile_width = domain.tile_width,
+                .ghost_width = domain.ghost_width,
                 .patches = MultiArrayList(IndexBox){},
                 .blocks = MultiArrayList(Block){},
                 .tiles_to_blocks = ArrayListUnmanaged(usize){},
@@ -165,14 +188,58 @@ pub fn Geometry(comptime N: usize) type {
             return self.tiles_to_blocks.items[offset..(offset + space.total())];
         }
 
-        pub fn computeBlocks(self: *Self, tags: ArrayList(bool), max_tiles: usize, efficiency: f64) !void {
-            _ = efficiency;
-            // Checks
-            assert(tags.items.len == self.tileTotal());
-            assert(max_tiles > 0);
-            // Setup partitioner
-            var partitioner: Partitioner(N) = Partitioner(N).init(self.gpa);
-            defer partitioner.deinit();
+        pub fn cellTotal(self: Self) usize {
+            return self.total_cells;
+        }
+
+        pub fn cellOffset(self: Self, block: usize) usize {
+            return self.blocks.items(.offset)[block];
+        }
+    };
+}
+
+/// A geometry where all tiles are active.
+pub fn UniformGeometry(comptime N: usize) type {
+    return struct {
+        /// The physical bounds of the problem domain.
+        physical_bounds: RealBox,
+        /// The size of the problem domain in index space.
+        index_size: [N]usize,
+        /// The number of cells on the edge of each tile.
+        tile_width: usize,
+        /// The number of additional ghost cells around the domain.
+        ghost_width: usize,
+
+        // Aliases
+        const Self = @This();
+        const RealBox = Box(N, f64);
+        const IndexBox = Box(N, usize);
+
+        /// Constructs a UniformGeometry from a domain.
+        pub fn fromDomain(domain: Domain(N)) Self {
+            return .{
+                .physical_bounds = domain.physical_bounds,
+                .index_size = domain.index_size,
+                .tile_width = domain.tile_width,
+                .ghost_width = domain.ghost_width,
+            };
+        }
+
+        /// Returns the total number of tiles on this geometry
+        pub fn tileTotal(self: Self) usize {
+            const space: IndexSpace(N) = .{ .size = self.index_size };
+            return space.total();
+        }
+
+        /// Returns the total number of cells (including ghost cells) on this geometry.
+        pub fn cellTotal(self: Self) usize {
+            var total: usize = 1;
+
+            for (0..N) |i| {
+                total *= self.index_size[i] * self.tile_width[i] + 2 * self.ghost_width;
+            }
+
+            return total;
         }
     };
 }

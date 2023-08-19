@@ -87,7 +87,7 @@ pub const VtkUnstructuredGrid = struct {
     }
 
     /// Adds a data field associated with each point to the vtk unstructured grid.
-    pub fn add_field(self: *VtkUnstructuredGrid, name: []const u8, data: []const f64, dimension: i32) !void {
+    pub fn addField(self: *VtkUnstructuredGrid, name: []const u8, data: []const f64, dimension: i32) !void {
         return self.point_data.append(self.allocator, .{
             .name = name,
             .data = data,
@@ -96,7 +96,7 @@ pub const VtkUnstructuredGrid = struct {
     }
 
     /// Adds a data field associated with each cell to the vtk unstructured grid.
-    pub fn add_cell_field(self: *VtkUnstructuredGrid, name: []const u8, data: []const f64, dimension: i32) !void {
+    pub fn addCellField(self: *VtkUnstructuredGrid, name: []const u8, data: []const f64, dimension: i32) !void {
         return self.cell_data.append(self.allocator, .{
             .name = name,
             .data = data,
@@ -112,31 +112,31 @@ pub const VtkUnstructuredGrid = struct {
         const n_vertices = self.cell_type.n_vertices();
         const n_cells: usize = self.vertices.items.len / n_vertices;
 
-        try write_header(n_points, n_cells, out_stream);
-        try write_points(dimension, self.points.items, out_stream);
-        try write_cells(self.cell_type, self.vertices.items, out_stream);
-        try self.write_point_data(out_stream);
-        try self.write_cell_data(out_stream);
-        try write_footer(out_stream);
+        try writeHeader(n_points, n_cells, out_stream);
+        try writePoints(dimension, self.points.items, out_stream);
+        try writeCells(self.cell_type, self.vertices.items, out_stream);
+        try self.writePointData(out_stream);
+        try self.writeCellData(out_stream);
+        try writeFooter(out_stream);
     }
 
-    fn write_point_data(self: VtkUnstructuredGrid, out_stream: anytype) @TypeOf(out_stream).Error!void {
+    fn writePointData(self: VtkUnstructuredGrid, out_stream: anytype) @TypeOf(out_stream).Error!void {
         try out_stream.print("<PointData>\n", .{});
         for (self.point_data.items) |point_data| {
-            try write_data_array(point_data, out_stream);
+            try writeDataArray(point_data, out_stream);
         }
         try out_stream.print("</PointData>\n", .{});
     }
 
-    fn write_cell_data(self: VtkUnstructuredGrid, out_stream: anytype) @TypeOf(out_stream).Error!void {
+    fn writeCellData(self: VtkUnstructuredGrid, out_stream: anytype) @TypeOf(out_stream).Error!void {
         try out_stream.print("<CellData>\n", .{});
         for (self.point_data.items) |point_data| {
-            try write_data_array(point_data, out_stream);
+            try writeDataArray(point_data, out_stream);
         }
         try out_stream.print("</CellData>\n", .{});
     }
 
-    fn write_header(n_points: usize, n_cells: usize, out_stream: anytype) @TypeOf(out_stream).Error!void {
+    fn writeHeader(n_points: usize, n_cells: usize, out_stream: anytype) @TypeOf(out_stream).Error!void {
         return out_stream.print(
             \\<VTKFile type="UnstructuredGrid" version="1.0">
             \\<UnstructuredGrid>
@@ -145,7 +145,7 @@ pub const VtkUnstructuredGrid = struct {
         , .{ n_cells, n_points });
     }
 
-    fn write_footer(out_stream: anytype) @TypeOf(out_stream).Error!void {
+    fn writeFooter(out_stream: anytype) @TypeOf(out_stream).Error!void {
         return out_stream.print(
             \\</Piece>
             \\</UnstructuredGrid>
@@ -154,14 +154,14 @@ pub const VtkUnstructuredGrid = struct {
         , .{});
     }
 
-    fn write_points(n_components: usize, points: []const f64, out_stream: anytype) @TypeOf(out_stream).Error!void {
+    fn writePoints(n_components: usize, points: []const f64, out_stream: anytype) @TypeOf(out_stream).Error!void {
         try out_stream.print(
             \\<Points>
             \\<DataArray type="Float64" NumberOfComponents="{}" format="ascii">
             \\
         , .{n_components});
 
-        try write_vec_array(f64, n_components, points, out_stream);
+        try writeVecArray(f64, n_components, points, out_stream);
 
         try out_stream.print(
             \\</DataArray>
@@ -170,7 +170,7 @@ pub const VtkUnstructuredGrid = struct {
         , .{});
     }
 
-    fn write_cells(cell_type: VtkCellType, cells: []const i64, out_stream: anytype) @TypeOf(out_stream).Error!void {
+    fn writeCells(cell_type: VtkCellType, cells: []const i64, out_stream: anytype) @TypeOf(out_stream).Error!void {
         const n_vertices = cell_type.n_vertices();
         const tag = cell_type.tag();
 
@@ -181,7 +181,7 @@ pub const VtkUnstructuredGrid = struct {
             \\
         , .{n_vertices});
 
-        try write_vec_array(i64, n_vertices, cells, out_stream);
+        try writeVecArray(i64, n_vertices, cells, out_stream);
 
         try out_stream.print("</DataArray>\n", .{});
 
@@ -218,16 +218,16 @@ pub const VtkUnstructuredGrid = struct {
         , .{});
     }
 
-    fn write_data_array(array: VtkDataArray, out_stream: anytype) @TypeOf(out_stream).Error!void {
+    fn writeDataArray(array: VtkDataArray, out_stream: anytype) @TypeOf(out_stream).Error!void {
         try out_stream.print(
             \\<DataArray type="Float64" Name="{s}" NumberOfComponents="{}" format="ascii">
             \\
         , .{ array.name, array.n_components });
-        try write_vec_array(f64, array.n_components, array.data.items, out_stream);
+        try writeVecArray(f64, array.n_components, array.data.items, out_stream);
         try out_stream.print("</DataArray>\n", .{});
     }
 
-    fn write_vec_array(comptime T: type, n_components: usize, data: []const T, out_stream: anytype) @TypeOf(out_stream).Error!void {
+    fn writeVecArray(comptime T: type, n_components: usize, data: []const T, out_stream: anytype) @TypeOf(out_stream).Error!void {
         const n_vecs: usize = data.len / n_components;
 
         for (0..n_vecs) |i| {

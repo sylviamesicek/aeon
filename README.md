@@ -5,11 +5,12 @@
 ## To Do
 
 To reach the state of minimum viable product (MVP) the following features must be completed. 
-- [x] Single level cell clustering using the Berger-Rigoutsos alogorithm
-- [ ] Multilevel regridding based on GRChombo
-- [ ] Stencil application
-- [ ] Interior ghost node filling
-- [ ] Exterior ghost node filling
+- [x] Single level cell clustering using the Berger-Rigoutsos alogorithm.
+- [x] Patch compatible clustering algorithm extension.
+- [ ] Multilevel regridding based on GRChombo.
+- [ ] Stencil application.
+- [ ] Interior ghost node filling.
+- [ ] Exterior ghost node filling.
 - [ ] Multigrid elliptic solver using BiCGStab and Jacobi's Method.
 - [ ] Hyperbolic solver using 4th order Runge-Kutta and subcylcing.
 
