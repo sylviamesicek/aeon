@@ -1,47 +1,178 @@
 const std = @import("std");
+const Allocator = std.mem.Allocator;
+const ArrayList = std.ArrayList;
+const ArrayListUnmanaged = std.ArrayListUnmanaged;
+const MultiArrayList = std.MultiArrayList;
+const assert = std.debug.assert;
+const pow = std.math.pow;
+const maxInt = std.math.maxInt;
 
 pub const IndexSpace = @import("index.zig").IndexSpace;
 pub const Box = @import("box.zig").Box;
 pub const Tiles = @import("tiles.zig").Tiles;
+pub const Partitioner = @import("tiles.zig").Partitioner;
 
-/// Represents one level of a mesh. This includes an array of
-/// rectangular blocks that make up that particular level (which needs
-/// not extend over the whole domain), and information for transforming
-/// between index space and physical space.
+/// Stores data for the geometry of a problem on one level. A domain is uniformly
+/// divided into a number of tiles determined by `index_size`. A tile can be active
+/// (which means the physical space covered by that tile is part of the problem space).
+/// An active tile is further divded into cells as specified by `tile_width`,
+/// where the value of a function is known at the center of each cell.
 ///
-/// TODO: Rework init/deinit/partition API to be more zig-ish.
+/// Cells are grouped (using point clustering) into a set of blocks, which allows
+/// for better uniformity and cache efficiency when applying operators to functions.
+/// Blocks are further divided between patches, to allow for O(1) block indexing (that
+/// is, finding the block a tile belongs to) while still providing minimal storage
+/// overhead.
 pub fn Geometry(comptime N: usize) type {
     return struct {
-        // Fields
-        allocator: std.mem.Allocator,
-        physical_bounds: Box(N, f64),
-        index_space: IndexSpace(N),
+        /// A general allocator used by `Geometry` internals.
+        gpa: Allocator,
+        /// The physical bounds of the problem domain.
+        physical_bounds: RealBox,
+        /// The size of the problem domain in index space.
+        index_size: [N]usize,
+        /// The number of cells on the edge of each tile.
         tile_width: usize,
+        /// The number of additional ghost cells around each block.
         ghost_width: usize,
-        blocks: BlockList,
-        dof_offsets: OffsetList,
+        /// A list of patches on this level.
+        patches: MultiArrayList(Patch),
+        /// A list of blocks on this level.
+        blocks: MultiArrayList(Block),
+        /// An array mapping positions in patches to the block
+        /// that contains that tile. `intMax(usize)` indicates
+        /// that there is no block that contains that tile.
+        tiles_to_blocks: ArrayListUnmanaged(usize),
+        /// The total number of cells on this level, including
+        /// ghost cells.
+        total_cells: usize,
 
         // Aliases
         const Self = @This();
-        const BlockList = std.ArrayListUnmanaged(Box(N, usize));
-        const OffsetList = std.ArrayListUnmanaged(usize);
+        const RealBox = Box(N, f64);
+        const IndexBox = Box(N, usize);
 
-        /// Geometry
-        pub fn init(allocator: std.mem.Allocator, physical_bounds: Box(N, f64)) Self {
+        // Subtypes
+
+        pub const Config = struct {
+            /// The physical bounds of the problem domain.
+            physical_bounds: RealBox,
+            /// The size of the problem domain in index space.
+            index_size: [N]usize,
+            /// The number of cells on the edge of each tile.
+            tile_width: usize,
+            /// The number of additional ghost cells around each block.
+            ghost_width: usize,
+
+            pub fn check(config: Config) void {
+                assert(config.tile_width >= 1);
+                assert(config.tile_width >= config.ghost_width);
+                for (0..N) |i| {
+                    assert(config.index_size[i] > 0);
+                    assert(config.physical_bounds.widths[i] > 0.0);
+                }
+            }
+        };
+
+        pub const Patch = struct {
+            /// Bounds of the patch in index space.
+            bounds: IndexBox,
+            /// Offset of the patch into tile array.
+            offset: usize,
+        };
+
+        pub const Block = struct {
+            /// Bounds of the block in index space.
+            bounds: IndexBox,
+            /// Patch this block is in.
+            patch: usize,
+            /// Offset into an array of active tiles.
+            offset_tiles: usize,
+            /// Offset into an array of active cells.
+            offset_cells: usize,
+        };
+
+        // Methods
+
+        pub fn init(gpa: Allocator, config: Config) Self {
+            config.check();
             return .{
-                .allocator = allocator,
-                .physical_bounds = physical_bounds,
-                .index_space = .{ .size = [1]usize{0} ** N },
-                .tile_width = 1,
-                .ghost_width = 1,
-                .blocks = BlockList{},
-                .dof_offsets = OffsetList{},
+                .gpa = gpa,
+                .physical_bounds = config.physical_bounds,
+                .index_size = config.index_size,
+                .tile_width = config.tile_width,
+                .ghost_width = config.ghost_width,
+                .patches = MultiArrayList(IndexBox){},
+                .blocks = MultiArrayList(Block){},
+                .tiles_to_blocks = ArrayListUnmanaged(usize){},
+                .total = 0,
             };
         }
 
         pub fn deinit(self: *Self) void {
-            self.blocks.deinit(self.allocator);
-            self.dof_offsets.deinit(self.allocator);
+            self.patches.deinit(self.gpa);
+            self.blocks.deinit(self.gpa);
+            self.tiles_to_blocks.deinit(self.gpa);
+        }
+
+        pub fn addPatch(self: *Self, patch: IndexBox) !void {
+            const space: IndexSpace(N) = .{ .size = patch.widths };
+            const total: usize = space.total();
+
+            const offset = self.tiles_to_blocks.items.len;
+
+            try self.patches.append(self.gpa, .{
+                .bounds = patch,
+                .offset = offset,
+            });
+
+            try self.tiles_to_blocks.appendNTimes(self.gpa, maxInt(usize), total);
+        }
+
+        pub fn removePatches(self: *Self) !void {
+            try self.patches.resize(self.gpa, 0);
+            try self.tags.resize(self.gpa, 0);
+        }
+
+        /// Returns the number of tiles in a given patch.
+        pub fn tilesInPatch(self: Self, patch: usize) usize {
+            const bounds = self.patches.items(.bounds)[patch];
+            const space: IndexSpace(N) = .{ .size = bounds.widths };
+            return space.total();
+        }
+
+        /// Gives the total number of tiles in all patches.
+        pub fn tileTotal(self: Self) usize {
+            return self.tiles_to_blocks.items.len;
+        }
+
+        pub fn tileOffset(self: Self, patch: usize) usize {
+            return self.patches.items(.offset)[patch];
+        }
+
+        pub fn tileToBlock(self: Self, patch: usize, tile: [N]usize) usize {
+            const bounds = self.patches.items(.bounds)[patch];
+            const offset = self.patches.items(.offset)[patch];
+            const space: IndexSpace(N) = .{ .size = bounds.widths };
+            const linear = space.linearFromCartesian(tile);
+            return self.tiles_to_blocks.items[offset + linear];
+        }
+
+        pub fn tilesToBlocks(self: Self, patch: usize) []const usize {
+            const bounds = self.patches.items(.bounds)[patch];
+            const offset = self.patches.items(.offset)[patch];
+            const space: IndexSpace(N) = .{ .size = bounds.widths };
+            return self.tiles_to_blocks.items[offset..(offset + space.total())];
+        }
+
+        pub fn computeBlocks(self: *Self, tags: ArrayList(bool), max_tiles: usize, efficiency: f64) !void {
+            _ = efficiency;
+            // Checks
+            assert(tags.items.len == self.tileTotal());
+            assert(max_tiles > 0);
+            // Setup partitioner
+            var partitioner: Partitioner(N) = Partitioner(N).init(self.gpa);
+            defer partitioner.deinit();
         }
     };
 }
@@ -50,12 +181,4 @@ test {
     _ = @import("box.zig");
     _ = @import("index.zig");
     _ = @import("tiles.zig");
-}
-
-test "geometry" {
-    var geometry = Geometry(2).init(std.testing.allocator, .{
-        .origin = [2]f64{ 0.0, 0.0 },
-        .widths = [2]f64{ 1.0, 1.0 },
-    });
-    defer geometry.deinit();
 }

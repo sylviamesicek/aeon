@@ -1,8 +1,17 @@
 # Aeon
 
-`Aeon` is a zig package for solving N-dimensional elliptic and hyperbolic PDES using the finite difference method and block-structured Adaptive Mesh Refinement (AMR). It is primarily being developed for use with Numerical Relativity
+`Aeon` is a zig package for solving N-dimensional elliptic and hyperbolic PDEs using the finite difference method and block-structured Adaptive Mesh Refinement (AMR). 
 
+## To Do
 
+To reach the state of minimum viable product (MVP) the following features must be completed. 
+- [x] Single level cell clustering using the Berger-Rigoutsos alogorithm
+- [ ] Multilevel regridding based on GRChombo
+- [ ] Stencil application
+- [ ] Interior ghost node filling
+- [ ] Exterior ghost node filling
+- [ ] Multigrid elliptic solver using BiCGStab and Jacobi's Method.
+- [ ] Hyperbolic solver using 4th order Runge-Kutta and subcylcing.
 
 
 
