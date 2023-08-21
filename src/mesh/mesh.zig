@@ -153,15 +153,15 @@ pub fn Mesh(comptime N: usize) type {
                 const level_index: usize = config.max_level - 1 - l;
 
                 // Get pointers to coarse level of old mesh and refined level of new mesh.
-                const coarse: *const Level = &src.levels.items[level_index - 1];
+                const coarse_src: *const Level = &src.levels.items[level_index - 1];
                 var level: *Level = &self.levels.items[level_index];
                 var refined: *Level = &self.levels.items[level_index + 1];
 
                 // Offset into tags array.
-                const level_tags = tags[coarse.tile_offset..];
+                const level_tags = tags[coarse_src.tile_offset..];
 
                 // Iterate the patches of the coarse level.
-                for (coarse.geometry.patches.items(.bounds), coarse.geometry.patches.items(.offset)) |bounds, offset| {
+                for (coarse_src.geometry.patches.items(.bounds), coarse_src.geometry.patches.items(.offset), 0..) |bounds, offset, parent_id| {
                     // Every "frame" reset arena.
                     defer arena.reset(.retain_capacity);
 
@@ -210,8 +210,11 @@ pub fn Mesh(comptime N: usize) type {
                     var patch_partitions: Partitions(N) = .{};
                     defer patch_partitions.deinit(allocator);
 
+                    // Update hierarchy
+                    level.parents.resize(partitions.blocks.len);
+
                     // Iterate newly computed patches
-                    for (partitions.blocks.items(.bounds)) |patch| {
+                    for (partitions.blocks.items(.bounds), 0..) |patch, patch_id| {
                         // Represents patch space on coarse level
                         const patch_space = patch.space();
                         patch_tags.resize(allocator, patch_space.total());
@@ -242,7 +245,11 @@ pub fn Mesh(comptime N: usize) type {
                         patch_refined.refine();
 
                         // Add this new patch to the refined geometry.
-                        level.geometry.addPatch(patch_refined, patch_blocks.items);
+                        try level.geometry.addPatch(patch_refined, patch_blocks.items);
+                        level.parents.appendAssumeCapacity(self.gpa, parent_id);
+
+                        // Update parents of new patch to point to parent on coarse level
+                        level.parents.items[patch_id] = parent_id;
                     }
                 }
             }
