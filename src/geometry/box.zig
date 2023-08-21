@@ -1,4 +1,5 @@
 const std = @import("std");
+const IndexSpace = @import("index.zig").IndexSpace;
 
 // /// Represents an index into the 2^N subcells formed
 // /// when dividing a hyper box along each axis.
@@ -47,28 +48,57 @@ const std = @import("std");
 pub fn Box(comptime N: usize, comptime T: type) type {
     return struct {
         origin: [N]T,
-        widths: [N]T,
+        size: [N]T,
 
         const Self = @This();
 
+        /// Returns the position of the center of the box.
         pub fn center(self: Self) [N]T {
             var result: [N]T = undefined;
 
             for (0..N) |i| {
-                result[i] = self.origin[i] + self.widths[i] / @as(T, 2);
+                result[i] = self.origin[i] + self.size[i] / @as(T, 2);
             }
 
             return result;
         }
 
+        /// Checks if the given position is contained by the box.
         pub fn contains(self: Self, x: [N]T) bool {
             var result = true;
 
             for (0..N) |i| {
-                result = result and self.origin[i] <= x[i] and x[i] <= self.origin[i] + self.widths[i];
+                result = result and self.origin[i] <= x[i] and x[i] <= self.origin[i] + self.size[i];
             }
 
             return result;
+        }
+
+        /// Returns the index space over the interior of the box.
+        pub fn space(self: Self) IndexSpace(N) {
+            return .{ .size = self.size };
+        }
+
+        pub fn globalFromLocal(self: Self, local: [N]usize) [N]usize {
+            var global: [N]usize = undefined;
+            for (0..N) |axis| {
+                global[axis] = self.origin[axis] + local[axis];
+            }
+            return global;
+        }
+
+        pub fn refine(self: *Self) void {
+            for (0..N) |axis| {
+                self.origin[axis] *= 2;
+                self.size[axis] *= 2;
+            }
+        }
+
+        pub fn coarsen(self: *Self) void {
+            for (0..N) |axis| {
+                self.origin[axis] = std.math.divFloor(usize, self.origin[axis], 2);
+                self.size[axis] = std.math.divCeil(usize, self.size[axis], 2);
+            }
         }
     };
 }
@@ -79,7 +109,7 @@ test "box" {
 
     const unit: Box(2, f64) = .{
         .origin = [2]f64{ 0.0, 0.0 },
-        .widths = [2]f64{ 1.0, 1.0 },
+        .size = [2]f64{ 1.0, 1.0 },
     };
 
     try expect(eql(unit.center(), [2]f64{ 0.5, 0.5 }));

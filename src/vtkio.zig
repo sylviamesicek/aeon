@@ -1,4 +1,5 @@
 const std = @import("std");
+const ArrayListUnmanaged = std.ArrayListUnmanaged;
 
 /// The type of a cell in an unstructured vtk mesh.
 pub const VtkCellType = enum {
@@ -34,11 +35,11 @@ pub const VtkCellType = enum {
 /// A vtk data array backed by an array of doubles.
 const VtkDataArray = struct {
     name: []const u8,
-    data: std.ArrayListUnmanaged(f64),
+    data: ArrayListUnmanaged(f64),
     n_components: usize,
 };
 
-const VtkDataArrayList = std.ArrayListUnmanaged(VtkDataArray);
+const VtkDataArrayList = ArrayListUnmanaged(VtkDataArray);
 
 /// Stores data for a vtk (unstructured) grid.
 pub const VtkUnstructuredGrid = struct {
@@ -51,9 +52,9 @@ pub const VtkUnstructuredGrid = struct {
     /// Stores the type of cell that make up this grid (currently must be global).
     cell_type: VtkCellType,
     /// Stores the positions of each point in the grid.
-    points: std.ArrayListUnmanaged(f64),
+    points: []f64,
     /// Stores the vertices of each cell in the grid.
-    vertices: std.ArrayListUnmanaged(i64),
+    vertices: []i64,
 
     /// Global config of an unstructured grid. Describes cell type, point positions, and cell vertices.
     pub const Config = struct {
@@ -65,25 +66,39 @@ pub const VtkUnstructuredGrid = struct {
     /// Initialises a new unstructured grid using an allocator and a config.
     pub fn init(allocator: std.mem.Allocator, config: Config) !VtkUnstructuredGrid {
         var points_owned: std.ArrayListUnmanaged(f64) = try std.ArrayListUnmanaged(f64).initCapacity(allocator, config.points.len);
+        errdefer points_owned.deinit(allocator);
+
         points_owned.appendSliceAssumeCapacity(config.points);
 
         var vertices_owned: std.ArrayListUnmanaged(i64) = try std.ArrayListUnmanaged(i64).initCapacity(allocator, config.vertices.len);
+        errdefer vertices_owned.deinit(allocator);
+
         vertices_owned.appendSliceAssumeCapacity(config.vertices);
+
+        var points = try allocator.alloc(f64, config.points.len);
+        errdefer allocator.free(points);
+
+        @memcpy(points, config.points);
+
+        var vertices = try allocator.alloc(i64, config.vertices.len);
+        errdefer allocator.free(vertices);
+
+        @memcpy(vertices, config.vertices);
 
         return .{
             .allocator = allocator,
             .point_data = VtkDataArrayList{},
             .cell_data = VtkDataArrayList{},
             .cell_type = config.cell_type,
-            .points = points_owned,
-            .vertices = vertices_owned,
+            .points = points,
+            .vertices = vertices,
         };
     }
 
     /// Deinitalises an unstructured grid, freeing all data.
     pub fn deinit(self: *VtkUnstructuredGrid) void {
-        self.point_data.deinit(self.allocator);
-        self.cell_data.deinit(self.allocator);
+        self.allocator.free(self.point_data);
+        self.allocator.free(self.cell_data);
     }
 
     /// Adds a data field associated with each point to the vtk unstructured grid.
@@ -107,14 +122,14 @@ pub const VtkUnstructuredGrid = struct {
     /// Writes the unstructured grid into an output stream in .vtu format.
     pub fn write(self: VtkUnstructuredGrid, out_stream: anytype) @TypeOf(out_stream).Error!void {
         const dimension = self.cell_type.dimension();
-        const n_points: usize = self.points.items.len / dimension;
+        const n_points: usize = self.points.len / dimension;
 
         const n_vertices = self.cell_type.n_vertices();
-        const n_cells: usize = self.vertices.items.len / n_vertices;
+        const n_cells: usize = self.vertices.len / n_vertices;
 
         try writeHeader(n_points, n_cells, out_stream);
-        try writePoints(dimension, self.points.items, out_stream);
-        try writeCells(self.cell_type, self.vertices.items, out_stream);
+        try writePoints(dimension, self.points, out_stream);
+        try writeCells(self.cell_type, self.vertices, out_stream);
         try self.writePointData(out_stream);
         try self.writeCellData(out_stream);
         try writeFooter(out_stream);

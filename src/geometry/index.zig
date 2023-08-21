@@ -1,3 +1,8 @@
+const std = @import("std");
+const assert = std.debug.assert;
+
+const Box = @import("box.zig").Box;
+
 /// Describes an abstract index space, ie an N-dimensional space with
 /// size[i] discrete cells on each axis. Contains helpers for converting
 /// between cartesian and linear indices, as well as iterator over the space.
@@ -51,6 +56,19 @@ pub fn IndexSpace(comptime N: usize) type {
             return result;
         }
 
+        /// Computes total number of indices in this space including `2 * ghost` additional
+        /// indices along each axis
+        pub fn totalWithGhost(self: Self, width: usize, ghost: usize) usize {
+            var result: usize = 1;
+
+            for (0..N) |i| {
+                result *= self.size[i] * width + 2 * ghost;
+            }
+
+            return result;
+        }
+
+        /// Returns the index of the largest axis in the space.
         pub fn longestAxis(self: Self) usize {
             var axis: usize = 0;
 
@@ -61,6 +79,39 @@ pub fn IndexSpace(comptime N: usize) type {
             }
 
             return axis;
+        }
+
+        pub fn window(self: Self, bounds: Box(N, usize), comptime T: type, dest: []T, src: []const T) void {
+            const space = bounds.space();
+
+            assert(dest.len == space.total());
+            assert(src.len == self.total());
+
+            // Set new tags for patch
+            var indices = space.cartesianIndices();
+
+            var i: usize = 0;
+
+            while (indices.next()) |local| {
+                const global = bounds.globalFromLocal(local);
+                dest[i] = src[space.linearFromCartesian(global)];
+
+                i += 1;
+            }
+        }
+
+        pub fn fillSubspace(self: Self, bounds: Box(N, usize), comptime T: type, dest: []T, val: T) void {
+            const space = bounds.space();
+
+            assert(dest.len == self.total());
+
+            // Set new tags for patch
+            var indices = space.cartesianIndices();
+
+            while (indices.next()) |local| {
+                const global = bounds.globalFromLocal(local);
+                dest[self.linearFromCartesian(global)] = val;
+            }
         }
 
         /// An iterator over the cartesian indices of the index space.
@@ -145,7 +196,6 @@ pub fn IndexSpace(comptime N: usize) type {
 }
 
 test "index space" {
-    const std = @import("std");
     const expect = std.testing.expect;
     const eql = std.mem.eql;
 
