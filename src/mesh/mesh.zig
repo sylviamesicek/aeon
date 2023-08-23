@@ -239,16 +239,16 @@ pub fn Mesh(comptime N: usize) type {
                     config.patch_effciency,
                 );
 
-                for (partitions.buffer.items) |index| {
+                for (partitions.children.items) |index| {
                     try target.index_buffer.append(self.gpa, cluster_indices.items[index]);
                 }
 
                 for (partitions.blocks.items(.children)) |children| {
-                    const child_offset: usize = (@intFromPtr(children.ptr) - @intFromPtr(partitions.buffer.items.ptr)) / @sizeOf(usize);
+                    const child_offset: usize = (@intFromPtr(children.ptr) - @intFromPtr(partitions.children.items.ptr)) / @sizeOf(usize);
                     try target.children.append(self.gpa, target.index_buffer.items[child_offset..(child_offset + children.len)]);
                 }
 
-                try target.index_buffer.appendSlice(self.gpa, partitions.buffer.items);
+                try target.index_buffer.appendSlice(self.gpa, partitions.children.items);
 
                 try target.children.appendSlice(self.gpa, partitions.blocks.items(.children));
 
@@ -480,6 +480,12 @@ pub fn Mesh2(comptime N: usize) type {
                 self.patches.deinit(allocator);
                 self.index_buffer.deinit(allocator);
             }
+
+            fn childrenSlice(self: *Level, patch: usize) []usize {
+                const offset = self.patches.items(.children_offset)[patch];
+                const count = self.patches.items(.children_count)[patch];
+                return self.children[offset..(offset + count)];
+            }
         };
 
         pub fn init(allocator: Allocator, config: Config) Self {
@@ -562,6 +568,77 @@ pub fn Mesh2(comptime N: usize) type {
 
             while (total_levels > dest.levels.len) {
                 dest.levels.append(dest.gpa, Level.init());
+            }
+
+            // 3. Recursively generate levels on new mesh.
+            // *******************************************
+
+            // Scratch allocator
+            var arena: ArenaAllocator = ArenaAllocator.init(dest.gpa);
+            defer arena.deinit(dest.gpa);
+
+            var scratch: Allocator = arena.allocator();
+
+            for (0..total_levels) |reverse_level_id| {
+                const level_id: usize = total_levels - 1 - reverse_level_id;
+
+                const underlying: *const Level = src.levels.items[level_id - 1];
+
+                const target: *Level = dest.levels.items[level_id];
+                const target_coarse: *Level = dest.levels.items[level_id - 1];
+                _ = target_coarse;
+                const target_refined: *Level = dest.levels.items[level_id + 1];
+
+                // Offset into tags array.
+                const utags: []const usize = tags[underlying.tile_offset..(underlying.tile_offset + underlying.tile_total)];
+
+                // Generate new patches
+                for (0..underlying.patches.len) |upid| {
+                    arena.reset(.retain_capacity);
+
+                    const upbounds: IndexBox = underlying.patches.items(.bounds)[upid];
+                    const upspace: IndexSpace(N) = upbounds.space();
+                    const upoffset: usize = underlying.patches.items(.tile_offset)[upid];
+                    const uptags: []const usize = utags[upoffset..(upoffset + upspace.total())];
+
+                    // Scratch space for partitioning algorithm
+                    var partitions: Partitions(N) = .{};
+                    defer partitions.deinit(scratch);
+
+                    // Build clusters from level l+1
+                    var clusters: ArrayListUnmanaged(Box(N, usize)) = .{};
+                    defer clusters.deinit(scratch);
+
+                    // Maps cluster index to global index on l+1
+                    var cluster_indices: ArrayListUnmanaged(usize) = .{};
+                    defer cluster_indices.deinit(scratch);
+
+                    // This assumes target current holds data for relationship between old patches on l
+                    // and new patches on l+1.
+                    for (underlying.childrenSlice(upid)) |child_id| {
+                        for (target.childrenSlice(child_id)) |refined_id| {
+                            var cluster = target_refined.patches.items(.bounds)[refined_id];
+
+                            cluster.coarsen();
+                            cluster.coarsen();
+
+                            try clusters.append(scratch, cluster);
+                            try cluster_indices.append(scratch, refined_id);
+                        }
+                    }
+
+                    // Run partitioning algorithm
+                    try partitions.compute(
+                        scratch,
+                        .{
+                            .size = upbounds.size,
+                            .tags = uptags,
+                            .clusters = clusters.items,
+                        },
+                        config.patch_max_tiles,
+                        config.patch_effciency,
+                    );
+                }
             }
 
             // 3. Generate Levels on new mesh.
@@ -674,16 +751,16 @@ pub fn Mesh2(comptime N: usize) type {
                     config.patch_effciency,
                 );
 
-                for (partitions.buffer.items) |index| {
+                for (partitions.children.items) |index| {
                     try target.index_buffer.append(self.gpa, cluster_indices.items[index]);
                 }
 
                 for (partitions.blocks.items(.children)) |children| {
-                    const child_offset: usize = (@intFromPtr(children.ptr) - @intFromPtr(partitions.buffer.items.ptr)) / @sizeOf(usize);
+                    const child_offset: usize = (@intFromPtr(children.ptr) - @intFromPtr(partitions.children.items.ptr)) / @sizeOf(usize);
                     try target.children.append(self.gpa, target.index_buffer.items[child_offset..(child_offset + children.len)]);
                 }
 
-                try target.index_buffer.appendSlice(self.gpa, partitions.buffer.items);
+                try target.index_buffer.appendSlice(self.gpa, partitions.children.items);
 
                 try target.children.appendSlice(self.gpa, partitions.blocks.items(.children));
 
