@@ -76,6 +76,15 @@ pub fn Mesh(comptime N: usize) type {
 
                 return size;
             }
+
+            pub fn check(self: Config) void {
+                assert(self.tile_width >= 1);
+                assert(self.tile_width >= self.ghost_width);
+                for (0..N) |i| {
+                    assert(self.index_size[i] > 0);
+                    assert(self.physical_bounds.size[i] > 0.0);
+                }
+            }
         };
 
         pub const Block = struct {
@@ -134,6 +143,8 @@ pub fn Mesh(comptime N: usize) type {
         };
 
         pub fn init(allocator: Allocator, config: Config) Self {
+            // Check config
+            config.check();
             // Scale initial size by 2^global_refinement
             const tile_space: IndexSpace(N) = .{ .size = config.baseTileSize() };
             const cell_space: IndexSpace(N) = .{ .size = config.baseCellSize() };
@@ -174,7 +185,7 @@ pub fn Mesh(comptime N: usize) type {
             patch_effciency: f64,
         };
 
-        pub fn regrid(dest: *Self, map: *ArrayList(TileMap), src: *const Self, tags: []const usize, config: RegridConfig) !void {
+        pub fn regrid(dest: *Self, map: *ArrayList(TileMap), src: *const Self, tags: []usize, config: RegridConfig) !void {
             // TODO: Ensure proper nesting by preprocessing tags.
 
             // 1. Copy config, and clear map.
@@ -259,7 +270,7 @@ pub fn Mesh(comptime N: usize) type {
                 const coarse_exists: usize = level_id > 0;
 
                 // Variables that depend on coarse existing
-                var utags: []const usize = undefined;
+                var utags: []usize = undefined;
                 var ulen: usize = undefined;
                 var ubounds: []const IndexBox = undefined;
                 var uoffsets: []const usize = undefined;
@@ -344,7 +355,27 @@ pub fn Mesh(comptime N: usize) type {
                 // Append first offset
                 try children_cache.append(dest.gpa, 0);
 
-                // 3.2 Generate new patches.
+                // 3.2 Preprocess tags.
+                // ********************
+
+                // If there is a refined level
+                if (refined_exists) {
+                    const target_refined: *const Level = dest.levels.items[level_id + 1];
+                    const source: *const Level = src.levels.items[level_id];
+
+                    // Loop through all blocks on that level and add there tags (plus buffer zone) to current tags.
+                    for (target_refined.blocks.items(.bounds), target_refined.blocks.items(.parent)) |rbounds, patch| {
+                        const parent: usize = target_refined.patches.items(.parent)[patch];
+                        _ = parent;
+                        const offset: usize = source.patches.items(.tile_offset)[patch];
+                        _ = offset;
+
+                        var cbounds: IndexBox = rbounds;
+                        cbounds.coarsen();
+                    }
+                }
+
+                // 3.3 Generate new patches.
                 // *************************
 
                 // Per patch tile offset
@@ -425,7 +456,7 @@ pub fn Mesh(comptime N: usize) type {
                     }
                 }
 
-                // 3.3 Generate new blocks by partitioning new patches.
+                // 3.4 Generate new blocks by partitioning new patches.
                 // ****************************************************
 
                 // Level wide offset into cells array.

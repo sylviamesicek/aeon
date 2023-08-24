@@ -26,7 +26,6 @@ pub fn main() !void {
 
     // Setup vtk grid object
     var grid = try VtkUnstructuredGrid.init(allocator, .{ .cell_type = .quad, .points = &[_]f64{}, .vertices = &[_]i64{} });
-
     defer grid.deinit();
 
     const stdout = std.io.getStdOut().writer();

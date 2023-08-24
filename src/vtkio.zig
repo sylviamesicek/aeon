@@ -1,5 +1,6 @@
 const std = @import("std");
 const ArrayListUnmanaged = std.ArrayListUnmanaged;
+const Allocator = std.mem.Allocator;
 
 /// The type of a cell in an unstructured vtk mesh.
 pub const VtkCellType = enum {
@@ -35,8 +36,12 @@ pub const VtkCellType = enum {
 /// A vtk data array backed by an array of doubles.
 const VtkDataArray = struct {
     name: []const u8,
-    data: ArrayListUnmanaged(f64),
+    data: []const f64,
     n_components: usize,
+
+    fn deinit(self: *VtkDataArray, allocator: Allocator) void {
+        self.data.deinit(allocator);
+    }
 };
 
 const VtkDataArrayList = ArrayListUnmanaged(VtkDataArray);
@@ -44,7 +49,7 @@ const VtkDataArrayList = ArrayListUnmanaged(VtkDataArray);
 /// Stores data for a vtk (unstructured) grid.
 pub const VtkUnstructuredGrid = struct {
     /// A stored allocator for internal `ArrayList`s.
-    allocator: std.mem.Allocator,
+    allocator: Allocator,
     /// Stores data which has been associated with each point.
     point_data: VtkDataArrayList,
     /// Stores data which has been associated with each cell.
@@ -64,23 +69,13 @@ pub const VtkUnstructuredGrid = struct {
     };
 
     /// Initialises a new unstructured grid using an allocator and a config.
-    pub fn init(allocator: std.mem.Allocator, config: Config) !VtkUnstructuredGrid {
-        var points_owned: std.ArrayListUnmanaged(f64) = try std.ArrayListUnmanaged(f64).initCapacity(allocator, config.points.len);
-        errdefer points_owned.deinit(allocator);
-
-        points_owned.appendSliceAssumeCapacity(config.points);
-
-        var vertices_owned: std.ArrayListUnmanaged(i64) = try std.ArrayListUnmanaged(i64).initCapacity(allocator, config.vertices.len);
-        errdefer vertices_owned.deinit(allocator);
-
-        vertices_owned.appendSliceAssumeCapacity(config.vertices);
-
-        var points = try allocator.alloc(f64, config.points.len);
+    pub fn init(allocator: Allocator, config: Config) !VtkUnstructuredGrid {
+        var points: []f64 = try allocator.alloc(f64, config.points.len);
         errdefer allocator.free(points);
 
         @memcpy(points, config.points);
 
-        var vertices = try allocator.alloc(i64, config.vertices.len);
+        var vertices: []i64 = try allocator.alloc(i64, config.vertices.len);
         errdefer allocator.free(vertices);
 
         @memcpy(vertices, config.vertices);
@@ -97,8 +92,11 @@ pub const VtkUnstructuredGrid = struct {
 
     /// Deinitalises an unstructured grid, freeing all data.
     pub fn deinit(self: *VtkUnstructuredGrid) void {
-        self.allocator.free(self.point_data);
-        self.allocator.free(self.cell_data);
+        self.point_data.deinit(self.allocator);
+        self.cell_data.deinit(self.allocator);
+
+        self.allocator.free(self.points);
+        self.allocator.free(self.vertices);
     }
 
     /// Adds a data field associated with each point to the vtk unstructured grid.
@@ -238,7 +236,7 @@ pub const VtkUnstructuredGrid = struct {
             \\<DataArray type="Float64" Name="{s}" NumberOfComponents="{}" format="ascii">
             \\
         , .{ array.name, array.n_components });
-        try writeVecArray(f64, array.n_components, array.data.items, out_stream);
+        try writeVecArray(f64, array.n_components, array.data, out_stream);
         try out_stream.print("</DataArray>\n", .{});
     }
 

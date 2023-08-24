@@ -166,7 +166,7 @@ pub fn Partitions(comptime N: usize) type {
                 .{
                     .bounds = .{
                         .origin = [1]usize{0} ** N,
-                        .widths = tiles.size,
+                        .size = tiles.size,
                     },
                     .children_offset = 0,
                     .children_count = tiles.clusters.len,
@@ -188,11 +188,11 @@ pub fn Partitions(comptime N: usize) type {
 
                 // Cull any unnessessary spacing on either side.
                 for (0..N) |axis| {
-                    while (signatures[axis][lower_bounds[axis]] == 0 and !masks[lower_bounds[axis]]) {
+                    while (signatures[axis][lower_bounds[axis]] == 0 and !masks[axis][lower_bounds[axis]]) {
                         lower_bounds[axis] += 1;
                     }
 
-                    while (signatures[axis][upper_bounds[axis] - 1] == 0 and !masks[upper_bounds[axis] - 1]) {
+                    while (signatures[axis][upper_bounds[axis] - 1] == 0 and !masks[axis][upper_bounds[axis] - 1]) {
                         upper_bounds[axis] -= 1;
                     }
 
@@ -383,7 +383,7 @@ pub fn Partitions(comptime N: usize) type {
                 const offset: usize = partition.children_offset;
                 const count: usize = partition.children_count;
 
-                for (self.children[offset..(offset + count)]) |child| {
+                for (self.children.items[offset..(offset + count)]) |child| {
                     const bounds = tiles.clusters[child];
 
                     @memset(masks[axis][bounds.origin[axis]..(bounds.origin[axis] + bounds.size[axis])], true);
@@ -393,14 +393,14 @@ pub fn Partitions(comptime N: usize) type {
 
         fn computeParents(self: *Self) void {
             for (self.blocks.items(.children_offset), self.blocks.items(.children_count), 0..) |offset, count, i| {
-                for (self.children[offset..(offset + count)]) |child| {
-                    self.parents[child] = i;
+                for (self.children.items[offset..(offset + count)]) |child| {
+                    self.parents.items[child] = i;
                 }
             }
         }
 
         const SplitContext = struct {
-            clusters: []IndexBox,
+            clusters: []const IndexBox,
             axis: usize,
         };
 
@@ -427,7 +427,7 @@ pub fn Partitions(comptime N: usize) type {
             };
 
             // Use heap sort.
-            heap(usize, self.children[parent.children_offset..(parent.children_count + parent.children_offset)], context, splitLessThanFn);
+            heap(usize, self.children.items[parent.children_offset..(parent.children_count + parent.children_offset)], context, splitLessThanFn);
 
             // Find adjusted index which does not bisect cluster.
             var index_inc: usize = index;
@@ -461,7 +461,7 @@ pub fn Partitions(comptime N: usize) type {
             var clusters_index = parent.children_count;
             // Perform search in reverse as we favour higher indices.
             // Worst case: O(n).
-            while (clusters_index > 0 and tiles.clusters[self.children[parent.clusters_offset + clusters_index - 1]].origin[axis] >= split_index) {
+            while (clusters_index > 0 and tiles.clusters[self.children.items[parent.children_offset + clusters_index - 1]].origin[axis] >= split_index) {
                 clusters_index -= 1;
             }
 
@@ -537,9 +537,16 @@ test "tiles basic" {
         buffer_offset += size[i];
     }
 
-    Partitions(3).computeSignatures(signatures, tiles, .{
-        .origin = [3]usize{ 0, 0, 0 },
-        .widths = [3]usize{ 5, 5, 5 },
+    var partitions: Partitions(3) = .{};
+    defer partitions.deinit(std.testing.allocator);
+
+    partitions.computeSignatures(signatures, tiles, .{
+        .bounds = .{
+            .origin = [3]usize{ 0, 0, 0 },
+            .size = [3]usize{ 5, 5, 5 },
+        },
+        .children_offset = 0,
+        .children_count = 0,
     });
 
     try expectEqualSlices(usize, &[5]usize{ 2, 0, 0, 1, 0 }, signatures[0]);
@@ -548,7 +555,7 @@ test "tiles basic" {
 
     const efficiency = tiles.computeEfficiency(.{
         .origin = [3]usize{ 0, 0, 0 },
-        .widths = [3]usize{ 4, 4, 4 },
+        .size = [3]usize{ 4, 4, 4 },
     });
 
     try expect(efficiency == 3.0 / 64.0);
@@ -579,5 +586,5 @@ test "tile partitioning" {
 
     const bounds = partitions.blocks.items(.bounds)[0];
     try expectEqualSlices(usize, &[2]usize{ 2, 2 }, &bounds.origin);
-    try expectEqualSlices(usize, &[2]usize{ 2, 2 }, &bounds.widths);
+    try expectEqualSlices(usize, &[2]usize{ 2, 2 }, &bounds.size);
 }
