@@ -83,7 +83,8 @@ pub fn Partition(comptime N: usize) type {
         /// The bounds of the partition in index space.
         bounds: Box(N, usize),
         /// The child clusters of the partition in index space.
-        children: []usize,
+        children_offset: usize,
+        children_count: usize,
     };
 }
 
@@ -95,7 +96,7 @@ pub fn Partitions(comptime N: usize) type {
         /// The parent partition for each cluster.
         parents: ArrayListUnmanaged(usize) = ArrayListUnmanaged(usize){},
         /// A buffer of cluster indices.
-        buffer: ArrayListUnmanaged(usize) = ArrayListUnmanaged(usize){},
+        children: ArrayListUnmanaged(usize) = ArrayListUnmanaged(usize){},
 
         const Self = @This();
         const IndexBox = Box(N, usize);
@@ -104,7 +105,7 @@ pub fn Partitions(comptime N: usize) type {
         pub fn deinit(self: *Self, allocator: Allocator) void {
             self.blocks.deinit(allocator);
             self.parents.deinit(allocator);
-            self.buffer.deinit(allocator);
+            self.children.deinit(allocator);
         }
 
         /// Runs Berger-Rigoutsos point clustering algorithm over the given set
@@ -119,7 +120,7 @@ pub fn Partitions(comptime N: usize) type {
         ) !void {
             self.blocks.shrinkRetainingCapacity(0);
             try self.parents.resize(allocator, tiles.clusters.len);
-            try self.buffer.resize(allocator, tiles.clusters.len);
+            try self.children.resize(allocator, tiles.clusters.len);
 
             // Find the required buffer length
             var buffer_length: usize = 0;
@@ -137,7 +138,7 @@ pub fn Partitions(comptime N: usize) type {
 
             // Fill cluster buffer with initial data.
             for (0..tiles.clusters.len) |i| {
-                self.buffer.items[i] = i;
+                self.children.items[i] = i;
             }
 
             // Build slices for each axis.
@@ -167,29 +168,31 @@ pub fn Partitions(comptime N: usize) type {
                         .origin = [1]usize{0} ** N,
                         .widths = tiles.size,
                     },
-                    .children = self.buffer.items,
+                    .children_offset = 0,
+                    .children_count = tiles.clusters.len,
                 },
             );
 
             // Begin recusively dividing partitions.
             stack_pop: while (stack.popOrNull()) |full| {
                 // Compute signatures
-                computeSignatures(signatures, tiles, full.bounds);
+                self.computeSignatures(signatures, tiles, full);
+                self.computeMasks(masks, tiles, full);
 
                 var lower_bounds: [N]usize = full.bounds.origin;
                 var upper_bounds: [N]usize = undefined;
 
                 for (0..N) |i| {
-                    upper_bounds[i] = full.bounds.origin[i] + full.bounds.widths[i];
+                    upper_bounds[i] = full.bounds.origin[i] + full.bounds.size[i];
                 }
 
                 // Cull any unnessessary spacing on either side.
                 for (0..N) |axis| {
-                    while (signatures[axis][lower_bounds[axis]] == 0) {
+                    while (signatures[axis][lower_bounds[axis]] == 0 and !masks[lower_bounds[axis]]) {
                         lower_bounds[axis] += 1;
                     }
 
-                    while (signatures[axis][upper_bounds[axis] - 1] == 0) {
+                    while (signatures[axis][upper_bounds[axis] - 1] == 0 and !masks[upper_bounds[axis] - 1]) {
                         upper_bounds[axis] -= 1;
                     }
 
@@ -211,7 +214,8 @@ pub fn Partitions(comptime N: usize) type {
 
                 const partition: Partition(N) = .{
                     .bounds = culled_subblock,
-                    .children = full.children,
+                    .children_offset = full.children_offset,
+                    .children_count = full.children_count,
                 };
 
                 // Check efficiency and maximum block sidelength
@@ -252,7 +256,7 @@ pub fn Partitions(comptime N: usize) type {
                         }
                     }
 
-                    if (splitBoxes(tiles, partition, masks, lower_bounds, upper_bounds, hole_axis, hole_index)) |split| {
+                    if (self.splitBoxes(masks, tiles, partition, lower_bounds, upper_bounds, hole_axis, hole_index)) |split| {
                         try stack.append(allocator, split.right);
                         try stack.append(allocator, split.left);
                     } else {
@@ -311,7 +315,7 @@ pub fn Partitions(comptime N: usize) type {
                         }
                     }
 
-                    if (splitBoxes(tiles, partition, masks, lower_bounds, upper_bounds, inflection_axis, inflection_index)) |split| {
+                    if (self.splitBoxes(masks, tiles, partition, lower_bounds, upper_bounds, inflection_axis, inflection_index)) |split| {
                         try stack.append(allocator, split.right);
                         try stack.append(allocator, split.left);
                     } else {
@@ -326,7 +330,7 @@ pub fn Partitions(comptime N: usize) type {
                 const mid_axis = longest;
                 const mid_index = (upper_bounds[mid_axis] + lower_bounds[mid_axis]) / 2;
 
-                if (splitBoxes(tiles, partition, masks, lower_bounds, upper_bounds, mid_axis, mid_index)) |split| {
+                if (self.splitBoxes(masks, tiles, partition, lower_bounds, upper_bounds, mid_axis, mid_index)) |split| {
                     try stack.append(allocator, split.right);
                     try stack.append(allocator, split.left);
                 } else {
@@ -338,7 +342,9 @@ pub fn Partitions(comptime N: usize) type {
             self.computeParents();
         }
 
-        fn computeSignatures(signatures: [N][]usize, tiles: Tiles(N), subblock: IndexBox) void {
+        fn computeSignatures(self: *const Self, signatures: [N][]usize, tiles: Tiles(N), partition: Partition(N)) void {
+            _ = self;
+            const subblock = partition.bounds;
             const space: IndexSpace(N) = .{ .size = tiles.size };
             const subspace: IndexSpace(N) = .{ .size = subblock.size };
 
@@ -368,10 +374,27 @@ pub fn Partitions(comptime N: usize) type {
             }
         }
 
+        fn computeMasks(self: *const Self, masks: [N][]bool, tiles: Tiles(N), partition: Partition(N)) void {
+            const subblock = partition.bounds;
+
+            for (0..N) |axis| {
+                @memset(masks[axis][subblock.origin[axis]..(subblock.origin[axis] + subblock.size[axis])], false);
+
+                const offset: usize = partition.children_offset;
+                const count: usize = partition.children_count;
+
+                for (self.children[offset..(offset + count)]) |child| {
+                    const bounds = tiles.clusters[child];
+
+                    @memset(masks[axis][bounds.origin[axis]..(bounds.origin[axis] + bounds.size[axis])], true);
+                }
+            }
+        }
+
         fn computeParents(self: *Self) void {
-            for (self.blocks.items(.children), 0..) |children, i| {
-                for (children) |child| {
-                    self.parents.items[child] = i;
+            for (self.blocks.items(.children_offset), self.blocks.items(.children_count), 0..) |offset, count, i| {
+                for (self.children[offset..(offset + count)]) |child| {
+                    self.parents[child] = i;
                 }
             }
         }
@@ -386,9 +409,10 @@ pub fn Partitions(comptime N: usize) type {
         }
 
         fn splitBoxes(
+            self: *const Self,
+            masks: [N][]bool,
             tiles: Tiles(N),
             parent: Partition(N),
-            masks: [N][]bool,
             lower: [N]usize,
             upper: [N]usize,
             axis: usize,
@@ -403,10 +427,7 @@ pub fn Partitions(comptime N: usize) type {
             };
 
             // Use heap sort.
-            heap(usize, parent.children, context, splitLessThanFn);
-
-            // Now that we have sorted the clusters, this should be optimally cache efficient.
-            computeMasks(masks, tiles, parent, axis);
+            heap(usize, self.children[parent.children_offset..(parent.children_count + parent.children_offset)], context, splitLessThanFn);
 
             // Find adjusted index which does not bisect cluster.
             var index_inc: usize = index;
@@ -437,10 +458,10 @@ pub fn Partitions(comptime N: usize) type {
             }
 
             // Find index to split children clusters
-            var clusters_index = parent.children.len;
+            var clusters_index = parent.children_count;
             // Perform search in reverse as we favour higher indices.
             // Worst case: O(n).
-            while (clusters_index > 0 and tiles.clusters[parent.children[clusters_index - 1]].origin[axis] >= split_index) {
+            while (clusters_index > 0 and tiles.clusters[self.children[parent.clusters_offset + clusters_index - 1]].origin[axis] >= split_index) {
                 clusters_index -= 1;
             }
 
@@ -460,25 +481,15 @@ pub fn Partitions(comptime N: usize) type {
             right.bounds.origin[axis] = index;
             right.bounds.size[axis] = upper[axis] - index;
 
-            left.children = parent.children[0..clusters_index];
-            right.children = parent.children[clusters_index..];
+            left.children_offset = parent.children_offset;
+            left.children_count = clusters_index;
+            right.children_offset = parent.children_offset + clusters_index;
+            right.children_count = parent.children_count - clusters_index;
 
             return .{
                 .left = left,
                 .right = right,
             };
-        }
-
-        fn computeMasks(masks: [N][]bool, tiles: Tiles(N), partition: Partition(N), axis: usize) void {
-            const subblock = partition.bounds;
-
-            @memset(masks[axis][subblock.origin[axis]..(subblock.origin[axis] + subblock.size[axis])], false);
-
-            for (partition.children) |child| {
-                const bounds = tiles.clusters[child];
-
-                @memset(masks[axis][bounds.origin[axis]..(bounds.origin[axis] + bounds.size[axis])], true);
-            }
         }
     };
 }

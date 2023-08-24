@@ -441,6 +441,7 @@ pub fn Mesh2(comptime N: usize) type {
         };
 
         pub const Patch = struct {
+            bounds: IndexBox,
             // Parent of this patch
             parent: usize,
             // Children of this patch
@@ -454,14 +455,14 @@ pub fn Mesh2(comptime N: usize) type {
             patches: MultiArrayList(Patch),
             /// Index buffer for children of patches
             children: ArrayListUnmanaged(usize),
-            // Offset in tile array for this level
-            tile_offset: usize,
-            // Offset into cell array for this level
-            cell_offset: usize,
             // Total number of tiles in this level
             tile_total: usize,
             // Total number of cells in this level.
             cell_total: usize,
+            // Offset in tile array for this level
+            tile_offset: usize,
+            // Offset into cell array for this level
+            cell_offset: usize,
 
             fn init() Level {
                 return .{
@@ -579,22 +580,68 @@ pub fn Mesh2(comptime N: usize) type {
 
             var scratch: Allocator = arena.allocator();
 
+            var children_cache: ArrayListUnmanaged(usize) = .{};
+            defer children_cache.deinit(dest.gpa);
+
             for (0..total_levels) |reverse_level_id| {
                 const level_id: usize = total_levels - 1 - reverse_level_id;
 
                 const underlying: *const Level = src.levels.items[level_id - 1];
 
                 const target: *Level = dest.levels.items[level_id];
-                const target_coarse: *Level = dest.levels.items[level_id - 1];
-                _ = target_coarse;
                 const target_refined: *Level = dest.levels.items[level_id + 1];
+
+                // Now we can clear the target arrays
+                target.blocks.shrinkRetainingCapacity(0);
+                target.patches.shrinkRetainingCapacity(0);
+                target.children.shrinkRetainingCapacity(0);
 
                 // Offset into tags array.
                 const utags: []const usize = tags[underlying.tile_offset..(underlying.tile_offset + underlying.tile_total)];
 
-                // Generate new patches
+                // 3.1 Build clusters on refined mesh to consider when repartitioning target.
+                // **************************************************************************
+
+                var cluster_offsets: []usize = try dest.gpa.alloc(usize, underlying.patches.len + 1);
+                defer dest.gpa.free(cluster_offsets);
+
+                var clusters: ArrayListUnmanaged(IndexBox) = .{};
+                defer clusters.deinit(dest.gpa);
+
+                var cluster_index_map: ArrayListUnmanaged(usize) = .{};
+                defer cluster_index_map.deinit(dest.gpa);
+
+                for (0..underlying.patches.len) |underlying_id| {
+                    const offset: usize = underlying.patches.items(.children_offset)[underlying_id];
+                    const count: usize = underlying.patches.items(.children_count)[underlying_id];
+
+                    for (underlying.children[offset..(offset + count)]) |child| {
+                        for (children_cache[child]..child[child + 1]) |refined| {
+                            var cluster: IndexBox = target_refined.patches.items(.bounds)[refined];
+
+                            cluster.coarsen();
+                            cluster.coarsen();
+
+                            try clusters.append(cluster);
+                            try cluster_index_map.append(refined);
+                        }
+                    }
+
+                    cluster_offsets[underlying_id] = clusters.len;
+                }
+
+                children_cache.clearRetainingCapacity();
+                children_cache.ensureTotalCapacity(dest.gpa, underlying.patches.len + 1);
+
+                try children_cache.append(dest.gpa, 0);
+
+                // 3.2 Generate new patches.
+                // *************************
+
+                var tile_offset: usize = 0;
+
                 for (0..underlying.patches.len) |upid| {
-                    arena.reset(.retain_capacity);
+                    _ = arena.reset(.retain_capacity);
 
                     const upbounds: IndexBox = underlying.patches.items(.bounds)[upid];
                     const upspace: IndexSpace(N) = upbounds.space();
@@ -605,40 +652,46 @@ pub fn Mesh2(comptime N: usize) type {
                     var partitions: Partitions(N) = .{};
                     defer partitions.deinit(scratch);
 
-                    // Build clusters from level l+1
-                    var clusters: ArrayListUnmanaged(Box(N, usize)) = .{};
-                    defer clusters.deinit(scratch);
-
-                    // Maps cluster index to global index on l+1
-                    var cluster_indices: ArrayListUnmanaged(usize) = .{};
-                    defer cluster_indices.deinit(scratch);
-
-                    // This assumes target current holds data for relationship between old patches on l
-                    // and new patches on l+1.
-                    for (underlying.childrenSlice(upid)) |child_id| {
-                        for (target.childrenSlice(child_id)) |refined_id| {
-                            var cluster = target_refined.patches.items(.bounds)[refined_id];
-
-                            cluster.coarsen();
-                            cluster.coarsen();
-
-                            try clusters.append(scratch, cluster);
-                            try cluster_indices.append(scratch, refined_id);
-                        }
-                    }
-
                     // Run partitioning algorithm
                     try partitions.compute(
                         scratch,
                         .{
                             .size = upbounds.size,
                             .tags = uptags,
-                            .clusters = clusters.items,
+                            .clusters = clusters.items[cluster_offsets[upid]..cluster_offsets[upid + 1]],
                         },
                         config.patch_max_tiles,
                         config.patch_effciency,
                     );
+
+                    const children_offset: usize = target.children.len;
+
+                    for (partitions.children.items) |index| {
+                        try target.children.append(dest.gpa, cluster_index_map.items[index]);
+                    }
+
+                    for (partitions.blocks.items(.bounds), partitions.blocks.items(.children_offset), partitions.blocks.items(.children_count)) |bounds, offset, count| {
+                        var rbounds: IndexBox = bounds;
+                        rbounds.refine();
+
+                        try target.patches.append(dest.gpa, Patch{
+                            .bounds = rbounds,
+                            .parent = upid,
+                            .children_offset = children_offset + offset,
+                            .children_count = count,
+                            .tile_offset = tile_offset,
+                        });
+
+                        tile_offset += rbounds.space().total();
+                    }
+
+                    try children_cache.append(dest.gpa, target.patches.len);
                 }
+
+                target.tile_total = tile_offset;
+
+                // 3.3 Generate new blocks patches.
+                // ********************************
             }
 
             // 3. Generate Levels on new mesh.
