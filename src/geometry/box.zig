@@ -94,10 +94,10 @@ pub fn Box(comptime N: usize, comptime T: type) type {
             }
         }
 
-        pub fn coarsen(self: *Self) void {
+        pub fn coarsen(self: *Self) !void {
             for (0..N) |axis| {
-                self.origin[axis] = std.math.divFloor(usize, self.origin[axis], 2);
-                self.size[axis] = std.math.divCeil(usize, self.size[axis], 2);
+                self.origin[axis] = try std.math.divFloor(usize, self.origin[axis], 2);
+                self.size[axis] = try std.math.divCeil(usize, self.size[axis], 2);
             }
         }
     };

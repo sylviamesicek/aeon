@@ -12,6 +12,10 @@ pub fn IndexSpace(comptime N: usize) type {
 
         const Self = @This();
 
+        pub fn fromSize(size: [N]usize) Self {
+            return .{ .size = size };
+        }
+
         /// Converts a cartesian index to a linear index.
         pub fn linearFromCartesian(self: Self, cartesian: [N]usize) usize {
             var stride: usize = 1;
@@ -81,7 +85,17 @@ pub fn IndexSpace(comptime N: usize) type {
             return axis;
         }
 
-        pub fn window(self: Self, bounds: Box(N, usize), comptime T: type, dest: []T, src: []const T) void {
+        pub fn scale(self: Self, s: usize) Self {
+            var size: [N]usize = undefined;
+
+            for (0..N) |i| {
+                size[i] = self.size[i] * s;
+            }
+
+            return .{ .size = size };
+        }
+
+        pub fn fillWindow(self: Self, bounds: Box(N, usize), comptime T: type, dest: []T, src: []const T) void {
             const space = bounds.space();
 
             assert(dest.len == space.total());
@@ -93,7 +107,7 @@ pub fn IndexSpace(comptime N: usize) type {
             var i: usize = 0;
 
             while (indices.next()) |local| {
-                const global = bounds.globalFromLocal(local);
+                const global: [N]usize = bounds.globalFromLocal(local);
                 dest[i] = src[space.linearFromCartesian(global)];
 
                 i += 1;

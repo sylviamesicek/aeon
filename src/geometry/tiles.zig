@@ -53,27 +53,6 @@ pub fn Tiles(comptime N: usize) type {
 
             return f_tagged / f_total;
         }
-
-        // /// Tags all tiles that lie in a cluster.
-        // pub fn tagClusters(self: *Self) void {
-        //     const space: IndexSpace(N) = .{ .size = self.size };
-
-        //     for (self.clusters) |cluster| {
-        //         const cluster_space: IndexSpace(N) = .{ .size = cluster.widths };
-        //         var indices = space.cartesianIndices();
-
-        //         while (indices.next()) |local| {
-        //             var global: [N]usize = undefined;
-
-        //             for (0..N) |axis| {
-        //                 global[axis] = cluster.origin[axis] + local[axis];
-        //             }
-
-        //             const linear: usize = cluster_space.linearFromCartesian(global);
-        //             self.clusters[linear] = true;
-        //         }
-        //     }
-        // }
     };
 }
 
