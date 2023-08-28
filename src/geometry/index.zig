@@ -95,6 +95,16 @@ pub fn IndexSpace(comptime N: usize) type {
             return .{ .size = size };
         }
 
+        pub fn extend(self: Self, s: [N]usize) Self {
+            var size: [N]usize = s;
+
+            for (0..N) |i| {
+                size[i] += self.size[i];
+            }
+
+            return .{ .size = size };
+        }
+
         pub fn fillWindow(self: Self, bounds: Box(N, usize), comptime T: type, dest: []T, src: []const T) void {
             const space = bounds.space();
 

@@ -1,48 +1,48 @@
 const std = @import("std");
 const IndexSpace = @import("index.zig").IndexSpace;
 
-// /// Represents an index into the 2^N subcells formed
-// /// when dividing a hyper box along each axis.
-// pub fn SplitIndex(comptime N: usize) type {
-//     return struct {
-//         linear: u16,
+/// Represents an index into the 2^N subcells formed
+/// when dividing a hyper box along each axis.
+pub fn SplitIndex(comptime N: usize) type {
+    if (N > 16) {
+        @compileError("Split index is only defined for values of N <= 16");
+    }
 
-//         const Self = @This();
+    return struct {
+        linear: u16,
 
-//         /// Builds a `SplitIndex` for a cartesian index, ie an array
-//         /// of bools indicating left/right split on each axis.
-//         pub fn fromCartesian(cart: [N]bool) Self {
-//             if (N > 16) {
-//                 @compileError("Split index is only defined for values of N <= 16");
-//             }
+        const Self = @This();
 
-//             var linear: u16 = 0x0;
+        /// Builds a `SplitIndex` for a cartesian index, ie an array
+        /// of bools indicating left/right split on each axis.
+        pub fn fromCartesian(cart: [N]bool) Self {
+            var linear: u16 = 0x0;
 
-//             for (0..N) |i| {
-//                 linear |= @as(u16, cart[i]) << i;
-//             }
+            for (0..N) |i| {
+                linear |= @as(u16, cart[i]) << i;
+            }
 
-//             return linear;
-//         }
+            return linear;
+        }
 
-//         /// Converts a linear `SplitIndex` to a cartesian implementation.
-//         pub fn toCartesian(self: Self) [N]bool {
-//             var cart: [N]bool = undefined;
+        /// Converts a linear `SplitIndex` to a cartesian implementation.
+        pub fn toCartesian(self: Self) [N]bool {
+            var cart: [N]bool = undefined;
 
-//             for (0..N) |i| {
-//                 cart[i] = self.linear & (1 << i) > 0;
-//             }
+            for (0..N) |i| {
+                cart[i] = self.linear & (1 << i) > 0;
+            }
 
-//             return cart;
-//         }
+            return cart;
+        }
 
-//         pub fn reverseAxis(self: Self, axis: usize) Self {
-//             return .{
-//                 .linear = self.linear ^ (1 << axis),
-//             };
-//         }
-//     };
-// }
+        pub fn reverseAxis(self: Self, axis: usize) Self {
+            return .{
+                .linear = self.linear ^ (1 << axis),
+            };
+        }
+    };
+}
 
 /// A N-dimensional axis aligned bounding box over a field T.
 pub fn Box(comptime N: usize, comptime T: type) type {
@@ -99,6 +99,16 @@ pub fn Box(comptime N: usize, comptime T: type) type {
                 self.origin[axis] = try std.math.divFloor(usize, self.origin[axis], 2);
                 self.size[axis] = try std.math.divCeil(usize, self.size[axis], 2);
             }
+        }
+
+        pub fn relativeTo(self: Self, other: Self) Self {
+            var result: Self = self;
+
+            for (0..N) |i| {
+                result.origin[i] -= other.origin[i];
+            }
+
+            return result;
         }
     };
 }

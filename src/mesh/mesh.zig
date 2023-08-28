@@ -100,7 +100,9 @@ pub fn Mesh(comptime N: usize) type {
         pub const Block = struct {
             bounds: IndexBox,
             patch: usize,
-            cell_offset: usize,
+            cell_total: usize = 0,
+            cell_offset: usize = 0,
+            boundary: [2 * N]bool = [1]bool{false} ** 2 ** N,
         };
 
         pub const Patch = struct {
@@ -110,7 +112,8 @@ pub fn Mesh(comptime N: usize) type {
             // Children of this patch
             children_offset: usize,
             children_count: usize,
-            tile_offset: usize,
+            tile_total: usize = 0,
+            tile_offset: usize = 0,
         };
 
         pub const Level = struct {
@@ -121,6 +124,10 @@ pub fn Mesh(comptime N: usize) type {
             patches: MultiArrayList(Patch),
             /// Index buffer for children of patches
             children: ArrayListUnmanaged(usize),
+            /// Cache of block indices per patch
+            tile_to_block: ArrayListUnmanaged(usize),
+            /// Blocks on the boundary
+            boundary_blocks: ArrayListUnmanaged(usize),
             // Total number of tiles in this level
             tile_total: usize,
             // Total number of cells in this level.
@@ -138,6 +145,8 @@ pub fn Mesh(comptime N: usize) type {
                     .blocks = .{},
                     .patches = .{},
                     .children = .{},
+                    .tile_to_block = .{},
+                    .boundary_blocks = .{},
                     .tile_offset = 0,
                     .cell_offset = 0,
                     .tile_total = 0,
@@ -149,12 +158,35 @@ pub fn Mesh(comptime N: usize) type {
                 self.blocks.deinit(allocator);
                 self.patches.deinit(allocator);
                 self.children.deinit(allocator);
+                self.tile_to_block.deinit(allocator);
+                self.boundary_blocks.deinit(allocator);
             }
 
             fn childrenSlice(self: *Level, patch: usize) []usize {
                 const offset = self.patches.items(.children_offset)[patch];
                 const count = self.patches.items(.children_count)[patch];
                 return self.children[offset..(offset + count)];
+            }
+
+            fn computeOffsets(self: *Level, tile_width: usize) void {
+                var tile_offset: usize = 0;
+
+                for (self.patches.items(.bounds), self.patches.items(.tile_total), self.patches.items(.tile_offset)) |bounds, *total, *offset| {
+                    offset.* = tile_offset;
+                    total.* = bounds.space().total();
+                    tile_offset += total.*;
+                }
+
+                var cell_offset: usize = 0;
+
+                for (self.blocks.items(.bounds), self.blocks.items(.cell_total), self.blocks.items(.cell_offset)) |bounds, *total, *offset| {
+                    offset.* = cell_offset;
+                    total.* = bounds.space().scale(tile_width).total();
+                    cell_offset += total.*;
+                }
+
+                self.tile_total = tile_offset;
+                self.cell_total = cell_offset;
             }
         };
 
@@ -311,14 +343,32 @@ pub fn Mesh(comptime N: usize) type {
                 var ubounds: []const IndexBox = undefined;
                 var uoffsets: []const usize = undefined;
 
+                if (coarse_exists) {
+                    // Get underlying data
+                    const underlying: *const Level = &src.levels.items[level_id - 1];
+
+                    utags = tags[underlying.tile_offset..(underlying.tile_offset + underlying.tile_total)];
+                    ulen = underlying.patches.len;
+                    ubounds = underlying.patches.items(.bounds);
+                    uoffsets = underlying.patches.items(.tile_offset);
+                } else {
+                    // Otherwise use base data
+                    utags = tags[0..dest.baseTileTotal()];
+                    ulen = 1;
+                    ubounds = bbounds_slice;
+                    uoffsets = boffsets_slice;
+                }
+
                 // 3.1 Build clusters on refined mesh to consider when repartitioning target.
                 // **************************************************************************
 
                 // Stores offsets per underlying patch into clusters array
-                var cluster_offsets: []usize = &[_]usize{};
+                var cluster_offsets: []usize = try dest.gpa.alloc(usize, ulen + 1);
                 defer dest.gpa.free(cluster_offsets);
 
-                // Stores bounds of clusters
+                cluster_offsets[0] = 0;
+
+                // Stores bounds of clusters (relative to patch)
                 var clusters: ArrayListUnmanaged(IndexBox) = .{};
                 defer clusters.deinit(dest.gpa);
 
@@ -329,14 +379,6 @@ pub fn Mesh(comptime N: usize) type {
                 if (coarse_exists) {
                     // Get underlying data
                     const underlying: *const Level = &src.levels.items[level_id - 1];
-
-                    utags = tags[underlying.tile_offset..(underlying.tile_offset + underlying.tile_total)];
-                    ulen = underlying.patches.len;
-                    ubounds = underlying.patches.items(.bounds);
-                    uoffsets = underlying.patches.items(.tile_offset);
-
-                    cluster_offsets = try dest.gpa.alloc(usize, ulen + 1);
-                    cluster_offsets[0] = 0;
 
                     // Update clusters
                     for (0..ulen) |underlying_id| {
@@ -353,7 +395,7 @@ pub fn Mesh(comptime N: usize) type {
                                     try cluster.coarsen();
                                     try cluster.coarsen();
 
-                                    try clusters.append(dest.gpa, cluster);
+                                    try clusters.append(dest.gpa, cluster.relativeTo(ubounds[underlying_id]));
                                     try cluster_index_map.append(dest.gpa, refined);
                                 }
                             }
@@ -362,15 +404,6 @@ pub fn Mesh(comptime N: usize) type {
                         cluster_offsets[underlying_id + 1] = clusters.items.len;
                     }
                 } else {
-                    // Otherwise use base data
-                    utags = tags[0..dest.baseTileTotal()];
-                    ulen = 1;
-                    ubounds = bbounds_slice;
-                    uoffsets = boffsets_slice;
-
-                    cluster_offsets = try dest.gpa.alloc(usize, ulen + 1);
-                    cluster_offsets[0] = 0;
-
                     // All registered patches are children of base
                     for (0..children_cache.items.len, 1..) |i, j| {
                         if (refined_exists) {
@@ -382,7 +415,7 @@ pub fn Mesh(comptime N: usize) type {
                                 try cluster.coarsen();
                                 try cluster.coarsen();
 
-                                try clusters.append(dest.gpa, cluster);
+                                try clusters.append(dest.gpa, cluster.relativeTo(ubounds[0]));
                                 try cluster_index_map.append(dest.gpa, refined);
                             }
                         }
@@ -403,6 +436,7 @@ pub fn Mesh(comptime N: usize) type {
 
                 // Per patch tile offset
                 var tile_offset: usize = 0;
+                _ = tile_offset;
 
                 for (0..ulen) |upid| {
                     // Reset arena for new "frame"
@@ -416,10 +450,8 @@ pub fn Mesh(comptime N: usize) type {
                     const upclusters: []const IndexBox = clusters.items[cluster_offsets[upid]..cluster_offsets[upid + 1]];
                     const upcluster_index_map: []const usize = cluster_index_map.items[cluster_offsets[upid]..cluster_offsets[upid + 1]];
 
-                    // Preprocess tags to include all elements from clusters
-                    for (upclusters) |cluster| {
-                        upbounds.space().fillSubspace(cluster, bool, uptags, true);
-                    }
+                    // Preprocess tags to include all elements from clusters (and one tile buffer region around cluster)
+                    preprocessTagsOnPatch(uptags, upbounds, upclusters);
 
                     // Scratch space for partitioning algorithm
                     var partitions: Partitions(N) = .{};
@@ -462,17 +494,11 @@ pub fn Mesh(comptime N: usize) type {
                             .parent = upid,
                             .children_offset = patch_children_offset + offset,
                             .children_count = count,
-                            .tile_offset = tile_offset,
                         });
-
-                        // Increment tile offset
-                        tile_offset += rbounds.space().total();
                     }
 
                     try children_cache.append(dest.gpa, target.patches.len);
                 }
-
-                target.tile_total = tile_offset;
 
                 // If refined exists, update parents of refined patches
                 if (refined_exists) {
@@ -488,9 +514,6 @@ pub fn Mesh(comptime N: usize) type {
 
                 // 3.4 Generate new blocks by partitioning new patches.
                 // ****************************************************
-
-                // Level wide offset into cells array.
-                var cell_offset: usize = 0;
 
                 // Loop through newly created patches
                 for (target.patches.items(.bounds), target.patches.items(.parent), 0..) |bounds, parent, patch| {
@@ -547,34 +570,17 @@ pub fn Mesh(comptime N: usize) type {
                         try target.blocks.append(dest.gpa, Block{
                             .bounds = rbounds,
                             .patch = patch,
-                            .cell_offset = cell_offset,
                         });
-
-                        // Inc cell offset with total ghost nodes.
-                        cell_offset += rbounds.space().scale(dest.tile_width).total();
                     }
                 }
-
-                // Set level total cells
-                target.cell_total = cell_offset;
             }
 
             // 4. Recompute level offsets and totals.
             // **************************************
 
-            var tile_offset: usize = dest.base.tile_total;
-            var cell_offset: usize = dest.base.cell_total;
-
-            for (dest.levels.items) |*level| {
-                level.tile_offset = tile_offset;
-                level.cell_offset = cell_offset;
-
-                tile_offset += level.tile_total;
-                cell_offset += level.cell_total;
-            }
-
-            dest.cell_total = cell_offset;
-            dest.tile_total = tile_offset;
+            dest.computeOffsets();
+            try dest.computeBoundaries();
+            try dest.computeTileToBlock();
         }
 
         pub fn transfer(self: Self, map: ArrayList(TileMap), src: Self, new: *ArrayList(f64), old: ArrayList(f64)) !void {
@@ -583,6 +589,78 @@ pub fn Mesh(comptime N: usize) type {
             _ = src;
             _ = map;
             _ = self;
+        }
+
+        fn preprocessTagsOnPatch(tags: []bool, bounds: IndexBox, clusters: []const IndexBox) void {
+            for (clusters) |upcluster| {
+                var cluster: Box(N, usize) = upcluster;
+
+                for (0..N) |i| {
+                    if (cluster.origin[i] > 0) {
+                        cluster.origin[i] -= 1;
+                        cluster.size[i] += 1;
+                    }
+
+                    if (cluster.origin[i] + cluster.size[i] < bounds.size[i]) {
+                        cluster.size[i] += 1;
+                    }
+                }
+
+                bounds.space().fillSubspace(cluster, bool, tags, true);
+            }
+        }
+
+        fn computeOffsets(self: *Self) void {
+            var tile_offset: usize = self.base.tile_total;
+            var cell_offset: usize = self.base.cell_total;
+
+            for (self.levels.items) |*level| {
+                level.computeOffsets(self.tile_width);
+
+                level.tile_offset = tile_offset;
+                level.cell_offset = cell_offset;
+
+                tile_offset += level.tile_total;
+                cell_offset += level.cell_total;
+            }
+
+            self.cell_total = cell_offset;
+            self.tile_total = tile_offset;
+        }
+
+        fn computeBoundaries(self: *Self) !void {
+            for (self.levels.items) |*level| {
+                level.boundary_blocks.clearRetainingCapacity();
+
+                const size: [N]usize = level.index_space.size;
+
+                for (level.blocks.items(.bounds), level.blocks.items(.boundary), 0..) |bounds, *boundary, id| {
+                    for (0..N) |i| {
+                        const left_boundary = bounds.origin[i] == 0;
+                        const right_boundary = bounds.origin[i] + bounds.size[i] == size[i];
+                        boundary[i] = left_boundary;
+                        boundary[i + N] = right_boundary;
+                    }
+
+                    try level.boundary_blocks.append(self.gpa, id);
+                }
+            }
+        }
+
+        fn computeTileToBlock(self: *Self) !void {
+            for (self.levels.items) |*level| {
+                try level.tile_to_block.resize(self.gpa, level.tile_total);
+                @memset(level.tile_to_block.items, std.math.maxInt(usize));
+
+                for (level.blocks.items(.bounds), level.blocks.items(.patch), 0..) |bounds, parent, id| {
+                    const patch_bounds: IndexBox = level.patches.items(.bounds)[parent];
+                    const patch_tile_offset: usize = level.patches.items(.tile_offset)[parent];
+                    const patch_tile_total: usize = level.patches.items(.tile_total)[parent];
+                    const patch_tile_to_block: []usize = level.tile_to_block.items[patch_tile_offset..(patch_tile_offset + patch_tile_total)];
+
+                    patch_bounds.space().fillSubspace(bounds.relativeTo(patch_bounds), usize, patch_tile_to_block, id);
+                }
+            }
         }
     };
 }
