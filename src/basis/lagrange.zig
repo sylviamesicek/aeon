@@ -1,7 +1,7 @@
 const std = @import("std");
 
 /// Computes the interpolation stencil given a grid and a point.
-pub fn value_stencil(comptime T: type, comptime L: usize, grid: [L]T, point: T) [L]T {
+pub fn valueStencil(comptime T: type, comptime L: usize, grid: [L]T, point: T) [L]T {
     var stencil: [L]T = undefined;
 
     for (0..L) |i| {
@@ -18,7 +18,7 @@ pub fn value_stencil(comptime T: type, comptime L: usize, grid: [L]T, point: T) 
 }
 
 /// Computes the derivative stencil given a grid and a point.
-pub fn derivative_stencil(comptime T: type, comptime L: usize, grid: [L]T, point: T) [L]T {
+pub fn derivativeStencil(comptime T: type, comptime L: usize, grid: [L]T, point: T) [L]T {
     var stencil: [L]T = undefined;
 
     for (0..L) |i| {
@@ -42,7 +42,7 @@ pub fn derivative_stencil(comptime T: type, comptime L: usize, grid: [L]T, point
     return stencil;
 }
 
-pub fn second_derivative_stencil(comptime T: type, comptime L: usize, grid: [L]T, point: T) [L]T {
+pub fn secondDerivativeStencil(comptime T: type, comptime L: usize, grid: [L]T, point: T) [L]T {
     var stencil: [L]T = undefined;
 
     for (0..L) |i| {
@@ -74,7 +74,7 @@ pub fn second_derivative_stencil(comptime T: type, comptime L: usize, grid: [L]T
     return stencil;
 }
 
-fn cell_grid(comptime T: type, comptime L: usize, comptime R: usize) [L + R + 1]T {
+fn cellGrid(comptime T: type, comptime L: usize, comptime R: usize) [L + R + 1]T {
     var grid: [L + R + 1]T = undefined;
 
     for (0..(L + R + 1)) |i| {

@@ -8,12 +8,13 @@ const assert = std.debug.assert;
 const exp2 = std.math.exp2;
 
 const geometry = @import("../geometry/geometry.zig");
+
 const Box = geometry.Box;
-const Geometry = geometry.Geometry;
 const IndexSpace = geometry.IndexSpace;
-const UniformGeometry = geometry.UniformGeometry;
 const Tiles = geometry.Tiles;
 const Partitions = geometry.Partitions;
+
+const transfer = @import("transfer.zig");
 
 pub const TileSrc = enum(u2) {
     unchanged,
@@ -168,7 +169,7 @@ pub fn Mesh(comptime N: usize) type {
                 return self.children[offset..(offset + count)];
             }
 
-            fn computeOffsets(self: *Level, tile_width: usize) void {
+            fn computeOffsets(self: *Level, tile_width: usize, ghost_width: usize) void {
                 var tile_offset: usize = 0;
 
                 for (self.patches.items(.bounds), self.patches.items(.tile_total), self.patches.items(.tile_offset)) |bounds, *total, *offset| {
@@ -181,7 +182,7 @@ pub fn Mesh(comptime N: usize) type {
 
                 for (self.blocks.items(.bounds), self.blocks.items(.cell_total), self.blocks.items(.cell_offset)) |bounds, *total, *offset| {
                     offset.* = cell_offset;
-                    total.* = bounds.space().scale(tile_width).total();
+                    total.* = bounds.space().scale(tile_width).extendUniform(2 * ghost_width).total();
                     cell_offset += total.*;
                 }
 
@@ -200,7 +201,7 @@ pub fn Mesh(comptime N: usize) type {
             const base: Base = .{
                 .index_space = tile_space,
                 .tile_total = tile_space.total(),
-                .cell_total = cell_space.total(),
+                .cell_total = cell_space.extendUniform(2 * config.ghost_width).total(),
             };
 
             return .{
@@ -615,7 +616,7 @@ pub fn Mesh(comptime N: usize) type {
             var cell_offset: usize = self.base.cell_total;
 
             for (self.levels.items) |*level| {
-                level.computeOffsets(self.tile_width);
+                level.computeOffsets(self.tile_width, self.ghost_width);
 
                 level.tile_offset = tile_offset;
                 level.cell_offset = cell_offset;
