@@ -10,23 +10,89 @@ const MultiArrayList = std.MultiArrayList;
 const Box = @import("box.zig").Box;
 const IndexSpace = @import("index.zig").IndexSpace;
 
-/// A set of tiles in some index space. Individual tiles may be "tagged" as active,
-/// and one may use the `Partitions` object to generate blocks that surrond these
-/// active tiles, as well as specify "clusters" of tiles which may not be bisected
-/// by these blocks (ie, there is a direct parent-child relationship between a block
-/// and a set of clusters).
-pub fn Tiles(comptime N: usize) type {
+/// A set of tiles in some index space, grouped into several partitions.
+/// Individual tiles may be "tagged" as active, and this object provides an
+/// interface into grouping active tiles into partitions as well as specify "clusters" of
+/// tiles which may not be bisected by these partitions (ie, there is a direct parent-child
+/// relationship between a partition and a set of clusters).
+pub fn PartitionSpace(comptime N: usize) type {
     return struct {
+        gpa: Allocator,
+        /// Size of the space to be partitioned.
         size: [N]usize,
-        tags: []const bool,
+        /// The set of partitions in the partitions list.
+        parts: MultiArrayList(Partition),
+        /// The set of clusters in the partition space.
         clusters: []const IndexBox,
+        /// The parent partition for each cluster.
+        parents: []usize,
+        /// A buffer of cluster indices.
+        children: []usize,
 
         const Self = @This();
         const IndexBox = Box(N, usize);
 
-        /// Computes the "efficiency" of a certain partition, ie, the ratio
-        /// of active to total tiles covered by the partition.
-        pub fn computeEfficiency(self: Self, subblock: IndexBox) f64 {
+        const Partition = struct {
+            /// The bounds of the partition in index space.
+            bounds: Box(N, usize),
+            /// The child clusters of the partition in index space.
+            children_offset: usize,
+            children_total: usize,
+        };
+
+        pub fn init(allocator: Allocator, size: [N]usize, clusters: []const IndexBox) Self {
+            var owned_clusters = try allocator.alloc(IndexBox, clusters.len);
+            errdefer allocator.free(owned_clusters);
+
+            @memcpy(owned_clusters, clusters);
+
+            var parents = try allocator.alloc(usize, clusters.len);
+            errdefer allocator.free(parents);
+
+            @memset(parents, 0);
+
+            var children = try allocator.alloc(usize, clusters.len);
+            errdefer allocator.free(children);
+
+            for (0..children.len) |i| {
+                children[i] = i;
+            }
+
+            var parts: MultiArrayList(Partition) = .{};
+            errdefer parts.deinit(allocator);
+
+            try parts.append(allocator, .{
+                .bounds = .{
+                    .origin = [1]usize{0} ** N,
+                    .size = size,
+                },
+                .children_offset = 0,
+                .children_total = clusters.len,
+            });
+
+            return .{
+                .gpa = allocator,
+                .size = size,
+                .parts = parts,
+                .clusters = owned_clusters,
+                .parents = parents,
+                .children = children,
+            };
+        }
+
+        // Clears all memory held by the partitions object.
+        pub fn deinit(self: *Self) void {
+            self.parts.deinit(self.gpa);
+            self.gpa.free(self.clusters);
+            self.gpa.free(self.parents);
+            self.gpa.free(self.children);
+        }
+
+        fn partitions(self: Self) []const IndexBox {
+            return self.parts.items(.bounds);
+        }
+
+        pub fn computeEfficiency(self: Self, subblock: IndexBox, tags: []const bool) f64 {
             const subspace = IndexSpace(N){ .size = subblock.size };
             const space = IndexSpace(N){ .size = self.size };
 
@@ -43,7 +109,7 @@ pub fn Tiles(comptime N: usize) type {
 
                 const linear = space.linearFromCartesian(global);
 
-                if (self.tags[linear]) {
+                if (tags[linear]) {
                     n_tagged += 1;
                 }
             }
@@ -53,70 +119,47 @@ pub fn Tiles(comptime N: usize) type {
 
             return f_tagged / f_total;
         }
-    };
-}
-
-/// A single partition of some index space.
-pub fn Partition(comptime N: usize) type {
-    return struct {
-        /// The bounds of the partition in index space.
-        bounds: Box(N, usize),
-        /// The child clusters of the partition in index space.
-        children_offset: usize,
-        children_count: usize,
-    };
-}
-
-/// Represents a set of partitions of a tiles object.
-pub fn Partitions(comptime N: usize) type {
-    return struct {
-        /// The set of partitions in the partitions list.
-        blocks: MultiArrayList(Partition(N)) = MultiArrayList(Partition(N)){},
-        /// The parent partition for each cluster.
-        parents: ArrayListUnmanaged(usize) = ArrayListUnmanaged(usize){},
-        /// A buffer of cluster indices.
-        children: ArrayListUnmanaged(usize) = ArrayListUnmanaged(usize){},
-
-        const Self = @This();
-        const IndexBox = Box(N, usize);
-
-        // Clears all memory held by the partitions object.
-        pub fn deinit(self: *Self, allocator: Allocator) void {
-            self.blocks.deinit(allocator);
-            self.parents.deinit(allocator);
-            self.children.deinit(allocator);
-        }
 
         /// Runs Berger-Rigoutsos point clustering algorithm over the given set
         /// of tiles, while avoiding splitting prescribed "clusters" of tiles.
         /// These tiles are assumed to already be tagged.
-        pub fn compute(
+        pub fn build(
             self: *Self,
-            allocator: Allocator,
-            tiles: Tiles(N),
+            tags: []const bool,
             max_tiles: usize,
             efficiency: f64,
         ) !void {
+
+            // 1. Reset partitions and higherarchy.
+            // ************************************
+
             self.blocks.shrinkRetainingCapacity(0);
-            try self.parents.resize(allocator, tiles.clusters.len);
-            try self.children.resize(allocator, tiles.clusters.len);
+
+            @memset(self.parents, 0);
+
+            for (0..self.children.len) |i| {
+                self.children[i] = i;
+            }
+
+            // 2. Allocate signatures and masks.
+            // *********************************
 
             // Find the required buffer length
             var buffer_length: usize = 0;
 
             for (0..N) |i| {
-                buffer_length += tiles.size[i];
+                buffer_length += self.size[i];
             }
 
             // Allocate scratch data
-            var signature_buffer: []usize = try allocator.alloc(usize, buffer_length);
-            defer allocator.free(signature_buffer);
+            var signature_buffer: []usize = try self.gpa.alloc(usize, buffer_length);
+            defer self.gpa.free(signature_buffer);
 
-            var mask_buffer: []bool = try allocator.alloc(bool, buffer_length);
-            defer allocator.free(mask_buffer);
+            var mask_buffer: []bool = try self.gpa.alloc(bool, buffer_length);
+            defer self.gpa.free(mask_buffer);
 
             // Fill cluster buffer with initial data.
-            for (0..tiles.clusters.len) |i| {
+            for (0..self.clusters.len) |i| {
                 self.children.items[i] = i;
             }
 
@@ -127,7 +170,7 @@ pub fn Partitions(comptime N: usize) type {
             var buffer_offset: usize = 0;
 
             for (0..N) |i| {
-                const size: usize = tiles.size[i];
+                const size: usize = self.size[i];
 
                 signatures[i] = signature_buffer[buffer_offset..(buffer_offset + size)];
                 masks[i] = mask_buffer[buffer_offset..(buffer_offset + size)];
@@ -137,26 +180,26 @@ pub fn Partitions(comptime N: usize) type {
 
             // Allocate stack partitions.
             var stack = ArrayListUnmanaged(Partition(N)){};
-            defer stack.deinit(allocator);
+            defer stack.deinit(self.gpa);
 
             // Add first partition to stack
             try stack.append(
-                allocator,
+                self.gpa,
                 .{
                     .bounds = .{
                         .origin = [1]usize{0} ** N,
-                        .size = tiles.size,
+                        .size = self.size,
                     },
                     .children_offset = 0,
-                    .children_count = tiles.clusters.len,
+                    .children_count = self.clusters.len,
                 },
             );
 
             // Begin recusively dividing partitions.
             stack_pop: while (stack.popOrNull()) |full| {
                 // Compute signatures
-                self.computeSignatures(signatures, tiles, full);
-                self.computeMasks(masks, tiles, full);
+                self.computeSignatures(full, tags, signatures);
+                self.computeMasks(full, masks);
 
                 var lower_bounds: [N]usize = full.bounds.origin;
                 var upper_bounds: [N]usize = undefined;
@@ -198,12 +241,12 @@ pub fn Partitions(comptime N: usize) type {
                 };
 
                 // Check efficiency and maximum block sidelength
-                const cur_efficiency = tiles.computeEfficiency(culled_subblock);
+                const cur_efficiency = self.computeEfficiency(culled_subblock, tags);
                 const longest = culled_space.longestAxis();
 
                 // If these checks pass, we can add this cell as a new block.
                 if (cur_efficiency >= efficiency and culled_space.size[longest] <= max_tiles) {
-                    try self.blocks.append(allocator, partition);
+                    try self.parts.append(self.gpa, partition);
                     continue :stack_pop;
                 }
 
@@ -235,11 +278,11 @@ pub fn Partitions(comptime N: usize) type {
                         }
                     }
 
-                    if (self.splitBoxes(masks, tiles, partition, lower_bounds, upper_bounds, hole_axis, hole_index)) |split| {
-                        try stack.append(allocator, split.right);
-                        try stack.append(allocator, split.left);
+                    if (self.splitBoxes(masks, partition, lower_bounds, upper_bounds, hole_axis, hole_index)) |split| {
+                        try stack.append(self.gpa, split.right);
+                        try stack.append(self.gpa, split.left);
                     } else {
-                        try self.blocks.append(allocator, partition);
+                        try self.blocks.append(self.gpa, partition);
                     }
 
                     continue :stack_pop;
@@ -294,11 +337,11 @@ pub fn Partitions(comptime N: usize) type {
                         }
                     }
 
-                    if (self.splitBoxes(masks, tiles, partition, lower_bounds, upper_bounds, inflection_axis, inflection_index)) |split| {
-                        try stack.append(allocator, split.right);
-                        try stack.append(allocator, split.left);
+                    if (self.splitBoxes(masks, partition, lower_bounds, upper_bounds, inflection_axis, inflection_index)) |split| {
+                        try stack.append(self.gpa, split.right);
+                        try stack.append(self.gpa, split.left);
                     } else {
-                        try self.blocks.append(allocator, partition);
+                        try self.blocks.append(self.gpa, partition);
                     }
 
                     continue :stack_pop;
@@ -309,11 +352,11 @@ pub fn Partitions(comptime N: usize) type {
                 const mid_axis = longest;
                 const mid_index = (upper_bounds[mid_axis] + lower_bounds[mid_axis]) / 2;
 
-                if (self.splitBoxes(masks, tiles, partition, lower_bounds, upper_bounds, mid_axis, mid_index)) |split| {
-                    try stack.append(allocator, split.right);
-                    try stack.append(allocator, split.left);
+                if (self.splitBoxes(masks, partition, lower_bounds, upper_bounds, mid_axis, mid_index)) |split| {
+                    try stack.append(self.gpa, split.right);
+                    try stack.append(self.gpa, split.left);
                 } else {
-                    try self.blocks.append(allocator, partition);
+                    try self.blocks.append(self.gpa, partition);
                 }
             }
 
@@ -321,14 +364,14 @@ pub fn Partitions(comptime N: usize) type {
             self.computeParents();
         }
 
-        fn computeSignatures(self: *const Self, signatures: [N][]usize, tiles: Tiles(N), partition: Partition(N)) void {
-            _ = self;
-            const subblock = partition.bounds;
-            const space: IndexSpace(N) = .{ .size = tiles.size };
-            const subspace: IndexSpace(N) = .{ .size = subblock.size };
+        fn computeSignatures(self: *const Self, partition: Partition, tags: []const bool, signatures: [N][]usize) void {
+            const subblock: IndexBox = partition.bounds;
+            const space: IndexSpace(N) = .{ .size = self.size };
+            const subspace: IndexSpace(N) = subblock.space();
 
             for (0..N) |axis| {
                 @memset(signatures[axis][subblock.origin[axis]..(subblock.origin[axis] + subblock.size[axis])], 0);
+
                 for (0..subblock.size[axis]) |i| {
                     var sig: usize = 0;
 
@@ -343,7 +386,7 @@ pub fn Partitions(comptime N: usize) type {
 
                         const linear = space.linearFromCartesian(global);
 
-                        if (tiles.tags[linear]) {
+                        if (tags[linear]) {
                             sig += 1;
                         }
                     }
@@ -353,7 +396,7 @@ pub fn Partitions(comptime N: usize) type {
             }
         }
 
-        fn computeMasks(self: *const Self, masks: [N][]bool, tiles: Tiles(N), partition: Partition(N)) void {
+        fn computeMasks(self: *const Self, partition: Partition, masks: [N][]usize) void {
             const subblock = partition.bounds;
 
             for (0..N) |axis| {
@@ -363,7 +406,7 @@ pub fn Partitions(comptime N: usize) type {
                 const count: usize = partition.children_count;
 
                 for (self.children.items[offset..(offset + count)]) |child| {
-                    const bounds = tiles.clusters[child];
+                    const bounds = self.clusters[child];
 
                     @memset(masks[axis][bounds.origin[axis]..(bounds.origin[axis] + bounds.size[axis])], true);
                 }
@@ -390,7 +433,6 @@ pub fn Partitions(comptime N: usize) type {
         fn splitBoxes(
             self: *const Self,
             masks: [N][]bool,
-            tiles: Tiles(N),
             parent: Partition(N),
             lower: [N]usize,
             upper: [N]usize,
@@ -401,7 +443,7 @@ pub fn Partitions(comptime N: usize) type {
 
             // Sort children
             const context: SplitContext = .{
-                .clusters = tiles.clusters,
+                .clusters = self.clusters,
                 .axis = axis,
             };
 
@@ -440,7 +482,7 @@ pub fn Partitions(comptime N: usize) type {
             var clusters_index = parent.children_count;
             // Perform search in reverse as we favour higher indices.
             // Worst case: O(n).
-            while (clusters_index > 0 and tiles.clusters[self.children.items[parent.children_offset + clusters_index - 1]].origin[axis] >= split_index) {
+            while (clusters_index > 0 and self.clusters[self.children.items[parent.children_offset + clusters_index - 1]].origin[axis] >= split_index) {
                 clusters_index -= 1;
             }
 
@@ -473,7 +515,7 @@ pub fn Partitions(comptime N: usize) type {
     };
 }
 
-fn buildTiles(comptime N: usize, allocator: Allocator, size: [N]usize, tagged: []const [N]usize, clusters: []Box(N, usize)) !Tiles(N) {
+fn buildTags(comptime N: usize, allocator: Allocator, size: [N]usize, tagged: []const [N]usize) ![]bool {
     const space: IndexSpace(N) = .{ .size = size };
     const total = space.total();
 
@@ -486,12 +528,13 @@ fn buildTiles(comptime N: usize, allocator: Allocator, size: [N]usize, tagged: [
         tags[space.linearFromCartesian(t)] = true;
     }
 
-    return .{ .size = size, .tags = tags, .clusters = clusters };
+    return tags;
 }
 
 test "tiles basic" {
     const expect = std.testing.expect;
     const expectEqualSlices = std.testing.expectEqualSlices;
+    const allocator = std.testing.allocator;
 
     const size = [3]usize{ 5, 5, 5 };
 
@@ -501,8 +544,11 @@ test "tiles basic" {
         [_]usize{ 0, 1, 3 },
     };
 
-    var tiles: Tiles(3) = try buildTiles(3, std.testing.allocator, size, &tagged, &[_]Box(3, usize){});
-    defer std.testing.allocator.free(tiles.tags);
+    const tags: []const usize = buildTags(3, allocator, size, &tagged);
+    defer allocator.free(tags);
+
+    var partition_space = PartitionSpace(3).init(allocator, size, &[_]Box(3, usize){});
+    defer partition_space.deinit();
 
     const buffer_length: usize = size[0] + size[1] + size[2];
     var signature_buffer: []usize = try std.testing.allocator.alloc(usize, buffer_length);
@@ -516,26 +562,23 @@ test "tiles basic" {
         buffer_offset += size[i];
     }
 
-    var partitions: Partitions(3) = .{};
-    defer partitions.deinit(std.testing.allocator);
-
-    partitions.computeSignatures(signatures, tiles, .{
+    partition_space.computeSignatures(.{
         .bounds = .{
             .origin = [3]usize{ 0, 0, 0 },
             .size = [3]usize{ 5, 5, 5 },
         },
         .children_offset = 0,
         .children_count = 0,
-    });
+    }, tags, signatures);
 
     try expectEqualSlices(usize, &[5]usize{ 2, 0, 0, 1, 0 }, signatures[0]);
     try expectEqualSlices(usize, &[5]usize{ 1, 1, 1, 0, 0 }, signatures[1]);
     try expectEqualSlices(usize, &[5]usize{ 1, 1, 0, 1, 0 }, signatures[2]);
 
-    const efficiency = tiles.computeEfficiency(.{
+    const efficiency = partition_space.computeEfficiency(.{
         .origin = [3]usize{ 0, 0, 0 },
         .size = [3]usize{ 4, 4, 4 },
-    });
+    }, tags);
 
     try expect(efficiency == 3.0 / 64.0);
 }
@@ -543,6 +586,7 @@ test "tiles basic" {
 test "tile partitioning" {
     const expect = std.testing.expect;
     const expectEqualSlices = std.testing.expectEqualSlices;
+    const allocator = std.testing.allocator;
 
     const size = [2]usize{ 5, 5 };
 
@@ -553,17 +597,17 @@ test "tile partitioning" {
         [_]usize{ 3, 3 },
     };
 
-    var tiles: Tiles(2) = try buildTiles(2, std.testing.allocator, size, &tagged, &[_]Box(2, usize){});
-    defer std.testing.allocator.free(tiles.tags);
+    const tags: []const usize = buildTags(2, allocator, size, &tagged);
+    defer allocator.free(tags);
 
-    var partitions: Partitions(2) = .{};
-    defer partitions.deinit(std.testing.allocator);
+    var partition_space = PartitionSpace(2).init(allocator, size, &[_]Box(2, usize){});
+    defer partition_space.deinit();
 
-    try partitions.compute(std.testing.allocator, tiles, 4, 0.7);
+    try partition_space.build(tags, 4, 0.7);
 
-    try expect(partitions.blocks.items(.bounds).len == 1);
+    const partitions: []const Box(2, usize) = partition_space.partitions();
 
-    const bounds = partitions.blocks.items(.bounds)[0];
-    try expectEqualSlices(usize, &[2]usize{ 2, 2 }, &bounds.origin);
-    try expectEqualSlices(usize, &[2]usize{ 2, 2 }, &bounds.size);
+    try expect(partitions.len == 1);
+    try expectEqualSlices(usize, &[2]usize{ 2, 2 }, &partitions[0].origin);
+    try expectEqualSlices(usize, &[2]usize{ 2, 2 }, &partitions[0].size);
 }
