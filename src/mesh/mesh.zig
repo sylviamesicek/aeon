@@ -16,8 +16,6 @@ const Box = geometry.Box;
 const IndexSpace = geometry.IndexSpace;
 const PartitionSpace = geometry.PartitionSpace;
 
-const transfer = @import("transfer.zig");
-
 pub const TileSrc = enum(u2) {
     unchanged,
     /// If this bit is set, it indicates that the index points
@@ -53,6 +51,8 @@ pub fn Mesh(comptime N: usize) type {
         tile_total: usize,
         /// Total number of cells in mesh
         cell_total: usize,
+        transfer_tile_total: usize,
+        transfer_cell_total: usize,
         /// Base level (after performing global_refinement).
         base: Base,
         /// Refined levels
@@ -107,7 +107,6 @@ pub fn Mesh(comptime N: usize) type {
             patch: usize,
             cell_total: usize = 0,
             cell_offset: usize = 0,
-            boundary: [2 * N]bool = [1]bool{false} ** 2 ** N,
         };
 
         pub const Patch = struct {
@@ -122,8 +121,29 @@ pub fn Mesh(comptime N: usize) type {
             tile_offset: usize = 0,
         };
 
+        pub const TransferBlock = struct {
+            bounds: IndexBox,
+            patch: usize,
+
+            cell_total: usize = 0,
+            cell_offset: usize = 0,
+        };
+
+        pub const TransferPatch = struct {
+            bounds: IndexBox,
+
+            block_offset: usize,
+            block_total: usize,
+            patch_offset: usize,
+            patch_total: usize,
+
+            tile_offset: usize = 0,
+            tile_total: usize = 0,
+        };
+
         pub const Level = struct {
-            index_size: IndexSpace(N),
+            index_size: [N]usize,
+
             /// The blocks belonging to this level.
             blocks: MultiArrayList(Block),
             /// The patches belonging to this level.
@@ -141,10 +161,20 @@ pub fn Mesh(comptime N: usize) type {
             // Offset into cell array for this level
             cell_offset: usize,
 
+            /// Stores old blocks
+            transfer_blocks: MultiArrayList(TransferBlock),
+            /// Stores underlying patches
+            transfer_patches: MultiArrayList(TransferPatch),
+            transfer_tile_total: usize,
+            transfer_cell_total: usize,
+            transfer_tile_offset: usize,
+            transfer_cell_offset: usize,
+
             /// Allocates a new level with no data.
             fn init(index_size: [N]usize) Level {
                 return .{
                     .index_size = index_size,
+
                     .blocks = .{},
                     .patches = .{},
                     .children = .{},
@@ -153,6 +183,13 @@ pub fn Mesh(comptime N: usize) type {
                     .cell_offset = 0,
                     .tile_total = 0,
                     .cell_total = 0,
+
+                    .transfer_blocks = .{},
+                    .transfer_patches = .{},
+                    .transfer_tile_total = 0,
+                    .transfer_cell_total = 0,
+                    .transfer_tile_offset = 0,
+                    .transfer_cell_offset = 0,
                 };
             }
 
@@ -162,13 +199,15 @@ pub fn Mesh(comptime N: usize) type {
                 self.patches.deinit(allocator);
                 self.children.deinit(allocator);
                 self.parents.deinit(allocator);
+                self.transfer_blocks.deinit(allocator);
+                self.transfer_patches.deinit(allocator);
             }
 
             /// Gets a slice of children indices for each patch
             fn childrenSlice(self: *Level, patch: usize) []usize {
                 const offset = self.patches.items(.children_offset)[patch];
-                const count = self.patches.items(.children_count)[patch];
-                return self.children[offset..(offset + count)];
+                const count = self.patches.items(.children_total)[patch];
+                return self.children.items[offset..(offset + count)];
             }
 
             /// Computes patch and block offsets and level totals for tiles and cells.
@@ -191,6 +230,39 @@ pub fn Mesh(comptime N: usize) type {
 
                 self.tile_total = tile_offset;
                 self.cell_total = cell_offset;
+
+                var transfer_patch_offset: usize = 0;
+
+                for (self.transfer_patches.items(.patch_total), self.transfer_patches.items(.patch_offset)) |total, *offset| {
+                    offset.* = transfer_patch_offset;
+                    transfer_patch_offset += total;
+                }
+
+                var transfer_block_offset: usize = 0;
+
+                for (self.transfer_patches.items(.block_total), self.transfer_patches.items(.block_offset)) |total, *offset| {
+                    offset.* = transfer_block_offset;
+                    transfer_block_offset += total;
+                }
+
+                var transfer_tile_offset: usize = 0;
+
+                for (self.transfer_patches.items(.bounds), self.transfer_patches.items(.tile_total), self.transfer_patches.items(.tile_offset)) |bounds, *total, *offset| {
+                    offset.* = transfer_tile_offset;
+                    total.* = bounds.space().total();
+                    transfer_tile_offset += total.*;
+                }
+
+                var transfer_cell_offset: usize = 0;
+
+                for (self.transfer_blocks.items(.bounds), self.transfer_blocks.items(.cell_total), self.transfer_blocks.items(.cell_offset)) |bounds, *total, *offset| {
+                    offset.* = transfer_cell_offset;
+                    total.* = bounds.space().scale(tile_width).extendUniform(2 * ghost_width).total();
+                    transfer_cell_offset += total.*;
+                }
+
+                self.tile_total = transfer_tile_offset;
+                self.cell_total = transfer_cell_offset;
             }
 
             /// Refines every patch and block on this level.
@@ -200,6 +272,14 @@ pub fn Mesh(comptime N: usize) type {
                 }
 
                 for (self.blocks.items(.bounds)) |*bounds| {
+                    bounds.refine();
+                }
+
+                for (self.transfer_blocks.items(.bounds)) |*bounds| {
+                    bounds.refine();
+                }
+
+                for (self.transfer_patches.items(.bounds)) |*bounds| {
                     bounds.refine();
                 }
             }
@@ -227,6 +307,8 @@ pub fn Mesh(comptime N: usize) type {
                 .ghost_width = config.ghost_width,
                 .tile_total = base.tile_total,
                 .cell_total = base.cell_total,
+                .transfer_tile_total = base.tile_total,
+                .transfer_cell_total = base.cell_total,
                 .base = base,
                 .levels = .{},
                 .active_levels = 0,
@@ -278,12 +360,12 @@ pub fn Mesh(comptime N: usize) type {
         }
 
         pub fn levelTileSlice(self: *const Self, level: usize, comptime T: type, slice: []T) []T {
-            const l: *const Level = self.levels.items[level];
+            const l: *const Level = &self.levels.items[level];
             return slice[l.tile_offset..(l.tile_offset + l.tile_total)];
         }
 
         pub fn levelCellSlice(self: *const Self, level: usize, comptime T: type, slice: []T) []T {
-            const l: *const Level = self.levels.items[level];
+            const l: *const Level = &self.levels.items[level];
             return slice[l.tile_offset..(l.cell_offset + l.cell_total)];
         }
 
@@ -330,7 +412,7 @@ pub fn Mesh(comptime N: usize) type {
             // **********************************************************
             const total_levels = self.computeTotalLevels(tags, config);
             self.active_levels = total_levels;
-            self.cacheLevels(total_levels);
+            try self.cacheLevels(total_levels);
 
             // 2. Recursively generate levels on new mesh.
             // *******************************************
@@ -364,13 +446,12 @@ pub fn Mesh(comptime N: usize) type {
             var cluster_offsets: ArrayListUnmanaged(usize) = .{};
             defer cluster_offsets.deinit(self.gpa);
 
-            var coarse_offsets: ArrayListUnmanaged(usize) = .{};
-            defer coarse_offsets.deinit(self.gpa);
+            var coarse_children: ArrayListUnmanaged(usize) = .{};
+            defer coarse_children.deinit(self.gpa);
 
             // Loop through levels from highest to lowest
             for (0..total_levels) |reverse_level_id| {
                 const level_id: usize = total_levels - 1 - reverse_level_id;
-
                 // Get a mutable reference to the target level.
                 const target: *Level = &self.levels.items[level_id];
 
@@ -394,22 +475,22 @@ pub fn Mesh(comptime N: usize) type {
 
                 if (refined_exists and coarse_exists) {
                     const refined: *const Level = &self.levels.items[level_id + 1];
-                    const coarse: *const Level = &self.levels.items[level_id - 1];
+                    const coarse: *Level = &self.levels.items[level_id - 1];
 
                     for (0..coarse.patches.len) |cpid| {
                         for (coarse.childrenSlice(cpid)) |tpid| {
                             for (target.childrenSlice(tpid)) |child| {
                                 var patch: IndexBox = refined.patches.items(.bounds)[child];
 
-                                patch.coarsen();
-                                patch.coarsen();
+                                try patch.coarsen();
+                                try patch.coarsen();
 
                                 try clusters.append(self.gpa, patch);
                                 try cluster_index_map.append(self.gpa, child);
                             }
                         }
 
-                        try cluster_offsets.append(self.gpa, clusters.len);
+                        try cluster_offsets.append(self.gpa, clusters.items.len);
                     }
                 } else if (refined_exists) {
                     const refined: *const Level = &self.levels.items[level_id + 1];
@@ -418,18 +499,66 @@ pub fn Mesh(comptime N: usize) type {
                         for (target.childrenSlice(tpid)) |child| {
                             var patch: IndexBox = refined.patches.items(.bounds)[child];
 
-                            patch.coarsen();
-                            patch.coarsen();
+                            try patch.coarsen();
+                            try patch.coarsen();
 
                             try clusters.append(self.gpa, patch);
                             try cluster_index_map.append(self.gpa, child);
                         }
                     }
 
-                    try cluster_offsets.append(self.gpa, clusters.len);
+                    try cluster_offsets.append(self.gpa, clusters.items.len);
+                } else {
+                    try cluster_offsets.append(self.gpa, clusters.items.len);
                 }
 
                 // Now we can clear the target arrays
+                target.transfer_blocks.shrinkRetainingCapacity(0);
+                target.transfer_patches.shrinkRetainingCapacity(0);
+
+                if (coarse_exists) {
+                    const coarse: *const Level = &self.levels.items[level_id - 1];
+
+                    for (0..coarse.patches.len) |cpid| {
+                        const upbounds: IndexBox = coarse.patches.items(.bounds)[cpid];
+
+                        try target.transfer_patches.append(self.gpa, TransferPatch{
+                            .bounds = upbounds,
+                            .block_offset = 0,
+                            .block_total = 0,
+                            .patch_offset = 0,
+                            .patch_total = 0,
+                        });
+                    }
+
+                    for (target.blocks.items(.bounds), target.blocks.items(.patch)) |bounds, patch| {
+                        const cpid: usize = coarse.parents.items[patch];
+                        target.transfer_patches.items(.block_total)[cpid] += 1;
+
+                        try target.transfer_blocks.append(self.gpa, TransferBlock{
+                            .bounds = bounds,
+                            .patch = cpid,
+                        });
+                    }
+                } else {
+                    try target.transfer_patches.append(self.gpa, TransferPatch{
+                        .bounds = bbounds,
+                        .block_offset = 0,
+                        .block_total = 0,
+                        .patch_offset = 0,
+                        .patch_total = 0,
+                    });
+
+                    for (target.blocks.items(.bounds)) |bounds| {
+                        target.transfer_patches.items(.block_total)[0] += 1;
+
+                        try target.transfer_blocks.append(self.gpa, TransferBlock{
+                            .bounds = bounds,
+                            .patch = 0,
+                        });
+                    }
+                }
+
                 target.patches.shrinkRetainingCapacity(0);
                 target.blocks.shrinkRetainingCapacity(0);
                 target.children.shrinkRetainingCapacity(0);
@@ -441,79 +570,79 @@ pub fn Mesh(comptime N: usize) type {
                 // - refined has been fully updated
 
                 // Variables that depend on coarse existing
-                var utags: []bool = undefined;
-                var ulen: usize = undefined;
-                var ubounds: []const IndexBox = undefined;
-                var uoffsets: []const usize = undefined;
+                var ctags: []bool = undefined;
+                var clen: usize = undefined;
+                var cbounds: []const IndexBox = undefined;
+                var coffsets: []const usize = undefined;
 
                 if (coarse_exists) {
                     // Get underlying data
-                    const underlying: *const Level = &self.levels.items[level_id - 1];
+                    const coarse: *const Level = &self.levels.items[level_id - 1];
 
-                    utags = self.levelTileSlice(level_id - 1, bool, tags);
-                    ulen = underlying.patches.len;
-                    ubounds = underlying.patches.items(.bounds);
-                    uoffsets = underlying.patches.items(.tile_offset);
+                    ctags = self.levelTileSlice(level_id - 1, bool, tags);
+                    clen = coarse.patches.len;
+                    cbounds = coarse.patches.items(.bounds);
+                    coffsets = coarse.patches.items(.tile_offset);
                 } else {
                     // Otherwise use base data
-                    utags = self.baseTileSlice(bool, tags);
-                    ulen = 1;
-                    ubounds = bbounds_slice;
-                    uoffsets = boffsets_slice;
+                    ctags = self.baseTileSlice(bool, tags);
+                    clen = 1;
+                    cbounds = bbounds_slice;
+                    coffsets = boffsets_slice;
                 }
 
                 // 3.3 Generate new patches.
                 // *************************
 
-                coarse_offsets.shrinkRetainingCapacity(0);
+                coarse_children.shrinkRetainingCapacity(0);
 
-                try coarse_offsets.append(self.gpa, 0);
+                try coarse_children.append(self.gpa, 0);
 
-                for (0..ulen) |upid| {
+                for (0..clen) |cpid| {
                     // Reset arena for new "frame"
-                    _ = arena.reset(.retain_capacity);
+                    defer _ = arena.reset(.retain_capacity);
 
                     // Make aliases for patch variables
-                    const upbounds: IndexBox = ubounds[upid];
-                    const upoffset: usize = uoffsets[upid];
-                    const upspace: IndexSpace(N) = upbounds.space();
-                    const uptags: []bool = utags[upoffset..(upoffset + upspace.total())];
+                    const cpbounds: IndexBox = cbounds[cpid];
+                    const cpoffset: usize = coffsets[cpid];
+                    const cpspace: IndexSpace(N) = cpbounds.space();
+                    const cptags: []bool = ctags[cpoffset..(cpoffset + cpspace.total())];
 
                     // As well as clusters in this patch
-                    const upclusters: []const IndexBox = clusters.items[cluster_offsets[upid]..cluster_offsets[upid + 1]];
-                    const upcluster_index_map: []const usize = cluster_index_map.items[cluster_offsets[upid]..cluster_offsets[upid + 1]];
+                    const upclusters: []const IndexBox = clusters.items[cluster_offsets.items[cpid]..cluster_offsets.items[cpid + 1]];
+                    const upcluster_index_map: []const usize = cluster_index_map.items[cluster_offsets.items[cpid]..cluster_offsets.items[cpid + 1]];
 
                     // Preprocess tags to include all elements from clusters (and one tile buffer region around cluster)
-                    preprocessTagsOnPatch(uptags, upbounds, upclusters);
+                    preprocessTagsOnPatch(cptags, cpbounds, upclusters);
 
                     // Run partitioning algorithm
-                    var partition_space = PartitionSpace(N).init(scratch, upbounds.size, upclusters);
+                    var partition_space = try PartitionSpace(N).init(scratch, cpbounds.size, upclusters);
                     defer partition_space.deinit();
 
-                    try partition_space.build(uptags, config.patch_max_tiles, config.patch_efficiency);
+                    try partition_space.build(cptags, config.patch_max_tiles, config.patch_efficiency);
 
                     // Add patches to target
                     const patch_children_offset: usize = target.children.items.len;
 
                     for (partition_space.parts.items(.bounds), partition_space.parts.items(.children_offset), partition_space.parts.items(.children_total)) |bounds, offset, total| {
                         // Compute refined bounds in global space.
-                        var rbounds: IndexBox = undefined;
+                        var pbounds: IndexBox = undefined;
 
                         for (0..N) |axis| {
-                            rbounds.origin[axis] = upbounds.origin[axis] + bounds.origin[axis];
-                            rbounds.size[axis] = bounds.size[axis];
+                            pbounds.origin[axis] = cpbounds.origin[axis] + bounds.origin[axis];
+                            pbounds.size[axis] = bounds.size[axis];
                         }
 
                         // Append to patch list
                         try target.patches.append(self.gpa, Patch{
-                            .bounds = rbounds,
+                            .bounds = pbounds,
                             .children_offset = patch_children_offset + offset,
                             .children_total = total,
                         });
                     }
 
                     // Append mapped children indices to buffer.
-                    for (partition_space.children.items) |index| {
+                    for (partition_space.children) |index| {
                         try target.children.append(self.gpa, upcluster_index_map[index]);
                     }
 
@@ -524,22 +653,24 @@ pub fn Mesh(comptime N: usize) type {
                         }
                     }
 
-                    try coarse_offsets.append(self.gpa, target.patches.len);
+                    try coarse_children.append(self.gpa, target.patches.len);
+
+                    target.transfer_patches.items(.patch_total)[cpid] += partition_space.parts.len;
                 }
 
                 if (coarse_exists) {
-                    const coarse: *const Level = &self.levels.items[level_id - 1];
+                    const coarse: *Level = &self.levels.items[level_id - 1];
 
                     try coarse.children.resize(self.gpa, target.patches.len);
                     try coarse.parents.resize(self.gpa, target.patches.len);
 
                     for (0..target.patches.len) |i| {
-                        coarse.children[i] = i;
+                        coarse.children.items[i] = i;
                     }
 
-                    for (0..ulen) |cpid| {
-                        const start = coarse_offsets[cpid];
-                        const end = coarse_offsets[cpid + 1];
+                    for (0..clen) |cpid| {
+                        const start = coarse_children.items[cpid];
+                        const end = coarse_children.items[cpid + 1];
 
                         coarse.patches.items(.children_offset)[cpid] = start;
                         coarse.patches.items(.children_total)[cpid] = end - start;
@@ -557,70 +688,64 @@ pub fn Mesh(comptime N: usize) type {
                 // ****************************************************
 
                 // Loop through newly created patches
-                for (target.patches.items(.bounds), target.patches.items(.parent), 0..) |bounds, parent, patch| {
-                    // Reset arena for new frame.
-                    _ = arena.reset(.retain_capacity);
-
-                    // Get coarse bounds and space.
-                    var cbounds: IndexBox = bounds;
-                    try cbounds.coarsen();
-
-                    const cspace: IndexSpace(N) = cbounds.space();
-
+                for (0..clen) |cpid| {
                     // Aliases for underlying variables
-                    const upbounds: IndexBox = ubounds[parent];
-                    const upoffset: usize = uoffsets[parent];
-                    const upspace: IndexSpace(N) = upbounds.space();
-                    const uptags: []const bool = utags[upoffset..(upoffset + upspace.total())];
+                    const cpbounds: IndexBox = cbounds[cpid];
+                    const cpoffset: usize = coffsets[cpid];
+                    const cpspace: IndexSpace(N) = cpbounds.space();
+                    const cptags: []const bool = ctags[cpoffset..(cpoffset + cpspace.total())];
 
-                    // Build patch tags
-                    var ptags: []bool = try scratch.alloc(bool, cspace.total());
-                    defer scratch.free(ptags);
-                    // Set ptags using window of uptags
-                    upspace.fillWindow(cbounds, bool, ptags, uptags);
+                    for (coarse_children.items[cpid]..coarse_children.items[cpid + 1]) |patch| {
+                        // Reset arena for new frame.
+                        defer _ = arena.reset(.retain_capacity);
 
-                    // Scratch space for partitioning algorithm
-                    var partitions: Partitions(N) = .{};
-                    defer partitions.deinit(scratch);
+                        const bounds: IndexBox = target.patches.items(.bounds)[patch];
 
-                    // Run partitioning algorithm
-                    try partitions.compute(
-                        scratch,
-                        .{
-                            .size = cbounds.size,
-                            .tags = ptags,
-                            .clusters = &[_]IndexBox{},
-                        },
-                        config.block_max_tiles,
-                        config.block_efficiency,
-                    );
+                        const space: IndexSpace(N) = bounds.space();
 
-                    // For each resulting block
-                    for (partitions.blocks.items(.bounds)) |pbounds| {
-                        // Compute refined global bounds
-                        var rbounds: IndexBox = undefined;
+                        // Build patch tags
+                        var ptags: []bool = try scratch.alloc(bool, space.total());
+                        defer scratch.free(ptags);
+                        // Set ptags using window of uptags
+                        cpspace.fillWindow(bounds.relativeTo(cpbounds), bool, ptags, cptags);
 
-                        for (0..N) |axis| {
-                            rbounds.origin[axis] = cbounds.origin[axis] + pbounds.origin[axis];
-                            rbounds.size[axis] = pbounds.size[axis];
+                        // Run partitioning algorithm
+                        var partition_space = try PartitionSpace(N).init(scratch, bounds.size, &[_]IndexBox{});
+                        defer partition_space.deinit();
+
+                        try partition_space.build(ptags, config.block_max_tiles, config.block_efficiency);
+
+                        // For each resulting block
+                        for (partition_space.parts.items(.bounds)) |pbounds| {
+                            // Compute refined global bounds
+                            var rbounds: IndexBox = undefined;
+
+                            for (0..N) |axis| {
+                                rbounds.origin[axis] = bounds.origin[axis] + pbounds.origin[axis];
+                                rbounds.size[axis] = pbounds.size[axis];
+                            }
+
+                            // Add to list of blocks with appropriate patch id.
+                            try target.blocks.append(self.gpa, Block{
+                                .bounds = rbounds,
+                                .patch = patch,
+                            });
                         }
-
-                        rbounds.refine();
-
-                        // Add to list of blocks with appropriate patch id.
-                        try target.blocks.append(dest.gpa, Block{
-                            .bounds = rbounds,
-                            .patch = patch,
-                        });
                     }
                 }
+
+                target.refine();
+
+                // At this moment in time
+                // - coarse is old (but heirarchy is updated)
+                // - target has been fully updated
+                // - refined has been fully updated
             }
 
             // 4. Recompute level offsets and totals.
             // **************************************
 
-            dest.computeOffsets();
-            try dest.computeBoundaries();
+            self.computeOffsets();
         }
 
         pub fn transfer(self: Self, map: ArrayList(TileMap), src: Self, new: *ArrayList(f64), old: ArrayList(f64)) !void {
@@ -654,21 +779,33 @@ pub fn Mesh(comptime N: usize) type {
             var tile_offset: usize = self.base.tile_total;
             var cell_offset: usize = self.base.cell_total;
 
+            var transfer_tile_offset: usize = self.base.tile_total;
+            var transfer_cell_offset: usize = self.base.cell_total;
+
             for (self.levels.items) |*level| {
                 level.computeOffsets(self.tile_width, self.ghost_width);
 
                 level.tile_offset = tile_offset;
                 level.cell_offset = cell_offset;
 
+                level.transfer_tile_offset = transfer_tile_offset;
+                level.transfer_cell_offset = transfer_cell_offset;
+
                 tile_offset += level.tile_total;
                 cell_offset += level.cell_total;
+
+                transfer_tile_offset += level.transfer_tile_total;
+                transfer_cell_offset += level.transfer_cell_total;
             }
 
             self.cell_total = cell_offset;
             self.tile_total = tile_offset;
+
+            self.transfer_tile_total = transfer_tile_offset;
+            self.transfer_cell_total = transfer_cell_offset;
         }
 
-        fn computeTotalLevels(self: *const Self, tags: []const usize, config: RegridConfig) usize {
+        fn computeTotalLevels(self: *const Self, tags: []const bool, config: RegridConfig) usize {
             // Clamp to max levels
             if (self.active_levels == config.max_levels) {
                 return config.max_levels;
@@ -706,6 +843,8 @@ pub fn Mesh(comptime N: usize) type {
                     try self.levels.append(self.gpa, Level.init(size));
                 }
             }
+
+            self.active_levels = total;
         }
     };
 }
@@ -734,20 +873,17 @@ test "mesh regridding" {
     var mesh: Mesh2 = Mesh2.init(allocator, config);
     defer mesh.deinit();
 
-    var tags: []bool = try allocator.alloc(bool, mesh.tile_total);
+    var tags: []bool = try allocator.alloc(bool, mesh.tileTotal());
     defer allocator.free(tags);
 
     // Tag all
     @memset(tags, true);
 
-    var dest: Mesh2 = Mesh2.init(allocator, config);
-    defer dest.deinit();
-
-    try dest.regrid(&mesh, tags, .{
+    try mesh.regrid(tags, .{
         .max_levels = 1,
-        .block_max_tiles = 10,
+        .block_max_tiles = 80,
         .block_efficiency = 0.7,
-        .patch_max_tiles = 10,
+        .patch_max_tiles = 80,
         .patch_efficiency = 0.1,
     });
 }

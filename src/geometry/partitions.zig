@@ -40,7 +40,7 @@ pub fn PartitionSpace(comptime N: usize) type {
             children_total: usize,
         };
 
-        pub fn init(allocator: Allocator, size: [N]usize, clusters: []const IndexBox) Self {
+        pub fn init(allocator: Allocator, size: [N]usize, clusters: []const IndexBox) !Self {
             var owned_clusters = try allocator.alloc(IndexBox, clusters.len);
             errdefer allocator.free(owned_clusters);
 
@@ -133,7 +133,7 @@ pub fn PartitionSpace(comptime N: usize) type {
             // 1. Reset partitions and higherarchy.
             // ************************************
 
-            self.blocks.shrinkRetainingCapacity(0);
+            self.parts.shrinkRetainingCapacity(0);
 
             @memset(self.parents, 0);
 
@@ -160,7 +160,7 @@ pub fn PartitionSpace(comptime N: usize) type {
 
             // Fill cluster buffer with initial data.
             for (0..self.clusters.len) |i| {
-                self.children.items[i] = i;
+                self.children[i] = i;
             }
 
             // Build slices for each axis.
@@ -179,7 +179,7 @@ pub fn PartitionSpace(comptime N: usize) type {
             }
 
             // Allocate stack partitions.
-            var stack = ArrayListUnmanaged(Partition(N)){};
+            var stack = ArrayListUnmanaged(Partition){};
             defer stack.deinit(self.gpa);
 
             // Add first partition to stack
@@ -191,7 +191,7 @@ pub fn PartitionSpace(comptime N: usize) type {
                         .size = self.size,
                     },
                     .children_offset = 0,
-                    .children_count = self.clusters.len,
+                    .children_total = self.clusters.len,
                 },
             );
 
@@ -234,10 +234,10 @@ pub fn PartitionSpace(comptime N: usize) type {
 
                 const culled_space: IndexSpace(N) = .{ .size = culled_subblock.size };
 
-                const partition: Partition(N) = .{
+                const partition: Partition = .{
                     .bounds = culled_subblock,
                     .children_offset = full.children_offset,
-                    .children_count = full.children_count,
+                    .children_total = full.children_total,
                 };
 
                 // Check efficiency and maximum block sidelength
@@ -282,7 +282,7 @@ pub fn PartitionSpace(comptime N: usize) type {
                         try stack.append(self.gpa, split.right);
                         try stack.append(self.gpa, split.left);
                     } else {
-                        try self.blocks.append(self.gpa, partition);
+                        try self.parts.append(self.gpa, partition);
                     }
 
                     continue :stack_pop;
@@ -341,7 +341,7 @@ pub fn PartitionSpace(comptime N: usize) type {
                         try stack.append(self.gpa, split.right);
                         try stack.append(self.gpa, split.left);
                     } else {
-                        try self.blocks.append(self.gpa, partition);
+                        try self.parts.append(self.gpa, partition);
                     }
 
                     continue :stack_pop;
@@ -356,7 +356,7 @@ pub fn PartitionSpace(comptime N: usize) type {
                     try stack.append(self.gpa, split.right);
                     try stack.append(self.gpa, split.left);
                 } else {
-                    try self.blocks.append(self.gpa, partition);
+                    try self.parts.append(self.gpa, partition);
                 }
             }
 
@@ -396,16 +396,16 @@ pub fn PartitionSpace(comptime N: usize) type {
             }
         }
 
-        fn computeMasks(self: *const Self, partition: Partition, masks: [N][]usize) void {
+        fn computeMasks(self: *const Self, partition: Partition, masks: [N][]bool) void {
             const subblock = partition.bounds;
 
             for (0..N) |axis| {
                 @memset(masks[axis][subblock.origin[axis]..(subblock.origin[axis] + subblock.size[axis])], false);
 
                 const offset: usize = partition.children_offset;
-                const count: usize = partition.children_count;
+                const total: usize = partition.children_total;
 
-                for (self.children.items[offset..(offset + count)]) |child| {
+                for (self.children[offset..(offset + total)]) |child| {
                     const bounds = self.clusters[child];
 
                     @memset(masks[axis][bounds.origin[axis]..(bounds.origin[axis] + bounds.size[axis])], true);
@@ -414,9 +414,9 @@ pub fn PartitionSpace(comptime N: usize) type {
         }
 
         fn computeParents(self: *Self) void {
-            for (self.blocks.items(.children_offset), self.blocks.items(.children_count), 0..) |offset, count, i| {
-                for (self.children.items[offset..(offset + count)]) |child| {
-                    self.parents.items[child] = i;
+            for (self.parts.items(.children_offset), self.parts.items(.children_total), 0..) |offset, total, i| {
+                for (self.children[offset..(offset + total)]) |child| {
+                    self.parents[child] = i;
                 }
             }
         }
@@ -433,12 +433,12 @@ pub fn PartitionSpace(comptime N: usize) type {
         fn splitBoxes(
             self: *const Self,
             masks: [N][]bool,
-            parent: Partition(N),
+            parent: Partition,
             lower: [N]usize,
             upper: [N]usize,
             axis: usize,
             index: usize,
-        ) ?struct { left: Partition(N), right: Partition(N) } {
+        ) ?struct { left: Partition, right: Partition } {
             assert(index > 0);
 
             // Sort children
@@ -448,7 +448,7 @@ pub fn PartitionSpace(comptime N: usize) type {
             };
 
             // Use heap sort.
-            heap(usize, self.children.items[parent.children_offset..(parent.children_count + parent.children_offset)], context, splitLessThanFn);
+            heap(usize, self.children[parent.children_offset..(parent.children_total + parent.children_offset)], context, splitLessThanFn);
 
             // Find adjusted index which does not bisect cluster.
             var index_inc: usize = index;
@@ -479,16 +479,16 @@ pub fn PartitionSpace(comptime N: usize) type {
             }
 
             // Find index to split children clusters
-            var clusters_index = parent.children_count;
+            var clusters_index = parent.children_total;
             // Perform search in reverse as we favour higher indices.
             // Worst case: O(n).
-            while (clusters_index > 0 and self.clusters[self.children.items[parent.children_offset + clusters_index - 1]].origin[axis] >= split_index) {
+            while (clusters_index > 0 and self.clusters[self.children[parent.children_offset + clusters_index - 1]].origin[axis] >= split_index) {
                 clusters_index -= 1;
             }
 
             // Generate left and right partitions
-            var left: Partition(N) = undefined;
-            var right: Partition(N) = undefined;
+            var left: Partition = undefined;
+            var right: Partition = undefined;
 
             for (0..N) |i| {
                 left.bounds.origin[i] = lower[i];
@@ -503,9 +503,9 @@ pub fn PartitionSpace(comptime N: usize) type {
             right.bounds.size[axis] = upper[axis] - index;
 
             left.children_offset = parent.children_offset;
-            left.children_count = clusters_index;
+            left.children_total = clusters_index;
             right.children_offset = parent.children_offset + clusters_index;
-            right.children_count = parent.children_count - clusters_index;
+            right.children_total = parent.children_total - clusters_index;
 
             return .{
                 .left = left,
@@ -544,10 +544,10 @@ test "tiles basic" {
         [_]usize{ 0, 1, 3 },
     };
 
-    const tags: []const usize = buildTags(3, allocator, size, &tagged);
+    const tags: []bool = try buildTags(3, allocator, size, &tagged);
     defer allocator.free(tags);
 
-    var partition_space = PartitionSpace(3).init(allocator, size, &[_]Box(3, usize){});
+    var partition_space = try PartitionSpace(3).init(allocator, size, &[_]Box(3, usize){});
     defer partition_space.deinit();
 
     const buffer_length: usize = size[0] + size[1] + size[2];
@@ -568,7 +568,7 @@ test "tiles basic" {
             .size = [3]usize{ 5, 5, 5 },
         },
         .children_offset = 0,
-        .children_count = 0,
+        .children_total = 0,
     }, tags, signatures);
 
     try expectEqualSlices(usize, &[5]usize{ 2, 0, 0, 1, 0 }, signatures[0]);
@@ -597,10 +597,10 @@ test "tile partitioning" {
         [_]usize{ 3, 3 },
     };
 
-    const tags: []const usize = buildTags(2, allocator, size, &tagged);
+    const tags: []bool = try buildTags(2, allocator, size, &tagged);
     defer allocator.free(tags);
 
-    var partition_space = PartitionSpace(2).init(allocator, size, &[_]Box(2, usize){});
+    var partition_space = try PartitionSpace(2).init(allocator, size, &[_]Box(2, usize){});
     defer partition_space.deinit();
 
     try partition_space.build(tags, 4, 0.7);
