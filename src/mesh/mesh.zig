@@ -335,6 +335,10 @@ pub fn Mesh(comptime N: usize) type {
             return self.cell_total;
         }
 
+        pub fn transferTotal(self: *const Self) usize {
+            return self.transfer_tile_total;
+        }
+
         pub fn baseTileTotal(self: *const Self) usize {
             return self.base.tile_total;
         }
@@ -343,12 +347,20 @@ pub fn Mesh(comptime N: usize) type {
             return self.base.cell_total;
         }
 
+        pub fn baseTransferTotal(self: *const Self) usize {
+            return self.base.tile_total;
+        }
+
         pub fn levelTileTotal(self: *const Self, level: usize) usize {
             return self.levels.items[level].tile_total;
         }
 
         pub fn levelCellTotal(self: *const Self, level: usize) usize {
-            return self.levels.items[level].tile_total;
+            return self.levels.items[level].cell_total;
+        }
+
+        pub fn levelTransferTotal(self: *const Self, level: usize) usize {
+            return self.levels.items[level].transfer_tile_total;
         }
 
         pub fn baseTileSlice(self: *const Self, comptime T: type, slice: []T) []T {
@@ -359,6 +371,10 @@ pub fn Mesh(comptime N: usize) type {
             return slice[0..self.baseCellTotal()];
         }
 
+        pub fn baseTransferSlice(self: *const Self, comptime T: type, slice: []T) []T {
+            return slice[0..self.baseTransferTotal()];
+        }
+
         pub fn levelTileSlice(self: *const Self, level: usize, comptime T: type, slice: []T) []T {
             const l: *const Level = &self.levels.items[level];
             return slice[l.tile_offset..(l.tile_offset + l.tile_total)];
@@ -366,7 +382,12 @@ pub fn Mesh(comptime N: usize) type {
 
         pub fn levelCellSlice(self: *const Self, level: usize, comptime T: type, slice: []T) []T {
             const l: *const Level = &self.levels.items[level];
-            return slice[l.tile_offset..(l.cell_offset + l.cell_total)];
+            return slice[l.cell_offset..(l.cell_offset + l.cell_total)];
+        }
+
+        pub fn levelTransferSlice(self: *const Self, level: usize, comptime T: type, slice: []T) []T {
+            const l: *const Level = &self.levels.items[level];
+            return slice[l.transfer_tile_offset..(l.transfer_tile_offset + l.transfer_tile_total)];
         }
 
         // *************************
@@ -386,6 +407,26 @@ pub fn Mesh(comptime N: usize) type {
                     const pbounds: IndexBox = level.patches.items(.bounds)[parent];
                     const tile_offset: usize = level.patches.items(.tile_offset)[parent];
                     const tile_total: usize = level.patches.items(.tile_total)[parent];
+                    const tile_to_block: []usize = level_map[tile_offset..(tile_offset + tile_total)];
+
+                    pbounds.space().fillSubspace(bounds.relativeTo(pbounds), usize, tile_to_block, id);
+                }
+            }
+        }
+
+        pub fn buildTransferMap(self: *const Self, map: []usize) !void {
+            assert(map.len == self.transferTotal());
+
+            @memset(map, std.math.maxInt(usize));
+            @memset(self.baseTransferSlice(usize, map), 0);
+
+            for (self.levels.items, 0..) |*level, l| {
+                const level_map: []usize = self.levelTransferSlice(l, usize, map);
+
+                for (level.transfer_blocks.items(.bounds), level.transfer_blocks.items(.patch), 0..) |bounds, parent, id| {
+                    const pbounds: IndexBox = level.transfer_patches.items(.bounds)[parent];
+                    const tile_offset: usize = level.transfer_patches.items(.tile_offset)[parent];
+                    const tile_total: usize = level.transfer_patches.items(.tile_total)[parent];
                     const tile_to_block: []usize = level_map[tile_offset..(tile_offset + tile_total)];
 
                     pbounds.space().fillSubspace(bounds.relativeTo(pbounds), usize, tile_to_block, id);
