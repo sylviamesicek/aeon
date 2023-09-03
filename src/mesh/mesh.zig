@@ -12,28 +12,7 @@ const exp2 = std.math.exp2;
 
 const geometry = @import("../geometry/geometry.zig");
 
-const Box = geometry.Box;
-const IndexSpace = geometry.IndexSpace;
-const PartitionSpace = geometry.PartitionSpace;
-
-pub const TileSrc = enum(u2) {
-    unchanged,
-    /// If this bit is set, it indicates that the index points
-    /// to a tile on level `l-1` and that the data must be
-    /// interpolated to the new level.
-    added,
-    empty,
-};
-
-/// A mapping of from a tile on an old mesh
-/// to a new one.
-pub const TileMap = packed struct {
-    src: TileSrc,
-    /// The index of the source tile (if any)
-    index: u62,
-};
-
-pub fn Mesh(comptime N: usize) type {
+pub fn Mesh(comptime N: usize, comptime O: usize) type {
     return struct {
         /// Allocator used for various arraylists stored in this struct.
         gpa: Allocator,
@@ -45,8 +24,6 @@ pub fn Mesh(comptime N: usize) type {
         global_refinement: usize,
         /// Number of cells per tile edge
         tile_width: usize,
-        /// Number of ghost cells along boundary of domain
-        ghost_width: usize,
         /// Total number of tiles in mesh
         tile_total: usize,
         /// Total number of cells in mesh
@@ -62,33 +39,34 @@ pub fn Mesh(comptime N: usize) type {
 
         // Aliases
         const Self = @This();
-        const IndexBox = Box(N, usize);
-        const RealBox = Box(N, f64);
+        const IndexBox = geometry.Box(N, usize);
+        const RealBox = geometry.Box(N, f64);
+        const IndexSpace = geometry.IndexSpace(N);
+        const PartitionSpace = geometry.PartitionSpace(N);
 
         pub const Config = struct {
-            physical_bounds: Box(N, f64),
+            physical_bounds: RealBox,
             index_size: [N]usize,
             tile_width: usize,
-            ghost_width: usize,
             global_refinement: usize,
 
-            pub fn baseTileSpace(self: Config) IndexSpace(N) {
+            pub fn baseTileSpace(self: Config) IndexSpace {
                 var scale: usize = 1;
 
                 for (0..self.global_refinement) |_| {
                     scale *= 2;
                 }
 
-                return IndexSpace(N).fromSize(self.index_size).scale(scale);
+                return IndexSpace.fromSize(self.index_size).scale(scale);
             }
 
-            pub fn baseCellSpace(self: Config) IndexSpace(N) {
-                return self.baseTileSpace().scale(self.tile_width).extendUniform(2 * self.ghost_width);
+            pub fn baseCellSpace(self: Config) IndexSpace {
+                return self.baseTileSpace().scale(self.tile_width).extendUniform(2 * O);
             }
 
             pub fn check(self: Config) void {
                 assert(self.tile_width >= 1);
-                assert(self.tile_width >= self.ghost_width);
+                assert(self.tile_width >= O);
                 for (0..N) |i| {
                     assert(self.index_size[i] > 0);
                     assert(self.physical_bounds.size[i] > 0.0);
@@ -211,7 +189,7 @@ pub fn Mesh(comptime N: usize) type {
             }
 
             /// Computes patch and block offsets and level totals for tiles and cells.
-            fn computeOffsets(self: *Level, tile_width: usize, ghost_width: usize) void {
+            fn computeOffsets(self: *Level, tile_width: usize) void {
                 var tile_offset: usize = 0;
 
                 for (self.patches.items(.bounds), self.patches.items(.tile_total), self.patches.items(.tile_offset)) |bounds, *total, *offset| {
@@ -224,7 +202,7 @@ pub fn Mesh(comptime N: usize) type {
 
                 for (self.blocks.items(.bounds), self.blocks.items(.cell_total), self.blocks.items(.cell_offset)) |bounds, *total, *offset| {
                     offset.* = cell_offset;
-                    total.* = bounds.space().scale(tile_width).extendUniform(2 * ghost_width).total();
+                    total.* = bounds.space().scale(tile_width).extendUniform(2 * O).total();
                     cell_offset += total.*;
                 }
 
@@ -257,7 +235,7 @@ pub fn Mesh(comptime N: usize) type {
 
                 for (self.transfer_blocks.items(.bounds), self.transfer_blocks.items(.cell_total), self.transfer_blocks.items(.cell_offset)) |bounds, *total, *offset| {
                     offset.* = transfer_cell_offset;
-                    total.* = bounds.space().scale(tile_width).extendUniform(2 * ghost_width).total();
+                    total.* = bounds.space().scale(tile_width).extendUniform(2 * O).total();
                     transfer_cell_offset += total.*;
                 }
 
@@ -289,8 +267,8 @@ pub fn Mesh(comptime N: usize) type {
             // Check config
             config.check();
             // Scale initial size by 2^global_refinement
-            const tile_space: IndexSpace(N) = config.baseTileSpace();
-            const cell_space: IndexSpace(N) = config.baseCellSpace();
+            const tile_space: IndexSpace = config.baseTileSpace();
+            const cell_space: IndexSpace = config.baseCellSpace();
 
             const base: Base = .{
                 .index_size = tile_space.size,
@@ -304,7 +282,6 @@ pub fn Mesh(comptime N: usize) type {
                 .index_size = config.index_size,
                 .global_refinement = config.global_refinement,
                 .tile_width = config.tile_width,
-                .ghost_width = config.ghost_width,
                 .tile_total = base.tile_total,
                 .cell_total = base.cell_total,
                 .transfer_tile_total = base.tile_total,
@@ -646,7 +623,7 @@ pub fn Mesh(comptime N: usize) type {
                     // Make aliases for patch variables
                     const cpbounds: IndexBox = cbounds[cpid];
                     const cpoffset: usize = coffsets[cpid];
-                    const cpspace: IndexSpace(N) = cpbounds.space();
+                    const cpspace: IndexSpace = cpbounds.space();
                     const cptags: []bool = ctags[cpoffset..(cpoffset + cpspace.total())];
 
                     // As well as clusters in this patch
@@ -657,7 +634,7 @@ pub fn Mesh(comptime N: usize) type {
                     preprocessTagsOnPatch(cptags, cpbounds, upclusters);
 
                     // Run partitioning algorithm
-                    var partition_space = try PartitionSpace(N).init(scratch, cpbounds.size, upclusters);
+                    var partition_space = try PartitionSpace.init(scratch, cpbounds.size, upclusters);
                     defer partition_space.deinit();
 
                     try partition_space.build(cptags, config.patch_max_tiles, config.patch_efficiency);
@@ -733,7 +710,7 @@ pub fn Mesh(comptime N: usize) type {
                     // Aliases for underlying variables
                     const cpbounds: IndexBox = cbounds[cpid];
                     const cpoffset: usize = coffsets[cpid];
-                    const cpspace: IndexSpace(N) = cpbounds.space();
+                    const cpspace: IndexSpace = cpbounds.space();
                     const cptags: []const bool = ctags[cpoffset..(cpoffset + cpspace.total())];
 
                     for (coarse_children.items[cpid]..coarse_children.items[cpid + 1]) |patch| {
@@ -742,7 +719,7 @@ pub fn Mesh(comptime N: usize) type {
 
                         const bounds: IndexBox = target.patches.items(.bounds)[patch];
 
-                        const space: IndexSpace(N) = bounds.space();
+                        const space: IndexSpace = bounds.space();
 
                         // Build patch tags
                         var ptags: []bool = try scratch.alloc(bool, space.total());
@@ -751,7 +728,7 @@ pub fn Mesh(comptime N: usize) type {
                         cpspace.fillWindow(bounds.relativeTo(cpbounds), bool, ptags, cptags);
 
                         // Run partitioning algorithm
-                        var partition_space = try PartitionSpace(N).init(scratch, bounds.size, &[_]IndexBox{});
+                        var partition_space = try PartitionSpace.init(scratch, bounds.size, &[_]IndexBox{});
                         defer partition_space.deinit();
 
                         try partition_space.build(ptags, config.block_max_tiles, config.block_efficiency);
@@ -789,17 +766,9 @@ pub fn Mesh(comptime N: usize) type {
             self.computeOffsets();
         }
 
-        pub fn transfer(self: Self, map: ArrayList(TileMap), src: Self, new: *ArrayList(f64), old: ArrayList(f64)) !void {
-            _ = old;
-            _ = new;
-            _ = src;
-            _ = map;
-            _ = self;
-        }
-
         fn preprocessTagsOnPatch(tags: []bool, bounds: IndexBox, clusters: []const IndexBox) void {
             for (clusters) |upcluster| {
-                var cluster: Box(N, usize) = upcluster;
+                var cluster: IndexBox = upcluster;
 
                 for (0..N) |i| {
                     if (cluster.origin[i] > 0) {
@@ -824,7 +793,7 @@ pub fn Mesh(comptime N: usize) type {
             var transfer_cell_offset: usize = self.base.cell_total;
 
             for (self.levels.items) |*level| {
-                level.computeOffsets(self.tile_width, self.ghost_width);
+                level.computeOffsets(self.tile_width);
 
                 level.tile_offset = tile_offset;
                 level.cell_offset = cell_offset;
@@ -875,11 +844,11 @@ pub fn Mesh(comptime N: usize) type {
         fn cacheLevels(self: *Self, total: usize) !void {
             while (total > self.levels.items.len) {
                 if (self.levels.items.len == 0) {
-                    const size: [N]usize = IndexSpace(N).fromSize(self.base.index_size).scale(2).size;
+                    const size: [N]usize = IndexSpace.fromSize(self.base.index_size).scale(2).size;
 
                     try self.levels.append(self.gpa, Level.init(size));
                 } else {
-                    const size: [N]usize = IndexSpace(N).fromSize(self.levels.getLast().index_size).scale(2).size;
+                    const size: [N]usize = IndexSpace.fromSize(self.levels.getLast().index_size).scale(2).size;
 
                     try self.levels.append(self.gpa, Level.init(size));
                 }
@@ -898,7 +867,7 @@ test "mesh regridding" {
 
     const allocator = std.testing.allocator;
 
-    const Mesh2 = Mesh(2);
+    const Mesh2 = Mesh(2, 0);
 
     const config: Mesh2.Config = .{
         .physical_bounds = .{
@@ -906,7 +875,6 @@ test "mesh regridding" {
             .size = [_]f64{ 1.0, 1.0 },
         },
         .index_size = [_]usize{ 10, 10 },
-        .ghost_width = 0,
         .tile_width = 16,
         .global_refinement = 2,
     };

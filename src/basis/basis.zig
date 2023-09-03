@@ -1,28 +1,213 @@
 const std = @import("std");
+const pow = std.math.pow;
+
 const lagrange = @import("lagrange.zig");
 
-pub const BasisType = enum { lagrange };
-pub const OperatorType = enum {
-    value,
-    derivative,
-    second_derivative,
-};
+const geometry = @import("../geometry/geometry.zig");
 
-/// A computes the stencil corresponding to the application of the given operator
-/// with the given basis on a grid at a point.
-pub fn stencil(comptime T: type, comptime L: usize, comptime b_type: BasisType, comptime o_type: OperatorType, grid: [L]T, point: T) [L]T {
-    switch (b_type) {
-        .lagrange => switch (o_type) {
-            .value => return lagrange.valueStencil(T, L, grid, point),
-            .derivative => return lagrange.derivativeStencil(T, L, grid, point),
-            .second_derivative => return lagrange.secondDerivativeStencil(T, L, grid, point),
-        },
-    }
+pub fn StencilSpace(comptime N: usize, comptime O: usize) type {
+    return struct {
+        physical_bounds: RealBox,
+        size: [N]usize,
+
+        const Self = @This();
+        const RealBox = geometry.Box(N, f64);
+        const IndexBox = geometry.Box(N, usize);
+        const IndexSpace = geometry.IndexSpace(N);
+
+        pub fn position(self: Self, cell: [N]usize) [N]f64 {
+            var result: [N]f64 = undefined;
+
+            for (0..N) |i| {
+                const origin: f64 = self.physical_bounds.origin[i];
+                const width: f64 = self.physical_bounds.size[i];
+                const ratio: f64 = @as(f64, @floatFromInt(cell[i])) / @as(f64, @floatFromInt(self.size[i] - 1));
+                result[i] = origin + width * ratio;
+            }
+
+            return result;
+        }
+
+        pub fn value(self: Self, cell: [N]usize, field: []const f64) f64 {
+            const space = IndexSpace.fromSize(sizeWithGhost(self.size));
+            const linear = space.linearFromCartesian(cellWithGhost(cell));
+            return field[linear];
+        }
+
+        pub fn derivative(self: Self, comptime ranks: [N]usize, cell: [N]usize, field: []const f64) f64 {
+            comptime var stencil_sizes: [N]usize = undefined;
+
+            inline for (0..N) |i| {
+                stencil_sizes[i] = if (ranks[i] == 0) 1 else 2 * O + 1;
+            }
+
+            comptime var stencils: [N][2 * O + 1]f64 = undefined;
+
+            inline for (0..N) |i| {
+                stencils[i] = derivativeStencil(ranks[i], O);
+            }
+
+            const stencil_space: IndexSpace = comptime IndexSpace.fromSize(stencil_sizes);
+            const space: IndexSpace = IndexSpace.fromSize(sizeWithGhost(self.size));
+
+            var result: f64 = 0.0;
+
+            comptime var stencil_indices = stencil_space.cartesianIndices();
+
+            inline while (stencil_indices.next()) |stencil_index| {
+                comptime var coef: f64 = 1.0;
+
+                inline for (0..N) |i| {
+                    if (ranks[i] != 0) {
+                        coef *= stencils[i][stencil_index[i]];
+                    }
+                }
+
+                var offset_cell: [N]usize = cell;
+
+                inline for (0..N) |i| {
+                    // This actually has an additional term -O (to correctly offset from center) +O (to account for ghost nodes).
+                    offset_cell[i] -= stencil_index[i];
+                }
+
+                const linear = space.linearFromCartesian(offset_cell);
+
+                result += coef * field[linear];
+            }
+
+            // Covariantly transform result
+            inline for (0..N) |i| {
+                var scale: f64 = @floatFromInt(self.size[i]);
+                scale /= self.physical_bounds.size[i];
+
+                inline for (0..ranks[i]) |_| {
+                    result *= scale;
+                }
+            }
+
+            return result;
+        }
+
+        pub fn prolong(self: Self, subcell: [N]usize, field: []const f64) f64 {
+            comptime var lstencils: [N][2 * O + 1]f64 = undefined;
+            comptime var rstencils: [N][2 * O + 1]f64 = undefined;
+
+            inline for (0..N) |i| {
+                lstencils[i] = prolongStencil(false, O);
+                rstencils[i] = prolongStencil(true, O);
+            }
+
+            const stencil_space: IndexSpace = comptime IndexSpace.fromSize([1]usize{2 * O + 1} ** N);
+            const space: IndexSpace = IndexSpace.fromSize(sizeWithGhost(self.size));
+
+            var result: f64 = 0.0;
+
+            comptime var stencil_indices = stencil_space.cartesianIndices();
+
+            inline while (stencil_indices.next()) |stencil_index| {
+                var coef: f64 = 1.0;
+
+                for (0..N) |i| {
+                    if (subcell[i] % 2 == 0) {
+                        coef *= rstencils[i][stencil_index[i]];
+                    } else {
+                        coef *= lstencils[i][stencil_index[i]];
+                    }
+                }
+
+                var offset_cell: [N]usize = undefined;
+
+                inline for (0..N) |i| {
+                    // This actually has an additional term -O (to correctly offset from center) +O (to account for ghost nodes).
+                    offset_cell[i] = @divTrunc(subcell[i] + 1, 2) - stencil_index[i];
+                }
+
+                const linear = space.linearFromCartesian(offset_cell);
+
+                result += coef * field[linear];
+            }
+
+            return result;
+        }
+
+        pub fn restrict(self: Self, supercell: [N]usize, field: []const f64) f64 {
+            const stencils: [N][2 * O + 1]f64 = [1][2 * O + 2]f64{restrictStencil(O)} ** N;
+
+            const stencil_space: IndexSpace = comptime IndexSpace.fromSize([1]usize{2 * O + 2} ** N);
+
+            const space: IndexSpace = IndexSpace.fromSize(sizeWithGhost(self.size));
+
+            var result: f64 = 0.0;
+
+            comptime var stencil_indices = stencil_space.cartesianIndices();
+
+            inline while (stencil_indices.next()) |stencil_index| {
+                comptime var coef: f64 = 1.0;
+
+                inline for (0..N) |i| {
+                    coef *= stencils[i][stencil_index[i]];
+                }
+
+                var offset_cell: [N]usize = undefined;
+
+                inline for (0..N) |i| {
+                    // This actually has an additional term -O (to correctly offset from center) +O (to account for ghost nodes).
+                    offset_cell[i] = 2 * supercell[i] - stencil_index[i] - 1;
+                }
+
+                const linear = space.linearFromCartesian(offset_cell);
+
+                result += coef * field[linear];
+            }
+
+            return result;
+        }
+
+        fn cellWithGhost(cell: [N]usize) [N]usize {
+            var result: [N]usize = cell;
+            for (0..N) |i| {
+                result[i] + O;
+            }
+            return result;
+        }
+
+        fn sizeWithGhost(size: [N]usize) [N]usize {
+            var result: [N]usize = size;
+            for (0..N) |i| {
+                result[i] + 2 * O;
+            }
+            return result;
+        }
+    };
+}
+
+fn derivativeStencil(comptime R: usize, comptime O: usize) [2 * O + 1]f64 {
+    const grid = cellCenteredGrid(f64, O, O);
+
+    return switch (R) {
+        0 => lagrange.valueStencil(f64, 2 * O + 1, grid, 0.0),
+        1 => lagrange.derivativeStencil(f64, 2 * O + 1, grid, 0.0),
+        2 => lagrange.secondDerivativeStencil(f64, 2 * O + 1, grid, 0.0),
+        else => @compileError("Rank of derivative stencil must be <= 2"),
+    };
+}
+
+fn prolongStencil(comptime side: bool, comptime O: usize) [2 * O + 1]f64 {
+    const grid = cellCenteredGrid(f64, O, O);
+    const point = if (side) 0.25 else -0.25;
+
+    return lagrange.valueStencil(f64, 2 * O + 1, grid, point);
+}
+
+fn restrictStencil(comptime O: usize) [2 * O + 2]f64 {
+    const grid = vertexCenteredGrid(f64, O + 1, O + 1);
+
+    return lagrange.valueStencil(f64, 2 * O + 2, grid, 0.0);
 }
 
 /// Builds a cell centered grid, with one central point, L points on the left,
 /// and R points on the right.
-pub fn cellCenteredGrid(comptime T: type, comptime L: usize, comptime R: usize) [L + R + 1]T {
+fn cellCenteredGrid(comptime T: type, comptime L: usize, comptime R: usize) [L + R + 1]T {
     var grid: [L + R + 1]T = undefined;
 
     for (0..(L + R + 1)) |i| {
@@ -33,7 +218,7 @@ pub fn cellCenteredGrid(comptime T: type, comptime L: usize, comptime R: usize) 
 }
 
 /// Builds a vertex centered grid, with L points on the left and R points on the right.
-pub fn vertexCenteredGrid(comptime T: type, comptime L: usize, comptime R: usize) [L + R]T {
+fn vertexCenteredGrid(comptime T: type, comptime L: usize, comptime R: usize) [L + R]T {
     var grid: [L + R]T = undefined;
 
     for (0..(L + R)) |i| {
@@ -55,16 +240,14 @@ test "basis grids" {
 }
 
 test "basis stencils" {
-    const expect = std.testing.expect;
-    const eql = std.mem.eql;
-
-    const grid = cellCenteredGrid(f64, 1, 1);
+    const expectEqualSlices = std.testing.expectEqualSlices;
 
     // Stencils
-    const vstencil = stencil(f64, grid.len, .lagrange, .value, grid, 0.0);
-    const dstencil = stencil(f64, grid.len, .lagrange, .derivative, grid, 0.0);
-    const sdstencil = stencil(f64, grid.len, .lagrange, .second_derivative, grid, 0.0);
-    try expect(eql(f64, &[_]f64{ 0.0, 1.0, 0.0 }, &vstencil));
-    try expect(eql(f64, &[_]f64{ -0.5, 0.0, 0.5 }, &dstencil));
-    try expect(eql(f64, &[_]f64{ 1.0, -2.0, 1.0 }, &sdstencil));
+    try expectEqualSlices(f64, &[_]f64{ 0.0, 1.0, 0.0 }, &derivativeStencil(0, 1));
+    try expectEqualSlices(f64, &[_]f64{ -0.5, 0.0, 0.5 }, &derivativeStencil(1, 1));
+    try expectEqualSlices(f64, &[_]f64{ 1.0, -2.0, 1.0 }, &derivativeStencil(2, 1));
+
+    try expectEqualSlices(f64, &[_]f64{ 0.15625, 0.9375, -0.09375 }, &prolongStencil(false, 1));
+    try expectEqualSlices(f64, &[_]f64{ -0.09375, 0.9375, 0.15625 }, &prolongStencil(true, 1));
+    try expectEqualSlices(f64, &[_]f64{ -0.0625, 0.5625, 0.5625, -0.0625 }, &restrictStencil(1));
 }
