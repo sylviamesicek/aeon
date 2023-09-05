@@ -12,6 +12,12 @@ const exp2 = std.math.exp2;
 
 const geometry = @import("../geometry/geometry.zig");
 
+const boundaries = @import("boundary.zig");
+
+// Public Exports
+
+pub const BoundaryCondition = boundaries.BoundaryCondition;
+
 pub fn Mesh(comptime N: usize, comptime O: usize) type {
     return struct {
         /// Allocator used for various arraylists stored in this struct.
@@ -43,6 +49,7 @@ pub fn Mesh(comptime N: usize, comptime O: usize) type {
         const RealBox = geometry.Box(N, f64);
         const IndexSpace = geometry.IndexSpace(N);
         const PartitionSpace = geometry.PartitionSpace(N);
+        const Region = geometry.Region(N, O);
 
         pub const Config = struct {
             physical_bounds: RealBox,
@@ -409,6 +416,52 @@ pub fn Mesh(comptime N: usize, comptime O: usize) type {
                     pbounds.space().fillSubspace(bounds.relativeTo(pbounds), usize, tile_to_block, id);
                 }
             }
+        }
+
+        // *************************
+        // Fill Ghost **************
+        // *************************
+
+        pub fn fillGhostCells(self: *const Self, boundary: anytype, block_map: []const usize, field: []f64) !void {
+            assert(block_map.len == self.tileTotal());
+            assert(field.len == self.cellTotal());
+
+            // Fill base first
+            const base_field: []f64 = field[0..self.baseCellTotal()];
+            try self.fillBaseGhostCells(base_field);
+
+            if (self.active_levels > 0) {
+                const target_field: []f64 = self.levelCellSlice(1, f64, field);
+                try self.fillLevelGhostCells(base_field, boundary, target_field);
+            }
+
+            for (2..self.active_levels) |level_id| {
+                const coarse_field: []f64 = self.levelCellSlice(level_id - 1, f64, field);
+                const target_field: []f64 = self.levelCellSlice(level_id, f64, field);
+                try self.fillLevelGhostCells(boundary, coarse_field, target_field);
+            }
+        }
+
+        fn fillBaseGhostCells(self: *const Self, boundary: anytype, base_field: []f64) !void {
+            const regions = Region.orderedRegions();
+
+            inline for (regions) |region| {
+                try self.fillBlockExteriorGhostCells(region, boundary, base_field);
+            }
+        }
+
+        fn fillLevelGhostCells(self: *const Self, boundary: anytype, coarse_field: []const f64, target_field: []f64) !void {
+            _ = boundary;
+            _ = target_field;
+            _ = coarse_field;
+            _ = self;
+        }
+
+        fn fillBlockExteriorGhostCells(self: *const Self, comptime region: Region, boundary: anytype, field: []f64) !void {
+            _ = field;
+            _ = boundary;
+            _ = region;
+            _ = self;
         }
 
         // *************************
@@ -896,3 +949,5 @@ test "mesh regridding" {
         .patch_efficiency = 0.1,
     });
 }
+
+test {}

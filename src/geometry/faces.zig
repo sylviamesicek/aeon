@@ -1,8 +1,8 @@
 const std = @import("std");
 
-pub fn FaceIndex(comptime N: usize) type {
+pub fn Face(comptime N: usize) type {
     if (N > 16) {
-        @compileError("FaceIndex only supports N <= 16");
+        @compileError("Face only supports N <= 16");
     }
 
     return struct {
