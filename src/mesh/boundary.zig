@@ -47,40 +47,14 @@ pub fn isBoundaryFunction(comptime N: usize) TraitFn {
     return is(fn ([N]f64, Face(N)) BoundaryCondition);
 }
 
-pub fn hasDiritchletDecl(comptime N: usize) bool {
+pub fn hasConditionDecl(comptime N: usize) TraitFn {
     const Closure = struct {
         fn trait(comptime T: type) bool {
-            if (!hasFn("diritchlet")(T)) {
+            if (!hasFn("condition")(T)) {
                 return false;
             }
 
-            return isBoundaryFunction(N)(@TypeOf(T.diritchlet));
-        }
-    };
-    return Closure.trait;
-}
-
-pub fn hasNuemannDecl(comptime N: usize) bool {
-    const Closure = struct {
-        fn trait(comptime T: type) bool {
-            if (!hasFn("diritchlet")(T)) {
-                return false;
-            }
-
-            return isBoundaryFunction(N)(@TypeOf(T.nuemann));
-        }
-    };
-    return Closure.trait;
-}
-
-pub fn hasRobinDecl(comptime N: usize) bool {
-    const Closure = struct {
-        fn trait(comptime T: type) bool {
-            if (!hasFn("robin")(T)) {
-                return false;
-            }
-
-            return isBoundaryFunction(N)(@TypeOf(T.robin));
+            return isBoundaryFunction(N)(@TypeOf(T.condition));
         }
     };
     return Closure.trait;

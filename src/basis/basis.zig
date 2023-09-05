@@ -6,7 +6,9 @@ const lagrange = @import("lagrange.zig");
 
 const geometry = @import("../geometry/geometry.zig");
 
-// All cell indices are in standard index space.
+/// Manages the application of stencil products on functions. Supports computing values, centered derivatives
+/// positions, boundary positions, boundary values, boundary derivatives, prolongation, and restriction.
+/// All cell indices are in standard index space (ie without ghost cells included).
 pub fn StencilSpace(comptime N: usize, comptime O: usize) type {
     return struct {
         physical_bounds: RealBox,
@@ -47,16 +49,25 @@ pub fn StencilSpace(comptime N: usize, comptime O: usize) type {
             return result;
         }
 
+        /// Computes the value of a field at a cell.
         pub fn value(self: Self, cell: [N]usize, field: []const f64) f64 {
             const space = IndexSpace.fromSize(sizeWithGhost(self.size));
             const linear = space.linearFromCartesian(cellWithGhost(cell));
             return field[linear];
         }
 
+        pub fn setValue(self: Self, cell: [N]usize, field: []f64, v: f64) void {
+            const space = IndexSpace.fromSize(sizeWithGhost(self.size));
+            const linear = space.linearFromCartesian(cellWithGhost(cell));
+            field[linear] = v;
+        }
+
+        /// Computes the diagonal coefficient of the value stencil.
         pub fn valueDiagonal(_: Self) f64 {
             return 1.0;
         }
 
+        /// Computes the derivative of a field at a cell.
         pub fn derivative(self: Self, comptime ranks: [N]usize, cell: [N]usize, field: []const f64) f64 {
             comptime var stencil_sizes: [N]usize = undefined;
 
@@ -111,6 +122,7 @@ pub fn StencilSpace(comptime N: usize, comptime O: usize) type {
             return result;
         }
 
+        /// Computes the diagonal coefficient of the derivative stencil.
         pub fn derivativeDiagonal(self: Self, comptime ranks: [N]usize) f64 {
             comptime var stencils: [N][2 * O + 1]f64 = undefined;
 
@@ -139,14 +151,17 @@ pub fn StencilSpace(comptime N: usize, comptime O: usize) type {
             return result;
         }
 
+        /// Computes the value at a boundary of a field.
         pub fn boundaryValue(self: Self, comptime extents: [N]isize, cell: [N]usize, field: []const f64) f64 {
             return self.boundaryDerivative([1]usize{0} ** N, extents, cell, field);
         }
 
+        /// Computes the outmost coefficient of a boundary stencil.
         pub fn boundaryValueCoef(self: Self, comptime extents: [N]isize) f64 {
             return self.boundaryDerivativeCoef([1]usize{0} ** N, extents);
         }
 
+        /// Computes the derivative at a bounday of a field.
         pub fn boundaryDerivative(self: Self, comptime ranks: [N]usize, comptime extents: [N]isize, cell: [N]usize, field: []const f64) f64 {
             comptime var stencil_sizes: [N]usize = undefined;
 
@@ -210,6 +225,7 @@ pub fn StencilSpace(comptime N: usize, comptime O: usize) type {
             return result;
         }
 
+        /// Computes the outmost coefficient of a boundary derivative stencil.
         pub fn boundaryDerivativeCoef(self: Self, comptime ranks: [N]usize, comptime extents: [N]isize) f64 {
             comptime var stencils: [N][3 * O + 1]f64 = undefined;
 
@@ -242,6 +258,7 @@ pub fn StencilSpace(comptime N: usize, comptime O: usize) type {
             return result;
         }
 
+        /// Prolongs the value of a field to a subcell.
         pub fn prolong(self: Self, subcell: [N]usize, field: []const f64) f64 {
             comptime var lstencils: [N][2 * O + 1]f64 = undefined;
             comptime var rstencils: [N][2 * O + 1]f64 = undefined;
@@ -284,6 +301,7 @@ pub fn StencilSpace(comptime N: usize, comptime O: usize) type {
             return result;
         }
 
+        /// Restricts the value of a field to a supercell.
         pub fn restrict(self: Self, supercell: [N]usize, field: []const f64) f64 {
             const stencils: [N][2 * O + 1]f64 = [1][2 * O + 2]f64{restrictStencil(O)} ** N;
 

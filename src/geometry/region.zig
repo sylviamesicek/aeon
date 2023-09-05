@@ -124,7 +124,6 @@ pub fn Region(comptime N: usize, comptime O: usize) type {
 
         pub const ExtentIterator = struct {
             inner: IndexSpace.CartesianIterator,
-            block: [N]usize,
             sides: [N]Side,
 
             pub fn next(self: ExtentIterator) ?[N]isize {
@@ -150,7 +149,7 @@ pub fn Region(comptime N: usize, comptime O: usize) type {
 
         /// Iterates outwards from the inner face. Provides offsets that can be added to the inner face
         /// index to find the global index.
-        pub fn extentOffsets(self: Self, block: [N]usize) ExtentIterator {
+        pub fn extentOffsets(self: Self) ExtentIterator {
             var size: [N]usize = undefined;
 
             for (0..N) |i| {
@@ -165,7 +164,6 @@ pub fn Region(comptime N: usize, comptime O: usize) type {
 
             return .{
                 .inner = space.cartesianIndices(),
-                .block = block,
                 .sides = self.sides,
             };
         }

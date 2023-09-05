@@ -10,8 +10,8 @@ const ArenaAllocator = std.heap.ArenaAllocator;
 const assert = std.debug.assert;
 const exp2 = std.math.exp2;
 
+const basis = @import("../basis/basis.zig");
 const geometry = @import("../geometry/geometry.zig");
-
 const boundaries = @import("boundary.zig");
 
 // Public Exports
@@ -47,9 +47,11 @@ pub fn Mesh(comptime N: usize, comptime O: usize) type {
         const Self = @This();
         const IndexBox = geometry.Box(N, usize);
         const RealBox = geometry.Box(N, f64);
+        const Face = geometry.Face(N);
         const IndexSpace = geometry.IndexSpace(N);
         const PartitionSpace = geometry.PartitionSpace(N);
         const Region = geometry.Region(N, O);
+        const StencilSpace = basis.StencilSpace(N, O);
 
         pub const Config = struct {
             physical_bounds: RealBox,
@@ -425,6 +427,7 @@ pub fn Mesh(comptime N: usize, comptime O: usize) type {
         pub fn fillGhostCells(self: *const Self, boundary: anytype, block_map: []const usize, field: []f64) !void {
             assert(block_map.len == self.tileTotal());
             assert(field.len == self.cellTotal());
+            assert(boundaries.hasConditionDecl(N)(boundary));
 
             // Fill base first
             const base_field: []f64 = field[0..self.baseCellTotal()];
@@ -445,8 +448,13 @@ pub fn Mesh(comptime N: usize, comptime O: usize) type {
         fn fillBaseGhostCells(self: *const Self, boundary: anytype, base_field: []f64) !void {
             const regions = Region.orderedRegions();
 
+            const block: IndexBox = .{
+                .origin = [1]usize{0} ** N,
+                .size = self.base.index_size,
+            };
+
             inline for (regions) |region| {
-                try self.fillBlockExteriorGhostCells(region, boundary, base_field);
+                try self.fillExteriorGhostCells(region, 0, block, boundary, base_field);
             }
         }
 
@@ -457,11 +465,83 @@ pub fn Mesh(comptime N: usize, comptime O: usize) type {
             _ = self;
         }
 
-        fn fillBlockExteriorGhostCells(self: *const Self, comptime region: Region, boundary: anytype, field: []f64) !void {
-            _ = field;
-            _ = boundary;
-            _ = region;
-            _ = self;
+        fn fillExteriorGhostCells(self: *const Self, comptime region: Region, level: usize, block: IndexBox, boundary: anytype, field: []f64) !void {
+            const stencil_space: StencilSpace = self.computeStencilSpace(level, block);
+
+            var inner_face_cells = region.innerFaceIndices(stencil_space.index_size);
+
+            while (inner_face_cells.next()) |inner_face_cell| {
+                var cell: [N]usize = inner_face_cell;
+
+                for (0..N) |i| {
+                    cell[i] -= O;
+                }
+
+                comptime var extent_indices = region.extentOffsets();
+
+                inline while (extent_indices) |extents| {
+                    var target: [N]usize = cell;
+
+                    for (0..N) |i| {
+                        target[i] += extents[i];
+                    }
+
+                    stencil_space.setValue(target, field, 0.0);
+
+                    const position = stencil_space.boundaryPosition(extents, cell);
+
+                    var value: f64 = 0.0;
+                    var normals: [N]usize = undefined;
+                    var rhs: f64 = 0.0;
+
+                    for (0..N) |i| {
+                        if (extents[i] != 0) {
+                            const condition: BoundaryCondition = boundary.condition(position, Face{
+                                .side = extents[i] > 0,
+                                .axis = i,
+                            });
+
+                            value += condition.value;
+                            normals[i] = condition.normal;
+                            rhs += condition.rhs;
+                        }
+                    }
+
+                    var sum = stencil_space.boundaryValue(extents, cell, field);
+                    var coef: f64 = stencil_space.boundaryValueCoef(extents);
+
+                    inline for (0..N) |i| {
+                        if (extents[i] != 0) {
+                            var ranks: [N]usize = [1]usize{0} ** N;
+                            ranks[i] = 1;
+
+                            sum += stencil_space.boundaryDerivative(ranks, extents, cell, field);
+                            coef += stencil_space.boundaryDerivativeCoef(ranks, extents);
+                        }
+                    }
+
+                    stencil_space.setValue(target, field, (rhs - sum) / coef);
+                }
+            }
+        }
+
+        fn computeStencilSpace(self: *const Self, level: usize, block: IndexBox) StencilSpace {
+            const index_size: [N]usize = self.levels[level].index_size;
+
+            var physical_bounds: RealBox = undefined;
+
+            for (0..N) |i| {
+                const sratio: f64 = @as(f64, @floatFromInt(block.size[i])) / @as(f64, @floatFromInt(index_size[i]));
+                const oratio: f64 = @as(f64, @floatFromInt(block.origin[i])) / @as(f64, @floatFromInt(index_size[i] - 1));
+
+                physical_bounds.size[i] = self.physical_bounds.size[i] * sratio;
+                physical_bounds.origin[i] = self.physical_bounds.origin[i] + self.physical_bounds.size[i] * oratio;
+            }
+
+            return .{
+                .physical_bounds = physical_bounds,
+                .index_size = block.space().scale(self.tile_width).size,
+            };
         }
 
         // *************************
