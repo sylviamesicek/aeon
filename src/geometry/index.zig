@@ -60,18 +60,6 @@ pub fn IndexSpace(comptime N: usize) type {
             return result;
         }
 
-        /// Computes total number of indices in this space including `2 * ghost` additional
-        /// indices along each axis
-        pub fn totalWithGhost(self: Self, width: usize, ghost: usize) usize {
-            var result: usize = 1;
-
-            for (0..N) |i| {
-                result *= self.size[i] * width + 2 * ghost;
-            }
-
-            return result;
-        }
-
         /// Returns the index of the largest axis in the space.
         pub fn longestAxis(self: Self) usize {
             var axis: usize = 0;
@@ -85,6 +73,7 @@ pub fn IndexSpace(comptime N: usize) type {
             return axis;
         }
 
+        /// Scales the index space by `s`
         pub fn scale(self: Self, s: usize) Self {
             var size: [N]usize = undefined;
 
@@ -95,6 +84,7 @@ pub fn IndexSpace(comptime N: usize) type {
             return .{ .size = size };
         }
 
+        /// Extends the index space along each axis by s[axis].
         pub fn extend(self: Self, s: [N]usize) Self {
             var size: [N]usize = s;
 
@@ -105,6 +95,7 @@ pub fn IndexSpace(comptime N: usize) type {
             return .{ .size = size };
         }
 
+        /// Extends the index space along all axes by s.
         pub fn extendUniform(self: Self, s: usize) Self {
             var size: [N]usize = self.size;
 
@@ -115,7 +106,8 @@ pub fn IndexSpace(comptime N: usize) type {
             return .{ .size = size };
         }
 
-        pub fn fillWindow(self: Self, bounds: Box(N, usize), comptime T: type, dest: []T, src: []const T) void {
+        /// Builds a window, ie a smaller array that represents a subspace within the index space.
+        pub fn window(self: Self, bounds: Box(N, usize), comptime T: type, dest: []T, src: []const T) void {
             const space = bounds.space();
 
             assert(dest.len == space.total());
@@ -134,6 +126,7 @@ pub fn IndexSpace(comptime N: usize) type {
             }
         }
 
+        /// Fills a subspace of an array representing values defined over the index space with `val`.
         pub fn fillSubspace(self: Self, bounds: Box(N, usize), comptime T: type, dest: []T, val: T) void {
             const space = bounds.space();
 

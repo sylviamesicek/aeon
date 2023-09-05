@@ -431,43 +431,58 @@ pub fn Mesh(comptime N: usize, comptime O: usize) type {
 
             // Fill base first
             const base_field: []f64 = field[0..self.baseCellTotal()];
-            try self.fillBaseGhostCells(base_field);
+            self.fillBaseGhostCells(base_field);
 
             if (self.active_levels > 0) {
                 const target_field: []f64 = self.levelCellSlice(1, f64, field);
-                try self.fillLevelGhostCells(base_field, boundary, target_field);
+                try self.fillLevelGhostCells(0, boundary, base_field, target_field);
             }
 
-            for (2..self.active_levels) |level_id| {
+            for (1..self.active_levels) |level_id| {
                 const coarse_field: []f64 = self.levelCellSlice(level_id - 1, f64, field);
                 const target_field: []f64 = self.levelCellSlice(level_id, f64, field);
-                try self.fillLevelGhostCells(boundary, coarse_field, target_field);
+                try self.fillLevelGhostCells(level_id, boundary, coarse_field, target_field);
             }
         }
 
-        fn fillBaseGhostCells(self: *const Self, boundary: anytype, base_field: []f64) !void {
+        fn fillBaseGhostCells(self: *const Self, boundary: anytype, base_field: []f64) void {
             const regions = Region.orderedRegions();
 
-            const block: IndexBox = .{
-                .origin = [1]usize{0} ** N,
-                .size = self.base.index_size,
+            const stencil_space: StencilSpace = .{
+                .physical_bounds = self.physical_bounds,
+                .index_size = IndexSpace.fromSize(self.base.index_size).scale(self.tile_width).size,
             };
 
             inline for (regions) |region| {
-                try self.fillExteriorGhostCells(region, 0, block, boundary, base_field);
+                fillExteriorGhostCells(region, stencil_space, boundary, base_field);
             }
         }
 
-        fn fillLevelGhostCells(self: *const Self, boundary: anytype, coarse_field: []const f64, target_field: []f64) !void {
+        fn fillLevelGhostCells(self: *const Self, level: usize, boundary: anytype, coarse_field: []const f64, target_field: []f64) !void {
             _ = boundary;
             _ = target_field;
             _ = coarse_field;
-            _ = self;
+
+            const target: *const Level = self.levels[level];
+
+            const blocks = target.blocks.slice();
+
+            for (0..blocks.len) |block| {
+                _ = block;
+            }
         }
 
-        fn fillExteriorGhostCells(self: *const Self, comptime region: Region, level: usize, block: IndexBox, boundary: anytype, field: []f64) !void {
-            const stencil_space: StencilSpace = self.computeStencilSpace(level, block);
+        fn fillInteriorGhostCells(self: *const Self, comptime region: Region, level: usize, block: usize, coarse_block_map: []const usize, coarse_field: []const f64, target_field: []f64) void {
+            _ = coarse_block_map;
+            _ = self;
+            _ = target_field;
+            _ = coarse_field;
+            _ = block;
+            _ = level;
+            _ = region;
+        }
 
+        fn fillExteriorGhostCells(comptime region: Region, stencil_space: StencilSpace, boundary: anytype, field: []f64) void {
             var inner_face_cells = region.innerFaceIndices(stencil_space.index_size);
 
             while (inner_face_cells.next()) |inner_face_cell| {
@@ -858,7 +873,7 @@ pub fn Mesh(comptime N: usize, comptime O: usize) type {
                         var ptags: []bool = try scratch.alloc(bool, space.total());
                         defer scratch.free(ptags);
                         // Set ptags using window of uptags
-                        cpspace.fillWindow(bounds.relativeTo(cpbounds), bool, ptags, cptags);
+                        cpspace.window(bounds.relativeTo(cpbounds), bool, ptags, cptags);
 
                         // Run partitioning algorithm
                         var partition_space = try PartitionSpace.init(scratch, bounds.size, &[_]IndexBox{});

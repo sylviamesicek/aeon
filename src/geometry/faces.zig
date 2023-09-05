@@ -1,10 +1,7 @@
 const std = @import("std");
 
+/// Identifies a face by axis and side (false is left, true is right).
 pub fn Face(comptime N: usize) type {
-    if (N > 16) {
-        @compileError("Face only supports N <= 16");
-    }
-
     return struct {
         side: bool,
         axis: usize,

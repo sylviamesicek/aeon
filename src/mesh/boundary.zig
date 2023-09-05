@@ -43,10 +43,13 @@ const is = std.meta.trait.is;
 const hasFn = std.meta.trait.hasFn;
 const TraitFn = std.meta.trait.TraitFn;
 
+/// A trait to check if a type is a boundary function (ie a function which takes in a position and a face
+/// and returns a boundary condition).
 pub fn isBoundaryFunction(comptime N: usize) TraitFn {
     return is(fn ([N]f64, Face(N)) BoundaryCondition);
 }
 
+/// Checks whether a type has a function named `condition` that satisfied the `isBoundaryFunction(N)` trait.
 pub fn hasConditionDecl(comptime N: usize) TraitFn {
     const Closure = struct {
         fn trait(comptime T: type) bool {

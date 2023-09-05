@@ -76,17 +76,23 @@ pub fn Box(comptime N: usize, comptime T: type) type {
 
         /// Returns the index space over the interior of the box.
         pub fn space(self: Self) IndexSpace(N) {
+            if (T != usize) {
+                @compileError("space() is only supported for T == usize");
+            }
+
             return .{ .size = self.size };
         }
 
-        pub fn globalFromLocal(self: Self, local: [N]usize) [N]usize {
-            var global: [N]usize = undefined;
+        /// Transforms a local position into a global one.
+        pub fn globalFromLocal(self: Self, local: [N]T) [N]T {
+            var global: [N]T = undefined;
             for (0..N) |axis| {
                 global[axis] = self.origin[axis] + local[axis];
             }
             return global;
         }
 
+        /// Refines the box by multiplying each component by 2.
         pub fn refine(self: *Self) void {
             for (0..N) |axis| {
                 self.origin[axis] *= 2;
@@ -94,13 +100,15 @@ pub fn Box(comptime N: usize, comptime T: type) type {
             }
         }
 
+        /// Coarsens the box by dividing each component by 2.
         pub fn coarsen(self: *Self) !void {
             for (0..N) |axis| {
-                self.origin[axis] = try std.math.divFloor(usize, self.origin[axis], 2);
-                self.size[axis] = try std.math.divCeil(usize, self.size[axis], 2);
+                self.origin[axis] = try std.math.divFloor(T, self.origin[axis], 2);
+                self.size[axis] = try std.math.divCeil(T, self.size[axis], 2);
             }
         }
 
+        /// Moves the box so that its origin is measured relative to the origin of `other`.
         pub fn relativeTo(self: Self, other: Self) Self {
             var result: Self = self;
 

@@ -3,8 +3,19 @@ const heap = std.sort.heap;
 
 const geometry = @import("../geometry/geometry.zig");
 
-/// Defines a region of a block when ghost cells are included.
-pub fn Region(comptime N: usize, comptime O: usize) type {
+/// Defines an extended region around a block that can optionally include ghost nodes. In 2D, a region looks like
+///
+///     ---------------
+///     | NW | N | NE |
+///     ---------------
+///     | W  |   | E  |
+///     ---------------
+///     | SW | S | SE |
+///     ---------------
+///
+/// And allows one to write algorithms that traverse the edges and corners in an ordered way and iterate over the
+/// cells within a given section.
+pub fn Region(comptime N: usize) type {
     return struct {
         sides: [N]Side,
 
@@ -19,7 +30,7 @@ pub fn Region(comptime N: usize, comptime O: usize) type {
         const IndexSpace = geometry.IndexSpace(N);
         const IndexBox = geometry.Box(N, usize);
 
-        /// How many steps of adjacency to reach the middle.
+        /// How many steps of adjacency to reach the middle section.
         pub fn adjacency(self: Self) usize {
             var res: usize = 0;
 
@@ -32,32 +43,34 @@ pub fn Region(comptime N: usize, comptime O: usize) type {
             return res;
         }
 
-        pub const CartesianIterator = struct {
-            inner: IndexSpace.CartesianIterator,
-            block: [N]usize,
-            sides: [N]Side,
+        pub fn CartesianIterator(comptime O: usize) type {
+            return struct {
+                inner: IndexSpace.CartesianIterator,
+                block: [N]usize,
+                sides: [N]Side,
 
-            pub fn next(self: CartesianIterator) ?[N]usize {
-                if (self.inner.next()) |cart| {
-                    var result: [N]usize = undefined;
+                pub fn next(self: CartesianIterator) ?[N]usize {
+                    if (self.inner.next()) |cart| {
+                        var result: [N]usize = undefined;
 
-                    for (0..N) |i| {
-                        switch (self.sides[i]) {
-                            .left => result[i] = O - 1 - cart[i],
-                            .right => result[i] = O + self.block[i] + cart[i],
-                            else => result[i] = O + cart[i],
+                        for (0..N) |i| {
+                            switch (self.sides[i]) {
+                                .left => result[i] = O - 1 - cart[i],
+                                .right => result[i] = O + self.block[i] + cart[i],
+                                else => result[i] = O + cart[i],
+                            }
                         }
-                    }
 
-                    return result;
-                } else {
-                    return null;
+                        return result;
+                    } else {
+                        return null;
+                    }
                 }
-            }
-        };
+            };
+        }
 
         /// Iterates all cell indices (in ghost space) in this region.
-        pub fn cartesianIndices(self: Self, block: [N]usize) CartesianIterator {
+        pub fn cartesianIndices(self: Self, comptime O: usize, block: [N]usize) CartesianIterator(O) {
             var size: [N]usize = undefined;
 
             for (0..N) |i| {
@@ -77,32 +90,34 @@ pub fn Region(comptime N: usize, comptime O: usize) type {
             };
         }
 
-        pub const InnerFaceIterator = struct {
-            inner: IndexSpace.CartesianIterator,
-            block: [N]usize,
-            sides: [N]Side,
+        pub fn InnerFaceIterator(comptime O: usize) type {
+            return struct {
+                inner: IndexSpace.CartesianIterator,
+                block: [N]usize,
+                sides: [N]Side,
 
-            pub fn next(self: InnerFaceIterator) ?[N]usize {
-                if (self.inner.next()) |cart| {
-                    var result: [N]usize = undefined;
+                pub fn next(self: InnerFaceIterator) ?[N]usize {
+                    if (self.inner.next()) |cart| {
+                        var result: [N]usize = undefined;
 
-                    for (0..N) |i| {
-                        switch (self.sides[i]) {
-                            .left => result[i] = O,
-                            .right => result[i] = O + self.block[i],
-                            else => result[i] = O + cart[i],
+                        for (0..N) |i| {
+                            switch (self.sides[i]) {
+                                .left => result[i] = O,
+                                .right => result[i] = O + self.block[i],
+                                else => result[i] = O + cart[i],
+                            }
                         }
-                    }
 
-                    return result;
-                } else {
-                    return null;
+                        return result;
+                    } else {
+                        return null;
+                    }
                 }
-            }
-        };
+            };
+        }
 
         /// Iterates over all indices on the inner face.
-        pub fn innerFaceIndices(self: Self, block: [N]usize) InnerFaceIterator {
+        pub fn innerFaceIndices(self: Self, comptime O: usize, block: [N]usize) InnerFaceIterator(O) {
             var size: [N]usize = undefined;
 
             for (0..N) |i| {
@@ -149,7 +164,7 @@ pub fn Region(comptime N: usize, comptime O: usize) type {
 
         /// Iterates outwards from the inner face. Provides offsets that can be added to the inner face
         /// index to find the global index.
-        pub fn extentOffsets(self: Self) ExtentIterator {
+        pub fn extentOffsets(self: Self, comptime O: usize) ExtentIterator {
             var size: [N]usize = undefined;
 
             for (0..N) |i| {
@@ -172,6 +187,7 @@ pub fn Region(comptime N: usize, comptime O: usize) type {
         // Constructors ***********
         // ************************
 
+        /// Assembles an array of all valid regions.
         pub fn regions() [3 ^ N]Region(N) {
             var regs: [3 ^ N]Region(N) = undefined;
 
@@ -195,6 +211,7 @@ pub fn Region(comptime N: usize, comptime O: usize) type {
             return regs;
         }
 
+        /// Constructs an array of regions ordered by adjacency.
         pub fn orderedRegions() [3 ^ N]Region(N) {
             var regs: [3 ^ N]Region(N) = regions();
             heap(Region(N), &regs, void, lessThanFn);

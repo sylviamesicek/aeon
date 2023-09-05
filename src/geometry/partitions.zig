@@ -40,6 +40,7 @@ pub fn PartitionSpace(comptime N: usize) type {
             children_total: usize,
         };
 
+        /// Builds a new partition space from an allocator, size and set of defined clusters.
         pub fn init(allocator: Allocator, size: [N]usize, clusters: []const IndexBox) !Self {
             var owned_clusters = try allocator.alloc(IndexBox, clusters.len);
             errdefer allocator.free(owned_clusters);
@@ -88,10 +89,12 @@ pub fn PartitionSpace(comptime N: usize) type {
             self.gpa.free(self.children);
         }
 
+        /// Iterates over computed partitions in partition space.
         fn partitions(self: Self) []const IndexBox {
             return self.parts.items(.bounds);
         }
 
+        /// Computes the efficiency of a given partition.
         pub fn computeEfficiency(self: Self, subblock: IndexBox, tags: []const bool) f64 {
             const subspace = IndexSpace(N){ .size = subblock.size };
             const space = IndexSpace(N){ .size = self.size };
