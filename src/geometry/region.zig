@@ -48,7 +48,7 @@ pub fn Region(comptime N: usize) type {
             return res;
         }
 
-        pub fn toSpace(self: Self, comptime O: usize, block: [N]usize) IndexSpace {
+        pub fn space(self: Self, comptime O: usize, block: [N]usize) IndexSpace {
             var size: [N]usize = undefined;
 
             for (0..N) |i| {
@@ -100,10 +100,8 @@ pub fn Region(comptime N: usize) type {
                 }
             }
 
-            const space = IndexSpace.fromSize(size);
-
             return .{
-                .inner = space.cartesianIndices(),
+                .inner = IndexSpace.fromSize(size).cartesianIndices(),
                 .block = block,
                 .sides = self.sides,
             };
@@ -147,10 +145,8 @@ pub fn Region(comptime N: usize) type {
                 }
             }
 
-            const space = IndexSpace.fromSize(size);
-
             return .{
-                .inner = space.cartesianIndices(),
+                .inner = IndexSpace.fromSize(size).cartesianIndices(),
                 .block = block,
                 .sides = self.sides,
             };
@@ -194,10 +190,8 @@ pub fn Region(comptime N: usize) type {
                 }
             }
 
-            const space = IndexSpace.fromSize(size);
-
             return .{
-                .inner = space.cartesianIndices(),
+                .inner = IndexSpace.fromSize(size).cartesianIndices(),
                 .sides = self.sides,
             };
         }
@@ -210,9 +204,9 @@ pub fn Region(comptime N: usize) type {
         pub fn regions() [Count]Region(N) {
             var regs: [Count]Region(N) = undefined;
 
-            const space = IndexSpace.fromSize([1]usize{3} ** N);
+            const rspace = IndexSpace.fromSize([1]usize{3} ** N);
 
-            var indices = space.cartesianIndices();
+            var indices = rspace.cartesianIndices();
 
             var i: usize = 0;
 
