@@ -6,6 +6,8 @@ const Box = @import("box.zig").Box;
 /// Describes an abstract index space, ie an N-dimensional space with
 /// size[i] discrete cells on each axis. Contains helpers for converting
 /// between cartesian and linear indices, as well as iterator over the space.
+/// This interprets multidimensional arrays as being in row-major (last most index
+/// should change the fastest for optimal cache efficiency).
 pub fn IndexSpace(comptime N: usize) type {
     return struct {
         size: [N]usize,

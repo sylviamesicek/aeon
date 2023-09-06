@@ -1,9 +1,10 @@
 const std = @import("std");
-const heap = std.sort.heap;
+const insertion = std.sort.insertion;
+const powi = std.math.powi;
 
 const geometry = @import("../geometry/geometry.zig");
 
-/// Defines an extended region around a block that can optionally include ghost nodes. In 2D, a region looks like
+/// Defines an extended region around a block that can optionally include ghost nodes. In 2D, a region subdivision looks like
 ///
 ///     ---------------
 ///     | NW | N | NE |
@@ -14,8 +15,12 @@ const geometry = @import("../geometry/geometry.zig");
 ///     ---------------
 ///
 /// And allows one to write algorithms that traverse the edges and corners in an ordered way and iterate over the
-/// cells within a given section.
+/// cells within a given region.
 pub fn Region(comptime N: usize) type {
+    const Count = powi(usize, 3, N) catch {
+        @compileError("Invalid N for Region type");
+    };
+
     return struct {
         sides: [N]Side,
 
@@ -30,7 +35,7 @@ pub fn Region(comptime N: usize) type {
         const IndexSpace = geometry.IndexSpace(N);
         const IndexBox = geometry.Box(N, usize);
 
-        /// How many steps of adjacency to reach the middle section.
+        /// How many steps of adjacency to reach the middle region.
         pub fn adjacency(self: Self) usize {
             var res: usize = 0;
 
@@ -43,13 +48,27 @@ pub fn Region(comptime N: usize) type {
             return res;
         }
 
+        pub fn toSpace(self: Self, comptime O: usize, block: [N]usize) IndexSpace {
+            var size: [N]usize = undefined;
+
+            for (0..N) |i| {
+                if (self.sides[i] == .left or self.sides[i] == .right) {
+                    size[i] = O;
+                } else {
+                    size[i] = block[i];
+                }
+            }
+
+            return IndexSpace.fromSize(size);
+        }
+
         pub fn CartesianIterator(comptime O: usize) type {
             return struct {
                 inner: IndexSpace.CartesianIterator,
                 block: [N]usize,
                 sides: [N]Side,
 
-                pub fn next(self: CartesianIterator) ?[N]usize {
+                pub fn next(self: *CartesianIterator(O)) ?[N]usize {
                     if (self.inner.next()) |cart| {
                         var result: [N]usize = undefined;
 
@@ -96,14 +115,14 @@ pub fn Region(comptime N: usize) type {
                 block: [N]usize,
                 sides: [N]Side,
 
-                pub fn next(self: InnerFaceIterator) ?[N]usize {
+                pub fn next(self: *InnerFaceIterator(O)) ?[N]usize {
                     if (self.inner.next()) |cart| {
                         var result: [N]usize = undefined;
 
                         for (0..N) |i| {
                             switch (self.sides[i]) {
                                 .left => result[i] = O,
-                                .right => result[i] = O + self.block[i],
+                                .right => result[i] = O + self.block[i] - 1,
                                 else => result[i] = O + cart[i],
                             }
                         }
@@ -141,7 +160,7 @@ pub fn Region(comptime N: usize) type {
             inner: IndexSpace.CartesianIterator,
             sides: [N]Side,
 
-            pub fn next(self: ExtentIterator) ?[N]isize {
+            pub fn next(self: *ExtentIterator) ?[N]isize {
                 if (self.inner.next()) |cart| {
                     var result: [N]isize = undefined;
 
@@ -188,8 +207,8 @@ pub fn Region(comptime N: usize) type {
         // ************************
 
         /// Assembles an array of all valid regions.
-        pub fn regions() [3 ^ N]Region(N) {
-            var regs: [3 ^ N]Region(N) = undefined;
+        pub fn regions() [Count]Region(N) {
+            var regs: [Count]Region(N) = undefined;
 
             const space = IndexSpace.fromSize([1]usize{3} ** N);
 
@@ -198,9 +217,9 @@ pub fn Region(comptime N: usize) type {
             var i: usize = 0;
 
             while (indices.next()) |cart| {
-                comptime var sides: [N]Side = undefined;
+                var sides: [N]Side = undefined;
 
-                inline for (0..N) |axis| {
+                for (0..N) |axis| {
                     sides[axis] = @enumFromInt(cart[axis]);
                 }
 
@@ -212,9 +231,9 @@ pub fn Region(comptime N: usize) type {
         }
 
         /// Constructs an array of regions ordered by adjacency.
-        pub fn orderedRegions() [3 ^ N]Region(N) {
-            var regs: [3 ^ N]Region(N) = regions();
-            heap(Region(N), &regs, void, lessThanFn);
+        pub fn orderedRegions() [Count]Region(N) {
+            var regs: [Count]Region(N) = regions();
+            insertion(Region(N), &regs, {}, lessThanFn);
             return regs;
         }
 
@@ -222,4 +241,58 @@ pub fn Region(comptime N: usize) type {
             return lhs.adjacency() < rhs.adjacency();
         }
     };
+}
+
+test "region adjacency" {
+    const expectEqualSlices = std.testing.expectEqualSlices;
+
+    const Side = Region(2).Side;
+
+    const regions = Region(2).orderedRegions();
+
+    try expectEqualSlices(Side, &regions[0].sides, &[_]Side{ .middle, .middle });
+    try expectEqualSlices(Side, &regions[1].sides, &[_]Side{ .left, .middle });
+    try expectEqualSlices(Side, &regions[2].sides, &[_]Side{ .middle, .left });
+    try expectEqualSlices(Side, &regions[3].sides, &[_]Side{ .middle, .right });
+    try expectEqualSlices(Side, &regions[4].sides, &[_]Side{ .right, .middle });
+    try expectEqualSlices(Side, &regions[5].sides, &[_]Side{ .left, .left });
+    try expectEqualSlices(Side, &regions[6].sides, &[_]Side{ .left, .right });
+    try expectEqualSlices(Side, &regions[7].sides, &[_]Side{ .right, .left });
+    try expectEqualSlices(Side, &regions[8].sides, &[_]Side{ .right, .right });
+}
+
+test "region indices" {
+    const expect = std.testing.expect;
+    const expectEqualSlices = std.testing.expectEqualSlices;
+
+    const Side = Region(2).Side;
+
+    const block: [2]usize = [_]usize{ 2, 2 };
+
+    const region = Region(2){
+        .sides = [_]Side{ .right, .left },
+    };
+
+    try expect(region.adjacency() == 2);
+
+    var indices = region.cartesianIndices(2, block);
+
+    try expectEqualSlices(usize, &[_]usize{ 4, 1 }, &indices.next().?);
+    try expectEqualSlices(usize, &[_]usize{ 4, 0 }, &indices.next().?);
+    try expectEqualSlices(usize, &[_]usize{ 5, 1 }, &indices.next().?);
+    try expectEqualSlices(usize, &[_]usize{ 5, 0 }, &indices.next().?);
+    try expect(indices.next() == null);
+
+    var inner_indices = region.innerFaceIndices(2, block);
+
+    try expectEqualSlices(usize, &[_]usize{ 3, 2 }, &inner_indices.next().?);
+    try expect(inner_indices.next() == null);
+
+    var offsets = region.extentOffsets(2);
+
+    try expectEqualSlices(isize, &[_]isize{ 1, -1 }, &offsets.next().?);
+    try expectEqualSlices(isize, &[_]isize{ 1, -2 }, &offsets.next().?);
+    try expectEqualSlices(isize, &[_]isize{ 2, -1 }, &offsets.next().?);
+    try expectEqualSlices(isize, &[_]isize{ 2, -2 }, &offsets.next().?);
+    try expect(offsets.next() == null);
 }

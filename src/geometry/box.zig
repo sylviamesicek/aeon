@@ -92,6 +92,14 @@ pub fn Box(comptime N: usize, comptime T: type) type {
             return global;
         }
 
+        pub fn localFromGlobal(self: Self, global: [N]T) [N]T {
+            var local: [N]T = undefined;
+            for (0..N) |axis| {
+                local[axis] = global[axis] - self.origin[axis];
+            }
+            return local;
+        }
+
         /// Refines the box by multiplying each component by 2.
         pub fn refine(self: *Self) void {
             for (0..N) |axis| {
