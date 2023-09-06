@@ -100,8 +100,9 @@ pub fn Mesh(comptime N: usize, comptime O: usize) type {
         pub const Patch = struct {
             /// Bounds of this patch in level index space.
             bounds: IndexBox,
-            /// Children of this patch
+            /// Offset into children array
             children_offset: usize,
+            /// Number of child patches
             children_total: usize,
             /// The total number of tiles on this patch.
             tile_total: usize = 0,
@@ -194,8 +195,18 @@ pub fn Mesh(comptime N: usize, comptime O: usize) type {
             /// Gets a slice of children indices for each patch
             fn childrenSlice(self: *Level, patch: usize) []usize {
                 const offset = self.patches.items(.children_offset)[patch];
-                const count = self.patches.items(.children_total)[patch];
-                return self.children.items[offset..(offset + count)];
+                const total = self.patches.items(.children_total)[patch];
+                return self.children.items[offset..(offset + total)];
+            }
+
+            fn tileSlice(self: *Level, patch: usize, level_slice: anytype) @TypeOf(level_slice) {
+                if (@TypeOf(level_slice) != []f64 and @TypeOf(level_slice) != []const f64) {
+                    @compileError("tileSlice only defined for []f64 and []const f64");
+                }
+
+                const offset = self.patches.items(.tile_offset)[patch];
+                const total = self.patches.items(.tile_total)[patch];
+                return level_slice[offset..(offset + total)];
             }
 
             /// Computes patch and block offsets and level totals for tiles and cells.
