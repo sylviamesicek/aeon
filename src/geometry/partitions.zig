@@ -21,7 +21,7 @@ pub fn PartitionSpace(comptime N: usize) type {
         /// Size of the space to be partitioned.
         size: [N]usize,
         /// The set of partitions in the partitions list.
-        parts: MultiArrayList(Partition),
+        parts: ArrayListUnmanaged(Partition),
         /// The set of clusters in the partition space.
         clusters: []const IndexBox,
         /// The parent partition for each cluster.
@@ -32,7 +32,7 @@ pub fn PartitionSpace(comptime N: usize) type {
         const Self = @This();
         const IndexBox = Box(N, usize);
 
-        const Partition = struct {
+        pub const Partition = struct {
             /// The bounds of the partition in index space.
             bounds: Box(N, usize),
             /// The child clusters of the partition in index space.
@@ -90,8 +90,8 @@ pub fn PartitionSpace(comptime N: usize) type {
         }
 
         /// Iterates over computed partitions in partition space.
-        fn partitions(self: Self) []const IndexBox {
-            return self.parts.items(.bounds);
+        pub fn partitions(self: Self) []const Partition {
+            return self.parts.items;
         }
 
         /// Computes the efficiency of a given partition.
@@ -417,8 +417,8 @@ pub fn PartitionSpace(comptime N: usize) type {
         }
 
         fn computeParents(self: *Self) void {
-            for (self.parts.items(.children_offset), self.parts.items(.children_total), 0..) |offset, total, i| {
-                for (self.children[offset..(offset + total)]) |child| {
+            for (self.parts.items, 0..) |part, i| {
+                for (self.children[part.children_offset..(part.children_offset + part.children_total)]) |child| {
                     self.parents[child] = i;
                 }
             }

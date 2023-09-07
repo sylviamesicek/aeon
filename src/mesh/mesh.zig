@@ -540,7 +540,7 @@ pub fn Mesh(comptime N: usize, comptime O: usize) type {
 
                 // At this moment in time
                 // - coarse is old
-                // - target is old (but children and parents have been updated)
+                // - target is old
                 // - refined has been fully updated
 
                 // To assemble clusters per patch we iterate children of coarse, then children of target
@@ -641,10 +641,8 @@ pub fn Mesh(comptime N: usize, comptime O: usize) type {
                 //     }
                 // }
 
-                target.patches.shrinkRetainingCapacity(0);
-                target.blocks.shrinkRetainingCapacity(0);
-                target.children.shrinkRetainingCapacity(0);
-                target.parents.shrinkRetainingCapacity(0);
+                try target.setTotalChildren(self.gpa, clusters.len);
+                target.clearRetainingCapacity();
 
                 // At this moment in time
                 // - coarse is old
@@ -661,13 +659,13 @@ pub fn Mesh(comptime N: usize, comptime O: usize) type {
                     // Get underlying data
                     const coarse: *const Level = &self.levels.items[level_id - 1];
 
-                    ctags = self.levelTileSlice(level_id - 1, bool, tags);
+                    ctags = coarse.levelTileSlice(tags);
                     clen = coarse.patches.len;
                     cbounds = coarse.patches.items(.bounds);
                     coffsets = coarse.patches.items(.tile_offset);
                 } else {
                     // Otherwise use base data
-                    ctags = self.baseTileSlice(bool, tags);
+                    ctags = self.baseTileSlice(tags);
                     clen = 1;
                     cbounds = bbounds_slice;
                     coffsets = boffsets_slice;
@@ -676,6 +674,7 @@ pub fn Mesh(comptime N: usize, comptime O: usize) type {
                 // 3.3 Generate new patches.
                 // *************************
 
+                // Start filling coarse children
                 coarse_children.shrinkRetainingCapacity(0);
 
                 try coarse_children.append(self.gpa, 0);
@@ -697,129 +696,92 @@ pub fn Mesh(comptime N: usize, comptime O: usize) type {
                     // Preprocess tags to include all elements from clusters (and one tile buffer region around cluster)
                     preprocessTagsOnPatch(cptags, cpbounds, upclusters);
 
-                    // Run partitioning algorithm
-                    var partition_space = try PartitionSpace.init(scratch, cpbounds.size, upclusters);
-                    defer partition_space.deinit();
+                    // Run partitioning algorithm on coarse patch to determine blocks.
+                    var cppartitioner = try PartitionSpace.init(scratch, cpbounds.size, upclusters);
+                    defer cppartitioner.deinit();
 
-                    try partition_space.build(cptags, config.patch_max_tiles, config.patch_efficiency);
+                    try cppartitioner.build(cptags, config.patch_max_tiles, config.patch_efficiency);
 
-                    // Add patches to target
-                    const patch_children_offset: usize = target.children.items.len;
+                    // Iterate computed patches
+                    for (cppartitioner.partitions()) |patch| {
+                        // Build a space from the patch size.
+                        const pspace: IndexSpace = patch.bounds.space();
 
-                    for (partition_space.parts.items(.bounds), partition_space.parts.items(.children_offset), partition_space.parts.items(.children_total)) |bounds, offset, total| {
-                        // Compute refined bounds in global space.
-                        var pbounds: IndexBox = undefined;
+                        // Allocate sufficient space to hold children of this patch
+                        var pchildren: []usize = try scratch.alloc(usize, patch.children_total);
+                        defer scratch.free(pchildren);
 
-                        for (0..N) |axis| {
-                            pbounds.origin[axis] = cpbounds.origin[axis] + bounds.origin[axis];
-                            pbounds.size[axis] = bounds.size[axis];
+                        // Fill with computed children of patch (using index map to find global index into refined children)
+                        for (patch.children_offset..(patch.children_offset + patch.children_total), pchildren) |child_id, *child| {
+                            child = upcluster_index_map[child_id];
                         }
 
-                        // Append to patch list
-                        try target.patches.append(self.gpa, Patch{
-                            .bounds = pbounds,
-                            .children_offset = patch_children_offset + offset,
-                            .children_total = total,
-                        });
-                    }
-
-                    // Append mapped children indices to buffer.
-                    for (partition_space.children) |index| {
-                        try target.children.append(self.gpa, upcluster_index_map[index]);
-                    }
-
-                    // Set parents to corret values
-                    for (partition_space.parts.items(.children_offset), partition_space.parts.items(.children_total), 0..) |offset, total, i| {
-                        for (target.children.items[offset..(offset + total)]) |child| {
-                            target.parents.items[child] = i;
-                        }
-                    }
-
-                    try coarse_children.append(self.gpa, target.patches.len);
-
-                    target.transfer_patches.items(.patch_total)[cpid] += partition_space.parts.len;
-                }
-
-                if (coarse_exists) {
-                    const coarse: *Level = &self.levels.items[level_id - 1];
-
-                    try coarse.children.resize(self.gpa, target.patches.len);
-                    try coarse.parents.resize(self.gpa, target.patches.len);
-
-                    for (0..target.patches.len) |i| {
-                        coarse.children.items[i] = i;
-                    }
-
-                    for (0..clen) |cpid| {
-                        const start = coarse_children.items[cpid];
-                        const end = coarse_children.items[cpid + 1];
-
-                        coarse.patches.items(.children_offset)[cpid] = start;
-                        coarse.patches.items(.children_total)[cpid] = end - start;
-
-                        @memset(coarse.parents.items[start..end], cpid);
-                    }
-                }
-
-                // At this moment in time
-                // - coarse is old (but heirarchy is updated)
-                // - target is updated (but blocks are still empty and patches are still coarse)
-                // - refined has been fully updated
-
-                // 3.4 Generate new blocks by partitioning new patches.
-                // ****************************************************
-
-                // Loop through newly created patches
-                for (0..clen) |cpid| {
-                    // Aliases for underlying variables
-                    const cpbounds: IndexBox = cbounds[cpid];
-                    const cpoffset: usize = coffsets[cpid];
-                    const cpspace: IndexSpace = cpbounds.space();
-                    const cptags: []const bool = ctags[cpoffset..(cpoffset + cpspace.total())];
-
-                    for (coarse_children.items[cpid]..coarse_children.items[cpid + 1]) |patch| {
-                        // Reset arena for new frame.
-                        defer _ = arena.reset(.retain_capacity);
-
-                        const bounds: IndexBox = target.patches.items(.bounds)[patch];
-
-                        const space: IndexSpace = bounds.space();
-
-                        // Build patch tags
-                        var ptags: []bool = try scratch.alloc(bool, space.total());
+                        // Build window into tags for this patch
+                        var ptags: []bool = try scratch.alloc(bool, pspace.total());
                         defer scratch.free(ptags);
                         // Set ptags using window of uptags
-                        cpspace.window(bounds.relativeTo(cpbounds), bool, ptags, cptags);
+                        cpspace.window(patch.bounds, bool, ptags, cptags);
 
-                        // Run partitioning algorithm
-                        var partition_space = try PartitionSpace.init(scratch, bounds.size, &[_]IndexBox{});
-                        defer partition_space.deinit();
+                        // Run patitioning algorithm on patch to determine blocks
+                        var ppartitioner = try PartitionSpace.init(scratch, pspace.size, &[_]IndexBox{});
+                        defer ppartitioner.deinit();
 
-                        try partition_space.build(ptags, config.block_max_tiles, config.block_efficiency);
+                        try ppartitioner.build(ptags, config.block_max_tiles, config.block_efficiency);
 
-                        // For each resulting block
-                        for (partition_space.parts.items(.bounds)) |pbounds| {
-                            // Compute refined global bounds
-                            var rbounds: IndexBox = undefined;
+                        // Offset blocks to be in global space
+                        var pblocks: []IndexBox = try scratch.alloc(IndexBox, ppartitioner.partitions().len);
+                        try scratch.free(pblocks);
+
+                        // Compute global bounds of the patch
+                        var pbounds: IndexBox = patch.bounds;
+
+                        for (0..N) |i| {
+                            pbounds.origin[i] += cpbounds.origin[i];
+                        }
+
+                        // Iterate computed blocks and offset to find global bounds of each block
+                        for (ppartitioner.partitions(), pblocks) |block, *pblock| {
+                            pblock = block;
 
                             for (0..N) |axis| {
-                                rbounds.origin[axis] = bounds.origin[axis] + pbounds.origin[axis];
-                                rbounds.size[axis] = pbounds.size[axis];
+                                pblock.origin[axis] += pbounds.origin[axis];
                             }
-
-                            // Add to list of blocks with appropriate patch id.
-                            try target.blocks.append(self.gpa, Block{
-                                .bounds = rbounds,
-                                .patch = patch,
-                            });
                         }
+
+                        // Add patch to level
+                        try target.addPatch(self.gpa, pbounds, pblocks, pchildren);
                     }
+
+                    try coarse_children.append(self.gpa, target.patchTotal());
+
+                    // target.transfer_patches.items(.patch_total)[cpid] += partition_space.parts.len;
                 }
+
+                // if (coarse_exists) {
+                //     const coarse: *Level = &self.levels.items[level_id - 1];
+
+                //     try coarse.children.resize(self.gpa, target.patches.len);
+                //     try coarse.parents.resize(self.gpa, target.patches.len);
+
+                //     for (0..target.patches.len) |i| {
+                //         coarse.children.items[i] = i;
+                //     }
+
+                //     for (0..clen) |cpid| {
+                //         const start = coarse_children.items[cpid];
+                //         const end = coarse_children.items[cpid + 1];
+
+                //         coarse.patches.items(.children_offset)[cpid] = start;
+                //         coarse.patches.items(.children_total)[cpid] = end - start;
+
+                //         @memset(coarse.parents.items[start..end], cpid);
+                //     }
+                // }
 
                 target.refine();
 
                 // At this moment in time
-                // - coarse is old (but heirarchy is updated)
+                // - coarse is old
                 // - target has been fully updated
                 // - refined has been fully updated
             }

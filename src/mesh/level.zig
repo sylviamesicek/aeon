@@ -98,10 +98,15 @@ pub fn Level(comptime N: usize, comptime O: usize) type {
             self.parents.shrinkRetainingCapacity(0);
         }
 
+        pub fn patchTotal(self: *const Self) usize {
+            return self.patches.len;
+        }
+
         pub fn setTotalChildren(self: *Self, allocator: Allocator, total: usize) !void {
             try self.parents.resize(allocator, total);
         }
 
+        /// All blocks should be given relative two the bounds of the patch.
         pub fn addPatch(self: *Self, allocator: Allocator, bounds: IndexBox, blocks: []const IndexBox, children: []const usize) !void {
             const patch_id: usize = self.patches.len;
             const block_offset: usize = self.blocks.len;
@@ -120,8 +125,14 @@ pub fn Level(comptime N: usize, comptime O: usize) type {
             try self.blocks.ensureUnusedCapacity(allocator, blocks.len);
 
             for (blocks) |block| {
+                var bbounds: IndexBox = block;
+
+                for (0..N) |i| {
+                    bbounds.origin[i] += bounds.origin[i];
+                }
+
                 self.blocks.appendAssumeCapacity(Block(N){
-                    .bounds = block,
+                    .bounds = bbounds,
                     .patch = patch_id,
                 });
             }
