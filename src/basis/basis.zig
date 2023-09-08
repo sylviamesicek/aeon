@@ -5,6 +5,9 @@ const assert = std.debug.assert;
 const lagrange = @import("lagrange.zig");
 
 const geometry = @import("../geometry/geometry.zig");
+const mesh = @import("../mesh/mesh.zig");
+
+const BoundaryCondition = mesh.BoundaryCondition;
 
 /// Manages the application of stencil products on functions. Supports computing values, centered derivatives
 /// positions, boundary positions, boundary values, boundary derivatives, prolongation, and restriction.
@@ -19,6 +22,7 @@ pub fn StencilSpace(comptime N: usize, comptime O: usize) type {
         const IndexBox = geometry.Box(N, usize);
         const IndexSpace = geometry.IndexSpace(N);
         const Region = geometry.Region(N, O);
+        const Face = geometry.Face(N);
 
         // Gets position of cell.
         pub fn position(self: Self, cell: [N]usize) [N]f64 {
@@ -349,6 +353,65 @@ pub fn StencilSpace(comptime N: usize, comptime O: usize) type {
                 result[i] + 2 * O;
             }
             return result;
+        }
+
+        pub fn fillBoundary(self: Self, comptime region: Region(N), boundary: anytype, field: []f64) void {
+            var inner_face_cells = region.innerFaceIndices(O, self.index_size);
+
+            while (inner_face_cells.next()) |inner_face_cell| {
+                var cell: [N]usize = inner_face_cell;
+
+                for (0..N) |i| {
+                    cell[i] -= O;
+                }
+
+                comptime var extent_indices = region.extentOffsets();
+
+                inline while (extent_indices) |extents| {
+                    var target: [N]usize = cell;
+
+                    for (0..N) |i| {
+                        target[i] += extents[i];
+                    }
+
+                    self.setValue(target, field, 0.0);
+
+                    const pos = self.boundaryPosition(extents, cell);
+                    _ = pos;
+
+                    var v: f64 = 0.0;
+                    var normals: [N]usize = undefined;
+                    var rhs: f64 = 0.0;
+
+                    for (0..N) |i| {
+                        if (extents[i] != 0) {
+                            const condition: BoundaryCondition = boundary.condition(position, Face{
+                                .side = extents[i] > 0,
+                                .axis = i,
+                            });
+
+                            v += condition.value;
+                            normals[i] = condition.normal;
+                            rhs += condition.rhs;
+                        }
+                    }
+
+                    var sum: f64 = v * self.boundaryValue(extents, cell, field);
+                    var coef: f64 = v * self.boundaryValueCoef(extents);
+
+                    inline for (0..N) |i| {
+                        if (extents[i] != 0) {
+                            var ranks: [N]usize = [1]usize{0} ** N;
+                            ranks[i] = 1;
+
+                            sum += normals[i] * self.boundaryDerivative(ranks, extents, cell, field);
+                            coef += normals[i] * self.boundaryDerivativeCoef(ranks, extents);
+                        }
+                    }
+
+                    self.setValue(target, field, (rhs - sum) / coef);
+                }
+            }
         }
     };
 }

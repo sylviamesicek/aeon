@@ -39,9 +39,9 @@ pub fn Mesh(comptime N: usize, comptime O: usize) type {
 
         // Aliases
         const Self = @This();
-        const Level = levels.Level(N, O);
-        const Block = levels.Block(N);
-        const Patch = levels.Patch(N);
+        pub const Level = levels.Level(N, O);
+        pub const Block = levels.Block(N);
+        pub const Patch = levels.Patch(N);
         const IndexBox = geometry.Box(N, usize);
         const RealBox = geometry.Box(N, f64);
         const Face = geometry.Face(N);
@@ -190,47 +190,41 @@ pub fn Mesh(comptime N: usize, comptime O: usize) type {
             }
         }
 
-        // *************************
-        // Fill Ghost **************
-        // *************************
-
-        pub fn fillGhostCells(self: *const Self, boundary: anytype, block_map: []const usize, field: []f64) !void {
+        pub fn fillBoundary(self: *const Self, boundary: anytype, block_map: []const usize, field: []f64) !void {
             assert(block_map.len == self.tileTotal());
             assert(field.len == self.cellTotal());
             assert(boundaries.hasConditionDecl(N)(boundary));
 
-            // Fill base first
-            self.fillBaseGhostCells(boundary, field);
+            self.fillBaseExterior(boundary, field);
 
-            for (0..self.active_levels) |level_id| {
-                self.fillLevelGhostCells(level_id, boundary, block_map, field);
+            for (0..self.active_levels) |i| {
+                self.fillLevelBoundary(i, boundary, block_map, field);
             }
         }
 
-        fn fillBaseGhostCells(self: *const Self, boundary: anytype, field: []f64) void {
+        fn fillBaseExterior(self: *const Self, boundary: anytype, field: []f64) void {
             const regions = Region.orderedRegions();
 
-            const stencil_space: StencilSpace = .{
-                .physical_bounds = self.physical_bounds,
-                .index_size = IndexSpace.fromSize(self.base.index_size).scale(self.tile_width).size,
-            };
+            const base_field: []f64 = self.baseCellSlice(field);
+            const stencil_space = self.baseStencilSpace();
 
             inline for (regions) |region| {
-                fillExteriorGhostCells(region, stencil_space, boundary, field[0..self.baseCellTotal()]);
+                stencil_space.fillBoundary(region, boundary, base_field);
             }
         }
 
-        fn fillLevelGhostCells(self: *const Self, level: usize, boundary: anytype, block_map: []const usize, field: []f64) void {
+        fn fillLevelBoundary(self: *const Self, level: usize, boundary: anytype, block_map: []const usize, field: []f64) !void {
             const target: *const Level = self.levels[level];
+            const index_size: IndexBox = target.index_size;
 
             const blocks = target.blocks.slice();
-
-            const index_size = target.index_size;
 
             for (0..blocks.len) |block| {
                 const bounds: IndexBox = blocks.items(.bounds)[block];
                 const offset: usize = blocks.items(.cell_offset)[block];
+                _ = offset;
                 const total: usize = blocks.items(.cell_total)[block];
+                _ = total;
 
                 const regions = Region.orderedRegions();
 
@@ -246,16 +240,16 @@ pub fn Mesh(comptime N: usize, comptime O: usize) type {
                     }
 
                     if (exterior) {
-                        self.fillInteriorGhostCells(region, level, block, block_map, field);
+                        self.fillLevelInterior(region, level, block, block_map, field);
                     } else {
-                        const space = self.computeStencilSpace(level, bounds);
-                        self.fillExteriorGhostCells(region, space, boundary, field[offset + (offset + total)]);
+                        self.fillLevelExterior(region, level, block, boundary, field);
                     }
                 }
             }
         }
 
-        fn fillInteriorGhostCells(self: *const Self, comptime region: Region, level: usize, block: usize, block_map: []const usize, field: []f64) void {
+        fn fillLevelInterior(self: *const Self, comptime region: Region, level: usize, block: usize, block_map: []const usize, field: []f64) void {
+            _ = field;
             const target: *const Level = &self.levels[level];
 
             const blocks = target.blocks.slice();
@@ -266,194 +260,127 @@ pub fn Mesh(comptime N: usize, comptime O: usize) type {
 
             const pbounds: IndexBox = patches.items(.bounds)[patch];
             const poffset = patches.items(.tile_offset)[patch];
+            _ = poffset;
             const ptotal = patches.items(.tile_total)[patch];
+            _ = ptotal;
             const pspace = pbounds.space();
 
-            const pblock_map = block_map[(target.tile_offset + poffset)..(target.tile_offset + poffset + ptotal)];
+            const pblock_map: []const usize = target.patchTileSlice(patch, target.levelTileSlice(block_map));
 
-            var cparent: usize = undefined;
-            var cbounds: []const IndexBox = undefined;
-            var cpblock_map: []const usize = undefined;
+            const rbounds: IndexBox = bounds.relativeTo(pbounds);
 
-            const bbounds_slice = &[_]IndexBox{.{
-                .origin = [1]usize{0} ** N,
-                .size = self.base.index_size,
-            }};
+            var rneighbors = region.cartesianIndices(1, rbounds.size);
 
-            if (level == 0) {
-                cparent = 0;
-                cbounds = bbounds_slice;
-                cpblock_map = block_map[0..self.baseTileTotal()];
-            } else {
-                const coarse: *const Level = &self.levels[level - 1];
-                const cpatches = coarse.patches.slice();
-
-                cparent = coarse.parents.items[block];
-                cbounds = cpatches.items(.bounds);
-
-                const cptotal = cpatches.items(.tile_total)[cparent];
-                const cpoffset = cpatches.items(.tile_offset)[cparent];
-
-                cpblock_map = block_map[(coarse.tile_offset + cpoffset)..(coarse.tile_offset + cpoffset + cptotal)];
-            }
-
-            var tile_neighbors = region.cartesianIndices(1, bounds.size);
-
-            for (tile_neighbors) |tile_neighbor| {
-                var tile: [N]usize = tile_neighbor;
+            for (rneighbors) |rneighbor| {
+                var tile: [N]usize = undefined;
 
                 for (0..N) |i| {
-                    tile[i] -= 1;
+                    tile[i] = rbounds.origin[i] + rneighbor[i] - 1;
                 }
 
-                const global: [N]usize = bounds.globalFromLocal(tile);
+                const neighbor = pblock_map[pspace.linearFromCartesian(tile)];
 
-                const block_neighbor: usize = pblock_map[pspace.linearFromCartesian(pbounds.localFromGlobal(global))];
-
-                if (block_neighbor == maxInt(usize)) {
-                    const cpbounds: IndexBox = cbounds[cparent];
-                    const cpspace = cpbounds.space();
-
-                    var cglobal: [N]usize = global;
-
-                    for (0..N) |i| {
-                        cglobal[i] /= 2;
-                    }
-
-                    const cblock_neighbor: usize = cpblock_map[cpspace.linearFromCartesian(cpbounds.localFromGlobal(cglobal))];
-
-                    self.interpolateGhostFromCoarse(region, level, block, cblock_neighbor, global, field);
-                } else {
-                    self.copyGhostFromNeighbor(region, level, block, block_neighbor, global, field);
+                if (neighbor == maxInt(usize)) {} else {
+                    const nbounds: IndexBox = blocks.items(.bounds)[neighbor];
+                    _ = nbounds;
                 }
             }
         }
 
-        fn interpolateGhostFromCoarse(self: *const Self, comptime region: Region, level: usize, block: usize, neighbor: usize, tile: [N]usize, field: []f64) void {
-            _ = level;
-            _ = self;
-            _ = field;
-            _ = tile;
-            _ = neighbor;
-            _ = block;
-            _ = region;
-        }
-
-        fn copyGhostFromNeighbor(self: *const Self, comptime region: Region, level: usize, block: usize, neighbor: usize, tile: [N]usize, field: []f64) void {
+        fn fillLevelExterior(self: *const Self, comptime region: Region, level: usize, block: usize, boundary: anytype, field: []f64) void {
             const target: *const Level = &self.levels[level];
 
-            const blocks = target.blocks.slice();
+            const level_field: []f64 = target.levelCellSlice(field);
+            const block_field: []f64 = target.blockCellSlice(block, level_field);
 
-            const bounds: IndexBox = blocks.items(.bounds)[block];
-            const neighbor_bounds: IndexBox = blocks.items(.bounds)[neighbor];
+            const stencil_space = self.levelStencilSpace(level, block);
 
-            const offset = block.items(.cell_offset)[block];
-            const neighbor_offset = block.items(.cell_offset)[neighbor];
-
-            const block_field: []f64 = field[(target.cell_offset + offset)..];
-            const neighbor_block_field: []const f64 = field[(target.cell_offset + neighbor_offset)..];
-
-            const cell_space = bounds.space().scale(self.tile_width).extendUniform(2 * O);
-            const neighbor_cell_space = neighbor_bounds.space().scale(self.tile_width).extendUniform(2 * O);
-
-            const btile: [N]usize = bounds.localFromGlobal(tile);
-            const ntile: [N]usize = neighbor_bounds.localFromGlobal(tile);
-
-            var cell_origin: [N]usize = undefined;
-            // Neighbor cell origin computed normally
-            var neighbor_cell_origin: [N]usize = undefined;
-
-            for (0..N) |i| {
-                switch (region.sides[i]) {
-                    .left => cell_origin[i] = 0,
-                    .middle => cell_origin[i] = btile[i] * self.tile_width,
-                    .right => cell_origin[i] = bounds.size[i] * self.tile_width + O,
-                }
-
-                switch (region.sides[i]) {
-                    .left => neighbor_cell_origin[i] = ntile[i] * (self.tile_width + 1) - O,
-                    .middle => neighbor_cell_origin[i] = ntile[i] * self.tile_width,
-                    .right => neighbor_cell_origin[i] = ntile[i] * self.tile_width,
-                }
-            }
-
-            var indices = region.space(O, [1]usize{self.tile_width} ** N).cartesianIndices();
-
-            while (indices.next()) |cart| {
-                var cell: [N]usize = undefined;
-                var ncell: [N]usize = undefined;
-
-                for (0..N) |i| {
-                    cell[i] = cell_origin[i] + cart[i];
-                    ncell[i] = neighbor_cell_origin[i] + cart[i];
-                }
-
-                const linear: usize = cell_space.linearFromCartesian(cell);
-                const nlinear: usize = neighbor_cell_space.linearFromCartesian(ncell);
-
-                block_field[linear] = neighbor_block_field[nlinear];
-            }
+            stencil_space.fillBoundary(region, boundary, block_field);
         }
 
-        fn fillExteriorGhostCells(comptime region: Region, stencil_space: StencilSpace, boundary: anytype, field: []f64) void {
-            var inner_face_cells = region.innerFaceIndices(O, stencil_space.index_size);
+        //         if (block_neighbor == maxInt(usize)) {
+        //             const cpbounds: IndexBox = cbounds[cparent];
+        //             const cpspace = cpbounds.space();
 
-            while (inner_face_cells.next()) |inner_face_cell| {
-                var cell: [N]usize = inner_face_cell;
+        //             var cglobal: [N]usize = global;
 
-                for (0..N) |i| {
-                    cell[i] -= O;
-                }
+        //             for (0..N) |i| {
+        //                 cglobal[i] /= 2;
+        //             }
 
-                comptime var extent_indices = region.extentOffsets();
+        //             const cblock_neighbor: usize = cpblock_map[cpspace.linearFromCartesian(cpbounds.localFromGlobal(cglobal))];
 
-                inline while (extent_indices) |extents| {
-                    var target: [N]usize = cell;
+        //             self.interpolateGhostFromCoarse(region, level, block, cblock_neighbor, global, field);
+        //         } else {
+        //             self.copyGhostFromNeighbor(region, level, block, block_neighbor, global, field);
+        //         }
+        //     }
+        // }
 
-                    for (0..N) |i| {
-                        target[i] += extents[i];
-                    }
+        // fn copyGhostFromNeighbor(self: *const Self, comptime region: Region, level: usize, block: usize, neighbor: usize, tile: [N]usize, field: []f64) void {
+        //     const target: *const Level = &self.levels[level];
 
-                    stencil_space.setValue(target, field, 0.0);
+        //     const blocks = target.blocks.slice();
 
-                    const position = stencil_space.boundaryPosition(extents, cell);
+        //     const bounds: IndexBox = blocks.items(.bounds)[block];
+        //     const neighbor_bounds: IndexBox = blocks.items(.bounds)[neighbor];
 
-                    var value: f64 = 0.0;
-                    var normals: [N]usize = undefined;
-                    var rhs: f64 = 0.0;
+        //     const offset = block.items(.cell_offset)[block];
+        //     const neighbor_offset = block.items(.cell_offset)[neighbor];
 
-                    for (0..N) |i| {
-                        if (extents[i] != 0) {
-                            const condition: BoundaryCondition = boundary.condition(position, Face{
-                                .side = extents[i] > 0,
-                                .axis = i,
-                            });
+        //     const block_field: []f64 = field[(target.cell_offset + offset)..];
+        //     const neighbor_block_field: []const f64 = field[(target.cell_offset + neighbor_offset)..];
 
-                            value += condition.value;
-                            normals[i] = condition.normal;
-                            rhs += condition.rhs;
-                        }
-                    }
+        //     const cell_space = bounds.space().scale(self.tile_width).extendUniform(2 * O);
+        //     const neighbor_cell_space = neighbor_bounds.space().scale(self.tile_width).extendUniform(2 * O);
 
-                    var sum = stencil_space.boundaryValue(extents, cell, field);
-                    var coef: f64 = stencil_space.boundaryValueCoef(extents);
+        //     const btile: [N]usize = bounds.localFromGlobal(tile);
+        //     const ntile: [N]usize = neighbor_bounds.localFromGlobal(tile);
 
-                    inline for (0..N) |i| {
-                        if (extents[i] != 0) {
-                            var ranks: [N]usize = [1]usize{0} ** N;
-                            ranks[i] = 1;
+        //     var cell_origin: [N]usize = undefined;
+        //     // Neighbor cell origin computed normally
+        //     var neighbor_cell_origin: [N]usize = undefined;
 
-                            sum += stencil_space.boundaryDerivative(ranks, extents, cell, field);
-                            coef += stencil_space.boundaryDerivativeCoef(ranks, extents);
-                        }
-                    }
+        //     for (0..N) |i| {
+        //         switch (region.sides[i]) {
+        //             .left => cell_origin[i] = 0,
+        //             .middle => cell_origin[i] = btile[i] * self.tile_width,
+        //             .right => cell_origin[i] = bounds.size[i] * self.tile_width + O,
+        //         }
 
-                    stencil_space.setValue(target, field, (rhs - sum) / coef);
-                }
-            }
+        //         switch (region.sides[i]) {
+        //             .left => neighbor_cell_origin[i] = ntile[i] * (self.tile_width + 1) - O,
+        //             .middle => neighbor_cell_origin[i] = ntile[i] * self.tile_width,
+        //             .right => neighbor_cell_origin[i] = ntile[i] * self.tile_width,
+        //         }
+        //     }
+
+        //     var indices = region.space(O, [1]usize{self.tile_width} ** N).cartesianIndices();
+
+        //     while (indices.next()) |cart| {
+        //         var cell: [N]usize = undefined;
+        //         var ncell: [N]usize = undefined;
+
+        //         for (0..N) |i| {
+        //             cell[i] = cell_origin[i] + cart[i];
+        //             ncell[i] = neighbor_cell_origin[i] + cart[i];
+        //         }
+
+        //         const linear: usize = cell_space.linearFromCartesian(cell);
+        //         const nlinear: usize = neighbor_cell_space.linearFromCartesian(ncell);
+
+        //         block_field[linear] = neighbor_block_field[nlinear];
+        //     }
+        // }
+
+        fn baseStencilSpace(self: *const Self) StencilSpace {
+            return .{
+                .physical_bounds = self.physical_bounds,
+                .index_size = IndexSpace.fromSize(self.base.index_size).scale(self.tile_width).size,
+            };
         }
 
-        fn computeStencilSpace(self: *const Self, level: usize, block: IndexBox) StencilSpace {
+        fn levelStencilSpace(self: *const Self, level: usize, block: IndexBox) StencilSpace {
             const index_size: [N]usize = self.levels[level].index_size;
 
             var physical_bounds: RealBox = undefined;
@@ -556,6 +483,8 @@ pub fn Mesh(comptime N: usize, comptime O: usize) type {
                     const coarse: *const Level = &self.levels.items[level_id - 1];
 
                     for (0..coarse.patches.len) |cpid| {
+                        const cpbounds: IndexBox = coarse.patches.items(.bounds)[cpid];
+
                         for (coarse.childrenSlice(cpid)) |tpid| {
                             const start = coarse_children[tpid];
                             const end = coarse_children[tpid + 1];
@@ -566,7 +495,7 @@ pub fn Mesh(comptime N: usize, comptime O: usize) type {
                                 try patch.coarsen();
                                 try patch.coarsen();
 
-                                try clusters.append(self.gpa, patch);
+                                try clusters.append(self.gpa, patch.relativeTo(cpbounds));
                                 try cluster_index_map.append(self.gpa, child);
                             }
                         }
@@ -694,7 +623,7 @@ pub fn Mesh(comptime N: usize, comptime O: usize) type {
                     const upcluster_index_map: []const usize = cluster_index_map.items[cluster_offsets.items[cpid]..cluster_offsets.items[cpid + 1]];
 
                     // Preprocess tags to include all elements from clusters (and one tile buffer region around cluster)
-                    preprocessTagsOnPatch(cptags, cpbounds, upclusters);
+                    preprocessTagsOnPatch(cptags, cpspace, upclusters);
 
                     // Run partitioning algorithm on coarse patch to determine blocks.
                     var cppartitioner = try PartitionSpace.init(scratch, cpbounds.size, upclusters);
@@ -792,7 +721,7 @@ pub fn Mesh(comptime N: usize, comptime O: usize) type {
             self.computeOffsets();
         }
 
-        fn preprocessTagsOnPatch(tags: []bool, bounds: IndexBox, clusters: []const IndexBox) void {
+        fn preprocessTagsOnPatch(tags: []bool, space: IndexSpace, clusters: []const IndexBox) void {
             for (clusters) |upcluster| {
                 var cluster: IndexBox = upcluster;
 
@@ -802,12 +731,12 @@ pub fn Mesh(comptime N: usize, comptime O: usize) type {
                         cluster.size[i] += 1;
                     }
 
-                    if (cluster.origin[i] + cluster.size[i] < bounds.size[i]) {
+                    if (cluster.origin[i] + cluster.size[i] < space.size[i]) {
                         cluster.size[i] += 1;
                     }
                 }
 
-                bounds.space().fillSubspace(cluster, bool, tags, true);
+                space.fillSubspace(cluster, bool, tags, true);
             }
         }
 

@@ -1,6 +1,8 @@
 const std = @import("std");
 
-const Face = @import("../geometry/geometry.zig").Face;
+const geometry = @import("../geometry/geometry.zig");
+
+const Face = geometry.Face;
 
 /// Represents a boundary condition as returned by a BoundaryOperator. Specifies a robin boundary condition along each
 /// face as a function of position.
