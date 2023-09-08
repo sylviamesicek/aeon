@@ -62,34 +62,32 @@ pub fn Region(comptime N: usize) type {
             return IndexSpace.fromSize(size);
         }
 
-        pub fn CartesianIterator(comptime O: usize) type {
-            return struct {
-                inner: IndexSpace.CartesianIterator,
-                block: [N]usize,
-                sides: [N]Side,
+        pub const CartesianIterator = struct {
+            inner: IndexSpace.CartesianIterator,
+            block: [N]usize,
+            sides: [N]Side,
 
-                pub fn next(self: *CartesianIterator(O)) ?[N]usize {
-                    if (self.inner.next()) |cart| {
-                        var result: [N]usize = undefined;
+            pub fn next(self: *CartesianIterator) ?[N]isize {
+                if (self.inner.next()) |cart| {
+                    var result: [N]isize = undefined;
 
-                        for (0..N) |i| {
-                            switch (self.sides[i]) {
-                                .left => result[i] = O - 1 - cart[i],
-                                .right => result[i] = O + self.block[i] + cart[i],
-                                else => result[i] = O + cart[i],
-                            }
+                    for (0..N) |i| {
+                        switch (self.sides[i]) {
+                            .left => result[i] = -1 - cart[i],
+                            .right => result[i] = self.block[i] + cart[i],
+                            else => result[i] = cart[i],
                         }
-
-                        return result;
-                    } else {
-                        return null;
                     }
+
+                    return result;
+                } else {
+                    return null;
                 }
-            };
-        }
+            }
+        };
 
         /// Iterates all cell indices (in ghost space) in this region.
-        pub fn cartesianIndices(self: Self, comptime O: usize, block: [N]usize) CartesianIterator(O) {
+        pub fn cartesianIndices(self: Self, comptime O: usize, block: [N]usize) CartesianIterator {
             var size: [N]usize = undefined;
 
             for (0..N) |i| {
@@ -107,34 +105,32 @@ pub fn Region(comptime N: usize) type {
             };
         }
 
-        pub fn InnerFaceIterator(comptime O: usize) type {
-            return struct {
-                inner: IndexSpace.CartesianIterator,
-                block: [N]usize,
-                sides: [N]Side,
+        pub const InnerFaceIterator = struct {
+            inner: IndexSpace.CartesianIterator,
+            block: [N]usize,
+            sides: [N]Side,
 
-                pub fn next(self: *InnerFaceIterator(O)) ?[N]usize {
-                    if (self.inner.next()) |cart| {
-                        var result: [N]usize = undefined;
+            pub fn next(self: *InnerFaceIterator) ?[N]usize {
+                if (self.inner.next()) |cart| {
+                    var result: [N]usize = undefined;
 
-                        for (0..N) |i| {
-                            switch (self.sides[i]) {
-                                .left => result[i] = O,
-                                .right => result[i] = O + self.block[i] - 1,
-                                else => result[i] = O + cart[i],
-                            }
+                    for (0..N) |i| {
+                        switch (self.sides[i]) {
+                            .left => result[i],
+                            .right => result[i] = self.block[i] - 1,
+                            else => result[i] = cart[i],
                         }
-
-                        return result;
-                    } else {
-                        return null;
                     }
+
+                    return result;
+                } else {
+                    return null;
                 }
-            };
-        }
+            }
+        };
 
         /// Iterates over all indices on the inner face.
-        pub fn innerFaceIndices(self: Self, comptime O: usize, block: [N]usize) InnerFaceIterator(O) {
+        pub fn innerFaceIndices(self: Self, block: [N]usize) InnerFaceIterator {
             var size: [N]usize = undefined;
 
             for (0..N) |i| {
@@ -194,6 +190,20 @@ pub fn Region(comptime N: usize) type {
                 .inner = IndexSpace.fromSize(size).cartesianIndices(),
                 .sides = self.sides,
             };
+        }
+
+        pub fn extentDir(self: Self) [N]isize {
+            var dir: [N]isize = undefined;
+
+            for (0..N) |i| {
+                switch (self.sides[i]) {
+                    .left => dir[i] = -1,
+                    .right => dir[i] = 1,
+                    .middle => dir[i] = 0,
+                }
+            }
+
+            return dir;
         }
 
         // ************************
