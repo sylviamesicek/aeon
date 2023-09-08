@@ -30,7 +30,7 @@ pub fn Array(comptime N: usize, comptime T: type) type {
             var res: [N]T = v;
 
             for (0..N) |i| {
-                res[i] += u;
+                res[i] *= u;
             }
 
             return res;

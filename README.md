@@ -11,8 +11,9 @@ To reach the state of minimum viable product (MVP) the following features must b
 - [x] Multilevel regridding based on GRChombo.
 - [x] Stencil application.
 - [ ] Transfer between regridding runs.
-- [ ] Interior ghost node filling.
+- [x] Interior ghost node filling.
 - [x] Exterior ghost node filling.
+- [ ] Syncing after operator.
 - [ ] Multigrid elliptic solver using BiCGStab and Jacobi's Method.
 - [ ] Hyperbolic solver using 4th order Runge-Kutta and subcylcing.
 

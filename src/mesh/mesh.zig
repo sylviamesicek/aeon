@@ -52,6 +52,7 @@ pub fn Mesh(comptime N: usize, comptime O: usize) type {
         const StencilSpace = basis.StencilSpace(N, O);
 
         const Array = array.Array(N, usize);
+
         const add = Array.add;
         const sub = Array.sub;
         const scaled = Array.scaled;
@@ -197,6 +198,10 @@ pub fn Mesh(comptime N: usize, comptime O: usize) type {
             }
         }
 
+        // ************************
+        // Fill operation *********
+        // ************************
+
         pub fn fillBoundary(self: *const Self, boundary: anytype, block_map: []const usize, field: []f64) !void {
             assert(block_map.len == self.tileTotal());
             assert(field.len == self.cellTotal());
@@ -309,10 +314,14 @@ pub fn Mesh(comptime N: usize, comptime O: usize) type {
                         var indices = region.cartesianIndices(O, [1]usize{self.config.tile_width} ** N);
 
                         while (indices.next()) |index| {
-                            const bcell: [N]usize = add(origin, index);
-                            const ncell: [N]usize = add(neighbor_origin, index);
+                            const block_cell: [N]usize = add(origin, index);
+                            const neighbor_cell: [N]usize = add(neighbor_origin, index);
 
-                            block_stencil.setValue(bcell, block_field, coarse_neighbor_stencil.prolong(ncell, neighbor_field));
+                            block_stencil.setValue(
+                                block_cell,
+                                block_field,
+                                coarse_neighbor_stencil.prolong(neighbor_cell, neighbor_field),
+                            );
                         }
                     } else {
                         var base_bounds: IndexBox = .{
@@ -330,10 +339,14 @@ pub fn Mesh(comptime N: usize, comptime O: usize) type {
                         var indices = region.cartesianIndices(O, splat(self.config.tile_width));
 
                         while (indices.next()) |index| {
-                            const bcell: [N]usize = add(origin, index);
-                            const ncell: [N]usize = add(base_origin, index);
+                            const block_cell: [N]usize = add(origin, index);
+                            const base_cell: [N]usize = add(base_origin, index);
 
-                            block_stencil.setValue(bcell, block_field, base_stencil.prolong(ncell, base_field));
+                            block_stencil.setValue(
+                                block_cell,
+                                block_field,
+                                base_stencil.prolong(base_cell, base_field),
+                            );
                         }
                     }
                 } else {
@@ -350,7 +363,11 @@ pub fn Mesh(comptime N: usize, comptime O: usize) type {
                         const bcell: [N]usize = add(origin, index);
                         const ncell: [N]usize = add(neighbor_origin, index);
 
-                        block_stencil.setValue(bcell, block_field, neighbor_stencil.value(ncell, neighbor_field));
+                        block_stencil.setValue(
+                            bcell,
+                            block_field,
+                            neighbor_stencil.value(ncell, neighbor_field),
+                        );
                     }
                 }
             }
@@ -392,6 +409,10 @@ pub fn Mesh(comptime N: usize, comptime O: usize) type {
                 .index_size = block.space().scale(self.tile_width).size,
             };
         }
+
+        // ***********************
+        // Sync operation ********
+        // ***********************
 
         // *************************
         // Regridding **************
@@ -805,10 +826,8 @@ pub fn Mesh(comptime N: usize, comptime O: usize) type {
 }
 
 test "mesh regridding" {
-    const expect = std.testing.expect;
-    _ = expect;
-    const expectEqualSlices = std.testing.expectEqualSlices;
-    _ = expectEqualSlices;
+    // const expect = std.testing.expect;
+    // const expectEqualSlices = std.testing.expectEqualSlices;
 
     const allocator = std.testing.allocator;
 
@@ -841,5 +860,3 @@ test "mesh regridding" {
         .patch_efficiency = 0.1,
     });
 }
-
-test {}
