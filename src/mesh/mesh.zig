@@ -11,6 +11,7 @@ const assert = std.debug.assert;
 const exp2 = std.math.exp2;
 const maxInt = std.math.maxInt;
 
+const array = @import("../array.zig");
 const basis = @import("../basis/basis.zig");
 const geometry = @import("../geometry/geometry.zig");
 const boundaries = @import("boundary.zig");
@@ -49,6 +50,12 @@ pub fn Mesh(comptime N: usize, comptime O: usize) type {
         const PartitionSpace = geometry.PartitionSpace(N);
         const Region = geometry.Region(N);
         const StencilSpace = basis.StencilSpace(N, O);
+
+        const Array = array.Array(N, usize);
+        const add = Array.add;
+        const sub = Array.sub;
+        const scaled = Array.scaled;
+        const splat = Array.splat;
 
         pub const Config = struct {
             physical_bounds: RealBox,
@@ -221,10 +228,6 @@ pub fn Mesh(comptime N: usize, comptime O: usize) type {
 
             for (0..blocks.len) |block| {
                 const bounds: IndexBox = blocks.items(.bounds)[block];
-                const offset: usize = blocks.items(.cell_offset)[block];
-                _ = offset;
-                const total: usize = blocks.items(.cell_total)[block];
-                _ = total;
 
                 const regions = Region.orderedRegions();
 
@@ -270,18 +273,8 @@ pub fn Mesh(comptime N: usize, comptime O: usize) type {
             var inner_tiles = region.innerFaceIndices(1, bounds.size);
 
             while (inner_tiles.next()) |inner_tile| {
-                var buffer_tile: [N]usize = bounds.globalFromLocal(inner_tile);
-
-                for (0..N) |i| {
-                    buffer_tile[i] += region.extentDir()[i];
-                }
-
-                var origin: [N]usize = undefined;
-
-                for (0..N) |i| {
-                    origin[i] = inner_tile[i] * self.config.tile_width;
-                }
-
+                const buffer_tile: [N]usize = add(bounds.globalFromLocal(inner_tile), region.extentDir());
+                const origin: [N]usize = scaled(inner_tile, self.config.tile_width);
                 const neighbor: usize = patch_block_map[patch_space.linearFromCartesian(buffer_tile)];
 
                 if (neighbor == maxInt(usize)) {
@@ -310,54 +303,35 @@ pub fn Mesh(comptime N: usize, comptime O: usize) type {
 
                         neighbor_bounds.refine();
 
-                        var norigin: [N]usize = neighbor_bounds.localFromGlobal(bounds.globalFromLocal(inner_tile));
-
-                        for (0..N) |i| {
-                            norigin[i] *= self.config.tile_width;
-                        }
-
+                        const neighbor_origin: [N]usize = scaled(neighbor_bounds.localFromGlobal(bounds.globalFromLocal(inner_tile)), self.config.tile_width);
                         const neighbor_field: []const f64 = coarse.blockCellSlice(coarse_neighbor, coarse_field);
 
                         var indices = region.cartesianIndices(O, [1]usize{self.config.tile_width} ** N);
 
                         while (indices.next()) |index| {
-                            var bcell: [N]usize = undefined;
-                            var ncell: [N]usize = undefined;
-
-                            for (0..N) |i| {
-                                bcell[i] = origin[i] + index[i];
-                                ncell[i] = norigin[i] + index[i];
-                            }
+                            const bcell: [N]usize = add(origin, index);
+                            const ncell: [N]usize = add(neighbor_origin, index);
 
                             block_stencil.setValue(bcell, block_field, coarse_neighbor_stencil.prolong(ncell, neighbor_field));
                         }
                     } else {
                         var base_bounds: IndexBox = .{
-                            .origin = [1]usize{0} ** N,
+                            .origin = splat(0),
                             .size = self.base.index_size,
                         };
 
                         base_bounds.refine();
 
-                        var norigin: [N]usize = base_bounds.localFromGlobal(bounds.globalFromLocal(inner_tile));
-
-                        for (0..N) |i| {
-                            norigin[i] *= self.config.tile_width;
-                        }
+                        const base_origin: [N]usize = scaled(base_bounds.localFromGlobal(bounds.globalFromLocal(inner_tile)), self.config.tile_width);
 
                         const base_field: []const f64 = self.baseCellSlice(field);
                         const base_stencil: StencilSpace = self.baseStencilSpace();
 
-                        var indices = region.cartesianIndices(O, [1]usize{self.config.tile_width} ** N);
+                        var indices = region.cartesianIndices(O, splat(self.config.tile_width));
 
                         while (indices.next()) |index| {
-                            var bcell: [N]usize = undefined;
-                            var ncell: [N]usize = undefined;
-
-                            for (0..N) |i| {
-                                bcell[i] = origin[i] + index[i];
-                                ncell[i] = norigin[i] + index[i];
-                            }
+                            const bcell: [N]usize = add(origin, index);
+                            const ncell: [N]usize = add(base_origin, index);
 
                             block_stencil.setValue(bcell, block_field, base_stencil.prolong(ncell, base_field));
                         }
@@ -368,22 +342,13 @@ pub fn Mesh(comptime N: usize, comptime O: usize) type {
                     const neighbor_bounds: IndexBox = blocks.items(.bounds)[neighbor].relativeTo(patch_bounds);
                     const neighbor_stencil: StencilSpace = self.levelStencilSpace(level, blocks.items(.bounds)[neighbor]);
 
-                    var norigin: [N]usize = neighbor_bounds.localFromGlobal(bounds.globalFromLocal(inner_tile));
-
-                    for (0..N) |i| {
-                        norigin[i] *= self.config.tile_width;
-                    }
+                    const neighbor_origin: [N]usize = scaled(neighbor_bounds.localFromGlobal(bounds.globalFromLocal(inner_tile)), self.config.tile_width);
 
                     var indices = region.cartesianIndices(O, [1]usize{self.config.tile_width} ** N);
 
                     while (indices.next()) |index| {
-                        var bcell: [N]usize = undefined;
-                        var ncell: [N]usize = undefined;
-
-                        for (0..N) |i| {
-                            bcell[i] = origin[i] + index[i];
-                            ncell[i] = norigin[i] + index[i];
-                        }
+                        const bcell: [N]usize = add(origin, index);
+                        const ncell: [N]usize = add(neighbor_origin, index);
 
                         block_stencil.setValue(bcell, block_field, neighbor_stencil.value(ncell, neighbor_field));
                     }
@@ -402,29 +367,10 @@ pub fn Mesh(comptime N: usize, comptime O: usize) type {
             stencil_space.fillBoundary(region, boundary, block_field);
         }
 
-        //         if (block_neighbor == maxInt(usize)) {
-        //             const cpbounds: IndexBox = cbounds[cparent];
-        //             const cpspace = cpbounds.space();
-
-        //             var cglobal: [N]usize = global;
-
-        //             for (0..N) |i| {
-        //                 cglobal[i] /= 2;
-        //             }
-
-        //             const cblock_neighbor: usize = cpblock_map[cpspace.linearFromCartesian(cpbounds.localFromGlobal(cglobal))];
-
-        //             self.interpolateGhostFromCoarse(region, level, block, cblock_neighbor, global, field);
-        //         } else {
-        //             self.copyGhostFromNeighbor(region, level, block, block_neighbor, global, field);
-        //         }
-        //     }
-        // }
-
         fn baseStencilSpace(self: *const Self) StencilSpace {
             return .{
                 .physical_bounds = self.physical_bounds,
-                .index_size = IndexSpace.fromSize(self.base.index_size).scale(self.tile_width).size,
+                .index_size = scaled(self.base.index_size, self.tile_width),
             };
         }
 
@@ -710,11 +656,7 @@ pub fn Mesh(comptime N: usize, comptime O: usize) type {
                         try scratch.free(pblocks);
 
                         // Compute global bounds of the patch
-                        var pbounds: IndexBox = patch.bounds;
-
-                        for (0..N) |i| {
-                            pbounds.origin[i] += cpbounds.origin[i];
-                        }
+                        var pbounds: IndexBox = add(patch.bounds, cpbounds.origin);
 
                         // Iterate computed blocks and offset to find global bounds of each block
                         for (ppartitioner.partitions(), pblocks) |block, *pblock| {

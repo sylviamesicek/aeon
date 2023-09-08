@@ -1,6 +1,7 @@
 const std = @import("std");
 
 // Subdirectories
+const array = @import("array.zig");
 const basis = @import("basis/basis.zig");
 const geometry = @import("geometry/geometry.zig");
 const mesh = @import("mesh/mesh.zig");
@@ -33,6 +34,7 @@ pub fn main() !void {
 }
 
 test {
+    _ = array;
     _ = basis;
     _ = geometry;
     _ = mesh;
