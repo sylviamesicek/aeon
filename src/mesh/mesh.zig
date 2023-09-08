@@ -271,41 +271,91 @@ pub fn Mesh(comptime N: usize, comptime O: usize) type {
             var rinner_tiles = region.innerFaceIndices(1, rbounds.size);
 
             while (rinner_tiles.next()) |inner_tile| {
-                var buffer_tile: [N]usize = undefined;
+                var buffer_tile: [N]usize = rbounds.globalFromLocal(inner_tile);
 
                 for (0..N) |i| {
-                    buffer_tile[i] = rbounds.origin[i] + inner_tile[i] + region.extentDir()[i];
+                    buffer_tile[i] += region.extentDir()[i];
+                }
+
+                var origin: [N]usize = undefined;
+
+                for (0..N) |i| {
+                    origin[i] = inner_tile[i] * self.config.tile_width;
                 }
 
                 const neighbor: usize = pblock_map[pspace.linearFromCartesian(buffer_tile)];
 
-                // TODO implement interpolation
-                if (neighbor == maxInt(usize)) {}
+                if (neighbor == maxInt(usize)) {
+                    const coarse: *const Level = &self.levels[level - 1];
+                    const coarse_patch = coarse.parents[patch];
+                    const coarse_block_map: []const usize = coarse.levelTileSlice(block_map);
+                    const cpblock_map: []const usize = coarse.patchTileSlice(coarse_patch, coarse_block_map);
+                    const coarse_field: []const f64 = coarse.levelCellSlice(field);
 
-                const neighbor_field: []const f64 = target.blockCellSlice(neighbor, target_field);
-                const nbounds: IndexBox = blocks.items(.bounds)[neighbor].relativeTo(pbounds);
-                const nstencil: StencilSpace = self.levelStencilSpace(level, blocks.items(.bounds)[neighbor]);
+                    const coarse_patch_bounds = coarse.patches.items(.bounds)[coarse_patch];
+                    const coarse_patch_space = coarse_patch_bounds.space();
 
-                var borigin: [N]usize = undefined;
-
-                for (0..N) |i| {
-                    borigin[i] = inner_tile[i] * self.config.tile_width;
-                }
-
-                const norigin: [N]usize = nbounds.localFromGlobal(rbounds.globalFromLocal(inner_tile));
-
-                var indices = region.cartesianIndices(O, [1]usize{self.config.tile_width} ** N);
-
-                while (indices.next()) |index| {
-                    var bcell: [N]usize = undefined;
-                    var ncell: [N]usize = undefined;
+                    var coarse_inner_tile: [N]usize = undefined;
+                    var coarse_buffer_tile: [N]usize = undefined;
 
                     for (0..N) |i| {
-                        bcell[i] = borigin[i] + index[i];
-                        ncell[i] = norigin[i] + index[i];
+                        coarse_inner_tile[i] = inner_tile[i] / 2;
+                        coarse_buffer_tile[i] = buffer_tile[i] / 2;
                     }
 
-                    bstencil.setValue(bcell, block_field, nstencil.value(ncell, neighbor_field));
+                    const coarse_neighbor = cpblock_map[coarse_patch_space.linearFromCartesian(coarse_buffer_tile)];
+
+                    var neighbor_bounds = coarse.blocks.items(.bounds)[coarse_neighbor].relativeTo(coarse_patch_bounds);
+                    const coarse_neighbor_stencil: StencilSpace = self.levelStencilSpace(level - 1, coarse.blocks.items(.bounds)[coarse_neighbor]);
+
+                    neighbor_bounds.refine();
+
+                    var norigin: [N]usize = neighbor_bounds.localFromGlobal(rbounds.globalFromLocal(inner_tile));
+
+                    for (0..N) |i| {
+                        norigin[i] *= self.config.tile_width;
+                    }
+
+                    const neighbor_field: []const f64 = coarse.blockCellSlice(coarse_neighbor, coarse_field);
+
+                    var indices = region.cartesianIndices(O, [1]usize{self.config.tile_width} ** N);
+
+                    while (indices.next()) |index| {
+                        var bcell: [N]usize = undefined;
+                        var ncell: [N]usize = undefined;
+
+                        for (0..N) |i| {
+                            bcell[i] = origin[i] + index[i];
+                            ncell[i] = norigin[i] + index[i];
+                        }
+
+                        bstencil.setValue(bcell, block_field, coarse_neighbor_stencil.prolong(ncell, neighbor_field));
+                    }
+                } else {
+                    // Copy from neighbor on same level
+                    const neighbor_field: []const f64 = target.blockCellSlice(neighbor, target_field);
+                    const neighbor_bounds: IndexBox = blocks.items(.bounds)[neighbor].relativeTo(pbounds);
+                    const neighbor_stencil: StencilSpace = self.levelStencilSpace(level, blocks.items(.bounds)[neighbor]);
+
+                    var norigin: [N]usize = neighbor_bounds.localFromGlobal(rbounds.globalFromLocal(inner_tile));
+
+                    for (0..N) |i| {
+                        norigin[i] *= self.config.tile_width;
+                    }
+
+                    var indices = region.cartesianIndices(O, [1]usize{self.config.tile_width} ** N);
+
+                    while (indices.next()) |index| {
+                        var bcell: [N]usize = undefined;
+                        var ncell: [N]usize = undefined;
+
+                        for (0..N) |i| {
+                            bcell[i] = origin[i] + index[i];
+                            ncell[i] = norigin[i] + index[i];
+                        }
+
+                        bstencil.setValue(bcell, block_field, neighbor_stencil.value(ncell, neighbor_field));
+                    }
                 }
             }
         }
