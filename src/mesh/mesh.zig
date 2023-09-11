@@ -202,7 +202,7 @@ pub fn Mesh(comptime N: usize, comptime O: usize) type {
         // Fill operation *********
         // ************************
 
-        pub fn fillBoundary(self: *const Self, boundary: anytype, block_map: []const usize, field: []f64) !void {
+        pub fn fillBoundary(self: *const Self, boundary: anytype, block_map: []const usize, field: []f64) void {
             assert(block_map.len == self.tileTotal());
             assert(field.len == self.cellTotal());
             assert(boundaries.hasConditionDecl(N)(boundary));
@@ -225,7 +225,7 @@ pub fn Mesh(comptime N: usize, comptime O: usize) type {
             }
         }
 
-        fn fillLevelBoundary(self: *const Self, level: usize, boundary: anytype, block_map: []const usize, field: []f64) !void {
+        fn fillLevelBoundary(self: *const Self, level: usize, boundary: anytype, block_map: []const usize, field: []f64) void {
             const target: *const Level = self.levels[level];
             const index_size: IndexBox = target.index_size;
 
@@ -406,13 +406,125 @@ pub fn Mesh(comptime N: usize, comptime O: usize) type {
 
             return .{
                 .physical_bounds = physical_bounds,
-                .index_size = block.space().scale(self.tile_width).size,
+                .size = block.space().scale(self.tile_width).size,
             };
         }
 
         // ***********************
         // Sync operation ********
         // ***********************
+
+        pub fn sync(self: *const Self, block_map: []const usize, field: []f64) void {
+            assert(block_map.len == self.tileTotal());
+            assert(field.len == self.cellTotal());
+
+            self.syncBase(field);
+
+            for (0..self.active_levels - 1) |level| {
+                self.syncLevel(level, block_map, field);
+            }
+        }
+
+        pub fn syncBase(self: *const Self, field: []f64) void {
+            if (self.active_levels == 0) {
+                return;
+            }
+
+            const stencil_space = self.baseStencilSpace();
+
+            const refined: *const Level = &self.levels[0];
+            const blocks = refined.blocks.slice();
+
+            const level_field: []const f64 = refined.levelCellSlice(field);
+
+            for (0..blocks.len) |b| {
+                var block_bounds: IndexBox = blocks.items(.bounds)[b];
+                var block_stencil_space: StencilSpace = self.levelStencilSpace(0, block_bounds);
+
+                block_bounds.coarsen();
+
+                for (0..N) |i| {
+                    stencil_space.size[i] /= 2;
+                }
+
+                const block_field: []const f64 = refined.blockCellSlice(b, level_field);
+
+                const origin: [N]usize = scaled(block_bounds.origin, self.config.tile_width);
+
+                var indices = block_bounds.space().cartesianIndices();
+
+                while (indices.next()) |index| {
+                    const cell: [N]usize = add(origin, index);
+
+                    stencil_space.setValue(cell, field, block_stencil_space.restrict(index, block_field));
+                }
+            }
+        }
+
+        pub fn syncLevel(self: *const Self, level: usize, block_map: []const usize, field: []f64) void {
+            if (self.active_levels > level + 1) {
+                return;
+            }
+
+            const target: *const Level = &self.levels[level];
+            const refined: *const Level = &self.levels[level + 1];
+
+            const target_field: []f64 = target.levelCellSlice(field);
+            const refined_field: []const f64 = refined.levelCellSlice(field);
+
+            const target_block_map: []const usize = target.levelTileSlice(block_map);
+            const patches = target.patches.slice();
+            const blocks = target.blocks.slice();
+
+            const refined_patches = refined.patches.slice();
+            const refined_blocks = refined.blocks.slice();
+
+            for (0..refined_patches.len) |refined_patch| {
+                const patch: usize = target.parents[refined_patches];
+                const patch_block_map: usize = target.patchTileSlice(patch, target_block_map);
+                const patch_bounds: IndexBox = patches.items(.bounds)[patch];
+                const patch_space: IndexSpace = patch_bounds.space();
+
+                const offset: usize = refined_patches.items(.block_offset)[refined_patch];
+                const total: usize = refined_patches.items(.block_total)[refined_patch];
+                for (offset..(offset + total)) |refined_block| {
+                    var refined_block_bounds: IndexBox = refined_blocks.items(.block_bounds)[refined_block];
+                    refined_block_bounds.coarsen();
+
+                    const relative_refined_bounds: IndexBox = refined_block_bounds.relativeTo(patch_bounds);
+                    const relative_refined_space: IndexSpace = relative_refined_bounds.space();
+
+                    const refined_stencil_space: StencilSpace = self.levelStencilSpace(level + 1, refined_block);
+                    const refined_block_field: []const f64 = refined.blockCellSlice(refined_block, refined_field);
+
+                    var tiles = relative_refined_space.cartesianIndices();
+
+                    while (tiles.next()) |tile| {
+                        const refined_origin: [N]usize = scaled(tile, self.config.tile_width);
+                        // Tile in patch space
+                        const relative_tile = add(tile, relative_refined_bounds.origin);
+                        const block = patch_block_map[patch_space.linearFromCartesian(relative_tile)];
+                        const block_bounds: IndexBox = blocks.items(.bounds)[block];
+                        const stencil_space: StencilSpace = self.levelStencilSpace(level + 1, block);
+                        const block_field: []f64 = target.blockCellSlice(block, target_field);
+
+                        // Bounds in patch space
+                        const relative_bounds: IndexBox = block_bounds.relativeTo(patch_bounds);
+
+                        const origin: [N]usize = scaled(relative_bounds.localFromGlobal(relative_tile), self.config.tile_width);
+
+                        var indices = IndexSpace.fromSize(splat(self.config.tile_width)).cartesianIndices();
+
+                        while (indices) |index| {
+                            const rcell = add(refined_origin, index);
+                            const cell = add(origin, index);
+
+                            stencil_space.setValue(cell, block_field, refined_stencil_space.restrict(rcell, refined_block_field));
+                        }
+                    }
+                }
+            }
+        }
 
         // *************************
         // Regridding **************
