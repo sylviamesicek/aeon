@@ -60,6 +60,52 @@ pub fn ApproxEngine(comptime N: usize, comptime O: usize, comptime Input: type) 
             return self.laplacianField(self.output);
         }
 
+        pub fn valueDiagonal(self: Self) f64 {
+            return self.space.valueDiagonal();
+        }
+
+        pub fn gradientDiagonal(self: Self) [N]f64 {
+            var result: [N]f64 = undefined;
+
+            inline for (0..N) |i| {
+                comptime var ranks: [N]usize = [1]usize{0} ** N;
+                ranks[i] += 1;
+
+                result[i] = self.space.derivativeDiagonal(ranks);
+            }
+
+            return result;
+        }
+
+        pub fn hessianDiagonal(self: Self) [N]f64 {
+            var result: [N][N]f64 = undefined;
+
+            inline for (0..N) |i| {
+                inline for (0..N) |j| {
+                    comptime var ranks: [N]usize = [1]usize{0} ** N;
+                    ranks[i] += 1;
+                    ranks[j] += 1;
+
+                    result[i][j] = self.space.derivativeDiagonal(ranks);
+                }
+            }
+
+            return result;
+        }
+
+        pub fn laplacianDiagonal(self: Self) [N]f64 {
+            var result: f64 = 0.0;
+
+            inline for (0..N) |i| {
+                comptime var ranks: [N]usize = [1]usize{0} ** N;
+                ranks[i] = 2;
+
+                result += self.space.derivativeDiagonal(ranks);
+            }
+
+            return result;
+        }
+
         fn valueField(self: Self, field: []const f64) f64 {
             return self.space.value(self.cell, field);
         }
@@ -135,6 +181,10 @@ pub fn isOperator(comptime N: usize, comptime O: usize) TraitFn {
             }
 
             if (!(hasFn("apply")(T) and @TypeOf(T.apply) == fn (T, ApproxEngine(N, O, T.input)) f64)) {
+                return false;
+            }
+
+            if (!(hasFn("applyDiagonal")(T) and @TypeOf(T.applyDiagonal) == fn (T, ApproxEngine(N, O, T.input)) f64)) {
                 return false;
             }
 
