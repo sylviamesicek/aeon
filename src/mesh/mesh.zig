@@ -14,12 +14,18 @@ const maxInt = std.math.maxInt;
 const array = @import("../array.zig");
 const basis = @import("../basis/basis.zig");
 const geometry = @import("../geometry/geometry.zig");
+
 const boundaries = @import("boundary.zig");
+const operator = @import("operator.zig");
 const levels = @import("level.zig");
 
 // Public Exports
 
+pub const ApproxEngine = operator.ApproxEngine;
 pub const BoundaryCondition = boundaries.BoundaryCondition;
+
+pub const isInputStruct = operator.isInputStruct;
+pub const isOperator = operator.isOperator;
 
 pub fn Mesh(comptime N: usize, comptime O: usize) type {
     return struct {
@@ -202,19 +208,19 @@ pub fn Mesh(comptime N: usize, comptime O: usize) type {
         // Fill operation *********
         // ************************
 
-        pub fn fillBoundary(self: *const Self, boundary: anytype, block_map: []const usize, field: []f64) void {
+        pub fn fillBoundaries(self: *const Self, boundary: anytype, block_map: []const usize, field: []f64) void {
             assert(block_map.len == self.tileTotal());
             assert(field.len == self.cellTotal());
             assert(boundaries.hasConditionDecl(N)(boundary));
 
-            self.fillBaseExterior(boundary, field);
+            self.fillBaseBoundary(boundary, field);
 
             for (0..self.active_levels) |i| {
-                self.fillLevelBoundary(i, boundary, block_map, field);
+                self.fillLevelBoundaries(i, boundary, block_map, field);
             }
         }
 
-        fn fillBaseExterior(self: *const Self, boundary: anytype, field: []f64) void {
+        pub fn fillBaseBoundary(self: *const Self, boundary: anytype, field: []f64) void {
             const regions = Region.orderedRegions();
 
             const base_field: []f64 = self.baseCellSlice(field);
@@ -225,7 +231,7 @@ pub fn Mesh(comptime N: usize, comptime O: usize) type {
             }
         }
 
-        fn fillLevelBoundary(self: *const Self, level: usize, boundary: anytype, block_map: []const usize, field: []f64) void {
+        pub fn fillLevelBoundaries(self: *const Self, level: usize, boundary: anytype, block_map: []const usize, field: []f64) void {
             const target: *const Level = self.levels[level];
             const index_size: IndexBox = target.index_size;
 
