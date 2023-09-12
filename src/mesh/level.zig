@@ -87,8 +87,6 @@ pub fn Level(comptime N: usize, comptime O: usize) type {
             self.patches.deinit(allocator);
             self.children.deinit(allocator);
             self.parents.deinit(allocator);
-            self.transfer_blocks.deinit(allocator);
-            self.transfer_patches.deinit(allocator);
         }
 
         pub fn clearRetainingCapacity(self: *Self) void {
@@ -110,7 +108,7 @@ pub fn Level(comptime N: usize, comptime O: usize) type {
         pub fn addPatch(self: *Self, allocator: Allocator, bounds: IndexBox, blocks: []const IndexBox, children: []const usize) !void {
             const patch_id: usize = self.patches.len;
             const block_offset: usize = self.blocks.len;
-            const children_offset: usize = self.children.len;
+            const children_offset: usize = self.children.items.len;
 
             const patch: Patch(N) = .{
                 .bounds = bounds,

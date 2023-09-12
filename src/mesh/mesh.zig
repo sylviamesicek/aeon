@@ -619,8 +619,8 @@ pub fn Mesh(comptime N: usize, comptime O: usize) type {
                         const cpbounds: IndexBox = coarse.patches.items(.bounds)[cpid];
 
                         for (coarse.childrenSlice(cpid)) |tpid| {
-                            const start = coarse_children[tpid];
-                            const end = coarse_children[tpid + 1];
+                            const start = coarse_children.items[tpid];
+                            const end = coarse_children.items[tpid + 1];
 
                             for (start..end) |child| {
                                 var patch: IndexBox = refined.patches.items(.bounds)[child];
@@ -703,7 +703,7 @@ pub fn Mesh(comptime N: usize, comptime O: usize) type {
                 //     }
                 // }
 
-                try target.setTotalChildren(self.gpa, clusters.len);
+                try target.setTotalChildren(self.gpa, clusters.items.len);
                 target.clearRetainingCapacity();
 
                 // At this moment in time
@@ -775,7 +775,7 @@ pub fn Mesh(comptime N: usize, comptime O: usize) type {
 
                         // Fill with computed children of patch (using index map to find global index into refined children)
                         for (patch.children_offset..(patch.children_offset + patch.children_total), pchildren) |child_id, *child| {
-                            child = upcluster_index_map[child_id];
+                            child.* = upcluster_index_map[child_id];
                         }
 
                         // Build window into tags for this patch
@@ -792,14 +792,17 @@ pub fn Mesh(comptime N: usize, comptime O: usize) type {
 
                         // Offset blocks to be in global space
                         var pblocks: []IndexBox = try scratch.alloc(IndexBox, ppartitioner.partitions().len);
-                        try scratch.free(pblocks);
+                        scratch.free(pblocks);
 
                         // Compute global bounds of the patch
-                        var pbounds: IndexBox = add(patch.bounds, cpbounds.origin);
+                        const pbounds: IndexBox = .{
+                            .origin = add(patch.bounds.origin, cpbounds.origin),
+                            .size = patch.bounds.size,
+                        };
 
                         // Iterate computed blocks and offset to find global bounds of each block
                         for (ppartitioner.partitions(), pblocks) |block, *pblock| {
-                            pblock = block;
+                            pblock.* = block.bounds;
 
                             for (0..N) |axis| {
                                 pblock.origin[axis] += pbounds.origin[axis];
@@ -873,30 +876,18 @@ pub fn Mesh(comptime N: usize, comptime O: usize) type {
             var tile_offset: usize = self.base.tile_total;
             var cell_offset: usize = self.base.cell_total;
 
-            var transfer_tile_offset: usize = self.base.tile_total;
-            var transfer_cell_offset: usize = self.base.cell_total;
-
             for (self.levels.items) |*level| {
-                level.computeOffsets(self.tile_width);
+                level.computeOffsets(self.config.tile_width);
 
                 level.tile_offset = tile_offset;
                 level.cell_offset = cell_offset;
 
-                level.transfer_tile_offset = transfer_tile_offset;
-                level.transfer_cell_offset = transfer_cell_offset;
-
                 tile_offset += level.tile_total;
                 cell_offset += level.cell_total;
-
-                transfer_tile_offset += level.transfer_tile_total;
-                transfer_cell_offset += level.transfer_cell_total;
             }
 
             self.cell_total = cell_offset;
             self.tile_total = tile_offset;
-
-            self.transfer_tile_total = transfer_tile_offset;
-            self.transfer_cell_total = transfer_cell_offset;
         }
 
         fn computeTotalLevels(self: *const Self, tags: []const bool, config: RegridConfig) usize {

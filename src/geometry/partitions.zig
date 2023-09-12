@@ -59,7 +59,7 @@ pub fn PartitionSpace(comptime N: usize) type {
                 children[i] = i;
             }
 
-            var parts: MultiArrayList(Partition) = .{};
+            var parts: ArrayListUnmanaged(Partition) = .{};
             errdefer parts.deinit(allocator);
 
             try parts.append(allocator, .{
@@ -608,9 +608,9 @@ test "tile partitioning" {
 
     try partition_space.build(tags, 4, 0.7);
 
-    const partitions: []const Box(2, usize) = partition_space.partitions();
+    const partitions: []const PartitionSpace(2).Partition = partition_space.partitions();
 
     try expect(partitions.len == 1);
-    try expectEqualSlices(usize, &[2]usize{ 2, 2 }, &partitions[0].origin);
-    try expectEqualSlices(usize, &[2]usize{ 2, 2 }, &partitions[0].size);
+    try expectEqualSlices(usize, &[2]usize{ 2, 2 }, &partitions[0].bounds.origin);
+    try expectEqualSlices(usize, &[2]usize{ 2, 2 }, &partitions[0].bounds.size);
 }

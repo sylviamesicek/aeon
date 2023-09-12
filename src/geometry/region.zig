@@ -73,9 +73,9 @@ pub fn Region(comptime N: usize) type {
 
                     for (0..N) |i| {
                         switch (self.sides[i]) {
-                            .left => result[i] = -1 - cart[i],
-                            .right => result[i] = self.block[i] + cart[i],
-                            else => result[i] = cart[i],
+                            .left => result[i] = -1 - @as(isize, @intCast(cart[i])),
+                            .right => result[i] = @intCast(self.block[i] + cart[i]),
+                            else => result[i] = @intCast(cart[i]),
                         }
                     }
 
@@ -116,7 +116,7 @@ pub fn Region(comptime N: usize) type {
 
                     for (0..N) |i| {
                         switch (self.sides[i]) {
-                            .left => result[i],
+                            .left => result[i] = 0,
                             .right => result[i] = self.block[i] - 1,
                             else => result[i] = cart[i],
                         }
@@ -281,15 +281,15 @@ test "region indices" {
 
     var indices = region.cartesianIndices(2, block);
 
-    try expectEqualSlices(usize, &[_]usize{ 4, 1 }, &indices.next().?);
-    try expectEqualSlices(usize, &[_]usize{ 4, 0 }, &indices.next().?);
-    try expectEqualSlices(usize, &[_]usize{ 5, 1 }, &indices.next().?);
-    try expectEqualSlices(usize, &[_]usize{ 5, 0 }, &indices.next().?);
+    try expectEqualSlices(isize, &[_]isize{ 2, -1 }, &indices.next().?);
+    try expectEqualSlices(isize, &[_]isize{ 2, -2 }, &indices.next().?);
+    try expectEqualSlices(isize, &[_]isize{ 3, -1 }, &indices.next().?);
+    try expectEqualSlices(isize, &[_]isize{ 3, -2 }, &indices.next().?);
     try expect(indices.next() == null);
 
-    var inner_indices = region.innerFaceIndices(2, block);
+    var inner_indices = region.innerFaceIndices(block);
 
-    try expectEqualSlices(usize, &[_]usize{ 3, 2 }, &inner_indices.next().?);
+    try expectEqualSlices(usize, &[_]usize{ 1, 0 }, &inner_indices.next().?);
     try expect(inner_indices.next() == null);
 
     var offsets = region.extentOffsets(2);
