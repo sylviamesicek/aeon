@@ -184,7 +184,7 @@ pub fn Level(comptime N: usize, comptime O: usize) type {
 
             for (self.blocks.items(.bounds), self.blocks.items(.cell_total), self.blocks.items(.cell_offset)) |bounds, *total, *offset| {
                 offset.* = cell_offset;
-                total.* = bounds.space().scale(tile_width).extendUniform(2 * O).total();
+                total.* = bounds.space().scale(tile_width).extendUniform(4 * O).total();
                 cell_offset += total.*;
             }
 

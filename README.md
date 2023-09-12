@@ -13,7 +13,8 @@ To reach the state of minimum viable product (MVP) the following features must b
 - [ ] Transfer between regridding runs.
 - [x] Interior ghost node filling.
 - [x] Exterior ghost node filling.
-- [ ] Syncing after operator.
+- [x] Restriction operator.
+- [x] Prolongation operator.
 - [ ] Multigrid elliptic solver using BiCGStab and Jacobi's Method.
 - [ ] Hyperbolic solver using 4th order Runge-Kutta and subcylcing.
 
