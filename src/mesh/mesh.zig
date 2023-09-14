@@ -697,7 +697,8 @@ pub fn Mesh(comptime N: usize, comptime O: usize) type {
         // *************************
 
         pub fn writeVtk(self: *const Self, fields: anytype, out_stream: anytype) @TypeOf(out_stream).Error!void {
-            _ = fields;
+            const NFields = meta.fields(fields).len;
+
             const vtkio = @import("../vtkio.zig");
             const VtkUnstructuredGrid = vtkio.VtkUnstructuredGrid;
             const VtkCellType = vtkio.VtkCellType;
@@ -715,6 +716,13 @@ pub fn Mesh(comptime N: usize, comptime O: usize) type {
 
             var vertices: ArrayListUnmanaged(usize) = .{};
             defer vertices.deinit(self.gpa);
+
+            var field_arrays: [NFields]ArrayListUnmanaged(f64) = [1]ArrayListUnmanaged(f64){.{}} ** NFields;
+            defer {
+                for (field_arrays) |*field_array| {
+                    field_array.deinit(self.gpa);
+                }
+            }
 
             var point_offset: usize = 0;
 
@@ -770,9 +778,9 @@ pub fn Mesh(comptime N: usize, comptime O: usize) type {
                         }
                     }
 
-                    var cells = cell_space.cartesianIndices();
-
                     if (N == 1) {
+                        var cells = cell_space.cartesianIndices();
+
                         while (cells.next()) |cell| {
                             const v1: usize = point_space.linearFromCartesian(cell);
                             const v2: usize = point_space.linearFromCartesian(add(cell, splat(1)));
@@ -781,6 +789,8 @@ pub fn Mesh(comptime N: usize, comptime O: usize) type {
                             vertices.appendAssumeCapacity(point_offset + v2);
                         }
                     } else if (N == 2) {
+                        var cells = cell_space.cartesianIndices();
+
                         while (cells.next()) |cell| {
                             const v1: usize = point_space.linearFromCartesian(cell);
                             const v2: usize = point_space.linearFromCartesian(add(cell, [2]usize{ 0, 1 }));
@@ -793,6 +803,8 @@ pub fn Mesh(comptime N: usize, comptime O: usize) type {
                             vertices.appendAssumeCapacity(point_offset + v4);
                         }
                     } else if (N == 3) {
+                        var cells = cell_space.cartesianIndices();
+
                         while (cells.next()) |cell| {
                             const v1: usize = point_space.linearFromCartesian(cell);
                             const v2: usize = point_space.linearFromCartesian(add(cell, [3]usize{ 0, 1, 0 }));
@@ -813,6 +825,13 @@ pub fn Mesh(comptime N: usize, comptime O: usize) type {
                             vertices.appendAssumeCapacity(point_offset + v8);
                         }
                     }
+
+                    // var cells = cell_space.cartesianIndices();
+                    // while (cells.next()) |cell| {
+                    //     inline for (meta.fields(@TypeOf(fields))) |field| {
+
+                    //     }
+                    // }
                 }
             }
         }
