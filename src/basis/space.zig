@@ -156,6 +156,19 @@ pub fn StencilSpace(comptime N: usize, comptime O: usize) type {
             return result;
         }
 
+        pub fn vertexPosition(self: Self, vertex: [N]usize) [N]f64 {
+            var result: [N]f64 = undefined;
+
+            for (0..N) |i| {
+                const origin: f64 = self.physical_bounds.origin[i];
+                const width: f64 = self.physical_bounds.size[i];
+                const ratio: f64 = (@as(f64, @floatFromInt(vertex[i])) - 1) / @as(f64, @floatFromInt(self.size[i]));
+                result[i] = origin + width * ratio;
+            }
+
+            return result;
+        }
+
         // Gets boundary position of cell.
         pub fn boundaryPosition(self: Self, comptime extents: [N]isize, cell: [N]usize) [N]f64 {
             var result = self.position(cell);

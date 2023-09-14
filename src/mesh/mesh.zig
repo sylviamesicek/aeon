@@ -168,7 +168,7 @@ pub fn Mesh(comptime N: usize, comptime O: usize) type {
         pub fn buildBlockMap(self: *const Self, map: []usize) !void {
             assert(map.len == self.tileTotal());
 
-            @memset(map, std.math.maxInt(usize));
+            @memset(map, maxInt(usize));
             @memset(self.baseTileSlice(usize, map), 0);
 
             for (self.levels.items, 0..) |*level, l| {
@@ -185,25 +185,25 @@ pub fn Mesh(comptime N: usize, comptime O: usize) type {
             }
         }
 
-        pub fn buildTransferMap(self: *const Self, map: []usize) !void {
-            assert(map.len == self.transferTotal());
+        // pub fn buildTransferMap(self: *const Self, map: []usize) !void {
+        //     assert(map.len == self.transferTotal());
 
-            @memset(map, std.math.maxInt(usize));
-            @memset(self.baseTransferSlice(usize, map), 0);
+        //     @memset(map, std.math.maxInt(usize));
+        //     @memset(self.baseTransferSlice(usize, map), 0);
 
-            for (self.levels.items, 0..) |*level, l| {
-                const level_map: []usize = self.levelTransferSlice(l, usize, map);
+        //     for (self.levels.items, 0..) |*level, l| {
+        //         const level_map: []usize = self.levelTransferSlice(l, usize, map);
 
-                for (level.transfer_blocks.items(.bounds), level.transfer_blocks.items(.patch), 0..) |bounds, parent, id| {
-                    const pbounds: IndexBox = level.transfer_patches.items(.bounds)[parent];
-                    const tile_offset: usize = level.transfer_patches.items(.tile_offset)[parent];
-                    const tile_total: usize = level.transfer_patches.items(.tile_total)[parent];
-                    const tile_to_block: []usize = level_map[tile_offset..(tile_offset + tile_total)];
+        //         for (level.transfer_blocks.items(.bounds), level.transfer_blocks.items(.patch), 0..) |bounds, parent, id| {
+        //             const pbounds: IndexBox = level.transfer_patches.items(.bounds)[parent];
+        //             const tile_offset: usize = level.transfer_patches.items(.tile_offset)[parent];
+        //             const tile_total: usize = level.transfer_patches.items(.tile_total)[parent];
+        //             const tile_to_block: []usize = level_map[tile_offset..(tile_offset + tile_total)];
 
-                    pbounds.space().fillSubspace(bounds.relativeTo(pbounds), usize, tile_to_block, id);
-                }
-            }
-        }
+        //             pbounds.space().fillSubspace(bounds.relativeTo(pbounds), usize, tile_to_block, id);
+        //         }
+        //     }
+        // }
 
         // ************************
         // Fill operation *********
@@ -691,6 +691,131 @@ pub fn Mesh(comptime N: usize, comptime O: usize) type {
         // *************************
         // Application *************
         // *************************
+
+        // *************************
+        // Output ******************
+        // *************************
+
+        pub fn writeVtk(self: *const Self, fields: anytype, out_stream: anytype) @TypeOf(out_stream).Error!void {
+            _ = fields;
+            const vtkio = @import("../vtkio.zig");
+            const VtkUnstructuredGrid = vtkio.VtkUnstructuredGrid;
+            const VtkCellType = vtkio.VtkCellType;
+            _ = VtkUnstructuredGrid;
+
+            const cell_type: VtkCellType = switch (N) {
+                1 => .line,
+                2 => .quad,
+                3 => .hexa,
+                else => @compileError("Vtk Output not supported for N > 3"),
+            };
+
+            var positions: ArrayListUnmanaged(f64) = .{};
+            defer positions.deinit(self.gpa);
+
+            var vertices: ArrayListUnmanaged(usize) = .{};
+            defer vertices.deinit(self.gpa);
+
+            var point_offset: usize = 0;
+
+            const base_bounds_slice: []const IndexBox = &[_]IndexBox{.{
+                .size = self.base.index_size,
+                .origin = splat(0),
+            }};
+
+            const base_cell_offset_slice: []const usize = &[_]usize{0};
+            const base_cell_total_slice: []const usize = &[_]usize{self.base.cell_total};
+            for (-1..self.active_levels) |level| {
+                var level_offset: usize = undefined;
+
+                var block_bounds: []const IndexBox = undefined;
+                var block_offsets: []const usize = undefined;
+                var block_totals: []const usize = undefined;
+
+                if (level == -1) {
+                    level_offset = 0;
+                    block_bounds = base_bounds_slice;
+                    block_offsets = base_cell_offset_slice;
+                    block_totals = base_cell_total_slice;
+                } else {
+                    const target: *const Level = &self.levels[level];
+                    level_offset = target.cell_offset;
+                    block_bounds = target.blocks.items(.bounds);
+                    block_offsets = target.blocks.items(.cell_offset);
+                    block_totals = target.blocks.items(.cell_total);
+                }
+
+                for (block_bounds, block_offsets, block_totals) |bounds, offset, total| {
+                    _ = total;
+                    _ = offset;
+                    const stencil: StencilSpace = if (level == -1) self.baseStencilSpace() else self.levelStencilSpace(level, bounds);
+
+                    const cell_size = scaled(bounds.size, self.config.tile_width);
+                    const point_size = add(cell_size, splat(1));
+
+                    const cell_space: IndexSpace = IndexSpace.fromSize(cell_size);
+                    const point_space: IndexSpace = IndexSpace.fromSize(point_size);
+
+                    positions.ensureUnusedCapacity(self.gpa, N * point_space.total());
+                    vertices.ensureUnusedCapacity(self.gpa, cell_type.nvertices() * cell_space.total());
+
+                    // Fill positions and vertices
+
+                    var points = point_space.cartesianIndices();
+
+                    while (points.next()) |point| {
+                        const pos = stencil.vertexPosition(point);
+                        for (0..N) |i| {
+                            positions.appendAssumeCapacity(pos[i]);
+                        }
+                    }
+
+                    var cells = cell_space.cartesianIndices();
+
+                    if (N == 1) {
+                        while (cells.next()) |cell| {
+                            const v1: usize = point_space.linearFromCartesian(cell);
+                            const v2: usize = point_space.linearFromCartesian(add(cell, splat(1)));
+
+                            vertices.appendAssumeCapacity(point_offset + v1);
+                            vertices.appendAssumeCapacity(point_offset + v2);
+                        }
+                    } else if (N == 2) {
+                        while (cells.next()) |cell| {
+                            const v1: usize = point_space.linearFromCartesian(cell);
+                            const v2: usize = point_space.linearFromCartesian(add(cell, [2]usize{ 0, 1 }));
+                            const v3: usize = point_space.linearFromCartesian(add(cell, [2]usize{ 1, 1 }));
+                            const v4: usize = point_space.linearFromCartesian(add(cell, [2]usize{ 1, 0 }));
+
+                            vertices.appendAssumeCapacity(point_offset + v1);
+                            vertices.appendAssumeCapacity(point_offset + v2);
+                            vertices.appendAssumeCapacity(point_offset + v3);
+                            vertices.appendAssumeCapacity(point_offset + v4);
+                        }
+                    } else if (N == 3) {
+                        while (cells.next()) |cell| {
+                            const v1: usize = point_space.linearFromCartesian(cell);
+                            const v2: usize = point_space.linearFromCartesian(add(cell, [3]usize{ 0, 1, 0 }));
+                            const v3: usize = point_space.linearFromCartesian(add(cell, [3]usize{ 1, 1, 0 }));
+                            const v4: usize = point_space.linearFromCartesian(add(cell, [3]usize{ 1, 0, 0 }));
+                            const v5: usize = point_space.linearFromCartesian(add(cell, [3]usize{ 0, 0, 1 }));
+                            const v6: usize = point_space.linearFromCartesian(add(cell, [3]usize{ 0, 1, 3 }));
+                            const v7: usize = point_space.linearFromCartesian(add(cell, [3]usize{ 1, 1, 3 }));
+                            const v8: usize = point_space.linearFromCartesian(add(cell, [3]usize{ 1, 0, 3 }));
+
+                            vertices.appendAssumeCapacity(point_offset + v1);
+                            vertices.appendAssumeCapacity(point_offset + v2);
+                            vertices.appendAssumeCapacity(point_offset + v3);
+                            vertices.appendAssumeCapacity(point_offset + v4);
+                            vertices.appendAssumeCapacity(point_offset + v5);
+                            vertices.appendAssumeCapacity(point_offset + v6);
+                            vertices.appendAssumeCapacity(point_offset + v7);
+                            vertices.appendAssumeCapacity(point_offset + v8);
+                        }
+                    }
+                }
+            }
+        }
 
         // *************************
         // Regridding **************

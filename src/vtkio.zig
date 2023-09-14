@@ -4,6 +4,8 @@ const Allocator = std.mem.Allocator;
 
 /// The type of a cell in an unstructured vtk mesh.
 pub const VtkCellType = enum {
+    /// A 1d line, consisting of two vertex points.
+    line,
     /// A 2d quad, consisting of four vertex points.
     quad,
     /// A 3d hexahedron (distored cube) with 8 vertex points.
@@ -11,14 +13,16 @@ pub const VtkCellType = enum {
 
     pub fn dimension(self: VtkCellType) usize {
         return switch (self) {
+            .line => 1,
             .quad => 2,
             .hexa => 3,
         };
     }
 
     /// Counts the number of vertices for a given cell type.
-    pub fn n_vertices(self: VtkCellType) usize {
+    pub fn nvertices(self: VtkCellType) usize {
         return switch (self) {
+            .line => 2,
             .quad => 4,
             .hexa => 8,
         };
@@ -27,6 +31,7 @@ pub const VtkCellType = enum {
     /// Returns the VTK spec tag corresponding to the given cell type.
     pub fn tag(self: VtkCellType) i8 {
         return switch (self) {
+            .line => 3,
             .quad => 9,
             .hexa => 12,
         };
@@ -122,7 +127,7 @@ pub const VtkUnstructuredGrid = struct {
         const dimension = self.cell_type.dimension();
         const n_points: usize = self.points.len / dimension;
 
-        const n_vertices = self.cell_type.n_vertices();
+        const n_vertices = self.cell_type.nvertices();
         const n_cells: usize = self.vertices.len / n_vertices;
 
         try writeHeader(n_points, n_cells, out_stream);
@@ -184,7 +189,7 @@ pub const VtkUnstructuredGrid = struct {
     }
 
     fn writeCells(cell_type: VtkCellType, cells: []const i64, out_stream: anytype) @TypeOf(out_stream).Error!void {
-        const n_vertices = cell_type.n_vertices();
+        const n_vertices = cell_type.nvertices();
         const tag = cell_type.tag();
 
         // Connectivity Info

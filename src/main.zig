@@ -1,4 +1,5 @@
 const std = @import("std");
+const Allocator = std.mem.Allocator;
 
 // Subdirectories
 const array = @import("array.zig");
@@ -8,11 +9,20 @@ const mesh = @import("mesh/mesh.zig");
 const solver = @import("solver/solver.zig");
 const vtkio = @import("vtkio.zig");
 
-// Aliases
-const VtkCellType = vtkio.VtkCellType;
-const VtkUnstructuredGrid = vtkio.VtkUnstructuredGrid;
+/// Main function, using a universal base allocator.
+fn mainChecked(allocator: Allocator) !void {
+    // Aliases
+    const VtkUnstructuredGrid = vtkio.VtkUnstructuredGrid;
 
-// Main function
+    // Setup vtk grid object
+    var grid = try VtkUnstructuredGrid.init(allocator, .{ .cell_type = .quad, .points = &[_]f64{}, .vertices = &[_]i64{} });
+    defer grid.deinit();
+
+    const stdout = std.io.getStdOut().writer();
+    try grid.write(stdout);
+}
+
+/// Actual main function (with allocator and leak detection boilerplate)
 pub fn main() !void {
     // Setup Allocator
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
@@ -24,14 +34,8 @@ pub fn main() !void {
         }
     }
 
-    const allocator = gpa.allocator();
-
-    // Setup vtk grid object
-    var grid = try VtkUnstructuredGrid.init(allocator, .{ .cell_type = .quad, .points = &[_]f64{}, .vertices = &[_]i64{} });
-    defer grid.deinit();
-
-    const stdout = std.io.getStdOut().writer();
-    try grid.write(stdout);
+    // Run main
+    try mainChecked(gpa.allocator());
 }
 
 test {
