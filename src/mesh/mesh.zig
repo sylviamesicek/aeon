@@ -212,7 +212,7 @@ pub fn Mesh(comptime N: usize, comptime O: usize) type {
         pub fn fillBoundaries(self: *const Self, boundary: anytype, block_map: []const usize, field: []f64) void {
             assert(block_map.len == self.tileTotal());
             assert(field.len == self.cellTotal());
-            assert(boundaries.hasConditionDecl(N)(boundary));
+            assert(boundaries.hasBoundaryDecl(N)(boundary));
 
             self.fillBaseBoundary(boundary, field);
 
@@ -687,6 +687,10 @@ pub fn Mesh(comptime N: usize, comptime O: usize) type {
                 }
             }
         }
+
+        // *************************
+        // Application *************
+        // *************************
 
         // *************************
         // Regridding **************

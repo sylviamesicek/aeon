@@ -5,6 +5,7 @@ const array = @import("array.zig");
 const basis = @import("basis/basis.zig");
 const geometry = @import("geometry/geometry.zig");
 const mesh = @import("mesh/mesh.zig");
+const solver = @import("solver/solver.zig");
 const vtkio = @import("vtkio.zig");
 
 // Aliases
@@ -38,5 +39,6 @@ test {
     _ = basis;
     _ = geometry;
     _ = mesh;
+    _ = solver;
     _ = vtkio;
 }
