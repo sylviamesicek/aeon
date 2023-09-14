@@ -15,8 +15,12 @@ To reach the state of minimum viable product (MVP) the following features must b
 - [x] Exterior ghost node filling.
 - [x] Restriction operator.
 - [x] Prolongation operator.
-- [ ] Multigrid elliptic solver using BiCGStab and Jacobi's Method.
-- [ ] Hyperbolic solver using 4th order Runge-Kutta and subcylcing.
+- [x] BiCGStab(l) Solver.
+- [ ] Jacobi's Method.
+- [ ] Multigrid elliptic solver.
+- [ ] Runge Kutta 4th order.
+- [ ] Hyperbolic solver
+- [ ] VTK Output
 
 <!-- [![Build Status](https://github.com/lukazmm/Aeon.jl/actions/workflows/CI.yml/badge.svg?branch=main)](https://github.com/lukazmm/Aeon.jl/actions/workflows/CI.yml?query=branch%3Amain)
 [![Coverage](https://codecov.io/gh/lukazmm/Aeon.jl/branch/main/graph/badge.svg)](https://codecov.io/gh/lukazmm/Aeon.jl) -->
