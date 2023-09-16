@@ -1,21 +1,20 @@
 const std = @import("std");
-const meta = std.meta;
-const trait = meta.trait;
 
 const basis = @import("../basis/basis.zig");
+const system = @import("system.zig");
 
+/// Wraps a stencil space, output field, input system, and cell, to provide a consistent
+/// interface to write operators.
 pub fn ApproxEngine(comptime N: usize, comptime O: usize, comptime Input: type) type {
-    std.debug.assert(isInputStruct(Input));
-
-    const ILen: usize = meta.fields(Input).len;
+    std.debug.assert(system.isConstSystem(Input));
 
     return struct {
         space: StencilSpace,
         output: []const f64,
-        inputs: [ILen][]const f64,
+        inputs: Input,
         cell: [N]usize,
 
-        pub const Field = meta.FieldEnum(Input);
+        pub const FieldEnum = system.SystemFieldEnum(Input);
 
         const Self = @This();
         const StencilSpace = basis.StencilSpace(N, O);
@@ -24,24 +23,24 @@ pub fn ApproxEngine(comptime N: usize, comptime O: usize, comptime Input: type) 
             return self.space.position(self.cell);
         }
 
-        pub fn value(self: Self, comptime field: Field) f64 {
-            const field_index = @intFromEnum(field);
-            return self.valueField(self.inputs[field_index]);
+        pub fn value(self: Self, comptime field: FieldEnum) f64 {
+            const f: []const f64 = system.systemField(Input, self.inputs, field);
+            return self.valueField(f);
         }
 
-        pub fn gradient(self: Self, comptime field: Field) [N]f64 {
-            const field_index = @intFromEnum(field);
-            return self.gradientField(self.inputs[field_index]);
+        pub fn gradient(self: Self, comptime field: FieldEnum) [N]f64 {
+            const f: []const f64 = system.systemField(Input, self.inputs, field);
+            return self.gradientField(f);
         }
 
-        pub fn hessian(self: Self, comptime field: Field) [N][N]f64 {
-            const field_index = @intFromEnum(field);
-            return self.hessianField(self.inputs[field_index]);
+        pub fn hessian(self: Self, comptime field: FieldEnum) [N][N]f64 {
+            const f: []const f64 = system.systemField(Input, self.inputs, field);
+            return self.hessianField(f);
         }
 
-        pub fn laplacian(self: Self, comptime field: Field) f64 {
-            const field_index = @intFromEnum(field);
-            return self.laplacianField(self.inputs[field_index]);
+        pub fn laplacian(self: Self, comptime field: FieldEnum) f64 {
+            const f: []const f64 = system.systemField(Input, self.inputs, field);
+            return self.laplacianField(f);
         }
 
         pub fn valueOp(self: Self) f64 {
@@ -154,29 +153,14 @@ pub fn ApproxEngine(comptime N: usize, comptime O: usize, comptime Input: type) 
     };
 }
 
-const is = trait.is;
-const hasFn = trait.hasFn;
+const is = std.meta.trait.is;
+const hasFn = std.meta.trait.hasFn;
 const TraitFn = std.meta.trait.TraitFn;
-
-pub fn isInputStruct(comptime T: type) bool {
-    switch (@typeInfo(T)) {
-        .Struct => |info| {
-            for (info.fields) |field| {
-                if (field.type != []const f64) {
-                    return false;
-                }
-            }
-
-            return true;
-        },
-        else => return false,
-    }
-}
 
 pub fn isOperator(comptime N: usize, comptime O: usize) TraitFn {
     const Closure = struct {
         fn t(comptime T: type) bool {
-            if (!(@hasDecl(T, "Input") and T.Input == type and isInputStruct(T.Input))) {
+            if (!(@hasDecl(T, "Input") and T.Input == type and system.isConstSystem(T.Input))) {
                 return false;
             }
 

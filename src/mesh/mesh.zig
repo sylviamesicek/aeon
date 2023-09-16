@@ -21,11 +21,10 @@ const levels = @import("level.zig");
 
 // Public Exports
 
+pub const system = @import("system.zig");
+
 pub const ApproxEngine = operator.ApproxEngine;
 pub const BoundaryCondition = boundaries.BoundaryCondition;
-
-pub const isInputStruct = operator.isInputStruct;
-pub const isOperator = operator.isOperator;
 
 pub fn Mesh(comptime N: usize, comptime O: usize) type {
     return struct {
@@ -1272,4 +1271,8 @@ test "mesh regridding" {
         .patch_max_tiles = 80,
         .patch_efficiency = 0.1,
     });
+}
+
+test {
+    _ = system;
 }

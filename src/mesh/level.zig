@@ -6,6 +6,8 @@ const Allocator = std.mem.Allocator;
 const geometry = @import("../geometry/geometry.zig");
 const Box = geometry.Box;
 
+/// Represents a block in a mesh. A block exists in some patch, and is composed of a set of
+/// tiles which are further subdivided into cells.
 pub fn Block(comptime N: usize) type {
     return struct {
         /// Bounds of this block in level index space.
@@ -21,6 +23,9 @@ pub fn Block(comptime N: usize) type {
     };
 }
 
+/// A set of tiles on a patch which are more sparesly laid out than blocks. Patches form
+/// a higherarchical structure between levels on a mesh, and are essentially an optimisation
+/// which allows for O(1) lookups of intersections and underlying blocks.
 pub fn Patch(comptime N: usize) type {
     return struct {
         /// Bounds of this patch in level index space.
@@ -42,6 +47,7 @@ pub fn Patch(comptime N: usize) type {
     };
 }
 
+/// A single level of a mesh.
 pub fn Level(comptime N: usize, comptime O: usize) type {
     return struct {
         /// Number of indices on each side in the level index space.
