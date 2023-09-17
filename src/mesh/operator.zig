@@ -6,7 +6,9 @@ const system = @import("system.zig");
 /// Wraps a stencil space, output field, input system, and cell, to provide a consistent
 /// interface to write operators.
 pub fn ApproxEngine(comptime N: usize, comptime O: usize, comptime Input: type) type {
-    std.debug.assert(system.isConstSystem(Input));
+    if (!system.isConstSystem(Input)) {
+        @compileError("Input type must be a const system");
+    }
 
     return struct {
         space: StencilSpace,

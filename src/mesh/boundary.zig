@@ -40,15 +40,15 @@ pub const BoundaryCondition = struct {
     }
 };
 
-/// Checks whether a type has a function named `condition` that satisfied the `isBoundaryFunction(N)` trait.
-pub fn hasBoundaryDecl(comptime N: usize) std.meta.trait.TraitFn {
+/// A trait indicating whether a type is a boundrary operator.
+pub fn isBoundaryOperator(comptime N: usize) std.meta.trait.TraitFn {
     const Closure = struct {
         fn trait(comptime T: type) bool {
-            if (!std.meta.trait.hasFn("condition")(T)) {
+            if (!std.meta.trait.hasFn("boundary")(T)) {
                 return false;
             }
 
-            return fn (T, [N]f64, Face(N)) BoundaryCondition == @TypeOf(T.condition);
+            return fn (T, [N]f64, Face(N)) BoundaryCondition == @TypeOf(T.boundary);
         }
     };
     return Closure.trait;

@@ -43,26 +43,10 @@ pub fn Mesh(comptime N: usize, comptime O: usize) type {
         /// Number of levels which are active.
         active_levels: usize,
 
-        // Aliases
-        const Self = @This();
+        // Public types
         pub const Level = levels.Level(N, O);
         pub const Block = levels.Block(N);
         pub const Patch = levels.Patch(N);
-        const IndexBox = geometry.Box(N, usize);
-        const RealBox = geometry.Box(N, f64);
-        const Face = geometry.Face(N);
-        const IndexSpace = geometry.IndexSpace(N);
-        const PartitionSpace = geometry.PartitionSpace(N);
-        const Region = geometry.Region(N);
-        const StencilSpace = basis.StencilSpace(N, O);
-        const InterpolationSpace = basis.InterpolationSpace(N, O);
-
-        const Array = array.Array(N, usize);
-
-        const add = Array.add;
-        const sub = Array.sub;
-        const scaled = Array.scaled;
-        const splat = Array.splat;
 
         pub const Config = struct {
             physical_bounds: RealBox,
@@ -100,6 +84,26 @@ pub fn Mesh(comptime N: usize, comptime O: usize) type {
             cell_total: usize,
         };
 
+        // Aliases
+        const Self = @This();
+        const IndexBox = geometry.Box(N, usize);
+        const RealBox = geometry.Box(N, f64);
+        const Face = geometry.Face(N);
+        const IndexSpace = geometry.IndexSpace(N);
+        const PartitionSpace = geometry.PartitionSpace(N);
+        const Region = geometry.Region(N);
+        const StencilSpace = basis.StencilSpace(N, O);
+        const InterpolationSpace = basis.InterpolationSpace(N, O);
+
+        // Mixins
+        const Array = array.Array(N, usize);
+
+        const add = Array.add;
+        const sub = Array.sub;
+        const scaled = Array.scaled;
+        const splat = Array.splat;
+
+        /// Initialises a new mesh with an general purpose allocator, subject to the given configuration.
         pub fn init(allocator: Allocator, config: Config) Self {
             // Check config
             config.check();
@@ -124,6 +128,7 @@ pub fn Mesh(comptime N: usize, comptime O: usize) type {
             };
         }
 
+        /// Deinitalises a mesh.
         pub fn deinit(self: *Self) void {
             for (self.levels.items) |*level| {
                 level.deinit(self.gpa);
@@ -133,7 +138,7 @@ pub fn Mesh(comptime N: usize, comptime O: usize) type {
         }
 
         // **********************************
-        // Helpers for querying totals ******
+        // Helpers **************************
         // **********************************
 
         pub fn tileTotal(self: *const Self) usize {
@@ -144,20 +149,12 @@ pub fn Mesh(comptime N: usize, comptime O: usize) type {
             return self.cell_total;
         }
 
-        pub fn baseTileTotal(self: *const Self) usize {
-            return self.base.tile_total;
-        }
-
-        pub fn baseCellTotal(self: *const Self) usize {
-            return self.base.cell_total;
-        }
-
         pub fn baseTileSlice(self: *const Self, mesh_slice: anytype) @TypeOf(mesh_slice) {
-            return mesh_slice[0..self.baseTileTotal()];
+            return mesh_slice[0..self.base.tile_total];
         }
 
         pub fn baseCellSlice(self: *const Self, mesh_slice: anytype) @TypeOf(mesh_slice) {
-            return mesh_slice[0..self.baseCellTotal()];
+            return mesh_slice[0..self.base.cell_total];
         }
 
         // *************************
@@ -695,14 +692,13 @@ pub fn Mesh(comptime N: usize, comptime O: usize) type {
         // Output ******************
         // *************************
 
-        pub fn writeVtk(self: *const Self, fields: anytype, out_stream: anytype) @TypeOf(out_stream).Error!void {
-            const NFields = meta.fields(fields).len;
-
+        pub fn writeVtk(self: *const Self, sys: anytype, out_stream: anytype) !void {
             const vtkio = @import("../vtkio.zig");
             const VtkUnstructuredGrid = vtkio.VtkUnstructuredGrid;
             const VtkCellType = vtkio.VtkCellType;
-            _ = VtkUnstructuredGrid;
 
+            // Global Constant
+            const FieldCount: usize = system.systemFieldCount(sys);
             const cell_type: VtkCellType = switch (N) {
                 1 => .line,
                 2 => .quad,
@@ -710,61 +706,38 @@ pub fn Mesh(comptime N: usize, comptime O: usize) type {
                 else => @compileError("Vtk Output not supported for N > 3"),
             };
 
-            var positions: ArrayListUnmanaged(f64) = .{};
-            defer positions.deinit(self.gpa);
+            const GridData = struct {
+                positions: ArrayListUnmanaged(f64) = .{},
+                vertices: ArrayListUnmanaged(usize) = .{},
+                fields: [FieldCount]ArrayListUnmanaged(f64) = [1]ArrayListUnmanaged(f64){.{}} ** FieldCount,
+                input: @TypeOf(sys),
 
-            var vertices: ArrayListUnmanaged(usize) = .{};
-            defer vertices.deinit(self.gpa);
+                fn deinit(data: *@This(), allocator: Allocator) void {
+                    data.positions.deinit(allocator);
+                    data.vertices.deinit(allocator);
 
-            var field_arrays: [NFields]ArrayListUnmanaged(f64) = [1]ArrayListUnmanaged(f64){.{}} ** NFields;
-            defer {
-                for (field_arrays) |*field_array| {
-                    field_array.deinit(self.gpa);
-                }
-            }
-
-            var point_offset: usize = 0;
-
-            const base_bounds_slice: []const IndexBox = &[_]IndexBox{.{
-                .size = self.base.index_size,
-                .origin = splat(0),
-            }};
-
-            const base_cell_offset_slice: []const usize = &[_]usize{0};
-            const base_cell_total_slice: []const usize = &[_]usize{self.base.cell_total};
-            for (-1..self.active_levels) |level| {
-                var level_offset: usize = undefined;
-
-                var block_bounds: []const IndexBox = undefined;
-                var block_offsets: []const usize = undefined;
-                var block_totals: []const usize = undefined;
-
-                if (level == -1) {
-                    level_offset = 0;
-                    block_bounds = base_bounds_slice;
-                    block_offsets = base_cell_offset_slice;
-                    block_totals = base_cell_total_slice;
-                } else {
-                    const target: *const Level = &self.levels[level];
-                    level_offset = target.cell_offset;
-                    block_bounds = target.blocks.items(.bounds);
-                    block_offsets = target.blocks.items(.cell_offset);
-                    block_totals = target.blocks.items(.cell_total);
+                    for (data.fields) |*field| {
+                        field.deinit(allocator);
+                    }
                 }
 
-                for (block_bounds, block_offsets, block_totals) |bounds, offset, total| {
-                    _ = total;
-                    _ = offset;
-                    const stencil: StencilSpace = if (level == -1) self.baseStencilSpace() else self.levelStencilSpace(level, bounds);
-
-                    const cell_size = scaled(bounds.size, self.config.tile_width);
+                fn build(
+                    data: *@This(),
+                    allocator: Allocator,
+                    stencil: StencilSpace,
+                    offset: usize,
+                    total: usize,
+                ) !void {
+                    const cell_size = stencil.size;
                     const point_size = add(cell_size, splat(1));
 
                     const cell_space: IndexSpace = IndexSpace.fromSize(cell_size);
                     const point_space: IndexSpace = IndexSpace.fromSize(point_size);
 
-                    positions.ensureUnusedCapacity(self.gpa, N * point_space.total());
-                    vertices.ensureUnusedCapacity(self.gpa, cell_type.nvertices() * cell_space.total());
+                    const point_offset: usize = data.positions.items.len;
+
+                    data.positions.ensureUnusedCapacity(allocator, N * point_space.total());
+                    data.vertices.ensureUnusedCapacity(allocator, cell_type.nvertices() * cell_space.total());
 
                     // Fill positions and vertices
 
@@ -773,7 +746,7 @@ pub fn Mesh(comptime N: usize, comptime O: usize) type {
                     while (points.next()) |point| {
                         const pos = stencil.vertexPosition(point);
                         for (0..N) |i| {
-                            positions.appendAssumeCapacity(pos[i]);
+                            data.positions.appendAssumeCapacity(pos[i]);
                         }
                     }
 
@@ -784,8 +757,8 @@ pub fn Mesh(comptime N: usize, comptime O: usize) type {
                             const v1: usize = point_space.linearFromCartesian(cell);
                             const v2: usize = point_space.linearFromCartesian(add(cell, splat(1)));
 
-                            vertices.appendAssumeCapacity(point_offset + v1);
-                            vertices.appendAssumeCapacity(point_offset + v2);
+                            data.vertices.appendAssumeCapacity(point_offset + v1);
+                            data.vertices.appendAssumeCapacity(point_offset + v2);
                         }
                     } else if (N == 2) {
                         var cells = cell_space.cartesianIndices();
@@ -796,10 +769,10 @@ pub fn Mesh(comptime N: usize, comptime O: usize) type {
                             const v3: usize = point_space.linearFromCartesian(add(cell, [2]usize{ 1, 1 }));
                             const v4: usize = point_space.linearFromCartesian(add(cell, [2]usize{ 1, 0 }));
 
-                            vertices.appendAssumeCapacity(point_offset + v1);
-                            vertices.appendAssumeCapacity(point_offset + v2);
-                            vertices.appendAssumeCapacity(point_offset + v3);
-                            vertices.appendAssumeCapacity(point_offset + v4);
+                            data.vertices.appendAssumeCapacity(point_offset + v1);
+                            data.vertices.appendAssumeCapacity(point_offset + v2);
+                            data.vertices.appendAssumeCapacity(point_offset + v3);
+                            data.vertices.appendAssumeCapacity(point_offset + v4);
                         }
                     } else if (N == 3) {
                         var cells = cell_space.cartesianIndices();
@@ -814,25 +787,74 @@ pub fn Mesh(comptime N: usize, comptime O: usize) type {
                             const v7: usize = point_space.linearFromCartesian(add(cell, [3]usize{ 1, 1, 3 }));
                             const v8: usize = point_space.linearFromCartesian(add(cell, [3]usize{ 1, 0, 3 }));
 
-                            vertices.appendAssumeCapacity(point_offset + v1);
-                            vertices.appendAssumeCapacity(point_offset + v2);
-                            vertices.appendAssumeCapacity(point_offset + v3);
-                            vertices.appendAssumeCapacity(point_offset + v4);
-                            vertices.appendAssumeCapacity(point_offset + v5);
-                            vertices.appendAssumeCapacity(point_offset + v6);
-                            vertices.appendAssumeCapacity(point_offset + v7);
-                            vertices.appendAssumeCapacity(point_offset + v8);
+                            data.vertices.appendAssumeCapacity(point_offset + v1);
+                            data.vertices.appendAssumeCapacity(point_offset + v2);
+                            data.vertices.appendAssumeCapacity(point_offset + v3);
+                            data.vertices.appendAssumeCapacity(point_offset + v4);
+                            data.vertices.appendAssumeCapacity(point_offset + v5);
+                            data.vertices.appendAssumeCapacity(point_offset + v6);
+                            data.vertices.appendAssumeCapacity(point_offset + v7);
+                            data.vertices.appendAssumeCapacity(point_offset + v8);
                         }
                     }
 
-                    // var cells = cell_space.cartesianIndices();
-                    // while (cells.next()) |cell| {
-                    //     inline for (meta.fields(@TypeOf(fields))) |field| {
+                    for (0..FieldCount) |id| {
+                        data.fields[id].ensureUnusedCapacity(allocator, cell_space.total());
+                    }
 
-                    //     }
-                    // }
+                    var cells = cell_space.cartesianIndices();
+                    while (cells.next()) |cell| {
+                        for (system.systemFields(@TypeOf(sys), sys), 0..) |field, id| {
+                            const block_field: []const f64 = field[offset .. offset + total];
+                            data.fields[id].appendAssumeCapacity(stencil.value(cell, block_field));
+                        }
+                    }
+                }
+            };
+
+            // Build data
+            const data = GridData{ .input = sys };
+            defer data.deinit(self.gpa);
+
+            // Build base
+            try data.build(
+                self.gpa,
+                self.baseStencilSpace(),
+                0,
+                self.base.cell_total,
+            );
+
+            for (0..self.active_levels) |level| {
+                const target: *const Level = &self.levels[level];
+                const level_offset = target.cell_offset;
+                const block_bounds = target.blocks.items(.bounds);
+                const block_offsets = target.blocks.items(.cell_offset);
+                const block_totals = target.blocks.items(.cell_total);
+
+                for (block_bounds, block_offsets, block_totals) |bounds, offset, total| {
+                    const stencil: StencilSpace = self.levelStencilSpace(level, bounds);
+
+                    try data.build(
+                        self.gpa,
+                        stencil,
+                        level_offset + offset,
+                        total,
+                    );
                 }
             }
+
+            var grid: VtkUnstructuredGrid = try VtkUnstructuredGrid.init(self.gpa, .{
+                .points = data.positions,
+                .vertices = data.vertices,
+                .cell_type = cell_type,
+            });
+            defer grid.deinit(self.gpa);
+
+            for (system.systemFieldCount(@TypeOf(sys)), 0..) |name, id| {
+                try grid.addCellField(name, data.fields[id].items, 1);
+            }
+
+            try grid.write(out_stream);
         }
 
         // *************************
