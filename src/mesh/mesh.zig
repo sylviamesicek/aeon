@@ -25,8 +25,11 @@ const levels = @import("level.zig");
 
 pub const system = @import("system.zig");
 
-pub const ApproxEngine = operator.ApproxEngine;
+pub const OperatorEngine = operator.OperatorEngine;
+pub const FunctionEngine = operator.FunctionEngine;
+
 pub const isMeshOperator = operator.isMeshOperator;
+pub const isMeshFunction = operator.isMeshFunction;
 
 pub fn Mesh(comptime N: usize, comptime O: usize) type {
     return struct {
@@ -714,16 +717,16 @@ pub fn Mesh(comptime N: usize, comptime O: usize) type {
             field: []const f64,
             rhs: []const f64,
             oper: anytype,
-            input: anytype,
+            context: anytype,
         ) void {
-            if (!(operator.isMeshOperator(N, O)(oper) and oper.Input == @TypeOf(input))) {
+            if (!(operator.isMeshOperator(N, O)(oper) and oper.Context == @TypeOf(context))) {
                 @compileError("Oper must satisfy isMeshOperator trait.");
             }
 
             const base_x: []f64 = self.baseCellSlice(x);
             const base_field: []const f64 = self.baseCellSlice(field);
             const base_rhs: []const f64 = self.baseCellSlice(rhs);
-            const base_input: @TypeOf(input) = system.systemSlice(@TypeOf(input), input, 0, self.base.cell_total);
+            const base_context: @TypeOf(context) = system.systemSlice(context, 0, self.base.cell_total);
 
             const stencil_space: StencilSpace = self.baseStencilSpace();
             const cell_space = IndexSpace.fromSize(stencil_space.size);
@@ -731,10 +734,12 @@ pub fn Mesh(comptime N: usize, comptime O: usize) type {
             var cell_indices = cell_space.cartesianIndices();
 
             while (cell_indices.next()) |cell| {
-                const engine = ApproxEngine(N, O, @TypeOf(input)){
+                const engine = OperatorEngine(N, O, @TypeOf(context)){
                     .space = stencil_space,
-                    .output = base_field,
-                    .input = base_input,
+                    .output = .{
+                        .output = base_field,
+                    },
+                    .input = base_context,
                     .cell = cell,
                 };
 
@@ -755,9 +760,9 @@ pub fn Mesh(comptime N: usize, comptime O: usize) type {
             field: []const f64,
             rhs: []const f64,
             oper: anytype,
-            input: anytype,
+            context: anytype,
         ) void {
-            if (!(operator.isMeshOperator(N, O)(oper) and oper.Input == @TypeOf(input))) {
+            if (!(operator.isMeshOperator(N, O)(oper) and oper.Context == @TypeOf(context))) {
                 @compileError("Oper must satisfy isMeshOperator trait.");
             }
 
@@ -765,13 +770,13 @@ pub fn Mesh(comptime N: usize, comptime O: usize) type {
             const level_x: []f64 = target.levelCellSlice(x);
             const level_field: []const f64 = target.levelCellSlice(field);
             const level_rhs: []const f64 = target.levelCellSlice(rhs);
-            const level_input: @TypeOf(input) = system.systemSlice(@TypeOf(input), input, target.cell_offset, target.cell_total);
+            const level_context: @TypeOf(context) = system.systemSlice(context, target.cell_offset, target.cell_total);
 
             for (target.blocks.items(.bounds), target.blocks.items(.cell_offset), target.blocks.items(.cell_total)) |block, offset, total| {
                 const block_x: []f64 = level_x[offset..(offset + total)];
                 const block_field: []const f64 = level_field[offset..(offset + total)];
                 const block_rhs: []const f64 = level_rhs[offset..(offset + total)];
-                const block_input: @TypeOf(input) = system.systemSlice(@TypeOf(input), level_input, offset, total);
+                const block_context: @TypeOf(context) = system.systemSlice(level_context, offset, total);
 
                 const stencil_space: StencilSpace = self.levelStencilSpace(level, block);
                 const cell_space = IndexSpace.fromSize(stencil_space.size);
@@ -779,10 +784,12 @@ pub fn Mesh(comptime N: usize, comptime O: usize) type {
                 var cell_indices = cell_space.cartesianIndices();
 
                 while (cell_indices.next()) |cell| {
-                    const engine = ApproxEngine(N, O, @TypeOf(input)){
+                    const engine = FunctionEngine(N, O, @TypeOf(block_context)){
                         .space = stencil_space,
-                        .output = block_field,
-                        .input = block_input,
+                        .output = .{
+                            .output = block_field,
+                        },
+                        .context = block_context,
                         .cell = cell,
                     };
 
@@ -820,15 +827,15 @@ pub fn Mesh(comptime N: usize, comptime O: usize) type {
             x: []f64,
             field: []const f64,
             oper: anytype,
-            input: anytype,
+            context: anytype,
         ) void {
-            if (!(operator.isMeshOperator(N, O)(oper) and oper.Input == @TypeOf(input))) {
+            if (!(operator.isMeshOperator(N, O)(oper) and oper.Context == @TypeOf(context))) {
                 @compileError("Oper must satisfy isMeshOperator trait.");
             }
 
             const base_x: []f64 = self.baseCellSlice(x);
             const base_field: []const f64 = self.baseCellSlice(field);
-            const base_input: @TypeOf(input) = system.systemSlice(@TypeOf(input), input, 0, self.base.cell_total);
+            const base_context: @TypeOf(context) = system.systemSlice(context, 0, self.base.cell_total);
 
             const stencil_space: StencilSpace = self.baseStencilSpace();
             const cell_space = IndexSpace.fromSize(stencil_space.size);
@@ -836,10 +843,12 @@ pub fn Mesh(comptime N: usize, comptime O: usize) type {
             var cell_indices = cell_space.cartesianIndices();
 
             while (cell_indices.next()) |cell| {
-                const engine = ApproxEngine(N, O, @TypeOf(input)){
+                const engine = OperatorEngine(N, O, @TypeOf(context)){
                     .space = stencil_space,
-                    .output = base_field,
-                    .input = base_input,
+                    .output = .{
+                        .output = base_field,
+                    },
+                    .context = base_context,
                     .cell = cell,
                 };
 
@@ -854,21 +863,21 @@ pub fn Mesh(comptime N: usize, comptime O: usize) type {
             x: []f64,
             field: []const f64,
             oper: anytype,
-            input: anytype,
+            context: anytype,
         ) void {
-            if (!(operator.isMeshOperator(N, O)(oper) and oper.Input == @TypeOf(input))) {
+            if (!(operator.isMeshOperator(N, O)(oper) and oper.Context == @TypeOf(context))) {
                 @compileError("Oper must satisfy isMeshOperator trait.");
             }
 
             const target: *const Level = &self.levels[level];
             const level_x: []f64 = target.levelCellSlice(x);
             const level_field: []const f64 = target.levelCellSlice(field);
-            const level_input: @TypeOf(input) = system.systemSlice(@TypeOf(input), input, target.cell_offset, target.cell_total);
+            const level_context: @TypeOf(context) = system.systemSlice(context, target.cell_offset, target.cell_total);
 
             for (target.blocks.items(.bounds), target.blocks.items(.cell_offset), target.blocks.items(.cell_total)) |block, offset, total| {
                 const block_x: []f64 = level_x[offset..(offset + total)];
                 const block_field: []const f64 = level_field[offset..(offset + total)];
-                const block_input: @TypeOf(input) = system.systemSlice(@TypeOf(input), level_input, offset, total);
+                const block_context: @TypeOf(context) = system.systemSlice(level_context, offset, total);
 
                 const stencil_space: StencilSpace = self.levelStencilSpace(level, block);
                 const cell_size: [N]usize = if (full) add(stencil_space.size, splat(2 * O)) else stencil_space.size;
@@ -878,10 +887,12 @@ pub fn Mesh(comptime N: usize, comptime O: usize) type {
 
                 while (cell_indices.next()) |cell| {
                     const offset_cell = if (full) add(stencil_space.size, [1]isize{-O} ** N) else cell;
-                    const engine = ApproxEngine(N, O, @TypeOf(input)){
+                    const engine = OperatorEngine(N, O, @TypeOf(context)){
                         .space = stencil_space,
-                        .output = block_field,
-                        .input = block_input,
+                        .output = .{
+                            .output = block_field,
+                        },
+                        .context = block_context,
                         .cell = offset_cell,
                     };
 

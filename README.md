@@ -16,7 +16,7 @@ To reach the state of minimum viable product (MVP) the following features must b
 - [x] Restriction operator.
 - [x] Prolongation operator.
 - [x] BiCGStab(l) Solver.
-- [ ] Jacobi's Method.
+- [x] Jacobi's Method.
 - [ ] Multigrid elliptic solver.
 - [ ] Runge Kutta 4th order method.
 - [ ] Hyperbolic solver.

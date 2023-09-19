@@ -5,15 +5,19 @@ const system = @import("system.zig");
 
 /// Wraps a stencil space, output field, input system, and cell, to provide a consistent
 /// interface to write operators.
-pub fn ApproxEngine(comptime N: usize, comptime O: usize, comptime Input: type) type {
-    if (!system.isSystem(Input)) {
-        @compileError("Input type must be a system");
+pub fn Engine(comptime N: usize, comptime O: usize, comptime Context: type, comptime Output: type) type {
+    if (!system.isSystem(Context)) {
+        @compileError("Context type must be a system");
+    }
+
+    if (!system.isSystem(Output)) {
+        @compileError("Output type must be a system");
     }
 
     return struct {
         space: StencilSpace,
-        output: []const f64,
-        input: Input,
+        output: Output,
+        context: Context,
         cell: [N]usize,
 
         // Aliases
@@ -21,7 +25,8 @@ pub fn ApproxEngine(comptime N: usize, comptime O: usize, comptime Input: type) 
         const StencilSpace = basis.StencilSpace(N, 2 * O, O);
 
         // Public types
-        pub const FieldEnum = system.SystemFieldEnum(Input);
+        pub const CFieldEnum = system.SystemFieldEnum(Context);
+        pub const OFieldEnum = system.SystemFieldEnum(Output);
 
         /// Computes the position of the cell.
         pub fn position(self: Self) [N]f64 {
@@ -29,47 +34,51 @@ pub fn ApproxEngine(comptime N: usize, comptime O: usize, comptime Input: type) 
         }
 
         /// Returns the value of the field at the current cell.
-        pub fn value(self: Self, comptime field: FieldEnum) f64 {
-            const f: []const f64 = system.systemField(Input, self.input, field);
+        pub fn value(self: Self, comptime field: CFieldEnum) f64 {
+            const f: []const f64 = system.systemField(self.context, field);
             return self.valueField(f);
         }
 
         /// Returns the gradient of the field at the current cell.
-        pub fn gradient(self: Self, comptime field: FieldEnum) [N]f64 {
-            const f: []const f64 = system.systemField(Input, self.input, field);
+        pub fn gradient(self: Self, comptime field: CFieldEnum) [N]f64 {
+            const f: []const f64 = system.systemField(self.context, field);
             return self.gradientField(f);
         }
 
         /// Returns the hessian of the field at the current cell.
-        pub fn hessian(self: Self, comptime field: FieldEnum) [N][N]f64 {
-            const f: []const f64 = system.systemField(Input, self.input, field);
+        pub fn hessian(self: Self, comptime field: CFieldEnum) [N][N]f64 {
+            const f: []const f64 = system.systemField(self.context, field);
             return self.hessianField(f);
         }
 
         /// Returns the laplacian of the field at the current cell.
-        pub fn laplacian(self: Self, comptime field: FieldEnum) f64 {
-            const f: []const f64 = system.systemField(Input, self.input, field);
+        pub fn laplacian(self: Self, comptime field: CFieldEnum) f64 {
+            const f: []const f64 = system.systemField(self.context, field);
             return self.laplacianField(f);
         }
 
-        /// Returns the value of the output field at the current cell.
-        pub fn valueOp(self: Self) f64 {
-            return self.valueField(self.output);
+        /// Returns the value of the field at the current cell.
+        pub fn valueOp(self: Self, comptime field: OFieldEnum) f64 {
+            const f: []const f64 = system.systemField(self.output, field);
+            return self.valueField(f);
         }
 
-        /// Returns the gradient of the output field at the current cell.
-        pub fn gradientOp(self: Self) [N]f64 {
-            return self.gradientField(self.output);
+        /// Returns the gradient of the field at the current cell.
+        pub fn gradientOp(self: Self, comptime field: OFieldEnum) [N]f64 {
+            const f: []const f64 = system.systemField(self.output, field);
+            return self.gradientField(f);
         }
 
-        /// Returns the hessian of the output field at the current cell.
-        pub fn hessianOp(self: Self) [N][N]f64 {
-            return self.hessianField(self.output);
+        /// Returns the hessian of the field at the current cell.
+        pub fn hessianOp(self: Self, comptime field: OFieldEnum) [N][N]f64 {
+            const f: []const f64 = system.systemField(self.output, field);
+            return self.hessianField(f);
         }
 
-        /// Returns the laplacian of the output field at the current cell.
-        pub fn laplacianOp(self: Self) f64 {
-            return self.laplacianField(self.output);
+        /// Returns the laplacian of the field at the current cell.
+        pub fn laplacianOp(self: Self, comptime field: OFieldEnum) f64 {
+            const f: []const f64 = system.systemField(self.output, field);
+            return self.laplacianField(f);
         }
 
         /// Returns the value diagonal coefficient.
@@ -170,20 +179,25 @@ pub fn ApproxEngine(comptime N: usize, comptime O: usize, comptime Input: type) 
     };
 }
 
+/// An `Engine` which does not call any *Op() functions.
+pub fn FunctionEngine(comptime N: usize, comptime O: usize, comptime Context: type) type {
+    return Engine(N, O, Context, struct {});
+}
+
 /// A trait which checks if a type is a mesh operator. Such a type follows the following set of declarations.
 /// ```
 /// const Operator = struct {
-///     pub const Input = struct {
+///     pub const Context = struct {
 ///         field1: []const f64,
 ///         field2: []const f64,
 ///         // ...
 ///     };
 ///
-///     pub fn apply(self: Operator, engine: ApproxEngine(2, 2, Input)) f64 {
+///     pub fn apply(self: Operator, engine: OperatorEngine(2, 2, Context)) f64 {
 ///         // ...
 ///     }
 ///
-///     pub fn applyDiagonal(self: Operator, engine: ApproxEngine(2, 2, Input)) f64 {
+///     pub fn applyDiagonal(self: Operator, engine: OperatorEngine(2, 2, Context)) f64 {
 ///         // ...
 ///     }
 /// };
@@ -193,15 +207,53 @@ pub fn isMeshOperator(comptime N: usize, comptime O: usize) fn (type) bool {
 
     const Closure = struct {
         fn trait(comptime T: type) bool {
-            if (!(@hasDecl(T, "Input") and T.Input == type and system.isConstSystem(T.Input))) {
+            if (!(@hasDecl(T, "Context") and T.Context == type and system.isConstSystem(T.Context))) {
                 return false;
             }
 
-            if (!(hasFn("apply")(T) and @TypeOf(T.apply) == fn (T, ApproxEngine(N, O, T.Input)) f64)) {
+            if (!(@hasDecl(T, "Output") and T.Output == type and system.isConstSystem(T.Output))) {
                 return false;
             }
 
-            if (!(hasFn("applyDiagonal")(T) and @TypeOf(T.applyDiagonal) == fn (T, ApproxEngine(N, O, T.Input)) f64)) {
+            if (!(hasFn("apply")(T) and @TypeOf(T.apply) == fn (T, Engine(N, O, T.Context, T.Output)) system.SystemValueStruct(T.Output))) {
+                return false;
+            }
+
+            if (!(hasFn("applyDiagonal")(T) and @TypeOf(T.applyDiagonal) == fn (T, Engine(N, O, T.Context, T.Output)) system.SystemValueStruct(T.Output))) {
+                return false;
+            }
+
+            return true;
+        }
+    };
+
+    return Closure.trait;
+}
+
+/// A trait which checks if a type is a mesh function. Such a type follows the following set of declarations.
+/// ```
+/// const Function = struct {
+///     pub const Context = struct {
+///         field1: []const f64,
+///         field2: []const f64,
+///         // ...
+///     };
+///
+///     pub fn value(self: Operator, engine: FunctionEngine(2, 2, Context)) f64 {
+///         // ...
+///     }
+/// };
+/// ```
+pub fn isMeshFunction(comptime N: usize, comptime O: usize) fn (type) bool {
+    const hasFn = std.meta.trait.hasFn;
+
+    const Closure = struct {
+        fn trait(comptime T: type) bool {
+            if (!(@hasDecl(T, "Context") and T.Context == type and system.isConstSystem(T.Context))) {
+                return false;
+            }
+
+            if (!(hasFn("value")(T) and @TypeOf(T.value) == fn (T, FunctionEngine(N, O, T.Context)) f64)) {
                 return false;
             }
 
