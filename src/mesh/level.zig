@@ -102,10 +102,12 @@ pub fn Level(comptime N: usize, comptime O: usize) type {
             self.parents.shrinkRetainingCapacity(0);
         }
 
+        /// Returns the total number of patches in this level.
         pub fn patchTotal(self: *const Self) usize {
             return self.patches.len;
         }
 
+        /// Preallocates a number of total children.
         pub fn setTotalChildren(self: *Self, allocator: Allocator, total: usize) !void {
             try self.parents.resize(allocator, total);
         }

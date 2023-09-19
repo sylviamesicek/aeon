@@ -1,21 +1,23 @@
-const std = @import("std");
-const meta = std.meta;
+// std imports
 
+const std = @import("std");
 const Allocator = std.mem.Allocator;
 const ArrayList = std.ArrayList;
 const ArrayListUnmanaged = std.ArrayListUnmanaged;
 const MultiArrayList = std.MultiArrayList;
 const ArenaAllocator = std.heap.ArenaAllocator;
-
 const assert = std.debug.assert;
 const exp2 = std.math.exp2;
 const maxInt = std.math.maxInt;
+
+// root imports
 
 const array = @import("../array.zig");
 const basis = @import("../basis/basis.zig");
 const geometry = @import("../geometry/geometry.zig");
 
-const boundaries = @import("boundary.zig");
+// Submodules
+
 const operator = @import("operator.zig");
 const levels = @import("level.zig");
 
@@ -24,7 +26,7 @@ const levels = @import("level.zig");
 pub const system = @import("system.zig");
 
 pub const ApproxEngine = operator.ApproxEngine;
-pub const BoundaryCondition = boundaries.BoundaryCondition;
+pub const isMeshOperator = operator.isMeshOperator;
 
 pub fn Mesh(comptime N: usize, comptime O: usize) type {
     return struct {
@@ -202,18 +204,17 @@ pub fn Mesh(comptime N: usize, comptime O: usize) type {
         // }
 
         // ************************
-        // Fill operation *********
+        // Fill operations ********
         // ************************
 
-        pub fn fillBoundaries(self: *const Self, boundary: anytype, block_map: []const usize, field: []f64) void {
+        pub fn fillBoundaries(self: *const Self, comptime full: bool, boundary: anytype, block_map: []const usize, field: []f64) void {
             assert(block_map.len == self.tileTotal());
             assert(field.len == self.cellTotal());
-            assert(boundaries.hasBoundaryDecl(N)(boundary));
 
             self.fillBaseBoundary(boundary, field);
 
             for (0..self.active_levels) |i| {
-                self.fillLevelBoundaries(i, boundary, block_map, field);
+                self.fillLevelBoundary(full, i, boundary, block_map, field, full);
             }
         }
 
@@ -228,7 +229,7 @@ pub fn Mesh(comptime N: usize, comptime O: usize) type {
             }
         }
 
-        pub fn fillLevelBoundaries(self: *const Self, level: usize, boundary: anytype, block_map: []const usize, field: []f64) void {
+        pub fn fillLevelBoundary(self: *const Self, comptime full: bool, level: usize, boundary: anytype, block_map: []const usize, field: []f64) void {
             const target: *const Level = self.levels[level];
             const index_size: IndexBox = target.index_size;
 
@@ -251,15 +252,16 @@ pub fn Mesh(comptime N: usize, comptime O: usize) type {
                     }
 
                     if (exterior) {
-                        self.fillLevelInterior(region, level, block, block_map, field);
+                        self.fillLevelInterior(region, full, level, block, block_map, field);
                     } else {
-                        self.fillLevelExterior(region, level, block, boundary, field);
+                        self.fillLevelExterior(region, full, level, block, boundary, field);
                     }
                 }
             }
         }
 
-        fn fillLevelInterior(self: *const Self, comptime region: Region, level: usize, block: usize, global_block_map: []const usize, global_field: []f64) void {
+        fn fillLevelInterior(self: *const Self, comptime region: Region, comptime full: bool, level: usize, block: usize, global_block_map: []const usize, global_field: []f64) void {
+            const E = if (full) 2 * O else O;
             // Cache target and target field
             const target: *const Level = &self.levels[level];
             const field: []f64 = target.levelCellSlice(global_field);
@@ -320,7 +322,7 @@ pub fn Mesh(comptime N: usize, comptime O: usize) type {
                         // Neighbor origin in subcell space
                         const coarse_neighbor_origin: [N]usize = scaled(coarse_relative_neighbor_bounds.localFromGlobal(relative_tile), self.config.tile_width);
 
-                        var indices = region.cartesianIndices(O, splat(self.config.tile_width));
+                        var indices = region.cartesianIndices(E, splat(self.config.tile_width));
 
                         while (indices.next()) |index| {
                             // Cell in subcell space
@@ -347,7 +349,7 @@ pub fn Mesh(comptime N: usize, comptime O: usize) type {
                         const base_field: []const f64 = self.baseCellSlice(field);
                         const base_interp: InterpolationSpace = InterpolationSpace.fromSize(self.base.index_size);
 
-                        var indices = region.cartesianIndices(O, splat(self.config.tile_width));
+                        var indices = region.cartesianIndices(E, splat(self.config.tile_width));
 
                         while (indices.next()) |index| {
                             const block_cell: [N]usize = add(origin, index);
@@ -368,7 +370,7 @@ pub fn Mesh(comptime N: usize, comptime O: usize) type {
 
                     const neighbor_origin: [N]usize = scaled(neighbor_bounds.localFromGlobal(relative_tile), self.config.tile_width);
 
-                    var indices = region.cartesianIndices(O, splat(self.config.tile_width));
+                    var indices = region.cartesianIndices(E, splat(self.config.tile_width));
 
                     while (indices.next()) |index| {
                         const cell: [N]usize = add(origin, index);
@@ -384,15 +386,16 @@ pub fn Mesh(comptime N: usize, comptime O: usize) type {
             }
         }
 
-        fn fillLevelExterior(self: *const Self, comptime region: Region, level: usize, block: usize, boundary: anytype, field: []f64) void {
+        fn fillLevelExterior(self: *const Self, comptime region: Region, comptime full: bool, level: usize, block: usize, boundary: anytype, field: []f64) void {
             const target: *const Level = &self.levels[level];
 
             const level_field: []f64 = target.levelCellSlice(field);
             const block_field: []f64 = target.blockCellSlice(block, level_field);
 
             const stencil_space = self.levelStencilSpace(level, block);
+            const E = if (full) 2 * O else O;
 
-            stencil_space.fillBoundary(region, boundary, block_field);
+            stencil_space.fillBoundary(region, E, boundary, block_field);
         }
 
         fn baseStencilSpace(self: *const Self) StencilSpace {

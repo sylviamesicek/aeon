@@ -42,6 +42,7 @@ pub fn derivativeStencil(comptime T: type, comptime L: usize, grid: [L]T, point:
     return stencil;
 }
 
+/// Computes the second derivative stencil given a grid and a point.
 pub fn secondDerivativeStencil(comptime T: type, comptime L: usize, grid: [L]T, point: T) [L]T {
     var stencil: [L]T = undefined;
 
@@ -72,15 +73,4 @@ pub fn secondDerivativeStencil(comptime T: type, comptime L: usize, grid: [L]T, 
     }
 
     return stencil;
-}
-
-fn cellGrid(comptime T: type, comptime L: usize, comptime R: usize) [L + R + 1]T {
-    var grid: [L + R + 1]T = undefined;
-
-    for (0..(L + R + 1)) |i| {
-        const signed: isize = @intCast(i);
-        grid[i] = @floatFromInt(signed - L);
-    }
-
-    return grid;
 }

@@ -41,10 +41,12 @@ pub const BoundaryCondition = struct {
 };
 
 /// A trait indicating whether a type is a boundrary operator.
-pub fn isBoundaryOperator(comptime N: usize) std.meta.trait.TraitFn {
+pub fn isBoundaryOperator(comptime N: usize) fn (type) bool {
+    const hasFn = std.meta.trait.hasFn;
+
     const Closure = struct {
         fn trait(comptime T: type) bool {
-            if (!std.meta.trait.hasFn("condition")(T)) {
+            if (!hasFn("condition")(T)) {
                 return false;
             }
 

@@ -1,14 +1,32 @@
 const std = @import("std");
-const bicgstabl = @import("bicgstabl.zig");
 
-/// Represents an operator which is simply a (linear) function taking a input vector and writing a transformation of this
-/// vector into an output vector.
-pub fn MatrixFreeOperator(comptime Ctx: type) type {
-    return fn ([]f64, Ctx, []const f64) void;
+// Submodules
+const bicgstab = @import("bicgstab.zig");
+
+// ************************
+// Public Exports *********
+// ************************
+
+/// A trait which checks if a type is an operator. Such a type follows the following set of declarations.
+/// ```
+/// const Operator = struct {
+///     pub fn apply(self: Operator, output: []f64, input: []const f64) f64 {
+///         // ...
+///     }
+/// };
+/// ```
+pub fn isOperator(comptime T: type) bool {
+    const hasFn = std.meta.trait.hasFn;
+
+    if (!(hasFn("apply")(T) and @TypeOf(T.apply) == fn (T, []f64, []const f64) void)) {
+        return false;
+    }
+
+    return true;
 }
 
-pub const BiCGStablSolver = bicgstabl.BiCGStablSolver;
+pub const BiCGStabSolver = bicgstab.BiCGStabSolver;
 
 test {
-    _ = bicgstabl;
+    _ = bicgstab;
 }

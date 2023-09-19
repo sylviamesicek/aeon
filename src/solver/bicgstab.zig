@@ -1,12 +1,12 @@
 const std = @import("std");
-const assert = std.debug.assert;
 const Allocator = std.mem.Allocator;
+const assert = std.debug.assert;
 
-const MatrixFreeOperator = @import("solver.zig").MatrixFreeOperator;
+const isOperator = @import("solver.zig").isOperator;
 
 /// A solver which uses the Bi-conjugate gradient method allong with `L` iterations of
 /// GMRES to smooth the solution vector between steps.
-pub fn BiCGStablSolver(comptime L: usize) type {
+pub fn BiCGStabSolver(comptime L: usize) type {
     const zdim: usize = L + 1;
     return struct {
         allocator: Allocator,
@@ -91,7 +91,7 @@ pub fn BiCGStablSolver(comptime L: usize) type {
             }
         }
 
-        pub fn solve(self: *Self, x: []f64, ctx: anytype, oper: MatrixFreeOperator(@TypeOf(ctx)), rhs: []const f64) usize {
+        pub fn solve(self: *Self, x: []f64, oper: anytype, rhs: []const f64) usize {
             assert(x.len == self.ndofs);
             assert(rhs.len == self.ndofs);
 
@@ -102,7 +102,7 @@ pub fn BiCGStablSolver(comptime L: usize) type {
             var sigma: [zdim]f64 = undefined;
 
             // Set termination tolerance
-            oper(self.tp, ctx, x);
+            oper.apply(self.tp, x);
 
             for (0..self.ndofs) |i| {
                 self.r[0][i] = rhs[i] - self.tp[i];
@@ -177,7 +177,7 @@ pub fn BiCGStablSolver(comptime L: usize) type {
                         // TODO Preconditioning
 
                         // u[j + 1] = M^-1 * A * u[j]
-                        oper(self.u[j + 1], ctx, self.u[j]);
+                        oper.apply(self.u[j + 1], self.u[j]);
 
                         // nu - <rtld, u[j + 1]>
                         nu = dot(self.rtld, self.u[j + 1]);
@@ -221,7 +221,7 @@ pub fn BiCGStablSolver(comptime L: usize) type {
                         if (finish_flag) break :end;
 
                         // r[j + 1] = M^-1 * A * r[j]
-                        oper(self.r[j + 1], ctx, self.r[j]);
+                        oper.apply(self.r[j + 1], self.r[j]);
                     }
 
                     // MR Part

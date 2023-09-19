@@ -1,6 +1,5 @@
 const std = @import("std");
 const meta = std.meta;
-const assert = std.debug.assert;
 
 /// The type of the slice in a system, whether []const f64 or []f64
 pub fn SystemSliceType(comptime T: type) type {
@@ -116,4 +115,6 @@ test "system trait" {
 
     try expect(!isConstSystem(Sys1));
     try expect(isMutableSystem(Sys2));
+    try expect(SystemSliceType(Sys2) == []f64);
+    try expect(systemFieldCount(Sys2) == 3);
 }

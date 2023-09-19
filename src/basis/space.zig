@@ -1,13 +1,19 @@
 const std = @import("std");
 
-const lagrange = @import("lagrange.zig");
+// Imported modules
 
 const geometry = @import("../geometry/geometry.zig");
-const mesh = @import("../mesh/mesh.zig");
+const lagrange = @import("lagrange.zig");
+const boundary = @import("boundary.zig");
 
-const BoundaryCondition = mesh.BoundaryCondition;
+// Imported types and functions
 
-pub fn InterpolationSpace(comptime N: usize, comptime E: usize, comptime O: usize) type {
+const BoundaryCondition = boundary.BoundaryCondition;
+const isBoundaryOperator = boundary.isBoundaryOperator;
+
+/// Provides an interface for interpolating and setting values on a block of a certain size
+/// with a buffer region `2*O` along each axis, to the order `O`.
+pub fn InterpolationSpace(comptime N: usize, comptime O: usize) type {
     return struct {
         size: [N]usize,
 
@@ -27,6 +33,7 @@ pub fn InterpolationSpace(comptime N: usize, comptime E: usize, comptime O: usiz
             return field[linear];
         }
 
+        /// Sets the value of a field at a cell.
         pub fn setValue(self: Self, cell: [N]usize, field: []f64, v: f64) void {
             const space = IndexSpace.fromSize(sizeWithGhost(self.size));
             const linear = space.linearFromCartesian(cellWithGhost(cell));
@@ -35,16 +42,12 @@ pub fn InterpolationSpace(comptime N: usize, comptime E: usize, comptime O: usiz
 
         /// Prolongs the value of a field to a subcell.
         pub fn prolong(self: Self, subcell: [N]usize, field: []const f64) f64 {
-            comptime var lstencils: [N][2 * O + 1]f64 = undefined;
-            comptime var rstencils: [N][2 * O + 1]f64 = undefined;
+            // Build stencils for both the left and right case at comptime.
+            const lstencil: [2 * O + 1]f64 = prolong(false, O);
+            const rstencil: [2 * O + 1]f64 = prolong(false, O);
 
-            inline for (0..N) |i| {
-                lstencils[i] = prolongStencil(false, O);
-                rstencils[i] = prolongStencil(true, O);
-            }
-
-            const stencil_space: IndexSpace = comptime IndexSpace.fromSize([1]usize{2 * O + 1} ** N);
-            const space: IndexSpace = IndexSpace.fromSize(sizeWithGhost(self.size));
+            const stencil_space: IndexSpace = IndexSpace.fromSize([1]usize{2 * O + 1} ** N);
+            const cell_space: IndexSpace = IndexSpace.fromSize(sizeWithGhost(self.size));
 
             var result: f64 = 0.0;
 
@@ -55,9 +58,9 @@ pub fn InterpolationSpace(comptime N: usize, comptime E: usize, comptime O: usiz
 
                 for (0..N) |i| {
                     if (subcell[i] % 2 == 0) {
-                        coef *= rstencils[i][stencil_index[i]];
+                        coef *= rstencil[stencil_index[i]];
                     } else {
-                        coef *= lstencils[i][stencil_index[i]];
+                        coef *= lstencil[stencil_index[i]];
                     }
                 }
 
@@ -67,7 +70,7 @@ pub fn InterpolationSpace(comptime N: usize, comptime E: usize, comptime O: usiz
                     offset_cell[i] = @divTrunc(subcell[i] + 1, 2) + stencil_index[i] - O;
                 }
 
-                const linear = space.linearFromCartesian(cellWithGhost(offset_cell));
+                const linear = cell_space.linearFromCartesian(cellWithGhost(offset_cell));
 
                 result += coef * field[linear];
             }
@@ -77,15 +80,10 @@ pub fn InterpolationSpace(comptime N: usize, comptime E: usize, comptime O: usiz
 
         /// Restricts the value of a field to a supercell.
         pub fn restrict(self: Self, supercell: [N]usize, field: []const f64) f64 {
-            if (O > E) {
-                @compileError("Order must be <= extent of interpolation space");
-            }
+            const stencil: [2 * O + 2]f64 = restrictStencil(O);
 
-            const stencils: [N][2 * O + 1]f64 = [1][2 * O + 2]f64{restrictStencil(O)} ** N;
-
-            const stencil_space: IndexSpace = comptime IndexSpace.fromSize([1]usize{2 * O + 2} ** N);
-
-            const space: IndexSpace = IndexSpace.fromSize(sizeWithGhost(self.size));
+            const stencil_space: IndexSpace = IndexSpace.fromSize([1]usize{2 * O + 2} ** N);
+            const cell_space: IndexSpace = IndexSpace.fromSize(sizeWithGhost(self.size));
 
             var result: f64 = 0.0;
 
@@ -95,16 +93,16 @@ pub fn InterpolationSpace(comptime N: usize, comptime E: usize, comptime O: usiz
                 comptime var coef: f64 = 1.0;
 
                 inline for (0..N) |i| {
-                    coef *= stencils[i][stencil_index[i]];
+                    coef *= stencil[stencil_index[i]];
                 }
 
                 var offset_cell: [N]usize = undefined;
 
                 inline for (0..N) |i| {
-                    offset_cell[i] = 2 * supercell[i] + stencil_index[i] - 1 - O;
+                    offset_cell[i] = 2 * supercell[i] + stencil_index[i] - O - 1;
                 }
 
-                const linear = space.linearFromCartesian(cellWithGhost(offset_cell));
+                const linear = cell_space.linearFromCartesian(cellWithGhost(offset_cell));
 
                 result += coef * field[linear];
             }
@@ -115,7 +113,7 @@ pub fn InterpolationSpace(comptime N: usize, comptime E: usize, comptime O: usiz
         fn cellWithGhost(cell: [N]usize) [N]usize {
             var result: [N]usize = cell;
             for (0..N) |i| {
-                result[i] + E;
+                result[i] + 2 * O;
             }
             return result;
         }
@@ -123,7 +121,7 @@ pub fn InterpolationSpace(comptime N: usize, comptime E: usize, comptime O: usiz
         fn sizeWithGhost(size: [N]usize) [N]usize {
             var result: [N]usize = size;
             for (0..N) |i| {
-                result[i] + 2 * E;
+                result[i] + 4 * O;
             }
             return result;
         }
@@ -133,7 +131,7 @@ pub fn InterpolationSpace(comptime N: usize, comptime E: usize, comptime O: usiz
 /// Manages the application of stencil products on functions. Supports computing values, centered derivatives
 /// positions, boundary positions, boundary values, boundary derivatives, prolongation, and restriction.
 /// All cell indices are in standard index space (ie without ghost cells included).
-pub fn StencilSpace(comptime N: usize, comptime E: usize, comptime O: usize) type {
+pub fn StencilSpace(comptime N: usize, comptime O: usize) type {
     return struct {
         physical_bounds: RealBox,
         size: [N]usize,
@@ -142,11 +140,11 @@ pub fn StencilSpace(comptime N: usize, comptime E: usize, comptime O: usize) typ
         const RealBox = geometry.Box(N, f64);
         const IndexBox = geometry.Box(N, usize);
         const IndexSpace = geometry.IndexSpace(N);
-        const Region = geometry.Region(N, E);
+        const Region = geometry.Region(N);
         const Face = geometry.Face(N);
-        const ISpace = InterpolationSpace(N, E);
+        const ISpace = InterpolationSpace(N, O);
 
-        // Gets position of cell.
+        /// Return the position of the given cell.
         pub fn position(self: Self, cell: [N]usize) [N]f64 {
             var result: [N]f64 = undefined;
 
@@ -160,6 +158,7 @@ pub fn StencilSpace(comptime N: usize, comptime E: usize, comptime O: usize) typ
             return result;
         }
 
+        /// Returns the position of the given vertex.
         pub fn vertexPosition(self: Self, vertex: [N]usize) [N]f64 {
             var result: [N]f64 = undefined;
 
@@ -173,7 +172,7 @@ pub fn StencilSpace(comptime N: usize, comptime E: usize, comptime O: usize) typ
             return result;
         }
 
-        // Gets boundary position of cell.
+        /// Returns the boundary position of the given cell, taking into account the extents.
         pub fn boundaryPosition(self: Self, comptime extents: [N]isize, cell: [N]usize) [N]f64 {
             var result = self.position(cell);
 
@@ -223,7 +222,7 @@ pub fn StencilSpace(comptime N: usize, comptime E: usize, comptime O: usize) typ
             }
 
             const stencil_space: IndexSpace = comptime IndexSpace.fromSize(stencil_sizes);
-            const space: IndexSpace = IndexSpace.fromSize(ISpace.sizeWithGhost(self.size));
+            const cell_space: IndexSpace = IndexSpace.fromSize(ISpace.sizeWithGhost(self.size));
 
             var result: f64 = 0.0;
 
@@ -245,7 +244,7 @@ pub fn StencilSpace(comptime N: usize, comptime E: usize, comptime O: usize) typ
                     offset_cell[i] = cell[i] + stencil_index[i] - O;
                 }
 
-                const linear = space.linearFromCartesian(ISpace.cellWithGhost(offset_cell));
+                const linear = cell_space.linearFromCartesian(ISpace.cellWithGhost(offset_cell));
 
                 result += coef * field[linear];
             }
@@ -304,24 +303,20 @@ pub fn StencilSpace(comptime N: usize, comptime E: usize, comptime O: usize) typ
 
         /// Computes the derivative at a bounday of a field.
         pub fn boundaryDerivative(self: Self, comptime ranks: [N]usize, comptime extents: [N]isize, cell: [N]usize, field: []const f64) f64 {
+            comptime var stencils: [N][3 * O]f64 = undefined;
+
+            inline for (0..N) |i| {
+                stencils[i] = boundaryDerivativeStencil(ranks[i], extents[i], O);
+            }
+
             comptime var stencil_sizes: [N]usize = undefined;
 
             inline for (0..N) |i| {
-                stencil_sizes[i] = if (ranks[i] == 0) 1 else if (extents[i] == 0) 1 else 2 * O + 1 + absSigned(extents[i]);
-            }
-
-            comptime var stencils: [N][3 * O + 1]f64 = undefined;
-
-            inline for (0..N) |i| {
-                stencils[i] = boundaryDerivativeStencil(
-                    ranks[i],
-                    extents[i],
-                    O,
-                );
+                stencil_sizes[i] = if (ranks[i] == 0) 1 else if (extents[i] == 0) 1 else 2 * O + absSigned(extents[i]);
             }
 
             const stencil_space: IndexSpace = comptime IndexSpace.fromSize(stencil_sizes);
-            const space: IndexSpace = IndexSpace.fromSize(ISpace.sizeWithGhost(self.size));
+            const cell_space: IndexSpace = IndexSpace.fromSize(ISpace.sizeWithGhost(self.size));
 
             var result: f64 = 0.0;
 
@@ -340,15 +335,15 @@ pub fn StencilSpace(comptime N: usize, comptime E: usize, comptime O: usize) typ
 
                 inline for (0..N) |i| {
                     if (extents[i] > 0) {
-                        offset_cell[i] = cell[i] + stencil_index[i] - 2 * O - 1 + 2 * O;
+                        offset_cell[i] = cell[i] + stencil_index[i] - 2 * O;
                     } else if (extents[i] < 0) {
-                        offset_cell[i] = cell[i] + stencil_index[i] - absSigned(extents[i]) + 2 * O;
+                        offset_cell[i] = cell[i] + stencil_index[i] - absSigned(extents[i]);
                     } else {
-                        offset_cell[i] = cell[i] + 2 * O;
+                        offset_cell[i] = cell[i];
                     }
                 }
 
-                const linear = space.linearFromCartesian(ISpace.cellWithGhost(offset_cell));
+                const linear = cell_space.linearFromCartesian(ISpace.cellWithGhost(offset_cell));
 
                 result += coef * field[linear];
             }
@@ -368,10 +363,10 @@ pub fn StencilSpace(comptime N: usize, comptime E: usize, comptime O: usize) typ
 
         /// Computes the outmost coefficient of a boundary derivative stencil.
         pub fn boundaryDerivativeCoef(self: Self, comptime ranks: [N]usize, comptime extents: [N]isize) f64 {
-            comptime var stencils: [N][2 * O + E]f64 = undefined;
+            comptime var stencils: [N][3 * O]f64 = undefined;
 
             inline for (0..N) |i| {
-                stencils[i] = boundaryDerivativeStencil(ranks[i], extents[i], O, E);
+                stencils[i] = boundaryDerivativeStencil(ranks[i], extents[i], O);
             }
 
             var result: f64 = 1.0;
@@ -409,23 +404,25 @@ pub fn StencilSpace(comptime N: usize, comptime E: usize, comptime O: usize) typ
             return ISpace.fromSize(self.size).prolong(supercell, field);
         }
 
-        pub fn fillBoundary(self: Self, comptime region: Region(N), comptime fill_extent: usize, boundary: anytype, field: []f64) void {
-            var inner_face_cells = region.innerFaceIndices(self.index_size);
+        pub fn fillBoundary(self: Self, comptime region: Region(N), comptime E: usize, operator: anytype, field: []f64) void {
+            if (!isBoundaryOperator(@TypeOf(operator))) {
+                @compileError("Operator must satisfy trait isBoundaryOperator to be used in fillBoundary.");
+            }
 
-            while (inner_face_cells.next()) |inner_face_cell| {
-                var cell: [N]usize = inner_face_cell;
+            if (E > 2 * O) {
+                @compileError("E must be <= 2 * O");
+            }
 
-                for (0..N) |i| {
-                    cell[i] -= O;
-                }
+            var inner_face_cells = region.innerFaceIndices(self.size);
 
-                comptime var extent_indices = region.extentOffsets(fill_extent);
+            while (inner_face_cells.next()) |cell| {
+                comptime var extent_indices = region.extentOffsets(E);
 
-                inline while (extent_indices) |extents| {
-                    var target: [N]usize = cell;
+                inline while (extent_indices.next()) |extents| {
+                    var target: [N]usize = undefined;
 
-                    for (0..N) |i| {
-                        target[i] += extents[i];
+                    inline for (0..N) |i| {
+                        target[i] = cell[i] + extents[i];
                     }
 
                     self.setValue(target, field, 0.0);
@@ -438,7 +435,7 @@ pub fn StencilSpace(comptime N: usize, comptime E: usize, comptime O: usize) typ
 
                     for (0..N) |i| {
                         if (extents[i] != 0) {
-                            const condition: BoundaryCondition = boundary.condition(pos, Face{
+                            const condition: BoundaryCondition = operator.condition(pos, Face{
                                 .side = extents[i] > 0,
                                 .axis = i,
                             });
@@ -484,15 +481,15 @@ fn absSigned(i: isize) usize {
     return @intCast(if (i < 0) -i else i);
 }
 
-fn boundaryDerivativeStencil(comptime R: usize, comptime extent: isize, comptime O: usize, comptime E: usize) [2 * O + E]f64 {
-    if (extent > E) {
-        @compileError("Extent must be <= E");
+fn boundaryDerivativeStencil(comptime R: usize, comptime extent: isize, comptime O: usize) [3 * O]f64 {
+    if (extent > O) {
+        @compileError("Extent must be <= O");
     }
 
-    var result: [2 * O + E]f64 = [1]f64{0} ** (2 * O + E);
+    var result: [3 * O]f64 = undefined;
 
     if (extent <= 0) {
-        const grid = vertexCenteredGrid(f64, absSigned(extent), 2 * O + 1);
+        const grid = vertexCenteredGrid(f64, absSigned(extent), 2 * O);
 
         const stencil = switch (R) {
             0 => lagrange.valueStencil(f64, grid.len, grid, 0.0),
@@ -505,7 +502,7 @@ fn boundaryDerivativeStencil(comptime R: usize, comptime extent: isize, comptime
             result[i] = s;
         }
     } else {
-        const grid = vertexCenteredGrid(f64, 2 * O + 1, absSigned(extent));
+        const grid = vertexCenteredGrid(f64, 2 * O, absSigned(extent));
 
         const stencil = switch (R) {
             0 => lagrange.valueStencil(f64, grid.len, grid, 0.0),

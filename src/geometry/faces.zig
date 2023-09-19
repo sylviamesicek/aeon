@@ -10,6 +10,7 @@ pub fn Face(comptime N: usize) type {
 
         pub const Count: usize = 2 * N;
 
+        /// Returns an index into an array of size `Count`.
         pub fn index(self: Self) usize {
             return if (self.side) .{ .index = self.axis + N } else .{ .index = self.axis };
         }
