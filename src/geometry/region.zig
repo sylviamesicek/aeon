@@ -15,7 +15,8 @@ const geometry = @import("../geometry/geometry.zig");
 ///     ---------------
 ///
 /// And allows one to write algorithms that traverse the edges and corners in an ordered way and iterate over the
-/// cells within a given region.
+/// cells within a given region. Most functions and iterators accept an extent parameter `E` which determines the
+/// additional width of these buffer regions and a `block` parameter which describes the size of the central block.
 pub fn Region(comptime N: usize) type {
     const Count = powi(usize, 3, N) catch {
         @compileError("Invalid N for Region type");
@@ -48,12 +49,13 @@ pub fn Region(comptime N: usize) type {
             return res;
         }
 
-        pub fn space(self: Self, comptime O: usize, block: [N]usize) IndexSpace {
+        /// Returns a space corresponding to the size of the region.
+        pub fn space(self: Self, comptime E: usize, block: [N]usize) IndexSpace {
             var size: [N]usize = undefined;
 
             for (0..N) |i| {
                 if (self.sides[i] == .left or self.sides[i] == .right) {
-                    size[i] = O;
+                    size[i] = E;
                 } else {
                     size[i] = block[i];
                 }
@@ -87,19 +89,9 @@ pub fn Region(comptime N: usize) type {
         };
 
         /// Iterates all cell indices (in ghost space) in this region.
-        pub fn cartesianIndices(self: Self, comptime O: usize, block: [N]usize) CartesianIterator {
-            var size: [N]usize = undefined;
-
-            for (0..N) |i| {
-                if (self.sides[i] == .left or self.sides[i] == .right) {
-                    size[i] = O;
-                } else {
-                    size[i] = block[i];
-                }
-            }
-
+        pub fn cartesianIndices(self: Self, comptime E: usize, block: [N]usize) CartesianIterator {
             return .{
-                .inner = IndexSpace.fromSize(size).cartesianIndices(),
+                .inner = self.space(E, block),
                 .block = block,
                 .sides = self.sides,
             };
@@ -142,7 +134,7 @@ pub fn Region(comptime N: usize) type {
             }
 
             return .{
-                .inner = IndexSpace.fromSize(size).cartesianIndices(),
+                .inner = self.space(1, block),
                 .block = block,
                 .sides = self.sides,
             };
@@ -175,12 +167,12 @@ pub fn Region(comptime N: usize) type {
 
         /// Iterates outwards from the inner face. Provides offsets that can be added to the inner face
         /// index to find the global index.
-        pub fn extentOffsets(self: Self, comptime O: usize) ExtentIterator {
+        pub fn extentOffsets(self: Self, comptime E: usize) ExtentIterator {
             var size: [N]usize = undefined;
 
             for (0..N) |i| {
                 if (self.sides[i] == .left or self.sides[i] == .right) {
-                    size[i] = O;
+                    size[i] = E;
                 } else {
                     size[i] = 1;
                 }

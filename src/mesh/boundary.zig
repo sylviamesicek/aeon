@@ -44,11 +44,11 @@ pub const BoundaryCondition = struct {
 pub fn isBoundaryOperator(comptime N: usize) std.meta.trait.TraitFn {
     const Closure = struct {
         fn trait(comptime T: type) bool {
-            if (!std.meta.trait.hasFn("boundary")(T)) {
+            if (!std.meta.trait.hasFn("condition")(T)) {
                 return false;
             }
 
-            return fn (T, [N]f64, Face(N)) BoundaryCondition == @TypeOf(T.boundary);
+            return fn (T, [N]f64, Face(N)) BoundaryCondition == @TypeOf(T.condition);
         }
     };
     return Closure.trait;
