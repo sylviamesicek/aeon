@@ -6,14 +6,14 @@ const system = @import("system.zig");
 /// Wraps a stencil space, output field, input system, and cell, to provide a consistent
 /// interface to write operators.
 pub fn ApproxEngine(comptime N: usize, comptime O: usize, comptime Input: type) type {
-    if (!system.isConstSystem(Input)) {
-        @compileError("Input type must be a const system");
+    if (!system.isSystem(Input)) {
+        @compileError("Input type must be a system");
     }
 
     return struct {
         space: StencilSpace,
         output: []const f64,
-        inputs: Input,
+        input: Input,
         cell: [N]usize,
 
         // Aliases
@@ -30,25 +30,25 @@ pub fn ApproxEngine(comptime N: usize, comptime O: usize, comptime Input: type) 
 
         /// Returns the value of the field at the current cell.
         pub fn value(self: Self, comptime field: FieldEnum) f64 {
-            const f: []const f64 = system.systemField(Input, self.inputs, field);
+            const f: []const f64 = system.systemField(Input, self.input, field);
             return self.valueField(f);
         }
 
         /// Returns the gradient of the field at the current cell.
         pub fn gradient(self: Self, comptime field: FieldEnum) [N]f64 {
-            const f: []const f64 = system.systemField(Input, self.inputs, field);
+            const f: []const f64 = system.systemField(Input, self.input, field);
             return self.gradientField(f);
         }
 
         /// Returns the hessian of the field at the current cell.
         pub fn hessian(self: Self, comptime field: FieldEnum) [N][N]f64 {
-            const f: []const f64 = system.systemField(Input, self.inputs, field);
+            const f: []const f64 = system.systemField(Input, self.input, field);
             return self.hessianField(f);
         }
 
         /// Returns the laplacian of the field at the current cell.
         pub fn laplacian(self: Self, comptime field: FieldEnum) f64 {
-            const f: []const f64 = system.systemField(Input, self.inputs, field);
+            const f: []const f64 = system.systemField(Input, self.input, field);
             return self.laplacianField(f);
         }
 

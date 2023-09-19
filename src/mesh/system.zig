@@ -57,6 +57,20 @@ pub fn systemField(comptime T: type, sys: T, comptime field: SystemFieldEnum(T))
     return @field(sys, @tagName(field));
 }
 
+pub fn systemSlice(comptime T: type, sys: T, offset: usize, total: usize) T {
+    if (!isSystem(T)) {
+        @compileError("systemSlice() may only be called on valid systems");
+    }
+
+    var slice: T = undefined;
+
+    inline for (meta.fields(T)) |field_info| {
+        @field(slice, field_info.name) = @field(sys, field_info.name)[offset..(offset + total)];
+    }
+
+    return slice;
+}
+
 /// A trait function to determine whether a
 /// type is a system. Aka a struct where all fields
 /// are const f64 slices.

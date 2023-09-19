@@ -688,7 +688,210 @@ pub fn Mesh(comptime N: usize, comptime O: usize) type {
         }
 
         // *************************
+        // Smoothing ***************
+        // *************************
+
+        /// Runs one iteration of Jacobi's method on the full mesh. Assuming all boundaries have been filled at least partially.
+        pub fn smooth(
+            self: *const Self,
+            x: []f64,
+            field: []const f64,
+            rhs: []const f64,
+            oper: anytype,
+            input: anytype,
+        ) void {
+            self.smoothBase(x, field, rhs, oper, input);
+
+            for (0..self.active_levels) |level| {
+                self.smoothLevel(level, x, field, rhs, oper, input);
+            }
+        }
+
+        /// Runs one iteration of Jacobi's method on the base level, assuming all boundaries have been filled at least partially.
+        pub fn smoothBase(
+            self: *const Self,
+            x: []f64,
+            field: []const f64,
+            rhs: []const f64,
+            oper: anytype,
+            input: anytype,
+        ) void {
+            if (!(operator.isMeshOperator(N, O)(oper) and oper.Input == @TypeOf(input))) {
+                @compileError("Oper must satisfy isMeshOperator trait.");
+            }
+
+            const base_x: []f64 = self.baseCellSlice(x);
+            const base_field: []const f64 = self.baseCellSlice(field);
+            const base_rhs: []const f64 = self.baseCellSlice(rhs);
+            const base_input: @TypeOf(input) = system.systemSlice(@TypeOf(input), input, 0, self.base.cell_total);
+
+            const stencil_space: StencilSpace = self.baseStencilSpace();
+            const cell_space = IndexSpace.fromSize(stencil_space.size);
+
+            var cell_indices = cell_space.cartesianIndices();
+
+            while (cell_indices.next()) |cell| {
+                const engine = ApproxEngine(N, O, @TypeOf(input)){
+                    .space = stencil_space,
+                    .output = base_field,
+                    .input = base_input,
+                    .cell = cell,
+                };
+
+                const f = stencil_space.value(cell, base_field);
+                const r: f64 = stencil_space.value(cell, base_rhs);
+                const a: f64 = oper.apply(engine);
+                const d: f64 = oper.applyDiagonal(engine);
+
+                stencil_space.setValue(cell, base_x, f + (r - a) / d);
+            }
+        }
+
+        /// Runs one iteration of Jacobi's method on the given level, assuming all boundaries have been filled at least partially.
+        pub fn smoothLevel(
+            self: *const Self,
+            level: usize,
+            x: []f64,
+            field: []const f64,
+            rhs: []const f64,
+            oper: anytype,
+            input: anytype,
+        ) void {
+            if (!(operator.isMeshOperator(N, O)(oper) and oper.Input == @TypeOf(input))) {
+                @compileError("Oper must satisfy isMeshOperator trait.");
+            }
+
+            const target: *const Level = &self.levels[level];
+            const level_x: []f64 = target.levelCellSlice(x);
+            const level_field: []const f64 = target.levelCellSlice(field);
+            const level_rhs: []const f64 = target.levelCellSlice(rhs);
+            const level_input: @TypeOf(input) = system.systemSlice(@TypeOf(input), input, target.cell_offset, target.cell_total);
+
+            for (target.blocks.items(.bounds), target.blocks.items(.cell_offset), target.blocks.items(.cell_total)) |block, offset, total| {
+                const block_x: []f64 = level_x[offset..(offset + total)];
+                const block_field: []const f64 = level_field[offset..(offset + total)];
+                const block_rhs: []const f64 = level_rhs[offset..(offset + total)];
+                const block_input: @TypeOf(input) = system.systemSlice(@TypeOf(input), level_input, offset, total);
+
+                const stencil_space: StencilSpace = self.levelStencilSpace(level, block);
+                const cell_space = IndexSpace.fromSize(stencil_space.size);
+
+                var cell_indices = cell_space.cartesianIndices();
+
+                while (cell_indices.next()) |cell| {
+                    const engine = ApproxEngine(N, O, @TypeOf(input)){
+                        .space = stencil_space,
+                        .output = block_field,
+                        .input = block_input,
+                        .cell = cell,
+                    };
+
+                    const f = stencil_space.value(cell, block_field);
+                    const r: f64 = stencil_space.value(cell, block_rhs);
+                    const a: f64 = oper.apply(engine);
+                    const d: f64 = oper.applyDiagonal(engine);
+
+                    stencil_space.setValue(cell, block_x, f + (r - a) / d);
+                }
+            }
+        }
+
+        // *************************
         // Application *************
+        // *************************
+
+        pub fn apply(
+            self: *const Self,
+            comptime full: bool,
+            x: []f64,
+            field: []const f64,
+            oper: anytype,
+            input: anytype,
+        ) void {
+            self.applyBase(x, field, oper, input);
+
+            for (0..self.active_levels) |level| {
+                self.applyLevel(full, level, x, field, oper, input);
+            }
+        }
+
+        pub fn applyBase(
+            self: *const Self,
+            x: []f64,
+            field: []const f64,
+            oper: anytype,
+            input: anytype,
+        ) void {
+            if (!(operator.isMeshOperator(N, O)(oper) and oper.Input == @TypeOf(input))) {
+                @compileError("Oper must satisfy isMeshOperator trait.");
+            }
+
+            const base_x: []f64 = self.baseCellSlice(x);
+            const base_field: []const f64 = self.baseCellSlice(field);
+            const base_input: @TypeOf(input) = system.systemSlice(@TypeOf(input), input, 0, self.base.cell_total);
+
+            const stencil_space: StencilSpace = self.baseStencilSpace();
+            const cell_space = IndexSpace.fromSize(stencil_space.size);
+
+            var cell_indices = cell_space.cartesianIndices();
+
+            while (cell_indices.next()) |cell| {
+                const engine = ApproxEngine(N, O, @TypeOf(input)){
+                    .space = stencil_space,
+                    .output = base_field,
+                    .input = base_input,
+                    .cell = cell,
+                };
+
+                stencil_space.setValue(cell, base_x, oper.apply(engine));
+            }
+        }
+
+        pub fn applyLevel(
+            self: *const Self,
+            comptime full: bool,
+            level: usize,
+            x: []f64,
+            field: []const f64,
+            oper: anytype,
+            input: anytype,
+        ) void {
+            if (!(operator.isMeshOperator(N, O)(oper) and oper.Input == @TypeOf(input))) {
+                @compileError("Oper must satisfy isMeshOperator trait.");
+            }
+
+            const target: *const Level = &self.levels[level];
+            const level_x: []f64 = target.levelCellSlice(x);
+            const level_field: []const f64 = target.levelCellSlice(field);
+            const level_input: @TypeOf(input) = system.systemSlice(@TypeOf(input), input, target.cell_offset, target.cell_total);
+
+            for (target.blocks.items(.bounds), target.blocks.items(.cell_offset), target.blocks.items(.cell_total)) |block, offset, total| {
+                const block_x: []f64 = level_x[offset..(offset + total)];
+                const block_field: []const f64 = level_field[offset..(offset + total)];
+                const block_input: @TypeOf(input) = system.systemSlice(@TypeOf(input), level_input, offset, total);
+
+                const stencil_space: StencilSpace = self.levelStencilSpace(level, block);
+                const cell_size: [N]usize = if (full) add(stencil_space.size, splat(2 * O)) else stencil_space.size;
+                const cell_space = IndexSpace.fromSize(cell_size);
+
+                var cell_indices = cell_space.cartesianIndices();
+
+                while (cell_indices.next()) |cell| {
+                    const offset_cell = if (full) add(stencil_space.size, [1]isize{-O} ** N) else cell;
+                    const engine = ApproxEngine(N, O, @TypeOf(input)){
+                        .space = stencil_space,
+                        .output = block_field,
+                        .input = block_input,
+                        .cell = offset_cell,
+                    };
+
+                    stencil_space.setValue(offset_cell, block_x, oper.apply(engine));
+                }
+            }
+        }
+
+        // *************************
+        // Projection **************
         // *************************
 
         // *************************
@@ -696,12 +899,16 @@ pub fn Mesh(comptime N: usize, comptime O: usize) type {
         // *************************
 
         pub fn writeVtk(self: *const Self, sys: anytype, out_stream: anytype) !void {
+            if (!system.isSystem(sys)) {
+                @compileError("Sys must satisfy isSystem trait.");
+            }
+
             const vtkio = @import("../vtkio.zig");
             const VtkUnstructuredGrid = vtkio.VtkUnstructuredGrid;
             const VtkCellType = vtkio.VtkCellType;
 
             // Global Constant
-            const FieldCount: usize = system.systemFieldCount(sys);
+            const field_count: usize = system.systemFieldCount(sys);
             const cell_type: VtkCellType = switch (N) {
                 1 => .line,
                 2 => .quad,
@@ -712,7 +919,7 @@ pub fn Mesh(comptime N: usize, comptime O: usize) type {
             const GridData = struct {
                 positions: ArrayListUnmanaged(f64) = .{},
                 vertices: ArrayListUnmanaged(usize) = .{},
-                fields: [FieldCount]ArrayListUnmanaged(f64) = [1]ArrayListUnmanaged(f64){.{}} ** FieldCount,
+                fields: [field_count]ArrayListUnmanaged(f64) = [1]ArrayListUnmanaged(f64){.{}} ** field_count,
                 input: @TypeOf(sys),
 
                 fn deinit(data: *@This(), allocator: Allocator) void {
@@ -801,7 +1008,7 @@ pub fn Mesh(comptime N: usize, comptime O: usize) type {
                         }
                     }
 
-                    for (0..FieldCount) |id| {
+                    for (0..field_count) |id| {
                         data.fields[id].ensureUnusedCapacity(allocator, cell_space.total());
                     }
 
