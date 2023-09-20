@@ -5,80 +5,18 @@ const system = @import("system.zig");
 
 /// Wraps a stencil space, output field, input system, and cell, to provide a consistent
 /// interface to write operators.
-pub fn Engine(comptime N: usize, comptime O: usize, comptime Context: type, comptime Output: type) type {
-    if (!system.isSystem(Context)) {
-        @compileError("Context type must be a system");
-    }
-
-    if (!system.isSystem(Output)) {
-        @compileError("Output type must be a system");
-    }
-
+pub fn Engine(comptime N: usize, comptime O: usize) type {
     return struct {
         space: StencilSpace,
-        output: Output,
-        context: Context,
         cell: [N]usize,
 
         // Aliases
         const Self = @This();
         const StencilSpace = basis.StencilSpace(N, 2 * O, O);
 
-        // Public types
-        pub const CFieldEnum = system.SystemFieldEnum(Context);
-        pub const OFieldEnum = system.SystemFieldEnum(Output);
-
         /// Computes the position of the cell.
         pub fn position(self: Self) [N]f64 {
             return self.space.position(self.cell);
-        }
-
-        /// Returns the value of the field at the current cell.
-        pub fn value(self: Self, comptime field: CFieldEnum) f64 {
-            const f: []const f64 = system.systemField(self.context, field);
-            return self.valueField(f);
-        }
-
-        /// Returns the gradient of the field at the current cell.
-        pub fn gradient(self: Self, comptime field: CFieldEnum) [N]f64 {
-            const f: []const f64 = system.systemField(self.context, field);
-            return self.gradientField(f);
-        }
-
-        /// Returns the hessian of the field at the current cell.
-        pub fn hessian(self: Self, comptime field: CFieldEnum) [N][N]f64 {
-            const f: []const f64 = system.systemField(self.context, field);
-            return self.hessianField(f);
-        }
-
-        /// Returns the laplacian of the field at the current cell.
-        pub fn laplacian(self: Self, comptime field: CFieldEnum) f64 {
-            const f: []const f64 = system.systemField(self.context, field);
-            return self.laplacianField(f);
-        }
-
-        /// Returns the value of the field at the current cell.
-        pub fn valueOp(self: Self, comptime field: OFieldEnum) f64 {
-            const f: []const f64 = system.systemField(self.output, field);
-            return self.valueField(f);
-        }
-
-        /// Returns the gradient of the field at the current cell.
-        pub fn gradientOp(self: Self, comptime field: OFieldEnum) [N]f64 {
-            const f: []const f64 = system.systemField(self.output, field);
-            return self.gradientField(f);
-        }
-
-        /// Returns the hessian of the field at the current cell.
-        pub fn hessianOp(self: Self, comptime field: OFieldEnum) [N][N]f64 {
-            const f: []const f64 = system.systemField(self.output, field);
-            return self.hessianField(f);
-        }
-
-        /// Returns the laplacian of the field at the current cell.
-        pub fn laplacianOp(self: Self, comptime field: OFieldEnum) f64 {
-            const f: []const f64 = system.systemField(self.output, field);
-            return self.laplacianField(f);
         }
 
         /// Returns the value diagonal coefficient.
@@ -131,11 +69,13 @@ pub fn Engine(comptime N: usize, comptime O: usize, comptime Context: type, comp
             return result;
         }
 
-        fn valueField(self: Self, field: []const f64) f64 {
+        /// Computes the value of the given field.
+        pub fn value(self: Self, field: []const f64) f64 {
             return self.space.value(self.cell, field);
         }
 
-        fn gradientField(self: Self, field: []const f64) [N]f64 {
+        /// Computes the gradient of the given field.
+        pub fn gradient(self: Self, field: []const f64) [N]f64 {
             var result: [N]f64 = undefined;
 
             inline for (0..N) |i| {
@@ -148,7 +88,8 @@ pub fn Engine(comptime N: usize, comptime O: usize, comptime Context: type, comp
             return result;
         }
 
-        fn hessianField(self: Self, field: []const f64) [N][N]f64 {
+        /// Computes the hessian of the given field.
+        pub fn hessian(self: Self, field: []const f64) [N][N]f64 {
             var result: [N][N]f64 = undefined;
 
             inline for (0..N) |i| {
@@ -164,7 +105,8 @@ pub fn Engine(comptime N: usize, comptime O: usize, comptime Context: type, comp
             return result;
         }
 
-        fn laplacianField(self: Self, field: []const f64) f64 {
+        /// Computes the laplacian of the given field.
+        pub fn laplacian(self: Self, field: []const f64) f64 {
             var result: f64 = 0.0;
 
             inline for (0..N) |i| {
@@ -179,25 +121,181 @@ pub fn Engine(comptime N: usize, comptime O: usize, comptime Context: type, comp
     };
 }
 
-/// An `Engine` which does not call any *Op() functions.
+/// An `Engine` which can compute operations on elements of a given context system.
 pub fn FunctionEngine(comptime N: usize, comptime O: usize, comptime Context: type) type {
-    return Engine(N, O, Context, struct {});
+    if (!system.isSystem(Context)) {
+        @compileError("Context must satisfy isSystem trait.");
+    }
+
+    return struct {
+        inner: Engine(N, O),
+        context: system.SystemSliceConst(Context),
+
+        // Aliases
+        const Self = @This();
+
+        pub const CFieldEnum = system.SystemFieldEnum(Context);
+
+        pub fn position(self: Self) [N]f64 {
+            return self.inner.position();
+        }
+
+        /// Returns the value of the field at the current cell.
+        pub fn value(self: Self, comptime field: Context) f64 {
+            const f: []const f64 = @field(self.context, @tagName(field));
+            return self.inner.value(f);
+        }
+
+        /// Returns the value of the field at the current cell.
+        pub fn gradient(self: Self, comptime field: Context) [N]f64 {
+            const f: []const f64 = @field(self.context, @tagName(field));
+            return self.inner.gradient(f);
+        }
+
+        /// Returns the value of the field at the current cell.
+        pub fn hessian(self: Self, comptime field: Context) [N][N]f64 {
+            const f: []const f64 = @field(self.context, @tagName(field));
+            return self.inner.hessian(f);
+        }
+
+        /// Returns the value of the field at the current cell.
+        pub fn laplacian(self: Self, comptime field: Context) f64 {
+            const f: []const f64 = @field(self.context, @tagName(field));
+            return self.inner.laplacian(f);
+        }
+
+        /// Returns the value of the field at the current cell.
+        pub fn valueDiagonal(self: Self) f64 {
+            return self.inner.valueDiagonal();
+        }
+
+        /// Returns the value of the field at the current cell.
+        pub fn gradientDiagonal(self: Self) [N]f64 {
+            return self.inner.gradientDiagonal();
+        }
+
+        /// Returns the value of the field at the current cell.
+        pub fn hessianDiagonal(self: Self) [N][N]f64 {
+            return self.inner.hessianDiagonal();
+        }
+
+        pub fn laplacianDiagonal(self: Self) f64 {
+            return self.inner.laplacianDiagonal();
+        }
+    };
+}
+
+/// An `Engine` which can compute operations on elements of a given context system, as well as on
+/// a given operated system
+pub fn OperatorEngine(comptime N: usize, comptime O: usize, comptime Context: type, comptime Operated: type) type {
+    if (!system.isSystem(Context)) {
+        @compileError("Context must satisfy isSystem trait.");
+    }
+
+    if (!system.isSystem(Operated)) {
+        @compileError("Operated must satisfy isSystem trait.");
+    }
+
+    return struct {
+        inner: Engine(N, O),
+        context: system.SystemSliceConst(Context),
+        operated: system.SystemSliceConst(Operated),
+
+        // Aliases
+        const Self = @This();
+
+        pub fn position(self: Self) [N]f64 {
+            return self.inner.position();
+        }
+
+        /// Returns the value of the field at the current cell.
+        pub fn value(self: Self, comptime field: Context) f64 {
+            const f: []const f64 = @field(self.context, @tagName(field));
+            return self.inner.value(f);
+        }
+
+        /// Returns the value of the field at the current cell.
+        pub fn gradient(self: Self, comptime field: Context) [N]f64 {
+            const f: []const f64 = @field(self.context, @tagName(field));
+            return self.inner.gradient(f);
+        }
+
+        /// Returns the value of the field at the current cell.
+        pub fn hessian(self: Self, comptime field: Context) [N][N]f64 {
+            const f: []const f64 = @field(self.context, @tagName(field));
+            return self.inner.hessian(f);
+        }
+
+        /// Returns the value of the field at the current cell.
+        pub fn laplacian(self: Self, comptime field: Context) f64 {
+            const f: []const f64 = @field(self.context, @tagName(field));
+            return self.inner.laplacian(f);
+        }
+
+        /// Returns the value of the field at the current cell.
+        pub fn valueOp(self: Self, comptime field: Operated) f64 {
+            const f: []const f64 = @field(self.operated, @tagName(field));
+            return self.inner.value(f);
+        }
+
+        /// Returns the value of the field at the current cell.
+        pub fn gradientOp(self: Self, comptime field: Operated) [N]f64 {
+            const f: []const f64 = @field(self.operated, @tagName(field));
+            return self.inner.gradient(f);
+        }
+
+        /// Returns the value of the field at the current cell.
+        pub fn hessianOp(self: Self, comptime field: Operated) [N][N]f64 {
+            const f: []const f64 = @field(self.operated, @tagName(field));
+            return self.inner.hessian(f);
+        }
+
+        /// Returns the value of the field at the current cell.
+        pub fn laplacianOp(self: Self, comptime field: Operated) f64 {
+            const f: []const f64 = @field(self.operated, @tagName(field));
+            return self.inner.laplacian(f);
+        }
+
+        /// Returns the value of the field at the current cell.
+        pub fn valueDiagonal(self: Self) f64 {
+            return self.inner.valueDiagonal();
+        }
+
+        /// Returns the value of the field at the current cell.
+        pub fn gradientDiagonal(self: Self) [N]f64 {
+            return self.inner.gradientDiagonal();
+        }
+
+        /// Returns the value of the field at the current cell.
+        pub fn hessianDiagonal(self: Self) [N][N]f64 {
+            return self.inner.hessianDiagonal();
+        }
+
+        /// Returns the value of the field at the current cell.
+        pub fn laplacianDiagonal(self: Self) f64 {
+            return self.inner.laplacianDiagonal();
+        }
+    };
 }
 
 /// A trait which checks if a type is a mesh operator. Such a type follows the following set of declarations.
 /// ```
 /// const Operator = struct {
-///     pub const Context = struct {
-///         field1: []const f64,
-///         field2: []const f64,
+///     pub const Context = enum {
+///         field1,
+///         field2,
 ///         // ...
 ///     };
 ///
-///     pub fn apply(self: Operator, engine: OperatorEngine(2, 2, Context)) f64 {
+///     pub const System = enum {
+///         result,
+///     };
+///
+///     pub fn apply(self: Operator, engine: OperatorEngine(2, 2, Context, System)) SystemValue(System) {
 ///         // ...
 ///     }
 ///
-///     pub fn applyDiagonal(self: Operator, engine: OperatorEngine(2, 2, Context)) f64 {
+///     pub fn applyDiagonal(self: Operator, engine: OperatorEngine(2, 2, Context, System)) SystemValue(System) {
 ///         // ...
 ///     }
 /// };
@@ -207,19 +305,19 @@ pub fn isMeshOperator(comptime N: usize, comptime O: usize) fn (type) bool {
 
     const Closure = struct {
         fn trait(comptime T: type) bool {
-            if (!(@hasDecl(T, "Context") and T.Context == type and system.isConstSystem(T.Context))) {
+            if (!(@hasDecl(T, "Context") and T.Context == type and system.isSystem(T.Context))) {
                 return false;
             }
 
-            if (!(@hasDecl(T, "Output") and T.Output == type and system.isConstSystem(T.Output))) {
+            if (!(@hasDecl(T, "System") and T.System == type and system.isSystem(T.System))) {
                 return false;
             }
 
-            if (!(hasFn("apply")(T) and @TypeOf(T.apply) == fn (T, Engine(N, O, T.Context, T.Output)) system.SystemValueStruct(T.Output))) {
+            if (!(hasFn("apply")(T) and @TypeOf(T.apply) == fn (T, OperatorEngine(N, O, T.Context, T.System)) system.SystemValue(T.System))) {
                 return false;
             }
 
-            if (!(hasFn("applyDiagonal")(T) and @TypeOf(T.applyDiagonal) == fn (T, Engine(N, O, T.Context, T.Output)) system.SystemValueStruct(T.Output))) {
+            if (!(hasFn("applyDiagonal")(T) and @TypeOf(T.applyDiagonal) == fn (T, OperatorEngine(N, O, T.Context, T.System)) system.SystemValue(T.System))) {
                 return false;
             }
 
@@ -233,13 +331,18 @@ pub fn isMeshOperator(comptime N: usize, comptime O: usize) fn (type) bool {
 /// A trait which checks if a type is a mesh function. Such a type follows the following set of declarations.
 /// ```
 /// const Function = struct {
-///     pub const Context = struct {
-///         field1: []const f64,
-///         field2: []const f64,
+///     pub const Context = enum {
+///         field1,
+///         field2,
 ///         // ...
 ///     };
 ///
-///     pub fn value(self: Operator, engine: FunctionEngine(2, 2, Context)) f64 {
+///     pub const Output = enum {
+///         x,
+///         y,
+///     }
+///
+///     pub fn value(self: Operator, engine: FunctionEngine(2, 2, Context)) SystemValue(Output) {
 ///         // ...
 ///     }
 /// };
@@ -253,7 +356,11 @@ pub fn isMeshFunction(comptime N: usize, comptime O: usize) fn (type) bool {
                 return false;
             }
 
-            if (!(hasFn("value")(T) and @TypeOf(T.value) == fn (T, FunctionEngine(N, O, T.Context)) f64)) {
+            if (!(@hasDecl(T, "Output") and T.Context == type and system.isMutableSystem(T.Output))) {
+                return false;
+            }
+
+            if (!(hasFn("value")(T) and @TypeOf(T.value) == fn (T, FunctionEngine(N, O, T.Context)) system.SystemValue(T.Output))) {
                 return false;
             }
 

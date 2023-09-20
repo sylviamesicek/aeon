@@ -1,45 +1,92 @@
 const std = @import("std");
 const meta = std.meta;
 
-/// The type of the slice in a system, whether []const f64 or []f64
-pub fn SystemSliceType(comptime T: type) type {
-    if (isConstSystem(T)) {
-        return []const f64;
-    } else if (isMutableSystem(T)) {
-        return []f64;
-    } else {
-        @compileError("SystemSliceType only valid for system types");
+/// Checks if a type could be used to describe a system
+pub fn isSystem(comptime T: type) bool {
+    switch (@typeInfo(T)) {
+        .Enum => |info| {
+            if (info.decls.len == 0 and info.is_exhaustive) {
+                return true;
+            }
+            return false;
+        },
+        else => return false,
     }
 }
 
-/// Returns an enum representing each field in the system.
-pub fn SystemFieldEnum(comptime T: type) type {
-    return meta.FieldEnum(T);
-}
-
-pub fn SystemValueStruct(comptime T: type) type {
+/// Builds a struct type with one named field per variant of T, of type F.
+pub fn SystemStruct(comptime T: type, comptime F: type) type {
     if (!isSystem(T)) {
-        @compileError("SystemValueStruct may only be called on system types.");
+        @compileError("T must satisfy isSystem trait");
     }
 
-    comptime var fields: [systemFieldCount(T)]std.builtin.Type.StructField = undefined;
+    const field_infos = meta.fields(T);
 
-    for (systemFieldNames(T), 0..) |name, id| {
-        fields[id] = .{
-            .name = name,
-            .type = f64,
+    if (field_infos.len == 0) {
+        return struct {};
+    }
+
+    var struct_fields: [field_infos.len]std.builtin.Type.StructField = undefined;
+    var decls = [_]std.builtin.Type.Declaration{};
+
+    inline for (field_infos, 0..) |field, i| {
+        struct_fields[i] = .{
+            .name = field.name,
+            .type = F,
             .default_value = null,
             .is_comptime = false,
-            .alignment = @alignOf(T),
+            .alignment = @alignOf(F),
         };
     }
 
-    return @Type(.{ .Struct = .{
-        .layout = .Auto,
-        .fields = &fields,
-        .decls = &.{},
-        .is_tuple = false,
-    } });
+    return @Type(.{
+        .Struct = .{
+            .layout = .Auto,
+            .fields = &struct_fields,
+            .decls = &decls,
+            .is_tuple = false,
+        },
+    });
+}
+
+/// A trait which determines if a type is a valid system struct.
+pub fn isSystemStruct(comptime T: type, comptime F: type) bool {
+    switch (@typeInfo(T)) {
+        .Struct => |info| {
+            inline for (info.fields) |field| {
+                if (field.type != F) {
+                    return false;
+                }
+            }
+
+            return info.decls.len == 0 and info.layout == .Auto and info.is_tuple == false and info.backing_integer == null;
+        },
+        else => return false,
+    }
+}
+
+pub fn SystemSlice(comptime T: type) type {
+    return SystemStruct(T, []f64);
+}
+
+pub fn isSystemSlice(comptime T: type) type {
+    return isSystemStruct(T, []f64);
+}
+
+pub fn SystemSliceConst(comptime T: type) type {
+    return SystemStruct(T, []const f64);
+}
+
+pub fn isSystemSliceConst(comptime T: type) type {
+    return isSystemStruct(T, []const f64);
+}
+
+pub fn SystemValue(comptime T: type) type {
+    return SystemStruct(T, f64);
+}
+
+pub fn isSystemValue(comptime T: type) type {
+    return isSystemStruct(T, f64);
 }
 
 // pub fn SystemUnion(comptime T: type, comptime U: type) type {
@@ -107,13 +154,13 @@ pub fn systemFieldNames(comptime T: type) [systemFieldCount(T)][:0]const u8 {
     return result;
 }
 
-/// Iterates the fields of a system.
-pub fn systemFields(comptime T: type, sys: T) [systemFieldCount(T)]SystemSliceType(T) {
+/// Iterates the fields of a struct system.
+pub fn systemStructFields(comptime T: type, comptime F: type, sys: SystemStruct(T, F)) [systemFieldCount(T)]F {
     if (!isSystem(T)) {
         @compileError("systemFields only valid for system types");
     }
 
-    var result: [systemFieldCount(T)]SystemSliceType(T) = undefined;
+    var result: [systemFieldCount(T)]F = undefined;
 
     inline for (meta.fields(T), 0..) |field_info, id| {
         result[id] = @field(sys, field_info.name);
@@ -122,66 +169,14 @@ pub fn systemFields(comptime T: type, sys: T) [systemFieldCount(T)]SystemSliceTy
     return result;
 }
 
-/// Get a field of a system given a value from its field enum.
-pub fn systemField(sys: anytype, comptime field: SystemFieldEnum(@TypeOf(sys))) SystemSliceType(@TypeOf(sys)) {
-    return @field(sys, @tagName(field));
-}
+pub fn systemStructSlice(sys: anytype, offset: usize, total: usize) @TypeOf(sys) {
+    var slice: @TypeOf(sys) = undefined;
 
-pub fn systemSlice(sys: anytype, offset: usize, total: usize) @TypeOf(sys) {
-    const T = @TypeOf(sys);
-
-    if (!isSystem(T)) {
-        @compileError("systemSlice() may only be called on valid systems");
-    }
-
-    var slice: T = undefined;
-
-    inline for (meta.fields(T)) |field_info| {
+    inline for (meta.fields(@TypeOf(sys))) |field_info| {
         @field(slice, field_info.name) = @field(sys, field_info.name)[offset..(offset + total)];
     }
 
     return slice;
-}
-
-/// A trait function to determine whether a
-/// type is a system. Aka a struct where all fields
-/// are const f64 slices.
-pub fn isConstSystem(comptime T: type) bool {
-    switch (@typeInfo(T)) {
-        .Struct => |info| {
-            inline for (info.fields) |field| {
-                if (field.type != []const f64) {
-                    return false;
-                }
-            }
-
-            return true;
-        },
-        else => return false,
-    }
-}
-
-/// A trait function to determine whether a
-/// type is a system. Aka a struct where all fields
-/// are mutable f64 slices.
-pub fn isMutableSystem(comptime T: type) bool {
-    switch (@typeInfo(T)) {
-        .Struct => |info| {
-            inline for (info.fields) |field| {
-                if (field.type != []f64) {
-                    return false;
-                }
-            }
-
-            return true;
-        },
-        else => return false,
-    }
-}
-
-/// An alias for `isConstSystem(T) or isMutableSystem(T)`
-pub fn isSystem(comptime T: type) bool {
-    return isConstSystem(T) or isMutableSystem(T);
 }
 
 test "system trait" {
@@ -193,14 +188,12 @@ test "system trait" {
         random: f64,
     };
 
-    const Sys2 = struct {
-        scalar: []f64,
-        other_scalar: []f64,
-        random: []f64,
+    const Sys2 = enum {
+        a,
+        b,
+        c,
     };
 
-    try expect(!isConstSystem(Sys1));
-    try expect(isMutableSystem(Sys2));
-    try expect(SystemSliceType(Sys2) == []f64);
-    try expect(systemFieldCount(Sys2) == 3);
+    try expect(!isSystem(Sys1));
+    try expect(isSystem(Sys2));
 }
