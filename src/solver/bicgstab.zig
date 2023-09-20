@@ -91,7 +91,7 @@ pub fn BiCGStabSolver(comptime L: usize) type {
             }
         }
 
-        pub fn solve(self: *Self, x: []f64, oper: anytype, rhs: []const f64) usize {
+        pub fn solve(self: *Self, oper: anytype, x: []f64, rhs: []const f64) usize {
             assert(x.len == self.ndofs);
             assert(rhs.len == self.ndofs);
 

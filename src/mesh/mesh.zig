@@ -15,6 +15,7 @@ const maxInt = std.math.maxInt;
 const array = @import("../array.zig");
 const basis = @import("../basis/basis.zig");
 const geometry = @import("../geometry/geometry.zig");
+const solver = @import("../solver/solver.zig");
 
 // Submodules
 
@@ -1048,6 +1049,52 @@ pub fn Mesh(comptime N: usize, comptime O: usize) type {
                     }
                 }
             }
+        }
+
+        // *************************
+        // Elliptic Solve (MOVE) ***
+        // *************************
+
+        pub fn solveBase(
+            self: *const Self,
+            oper: anytype,
+            result: system.SystemSlice(oper.System),
+            rhs: system.SystemSliceConst(oper.System),
+            context: system.SystemSliceConst(oper.Context),
+        ) void {
+            if (!(operator.isMeshOperator(N, O)(oper))) {
+                @compileError("Oper must satisfy isMeshOperator trait.");
+            }
+
+            if (system.systemFieldCount(oper.System) != 1) {
+                @compileError("solveBase only supports systems with 1 field currently.");
+            }
+
+            const field_name: [:0]const u8 = system.systemFieldNames(oper.System)[0];
+
+            const result_field: []f64 = @field(result, field_name);
+            const rhs_field: []const f64 = @field(rhs, field_name);
+
+            const Operator = struct {
+                inner: @TypeOf(oper),
+                ctx: oper.Context,
+
+                fn apply(sel: @This(), res: []f64, x: []const f64) void {
+                    _ = x;
+                    _ = res;
+                    _ = sel;
+                }
+            };
+
+            const solve_oper: Operator = .{
+                .inner = oper,
+                .ctx = context,
+            };
+
+            var sol: solver.BiCGStabSolver(2) = solver.BiCGStabSolver(2).init(self.gpa, result_field.len, 1000, 10e-6);
+            defer sol.deinit();
+
+            sol.solve(solve_oper, result_field, rhs_field);
         }
 
         // *************************
