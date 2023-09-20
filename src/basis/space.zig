@@ -18,7 +18,7 @@ pub fn InterpolationSpace(comptime N: usize, comptime O: usize) type {
         size: [N]usize,
 
         const Self = @This();
-        const IndexSpace = geometry.IndexSpace;
+        const IndexSpace = geometry.IndexSpace(N);
 
         pub fn fromSize(size: [N]usize) Self {
             return .{
@@ -113,7 +113,7 @@ pub fn InterpolationSpace(comptime N: usize, comptime O: usize) type {
         fn cellWithGhost(cell: [N]usize) [N]usize {
             var result: [N]usize = cell;
             for (0..N) |i| {
-                result[i] + 2 * O;
+                result[i] += 2 * O;
             }
             return result;
         }
@@ -121,7 +121,7 @@ pub fn InterpolationSpace(comptime N: usize, comptime O: usize) type {
         fn sizeWithGhost(size: [N]usize) [N]usize {
             var result: [N]usize = size;
             for (0..N) |i| {
-                result[i] + 4 * O;
+                result[i] += 4 * O;
             }
             return result;
         }
@@ -165,7 +165,7 @@ pub fn StencilSpace(comptime N: usize, comptime O: usize) type {
             for (0..N) |i| {
                 const origin: f64 = self.physical_bounds.origin[i];
                 const width: f64 = self.physical_bounds.size[i];
-                const ratio: f64 = (@as(f64, @floatFromInt(vertex[i])) - 1) / @as(f64, @floatFromInt(self.size[i]));
+                const ratio: f64 = (@as(f64, @floatFromInt(vertex[i]))) / @as(f64, @floatFromInt(self.size[i]));
                 result[i] = origin + width * ratio;
             }
 

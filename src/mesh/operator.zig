@@ -12,7 +12,7 @@ pub fn Engine(comptime N: usize, comptime O: usize) type {
 
         // Aliases
         const Self = @This();
-        const StencilSpace = basis.StencilSpace(N, 2 * O, O);
+        const StencilSpace = basis.StencilSpace(N, O);
 
         /// Computes the position of the cell.
         pub fn position(self: Self) [N]f64 {
@@ -305,19 +305,19 @@ pub fn isMeshOperator(comptime N: usize, comptime O: usize) fn (type) bool {
 
     const Closure = struct {
         fn trait(comptime T: type) bool {
-            if (!(@hasDecl(T, "Context") and T.Context == type and system.isSystem(T.Context))) {
+            if (comptime !(@hasDecl(T, "Context") and @TypeOf(T.Context) == type and system.isSystem(T.Context))) {
                 return false;
             }
 
-            if (!(@hasDecl(T, "System") and T.System == type and system.isSystem(T.System))) {
+            if (comptime !(@hasDecl(T, "System") and @TypeOf(T.System) == type and system.isSystem(T.System))) {
                 return false;
             }
 
-            if (!(hasFn("apply")(T) and @TypeOf(T.apply) == fn (T, OperatorEngine(N, O, T.Context, T.System)) system.SystemValue(T.System))) {
+            if (comptime !(hasFn("apply")(T) and @TypeOf(T.apply) == fn (T, OperatorEngine(N, O, T.Context, T.System)) system.SystemValue(T.System))) {
                 return false;
             }
 
-            if (!(hasFn("applyDiagonal")(T) and @TypeOf(T.applyDiagonal) == fn (T, OperatorEngine(N, O, T.Context, T.System)) system.SystemValue(T.System))) {
+            if (comptime !(hasFn("applyDiagonal")(T) and @TypeOf(T.applyDiagonal) == fn (T, OperatorEngine(N, O, T.Context, T.System)) system.SystemValue(T.System))) {
                 return false;
             }
 
@@ -352,15 +352,15 @@ pub fn isMeshFunction(comptime N: usize, comptime O: usize) fn (type) bool {
 
     const Closure = struct {
         fn trait(comptime T: type) bool {
-            if (!(@hasDecl(T, "Context") and T.Context == type and system.isConstSystem(T.Context))) {
+            if (comptime !(@hasDecl(T, "Context") and @TypeOf(T.Context) == type and system.isSystem(T.Context))) {
                 return false;
             }
 
-            if (!(@hasDecl(T, "Output") and T.Context == type and system.isMutableSystem(T.Output))) {
+            if (comptime !(@hasDecl(T, "Output") and @TypeOf(T.Output) == type and system.isSystem(T.Output))) {
                 return false;
             }
 
-            if (!(hasFn("value")(T) and @TypeOf(T.value) == fn (T, FunctionEngine(N, O, T.Context)) system.SystemValue(T.Output))) {
+            if (comptime !(hasFn("value")(T) and @TypeOf(T.value) == fn (T, FunctionEngine(N, O, T.Context)) system.SystemValue(T.Output))) {
                 return false;
             }
 

@@ -64,13 +64,13 @@ pub const VtkUnstructuredGrid = struct {
     /// Stores the positions of each point in the grid.
     points: []f64,
     /// Stores the vertices of each cell in the grid.
-    vertices: []i64,
+    vertices: []usize,
 
     /// Global config of an unstructured grid. Describes cell type, point positions, and cell vertices.
     pub const Config = struct {
         cell_type: VtkCellType,
         points: []const f64,
-        vertices: []const i64,
+        vertices: []const usize,
     };
 
     /// Initialises a new unstructured grid using an allocator and a config.
@@ -80,7 +80,7 @@ pub const VtkUnstructuredGrid = struct {
 
         @memcpy(points, config.points);
 
-        var vertices: []i64 = try allocator.alloc(i64, config.vertices.len);
+        var vertices: []usize = try allocator.alloc(usize, config.vertices.len);
         errdefer allocator.free(vertices);
 
         @memcpy(vertices, config.vertices);
@@ -105,7 +105,7 @@ pub const VtkUnstructuredGrid = struct {
     }
 
     /// Adds a data field associated with each point to the vtk unstructured grid.
-    pub fn addField(self: *VtkUnstructuredGrid, name: []const u8, data: []const f64, dimension: i32) !void {
+    pub fn addField(self: *VtkUnstructuredGrid, name: []const u8, data: []const f64, dimension: usize) !void {
         return self.point_data.append(self.allocator, .{
             .name = name,
             .data = data,
@@ -114,7 +114,7 @@ pub const VtkUnstructuredGrid = struct {
     }
 
     /// Adds a data field associated with each cell to the vtk unstructured grid.
-    pub fn addCellField(self: *VtkUnstructuredGrid, name: []const u8, data: []const f64, dimension: i32) !void {
+    pub fn addCellField(self: *VtkUnstructuredGrid, name: []const u8, data: []const f64, dimension: usize) !void {
         return self.cell_data.append(self.allocator, .{
             .name = name,
             .data = data,
@@ -188,7 +188,7 @@ pub const VtkUnstructuredGrid = struct {
         , .{});
     }
 
-    fn writeCells(cell_type: VtkCellType, cells: []const i64, out_stream: anytype) @TypeOf(out_stream).Error!void {
+    fn writeCells(cell_type: VtkCellType, cells: []const usize, out_stream: anytype) @TypeOf(out_stream).Error!void {
         const n_vertices = cell_type.nvertices();
         const tag = cell_type.tag();
 
@@ -199,7 +199,7 @@ pub const VtkUnstructuredGrid = struct {
             \\
         , .{n_vertices});
 
-        try writeVecArray(i64, n_vertices, cells, out_stream);
+        try writeVecArray(usize, n_vertices, cells, out_stream);
 
         try out_stream.print("</DataArray>\n", .{});
 

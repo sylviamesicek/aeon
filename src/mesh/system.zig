@@ -59,7 +59,7 @@ pub fn isSystemStruct(comptime T: type, comptime F: type) bool {
                 }
             }
 
-            return info.decls.len == 0 and info.layout == .Auto and info.is_tuple == false and info.backing_integer == null;
+            return true;
         },
         else => return false,
     }
@@ -69,7 +69,7 @@ pub fn SystemSlice(comptime T: type) type {
     return SystemStruct(T, []f64);
 }
 
-pub fn isSystemSlice(comptime T: type) type {
+pub fn isSystemSlice(comptime T: type) bool {
     return isSystemStruct(T, []f64);
 }
 
@@ -77,7 +77,7 @@ pub fn SystemSliceConst(comptime T: type) type {
     return SystemStruct(T, []const f64);
 }
 
-pub fn isSystemSliceConst(comptime T: type) type {
+pub fn isSystemSliceConst(comptime T: type) bool {
     return isSystemStruct(T, []const f64);
 }
 
@@ -85,7 +85,7 @@ pub fn SystemValue(comptime T: type) type {
     return SystemStruct(T, f64);
 }
 
-pub fn isSystemValue(comptime T: type) type {
+pub fn isSystemValue(comptime T: type) bool {
     return isSystemStruct(T, f64);
 }
 
@@ -140,12 +140,8 @@ pub fn systemFieldCount(comptime T: type) usize {
 }
 
 /// Iterates the names of fields in a system.
-pub fn systemFieldNames(comptime T: type) [systemFieldCount(T)][:0]const u8 {
-    if (!isSystem(T)) {
-        @compileError("systemFieldNames only valid for system types");
-    }
-
-    var result: [systemFieldCount(T)][:0]const u8 = undefined;
+pub fn systemFieldNames(comptime T: type) [systemFieldCount(T)][]const u8 {
+    var result: [systemFieldCount(T)][]const u8 = undefined;
 
     inline for (meta.fields(T), 0..) |field_info, id| {
         result[id] = field_info.name;

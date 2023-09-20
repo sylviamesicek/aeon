@@ -71,7 +71,7 @@ pub fn Mesh(comptime N: usize, comptime O: usize) type {
             }
 
             pub fn baseCellSpace(self: Config) IndexSpace {
-                return self.baseTileSpace().scale(self.tile_width).extendUniform(2 * O);
+                return self.baseTileSpace().scale(self.tile_width).extendUniform(4 * O);
             }
 
             pub fn check(self: Config) void {
@@ -404,13 +404,13 @@ pub fn Mesh(comptime N: usize, comptime O: usize) type {
 
         fn baseStencilSpace(self: *const Self) StencilSpace {
             return .{
-                .physical_bounds = self.physical_bounds,
-                .index_size = scaled(self.base.index_size, self.config.tile_width),
+                .physical_bounds = self.config.physical_bounds,
+                .size = scaled(self.base.index_size, self.config.tile_width),
             };
         }
 
         fn levelStencilSpace(self: *const Self, level: usize, block: IndexBox) StencilSpace {
-            const index_size: [N]usize = self.levels[level].index_size;
+            const index_size: [N]usize = self.levels.items[level].index_size;
 
             var physical_bounds: RealBox = undefined;
 
@@ -418,8 +418,8 @@ pub fn Mesh(comptime N: usize, comptime O: usize) type {
                 const sratio: f64 = @as(f64, @floatFromInt(block.size[i])) / @as(f64, @floatFromInt(index_size[i]));
                 const oratio: f64 = @as(f64, @floatFromInt(block.origin[i])) / @as(f64, @floatFromInt(index_size[i] - 1));
 
-                physical_bounds.size[i] = self.physical_bounds.size[i] * sratio;
-                physical_bounds.origin[i] = self.physical_bounds.origin[i] + self.physical_bounds.size[i] * oratio;
+                physical_bounds.size[i] = self.config.physical_bounds.size[i] * sratio;
+                physical_bounds.origin[i] = self.config.physical_bounds.origin[i] + self.config.physical_bounds.size[i] * oratio;
             }
 
             return .{
@@ -699,10 +699,10 @@ pub fn Mesh(comptime N: usize, comptime O: usize) type {
         pub fn smooth(
             self: *const Self,
             oper: anytype,
-            result: system.SystemSlice(oper.System),
-            input: system.SystemSliceConst(oper.System),
-            rhs: system.SystemSliceConst(oper.System),
-            context: system.SystemSliceConst(oper.Context),
+            result: system.SystemSlice(@TypeOf(oper).System),
+            input: system.SystemSliceConst(@TypeOf(oper).System),
+            rhs: system.SystemSliceConst(@TypeOf(oper).System),
+            context: system.SystemSliceConst(@TypeOf(oper).Context),
         ) void {
             self.smoothBase(oper, result, input, rhs, context);
 
@@ -715,12 +715,12 @@ pub fn Mesh(comptime N: usize, comptime O: usize) type {
         pub fn smoothBase(
             self: *const Self,
             oper: anytype,
-            result: system.SystemSlice(oper.System),
-            input: system.SystemSliceConst(oper.System),
-            rhs: system.SystemSliceConst(oper.System),
-            context: system.SystemSliceConst(oper.Context),
+            result: system.SystemSlice(@TypeOf(oper).System),
+            input: system.SystemSliceConst(@TypeOf(oper).System),
+            rhs: system.SystemSliceConst(@TypeOf(oper).System),
+            context: system.SystemSliceConst(@TypeOf(oper).Context),
         ) void {
-            if (!(operator.isMeshOperator(N, O)(oper))) {
+            if (!(operator.isMeshOperator(N, O)(@TypeOf(oper)))) {
                 @compileError("Oper must satisfy isMeshOperator trait.");
             }
 
@@ -738,7 +738,7 @@ pub fn Mesh(comptime N: usize, comptime O: usize) type {
             var cell_indices = cell_space.cartesianIndices();
 
             while (cell_indices.next()) |cell| {
-                const engine = OperatorEngine(N, O, oper.Context, oper.System){
+                const engine = OperatorEngine(N, O, @TypeOf(oper).Context, @TypeOf(oper).System){
                     .inner = .{
                         .space = stencil_space,
                         .cell = cell,
@@ -747,10 +747,10 @@ pub fn Mesh(comptime N: usize, comptime O: usize) type {
                     .operated = base_input,
                 };
 
-                const app: system.SystemValue(oper.System) = oper.apply(engine);
-                const diag: system.SystemValue(oper.System) = oper.applyDiagonal(engine);
+                const app: system.SystemValue(@TypeOf(oper).System) = oper.apply(engine);
+                const diag: system.SystemValue(@TypeOf(oper).System) = oper.applyDiagonal(engine);
 
-                inline for (system.systemFieldNames(oper.System)) |name| {
+                inline for (system.systemFieldNames(@TypeOf(oper).System)) |name| {
                     const f: f64 = stencil_space.value(cell, @field(base_input, name));
                     const r: f64 = stencil_space.value(cell, @field(base_rhs, name));
                     const a: f64 = @field(app, name);
@@ -766,12 +766,12 @@ pub fn Mesh(comptime N: usize, comptime O: usize) type {
             self: *const Self,
             level: usize,
             oper: anytype,
-            result: system.SystemSlice(oper.System),
-            input: system.SystemSliceConst(oper.System),
-            rhs: system.SystemSliceConst(oper.System),
-            context: system.SystemSliceConst(oper.Context),
+            result: system.SystemSlice(@TypeOf(oper).System),
+            input: system.SystemSliceConst(@TypeOf(oper).System),
+            rhs: system.SystemSliceConst(@TypeOf(oper).System),
+            context: system.SystemSliceConst(@TypeOf(oper).Context),
         ) void {
-            if (!(operator.isMeshOperator(N, O)(oper))) {
+            if (!(operator.isMeshOperator(N, O)(@TypeOf(oper)))) {
                 @compileError("Oper must satisfy isMeshOperator trait.");
             }
 
@@ -797,7 +797,7 @@ pub fn Mesh(comptime N: usize, comptime O: usize) type {
                 var cell_indices = cell_space.cartesianIndices();
 
                 while (cell_indices.next()) |cell| {
-                    const engine = OperatorEngine(N, O, oper.Context, oper.System){
+                    const engine = OperatorEngine(N, O, @TypeOf(oper).Context, @TypeOf(oper).System){
                         .inner = .{
                             .space = stencil_space,
                             .cell = cell,
@@ -806,10 +806,10 @@ pub fn Mesh(comptime N: usize, comptime O: usize) type {
                         .operated = block_input,
                     };
 
-                    const app: system.SystemValue(oper.System) = oper.apply(engine);
-                    const diag: system.SystemValue(oper.System) = oper.applyDiagonal(engine);
+                    const app: system.SystemValue(@TypeOf(oper).System) = oper.apply(engine);
+                    const diag: system.SystemValue(@TypeOf(oper).System) = oper.applyDiagonal(engine);
 
-                    inline for (system.systemFieldNames(oper.System)) |name| {
+                    inline for (system.systemFieldNames(@TypeOf(oper).System)) |name| {
                         const f: f64 = stencil_space.value(cell, @field(block_input, name));
                         const r: f64 = stencil_space.value(cell, @field(block_rhs, name));
                         const a: f64 = @field(app, name);
@@ -829,9 +829,9 @@ pub fn Mesh(comptime N: usize, comptime O: usize) type {
             self: *const Self,
             comptime full: bool,
             oper: anytype,
-            result: system.SystemSlice(oper.System),
-            input: system.SystemSliceConst(oper.System),
-            context: system.SystemSliceConst(oper.Context),
+            result: system.SystemSlice(@TypeOf(oper).System),
+            input: system.SystemSliceConst(@TypeOf(oper).System),
+            context: system.SystemSliceConst(@TypeOf(oper).Context),
         ) void {
             self.applyBase(oper, result, input, context);
 
@@ -843,11 +843,11 @@ pub fn Mesh(comptime N: usize, comptime O: usize) type {
         pub fn applyBase(
             self: *const Self,
             oper: anytype,
-            result: system.SystemSlice(oper.System),
-            input: system.SystemSliceConst(oper.System),
-            context: system.SystemSliceConst(oper.Context),
+            result: system.SystemSlice(@TypeOf(oper).System),
+            input: system.SystemSliceConst(@TypeOf(oper).System),
+            context: system.SystemSliceConst(@TypeOf(oper).Context),
         ) void {
-            if (!(operator.isMeshOperator(N, O)(oper))) {
+            if (!(operator.isMeshOperator(N, O)(@TypeOf(oper)))) {
                 @compileError("Oper must satisfy isMeshOperator trait.");
             }
 
@@ -864,7 +864,7 @@ pub fn Mesh(comptime N: usize, comptime O: usize) type {
             var cell_indices = cell_space.cartesianIndices();
 
             while (cell_indices.next()) |cell| {
-                const engine = OperatorEngine(N, O, oper.Context, oper.System){
+                const engine = OperatorEngine(N, O, @TypeOf(oper).Context, @TypeOf(oper).System){
                     .inner = .{
                         .space = stencil_space,
                         .cell = cell,
@@ -873,9 +873,9 @@ pub fn Mesh(comptime N: usize, comptime O: usize) type {
                     .operated = base_input,
                 };
 
-                const app: system.SystemValue(oper.System) = oper.apply(engine);
+                const app: system.SystemValue(@TypeOf(oper).System) = oper.apply(engine);
 
-                inline for (system.systemFieldNames(oper.System)) |name| {
+                inline for (system.systemFieldNames(@TypeOf(oper).System)) |name| {
                     stencil_space.setValue(
                         cell,
                         @field(base_result, name),
@@ -890,11 +890,11 @@ pub fn Mesh(comptime N: usize, comptime O: usize) type {
             comptime full: bool,
             level: usize,
             oper: anytype,
-            result: system.SystemSlice(oper.System),
-            input: system.SystemSliceConst(oper.System),
-            context: system.SystemSliceConst(oper.Context),
+            result: system.SystemSlice(@TypeOf(oper).System),
+            input: system.SystemSliceConst(@TypeOf(oper).System),
+            context: system.SystemSliceConst(@TypeOf(oper).Context),
         ) void {
-            if (!(operator.isMeshOperator(N, O)(oper))) {
+            if (!(operator.isMeshOperator(N, O)(@TypeOf(oper)))) {
                 @compileError("Oper must satisfy isMeshOperator trait.");
             }
 
@@ -920,7 +920,7 @@ pub fn Mesh(comptime N: usize, comptime O: usize) type {
 
                 while (cell_indices.next()) |cell| {
                     const offset_cell = if (full) add(stencil_space.size, [1]isize{-O} ** N) else cell;
-                    const engine = OperatorEngine(N, O, oper.Context, oper.System){
+                    const engine = OperatorEngine(N, O, @TypeOf(oper).Context, @TypeOf(oper).System){
                         .inner = .{
                             .space = stencil_space,
                             .cell = offset_cell,
@@ -929,9 +929,9 @@ pub fn Mesh(comptime N: usize, comptime O: usize) type {
                         .operated = block_input,
                     };
 
-                    const app: system.SystemValue(oper.System) = oper.apply(engine);
+                    const app: system.SystemValue(@TypeOf(oper).System) = oper.apply(engine);
 
-                    inline for (system.systemFieldNames(oper.System)) |name| {
+                    inline for (system.systemFieldNames(@TypeOf(oper).System)) |name| {
                         stencil_space.setValue(
                             offset_cell,
                             @field(block_result, name),
@@ -949,8 +949,8 @@ pub fn Mesh(comptime N: usize, comptime O: usize) type {
         pub fn project(
             self: *const Self,
             func: anytype,
-            result: system.SystemSlice(func.Output),
-            context: system.SystemSliceConst(func.Context),
+            result: system.SystemSlice(@TypeOf(func).Output),
+            context: system.SystemSliceConst(@TypeOf(func).Context),
         ) void {
             self.projectBase(func, result, context);
 
@@ -962,10 +962,10 @@ pub fn Mesh(comptime N: usize, comptime O: usize) type {
         pub fn projectBase(
             self: *const Self,
             func: anytype,
-            result: system.SystemSlice(func.Output),
-            context: system.SystemSliceConst(func.Context),
+            result: system.SystemSlice(@TypeOf(func).Output),
+            context: system.SystemSliceConst(@TypeOf(func).Context),
         ) void {
-            if (!(operator.isMeshFunction(N, O)(func))) {
+            if (comptime !(operator.isMeshFunction(N, O)(@TypeOf(func)))) {
                 @compileError("Func must satisfy isMeshFunction trait.");
             }
 
@@ -981,7 +981,7 @@ pub fn Mesh(comptime N: usize, comptime O: usize) type {
             var cell_indices = cell_space.cartesianIndices();
 
             while (cell_indices.next()) |cell| {
-                const engine = FunctionEngine(N, O, func.Context){
+                const engine = FunctionEngine(N, O, @TypeOf(func).Context){
                     .inner = .{
                         .space = stencil_space,
                         .cell = cell,
@@ -989,9 +989,9 @@ pub fn Mesh(comptime N: usize, comptime O: usize) type {
                     .context = base_context,
                 };
 
-                const val: system.SystemValue(func.Output) = func.value(engine);
+                const val: system.SystemValue(@TypeOf(func).Output) = func.value(engine);
 
-                inline for (system.systemFieldNames(func.Output)) |name| {
+                inline for (comptime system.systemFieldNames(@TypeOf(func).Output)) |name| {
                     stencil_space.setValue(
                         cell,
                         @field(base_result, name),
@@ -1005,14 +1005,14 @@ pub fn Mesh(comptime N: usize, comptime O: usize) type {
             self: *const Self,
             level: usize,
             func: anytype,
-            result: system.SystemSlice(func.Output),
-            context: system.SystemSliceConst(func.Context),
+            result: system.SystemSlice(@TypeOf(func).Output),
+            context: system.SystemSliceConst(@TypeOf(func).Context),
         ) void {
-            if (!(operator.isMeshFunction(N, O)(func))) {
+            if (comptime !(operator.isMeshFunction(N, O)(@TypeOf(func)))) {
                 @compileError("Func must satisfy isMeshFunction trait.");
             }
 
-            const target: *const Level = &self.levels[level];
+            const target: *const Level = &self.levels.items[level];
 
             const level_offset = target.cell_offset;
             const level_total = target.cell_total;
@@ -1030,7 +1030,7 @@ pub fn Mesh(comptime N: usize, comptime O: usize) type {
                 var cell_indices = cell_space.cartesianIndices();
 
                 while (cell_indices.next()) |cell| {
-                    const engine = FunctionEngine(N, O, func.Context){
+                    const engine = FunctionEngine(N, O, @TypeOf(func).Context){
                         .inner = .{
                             .space = stencil_space,
                             .cell = cell,
@@ -1038,9 +1038,9 @@ pub fn Mesh(comptime N: usize, comptime O: usize) type {
                         .context = block_context,
                     };
 
-                    const val: system.SystemValue(func.Output) = func.value(engine);
+                    const val: system.SystemValue(@TypeOf(func).Output) = func.value(engine);
 
-                    inline for (system.systemFieldNames(func.Output)) |name| {
+                    inline for (comptime system.systemFieldNames(@TypeOf(func).Output)) |name| {
                         stencil_space.setValue(
                             cell,
                             @field(block_result, name),
@@ -1058,19 +1058,19 @@ pub fn Mesh(comptime N: usize, comptime O: usize) type {
         pub fn solveBase(
             self: *const Self,
             oper: anytype,
-            result: system.SystemSlice(oper.System),
-            rhs: system.SystemSliceConst(oper.System),
-            context: system.SystemSliceConst(oper.Context),
+            result: system.SystemSlice(@TypeOf(oper).System),
+            rhs: system.SystemSliceConst(@TypeOf(oper).System),
+            context: system.SystemSliceConst(@TypeOf(oper).Context),
         ) void {
-            if (!(operator.isMeshOperator(N, O)(oper))) {
+            if (!(operator.isMeshOperator(N, O)(@TypeOf(oper)))) {
                 @compileError("Oper must satisfy isMeshOperator trait.");
             }
 
-            if (system.systemFieldCount(oper.System) != 1) {
+            if (system.systemFieldCount(@TypeOf(oper).System) != 1) {
                 @compileError("solveBase only supports systems with 1 field currently.");
             }
 
-            const field_name: [:0]const u8 = system.systemFieldNames(oper.System)[0];
+            const field_name: [:0]const u8 = system.systemFieldNames(@TypeOf(oper).System)[0];
 
             const result_field: []f64 = @field(result, field_name);
             const rhs_field: []const f64 = @field(rhs, field_name);
@@ -1083,6 +1083,8 @@ pub fn Mesh(comptime N: usize, comptime O: usize) type {
                     _ = x;
                     _ = res;
                     _ = sel;
+
+                    // TODO
                 }
             };
 
@@ -1101,36 +1103,20 @@ pub fn Mesh(comptime N: usize, comptime O: usize) type {
         // Output ******************
         // *************************
 
-        pub fn writeVtk(self: *const Self, sys: anytype, out_stream: anytype) !void {
-            if (!system.isSystemSliceConst(sys)) {
-                @compileError("Sys must satisfy isSystemSliceConst trait.");
-            }
-
-            const vtkio = @import("../vtkio.zig");
-            const VtkUnstructuredGrid = vtkio.VtkUnstructuredGrid;
-            const VtkCellType = vtkio.VtkCellType;
-
-            // Global Constant
-            const field_count: usize = system.systemFieldCount(sys);
-            const cell_type: VtkCellType = switch (N) {
-                1 => .line,
-                2 => .quad,
-                3 => .hexa,
-                else => @compileError("Vtk Output not supported for N > 3"),
-            };
-
-            const GridData = struct {
+        fn GridData(comptime System: type, comptime NVertices: usize) type {
+            const field_count = system.systemFieldCount(System);
+            return struct {
                 positions: ArrayListUnmanaged(f64) = .{},
                 vertices: ArrayListUnmanaged(usize) = .{},
                 fields: [field_count]ArrayListUnmanaged(f64) = [1]ArrayListUnmanaged(f64){.{}} ** field_count,
-                input: @TypeOf(sys),
+                input: System,
 
                 fn deinit(data: *@This(), allocator: Allocator) void {
                     data.positions.deinit(allocator);
                     data.vertices.deinit(allocator);
 
-                    for (data.fields) |*field| {
-                        field.deinit(allocator);
+                    for (0..data.fields.len) |i| {
+                        data.fields[i].deinit(allocator);
                     }
                 }
 
@@ -1149,8 +1135,8 @@ pub fn Mesh(comptime N: usize, comptime O: usize) type {
 
                     const point_offset: usize = data.positions.items.len;
 
-                    data.positions.ensureUnusedCapacity(allocator, N * point_space.total());
-                    data.vertices.ensureUnusedCapacity(allocator, cell_type.nvertices() * cell_space.total());
+                    try data.positions.ensureUnusedCapacity(allocator, N * point_space.total());
+                    try data.vertices.ensureUnusedCapacity(allocator, NVertices * cell_space.total());
 
                     // Fill positions and vertices
 
@@ -1212,22 +1198,40 @@ pub fn Mesh(comptime N: usize, comptime O: usize) type {
                     }
 
                     for (0..field_count) |id| {
-                        data.fields[id].ensureUnusedCapacity(allocator, cell_space.total());
+                        try data.fields[id].ensureUnusedCapacity(allocator, cell_space.total());
                     }
 
-                    const block_field = system.systemStructSlice(self.input, offset, total);
+                    const block_field = system.systemStructSlice(data.input, offset, total);
 
                     var cells = cell_space.cartesianIndices();
                     while (cells.next()) |cell| {
-                        for (system.systemFieldNames(@TypeOf(sys)), 0..) |name, id| {
+                        inline for (comptime system.systemFieldNames(System), 0..) |name, id| {
                             data.fields[id].appendAssumeCapacity(stencil.value(cell, @field(block_field, name)));
                         }
                     }
                 }
             };
+        }
+
+        pub fn writeVtk(self: *const Self, sys: anytype, out_stream: anytype) !void {
+            if (comptime !(system.isSystemSliceConst(@TypeOf(sys)) or system.isSystemSlice(@TypeOf(sys)))) {
+                @compileError("Sys must satisfy isSystemSliceConst trait.");
+            }
+
+            const vtkio = @import("../vtkio.zig");
+            const VtkUnstructuredGrid = vtkio.VtkUnstructuredGrid;
+            const VtkCellType = vtkio.VtkCellType;
+
+            // Global Constants
+            const cell_type: VtkCellType = switch (N) {
+                1 => .line,
+                2 => .quad,
+                3 => .hexa,
+                else => @compileError("Vtk Output not supported for N > 3"),
+            };
 
             // Build data
-            const data = GridData{ .input = sys };
+            var data = GridData(@TypeOf(sys), cell_type.nvertices()){ .input = sys };
             defer data.deinit(self.gpa);
 
             // Build base
@@ -1239,7 +1243,7 @@ pub fn Mesh(comptime N: usize, comptime O: usize) type {
             );
 
             for (0..self.active_levels) |level| {
-                const target: *const Level = &self.levels[level];
+                const target: *const Level = &self.levels.items[level];
                 const level_offset = target.cell_offset;
                 const block_bounds = target.blocks.items(.bounds);
                 const block_offsets = target.blocks.items(.cell_offset);
@@ -1258,11 +1262,11 @@ pub fn Mesh(comptime N: usize, comptime O: usize) type {
             }
 
             var grid: VtkUnstructuredGrid = try VtkUnstructuredGrid.init(self.gpa, .{
-                .points = data.positions,
-                .vertices = data.vertices,
+                .points = data.positions.items,
+                .vertices = data.vertices.items,
                 .cell_type = cell_type,
             });
-            defer grid.deinit(self.gpa);
+            defer grid.deinit();
 
             for (system.systemFieldNames(@TypeOf(sys)), 0..) |name, id| {
                 try grid.addCellField(name, data.fields[id].items, 1);
