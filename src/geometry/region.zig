@@ -33,8 +33,8 @@ pub fn Region(comptime N: usize) type {
         };
 
         const Self = @This();
-        const IndexSpace = geometry.IndexSpace(N);
-        const IndexBox = geometry.Box(N, usize);
+        const IndexBox = @import("box.zig").Box(N, usize);
+        const IndexSpace = @import("space.zig").IndexSpace(N);
 
         /// How many steps of adjacency to reach the middle region.
         pub fn adjacency(self: Self) usize {

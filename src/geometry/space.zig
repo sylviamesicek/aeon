@@ -1,96 +1,6 @@
 const std = @import("std");
 const assert = std.debug.assert;
 
-const Box = @import("box.zig").Box;
-
-pub fn Index(comptime N: usize) type {
-    return struct {
-        pub fn toUnsigned(index: [N]isize) [N]usize {
-            var result: [N]usize = undefined;
-
-            for (0..N) |i| {
-                result[i] = @intCast(index[i]);
-            }
-
-            return result;
-        }
-
-        pub fn toSigned(index: [N]usize) [N]isize {
-            var result: [N]isize = undefined;
-
-            for (0..N) |i| {
-                result[i] = @intCast(index[i]);
-            }
-
-            return result;
-        }
-
-        pub fn splat(index: usize) [N]usize {
-            return [1]usize{index} ** N;
-        }
-
-        pub fn splatSigned(index: isize) [N]isize {
-            return [1]isize{index} ** N;
-        }
-
-        pub fn add(v: [N]usize, u: [N]usize) [N]usize {
-            var result: [N]usize = undefined;
-
-            for (0..N) |i| {
-                result[i] = v[i] + u[i];
-            }
-
-            return result;
-        }
-
-        pub fn addSigned(v: [N]isize, u: [N]isize) [N]isize {
-            var result: [N]isize = undefined;
-
-            for (0..N) |i| {
-                result[i] = v[i] + u[i];
-            }
-
-            return result;
-        }
-
-        pub fn scale(v: [N]usize, s: usize) [N]usize {
-            var result: [N]usize = undefined;
-
-            for (0..N) |i| {
-                result[i] = v[i] * s;
-            }
-
-            return result;
-        }
-
-        pub fn scaleSigned(v: [N]isize, s: isize) [N]isize {
-            var result: [N]isize = undefined;
-
-            for (0..N) |i| {
-                result[i] = v[i] * s;
-            }
-
-            return result;
-        }
-
-        pub fn refined(self: [N]usize) [N]usize {
-            var result: [N]usize = undefined;
-            for (0..N) |i| {
-                result[i] = self[i] * 2;
-            }
-            return result;
-        }
-
-        pub fn coarsened(self: [N]usize) [N]usize {
-            var result: [N]usize = undefined;
-            for (0..N) |i| {
-                result[i] = self[i] / 2;
-            }
-            return result;
-        }
-    };
-}
-
 /// Describes an abstract index space, ie an N-dimensional space with
 /// size[i] discrete cells on each axis. Contains helpers for converting
 /// between cartesian and linear indices, as well as iterator over the space.
@@ -101,9 +11,14 @@ pub fn IndexSpace(comptime N: usize) type {
         size: [N]usize,
 
         const Self = @This();
+        const IndexBox = @import("box.zig").Box(N, usize);
 
         pub fn fromSize(size: [N]usize) Self {
             return .{ .size = size };
+        }
+
+        pub fn fromBox(box: IndexBox) Self {
+            return .{ .size = box.size };
         }
 
         /// Converts a cartesian index to a linear index.
@@ -163,41 +78,8 @@ pub fn IndexSpace(comptime N: usize) type {
             return axis;
         }
 
-        /// Scales the index space by `s`
-        pub fn scale(self: Self, s: usize) Self {
-            var size: [N]usize = undefined;
-
-            for (0..N) |i| {
-                size[i] = self.size[i] * s;
-            }
-
-            return .{ .size = size };
-        }
-
-        /// Extends the index space along each axis by s[axis].
-        pub fn extend(self: Self, s: [N]usize) Self {
-            var size: [N]usize = s;
-
-            for (0..N) |i| {
-                size[i] += self.size[i];
-            }
-
-            return .{ .size = size };
-        }
-
-        /// Extends the index space along all axes by s.
-        pub fn extendUniform(self: Self, s: usize) Self {
-            var size: [N]usize = self.size;
-
-            for (0..N) |i| {
-                size[i] += s;
-            }
-
-            return .{ .size = size };
-        }
-
         /// Builds a window, ie a smaller array that represents a subspace within the index space.
-        pub fn window(self: Self, bounds: Box(N, usize), comptime T: type, dest: []T, src: []const T) void {
+        pub fn window(self: Self, bounds: IndexBox, comptime T: type, dest: []T, src: []const T) void {
             const space = bounds.space();
 
             assert(dest.len == space.total());
@@ -217,7 +99,7 @@ pub fn IndexSpace(comptime N: usize) type {
         }
 
         /// Fills a subspace of an array representing values defined over the index space with `val`.
-        pub fn fillSubspace(self: Self, bounds: Box(N, usize), comptime T: type, dest: []T, val: T) void {
+        pub fn fillSubspace(self: Self, bounds: IndexBox, comptime T: type, dest: []T, val: T) void {
             const space = bounds.space();
 
             assert(dest.len == self.total());

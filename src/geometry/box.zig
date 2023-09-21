@@ -1,5 +1,5 @@
 const std = @import("std");
-const IndexSpace = @import("index.zig").IndexSpace;
+const IndexSpace = @import("space.zig").IndexSpace;
 
 /// Represents an index into the 2^N subcells formed
 /// when dividing a hyper box along each axis.
@@ -72,15 +72,6 @@ pub fn Box(comptime N: usize, comptime T: type) type {
             }
 
             return result;
-        }
-
-        /// Returns the index space over the interior of the box.
-        pub fn space(self: Self) IndexSpace(N) {
-            if (T != usize) {
-                @compileError("space() is only supported for T == usize");
-            }
-
-            return .{ .size = self.size };
         }
 
         /// Transforms a local position into a global one.

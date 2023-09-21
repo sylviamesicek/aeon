@@ -1,7 +1,7 @@
 // Subdirectories
-pub const array = @import("array.zig");
 pub const basis = @import("basis/basis.zig");
 pub const geometry = @import("geometry/geometry.zig");
+pub const index = @import("index.zig");
 pub const mesh = @import("mesh/mesh.zig");
 pub const solver = @import("solver/solver.zig");
 pub const vtkio = @import("vtkio.zig");
@@ -56,7 +56,6 @@ pub fn ScalarFieldProblem(comptime O: usize) type {
                 },
                 .tile_width = 10,
                 .index_size = [2]usize{ 1, 1 },
-                .global_refinement = 0,
             });
             defer grid.deinit();
 
@@ -97,7 +96,6 @@ pub fn main() !void {
 }
 
 test {
-    _ = array;
     _ = basis;
     _ = geometry;
     _ = mesh;

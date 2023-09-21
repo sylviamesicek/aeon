@@ -8,7 +8,6 @@ const ArrayListUnmanaged = std.ArrayListUnmanaged;
 const MultiArrayList = std.MultiArrayList;
 
 const Box = @import("box.zig").Box;
-const IndexSpace = @import("index.zig").IndexSpace;
 
 /// A set of tiles in some index space, grouped into several partitions.
 /// Individual tiles may be "tagged" as active, and this object provides an
@@ -31,10 +30,11 @@ pub fn PartitionSpace(comptime N: usize) type {
 
         const Self = @This();
         const IndexBox = Box(N, usize);
+        const IndexSpace = @import("space.zig").IndexSpace(N);
 
         pub const Partition = struct {
             /// The bounds of the partition in index space.
-            bounds: Box(N, usize),
+            bounds: IndexBox,
             /// The child clusters of the partition in index space.
             children_offset: usize,
             children_total: usize,
@@ -96,8 +96,8 @@ pub fn PartitionSpace(comptime N: usize) type {
 
         /// Computes the efficiency of a given partition.
         pub fn computeEfficiency(self: Self, subblock: IndexBox, tags: []const bool) f64 {
-            const subspace = IndexSpace(N){ .size = subblock.size };
-            const space = IndexSpace(N){ .size = self.size };
+            const subspace = IndexSpace.fromSize(subblock.size);
+            const space = IndexSpace.fromSize(self.size);
 
             const n_total = subspace.total();
             var n_tagged: usize = 0;
@@ -235,7 +235,7 @@ pub fn PartitionSpace(comptime N: usize) type {
                     culled_subblock.size[axis] = upper_bounds[axis] - lower_bounds[axis];
                 }
 
-                const culled_space: IndexSpace(N) = .{ .size = culled_subblock.size };
+                const culled_space: IndexSpace = IndexSpace.fromBox(culled_subblock);
 
                 const partition: Partition = .{
                     .bounds = culled_subblock,
@@ -369,8 +369,8 @@ pub fn PartitionSpace(comptime N: usize) type {
 
         fn computeSignatures(self: *const Self, partition: Partition, tags: []const bool, signatures: [N][]usize) void {
             const subblock: IndexBox = partition.bounds;
-            const space: IndexSpace(N) = .{ .size = self.size };
-            const subspace: IndexSpace(N) = subblock.space();
+            const space: IndexSpace = IndexSpace.fromSize(self.size);
+            const subspace: IndexSpace = IndexSpace.fromBox(subblock);
 
             for (0..N) |axis| {
                 @memset(signatures[axis][subblock.origin[axis]..(subblock.origin[axis] + subblock.size[axis])], 0);
@@ -519,7 +519,9 @@ pub fn PartitionSpace(comptime N: usize) type {
 }
 
 fn buildTags(comptime N: usize, allocator: Allocator, size: [N]usize, tagged: []const [N]usize) ![]bool {
-    const space: IndexSpace(N) = .{ .size = size };
+    const IndexSpace = @import("space.zig").IndexSpace(N);
+
+    const space: IndexSpace = .{ .size = size };
     const total = space.total();
 
     var tags: []bool = try allocator.alloc(bool, total);

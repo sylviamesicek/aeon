@@ -8,7 +8,7 @@ const system = @import("system.zig");
 pub fn Engine(comptime N: usize, comptime O: usize) type {
     return struct {
         space: StencilSpace,
-        cell: [N]usize,
+        cell: [N]isize,
 
         // Aliases
         const Self = @This();
@@ -276,6 +276,16 @@ pub fn OperatorEngine(comptime N: usize, comptime O: usize, comptime Context: ty
             return self.inner.laplacianDiagonal();
         }
     };
+}
+
+pub fn EngineType(comptime N: usize, comptime O: usize, comptime T: type) type {
+    if (comptime isMeshOperator(N, O)(T)) {
+        return OperatorEngine(N, O, T.Context, T.System);
+    } else if (comptime isMeshFunction(N, O)(T)) {
+        return FunctionEngine(N, O, T.Context);
+    } else {
+        @compileError("EngineType may only be called on types which satisfy isMeshOperator or isMeshFunction traits.");
+    }
 }
 
 /// A trait which checks if a type is a mesh operator. Such a type follows the following set of declarations.

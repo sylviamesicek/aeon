@@ -12,7 +12,6 @@ const maxInt = std.math.maxInt;
 
 // root imports
 
-const array = @import("../array.zig");
 const basis = @import("../basis/basis.zig");
 const geometry = @import("../geometry/geometry.zig");
 const solver = @import("../solver/solver.zig");
@@ -28,7 +27,7 @@ pub const system = @import("system.zig");
 
 pub const OperatorEngine = operator.OperatorEngine;
 pub const FunctionEngine = operator.FunctionEngine;
-
+pub const EngineType = operator.EngineType;
 pub const isMeshOperator = operator.isMeshOperator;
 pub const isMeshFunction = operator.isMeshFunction;
 
@@ -59,21 +58,21 @@ pub fn Mesh(comptime N: usize, comptime O: usize) type {
             index_size: [N]usize,
             tile_width: usize,
 
-            pub fn baseTileSpace(self: Config) IndexSpace {
-                return IndexSpace.fromSize(self.index_size);
-            }
-
-            pub fn baseCellSpace(self: Config) IndexSpace {
-                return self.baseTileSpace().scale(self.tile_width).extendUniform(4 * O);
-            }
-
             pub fn check(self: Config) void {
                 assert(self.tile_width >= 1);
-                assert(self.tile_width >= O);
+                assert(self.tile_width >= 2 * O);
                 for (0..N) |i| {
                     assert(self.index_size[i] > 0);
                     assert(self.physical_bounds.size[i] > 0.0);
                 }
+            }
+
+            fn baseTileSpace(self: Config) IndexSpace {
+                return IndexSpace.fromSize(self.index_size);
+            }
+
+            fn baseCellSpace(self: Config) IndexSpace {
+                return IndexSpace.fromSize(add(scaled(self.index_size, self.tile_width), splat(4 * O)));
             }
         };
 
@@ -91,16 +90,17 @@ pub fn Mesh(comptime N: usize, comptime O: usize) type {
         const IndexSpace = geometry.IndexSpace(N);
         const PartitionSpace = geometry.PartitionSpace(N);
         const Region = geometry.Region(N);
+        const CellSpace = basis.CellSpace(N, O);
         const StencilSpace = basis.StencilSpace(N, O);
-        const InterpolationSpace = basis.InterpolationSpace(N, O);
 
         // Mixins
-        const Array = array.Array(N, usize);
+        const Index = @import("../index.zig").Index(N);
 
-        const add = Array.add;
-        const sub = Array.sub;
-        const scaled = Array.scaled;
-        const splat = Array.splat;
+        const add = Index.add;
+        const sub = Index.sub;
+        const scaled = Index.scaled;
+        const splat = Index.splat;
+        const toSigned = Index.toSigned;
 
         /// Initialises a new mesh with an general purpose allocator, subject to the given configuration.
         pub fn init(allocator: Allocator, config: Config) Self {
@@ -222,7 +222,7 @@ pub fn Mesh(comptime N: usize, comptime O: usize) type {
             const stencil_space = self.baseStencilSpace();
 
             inline for (regions) |region| {
-                stencil_space.fillBoundary(region, boundary, base_field);
+                stencil_space.fillBoundary(region, O, boundary, base_field);
             }
         }
 
@@ -270,7 +270,7 @@ pub fn Mesh(comptime N: usize, comptime O: usize) type {
             // Get block bounds and containing patch
             const block_bounds: IndexBox = blocks.items(.bounds)[block];
             const block_field: []f64 = target.blockCellSlice(block, field);
-            const block_interp: InterpolationSpace = InterpolationSpace.fromSize(block_bounds.size);
+            const block_cell_space: CellSpace = CellSpace.fromSize(block_bounds.size);
 
             const patch = blocks.items(.patch)[block];
             const patch_bounds: IndexBox = patches.items(.bounds)[patch];
@@ -310,7 +310,7 @@ pub fn Mesh(comptime N: usize, comptime O: usize) type {
                         const coarse_patch_space = coarse_patch_bounds.space();
 
                         const coarse_neighbor = coarse_patch_block_map[coarse_patch_space.linearFromCartesian(coarse_buffer_tile)];
-                        const coarse_neighbor_interp: InterpolationSpace = InterpolationSpace.fromSize(coarse.blocks.items(.bounds)[coarse_neighbor].size);
+                        const coarse_neighbor_cell_space: CellSpace = CellSpace.fromSize(coarse.blocks.items(.bounds)[coarse_neighbor].size);
                         const coarse_neighbor_field: []const f64 = coarse.blockCellSlice(coarse_neighbor, coarse_field);
 
                         var coarse_relative_neighbor_bounds = coarse.blocks.items(.bounds)[coarse_neighbor].relativeTo(coarse_patch_bounds);
@@ -323,14 +323,14 @@ pub fn Mesh(comptime N: usize, comptime O: usize) type {
 
                         while (indices.next()) |index| {
                             // Cell in subcell space
-                            const block_cell: [N]usize = add(origin, index);
+                            const block_cell: [N]isize = CellSpace.offsetFromOrigin(origin, index);
                             // Cell in neighbor in subcell space
-                            const neighbor_cell: [N]usize = add(coarse_neighbor_origin, index);
+                            const neighbor_cell: [N]isize = CellSpace.offsetFromOrigin(coarse_neighbor_origin, index);
 
-                            block_interp.setValue(
+                            block_cell_space.setValue(
                                 block_cell,
                                 block_field,
-                                coarse_neighbor_interp.prolong(neighbor_cell, coarse_neighbor_field),
+                                coarse_neighbor_cell_space.prolong(neighbor_cell, coarse_neighbor_field),
                             );
                         }
                     } else {
@@ -344,18 +344,18 @@ pub fn Mesh(comptime N: usize, comptime O: usize) type {
                         const base_origin: [N]usize = scaled(base_bounds.localFromGlobal(relative_tile), self.config.tile_width);
 
                         const base_field: []const f64 = self.baseCellSlice(field);
-                        const base_interp: InterpolationSpace = InterpolationSpace.fromSize(self.base.index_size);
+                        const base_cell_space: CellSpace = CellSpace.fromSize(self.base.index_size);
 
                         var indices = region.cartesianIndices(E, splat(self.config.tile_width));
 
                         while (indices.next()) |index| {
-                            const block_cell: [N]usize = add(origin, index);
-                            const base_cell: [N]usize = add(base_origin, index);
+                            const block_cell: [N]isize = CellSpace.offsetFromOrigin(origin, index);
+                            const base_cell: [N]isize = CellSpace.offsetFromOrigin(base_origin, index);
 
-                            block_interp.setValue(
+                            block_cell_space.setValue(
                                 block_cell,
                                 block_field,
-                                base_interp.prolong(base_cell, base_field),
+                                base_cell_space.prolong(base_cell, base_field),
                             );
                         }
                     }
@@ -363,20 +363,20 @@ pub fn Mesh(comptime N: usize, comptime O: usize) type {
                     // Copy from neighbor on same level
                     const neighbor_field: []const f64 = target.blockCellSlice(neighbor, field);
                     const neighbor_bounds: IndexBox = blocks.items(.bounds)[neighbor].relativeTo(patch_bounds);
-                    const neighbor_interp: InterpolationSpace = InterpolationSpace.fromSize(blocks.items(.bounds)[neighbor].size);
+                    const neighbor_cell_space: CellSpace = CellSpace.fromSize(blocks.items(.bounds)[neighbor].size);
 
                     const neighbor_origin: [N]usize = scaled(neighbor_bounds.localFromGlobal(relative_tile), self.config.tile_width);
 
                     var indices = region.cartesianIndices(E, splat(self.config.tile_width));
 
                     while (indices.next()) |index| {
-                        const cell: [N]usize = add(origin, index);
-                        const neighbor_cell: [N]usize = add(neighbor_origin, index);
+                        const cell: [N]isize = CellSpace.offsetFromOrigin(origin, index);
+                        const neighbor_cell: [N]isize = CellSpace.offsetFromOrigin(neighbor_origin, index);
 
-                        block_interp.setValue(
+                        block_cell_space.setValue(
                             cell,
                             block_field,
-                            neighbor_interp.value(neighbor_cell, neighbor_field),
+                            neighbor_cell_space.value(neighbor_cell, neighbor_field),
                         );
                     }
                 }
@@ -403,6 +403,13 @@ pub fn Mesh(comptime N: usize, comptime O: usize) type {
         }
 
         fn levelStencilSpace(self: *const Self, level: usize, block: IndexBox) StencilSpace {
+            return .{
+                .physical_bounds = self.blockPhysicalBounds(level, block),
+                .size = scaled(block.size, self.config.tile_width),
+            };
+        }
+
+        fn blockPhysicalBounds(self: *const Self, level: usize, block: IndexBox) RealBox {
             const index_size: [N]usize = self.levels.items[level].index_size;
 
             var physical_bounds: RealBox = undefined;
@@ -415,10 +422,7 @@ pub fn Mesh(comptime N: usize, comptime O: usize) type {
                 physical_bounds.origin[i] = self.config.physical_bounds.origin[i] + self.config.physical_bounds.size[i] * oratio;
             }
 
-            return .{
-                .physical_bounds = physical_bounds,
-                .size = scaled(block.size, self.config.tile_width),
-            };
+            return physical_bounds;
         }
 
         // *************************************
@@ -443,7 +447,7 @@ pub fn Mesh(comptime N: usize, comptime O: usize) type {
             }
 
             // Get interpolation space for base
-            const interp_space: InterpolationSpace = InterpolationSpace.fromSize(self.base.index_size);
+            const cell_space: CellSpace = CellSpace.fromSize(self.base.index_size);
             const field: []f64 = self.baseCellSlice(global_field);
 
             // Refined level
@@ -457,7 +461,7 @@ pub fn Mesh(comptime N: usize, comptime O: usize) type {
                 var refined_block_bounds: IndexBox = refined_blocks.items(.bounds)[refined_block];
                 refined_block_bounds.coarsen();
 
-                const refined_interp_space: InterpolationSpace = InterpolationSpace.fromSize(refined_blocks.items(.bounds)[refined_block].size);
+                const refined_cell_space: CellSpace = CellSpace.fromSize(refined_blocks.items(.bounds)[refined_block].size);
                 const refined_block_field: []const f64 = refined.blockCellSlice(refined_block, refined_field);
 
                 // Origin of the refined block in supercell space
@@ -467,12 +471,12 @@ pub fn Mesh(comptime N: usize, comptime O: usize) type {
                 var indices = refined_block_bounds.space().cartesianIndices();
 
                 while (indices.next()) |index| {
-                    const supercell: [N]usize = add(refined_origin, index);
+                    const supercell: [N]isize = toSigned(add(refined_origin, index));
 
-                    interp_space.setValue(
+                    cell_space.setValue(
                         supercell,
                         field,
-                        refined_interp_space.restrict(index, refined_block_field),
+                        refined_cell_space.restrict(index, refined_block_field),
                     );
                 }
             }
@@ -518,7 +522,7 @@ pub fn Mesh(comptime N: usize, comptime O: usize) type {
                     // Compute bounds relatives to coarse patch bounds
                     const refined_relative_bounds: IndexBox = refined_block_bounds.relativeTo(patch_bounds);
                     const refined_block_space: IndexSpace = refined_relative_bounds.space();
-                    const refined_interp_space: InterpolationSpace = InterpolationSpace.fromSize(refined_relative_bounds.size);
+                    const refined_cell_space: CellSpace = CellSpace.fromSize(refined_relative_bounds.size);
                     const refined_block_field: []const f64 = refined.blockCellSlice(refined_block, refined_field);
 
                     // Iterate tiles in refined block
@@ -533,7 +537,7 @@ pub fn Mesh(comptime N: usize, comptime O: usize) type {
                         const block = patch_block_map[patch_space.linearFromCartesian(relative_tile)];
                         const block_bounds: IndexBox = blocks.items(.bounds)[block];
                         const block_field: []f64 = target.blockCellSlice(block, field);
-                        const interp_space: InterpolationSpace = InterpolationSpace.fromSize(block_bounds.size);
+                        const block_cell_space: CellSpace = CellSpace.fromSize(block_bounds.size);
 
                         // Bounds of block relative to patch
                         const relative_bounds: IndexBox = block_bounds.relativeTo(patch_bounds);
@@ -546,14 +550,14 @@ pub fn Mesh(comptime N: usize, comptime O: usize) type {
 
                         while (indices.next()) |index| {
                             // Refined cell in supercell space
-                            const refined_cell = add(refined_origin, index);
+                            const refined_cell = toSigned(add(refined_origin, index));
                             // Cell in supercell space
-                            const cell = add(origin, index);
+                            const cell = toSigned(add(origin, index));
 
-                            interp_space.setValue(
+                            block_cell_space.setValue(
                                 cell,
                                 block_field,
-                                refined_interp_space.restrict(refined_cell, refined_block_field),
+                                refined_cell_space.restrict(refined_cell, refined_block_field),
                             );
                         }
                     }
@@ -577,7 +581,7 @@ pub fn Mesh(comptime N: usize, comptime O: usize) type {
                 return;
             }
 
-            const stencil_space: InterpolationSpace = InterpolationSpace.fromSize(self.base.index_size);
+            const cell_space: CellSpace = CellSpace.fromSize(self.base.index_size);
 
             const target: *const Level = &self.levels[0];
             const blocks = target.blocks.slice();
@@ -587,7 +591,7 @@ pub fn Mesh(comptime N: usize, comptime O: usize) type {
 
             for (0..blocks.len) |b| {
                 const block_bounds: IndexBox = blocks.items(.bounds)[b];
-                const block_stencil_space: InterpolationSpace = InterpolationSpace.fromSize(block_bounds.size);
+                const block_cell_space: CellSpace = CellSpace.fromSize(block_bounds.size);
                 const block_field: []const f64 = target.blockCellSlice(b, level_field);
 
                 const origin: [N]usize = scaled(block_bounds.origin, self.config.tile_width);
@@ -595,9 +599,9 @@ pub fn Mesh(comptime N: usize, comptime O: usize) type {
                 var indices = block_bounds.space().scale(self.config.tile_width).cartesianIndices();
 
                 while (indices.next()) |index| {
-                    const cell: [N]usize = add(origin, index);
+                    const cell = toSigned(add(origin, index));
 
-                    block_stencil_space.setValue(index, block_field, stencil_space.prolong(cell, base_field));
+                    block_cell_space.setValue(toSigned(index), block_field, cell_space.prolong(cell, base_field));
                 }
             }
         }
@@ -640,7 +644,7 @@ pub fn Mesh(comptime N: usize, comptime O: usize) type {
                     var block_bounds: IndexBox = blocks.items(.block_bounds)[block];
                     block_bounds.coarsen();
                     // Compute interpolation space for this block
-                    const interp_space: InterpolationSpace = InterpolationSpace.fromSize(blocks.items(.block_bounds)[block].size);
+                    const cell_space: CellSpace = CellSpace.fromSize(blocks.items(.block_bounds)[block].size);
 
                     // Compute the bounds relative to the coarse patch
                     const relative_block_bounds = block_bounds.relativeTo(coarse_patch_bounds);
@@ -654,7 +658,7 @@ pub fn Mesh(comptime N: usize, comptime O: usize) type {
                         const coarse_block = coarse_patch_block_map[coarse_patch_space.linearFromCartesian(relative_tile)];
                         const coarse_block_bounds: IndexBox = coarse_blocks.items(.bounds)[coarse_block];
                         const coarse_relative_block_bounds: IndexBox = coarse_block_bounds.relativeTo(coarse_patch_bounds);
-                        const coarse_interp_space: InterpolationSpace = InterpolationSpace.fromSize(coarse_relative_block_bounds.size);
+                        const coarse_cell_space: CellSpace = CellSpace.fromSize(coarse_relative_block_bounds.size);
                         const coarse_block_field: []const f64 = coarse.blockCellSlice(coarse_block, coarse_field);
 
                         // Get coarse origin (in subcell space)
@@ -668,15 +672,15 @@ pub fn Mesh(comptime N: usize, comptime O: usize) type {
 
                         while (indices.next()) |index| {
                             // Get coarse subcell
-                            const coarse_cell = add(coarse_origin, index);
+                            const coarse_cell = toSigned(add(coarse_origin, index));
                             // Get target subcell
-                            const cell = add(origin, index);
+                            const cell = toSigned(add(origin, index));
 
                             // Prolong
-                            interp_space.setValue(
+                            cell_space.setValue(
                                 cell,
                                 block_field,
-                                coarse_interp_space.prolong(coarse_cell, coarse_block_field),
+                                coarse_cell_space.prolong(coarse_cell, coarse_block_field),
                             );
                         }
                     }
@@ -726,12 +730,11 @@ pub fn Mesh(comptime N: usize, comptime O: usize) type {
             const base_context = system.systemStructSlice(context, base_offset, base_total);
 
             const stencil_space: StencilSpace = self.baseStencilSpace();
-            const cell_space = IndexSpace.fromSize(stencil_space.size);
 
-            var cell_indices = cell_space.cartesianIndices();
+            var cells = stencil_space.cellSpace().cells();
 
-            while (cell_indices.next()) |cell| {
-                const engine = OperatorEngine(N, O, @TypeOf(oper).Context, @TypeOf(oper).System){
+            while (cells.next()) |cell| {
+                const engine = EngineType(N, O, @TypeOf(oper)){
                     .inner = .{
                         .space = stencil_space,
                         .cell = cell,
@@ -785,12 +788,11 @@ pub fn Mesh(comptime N: usize, comptime O: usize) type {
                 const block_context = system.systemStructSlice(level_context, offset, total);
 
                 const stencil_space: StencilSpace = self.levelStencilSpace(level, block);
-                const cell_space = IndexSpace.fromSize(stencil_space.size);
 
-                var cell_indices = cell_space.cartesianIndices();
+                var cells = stencil_space.cellSpace().cells();
 
-                while (cell_indices.next()) |cell| {
-                    const engine = OperatorEngine(N, O, @TypeOf(oper).Context, @TypeOf(oper).System){
+                while (cells.next()) |cell| {
+                    const engine = EngineType(N, O, @TypeOf(oper)){
                         .inner = .{
                             .space = stencil_space,
                             .cell = cell,
@@ -852,12 +854,11 @@ pub fn Mesh(comptime N: usize, comptime O: usize) type {
             const base_context = system.systemStructSlice(context, base_offset, base_total);
 
             const stencil_space: StencilSpace = self.baseStencilSpace();
-            const cell_space = IndexSpace.fromSize(stencil_space.size);
 
-            var cell_indices = cell_space.cartesianIndices();
+            var cells = stencil_space.cellSpace().cells();
 
-            while (cell_indices.next()) |cell| {
-                const engine = OperatorEngine(N, O, @TypeOf(oper).Context, @TypeOf(oper).System){
+            while (cells.next()) |cell| {
+                const engine = EngineType(N, O, @TypeOf(oper)){
                     .inner = .{
                         .space = stencil_space,
                         .cell = cell,
@@ -906,14 +907,12 @@ pub fn Mesh(comptime N: usize, comptime O: usize) type {
                 const block_context = system.systemStructSlice(level_context, offset, total);
 
                 const stencil_space: StencilSpace = self.levelStencilSpace(level, block);
-                const cell_size: [N]usize = if (full) add(stencil_space.size, splat(2 * O)) else stencil_space.size;
-                const cell_space = IndexSpace.fromSize(cell_size);
 
-                var cell_indices = cell_space.cartesianIndices();
+                var cell_indices = stencil_space.cellSpace().cells();
 
                 while (cell_indices.next()) |cell| {
                     const offset_cell = if (full) add(stencil_space.size, [1]isize{-O} ** N) else cell;
-                    const engine = OperatorEngine(N, O, @TypeOf(oper).Context, @TypeOf(oper).System){
+                    const engine = EngineType(N, O, @TypeOf(oper)){
                         .inner = .{
                             .space = stencil_space,
                             .cell = offset_cell,
@@ -969,12 +968,11 @@ pub fn Mesh(comptime N: usize, comptime O: usize) type {
             const base_context = system.systemStructSlice(context, base_offset, base_total);
 
             const stencil_space: StencilSpace = self.baseStencilSpace();
-            const cell_space = IndexSpace.fromSize(stencil_space.size);
 
-            var cell_indices = cell_space.cartesianIndices();
+            var cell_indices = stencil_space.cellSpace().cells();
 
             while (cell_indices.next()) |cell| {
-                const engine = FunctionEngine(N, O, @TypeOf(func).Context){
+                const engine = EngineType(N, O, @TypeOf(func)){
                     .inner = .{
                         .space = stencil_space,
                         .cell = cell,
@@ -985,7 +983,7 @@ pub fn Mesh(comptime N: usize, comptime O: usize) type {
                 const val: system.SystemValue(@TypeOf(func).Output) = func.value(engine);
 
                 inline for (comptime system.systemFieldNames(@TypeOf(func).Output)) |name| {
-                    stencil_space.setValue(
+                    stencil_space.cellSpace().setValue(
                         cell,
                         @field(base_result, name),
                         @field(val, name),
@@ -1018,12 +1016,11 @@ pub fn Mesh(comptime N: usize, comptime O: usize) type {
                 const block_context = system.systemStructSlice(level_context, offset, total);
 
                 const stencil_space: StencilSpace = self.levelStencilSpace(level, block);
-                const cell_space = IndexSpace.fromSize(stencil_space.size);
 
-                var cell_indices = cell_space.cartesianIndices();
+                var cell_indices = stencil_space.cellSpace().cells();
 
                 while (cell_indices.next()) |cell| {
-                    const engine = FunctionEngine(N, O, @TypeOf(func).Context){
+                    const engine = EngineType(N, O, @TypeOf(func)){
                         .inner = .{
                             .space = stencil_space,
                             .cell = cell,
@@ -1034,7 +1031,7 @@ pub fn Mesh(comptime N: usize, comptime O: usize) type {
                     const val: system.SystemValue(@TypeOf(func).Output) = func.value(engine);
 
                     inline for (comptime system.systemFieldNames(@TypeOf(func).Output)) |name| {
-                        stencil_space.setValue(
+                        stencil_space.cellSpace().setValue(
                             cell,
                             @field(block_result, name),
                             @field(val, name),
@@ -1136,7 +1133,7 @@ pub fn Mesh(comptime N: usize, comptime O: usize) type {
                     var points = point_space.cartesianIndices();
 
                     while (points.next()) |point| {
-                        const pos = stencil.vertexPosition(point);
+                        const pos = stencil.vertexPosition(toSigned(point));
                         for (0..N) |i| {
                             data.positions.appendAssumeCapacity(pos[i]);
                         }
@@ -1199,7 +1196,7 @@ pub fn Mesh(comptime N: usize, comptime O: usize) type {
                     var cells = cell_space.cartesianIndices();
                     while (cells.next()) |cell| {
                         inline for (comptime system.systemFieldNames(System), 0..) |name, id| {
-                            data.fields[id].appendAssumeCapacity(stencil.value(cell, @field(block_field, name)));
+                            data.fields[id].appendAssumeCapacity(stencil.value(toSigned(cell), @field(block_field, name)));
                         }
                     }
                 }

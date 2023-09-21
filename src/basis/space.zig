@@ -2,9 +2,9 @@ const std = @import("std");
 
 // Imported modules
 
-const geometry = @import("../geometry/geometry.zig");
 const lagrange = @import("lagrange.zig");
 const boundary = @import("boundary.zig");
+const geometry = @import("../geometry/geometry.zig");
 
 // Imported types and functions
 
@@ -13,7 +13,7 @@ const isBoundaryOperator = boundary.isBoundaryOperator;
 
 /// Provides an interface for interpolating and setting values on a block of a certain size
 /// with a buffer region `2*O` along each axis, to the order `O`.
-pub fn InterpolationSpace(comptime N: usize, comptime O: usize) type {
+pub fn CellSpace(comptime N: usize, comptime O: usize) type {
     return struct {
         size: [N]usize,
 
@@ -21,33 +21,63 @@ pub fn InterpolationSpace(comptime N: usize, comptime O: usize) type {
         const IndexSpace = geometry.IndexSpace(N);
 
         pub fn fromSize(size: [N]usize) Self {
-            return .{
-                .size = size,
-            };
+            return .{ .size = size };
+        }
+
+        pub fn sizeWithGhost(self: Self) [N]usize {
+            var result: [N]usize = undefined;
+
+            for (0..N) |i| {
+                result[i] = self.size[i] + 4 * O;
+            }
+
+            return result;
+        }
+
+        pub fn indexSpace(self: Self) IndexSpace {
+            return IndexSpace.fromSize(self.sizeWithGhost());
+        }
+
+        pub fn indexFromCell(cell: [N]isize) [N]usize {
+            var index: [N]usize = undefined;
+
+            for (0..N) |i| {
+                index[i] = @intCast(2 * @as(isize, @intCast(O)) + cell[i]);
+            }
+
+            return index;
+        }
+
+        pub fn offsetFromOrigin(origin: [N]usize, offset: [N]isize) [N]isize {
+            var result: [N]isize = undefined;
+
+            for (0..N) |i| {
+                result[i] = @as(isize, @intCast(origin[i])) + offset[i];
+            }
+
+            return result;
         }
 
         /// Computes the value of a field at a cell.
-        pub fn value(self: Self, cell: [N]usize, field: []const f64) f64 {
-            const space = IndexSpace.fromSize(sizeWithGhost(self.size));
-            const linear = space.linearFromCartesian(cellWithGhost(cell));
+        pub fn value(self: Self, cell: [N]isize, field: []const f64) f64 {
+            const linear = self.indexSpace().linearFromCartesian(indexFromCell(cell));
             return field[linear];
         }
 
         /// Sets the value of a field at a cell.
-        pub fn setValue(self: Self, cell: [N]usize, field: []f64, v: f64) void {
-            const space = IndexSpace.fromSize(sizeWithGhost(self.size));
-            const linear = space.linearFromCartesian(cellWithGhost(cell));
+        pub fn setValue(self: Self, cell: [N]isize, field: []f64, v: f64) void {
+            const linear = self.indexSpace().linearFromCartesian(indexFromCell(cell));
             field[linear] = v;
         }
 
         /// Prolongs the value of a field to a subcell.
-        pub fn prolong(self: Self, subcell: [N]usize, field: []const f64) f64 {
+        pub fn prolong(self: Self, subcell: [N]isize, field: []const f64) f64 {
             // Build stencils for both the left and right case at comptime.
             const lstencil: [2 * O + 1]f64 = prolong(false, O);
             const rstencil: [2 * O + 1]f64 = prolong(false, O);
 
             const stencil_space: IndexSpace = IndexSpace.fromSize([1]usize{2 * O + 1} ** N);
-            const cell_space: IndexSpace = IndexSpace.fromSize(sizeWithGhost(self.size));
+            const index_space: IndexSpace = self.indexSpace();
 
             var result: f64 = 0.0;
 
@@ -70,7 +100,7 @@ pub fn InterpolationSpace(comptime N: usize, comptime O: usize) type {
                     offset_cell[i] = @divTrunc(subcell[i] + 1, 2) + stencil_index[i] - O;
                 }
 
-                const linear = cell_space.linearFromCartesian(cellWithGhost(offset_cell));
+                const linear = index_space.linearFromCartesian(indexFromCell(offset_cell));
 
                 result += coef * field[linear];
             }
@@ -83,7 +113,7 @@ pub fn InterpolationSpace(comptime N: usize, comptime O: usize) type {
             const stencil: [2 * O + 2]f64 = restrictStencil(O);
 
             const stencil_space: IndexSpace = IndexSpace.fromSize([1]usize{2 * O + 2} ** N);
-            const cell_space: IndexSpace = IndexSpace.fromSize(sizeWithGhost(self.size));
+            const index_space: IndexSpace = self.indexSpace();
 
             var result: f64 = 0.0;
 
@@ -102,7 +132,7 @@ pub fn InterpolationSpace(comptime N: usize, comptime O: usize) type {
                     offset_cell[i] = 2 * supercell[i] + stencil_index[i] - O - 1;
                 }
 
-                const linear = cell_space.linearFromCartesian(cellWithGhost(offset_cell));
+                const linear = index_space.linearFromCartesian(indexFromCell(offset_cell));
 
                 result += coef * field[linear];
             }
@@ -110,27 +140,51 @@ pub fn InterpolationSpace(comptime N: usize, comptime O: usize) type {
             return result;
         }
 
-        fn cellWithGhost(cell: [N]usize) [N]usize {
-            var result: [N]usize = cell;
-            for (0..N) |i| {
-                result[i] += 2 * O;
-            }
-            return result;
+        pub fn CellIterator(comptime E: usize) type {
+            return struct {
+                inner: IndexSpace.CartesianIterator,
+
+                pub fn init(size: [N]usize) @This() {
+                    var index_size: [N]usize = size;
+
+                    for (0..N) |i| {
+                        index_size[i] += 2 * E;
+                    }
+
+                    return .{ .inner = IndexSpace.fromSize(index_size).cartesianIndices() };
+                }
+
+                pub fn next(self: *@This()) ?[N]isize {
+                    const index = self.inner.next() orelse return null;
+
+                    var result: [N]isize = undefined;
+
+                    for (0..N) |i| {
+                        result[i] = @as(isize, @intCast(index[i])) - E;
+                    }
+
+                    return result;
+                }
+            };
         }
 
-        fn sizeWithGhost(size: [N]usize) [N]usize {
-            var result: [N]usize = size;
-            for (0..N) |i| {
-                result[i] += 4 * O;
-            }
-            return result;
+        pub fn cellsWtihExtent(self: Self, comptime E: usize) CellIterator(E) {
+            return CellIterator(E).init(self.size);
+        }
+
+        pub fn cells(self: Self) CellIterator(0) {
+            return self.cellsWtihExtent(0);
+        }
+
+        pub fn fullCells(self: Self) CellIterator(O) {
+            return self.cellsWtihExtent(O);
         }
     };
 }
 
 /// Manages the application of stencil products on functions. Supports computing values, centered derivatives
 /// positions, boundary positions, boundary values, boundary derivatives, prolongation, and restriction.
-/// All cell indices are in standard index space (ie without ghost cells included).
+/// If full is false, all cell indices are in standard index space (ie without ghost cells included).
 pub fn StencilSpace(comptime N: usize, comptime O: usize) type {
     return struct {
         physical_bounds: RealBox,
@@ -142,10 +196,14 @@ pub fn StencilSpace(comptime N: usize, comptime O: usize) type {
         const IndexSpace = geometry.IndexSpace(N);
         const Region = geometry.Region(N);
         const Face = geometry.Face(N);
-        const ISpace = InterpolationSpace(N, O);
+        const CSpace = CellSpace(N, O);
+
+        pub fn cellSpace(self: Self) CSpace {
+            return CSpace.fromSize(self.size);
+        }
 
         /// Return the position of the given cell.
-        pub fn position(self: Self, cell: [N]usize) [N]f64 {
+        pub fn position(self: Self, cell: [N]isize) [N]f64 {
             var result: [N]f64 = undefined;
 
             for (0..N) |i| {
@@ -159,7 +217,7 @@ pub fn StencilSpace(comptime N: usize, comptime O: usize) type {
         }
 
         /// Returns the position of the given vertex.
-        pub fn vertexPosition(self: Self, vertex: [N]usize) [N]f64 {
+        pub fn vertexPosition(self: Self, vertex: [N]isize) [N]f64 {
             var result: [N]f64 = undefined;
 
             for (0..N) |i| {
@@ -172,34 +230,9 @@ pub fn StencilSpace(comptime N: usize, comptime O: usize) type {
             return result;
         }
 
-        /// Returns the boundary position of the given cell, taking into account the extents.
-        pub fn boundaryPosition(self: Self, comptime extents: [N]isize, cell: [N]usize) [N]f64 {
-            var result = self.position(cell);
-
-            for (0..N) |i| {
-                if (extents[i] < 0) {
-                    result[i] = self.physical_bounds.origin[i];
-                } else if (extents[i] > 0) {
-                    result[i] = self.physical_bounds.origin[i] + self.physical_bounds.size[i];
-                } else {
-                    const origin: f64 = self.physical_bounds.origin[i];
-                    const width: f64 = self.physical_bounds.size[i];
-                    const ratio: f64 = (@as(f64, @floatFromInt(cell[i])) + 0.5) / @as(f64, @floatFromInt(self.size[i]));
-                    result[i] = origin + width * ratio;
-                }
-            }
-
-            return result;
-        }
-
         /// Computes the value of a field at a cell.
-        pub fn value(self: Self, cell: [N]usize, field: []const f64) f64 {
-            return ISpace.fromSize(self.size).value(cell, field);
-        }
-
-        /// Sets the value of a field at the given cell.
-        pub fn setValue(self: Self, cell: [N]usize, field: []f64, v: f64) void {
-            ISpace.fromSize(self.size).setValue(cell, field, v);
+        pub fn value(self: Self, cell: [N]isize, field: []const f64) f64 {
+            return CSpace.fromSize(self.size).value(cell, field);
         }
 
         /// Computes the diagonal coefficient of the value stencil.
@@ -208,7 +241,7 @@ pub fn StencilSpace(comptime N: usize, comptime O: usize) type {
         }
 
         /// Computes the derivative of a field at a cell.
-        pub fn derivative(self: Self, comptime ranks: [N]usize, cell: [N]usize, field: []const f64) f64 {
+        pub fn derivative(self: Self, comptime ranks: [N]usize, cell: [N]isize, field: []const f64) f64 {
             comptime var stencil_sizes: [N]usize = undefined;
 
             inline for (0..N) |i| {
@@ -222,7 +255,7 @@ pub fn StencilSpace(comptime N: usize, comptime O: usize) type {
             }
 
             const stencil_space: IndexSpace = comptime IndexSpace.fromSize(stencil_sizes);
-            const cell_space: IndexSpace = IndexSpace.fromSize(ISpace.sizeWithGhost(self.size));
+            const index_space: IndexSpace = CSpace.fromSize(self.size).indexSpace();
 
             var result: f64 = 0.0;
 
@@ -244,7 +277,7 @@ pub fn StencilSpace(comptime N: usize, comptime O: usize) type {
                     offset_cell[i] = cell[i] + stencil_index[i] - O;
                 }
 
-                const linear = cell_space.linearFromCartesian(ISpace.cellWithGhost(offset_cell));
+                const linear = index_space.linearFromCartesian(CSpace.cellWithGhost(offset_cell));
 
                 result += coef * field[linear];
             }
@@ -291,8 +324,29 @@ pub fn StencilSpace(comptime N: usize, comptime O: usize) type {
             return result;
         }
 
+        /// Returns the boundary position of the given cell, taking into account the extents.
+        /// This cell is always given in standard index space.
+        pub fn boundaryPosition(self: Self, comptime extents: [N]isize, cell: [N]isize) [N]f64 {
+            var result: [N]f64 = undefined;
+
+            for (0..N) |i| {
+                if (extents[i] < 0) {
+                    result[i] = self.physical_bounds.origin[i];
+                } else if (extents[i] > 0) {
+                    result[i] = self.physical_bounds.origin[i] + self.physical_bounds.size[i];
+                } else {
+                    const origin: f64 = self.physical_bounds.origin[i];
+                    const width: f64 = self.physical_bounds.size[i];
+                    const ratio: f64 = (@as(f64, @floatFromInt(cell[i])) + 0.5) / @as(f64, @floatFromInt(self.size[i]));
+                    result[i] = origin + width * ratio;
+                }
+            }
+
+            return result;
+        }
+
         /// Computes the value at a boundary of a field.
-        pub fn boundaryValue(self: Self, comptime extents: [N]isize, cell: [N]usize, field: []const f64) f64 {
+        pub fn boundaryValue(self: Self, comptime extents: [N]isize, cell: [N]isize, field: []const f64) f64 {
             return self.boundaryDerivative([1]usize{0} ** N, extents, cell, field);
         }
 
@@ -302,7 +356,7 @@ pub fn StencilSpace(comptime N: usize, comptime O: usize) type {
         }
 
         /// Computes the derivative at a bounday of a field.
-        pub fn boundaryDerivative(self: Self, comptime ranks: [N]usize, comptime extents: [N]isize, cell: [N]usize, field: []const f64) f64 {
+        pub fn boundaryDerivative(self: Self, comptime ranks: [N]usize, comptime extents: [N]isize, cell: [N]isize, field: []const f64) f64 {
             comptime var stencils: [N][3 * O]f64 = undefined;
 
             inline for (0..N) |i| {
@@ -316,7 +370,7 @@ pub fn StencilSpace(comptime N: usize, comptime O: usize) type {
             }
 
             const stencil_space: IndexSpace = comptime IndexSpace.fromSize(stencil_sizes);
-            const cell_space: IndexSpace = IndexSpace.fromSize(ISpace.sizeWithGhost(self.size));
+            const index_space: IndexSpace = CSpace.fromSize(self.size).indexSpace();
 
             var result: f64 = 0.0;
 
@@ -343,7 +397,7 @@ pub fn StencilSpace(comptime N: usize, comptime O: usize) type {
                     }
                 }
 
-                const linear = cell_space.linearFromCartesian(ISpace.cellWithGhost(offset_cell));
+                const linear = index_space.linearFromCartesian(CSpace.indexFromCell(offset_cell));
 
                 result += coef * field[linear];
             }
@@ -392,16 +446,6 @@ pub fn StencilSpace(comptime N: usize, comptime O: usize) type {
             }
 
             return result;
-        }
-
-        /// Prolongs the value of a field to a subcell.
-        pub fn prolong(self: Self, subcell: [N]usize, field: []const f64) f64 {
-            return ISpace.fromSize(self.size).prolong(subcell, field);
-        }
-
-        /// Restricts the value of a field to a supercell.
-        pub fn restrict(self: Self, supercell: [N]usize, field: []const f64) f64 {
-            return ISpace.fromSize(self.size).prolong(supercell, field);
         }
 
         pub fn fillBoundary(self: Self, comptime region: Region(N), comptime E: usize, operator: anytype, field: []f64) void {

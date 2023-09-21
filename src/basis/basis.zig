@@ -10,10 +10,11 @@ const space = @import("space.zig");
 // Public exports ************
 // ***************************
 
-pub const StencilSpace = space.StencilSpace;
-pub const InterpolationSpace = space.InterpolationSpace;
-pub const BoudnaryCondition = boundary.BoundaryCondition;
+pub const BoundaryCondition = boundary.BoundaryCondition;
 pub const isBoundaryOperator = boundary.isBoundaryOperator;
+
+pub const CellSpace = space.CellSpace;
+pub const StencilSpace = space.StencilSpace;
 
 test {
     _ = boundary;
