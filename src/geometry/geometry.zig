@@ -9,6 +9,7 @@ const region = @import("region.zig");
 pub const Box = box.Box;
 pub const SplitIndex = box.SplitIndex;
 pub const Face = faces.Face;
+pub const Index = index.Index;
 pub const IndexSpace = index.IndexSpace;
 pub const PartitionSpace = partitions.PartitionSpace;
 pub const Region = region.Region;

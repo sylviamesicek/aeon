@@ -58,16 +58,9 @@ pub fn Mesh(comptime N: usize, comptime O: usize) type {
             physical_bounds: RealBox,
             index_size: [N]usize,
             tile_width: usize,
-            global_refinement: usize,
 
             pub fn baseTileSpace(self: Config) IndexSpace {
-                var scale: usize = 1;
-
-                for (0..self.global_refinement) |_| {
-                    scale *= 2;
-                }
-
-                return IndexSpace.fromSize(self.index_size).scale(scale);
+                return IndexSpace.fromSize(self.index_size);
             }
 
             pub fn baseCellSpace(self: Config) IndexSpace {

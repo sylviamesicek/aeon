@@ -3,57 +3,93 @@ const assert = std.debug.assert;
 
 const Box = @import("box.zig").Box;
 
-// pub fn Index(comptime N: usize) type {
-//     return struct {
-//         index: [N]usize,
+pub fn Index(comptime N: usize) type {
+    return struct {
+        pub fn toUnsigned(index: [N]isize) [N]usize {
+            var result: [N]usize = undefined;
 
-//         const Self = @This();
+            for (0..N) |i| {
+                result[i] = @intCast(index[i]);
+            }
 
-//         pub fn splat(s: usize) Self {
-//             return .{ .index = [1]usize{s} ** N };
-//         }
+            return result;
+        }
 
-//         pub fn add(self: Self, other: Self) Self {
-//             var result: Self = undefined;
-//             for (0..N) |i| {
-//                 result.index[i] = self.index[i] + other.index[i];
-//             }
-//             return result;
-//         }
+        pub fn toSigned(index: [N]usize) [N]isize {
+            var result: [N]isize = undefined;
 
-//         pub fn sub(self: Self, other: Self) Self {
-//             var result: Self = undefined;
-//             for (0..N) |i| {
-//                 result.index[i] = self.index[i] - other.index[i];
-//             }
-//             return result;
-//         }
+            for (0..N) |i| {
+                result[i] = @intCast(index[i]);
+            }
 
-//         pub fn scaled(self: Self, s: usize) Self {
-//             var result: Self = undefined;
-//             for (0..N) |i| {
-//                 result.index[i] = self.index[i] * s;
-//             }
-//             return result;
-//         }
+            return result;
+        }
 
-//         pub fn refined(self: Self) Self {
-//             var result: Self = undefined;
-//             for (0..N) |i| {
-//                 result.index[i] = self.index[i] * 2;
-//             }
-//             return result;
-//         }
+        pub fn splat(index: usize) [N]usize {
+            return [1]usize{index} ** N;
+        }
 
-//         pub fn coarsened(self: *Self) void {
-//             var result: Self = undefined;
-//             for (0..N) |i| {
-//                 result.index[i] = self.index[i] / 2;
-//             }
-//             return result;
-//         }
-//     };
-// }
+        pub fn splatSigned(index: isize) [N]isize {
+            return [1]isize{index} ** N;
+        }
+
+        pub fn add(v: [N]usize, u: [N]usize) [N]usize {
+            var result: [N]usize = undefined;
+
+            for (0..N) |i| {
+                result[i] = v[i] + u[i];
+            }
+
+            return result;
+        }
+
+        pub fn addSigned(v: [N]isize, u: [N]isize) [N]isize {
+            var result: [N]isize = undefined;
+
+            for (0..N) |i| {
+                result[i] = v[i] + u[i];
+            }
+
+            return result;
+        }
+
+        pub fn scale(v: [N]usize, s: usize) [N]usize {
+            var result: [N]usize = undefined;
+
+            for (0..N) |i| {
+                result[i] = v[i] * s;
+            }
+
+            return result;
+        }
+
+        pub fn scaleSigned(v: [N]isize, s: isize) [N]isize {
+            var result: [N]isize = undefined;
+
+            for (0..N) |i| {
+                result[i] = v[i] * s;
+            }
+
+            return result;
+        }
+
+        pub fn refined(self: [N]usize) [N]usize {
+            var result: [N]usize = undefined;
+            for (0..N) |i| {
+                result[i] = self[i] * 2;
+            }
+            return result;
+        }
+
+        pub fn coarsened(self: [N]usize) [N]usize {
+            var result: [N]usize = undefined;
+            for (0..N) |i| {
+                result[i] = self[i] / 2;
+            }
+            return result;
+        }
+    };
+}
 
 /// Describes an abstract index space, ie an N-dimensional space with
 /// size[i] discrete cells on each axis. Contains helpers for converting
