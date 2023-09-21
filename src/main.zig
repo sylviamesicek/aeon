@@ -72,7 +72,7 @@ pub fn ScalarFieldProblem(comptime O: usize) type {
 
             grid.project(func, .{ .seed = seed }, .{});
 
-            const file = try std.fs.cwd().createFile("seed.vtu", .{});
+            const file = try std.fs.cwd().createFile("output/seed.vtu", .{});
             defer file.close();
 
             try grid.writeVtk(.{ .seed = seed }, file.writer());
