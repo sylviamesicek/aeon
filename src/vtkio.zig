@@ -1,3 +1,6 @@
+//! A module for interacting with and producing vtk files for use with tools like
+//! Paraview and VisIt.
+
 const std = @import("std");
 const ArrayListUnmanaged = std.ArrayListUnmanaged;
 const Allocator = std.mem.Allocator;
@@ -51,8 +54,9 @@ const VtkDataArray = struct {
 
 const VtkDataArrayList = ArrayListUnmanaged(VtkDataArray);
 
-/// Stores data for a vtk (unstructured) grid.
-pub const VtkUnstructuredGrid = struct {
+/// Stores data for a vtk (unstructured) grid. This data structure does not own the fields or point data passed
+/// to it, only references.
+pub const VtuMeshOutput = struct {
     /// A stored allocator for internal `ArrayList`s.
     allocator: Allocator,
     /// Stores data which has been associated with each point.
@@ -62,9 +66,11 @@ pub const VtkUnstructuredGrid = struct {
     /// Stores the type of cell that make up this grid (currently must be global).
     cell_type: VtkCellType,
     /// Stores the positions of each point in the grid.
-    points: []f64,
+    points: []const f64,
     /// Stores the vertices of each cell in the grid.
-    vertices: []usize,
+    vertices: []const usize,
+
+    const Self = @This();
 
     /// Global config of an unstructured grid. Describes cell type, point positions, and cell vertices.
     pub const Config = struct {
@@ -74,38 +80,25 @@ pub const VtkUnstructuredGrid = struct {
     };
 
     /// Initialises a new unstructured grid using an allocator and a config.
-    pub fn init(allocator: Allocator, config: Config) !VtkUnstructuredGrid {
-        var points: []f64 = try allocator.alloc(f64, config.points.len);
-        errdefer allocator.free(points);
-
-        @memcpy(points, config.points);
-
-        var vertices: []usize = try allocator.alloc(usize, config.vertices.len);
-        errdefer allocator.free(vertices);
-
-        @memcpy(vertices, config.vertices);
-
+    pub fn init(allocator: Allocator, config: Config) !Self {
         return .{
             .allocator = allocator,
             .point_data = VtkDataArrayList{},
             .cell_data = VtkDataArrayList{},
             .cell_type = config.cell_type,
-            .points = points,
-            .vertices = vertices,
+            .points = config.points,
+            .vertices = config.vertices,
         };
     }
 
     /// Deinitalises an unstructured grid, freeing all data.
-    pub fn deinit(self: *VtkUnstructuredGrid) void {
+    pub fn deinit(self: *Self) void {
         self.point_data.deinit(self.allocator);
         self.cell_data.deinit(self.allocator);
-
-        self.allocator.free(self.points);
-        self.allocator.free(self.vertices);
     }
 
     /// Adds a data field associated with each point to the vtk unstructured grid.
-    pub fn addField(self: *VtkUnstructuredGrid, name: []const u8, data: []const f64, dimension: usize) !void {
+    pub fn addField(self: *Self, name: []const u8, data: []const f64, dimension: usize) !void {
         return self.point_data.append(self.allocator, .{
             .name = name,
             .data = data,
@@ -114,7 +107,7 @@ pub const VtkUnstructuredGrid = struct {
     }
 
     /// Adds a data field associated with each cell to the vtk unstructured grid.
-    pub fn addCellField(self: *VtkUnstructuredGrid, name: []const u8, data: []const f64, dimension: usize) !void {
+    pub fn addCellField(self: *Self, name: []const u8, data: []const f64, dimension: usize) !void {
         return self.cell_data.append(self.allocator, .{
             .name = name,
             .data = data,
@@ -123,7 +116,7 @@ pub const VtkUnstructuredGrid = struct {
     }
 
     /// Writes the unstructured grid into an output stream in .vtu format.
-    pub fn write(self: VtkUnstructuredGrid, out_stream: anytype) @TypeOf(out_stream).Error!void {
+    pub fn write(self: Self, out_stream: anytype) @TypeOf(out_stream).Error!void {
         const dimension = self.cell_type.dimension();
         const n_points: usize = self.points.len / dimension;
 
@@ -138,7 +131,7 @@ pub const VtkUnstructuredGrid = struct {
         try writeFooter(out_stream);
     }
 
-    fn writePointData(self: VtkUnstructuredGrid, out_stream: anytype) @TypeOf(out_stream).Error!void {
+    fn writePointData(self: Self, out_stream: anytype) @TypeOf(out_stream).Error!void {
         try out_stream.print("<PointData>\n", .{});
         for (self.point_data.items) |point_data| {
             try writeDataArray(point_data, out_stream);
@@ -146,7 +139,7 @@ pub const VtkUnstructuredGrid = struct {
         try out_stream.print("</PointData>\n", .{});
     }
 
-    fn writeCellData(self: VtkUnstructuredGrid, out_stream: anytype) @TypeOf(out_stream).Error!void {
+    fn writeCellData(self: Self, out_stream: anytype) @TypeOf(out_stream).Error!void {
         try out_stream.print("<CellData>\n", .{});
         for (self.cell_data.items) |cell_data| {
             try writeDataArray(cell_data, out_stream);

@@ -4,6 +4,7 @@ pub const geometry = @import("geometry/geometry.zig");
 pub const index = @import("index.zig");
 pub const mesh = @import("mesh/mesh.zig");
 pub const solver = @import("solver/solver.zig");
+pub const system = @import("system.zig");
 pub const vtkio = @import("vtkio.zig");
 
 // Imports
@@ -35,7 +36,7 @@ pub fn ScalarFieldProblem(comptime O: usize) type {
             pub const Context = enum {};
             pub const Output = Seed;
 
-            pub fn value(self: SeedFunction, engine: mesh.FunctionEngine(N, O, Context)) mesh.system.SystemValue(Output) {
+            pub fn value(self: SeedFunction, engine: mesh.FunctionEngine(N, O, Context)) system.SystemValue(Output) {
                 const pos = engine.position();
                 const rho = pos[0];
                 const z = pos[1];
@@ -59,7 +60,7 @@ pub fn ScalarFieldProblem(comptime O: usize) type {
             pub const Context = enum {};
             pub const Output = Seed;
 
-            pub fn value(self: SeedLaplacianFunction, engine: mesh.FunctionEngine(N, O, Context)) mesh.system.SystemValue(Output) {
+            pub fn value(self: SeedLaplacianFunction, engine: mesh.FunctionEngine(N, O, Context)) system.SystemValue(Output) {
                 const pos = engine.position();
                 const rho = pos[0];
                 const z = pos[1];
@@ -139,9 +140,6 @@ pub fn ScalarFieldProblem(comptime O: usize) type {
             };
 
             grid.project(seed_func, .{ .seed = seed }, .{});
-
-            var psi: []f64 = try allocator.alloc(f64, ndofs);
-            defer allocator.free(psi);
 
             const file = try std.fs.cwd().createFile("output/seed.vtu", .{});
             defer file.close();

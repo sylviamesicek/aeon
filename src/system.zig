@@ -1,7 +1,21 @@
+//! This module defines the concept of a system, ie a coupled set of fields defined over some physical/numerical space.
+//! A system can be described with an enum specifying the names of the composite fields.
+//!
+//! ```
+//! const System = enum {
+//!     field1,
+//!     field2,
+//!     // ...
+//! };
+//! ```
+//!
+//! This module provides traits for identifying such types, and building new types represents values of these systems at
+//! individual cells, slices of the systems in a SoA storage, ect.
+
 const std = @import("std");
 const meta = std.meta;
 
-/// Checks if a type could be used to describe a system
+/// A trait function used for determining if a type desribes a system.
 pub fn isSystem(comptime T: type) bool {
     switch (@typeInfo(T)) {
         .Enum => |info| {
@@ -65,6 +79,7 @@ pub fn isSystemStruct(comptime T: type, comptime F: type) bool {
     }
 }
 
+/// A mutable slice of a system in SoA storage.
 pub fn SystemSlice(comptime T: type) type {
     return SystemStruct(T, []f64);
 }
@@ -73,6 +88,7 @@ pub fn isSystemSlice(comptime T: type) bool {
     return isSystemStruct(T, []f64);
 }
 
+/// A constant slice of a system in SoA storage.
 pub fn SystemSliceConst(comptime T: type) type {
     return SystemStruct(T, []const f64);
 }
@@ -81,6 +97,7 @@ pub fn isSystemSliceConst(comptime T: type) bool {
     return isSystemStruct(T, []const f64);
 }
 
+/// The value of a system at a point.
 pub fn SystemValue(comptime T: type) type {
     return SystemStruct(T, f64);
 }
@@ -88,51 +105,6 @@ pub fn SystemValue(comptime T: type) type {
 pub fn isSystemValue(comptime T: type) bool {
     return isSystemStruct(T, f64);
 }
-
-// pub fn SystemUnion(comptime T: type, comptime U: type) type {
-//     // Determine field type
-//     comptime var FieldType: type = undefined;
-
-//     if (isConstSystem(T) and isConstSystem(U)) {
-//         FieldType = []const f64;
-//     } else if (isMutableSystem(T) and isMutableSystem(U)) {
-//         FieldType = []f64;
-//     } else {
-//         @compileError("SystemUnion can only operate on two system which are both of the same constness.");
-//     }
-
-//     comptime var fields: [systemFieldCount(T) + systemFieldCount(U)]std.builtin.Type.StructField = undefined;
-//     comptime var index = 0;
-
-//     for (systemFieldNames(T)) |name| {
-//         fields[index] = .{
-//             .name = name,
-//             .type = FieldType,
-//             .default_value = null,
-//             .is_comptime = false,
-//             .alignment = @alignOf(FieldType),
-//         };
-//         index += 1;
-//     }
-
-//     for (systemFieldNames(U)) |name| {
-//         fields[index] = .{
-//             .name = name,
-//             .type = FieldType,
-//             .default_value = null,
-//             .is_comptime = false,
-//             .alignment = @alignOf(FieldType),
-//         };
-//         index += 1;
-//     }
-
-//     return @Type(.{ .Struct = .{
-//         .layout = .Auto,
-//         .fields = &fields,
-//         .decls = &.{},
-//         .is_tuple = false,
-//     } });
-// }
 
 /// Returns the total number of fields in a system
 pub fn systemFieldCount(comptime T: type) usize {

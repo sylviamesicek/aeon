@@ -1,7 +1,7 @@
 const std = @import("std");
 
 const basis = @import("../basis/basis.zig");
-const system = @import("system.zig");
+const system = @import("../system.zig");
 
 /// Wraps a stencil space, output field, input system, and cell, to provide a consistent
 /// interface to write operators.
