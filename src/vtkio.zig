@@ -148,19 +148,19 @@ pub const VtkUnstructuredGrid = struct {
 
     fn writeCellData(self: VtkUnstructuredGrid, out_stream: anytype) @TypeOf(out_stream).Error!void {
         try out_stream.print("<CellData>\n", .{});
-        for (self.point_data.items) |point_data| {
-            try writeDataArray(point_data, out_stream);
+        for (self.cell_data.items) |cell_data| {
+            try writeDataArray(cell_data, out_stream);
         }
         try out_stream.print("</CellData>\n", .{});
     }
 
     fn writeHeader(n_points: usize, n_cells: usize, out_stream: anytype) @TypeOf(out_stream).Error!void {
         return out_stream.print(
-            \\<VTKFile type="UnstructuredGrid" version="1.0">
+            \\<VTKFile type="UnstructuredGrid" version="1.0" byte_order="LittleEndian">
             \\<UnstructuredGrid>
             \\<Piece NumberOfPoints="{}" NumberOfCells="{}">
             \\
-        , .{ n_cells, n_points });
+        , .{ n_points, n_cells });
     }
 
     fn writeFooter(out_stream: anytype) @TypeOf(out_stream).Error!void {
@@ -175,11 +175,24 @@ pub const VtkUnstructuredGrid = struct {
     fn writePoints(n_components: usize, points: []const f64, out_stream: anytype) @TypeOf(out_stream).Error!void {
         try out_stream.print(
             \\<Points>
-            \\<DataArray type="Float64" NumberOfComponents="{}" format="ascii">
+            \\<DataArray type="Float64" NumberOfComponents="3" format="ascii">
             \\
-        , .{n_components});
+        , .{});
 
-        try writeVecArray(f64, n_components, points, out_stream);
+        const n_vecs: usize = points.len / n_components;
+
+        for (0..n_vecs) |i| {
+            for (0..n_components) |d| {
+                const datam: f64 = points[i * n_components + d];
+                try out_stream.print("{} ", .{datam});
+            }
+
+            for (n_components..3) |_| {
+                try out_stream.print("0 ", .{});
+            }
+
+            try out_stream.print("\n", .{});
+        }
 
         try out_stream.print(
             \\</DataArray>
@@ -190,30 +203,17 @@ pub const VtkUnstructuredGrid = struct {
 
     fn writeCells(cell_type: VtkCellType, cells: []const usize, out_stream: anytype) @TypeOf(out_stream).Error!void {
         const n_vertices = cell_type.nvertices();
+        const n_cells: usize = cells.len / n_vertices;
         const tag = cell_type.tag();
 
         // Connectivity Info
         try out_stream.print(
             \\<Cells>
-            \\<DataArray type="Int64" Name="connectivity" NumberOfComponents="{}" format="ascii">
+            \\<DataArray type="Int64" Name="connectivity" format="ascii">
             \\
-        , .{n_vertices});
+        , .{});
 
         try writeVecArray(usize, n_vertices, cells, out_stream);
-
-        try out_stream.print("</DataArray>\n", .{});
-
-        // Tags
-        try out_stream.print(
-            \\<DataArray type="Int64" Name="types" format="ascii" RangeMin="{}" RangeMax="{}">
-            \\
-        , .{ tag, tag });
-
-        const n_cells: usize = cells.len / n_vertices;
-
-        for (0..n_cells) |_| {
-            try out_stream.print("{}\n", .{tag});
-        }
 
         try out_stream.print("</DataArray>\n", .{});
 
@@ -227,6 +227,18 @@ pub const VtkUnstructuredGrid = struct {
         for (0..n_cells) |_| {
             try out_stream.print("{}\n", .{acc});
             acc += n_vertices;
+        }
+
+        try out_stream.print("</DataArray>\n", .{});
+
+        // Tags
+        try out_stream.print(
+            \\<DataArray type="Int64" Name="types" format="ascii" RangeMin="{}" RangeMax="{}">
+            \\
+        , .{ tag, tag });
+
+        for (0..n_cells) |_| {
+            try out_stream.print("{}\n", .{tag});
         }
 
         try out_stream.print(
@@ -250,7 +262,7 @@ pub const VtkUnstructuredGrid = struct {
 
         for (0..n_vecs) |i| {
             for (0..n_components) |d| {
-                const datam = data[i * n_components + d];
+                const datam: T = data[i * n_components + d];
                 try out_stream.print("{any} ", .{datam});
             }
 

@@ -1062,11 +1062,11 @@ pub fn Mesh(comptime N: usize, comptime O: usize) type {
             rhs: system.SystemSliceConst(@TypeOf(oper).System),
             context: system.SystemSliceConst(@TypeOf(oper).Context),
         ) void {
-            if (!(operator.isMeshOperator(N, O)(@TypeOf(oper)))) {
+            if (comptime !(operator.isMeshOperator(N, O)(@TypeOf(oper)))) {
                 @compileError("Oper must satisfy isMeshOperator trait.");
             }
 
-            if (system.systemFieldCount(@TypeOf(oper).System) != 1) {
+            if (comptime system.systemFieldCount(@TypeOf(oper).System) != 1) {
                 @compileError("solveBase only supports systems with 1 field currently.");
             }
 
