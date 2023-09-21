@@ -91,7 +91,7 @@ pub fn Region(comptime N: usize) type {
         /// Iterates all cell indices (in ghost space) in this region.
         pub fn cartesianIndices(self: Self, comptime E: usize, block: [N]usize) CartesianIterator {
             return .{
-                .inner = self.space(E, block),
+                .inner = self.space(E, block).cartesianIndices(),
                 .block = block,
                 .sides = self.sides,
             };
@@ -134,7 +134,7 @@ pub fn Region(comptime N: usize) type {
             }
 
             return .{
-                .inner = self.space(1, block),
+                .inner = self.space(1, block).cartesianIndices(),
                 .block = block,
                 .sides = self.sides,
             };

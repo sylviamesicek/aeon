@@ -3,6 +3,7 @@ const ArrayListUnmanaged = std.ArrayListUnmanaged;
 const MultiArrayList = std.MultiArrayList;
 const Allocator = std.mem.Allocator;
 
+const basis = @import("../basis/basis.zig");
 const geometry = @import("../geometry/geometry.zig");
 const Box = geometry.Box;
 
@@ -71,6 +72,9 @@ pub fn Level(comptime N: usize, comptime O: usize) type {
 
         const Self = @This();
         const IndexBox = geometry.Box(N, usize);
+        const IndexSpace = geometry.IndexSpace(N);
+        const Index = @import("../index.zig").Index(N);
+        const CellSpace = basis.CellSpace(N, O);
 
         /// Allocates a new level with no data.
         pub fn init(index_size: [N]usize) Self {
@@ -184,7 +188,7 @@ pub fn Level(comptime N: usize, comptime O: usize) type {
 
             for (self.patches.items(.bounds), self.patches.items(.tile_total), self.patches.items(.tile_offset)) |bounds, *total, *offset| {
                 offset.* = tile_offset;
-                total.* = bounds.space().total();
+                total.* = CellSpace.fromSize(Index.scaled(bounds.size, tile_width)).indexSpace().total();
                 tile_offset += total.*;
             }
 
@@ -192,7 +196,7 @@ pub fn Level(comptime N: usize, comptime O: usize) type {
 
             for (self.blocks.items(.bounds), self.blocks.items(.cell_total), self.blocks.items(.cell_offset)) |bounds, *total, *offset| {
                 offset.* = cell_offset;
-                total.* = bounds.space().scale(tile_width).extendUniform(4 * O).total();
+                total.* = CellSpace.fromSize(Index.scaled(bounds.size, tile_width)).indexSpace().total();
                 cell_offset += total.*;
             }
 

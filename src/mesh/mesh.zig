@@ -1045,6 +1045,36 @@ pub fn Mesh(comptime N: usize, comptime O: usize) type {
         // Elliptic Solve (MOVE) ***
         // *************************
 
+        fn SolveOperator(comptime T: type, comptime B: type) type {
+            _ = B;
+            return struct {
+                mesh: *const Self,
+                oper: T,
+                context: T.Context,
+
+                fn apply(self: @This(), res: []f64, x: []const f64) void {
+                    var operated: T.System = undefined;
+                    @field(operated, system.systemFieldNames(T.System)[0]) = x;
+
+                    const stencil_space = self.mesh.baseStencilSpace();
+                    var cells = stencil_space.cellSpace().cells();
+
+                    while (cells.next()) |cell| {
+                        const engine = EngineType(N, O, T){
+                            .inner = .{
+                                .space = self.stencil_space,
+                                .cell = cell,
+                            },
+                            .context = self.context,
+                            .operated = operated,
+                        };
+
+                        stencil_space.cellSpace().setValue(cell, res, self.oper.apply(engine));
+                    }
+                }
+            };
+        }
+
         pub fn solveBase(
             self: *const Self,
             oper: anytype,
@@ -1068,19 +1098,12 @@ pub fn Mesh(comptime N: usize, comptime O: usize) type {
             const Operator = struct {
                 inner: @TypeOf(oper),
                 ctx: oper.Context,
-
-                fn apply(sel: @This(), res: []f64, x: []const f64) void {
-                    _ = x;
-                    _ = res;
-                    _ = sel;
-
-                    // TODO
-                }
             };
 
-            const solve_oper: Operator = .{
-                .inner = oper,
-                .ctx = context,
+            const solve_oper: Operator(@TypeOf(oper)) = .{
+                .mesh = self,
+                .oper = oper,
+                .context = context,
             };
 
             var sol: solver.BiCGStabSolver(2) = solver.BiCGStabSolver(2).init(self.gpa, result_field.len, 1000, 10e-6);
@@ -1481,7 +1504,7 @@ pub fn Mesh(comptime N: usize, comptime O: usize) type {
                     // Make aliases for patch variables
                     const cpbounds: IndexBox = cbounds[cpid];
                     const cpoffset: usize = coffsets[cpid];
-                    const cpspace: IndexSpace = cpbounds.space();
+                    const cpspace: IndexSpace = IndexSpace.fromBox(cpbounds);
                     const cptags: []bool = ctags[cpoffset..(cpoffset + cpspace.total())];
 
                     // As well as clusters in this patch
@@ -1500,7 +1523,7 @@ pub fn Mesh(comptime N: usize, comptime O: usize) type {
                     // Iterate computed patches
                     for (cppartitioner.partitions()) |patch| {
                         // Build a space from the patch size.
-                        const pspace: IndexSpace = patch.bounds.space();
+                        const pspace: IndexSpace = IndexSpace.fromBox(patch.bounds);
 
                         // Allocate sufficient space to hold children of this patch
                         var pchildren: []usize = try scratch.alloc(usize, patch.children_total);
@@ -1652,11 +1675,11 @@ pub fn Mesh(comptime N: usize, comptime O: usize) type {
         fn resizeActiveLevels(self: *Self, total: usize) !void {
             while (total > self.levels.items.len) {
                 if (self.levels.items.len == 0) {
-                    const size: [N]usize = IndexSpace.fromSize(self.base.index_size).scale(2).size;
+                    const size: [N]usize = scaled(self.base.index_size, 2);
 
                     try self.levels.append(self.gpa, Level.init(size));
                 } else {
-                    const size: [N]usize = IndexSpace.fromSize(self.levels.getLast().index_size).scale(2).size;
+                    const size: [N]usize = scaled(self.levels.getLast().index_size, 2);
 
                     try self.levels.append(self.gpa, Level.init(size));
                 }
@@ -1682,7 +1705,6 @@ test "mesh regridding" {
         },
         .index_size = [_]usize{ 10, 10 },
         .tile_width = 16,
-        .global_refinement = 2,
     };
 
     var mesh: Mesh2 = Mesh2.init(allocator, config);

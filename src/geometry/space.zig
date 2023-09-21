@@ -80,7 +80,7 @@ pub fn IndexSpace(comptime N: usize) type {
 
         /// Builds a window, ie a smaller array that represents a subspace within the index space.
         pub fn window(self: Self, bounds: IndexBox, comptime T: type, dest: []T, src: []const T) void {
-            const space = bounds.space();
+            const space = IndexSpace(N).fromBox(bounds);
 
             assert(dest.len == space.total());
             assert(src.len == self.total());
@@ -100,7 +100,7 @@ pub fn IndexSpace(comptime N: usize) type {
 
         /// Fills a subspace of an array representing values defined over the index space with `val`.
         pub fn fillSubspace(self: Self, bounds: IndexBox, comptime T: type, dest: []T, val: T) void {
-            const space = bounds.space();
+            const space = IndexSpace(N).fromBox(bounds);
 
             assert(dest.len == self.total());
 
