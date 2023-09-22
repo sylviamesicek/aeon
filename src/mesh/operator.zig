@@ -122,45 +122,43 @@ pub fn Engine(comptime N: usize, comptime O: usize) type {
 }
 
 /// An `Engine` which can compute operations on elements of a given context system.
-pub fn FunctionEngine(comptime N: usize, comptime O: usize, comptime Context: type) type {
-    if (!system.isSystem(Context)) {
-        @compileError("Context must satisfy isSystem trait.");
+pub fn FunctionEngine(comptime N: usize, comptime O: usize, comptime Input: type) type {
+    if (!system.isSystem(Input)) {
+        @compileError("Input must satisfy isSystem trait.");
     }
 
     return struct {
         inner: Engine(N, O),
-        context: system.SystemSliceConst(Context),
+        input: system.SystemSliceConst(Input),
 
         // Aliases
         const Self = @This();
-
-        pub const CFieldEnum = system.SystemFieldEnum(Context);
 
         pub fn position(self: Self) [N]f64 {
             return self.inner.position();
         }
 
         /// Returns the value of the field at the current cell.
-        pub fn value(self: Self, comptime field: Context) f64 {
-            const f: []const f64 = @field(self.context, @tagName(field));
+        pub fn value(self: Self, comptime field: Input) f64 {
+            const f: []const f64 = @field(self.input, @tagName(field));
             return self.inner.value(f);
         }
 
         /// Returns the value of the field at the current cell.
-        pub fn gradient(self: Self, comptime field: Context) [N]f64 {
-            const f: []const f64 = @field(self.context, @tagName(field));
+        pub fn gradient(self: Self, comptime field: Input) [N]f64 {
+            const f: []const f64 = @field(self.input, @tagName(field));
             return self.inner.gradient(f);
         }
 
         /// Returns the value of the field at the current cell.
-        pub fn hessian(self: Self, comptime field: Context) [N][N]f64 {
-            const f: []const f64 = @field(self.context, @tagName(field));
+        pub fn hessian(self: Self, comptime field: Input) [N][N]f64 {
+            const f: []const f64 = @field(self.input, @tagName(field));
             return self.inner.hessian(f);
         }
 
         /// Returns the value of the field at the current cell.
-        pub fn laplacian(self: Self, comptime field: Context) f64 {
-            const f: []const f64 = @field(self.context, @tagName(field));
+        pub fn laplacian(self: Self, comptime field: Input) f64 {
+            const f: []const f64 = @field(self.input, @tagName(field));
             return self.inner.laplacian(f);
         }
 
@@ -282,7 +280,7 @@ pub fn EngineType(comptime N: usize, comptime O: usize, comptime T: type) type {
     if (comptime isMeshOperator(N, O)(T)) {
         return OperatorEngine(N, O, T.Context, T.System);
     } else if (comptime isMeshFunction(N, O)(T)) {
-        return FunctionEngine(N, O, T.Context);
+        return FunctionEngine(N, O, T.Input);
     } else {
         @compileError("EngineType may only be called on types which satisfy isMeshOperator or isMeshFunction traits.");
     }
@@ -341,7 +339,7 @@ pub fn isMeshOperator(comptime N: usize, comptime O: usize) fn (type) bool {
 /// A trait which checks if a type is a mesh function. Such a type follows the following set of declarations.
 /// ```
 /// const Function = struct {
-///     pub const Context = enum {
+///     pub const Input = enum {
 ///         field1,
 ///         field2,
 ///         // ...
@@ -352,7 +350,7 @@ pub fn isMeshOperator(comptime N: usize, comptime O: usize) fn (type) bool {
 ///         y,
 ///     }
 ///
-///     pub fn value(self: Operator, engine: FunctionEngine(2, 2, Context)) SystemValue(Output) {
+///     pub fn value(self: Operator, engine: FunctionEngine(2, 2, Input)) SystemValue(Output) {
 ///         // ...
 ///     }
 /// };
@@ -362,7 +360,7 @@ pub fn isMeshFunction(comptime N: usize, comptime O: usize) fn (type) bool {
 
     const Closure = struct {
         fn trait(comptime T: type) bool {
-            if (comptime !(@hasDecl(T, "Context") and @TypeOf(T.Context) == type and system.isSystem(T.Context))) {
+            if (comptime !(@hasDecl(T, "Input") and @TypeOf(T.Input) == type and system.isSystem(T.Input))) {
                 return false;
             }
 
@@ -370,7 +368,7 @@ pub fn isMeshFunction(comptime N: usize, comptime O: usize) fn (type) bool {
                 return false;
             }
 
-            if (comptime !(hasFn("value")(T) and @TypeOf(T.value) == fn (T, FunctionEngine(N, O, T.Context)) system.SystemValue(T.Output))) {
+            if (comptime !(hasFn("value")(T) and @TypeOf(T.value) == fn (T, FunctionEngine(N, O, T.Input)) system.SystemValue(T.Output))) {
                 return false;
             }
 

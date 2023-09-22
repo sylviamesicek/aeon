@@ -46,10 +46,10 @@ pub fn BiCGStabSolver(comptime L: usize) type {
             const xp: []f64 = try allocator.alloc(f64, ndofs);
             errdefer allocator.free(xp);
 
-            var r: [zdim][]f64 = &[_]f64{} ** zdim;
-            var u: [zdim][]f64 = &[_]f64{} ** zdim;
+            var r: [zdim][]f64 = [1][]f64{&[_]f64{}} ** zdim;
+            var u: [zdim][]f64 = [1][]f64{&[_]f64{}} ** zdim;
 
-            defer {
+            errdefer {
                 for (0..zdim) |i| {
                     allocator.free(r[i]);
                     allocator.free(u[i]);
@@ -75,6 +75,9 @@ pub fn BiCGStabSolver(comptime L: usize) type {
 
                 .r = r,
                 .u = u,
+
+                .niters = 0,
+                .res = 0.0,
             };
         }
 
@@ -91,7 +94,7 @@ pub fn BiCGStabSolver(comptime L: usize) type {
             }
         }
 
-        pub fn solve(self: *Self, oper: anytype, x: []f64, rhs: []const f64) usize {
+        pub fn solve(self: *Self, oper: anytype, x: []f64, rhs: []const f64) void {
             assert(x.len == self.ndofs);
             assert(rhs.len == self.ndofs);
 
@@ -320,4 +323,34 @@ pub fn BiCGStabSolver(comptime L: usize) type {
             }
         }
     };
+}
+
+test "BiCGStab convergence" {
+    const IdentityOperator = struct {
+        pub fn apply(_: @This(), result: []f64, rhs: []const f64) void {
+            @memcpy(result, rhs);
+        }
+    };
+
+    const allocator = std.testing.allocator;
+
+    const ndofs = 100;
+
+    const rhs = try allocator.alloc(f64, ndofs);
+    defer allocator.free(rhs);
+
+    const x = try allocator.alloc(f64, ndofs);
+    defer allocator.free(x);
+
+    for (0..ndofs) |i| {
+        rhs[i] = @floatFromInt(i);
+        x[i] = 0.0;
+    }
+
+    var solver: BiCGStabSolver(2) = try BiCGStabSolver(2).init(allocator, ndofs, 1000, 10e-10);
+    defer solver.deinit();
+
+    solver.solve(IdentityOperator{}, x, rhs);
+
+    std.debug.print("{any}", .{x});
 }

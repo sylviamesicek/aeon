@@ -251,7 +251,7 @@ pub fn StencilSpace(comptime N: usize, comptime O: usize) type {
             comptime var stencils: [N][2 * O + 1]f64 = undefined;
 
             inline for (0..N) |i| {
-                stencils[i] = derivativeStencil(ranks[i], O);
+                stencils[i] = comptime derivativeStencil(ranks[i], O);
             }
 
             const stencil_space: IndexSpace = comptime IndexSpace.fromSize(stencil_sizes);
@@ -261,7 +261,7 @@ pub fn StencilSpace(comptime N: usize, comptime O: usize) type {
 
             comptime var stencil_indices = stencil_space.cartesianIndices();
 
-            inline while (stencil_indices.next()) |stencil_index| {
+            inline while (comptime stencil_indices.next()) |stencil_index| {
                 comptime var coef: f64 = 1.0;
 
                 inline for (0..N) |i| {
@@ -270,14 +270,14 @@ pub fn StencilSpace(comptime N: usize, comptime O: usize) type {
                     }
                 }
 
-                var offset_cell: [N]usize = undefined;
+                var offset_cell: [N]isize = undefined;
 
                 inline for (0..N) |i| {
                     // This actually has an additional term -O (to correctly offset from center).
                     offset_cell[i] = cell[i] + stencil_index[i] - O;
                 }
 
-                const linear = index_space.linearFromCartesian(CSpace.cellWithGhost(offset_cell));
+                const linear = index_space.linearFromCartesian(CSpace.indexFromCell(offset_cell));
 
                 result += coef * field[linear];
             }

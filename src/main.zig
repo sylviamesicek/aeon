@@ -19,6 +19,8 @@ pub fn ScalarFieldProblem(comptime O: usize) type {
     const N = 2;
     return struct {
         const Mesh = mesh.Mesh(N, O);
+        const Face = geometry.Face(N);
+        const BoundaryCondition = basis.BoundaryCondition;
 
         pub const Seed = enum {
             seed,
@@ -33,10 +35,10 @@ pub fn ScalarFieldProblem(comptime O: usize) type {
             amplitude: f64,
             sigma: f64,
 
-            pub const Context = enum {};
+            pub const Input = enum {};
             pub const Output = Seed;
 
-            pub fn value(self: SeedFunction, engine: mesh.FunctionEngine(N, O, Context)) system.SystemValue(Output) {
+            pub fn value(self: SeedFunction, engine: mesh.FunctionEngine(N, O, Input)) system.SystemValue(Output) {
                 const pos = engine.position();
                 const rho = pos[0];
                 const z = pos[1];
@@ -57,10 +59,10 @@ pub fn ScalarFieldProblem(comptime O: usize) type {
             amplitude: f64,
             sigma: f64,
 
-            pub const Context = enum {};
+            pub const Input = enum {};
             pub const Output = Seed;
 
-            pub fn value(self: SeedLaplacianFunction, engine: mesh.FunctionEngine(N, O, Context)) system.SystemValue(Output) {
+            pub fn value(self: SeedLaplacianFunction, engine: mesh.FunctionEngine(N, O, Input)) system.SystemValue(Output) {
                 const pos = engine.position();
                 const rho = pos[0];
                 const z = pos[1];
@@ -83,23 +85,23 @@ pub fn ScalarFieldProblem(comptime O: usize) type {
             pub const Context = Seed;
             pub const System = Metric;
 
-            pub fn apply(_: MetricOperator, engine: mesh.OperatorEngine(N, O, Context, System)) mesh.system.SystemValue(System) {
+            pub fn apply(_: MetricOperator, engine: mesh.OperatorEngine(N, O, Context, System)) system.SystemValue(System) {
                 const position: [N]f64 = engine.position();
 
-                const hessian: [N][N]f64 = engine.hessianOp(.metric);
-                const gradient: [N]f64 = engine.gradientOp(.metric);
-                const value: f64 = engine.valueOp(.metric);
+                const hessian: [N][N]f64 = engine.hessianOp(.factor);
+                const gradient: [N]f64 = engine.gradientOp(.factor);
+                const value: f64 = engine.valueOp(.factor);
 
                 const seed: f64 = engine.value(.seed);
 
                 const lap = hessian[0][0] + hessian[1][1] + gradient[0] / position[0];
 
                 return .{
-                    .seed = -lap - seed * value,
+                    .factor = -lap - seed * value,
                 };
             }
 
-            pub fn applyDiagonal(_: MetricOperator, engine: mesh.OperatorEngine(N, O, Context, System)) mesh.system.SystemValue(System) {
+            pub fn applyDiagonal(_: MetricOperator, engine: mesh.OperatorEngine(N, O, Context, System)) system.SystemValue(System) {
                 const position: [N]f64 = engine.position();
 
                 const hessian: [N][N]f64 = engine.hessianDiagonal();
@@ -111,8 +113,19 @@ pub fn ScalarFieldProblem(comptime O: usize) type {
                 const lap = hessian[0][0] + hessian[1][1] + gradient[0] / position[0];
 
                 return .{
-                    .seed = -lap - seed * value,
+                    .factor = -lap - seed * value,
                 };
+            }
+        };
+
+        pub const MetricBoundaryConditions = struct {
+            pub fn condition(_: @This(), pos: [N]f64, face: Face) BoundaryCondition {
+                if (face.side == false) {
+                    return BoundaryCondition.nuemann(0.0);
+                } else {
+                    const r: f64 = @sqrt(pos[0] * pos[0] + pos[1] * pos[1]);
+                    return BoundaryCondition.robin(1.0 / r, 1.0, 0.0);
+                }
             }
         };
 
@@ -125,7 +138,7 @@ pub fn ScalarFieldProblem(comptime O: usize) type {
                     .size = [2]f64{ 10.0, 10.0 },
                 },
                 .tile_width = 16,
-                .index_size = [2]usize{ 8, 8 },
+                .index_size = [2]usize{ 1, 1 },
             });
             defer grid.deinit();
 
@@ -139,12 +152,21 @@ pub fn ScalarFieldProblem(comptime O: usize) type {
                 .sigma = 1.0,
             };
 
-            grid.project(seed_func, .{ .seed = seed }, .{});
+            grid.apply(seed_func, .{ .seed = seed }, .{});
+
+            var metric: []f64 = try allocator.alloc(f64, ndofs);
+            defer allocator.free(metric);
+
+            const oper = MetricOperator{};
+            const boundary = MetricBoundaryConditions{};
+
+            // Solve
+            try grid.solveBase(oper, .{ .factor = metric }, .{ .factor = seed }, .{ .seed = seed }, boundary);
 
             const file = try std.fs.cwd().createFile("output/seed.vtu", .{});
             defer file.close();
 
-            try grid.writeVtk(.{ .seed = seed }, file.writer());
+            try grid.writeVtk(.{ .seed = seed, .metric = metric }, file.writer());
         }
     };
 }

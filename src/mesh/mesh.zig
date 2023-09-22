@@ -373,140 +373,22 @@ pub fn Mesh(comptime N: usize, comptime O: usize) type {
 
         pub fn apply(
             self: *const Self,
-            comptime full: bool,
-            oper: anytype,
-            result: system.SystemSlice(@TypeOf(oper).System),
-            input: system.SystemSliceConst(@TypeOf(oper).System),
-            context: system.SystemSliceConst(@TypeOf(oper).Context),
+            func: anytype,
+            result: system.SystemSlice(@TypeOf(func).Output),
+            input: system.SystemSliceConst(@TypeOf(func).Input),
         ) void {
-            self.applyBase(oper, result, input, context);
+            self.applyBase(func, result, input);
 
             for (0..self.active_levels) |level| {
-                self.applyLevel(full, level, result, input, context);
+                self.applyLevel(level, func, result, input);
             }
         }
 
         pub fn applyBase(
             self: *const Self,
-            oper: anytype,
-            result: system.SystemSlice(@TypeOf(oper).System),
-            input: system.SystemSliceConst(@TypeOf(oper).System),
-            context: system.SystemSliceConst(@TypeOf(oper).Context),
-        ) void {
-            if (!(operator.isMeshOperator(N, O)(@TypeOf(oper)))) {
-                @compileError("Oper must satisfy isMeshOperator trait.");
-            }
-
-            const base_offset = 0;
-            const base_total = self.base.cell_total;
-
-            const base_result = system.systemStructSlice(result, base_offset, base_total);
-            const base_input = system.systemStructSlice(input, base_offset, base_total);
-            const base_context = system.systemStructSlice(context, base_offset, base_total);
-
-            const stencil_space: StencilSpace = self.baseStencilSpace();
-
-            var cells = stencil_space.cellSpace().cells();
-
-            while (cells.next()) |cell| {
-                const engine = EngineType(N, O, @TypeOf(oper)){
-                    .inner = .{
-                        .space = stencil_space,
-                        .cell = cell,
-                    },
-                    .context = base_context,
-                    .operated = base_input,
-                };
-
-                const app: system.SystemValue(@TypeOf(oper).System) = oper.apply(engine);
-
-                inline for (system.systemFieldNames(@TypeOf(oper).System)) |name| {
-                    stencil_space.setValue(
-                        cell,
-                        @field(base_result, name),
-                        @field(app, name),
-                    );
-                }
-            }
-        }
-
-        pub fn applyLevel(
-            self: *const Self,
-            comptime full: bool,
-            level: usize,
-            oper: anytype,
-            result: system.SystemSlice(@TypeOf(oper).System),
-            input: system.SystemSliceConst(@TypeOf(oper).System),
-            context: system.SystemSliceConst(@TypeOf(oper).Context),
-        ) void {
-            if (!(operator.isMeshOperator(N, O)(@TypeOf(oper)))) {
-                @compileError("Oper must satisfy isMeshOperator trait.");
-            }
-
-            const target: *const Level = &self.levels[level];
-
-            const level_offset = target.cell_offset;
-            const level_total = target.cell_total;
-
-            const level_result = system.systemStructSlice(result, level_offset, level_total);
-            const level_input = system.systemStructSlice(input, level_offset, level_total);
-            const level_context = system.systemStructSlice(context, level_offset, level_total);
-
-            for (target.blocks.items(.bounds), target.blocks.items(.cell_offset), target.blocks.items(.cell_total)) |block, offset, total| {
-                const block_result = system.systemStructSlice(level_result, offset, total);
-                const block_input = system.systemStructSlice(level_input, offset, total);
-                const block_context = system.systemStructSlice(level_context, offset, total);
-
-                const stencil_space: StencilSpace = self.levelStencilSpace(level, block);
-
-                var cell_indices = stencil_space.cellSpace().cells();
-
-                while (cell_indices.next()) |cell| {
-                    const offset_cell = if (full) add(stencil_space.size, [1]isize{-O} ** N) else cell;
-                    const engine = EngineType(N, O, @TypeOf(oper)){
-                        .inner = .{
-                            .space = stencil_space,
-                            .cell = offset_cell,
-                        },
-                        .context = block_context,
-                        .operated = block_input,
-                    };
-
-                    const app: system.SystemValue(@TypeOf(oper).System) = oper.apply(engine);
-
-                    inline for (system.systemFieldNames(@TypeOf(oper).System)) |name| {
-                        stencil_space.setValue(
-                            offset_cell,
-                            @field(block_result, name),
-                            @field(app, name),
-                        );
-                    }
-                }
-            }
-        }
-
-        // *************************
-        // Projection **************
-        // *************************
-
-        pub fn project(
-            self: *const Self,
             func: anytype,
             result: system.SystemSlice(@TypeOf(func).Output),
-            context: system.SystemSliceConst(@TypeOf(func).Context),
-        ) void {
-            self.projectBase(func, result, context);
-
-            for (0..self.active_levels) |level| {
-                self.projectLevel(level, func, result, context);
-            }
-        }
-
-        pub fn projectBase(
-            self: *const Self,
-            func: anytype,
-            result: system.SystemSlice(@TypeOf(func).Output),
-            context: system.SystemSliceConst(@TypeOf(func).Context),
+            input: system.SystemSliceConst(@TypeOf(func).Input),
         ) void {
             if (comptime !(operator.isMeshFunction(N, O)(@TypeOf(func)))) {
                 @compileError("Func must satisfy isMeshFunction trait.");
@@ -516,7 +398,7 @@ pub fn Mesh(comptime N: usize, comptime O: usize) type {
             const base_total = self.base.cell_total;
 
             const base_result = system.systemStructSlice(result, base_offset, base_total);
-            const base_context = system.systemStructSlice(context, base_offset, base_total);
+            const base_context = system.systemStructSlice(input, base_offset, base_total);
 
             const stencil_space: StencilSpace = self.baseStencilSpace();
 
@@ -528,7 +410,7 @@ pub fn Mesh(comptime N: usize, comptime O: usize) type {
                         .space = stencil_space,
                         .cell = cell,
                     },
-                    .context = base_context,
+                    .input = base_context,
                 };
 
                 const val: system.SystemValue(@TypeOf(func).Output) = func.value(engine);
@@ -543,12 +425,12 @@ pub fn Mesh(comptime N: usize, comptime O: usize) type {
             }
         }
 
-        pub fn projectLevel(
+        pub fn applyLevel(
             self: *const Self,
             level: usize,
             func: anytype,
             result: system.SystemSlice(@TypeOf(func).Output),
-            context: system.SystemSliceConst(@TypeOf(func).Context),
+            input: system.SystemSliceConst(@TypeOf(func).Input),
         ) void {
             if (comptime !(operator.isMeshFunction(N, O)(@TypeOf(func)))) {
                 @compileError("Func must satisfy isMeshFunction trait.");
@@ -560,7 +442,7 @@ pub fn Mesh(comptime N: usize, comptime O: usize) type {
             const level_total = target.cell_total;
 
             const level_result = system.systemStructSlice(result, level_offset, level_total);
-            const level_context = system.systemStructSlice(context, level_offset, level_total);
+            const level_context = system.systemStructSlice(input, level_offset, level_total);
 
             for (target.blocks.items(.cell_offset), target.blocks.items(.cell_total), 0..) |offset, total, id| {
                 const block_result = system.systemStructSlice(level_result, offset, total);
@@ -576,7 +458,7 @@ pub fn Mesh(comptime N: usize, comptime O: usize) type {
                             .space = stencil_space,
                             .cell = cell,
                         },
-                        .context = block_context,
+                        .input = block_context,
                     };
 
                     const val: system.SystemValue(@TypeOf(func).Output) = func.value(engine);
@@ -597,20 +479,29 @@ pub fn Mesh(comptime N: usize, comptime O: usize) type {
         // *************************
 
         fn SolveOperator(comptime T: type, comptime B: type) type {
-            _ = B;
             return struct {
                 mesh: *const Self,
+                stencil_space: StencilSpace,
                 oper: T,
-                context: T.Context,
+                boundary: B,
+                context: system.SystemSliceConst(T.Context),
+                scratch: []f64,
 
-                fn apply(self: @This(), res: []f64, x: []const f64) void {
-                    var operated: T.System = undefined;
-                    @field(operated, system.systemFieldNames(T.System)[0]) = x;
+                pub fn apply(self: @This(), res: []f64, x: []const f64) void {
+                    var cells = self.stencil_space.cellSpace().cells();
+                    var linear: usize = 0;
 
-                    const stencil_space = self.mesh.baseStencilSpace();
-                    var cells = stencil_space.cellSpace().cells();
+                    while (cells.next()) |cell| : (linear += 1) {
+                        self.stencil_space.cellSpace().setValue(cell, self.scratch, x[linear]);
+                    }
 
-                    while (cells.next()) |cell| {
+                    var operated: system.SystemSliceConst(T.System) = undefined;
+                    @field(operated, system.systemFieldNames(T.System)[0]) = self.scratch;
+
+                    cells = self.stencil_space.cellSpace().cells();
+                    linear = 0;
+
+                    while (cells.next()) |cell| : (linear += 1) {
                         const engine = EngineType(N, O, T){
                             .inner = .{
                                 .space = self.stencil_space,
@@ -620,7 +511,7 @@ pub fn Mesh(comptime N: usize, comptime O: usize) type {
                             .operated = operated,
                         };
 
-                        stencil_space.cellSpace().setValue(cell, res, self.oper.apply(engine));
+                        res[linear] = @field(self.oper.apply(engine), system.systemFieldNames(T.System)[0]);
                     }
                 }
             };
@@ -632,7 +523,8 @@ pub fn Mesh(comptime N: usize, comptime O: usize) type {
             result: system.SystemSlice(@TypeOf(oper).System),
             rhs: system.SystemSliceConst(@TypeOf(oper).System),
             context: system.SystemSliceConst(@TypeOf(oper).Context),
-        ) void {
+            boundary: anytype,
+        ) !void {
             if (comptime !(operator.isMeshOperator(N, O)(@TypeOf(oper)))) {
                 @compileError("Oper must satisfy isMeshOperator trait.");
             }
@@ -641,26 +533,61 @@ pub fn Mesh(comptime N: usize, comptime O: usize) type {
                 @compileError("solveBase only supports systems with 1 field currently.");
             }
 
-            const field_name: [:0]const u8 = system.systemFieldNames(@TypeOf(oper).System)[0];
+            if (comptime !basis.isBoundaryOperator(N)(@TypeOf(boundary))) {
+                @compileError("Boundary must be boundary operator");
+            }
 
+            const field_name: []const u8 = comptime system.systemFieldNames(@TypeOf(oper).System)[0];
             const result_field: []f64 = @field(result, field_name);
             const rhs_field: []const f64 = @field(rhs, field_name);
 
-            const Operator = struct {
-                inner: @TypeOf(oper),
-                ctx: oper.Context,
-            };
+            const stencil_space = self.baseStencilSpace();
 
-            const solve_oper: Operator(@TypeOf(oper)) = .{
+            const ndofs = self.base.cell_total;
+            const ndofs_reduced = IndexSpace.fromSize(stencil_space.size).total();
+
+            var result_reduced = try self.gpa.alloc(f64, ndofs_reduced);
+            defer self.gpa.free(result_reduced);
+
+            var rhs_reduced = try self.gpa.alloc(f64, ndofs_reduced);
+            defer self.gpa.free(rhs_reduced);
+
+            var cells = stencil_space.cellSpace().cells();
+            var linear: usize = 0;
+
+            while (cells.next()) |cell| : (linear += 1) {
+                result_reduced[linear] = stencil_space.value(cell, result_field);
+                rhs_reduced[linear] = stencil_space.value(cell, rhs_field);
+            }
+
+            var scratch = try self.gpa.alloc(f64, ndofs);
+            defer self.gpa.free(scratch);
+
+            const solve_oper: SolveOperator(@TypeOf(oper), @TypeOf(boundary)) = .{
                 .mesh = self,
+                .stencil_space = stencil_space,
                 .oper = oper,
                 .context = context,
+                .boundary = boundary,
+                .scratch = scratch,
             };
 
-            var sol: solver.BiCGStabSolver(2) = solver.BiCGStabSolver(2).init(self.gpa, result_field.len, 1000, 10e-6);
+            var sol: solver.BiCGStabSolver(2) = try solver.BiCGStabSolver(2).init(
+                self.gpa,
+                ndofs_reduced,
+                1000,
+                10e-6,
+            );
             defer sol.deinit();
 
-            sol.solve(solve_oper, result_field, rhs_field);
+            sol.solve(solve_oper, result_reduced, rhs_reduced);
+
+            cells = stencil_space.cellSpace().cells();
+            linear = 0;
+
+            while (cells.next()) |cell| : (linear += 1) {
+                stencil_space.cellSpace().setValue(cell, result_field, result_reduced[linear]);
+            }
         }
 
         // *************************
