@@ -2,7 +2,11 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 const assert = std.debug.assert;
 
-const isOperator = @import("solver.zig").isOperator;
+const lac = @import("lac.zig");
+
+const IdentityMap = lac.IdentityMap;
+const isLinearMap = lac.isLinearMap;
+const isLinearSolver = lac.isLinearSolver;
 
 /// A solver which uses the Bi-conjugate gradient method allong with `L` iterations of
 /// GMRES to smooth the solution vector between steps.
@@ -94,9 +98,9 @@ pub fn BiCGStabSolver(comptime L: usize) type {
             }
         }
 
-        pub fn solve(self: *Self, oper: anytype, x: []f64, rhs: []const f64) void {
+        pub fn solve(self: *Self, oper: anytype, x: []f64, b: []const f64) void {
             assert(x.len == self.ndofs);
-            assert(rhs.len == self.ndofs);
+            assert(b.len == self.ndofs);
 
             var tau: [zdim * zdim]f64 = undefined;
             var gamma: [zdim]f64 = undefined;
@@ -108,13 +112,13 @@ pub fn BiCGStabSolver(comptime L: usize) type {
             oper.apply(self.tp, x);
 
             for (0..self.ndofs) |i| {
-                self.r[0][i] = rhs[i] - self.tp[i];
+                self.r[0][i] = b[i] - self.tp[i];
             }
 
             // Set initial guesses
             @memcpy(self.rtld, self.r[0]);
             @memcpy(self.bp, self.r[0]);
-            @memcpy(self.xp, self.r[0]);
+            @memcpy(self.xp, x);
             @memset(self.u[0], 0.0);
 
             var nrm2: f64 = norm2(self.r[0]);
@@ -134,7 +138,6 @@ pub fn BiCGStabSolver(comptime L: usize) type {
                 var tol: f64 = @fabs(self.tolerance) * nrm2;
                 var alpha: f64 = 0.0;
                 var beta: f64 = 0.0;
-                var nu: f64 = 0.0;
                 var omega: f64 = 1.0;
                 var rho0: f64 = 1.0;
                 var rho1: f64 = 0.0;
@@ -173,7 +176,7 @@ pub fn BiCGStabSolver(comptime L: usize) type {
                         // u[i] = r[i] - beta*u[i] from i in [0, j]
                         for (0..(j + 1)) |i| {
                             for (self.u[i], self.r[i]) |*uval, rval| {
-                                uval.* = rval - beta * uval.*;
+                                uval.* = -beta * uval.* + rval;
                             }
                         }
 
@@ -182,8 +185,8 @@ pub fn BiCGStabSolver(comptime L: usize) type {
                         // u[j + 1] = M^-1 * A * u[j]
                         oper.apply(self.u[j + 1], self.u[j]);
 
-                        // nu - <rtld, u[j + 1]>
-                        nu = dot(self.rtld, self.u[j + 1]);
+                        // nu = <rtld, u[j + 1]>
+                        const nu = dot(self.rtld, self.u[j + 1]);
 
                         // Test for breakdown
                         if (@fabs(nu) == 0.0) {
@@ -205,7 +208,7 @@ pub fn BiCGStabSolver(comptime L: usize) type {
                         // r[i] = r[i] - alpha * u[i + 1] for i in [0, j]
                         for (0..(j + 1)) |i| {
                             for (self.r[i], self.u[i + 1]) |*rval, uval| {
-                                rval.* = rval.* - alpha * uval;
+                                rval.* += -alpha * uval;
                             }
                         }
 
@@ -232,7 +235,7 @@ pub fn BiCGStabSolver(comptime L: usize) type {
                     while (j <= L) : (j += 1) {
                         var i: usize = 1;
                         while (i <= j - 1) : (i += 1) {
-                            nu = dot(self.r[j], self.r[i]) / sigma[i];
+                            const nu = dot(self.r[j], self.r[i]) / sigma[i];
                             tau[i * zdim + j] = nu;
 
                             for (self.r[j], self.r[i]) |*rj, ri| {
@@ -241,7 +244,7 @@ pub fn BiCGStabSolver(comptime L: usize) type {
                         }
 
                         sigma[j] = dot(self.r[j], self.r[j]);
-                        nu = dot(self.r[0], self.r[j]);
+                        const nu = dot(self.r[0], self.r[j]);
                         gamma1[j] = nu / sigma[j];
                     }
 
@@ -250,7 +253,7 @@ pub fn BiCGStabSolver(comptime L: usize) type {
 
                     j = L - 1;
                     while (j >= 1) : (j -= 1) {
-                        nu = 0.0;
+                        var nu: f64 = 0.0;
                         var i: usize = j + 1;
                         while (i <= L) : (i += 1) {
                             nu += tau[j * zdim + i] * gamma[i];
@@ -260,7 +263,7 @@ pub fn BiCGStabSolver(comptime L: usize) type {
 
                     j = 1;
                     while (j <= L - 1) : (j += 1) {
-                        nu = 0.0;
+                        var nu: f64 = 0.0;
                         var i: usize = j + 1;
                         while (i <= L - 1) : (i += 1) {
                             nu += tau[j * zdim + i] * gamma[i + 1];
@@ -326,31 +329,27 @@ pub fn BiCGStabSolver(comptime L: usize) type {
 }
 
 test "BiCGStab convergence" {
-    const IdentityOperator = struct {
-        pub fn apply(_: @This(), result: []f64, rhs: []const f64) void {
-            @memcpy(result, rhs);
-        }
-    };
+    const expectEqualSlices = std.testing.expectEqualSlices;
 
     const allocator = std.testing.allocator;
 
     const ndofs = 100;
 
-    const rhs = try allocator.alloc(f64, ndofs);
-    defer allocator.free(rhs);
+    const b = try allocator.alloc(f64, ndofs);
+    defer allocator.free(b);
 
     const x = try allocator.alloc(f64, ndofs);
     defer allocator.free(x);
 
     for (0..ndofs) |i| {
-        rhs[i] = @floatFromInt(i);
+        b[i] = @floatFromInt(i);
         x[i] = 0.0;
     }
 
     var solver: BiCGStabSolver(2) = try BiCGStabSolver(2).init(allocator, ndofs, 1000, 10e-10);
     defer solver.deinit();
 
-    solver.solve(IdentityOperator{}, x, rhs);
+    solver.solve(IdentityMap{}, x, b);
 
-    std.debug.print("{any}", .{x});
+    try expectEqualSlices(f64, b, x);
 }

@@ -13,7 +13,7 @@ const maxInt = std.math.maxInt;
 
 const basis = @import("../basis/basis.zig");
 const geometry = @import("../geometry/geometry.zig");
-const solver = @import("../solver/solver.zig");
+const lac = @import("../lac/lac.zig");
 const system = @import("../system.zig");
 
 // Submodules
@@ -572,7 +572,7 @@ pub fn Mesh(comptime N: usize, comptime O: usize) type {
                 .scratch = scratch,
             };
 
-            var sol: solver.BiCGStabSolver(2) = try solver.BiCGStabSolver(2).init(
+            var sol: lac.BiCGStabSolver(2) = try lac.BiCGStabSolver(2).init(
                 self.gpa,
                 ndofs_reduced,
                 1000,

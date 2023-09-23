@@ -13,7 +13,7 @@ const maxInt = std.math.maxInt;
 
 const basis = @import("../basis/basis.zig");
 const geometry = @import("../geometry/geometry.zig");
-const solver = @import("../solver/solver.zig");
+const lac = @import("../lac/lac.zig");
 const system = @import("../system.zig");
 
 /// Provides an interface for interacting with degrees of freedom defined on a mesh.
