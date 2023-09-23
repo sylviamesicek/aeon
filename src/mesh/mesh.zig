@@ -1,4 +1,9 @@
+//! This module provides the core functionality for defining systems across meshes,
+//! adaptively refining those meshes, filling boundaries, and solving partial
+//! differential equations on these domains.
+
 // std imports
+
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const ArrayList = std.ArrayList;
@@ -9,7 +14,7 @@ const assert = std.debug.assert;
 const exp2 = std.math.exp2;
 const maxInt = std.math.maxInt;
 
-// root imports
+// Root imports
 
 const basis = @import("../basis/basis.zig");
 const geometry = @import("../geometry/geometry.zig");
@@ -19,17 +24,27 @@ const system = @import("../system.zig");
 // Submodules
 
 const dofs = @import("dofs.zig");
-const operator = @import("operator.zig");
 const levels = @import("level.zig");
+const multigrid = @import("multigrid.zig");
+const operator = @import("operator.zig");
 
-// Public Exports
+// ************************
+// Public Exports *********
+// ************************
 
 pub const DofHandler = dofs.DofHandler;
+
+pub const MultigridSolver = multigrid.MultigridSolver;
+
 pub const OperatorEngine = operator.OperatorEngine;
 pub const FunctionEngine = operator.FunctionEngine;
 pub const EngineType = operator.EngineType;
 pub const isMeshOperator = operator.isMeshOperator;
 pub const isMeshFunction = operator.isMeshFunction;
+
+// ************************
+// Mesh *******************
+// ************************
 
 pub fn Mesh(comptime N: usize, comptime O: usize) type {
     return struct {
@@ -471,122 +486,6 @@ pub fn Mesh(comptime N: usize, comptime O: usize) type {
                         );
                     }
                 }
-            }
-        }
-
-        // *************************
-        // Elliptic Solve (MOVE) ***
-        // *************************
-
-        fn SolveOperator(comptime T: type, comptime B: type) type {
-            return struct {
-                mesh: *const Self,
-                stencil_space: StencilSpace,
-                oper: T,
-                boundary: B,
-                context: system.SystemSliceConst(T.Context),
-                scratch: []f64,
-
-                pub fn apply(self: @This(), res: []f64, x: []const f64) void {
-                    var cells = self.stencil_space.cellSpace().cells();
-                    var linear: usize = 0;
-
-                    while (cells.next()) |cell| : (linear += 1) {
-                        self.stencil_space.cellSpace().setValue(cell, self.scratch, x[linear]);
-                    }
-
-                    var operated: system.SystemSliceConst(T.System) = undefined;
-                    @field(operated, system.systemFieldNames(T.System)[0]) = self.scratch;
-
-                    cells = self.stencil_space.cellSpace().cells();
-                    linear = 0;
-
-                    while (cells.next()) |cell| : (linear += 1) {
-                        const engine = EngineType(N, O, T){
-                            .inner = .{
-                                .space = self.stencil_space,
-                                .cell = cell,
-                            },
-                            .context = self.context,
-                            .operated = operated,
-                        };
-
-                        res[linear] = @field(self.oper.apply(engine), system.systemFieldNames(T.System)[0]);
-                    }
-                }
-            };
-        }
-
-        pub fn solveBase(
-            self: *const Self,
-            oper: anytype,
-            result: system.SystemSlice(@TypeOf(oper).System),
-            rhs: system.SystemSliceConst(@TypeOf(oper).System),
-            context: system.SystemSliceConst(@TypeOf(oper).Context),
-            boundary: anytype,
-        ) !void {
-            if (comptime !(operator.isMeshOperator(N, O)(@TypeOf(oper)))) {
-                @compileError("Oper must satisfy isMeshOperator trait.");
-            }
-
-            if (comptime system.systemFieldCount(@TypeOf(oper).System) != 1) {
-                @compileError("solveBase only supports systems with 1 field currently.");
-            }
-
-            if (comptime !basis.isBoundaryOperator(N)(@TypeOf(boundary))) {
-                @compileError("Boundary must be boundary operator");
-            }
-
-            const field_name: []const u8 = comptime system.systemFieldNames(@TypeOf(oper).System)[0];
-            const result_field: []f64 = @field(result, field_name);
-            const rhs_field: []const f64 = @field(rhs, field_name);
-
-            const stencil_space = self.baseStencilSpace();
-
-            const ndofs = self.base.cell_total;
-            const ndofs_reduced = IndexSpace.fromSize(stencil_space.size).total();
-
-            var result_reduced = try self.gpa.alloc(f64, ndofs_reduced);
-            defer self.gpa.free(result_reduced);
-
-            var rhs_reduced = try self.gpa.alloc(f64, ndofs_reduced);
-            defer self.gpa.free(rhs_reduced);
-
-            var cells = stencil_space.cellSpace().cells();
-            var linear: usize = 0;
-
-            while (cells.next()) |cell| : (linear += 1) {
-                result_reduced[linear] = stencil_space.value(cell, result_field);
-                rhs_reduced[linear] = stencil_space.value(cell, rhs_field);
-            }
-
-            var scratch = try self.gpa.alloc(f64, ndofs);
-            defer self.gpa.free(scratch);
-
-            const solve_oper: SolveOperator(@TypeOf(oper), @TypeOf(boundary)) = .{
-                .mesh = self,
-                .stencil_space = stencil_space,
-                .oper = oper,
-                .context = context,
-                .boundary = boundary,
-                .scratch = scratch,
-            };
-
-            var sol: lac.BiCGStabSolver(2) = try lac.BiCGStabSolver(2).init(
-                self.gpa,
-                ndofs_reduced,
-                1000,
-                10e-6,
-            );
-            defer sol.deinit();
-
-            sol.solve(solve_oper, result_reduced, rhs_reduced);
-
-            cells = stencil_space.cellSpace().cells();
-            linear = 0;
-
-            while (cells.next()) |cell| : (linear += 1) {
-                stencil_space.cellSpace().setValue(cell, result_field, result_reduced[linear]);
             }
         }
 

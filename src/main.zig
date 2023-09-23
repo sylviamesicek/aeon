@@ -158,10 +158,12 @@ pub fn ScalarFieldProblem(comptime O: usize) type {
             defer allocator.free(metric);
 
             const oper = MetricOperator{};
+            _ = oper;
             const boundary = MetricBoundaryConditions{};
+            _ = boundary;
 
-            // Solve
-            try grid.solveBase(oper, .{ .factor = metric }, .{ .factor = seed }, .{ .seed = seed }, boundary);
+            // // Solve
+            // try grid.solveBase(oper, .{ .factor = metric }, .{ .factor = seed }, .{ .seed = seed }, boundary);
 
             const file = try std.fs.cwd().createFile("output/seed.vtu", .{});
             defer file.close();

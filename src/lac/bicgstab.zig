@@ -29,9 +29,6 @@ pub fn BiCGStabSolver(comptime L: usize) type {
         r: [zdim][]f64,
         u: [zdim][]f64,
 
-        niters: usize,
-        res: f64,
-
         const Self = @This();
 
         pub fn init(allocator: Allocator, ndofs: usize, max_iters: usize, tolerance: f64) !Self {
@@ -79,9 +76,6 @@ pub fn BiCGStabSolver(comptime L: usize) type {
 
                 .r = r,
                 .u = u,
-
-                .niters = 0,
-                .res = 0.0,
             };
         }
 
@@ -98,7 +92,7 @@ pub fn BiCGStabSolver(comptime L: usize) type {
             }
         }
 
-        pub fn solve(self: *Self, oper: anytype, x: []f64, b: []const f64) void {
+        pub fn solve(self: *const Self, oper: anytype, x: []f64, b: []const f64) void {
             assert(x.len == self.ndofs);
             assert(b.len == self.ndofs);
 
@@ -123,6 +117,7 @@ pub fn BiCGStabSolver(comptime L: usize) type {
 
             var nrm2: f64 = norm2(self.r[0]);
             var ires: f64 = nrm2;
+            _ = ires;
             var iter: usize = 0;
 
             end: {
@@ -298,8 +293,8 @@ pub fn BiCGStabSolver(comptime L: usize) type {
 
             if (iter < self.max_iters) iter += 1;
 
-            self.niters = iter;
-            self.res = nrm2 / ires;
+            // self.niters = iter;
+            // self.res = nrm2 / ires;
         }
 
         fn norm2(slice: []const f64) f64 {
@@ -332,18 +327,17 @@ test "BiCGStab convergence" {
     const expectEqualSlices = std.testing.expectEqualSlices;
 
     const allocator = std.testing.allocator;
-
     const ndofs = 100;
-
-    const b = try allocator.alloc(f64, ndofs);
-    defer allocator.free(b);
 
     const x = try allocator.alloc(f64, ndofs);
     defer allocator.free(x);
 
+    const b = try allocator.alloc(f64, ndofs);
+    defer allocator.free(b);
+
     for (0..ndofs) |i| {
-        b[i] = @floatFromInt(i);
         x[i] = 0.0;
+        b[i] = @floatFromInt(i);
     }
 
     var solver: BiCGStabSolver(2) = try BiCGStabSolver(2).init(allocator, ndofs, 1000, 10e-10);
