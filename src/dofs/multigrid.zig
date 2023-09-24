@@ -164,7 +164,7 @@ pub fn MultigridSolver(comptime N: usize, comptime O: usize, comptime BaseSolver
                                     .cell = cell,
                                 },
                                 .context = wrapper.context,
-                                .operated = sys,
+                                .sys = sys,
                             };
 
                             output[linear] = @field(wrapper.oper.apply(engine), field_name);

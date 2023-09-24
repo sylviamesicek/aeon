@@ -359,11 +359,6 @@ pub fn DofHandler(comptime N: usize, comptime O: usize) type {
                         target[i] = cell[i] + extents[i];
                     }
 
-                    // Set all fields of the system to zero at the target.
-                    inline for (comptime system.systemFieldNames(T.System)) |name| {
-                        stencil_space.cellSpace().setValue(target, @field(sys, name), 0.0);
-                    }
-
                     // Compute position of boundary given extents
                     const pos: [N]f64 = stencil_space.boundaryPosition(extents, cell);
 
@@ -380,21 +375,34 @@ pub fn DofHandler(comptime N: usize, comptime O: usize) type {
                     }
 
                     inline for (comptime system.systemFieldNames(T.System)) |name| {
+                        // Set the fields of the system to be zero at the target.
+                        stencil_space.cellSpace().setValue(target, @field(sys, name), 0.0);
+
                         var v: f64 = 0.0;
                         var normals: [N]f64 = undefined;
                         var rhs: f64 = 0.0;
 
                         for (0..N) |i| {
-                            if (extents[i] != 0) {
+                            if (extents[i] > 0) {
                                 const condition: BoundaryCondition = @field(conditions[i], name);
 
                                 v += condition.value;
                                 normals[i] = condition.normal;
                                 rhs += condition.rhs;
+                            } else if (extents[i] < 0) {
+                                const condition: BoundaryCondition = @field(conditions[i], name);
+
+                                v += condition.value;
+                                normals[i] = -condition.normal;
+                                rhs += condition.rhs;
                             }
                         }
 
-                        var sum: f64 = v * stencil_space.boundaryValue(extents, cell, @field(sys, name));
+                        var sum: f64 = v * stencil_space.boundaryValue(
+                            extents,
+                            cell,
+                            @field(sys, name),
+                        );
                         var coef: f64 = v * stencil_space.boundaryValueCoef(extents);
 
                         inline for (0..N) |i| {

@@ -97,9 +97,9 @@ pub fn ScalarFieldProblem(comptime O: usize) type {
             pub fn apply(_: MetricOperator, engine: dofs.OperatorEngine(N, O, Context, System)) system.SystemValue(System) {
                 const position: [N]f64 = engine.position();
 
-                const hessian: [N][N]f64 = engine.hessianOp(.factor);
-                const gradient: [N]f64 = engine.gradientOp(.factor);
-                const value: f64 = engine.valueOp(.factor);
+                const hessian: [N][N]f64 = engine.hessianSys(.factor);
+                const gradient: [N]f64 = engine.gradientSys(.factor);
+                const value: f64 = engine.valueSys(.factor);
 
                 const seed: f64 = engine.value(.seed);
 
@@ -127,15 +127,6 @@ pub fn ScalarFieldProblem(comptime O: usize) type {
             }
 
             pub fn condition(_: MetricOperator, pos: [N]f64, face: Face) dofs.SystemBoundaryCondition(System) {
-                if (face.side) {
-                    const r = @sqrt(pos[0] * pos[0] + pos[1] * pos[1]);
-                    _ = r;
-                } else {
-                    return .{
-                        .factor = BoundaryCondition.nuemann(0.0),
-                    };
-                }
-
                 if (face.side == false) {
                     return .{ .factor = BoundaryCondition.nuemann(0.0) };
                 } else {
@@ -154,7 +145,7 @@ pub fn ScalarFieldProblem(comptime O: usize) type {
                     .size = [2]f64{ 10.0, 10.0 },
                 },
                 .tile_width = 16,
-                .index_size = [2]usize{ 1, 1 },
+                .index_size = [2]usize{ 8, 8 },
             });
             defer grid.deinit();
 
@@ -179,7 +170,7 @@ pub fn ScalarFieldProblem(comptime O: usize) type {
 
             const oper = MetricOperator{};
 
-            var base_solver = try BiCGStabSolver.init(allocator, ndofs_reduced, 1000, 10e-6);
+            var base_solver = try BiCGStabSolver.init(allocator, ndofs_reduced, 100, 10e-6);
             defer base_solver.deinit();
 
             var solver = try MultigridSolver.init(allocator, &dof_handler, &base_solver);
@@ -221,16 +212,30 @@ pub fn ApplyTest(comptime O: usize) type {
             sys,
         };
 
-        // Function
-        pub const Function = struct {
+        // Solution Function
+        pub const SolutionFunction = struct {
             pub const Input = enum {};
             pub const Output = MySystem;
 
-            pub fn value(_: Function, engine: dofs.FunctionEngine(N, O, Input)) system.SystemValue(Output) {
+            pub fn value(_: SolutionFunction, engine: dofs.FunctionEngine(N, O, Input)) system.SystemValue(Output) {
                 const pos = engine.position();
 
                 return .{
                     .sys = math.sin(pos[0]) * math.sin(pos[1]),
+                };
+            }
+        };
+
+        // Function
+        pub const RhsFunction = struct {
+            pub const Input = enum {};
+            pub const Output = MySystem;
+
+            pub fn value(_: RhsFunction, engine: dofs.FunctionEngine(N, O, Input)) system.SystemValue(Output) {
+                const pos = engine.position();
+
+                return .{
+                    .sys = -2 * math.sin(pos[0]) * math.sin(pos[1]),
                 };
             }
         };
@@ -251,9 +256,7 @@ pub fn ApplyTest(comptime O: usize) type {
                 };
             }
 
-            pub fn condition(_: PoissonOperator, pos: [N]f64, face: Face) dofs.SystemBoundaryCondition(System) {
-                _ = face;
-                _ = pos;
+            pub fn condition(_: PoissonOperator, _: [N]f64, _: Face) dofs.SystemBoundaryCondition(System) {
                 return .{
                     .sys = BoundaryCondition.diritchlet(0.0),
                 };
@@ -265,11 +268,11 @@ pub fn ApplyTest(comptime O: usize) type {
         fn run(allocator: Allocator) !void {
             var grid = Mesh.init(allocator, .{
                 .physical_bounds = .{
-                    .origin = [2]f64{ 0.0, 0.0 },
-                    .size = [2]f64{ 2.0 * math.pi, 2.0 * math.pi },
+                    .origin = [1]f64{0.0} ** N,
+                    .size = [1]f64{2.0 * math.pi} ** N,
                 },
                 .tile_width = 16,
-                .index_size = [2]usize{ 8, 8 },
+                .index_size = [1]usize{8} ** N,
             });
             defer grid.deinit();
 
@@ -277,23 +280,55 @@ pub fn ApplyTest(comptime O: usize) type {
             defer dof_handler.deinit();
 
             const ndofs: usize = dof_handler.ndofs();
+            const ndofs_reduced = IndexSpace.fromSize(Index.scaled(grid.base.index_size, grid.tile_width)).total();
 
-            var function: []f64 = try allocator.alloc(f64, ndofs);
-            defer allocator.free(function);
+            // Projection solution
+            var solution: []f64 = try allocator.alloc(f64, ndofs);
+            defer allocator.free(solution);
 
-            dof_handler.project(Function{}, .{ .sys = function }, .{});
+            dof_handler.project(SolutionFunction{}, .{ .sys = solution }, .{});
 
+            // Right hand side
+            var rhs: []f64 = try allocator.alloc(f64, ndofs);
+            defer allocator.free(rhs);
+
+            dof_handler.project(RhsFunction{}, .{ .sys = rhs }, .{});
+
+            // Solution vectors
+            var numerical: []f64 = try allocator.alloc(f64, ndofs);
+            defer allocator.free(numerical);
+
+            var apply: []f64 = try allocator.alloc(f64, ndofs);
+            defer allocator.free(apply);
+
+            // Operator
             const oper = PoissonOperator{};
 
-            dof_handler.fillBaseBoundary(oper, .{
-                .sys = function,
-            });
+            dof_handler.fillBaseBoundary(oper, .{ .sys = solution });
+            dof_handler.apply(oper, .{ .sys = apply }, .{ .sys = solution }, .{});
+
+            // Solver
+            var base_solver = try BiCGStabSolver.init(allocator, ndofs_reduced, 100, 10e-6);
+            defer base_solver.deinit();
+
+            var solver = try MultigridSolver.init(allocator, &dof_handler, &base_solver);
+            defer solver.deinit();
+
+            solver.solve(
+                oper,
+                .{ .sys = numerical },
+                .{ .sys = rhs },
+                .{},
+            );
 
             const file = try std.fs.cwd().createFile("output/apply.vtu", .{});
             defer file.close();
 
             try dof_handler.writeVtk(true, .{
-                .function = function,
+                .numerical = numerical,
+                .rhs = rhs,
+                .solution = solution,
+                .apply = apply,
             }, file.writer());
         }
     };
@@ -312,9 +347,9 @@ pub fn main() !void {
     }
 
     // Run main
-    // try ScalarFieldProblem(2).run(gpa.allocator());
+    try ScalarFieldProblem(2).run(gpa.allocator());
 
-    try ApplyTest(2).run(gpa.allocator());
+    // try ApplyTest(2).run(gpa.allocator());
 }
 
 test {
