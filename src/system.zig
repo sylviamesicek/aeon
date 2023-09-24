@@ -15,9 +15,6 @@
 const std = @import("std");
 const meta = std.meta;
 
-const basis = @import("basis/basis.zig");
-const BoundaryCondition = basis.BoundaryCondition;
-
 /// A trait function used for determining if a type desribes a system.
 pub fn isSystem(comptime T: type) bool {
     switch (@typeInfo(T)) {
@@ -107,14 +104,6 @@ pub fn SystemValue(comptime T: type) type {
 
 pub fn isSystemValue(comptime T: type) bool {
     return isSystemStruct(T, f64);
-}
-
-pub fn SystemBoundaryCondition(comptime T: type) type {
-    return SystemStruct(T, BoundaryCondition);
-}
-
-pub fn isBoundaryCondition(comptime T: type) bool {
-    return isSystemStruct(T, BoundaryCondition);
 }
 
 /// Returns the total number of fields in a system

@@ -102,15 +102,15 @@ pub fn Region(comptime N: usize) type {
             block: [N]usize,
             sides: [N]Side,
 
-            pub fn next(self: *InnerFaceIterator) ?[N]usize {
+            pub fn next(self: *InnerFaceIterator) ?[N]isize {
                 if (self.inner.next()) |cart| {
-                    var result: [N]usize = undefined;
+                    var result: [N]isize = undefined;
 
                     for (0..N) |i| {
                         switch (self.sides[i]) {
                             .left => result[i] = 0,
-                            .right => result[i] = self.block[i] - 1,
-                            else => result[i] = cart[i],
+                            .right => result[i] = @as(isize, @intCast(self.block[i])) - 1,
+                            else => result[i] = @as(isize, cart[i]),
                         }
                     }
 

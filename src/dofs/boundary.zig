@@ -1,7 +1,13 @@
-const std = @import("std");
+const system = @import("../system.zig");
 
-const geometry = @import("../geometry/geometry.zig");
-const Face = geometry.Face;
+/// The value of a system at a point.
+pub fn SystemBoundaryCondition(comptime T: type) type {
+    return system.SystemStruct(T, BoundaryCondition);
+}
+
+pub fn isSystemBoundaryCondition(comptime T: type) bool {
+    return system.isSystemStruct(T, BoundaryCondition);
+}
 
 /// Represents a boundary condition as returned by a BoundaryOperator. Specifies a robin boundary condition along each
 /// face as a function of position.
@@ -39,19 +45,3 @@ pub const BoundaryCondition = struct {
         };
     }
 };
-
-/// A trait indicating whether a type is a boundrary operator.
-pub fn isBoundaryOperator(comptime N: usize) fn (type) bool {
-    const hasFn = std.meta.trait.hasFn;
-
-    const Closure = struct {
-        fn trait(comptime T: type) bool {
-            if (!hasFn("condition")(T)) {
-                return false;
-            }
-
-            return fn (T, [N]f64, Face(N)) BoundaryCondition == @TypeOf(T.condition);
-        }
-    };
-    return Closure.trait;
-}

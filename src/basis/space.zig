@@ -3,13 +3,7 @@ const std = @import("std");
 // Imported modules
 
 const lagrange = @import("lagrange.zig");
-const boundary = @import("boundary.zig");
 const geometry = @import("../geometry/geometry.zig");
-
-// Imported types and functions
-
-const BoundaryCondition = boundary.BoundaryCondition;
-const isBoundaryOperator = boundary.isBoundaryOperator;
 
 /// Provides an interface for interpolating and setting values on a block of a certain size
 /// with a buffer region `2*O` along each axis, to the order `O`.
@@ -446,66 +440,6 @@ pub fn StencilSpace(comptime N: usize, comptime O: usize) type {
             }
 
             return result;
-        }
-
-        pub fn fillBoundary(self: Self, comptime region: Region(N), comptime E: usize, operator: anytype, field: []f64) void {
-            if (!isBoundaryOperator(@TypeOf(operator))) {
-                @compileError("Operator must satisfy trait isBoundaryOperator to be used in fillBoundary.");
-            }
-
-            if (E > 2 * O) {
-                @compileError("E must be <= 2 * O");
-            }
-
-            var inner_face_cells = region.innerFaceIndices(self.size);
-
-            while (inner_face_cells.next()) |cell| {
-                comptime var extent_indices = region.extentOffsets(E);
-
-                inline while (extent_indices.next()) |extents| {
-                    var target: [N]usize = undefined;
-
-                    inline for (0..N) |i| {
-                        target[i] = cell[i] + extents[i];
-                    }
-
-                    self.setValue(target, field, 0.0);
-
-                    const pos: [N]f64 = self.boundaryPosition(extents, cell);
-
-                    var v: f64 = 0.0;
-                    var normals: [N]usize = undefined;
-                    var rhs: f64 = 0.0;
-
-                    for (0..N) |i| {
-                        if (extents[i] != 0) {
-                            const condition: BoundaryCondition = operator.condition(pos, Face{
-                                .side = extents[i] > 0,
-                                .axis = i,
-                            });
-
-                            v += condition.value;
-                            normals[i] = condition.normal;
-                            rhs += condition.rhs;
-                        }
-                    }
-
-                    var sum: f64 = v * self.boundaryValue(extents, cell, field);
-                    var coef: f64 = v * self.boundaryValueCoef(extents);
-
-                    inline for (0..N) |i| {
-                        if (extents[i] != 0) {
-                            var ranks: [N]usize = [1]usize{0} ** N;
-                            ranks[i] = 1;
-
-                            sum += normals[i] * self.boundaryDerivative(ranks, extents, cell, field);
-                            coef += normals[i] * self.boundaryDerivativeCoef(ranks, extents);
-                        }
-                    }
-
-                    self.setValue(target, field, (rhs - sum) / coef);
-                }
-            }
         }
     };
 }

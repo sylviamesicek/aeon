@@ -1,5 +1,6 @@
 // Subdirectories
 pub const basis = @import("basis/basis.zig");
+pub const dofs = @import("dofs/dofs.zig");
 pub const geometry = @import("geometry/geometry.zig");
 pub const index = @import("index.zig");
 pub const lac = @import("lac/lac.zig");
@@ -19,8 +20,9 @@ pub fn ScalarFieldProblem(comptime O: usize) type {
     const N = 2;
     return struct {
         const Mesh = mesh.Mesh(N, O);
+        const DofHandler = dofs.DofHandler(N, O);
         const Face = geometry.Face(N);
-        const BoundaryCondition = basis.BoundaryCondition;
+        const BoundaryCondition = dofs.BoundaryCondition;
 
         pub const Seed = enum {
             seed,
@@ -38,7 +40,7 @@ pub fn ScalarFieldProblem(comptime O: usize) type {
             pub const Input = enum {};
             pub const Output = Seed;
 
-            pub fn value(self: SeedFunction, engine: mesh.FunctionEngine(N, O, Input)) system.SystemValue(Output) {
+            pub fn value(self: SeedFunction, engine: dofs.FunctionEngine(N, O, Input)) system.SystemValue(Output) {
                 const pos = engine.position();
                 const rho = pos[0];
                 const z = pos[1];
@@ -62,7 +64,7 @@ pub fn ScalarFieldProblem(comptime O: usize) type {
             pub const Input = enum {};
             pub const Output = Seed;
 
-            pub fn value(self: SeedLaplacianFunction, engine: mesh.FunctionEngine(N, O, Input)) system.SystemValue(Output) {
+            pub fn value(self: SeedLaplacianFunction, engine: dofs.FunctionEngine(N, O, Input)) system.SystemValue(Output) {
                 const pos = engine.position();
                 const rho = pos[0];
                 const z = pos[1];
@@ -142,7 +144,10 @@ pub fn ScalarFieldProblem(comptime O: usize) type {
             });
             defer grid.deinit();
 
-            const ndofs: usize = grid.cellTotal();
+            var dof_handler = DofHandler.init(allocator, &grid);
+            defer dof_handler.deinit();
+
+            const ndofs: usize = grid.cell_total;
 
             var seed: []f64 = try allocator.alloc(f64, ndofs);
             defer allocator.free(seed);
@@ -152,7 +157,7 @@ pub fn ScalarFieldProblem(comptime O: usize) type {
                 .sigma = 1.0,
             };
 
-            grid.apply(seed_func, .{ .seed = seed }, .{});
+            dof_handler.apply(seed_func, .{ .seed = seed }, .{});
 
             var metric: []f64 = try allocator.alloc(f64, ndofs);
             defer allocator.free(metric);
@@ -168,7 +173,7 @@ pub fn ScalarFieldProblem(comptime O: usize) type {
             const file = try std.fs.cwd().createFile("output/seed.vtu", .{});
             defer file.close();
 
-            try grid.writeVtk(.{ .seed = seed, .metric = metric }, file.writer());
+            try dof_handler.writeVtk(.{ .seed = seed, .metric = metric }, file.writer());
         }
     };
 }

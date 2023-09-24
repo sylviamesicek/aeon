@@ -1,7 +1,11 @@
 const std = @import("std");
 
 const basis = @import("../basis/basis.zig");
+const geometry = @import("../geometry/geometry.zig");
 const system = @import("../system.zig");
+
+const boundary = @import("boundary.zig");
+const SystemBoundaryCondition = boundary.SystemBoundaryCondition;
 
 /// Wraps a stencil space, output field, input system, and cell, to provide a consistent
 /// interface to write operators.
@@ -369,6 +373,40 @@ pub fn isMeshFunction(comptime N: usize, comptime O: usize) fn (type) bool {
             }
 
             if (comptime !(hasFn("value")(T) and @TypeOf(T.value) == fn (T, FunctionEngine(N, O, T.Input)) system.SystemValue(T.Output))) {
+                return false;
+            }
+
+            return true;
+        }
+    };
+
+    return Closure.trait;
+}
+
+/// A trait which checks if a type is a mesh boundary. Such a type follows the following set of declarations.
+/// ```
+/// const Boundary = struct {
+///     pub const System = enum {
+///         field1,
+///         field2,
+///     }
+///
+///     pub fn condition(self: Boundary, pos: [2]f64, face: Face) SystemStruct(System, BoundaryCondition) {
+///         // ...
+///     }
+/// }
+/// ```
+pub fn isMeshBoundary(comptime N: usize) fn (type) bool {
+    const hasFn = std.meta.trait.hasFn;
+    const Face = geometry.Face(N);
+
+    const Closure = struct {
+        fn trait(comptime T: type) bool {
+            if (comptime !(@hasDecl(T, "System") and @TypeOf(T.System) == type and system.isSystem(T.System))) {
+                return false;
+            }
+
+            if (comptime !(hasFn("condition")(T) and @TypeOf(T.condition) == fn (T, [N]f64, Face) SystemBoundaryCondition)) {
                 return false;
             }
 

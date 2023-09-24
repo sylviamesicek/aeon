@@ -1,10 +1,10 @@
 const std = @import("std");
 const lac = @import("../lac/lac.zig");
 const system = @import("../system.zig");
+const mesh = @import("../mesh/mesh.zig");
 const geometry = @import("../geometry/geometry.zig");
 const index = @import("../index.zig");
 
-const mesh = @import("mesh.zig");
 const operator = @import("operator.zig");
 
 /// A multigrid based elliptic solver.
