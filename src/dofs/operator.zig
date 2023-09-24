@@ -406,7 +406,7 @@ pub fn isMeshBoundary(comptime N: usize) fn (type) bool {
                 return false;
             }
 
-            if (comptime !(hasFn("condition")(T) and @TypeOf(T.condition) == fn (T, [N]f64, Face) SystemBoundaryCondition)) {
+            if (comptime !(hasFn("condition")(T) and @TypeOf(T.condition) == fn (T, [N]f64, Face) SystemBoundaryCondition(T.System))) {
                 return false;
             }
 

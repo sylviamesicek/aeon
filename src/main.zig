@@ -19,10 +19,17 @@ const Allocator = std.mem.Allocator;
 pub fn ScalarFieldProblem(comptime O: usize) type {
     const N = 2;
     return struct {
-        const Mesh = mesh.Mesh(N, O);
-        const DofHandler = dofs.DofHandler(N, O);
-        const Face = geometry.Face(N);
         const BoundaryCondition = dofs.BoundaryCondition;
+        const DofHandler = dofs.DofHandler(N, O);
+        const MultigridSolver = dofs.MultigridSolver(N, O, BiCGStabSolver);
+
+        const Face = geometry.Face(N);
+        const IndexSpace = geometry.IndexSpace(N);
+        const Index = index.Index(N);
+
+        const BiCGStabSolver = lac.BiCGStabSolver(2);
+
+        const Mesh = mesh.Mesh(N, O);
 
         pub const Seed = enum {
             seed,
@@ -87,7 +94,7 @@ pub fn ScalarFieldProblem(comptime O: usize) type {
             pub const Context = Seed;
             pub const System = Metric;
 
-            pub fn apply(_: MetricOperator, engine: mesh.OperatorEngine(N, O, Context, System)) system.SystemValue(System) {
+            pub fn apply(_: MetricOperator, engine: dofs.OperatorEngine(N, O, Context, System)) system.SystemValue(System) {
                 const position: [N]f64 = engine.position();
 
                 const hessian: [N][N]f64 = engine.hessianOp(.factor);
@@ -103,7 +110,7 @@ pub fn ScalarFieldProblem(comptime O: usize) type {
                 };
             }
 
-            pub fn applyDiagonal(_: MetricOperator, engine: mesh.OperatorEngine(N, O, Context, System)) system.SystemValue(System) {
+            pub fn applyDiagonal(_: MetricOperator, engine: dofs.OperatorEngine(N, O, Context, System)) system.SystemValue(System) {
                 const position: [N]f64 = engine.position();
 
                 const hessian: [N][N]f64 = engine.hessianDiagonal();
@@ -118,15 +125,22 @@ pub fn ScalarFieldProblem(comptime O: usize) type {
                     .factor = -lap - seed * value,
                 };
             }
-        };
 
-        pub const MetricBoundaryConditions = struct {
-            pub fn condition(_: @This(), pos: [N]f64, face: Face) BoundaryCondition {
+            pub fn condition(_: MetricOperator, pos: [N]f64, face: Face) dofs.SystemBoundaryCondition(System) {
+                if (face.side) {
+                    const r = @sqrt(pos[0] * pos[0] + pos[1] * pos[1]);
+                    _ = r;
+                } else {
+                    return .{
+                        .factor = BoundaryCondition.nuemann(0.0),
+                    };
+                }
+
                 if (face.side == false) {
-                    return BoundaryCondition.nuemann(0.0);
+                    return .{ .factor = BoundaryCondition.nuemann(0.0) };
                 } else {
                     const r: f64 = @sqrt(pos[0] * pos[0] + pos[1] * pos[1]);
-                    return BoundaryCondition.robin(1.0 / r, 1.0, 0.0);
+                    return .{ .factor = BoundaryCondition.robin(1.0 / r, 1.0, 0.0) };
                 }
             }
         };
@@ -147,7 +161,8 @@ pub fn ScalarFieldProblem(comptime O: usize) type {
             var dof_handler = DofHandler.init(allocator, &grid);
             defer dof_handler.deinit();
 
-            const ndofs: usize = grid.cell_total;
+            const ndofs: usize = dof_handler.ndofs();
+            const ndofs_reduced = IndexSpace.fromSize(Index.scaled(grid.base.index_size, grid.tile_width)).total();
 
             var seed: []f64 = try allocator.alloc(f64, ndofs);
             defer allocator.free(seed);
@@ -163,12 +178,19 @@ pub fn ScalarFieldProblem(comptime O: usize) type {
             defer allocator.free(metric);
 
             const oper = MetricOperator{};
-            _ = oper;
-            const boundary = MetricBoundaryConditions{};
-            _ = boundary;
 
-            // // Solve
-            // try grid.solveBase(oper, .{ .factor = metric }, .{ .factor = seed }, .{ .seed = seed }, boundary);
+            var base_solver = try BiCGStabSolver.init(allocator, ndofs_reduced, 1000, 10e-6);
+            defer base_solver.deinit();
+
+            var solver = try MultigridSolver.init(allocator, &dof_handler, &base_solver);
+            defer solver.deinit();
+
+            solver.solve(
+                oper,
+                .{ .factor = metric },
+                .{ .factor = seed },
+                .{ .seed = seed },
+            );
 
             const file = try std.fs.cwd().createFile("output/seed.vtu", .{});
             defer file.close();

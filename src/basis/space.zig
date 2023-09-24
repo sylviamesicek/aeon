@@ -354,13 +354,13 @@ pub fn StencilSpace(comptime N: usize, comptime O: usize) type {
             comptime var stencils: [N][3 * O]f64 = undefined;
 
             inline for (0..N) |i| {
-                stencils[i] = boundaryDerivativeStencil(ranks[i], extents[i], O);
+                stencils[i] = comptime boundaryDerivativeStencil(ranks[i], extents[i], O);
             }
 
             comptime var stencil_sizes: [N]usize = undefined;
 
             inline for (0..N) |i| {
-                stencil_sizes[i] = if (ranks[i] == 0) 1 else if (extents[i] == 0) 1 else 2 * O + absSigned(extents[i]);
+                stencil_sizes[i] = comptime if (ranks[i] == 0) 1 else if (extents[i] == 0) 1 else 2 * O + @as(usize, @intCast(absSigned(extents[i])));
             }
 
             const stencil_space: IndexSpace = comptime IndexSpace.fromSize(stencil_sizes);
@@ -370,7 +370,7 @@ pub fn StencilSpace(comptime N: usize, comptime O: usize) type {
 
             comptime var stencil_indices = stencil_space.cartesianIndices();
 
-            inline while (stencil_indices.next()) |stencil_index| {
+            inline while (comptime stencil_indices.next()) |stencil_index| {
                 comptime var coef: f64 = 1.0;
 
                 inline for (0..N) |i| {
@@ -379,11 +379,11 @@ pub fn StencilSpace(comptime N: usize, comptime O: usize) type {
                     }
                 }
 
-                var offset_cell: [N]usize = undefined;
+                var offset_cell: [N]isize = undefined;
 
                 inline for (0..N) |i| {
                     if (extents[i] > 0) {
-                        offset_cell[i] = cell[i] + stencil_index[i] - 2 * O;
+                        offset_cell[i] = cell[i] + stencil_index[i] - @as(isize, @intCast(2 * O));
                     } else if (extents[i] < 0) {
                         offset_cell[i] = cell[i] + stencil_index[i] - absSigned(extents[i]);
                     } else {
@@ -414,20 +414,22 @@ pub fn StencilSpace(comptime N: usize, comptime O: usize) type {
             comptime var stencils: [N][3 * O]f64 = undefined;
 
             inline for (0..N) |i| {
-                stencils[i] = boundaryDerivativeStencil(ranks[i], extents[i], O);
+                stencils[i] = comptime boundaryDerivativeStencil(ranks[i], extents[i], O);
             }
 
-            var result: f64 = 1.0;
+            comptime var result: f64 = 1.0;
 
-            for (0..N) |i| {
+            inline for (0..N) |i| {
                 if (ranks[i] > 0) {
                     if (extents[i] > 0) {
-                        result *= stencils[i][2 * O + absSigned(extents[i]) - 1];
+                        result *= comptime stencils[i][2 * O + absSigned(extents[i]) - 1];
                     } else {
-                        result *= stencils[i][0];
+                        result *= comptime stencils[i][0];
                     }
                 }
             }
+
+            var scaled_result = result;
 
             // Covariantly transform result
             inline for (0..N) |i| {
@@ -435,11 +437,11 @@ pub fn StencilSpace(comptime N: usize, comptime O: usize) type {
                 scale /= self.physical_bounds.size[i];
 
                 inline for (0..ranks[i]) |_| {
-                    result *= scale;
+                    scaled_result *= scale;
                 }
             }
 
-            return result;
+            return scaled_result;
         }
     };
 }
@@ -455,8 +457,8 @@ fn derivativeStencil(comptime R: usize, comptime O: usize) [2 * O + 1]f64 {
     };
 }
 
-fn absSigned(i: isize) usize {
-    return @intCast(if (i < 0) -i else i);
+fn absSigned(i: isize) isize {
+    return if (i < 0) -i else i;
 }
 
 fn boundaryDerivativeStencil(comptime R: usize, comptime extent: isize, comptime O: usize) [3 * O]f64 {

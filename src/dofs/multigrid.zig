@@ -1,10 +1,13 @@
 const std = @import("std");
+const Allocator = std.mem.Allocator;
+
 const lac = @import("../lac/lac.zig");
 const system = @import("../system.zig");
 const mesh = @import("../mesh/mesh.zig");
 const geometry = @import("../geometry/geometry.zig");
 const index = @import("../index.zig");
 
+const dofs = @import("dofs.zig");
 const operator = @import("operator.zig");
 
 /// A multigrid based elliptic solver.
@@ -14,32 +17,39 @@ pub fn MultigridSolver(comptime N: usize, comptime O: usize, comptime BaseSolver
     }
 
     return struct {
-        mesh: *const Mesh,
+        gpa: Allocator,
+        dof_handler: *const DofHandler,
+        base_size: [N]usize,
         base_solver: *const BaseSolver,
         base_x: []f64,
         base_b: []f64,
         scratch: []f64,
 
         const Self = @This();
-        const Mesh = mesh.Mesh(N, O);
+        const DofHandler = dofs.DofHandler(N, O);
         const IndexSpace = geometry.IndexSpace(N);
         const Index = index.Index(N);
 
-        pub fn init(grid: *const Mesh, base_solver: *BaseSolver) !Self {
-            const ndofs = grid.cellTotal();
-            const ndofs_base = IndexSpace.fromSize(Index.scaled(grid.base.index_size, grid.config.tile_width)).total();
+        pub fn init(allocator: Allocator, dof_handler: *const DofHandler, base_solver: *BaseSolver) !Self {
+            const ndofs = dof_handler.ndofs();
 
-            const base_x: []f64 = try grid.gpa.alloc(f64, ndofs_base);
-            errdefer grid.gpa.free(base_x);
+            const base_size = dof_handler.mesh.base.index_size;
 
-            const base_b: []f64 = try grid.gpa.alloc(f64, ndofs_base);
-            errdefer grid.gpa.free(base_b);
+            const ndofs_base = IndexSpace.fromSize(Index.scaled(base_size, dof_handler.mesh.tile_width)).total();
 
-            const scratch = try grid.gpa.alloc(f64, ndofs);
-            errdefer grid.gpa.free(scratch);
+            const base_x: []f64 = try allocator.alloc(f64, ndofs_base);
+            errdefer allocator.free(base_x);
+
+            const base_b: []f64 = try allocator.alloc(f64, ndofs_base);
+            errdefer allocator.free(base_b);
+
+            const scratch = try allocator.alloc(f64, ndofs);
+            errdefer allocator.free(scratch);
 
             return .{
-                .mesh = grid,
+                .gpa = allocator,
+                .dof_handler = dof_handler,
+                .base_size = base_size,
                 .base_solver = base_solver,
                 .base_x = base_x,
                 .base_b = base_b,
@@ -48,11 +58,9 @@ pub fn MultigridSolver(comptime N: usize, comptime O: usize, comptime BaseSolver
         }
 
         pub fn deinit(self: *Self) void {
-            const gpa = self.mesh.gpa;
-
-            gpa.free(self.base_x);
-            gpa.free(self.base_b);
-            gpa.free(self.scratch);
+            self.gpa.free(self.base_x);
+            self.gpa.free(self.base_b);
+            self.gpa.free(self.scratch);
         }
 
         pub fn solve(
@@ -65,19 +73,19 @@ pub fn MultigridSolver(comptime N: usize, comptime O: usize, comptime BaseSolver
             // Alias
             const T = @TypeOf(oper);
 
-            if (comptime !(operator.isMeshOperator(N, O)(T))) {
-                @compileError("Oper must satisfy isMeshOperator trait.");
+            if (comptime !(operator.isMeshOperator(N, O)(T) and operator.isMeshBoundary(N)(T))) {
+                @compileError("Oper must satisfy isMeshOperator and isMeshBoundary traits.");
             }
 
             if (comptime system.systemFieldCount(T.System) != 1) {
                 @compileError("The multigrid solver only supports systems with 1 field currently.");
             }
 
-            const field_name: []const u8 = comptime system.systemFieldNames(T)[0];
+            const field_name: []const u8 = comptime system.systemFieldNames(T.System)[0];
             const x_field: []f64 = @field(x, field_name);
             const b_field: []const f64 = @field(b, field_name);
 
-            const stencil_space = self.baseStencilSpace();
+            const stencil_space = self.dof_handler.mesh.baseStencilSpace();
 
             // Fill base
             {
@@ -105,23 +113,23 @@ pub fn MultigridSolver(comptime N: usize, comptime O: usize, comptime BaseSolver
                 var linear: usize = 0;
 
                 while (cells.next()) |cell| : (linear += 1) {
-                    stencil_space.setValue(cell, x_field, self.base_x[linear]);
+                    stencil_space.cellSpace().setValue(cell, x_field, self.base_x[linear]);
                 }
             }
         }
 
         fn BaseLinearMap(comptime T: type) type {
-            const field_name: []const u8 = comptime system.systemFieldNames(T)[0];
+            const field_name: []const u8 = comptime system.systemFieldNames(T.System)[0];
 
             return struct {
                 self: *const Self,
                 oper: T,
                 context: system.SystemSliceConst(T.Context),
 
-                pub fn apply(wrapper: BaseLinearMap, output: []f64, input: []const f64) void {
+                pub fn apply(wrapper: @This(), output: []f64, input: []const f64) void {
                     // Aliases
-                    const self = wrapper.self;
-                    const stencil_space = self.mesh.baseStencilSpace();
+                    const self: *const Self = wrapper.self;
+                    const stencil_space = self.dof_handler.mesh.baseStencilSpace();
 
                     // Fill scratch spell
                     {
@@ -133,29 +141,33 @@ pub fn MultigridSolver(comptime N: usize, comptime O: usize, comptime BaseSolver
                         }
                     }
 
-                    // TODO fill boundaries of scratch.
+                    // Fill base boundary
+                    {
+                        var sys: system.SystemSlice(T.System) = undefined;
+                        @field(sys, field_name) = self.scratch;
+
+                        self.dof_handler.fillBaseBoundary(wrapper.oper, sys);
+                    }
 
                     // Apply operator
                     {
                         var cells = stencil_space.cellSpace().cells();
                         var linear: usize = 0;
 
-                        var operated: system.SystemSliceConst(T.System) = undefined;
-                        @field(operated, field_name) = self.scratch;
+                        var sys: system.SystemSliceConst(T.System) = undefined;
+                        @field(sys, field_name) = self.scratch;
 
                         while (cells.next()) |cell| : (linear += 1) {
-                            stencil_space.cellSpace().setValue(cell, self.scratch, input[linear]);
-
-                            const engine = system.EngineType(N, O, T){
+                            const engine = operator.EngineType(N, O, T){
                                 .inner = .{
-                                    .space = self.stencil_space,
+                                    .space = stencil_space,
                                     .cell = cell,
                                 },
-                                .context = self.context,
-                                .operated = operated,
+                                .context = wrapper.context,
+                                .operated = sys,
                             };
 
-                            output[linear] = @field(self.oper.apply(engine), field_name);
+                            output[linear] = @field(wrapper.oper.apply(engine), field_name);
                         }
                     }
                 }

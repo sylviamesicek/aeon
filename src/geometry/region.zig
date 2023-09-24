@@ -110,7 +110,7 @@ pub fn Region(comptime N: usize) type {
                         switch (self.sides[i]) {
                             .left => result[i] = 0,
                             .right => result[i] = @as(isize, @intCast(self.block[i])) - 1,
-                            else => result[i] = @as(isize, cart[i]),
+                            else => result[i] = @as(isize, @intCast(cart[i])),
                         }
                     }
 

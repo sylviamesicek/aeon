@@ -20,6 +20,7 @@ const system = @import("../system.zig");
 // submodules
 
 const boundary = @import("boundary.zig");
+const multigrid = @import("multigrid.zig");
 const operator = @import("operator.zig");
 
 // Public Exports
@@ -35,6 +36,8 @@ pub const EngineType = operator.EngineType;
 pub const isMeshFunction = operator.isMeshFunction;
 pub const isMeshOperator = operator.isMeshOperator;
 pub const isMeshBoundary = operator.isMeshBoundary;
+
+pub const MultigridSolver = multigrid.MultigridSolver;
 
 // *************************
 // Dof Handler *************
@@ -84,7 +87,7 @@ pub fn DofHandler(comptime N: usize, comptime O: usize) type {
             comptime full: bool,
             block_map: []const usize,
             bound: anytype,
-            sys: @TypeOf(bound).System,
+            sys: system.SystemSlice(@TypeOf(bound).System),
         ) void {
             _ = sys;
             const T = @TypeOf(bound);
@@ -103,9 +106,9 @@ pub fn DofHandler(comptime N: usize, comptime O: usize) type {
         pub fn fillBaseBoundary(
             self: *const Self,
             bound: anytype,
-            sys: @TypeOf(bound).System,
+            sys: system.SystemSlice(@TypeOf(bound).System),
         ) void {
-            const base_sys = system.systemStructSlice(sys, 0, self.base.cell_total);
+            const base_sys = system.systemStructSlice(sys, 0, self.mesh.base.cell_total);
 
             const stencil_space = self.mesh.baseStencilSpace();
             const regions = comptime Region.orderedRegions();
@@ -121,7 +124,7 @@ pub fn DofHandler(comptime N: usize, comptime O: usize) type {
             level: usize,
             block_map: []const usize,
             bound: anytype,
-            sys: @TypeOf(bound).System,
+            sys: system.SystemSlice(@TypeOf(bound).System),
         ) void {
             const target: *const Level = self.mesh.getLevel(level);
             const index_size = target.index_size;
@@ -331,7 +334,7 @@ pub fn DofHandler(comptime N: usize, comptime O: usize) type {
         }
 
         pub fn fillBoundaryRegion(
-            comptime region: Region(N),
+            comptime region: Region,
             comptime full: bool,
             stencil_space: StencilSpace,
             bound: anytype,
@@ -339,8 +342,8 @@ pub fn DofHandler(comptime N: usize, comptime O: usize) type {
         ) void {
             const T = @TypeOf(bound);
 
-            if (!isMeshBoundary(T)) {
-                @compileError("bound must satisfy the isMeshBoundary trait.");
+            if (comptime !isMeshBoundary(N)(T)) {
+                @compileError("Bound must satisfy the isMeshBoundary trait.");
             }
 
             var inner_face_cells = region.innerFaceIndices(stencil_space.size);
@@ -348,7 +351,7 @@ pub fn DofHandler(comptime N: usize, comptime O: usize) type {
             while (inner_face_cells.next()) |cell| {
                 comptime var extent_indices = region.extentOffsets(if (full) 2 * O else O);
 
-                inline while (extent_indices.next()) |extents| {
+                inline while (comptime extent_indices.next()) |extents| {
                     // Compute target cell for the given extent indices
                     var target: [N]isize = undefined;
 
@@ -378,14 +381,16 @@ pub fn DofHandler(comptime N: usize, comptime O: usize) type {
 
                     inline for (comptime system.systemFieldNames(T.System)) |name| {
                         var v: f64 = 0.0;
-                        var normals: [N]usize = undefined;
+                        var normals: [N]f64 = undefined;
                         var rhs: f64 = 0.0;
 
                         for (0..N) |i| {
                             if (extents[i] != 0) {
-                                v += conditions[i].value;
-                                normals[i] = conditions[i].normal;
-                                rhs += conditions[i].rhs;
+                                const condition: BoundaryCondition = @field(conditions[i], name);
+
+                                v += condition.value;
+                                normals[i] = condition.normal;
+                                rhs += condition.rhs;
                             }
                         }
 
@@ -394,7 +399,7 @@ pub fn DofHandler(comptime N: usize, comptime O: usize) type {
 
                         inline for (0..N) |i| {
                             if (extents[i] != 0) {
-                                var ranks: [N]usize = [1]usize{0} ** N;
+                                comptime var ranks: [N]usize = [1]usize{0} ** N;
                                 ranks[i] = 1;
 
                                 sum += normals[i] * stencil_space.boundaryDerivative(ranks, extents, cell, @field(sys, name));
@@ -1126,6 +1131,14 @@ pub fn DofHandler(comptime N: usize, comptime O: usize) type {
             }
 
             try grid.write(out_stream);
+        }
+
+        // **********************
+        // Helpers **************
+        // **********************
+
+        pub fn ndofs(self: *const Self) usize {
+            return self.mesh.cell_total;
         }
     };
 }
