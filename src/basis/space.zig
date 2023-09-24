@@ -422,7 +422,7 @@ pub fn StencilSpace(comptime N: usize, comptime O: usize) type {
             inline for (0..N) |i| {
                 if (ranks[i] > 0) {
                     if (extents[i] > 0) {
-                        result *= comptime stencils[i][2 * O + absSigned(extents[i]) - 1];
+                        result *= comptime stencils[i][2 * O + extents[i] - 1];
                     } else {
                         result *= comptime stencils[i][0];
                     }

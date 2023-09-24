@@ -857,18 +857,133 @@ pub fn DofHandler(comptime N: usize, comptime O: usize) type {
 
         pub fn apply(
             self: *const Self,
-            func: anytype,
-            result: system.SystemSlice(@TypeOf(func).Output),
-            input: system.SystemSliceConst(@TypeOf(func).Input),
+            oper: anytype,
+            result: system.SystemSlice(@TypeOf(oper).System),
+            sys: system.SystemSliceConst(@TypeOf(oper).System),
+            context: system.SystemSliceConst(@TypeOf(oper).Context),
         ) void {
-            self.applyBase(func, result, input);
+            self.applyBase(oper, result, sys, context);
 
             for (0..self.mesh.active_levels) |level| {
-                self.applyLevel(level, func, result, input);
+                self.applyLevel(level, oper, result, sys, context);
             }
         }
 
         pub fn applyBase(
+            self: *const Self,
+            oper: anytype,
+            result: system.SystemSlice(@TypeOf(oper).System),
+            sys: system.SystemSliceConst(@TypeOf(oper).System),
+            context: system.SystemSliceConst(@TypeOf(oper).Context),
+        ) void {
+            if (comptime !(operator.isMeshOperator(N, O)(@TypeOf(oper)))) {
+                @compileError("Func must satisfy isMeshOperator trait.");
+            }
+
+            const base_offset = 0;
+            const base_total = self.mesh.base.cell_total;
+
+            const base_result = system.systemStructSlice(result, base_offset, base_total);
+            const base_sys = system.systemStructSlice(sys, base_offset, base_total);
+            const base_context = system.systemStructSlice(context, base_offset, base_total);
+
+            const stencil_space: StencilSpace = self.mesh.baseStencilSpace();
+
+            var cell_indices = stencil_space.cellSpace().cells();
+
+            while (cell_indices.next()) |cell| {
+                const engine = EngineType(N, O, @TypeOf(oper)){
+                    .inner = .{
+                        .space = stencil_space,
+                        .cell = cell,
+                    },
+                    .sys = base_sys,
+                    .context = base_context,
+                };
+
+                const val: system.SystemValue(@TypeOf(oper).System) = oper.apply(engine);
+
+                inline for (comptime system.systemFieldNames(@TypeOf(oper).System)) |name| {
+                    stencil_space.cellSpace().setValue(
+                        cell,
+                        @field(base_result, name),
+                        @field(val, name),
+                    );
+                }
+            }
+        }
+
+        pub fn applyLevel(
+            self: *const Self,
+            level: usize,
+            oper: anytype,
+            result: system.SystemSlice(@TypeOf(oper).System),
+            sys: system.SystemSliceConst(@TypeOf(oper).System),
+            context: system.SystemSliceConst(@TypeOf(oper).Context),
+        ) void {
+            if (comptime !(operator.isMeshOperator(N, O)(@TypeOf(oper)))) {
+                @compileError("Func must satisfy isMeshOperator trait.");
+            }
+
+            const target: *const Level = self.mesh.getLevel(level);
+
+            const level_offset = target.cell_offset;
+            const level_total = target.cell_total;
+
+            const level_result = system.systemStructSlice(result, level_offset, level_total);
+            const level_sys = system.systemStructSlice(sys, level_offset, level_total);
+            const level_context = system.systemStructSlice(context, level_offset, level_total);
+
+            for (target.blocks.items(.cell_offset), target.blocks.items(.cell_total), 0..) |offset, total, id| {
+                const block_result = system.systemStructSlice(level_result, offset, total);
+                const block_sys = system.systemStructSlice(level_sys, offset, total);
+                const block_context = system.systemStructSlice(level_context, offset, total);
+
+                const stencil_space: StencilSpace = self.mesh.levelStencilSpace(level, id);
+
+                var cell_indices = stencil_space.cellSpace().cells();
+
+                while (cell_indices.next()) |cell| {
+                    const engine = EngineType(N, O, @TypeOf(oper)){
+                        .inner = .{
+                            .space = stencil_space,
+                            .cell = cell,
+                        },
+                        .context = block_context,
+                        .sys = block_sys,
+                    };
+
+                    const val: system.SystemValue(@TypeOf(oper).System) = oper.apply(engine);
+
+                    inline for (comptime system.systemFieldNames(@TypeOf(oper).System)) |name| {
+                        stencil_space.cellSpace().setValue(
+                            cell,
+                            @field(block_result, name),
+                            @field(val, name),
+                        );
+                    }
+                }
+            }
+        }
+
+        // *************************
+        // Projection **************
+        // *************************
+
+        pub fn project(
+            self: *const Self,
+            func: anytype,
+            result: system.SystemSlice(@TypeOf(func).Output),
+            input: system.SystemSliceConst(@TypeOf(func).Input),
+        ) void {
+            self.projectBase(func, result, input);
+
+            for (0..self.mesh.active_levels) |level| {
+                self.projectLevel(level, func, result, input);
+            }
+        }
+
+        pub fn projectBase(
             self: *const Self,
             func: anytype,
             result: system.SystemSlice(@TypeOf(func).Output),
@@ -909,7 +1024,7 @@ pub fn DofHandler(comptime N: usize, comptime O: usize) type {
             }
         }
 
-        pub fn applyLevel(
+        pub fn projectLevel(
             self: *const Self,
             level: usize,
             func: anytype,
@@ -962,7 +1077,7 @@ pub fn DofHandler(comptime N: usize, comptime O: usize) type {
         // Output ******************
         // *************************
 
-        fn GridData(comptime System: type, comptime NVertices: usize) type {
+        fn GridData(comptime System: type, comptime NVertices: usize, comptime full: bool) type {
             const field_count = system.systemFieldCount(System);
             return struct {
                 positions: ArrayListUnmanaged(f64) = .{},
@@ -986,7 +1101,7 @@ pub fn DofHandler(comptime N: usize, comptime O: usize) type {
                     offset: usize,
                     total: usize,
                 ) !void {
-                    const cell_size = stencil.size;
+                    const cell_size = if (full) add(stencil.size, splat(2 * O)) else stencil.size;
                     const point_size = add(cell_size, splat(1));
 
                     const cell_space: IndexSpace = IndexSpace.fromSize(cell_size);
@@ -998,11 +1113,16 @@ pub fn DofHandler(comptime N: usize, comptime O: usize) type {
                     try data.vertices.ensureUnusedCapacity(allocator, NVertices * cell_space.total());
 
                     // Fill positions and vertices
-
                     var points = point_space.cartesianIndices();
 
                     while (points.next()) |point| {
-                        const pos = stencil.vertexPosition(toSigned(point));
+                        var vertex: [N]isize = undefined;
+
+                        for (0..N) |i| {
+                            vertex[i] = @as(isize, @intCast(point[i])) - @as(isize, @intCast(2 * O));
+                        }
+
+                        const pos = stencil.vertexPosition(vertex);
                         for (0..N) |i| {
                             data.positions.appendAssumeCapacity(pos[i]);
                         }
@@ -1062,17 +1182,23 @@ pub fn DofHandler(comptime N: usize, comptime O: usize) type {
 
                     const block_field = system.systemStructSlice(data.input, offset, total);
 
-                    var cells = cell_space.cartesianIndices();
+                    var cells = if (full) stencil.cellSpace().fullCells() else stencil.cellSpace().cells();
+
                     while (cells.next()) |cell| {
                         inline for (comptime system.systemFieldNames(System), 0..) |name, id| {
-                            data.fields[id].appendAssumeCapacity(stencil.value(toSigned(cell), @field(block_field, name)));
+                            data.fields[id].appendAssumeCapacity(
+                                stencil.value(
+                                    cell,
+                                    @field(block_field, name),
+                                ),
+                            );
                         }
                     }
                 }
             };
         }
 
-        pub fn writeVtk(self: *const Self, sys: anytype, out_stream: anytype) !void {
+        pub fn writeVtk(self: *const Self, comptime full: bool, sys: anytype, out_stream: anytype) !void {
             if (comptime !(system.isSystemSliceConst(@TypeOf(sys)) or system.isSystemSlice(@TypeOf(sys)))) {
                 @compileError("Sys must satisfy isSystemSliceConst trait.");
             }
@@ -1090,7 +1216,7 @@ pub fn DofHandler(comptime N: usize, comptime O: usize) type {
             };
 
             // Build data
-            var data = GridData(@TypeOf(sys), cell_type.nvertices()){ .input = sys };
+            var data = GridData(@TypeOf(sys), cell_type.nvertices(), full){ .input = sys };
             defer data.deinit(self.gpa);
 
             // Build base

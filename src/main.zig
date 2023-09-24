@@ -172,7 +172,7 @@ pub fn ScalarFieldProblem(comptime O: usize) type {
                 .sigma = 1.0,
             };
 
-            dof_handler.apply(seed_func, .{ .seed = seed }, .{});
+            dof_handler.project(seed_func, .{ .seed = seed }, .{});
 
             var metric: []f64 = try allocator.alloc(f64, ndofs);
             defer allocator.free(metric);
@@ -195,7 +195,106 @@ pub fn ScalarFieldProblem(comptime O: usize) type {
             const file = try std.fs.cwd().createFile("output/seed.vtu", .{});
             defer file.close();
 
-            try dof_handler.writeVtk(.{ .seed = seed, .metric = metric }, file.writer());
+            try dof_handler.writeVtk(false, .{ .seed = seed, .metric = metric }, file.writer());
+        }
+    };
+}
+
+pub fn ApplyTest(comptime O: usize) type {
+    const N = 2;
+    return struct {
+        const math = std.math;
+
+        const BoundaryCondition = dofs.BoundaryCondition;
+        const DofHandler = dofs.DofHandler(N, O);
+        const MultigridSolver = dofs.MultigridSolver(N, O, BiCGStabSolver);
+
+        const Face = geometry.Face(N);
+        const IndexSpace = geometry.IndexSpace(N);
+        const Index = index.Index(N);
+
+        const BiCGStabSolver = lac.BiCGStabSolver(2);
+
+        const Mesh = mesh.Mesh(N, O);
+
+        pub const MySystem = enum {
+            sys,
+        };
+
+        // Function
+        pub const Function = struct {
+            pub const Input = enum {};
+            pub const Output = MySystem;
+
+            pub fn value(_: Function, engine: dofs.FunctionEngine(N, O, Input)) system.SystemValue(Output) {
+                const pos = engine.position();
+
+                return .{
+                    .sys = math.sin(pos[0]) * math.sin(pos[1]),
+                };
+            }
+        };
+
+        pub const PoissonOperator = struct {
+            pub const Context = enum {};
+            pub const System = MySystem;
+
+            pub fn apply(_: PoissonOperator, engine: dofs.OperatorEngine(N, O, Context, System)) system.SystemValue(System) {
+                return .{
+                    .sys = engine.laplacianSys(.sys),
+                };
+            }
+
+            pub fn applyDiagonal(_: PoissonOperator, engine: dofs.OperatorEngine(N, O, Context, System)) system.SystemValue(System) {
+                return .{
+                    .sys = engine.laplacianDiagonal(),
+                };
+            }
+
+            pub fn condition(_: PoissonOperator, pos: [N]f64, face: Face) dofs.SystemBoundaryCondition(System) {
+                _ = face;
+                _ = pos;
+                return .{
+                    .sys = BoundaryCondition.diritchlet(0.0),
+                };
+            }
+        };
+
+        // Run
+
+        fn run(allocator: Allocator) !void {
+            var grid = Mesh.init(allocator, .{
+                .physical_bounds = .{
+                    .origin = [2]f64{ 0.0, 0.0 },
+                    .size = [2]f64{ 2.0 * math.pi, 2.0 * math.pi },
+                },
+                .tile_width = 16,
+                .index_size = [2]usize{ 8, 8 },
+            });
+            defer grid.deinit();
+
+            var dof_handler = DofHandler.init(allocator, &grid);
+            defer dof_handler.deinit();
+
+            const ndofs: usize = dof_handler.ndofs();
+
+            var function: []f64 = try allocator.alloc(f64, ndofs);
+            defer allocator.free(function);
+
+            dof_handler.project(Function{}, .{ .sys = function }, .{});
+
+            const oper = PoissonOperator{};
+
+            dof_handler.fillBaseBoundary(oper, .{
+                .sys = function,
+            });
+
+            const file = try std.fs.cwd().createFile("output/apply.vtu", .{});
+            defer file.close();
+
+            try dof_handler.writeVtk(true, .{
+                .function = function,
+            }, file.writer());
         }
     };
 }
@@ -213,7 +312,9 @@ pub fn main() !void {
     }
 
     // Run main
-    try ScalarFieldProblem(2).run(gpa.allocator());
+    // try ScalarFieldProblem(2).run(gpa.allocator());
+
+    try ApplyTest(2).run(gpa.allocator());
 }
 
 test {

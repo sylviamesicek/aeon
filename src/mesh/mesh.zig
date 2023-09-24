@@ -680,7 +680,7 @@ test "mesh regridding" {
     var mesh: Mesh2 = Mesh2.init(allocator, config);
     defer mesh.deinit();
 
-    var tags: []bool = try allocator.alloc(bool, mesh.tileTotal());
+    var tags: []bool = try allocator.alloc(bool, mesh.tile_total);
     defer allocator.free(tags);
 
     // Tag all

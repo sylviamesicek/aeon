@@ -189,19 +189,19 @@ pub fn FunctionEngine(comptime N: usize, comptime O: usize, comptime Input: type
 
 /// An `Engine` which can compute operations on elements of a given context system, as well as on
 /// a given operated system
-pub fn OperatorEngine(comptime N: usize, comptime O: usize, comptime Context: type, comptime Operated: type) type {
+pub fn OperatorEngine(comptime N: usize, comptime O: usize, comptime Context: type, comptime System: type) type {
     if (!system.isSystem(Context)) {
         @compileError("Context must satisfy isSystem trait.");
     }
 
-    if (!system.isSystem(Operated)) {
+    if (!system.isSystem(System)) {
         @compileError("Operated must satisfy isSystem trait.");
     }
 
     return struct {
         inner: Engine(N, O),
         context: system.SystemSliceConst(Context),
-        operated: system.SystemSliceConst(Operated),
+        sys: system.SystemSliceConst(System),
 
         // Aliases
         const Self = @This();
@@ -235,26 +235,26 @@ pub fn OperatorEngine(comptime N: usize, comptime O: usize, comptime Context: ty
         }
 
         /// Returns the value of the field at the current cell.
-        pub fn valueOp(self: Self, comptime field: Operated) f64 {
-            const f: []const f64 = @field(self.operated, @tagName(field));
+        pub fn valueSys(self: Self, comptime field: System) f64 {
+            const f: []const f64 = @field(self.sys, @tagName(field));
             return self.inner.value(f);
         }
 
         /// Returns the value of the field at the current cell.
-        pub fn gradientOp(self: Self, comptime field: Operated) [N]f64 {
-            const f: []const f64 = @field(self.operated, @tagName(field));
+        pub fn gradientSys(self: Self, comptime field: System) [N]f64 {
+            const f: []const f64 = @field(self.sys, @tagName(field));
             return self.inner.gradient(f);
         }
 
         /// Returns the value of the field at the current cell.
-        pub fn hessianOp(self: Self, comptime field: Operated) [N][N]f64 {
-            const f: []const f64 = @field(self.operated, @tagName(field));
+        pub fn hessianSys(self: Self, comptime field: System) [N][N]f64 {
+            const f: []const f64 = @field(self.sys, @tagName(field));
             return self.inner.hessian(f);
         }
 
         /// Returns the value of the field at the current cell.
-        pub fn laplacianOp(self: Self, comptime field: Operated) f64 {
-            const f: []const f64 = @field(self.operated, @tagName(field));
+        pub fn laplacianSys(self: Self, comptime field: System) f64 {
+            const f: []const f64 = @field(self.sys, @tagName(field));
             return self.inner.laplacian(f);
         }
 

@@ -281,7 +281,7 @@ test "region indices" {
 
     var inner_indices = region.innerFaceIndices(block);
 
-    try expectEqualSlices(usize, &[_]usize{ 1, 0 }, &inner_indices.next().?);
+    try expectEqualSlices(isize, &[_]isize{ 1, 0 }, &inner_indices.next().?);
     try expect(inner_indices.next() == null);
 
     var offsets = region.extentOffsets(2);
