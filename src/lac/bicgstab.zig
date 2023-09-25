@@ -8,320 +8,185 @@ const IdentityMap = lac.IdentityMap;
 const isLinearMap = lac.isLinearMap;
 const isLinearSolver = lac.isLinearSolver;
 
-/// A solver which uses the Bi-conjugate gradient method allong with `L` iterations of
-/// GMRES to smooth the solution vector between steps.
-pub fn BiCGStabSolver(comptime L: usize) type {
-    const zdim: usize = L + 1;
-    return struct {
-        allocator: Allocator,
-        ndofs: usize,
-        max_iters: usize,
-        tolerance: f64,
+pub const BiCGStabSolver = struct {
+    allocator: Allocator,
+    ndofs: usize,
+    max_iters: usize,
+    tolerance: f64,
 
-        // Scratch vectors
-        rtld: []f64,
-        bp: []f64,
-        t: []f64,
-        tp: []f64,
-        xp: []f64,
+    // Scratch vectors
+    rg: []f64,
+    rh: []f64,
+    pg: []f64,
+    ph: []f64,
+    sg: []f64,
+    sh: []f64,
+    tg: []f64,
+    vg: []f64,
+    tp: []f64,
 
-        // Used for GMRES smoothing
-        r: [zdim][]f64,
-        u: [zdim][]f64,
+    const Self = @This();
 
-        const Self = @This();
+    pub fn init(allocator: Allocator, ndofs: usize, max_iters: usize, tolerance: f64) !Self {
+        const rg: []f64 = try allocator.alloc(f64, ndofs);
+        errdefer allocator.free(rg);
+        const rh: []f64 = try allocator.alloc(f64, ndofs);
+        errdefer allocator.free(rh);
+        const pg: []f64 = try allocator.alloc(f64, ndofs);
+        errdefer allocator.free(pg);
+        const ph: []f64 = try allocator.alloc(f64, ndofs);
+        errdefer allocator.free(ph);
+        const sg: []f64 = try allocator.alloc(f64, ndofs);
+        errdefer allocator.free(sg);
+        const sh: []f64 = try allocator.alloc(f64, ndofs);
+        errdefer allocator.free(sh);
+        const tg: []f64 = try allocator.alloc(f64, ndofs);
+        errdefer allocator.free(tg);
+        const vg: []f64 = try allocator.alloc(f64, ndofs);
+        errdefer allocator.free(vg);
+        const tp: []f64 = try allocator.alloc(f64, ndofs);
+        errdefer allocator.free(tp);
 
-        pub fn init(allocator: Allocator, ndofs: usize, max_iters: usize, tolerance: f64) !Self {
-            const rtld: []f64 = try allocator.alloc(f64, ndofs);
-            errdefer allocator.free(rtld);
+        return Self{
+            .allocator = allocator,
+            .ndofs = ndofs,
+            .max_iters = max_iters,
+            .tolerance = tolerance,
 
-            const bp: []f64 = try allocator.alloc(f64, ndofs);
-            errdefer allocator.free(bp);
+            .rg = rg,
+            .rh = rh,
+            .pg = pg,
+            .ph = ph,
+            .sg = sg,
+            .sh = sh,
+            .tg = tg,
+            .vg = vg,
+            .tp = tp,
+        };
+    }
 
-            const t: []f64 = try allocator.alloc(f64, ndofs);
-            errdefer allocator.free(t);
+    pub fn deinit(self: *Self) void {
+        self.allocator.free(self.rg);
+        self.allocator.free(self.rh);
+        self.allocator.free(self.pg);
+        self.allocator.free(self.ph);
+        self.allocator.free(self.sg);
+        self.allocator.free(self.sh);
+        self.allocator.free(self.tg);
+        self.allocator.free(self.vg);
+        self.allocator.free(self.tp);
+    }
 
-            const tp: []f64 = try allocator.alloc(f64, ndofs);
-            errdefer allocator.free(tp);
+    pub fn solve(self: *const Self, oper: anytype, x: []f64, b: []const f64) void {
+        assert(x.len == self.ndofs);
+        assert(b.len == self.ndofs);
 
-            const xp: []f64 = try allocator.alloc(f64, ndofs);
-            errdefer allocator.free(xp);
+        // Set termination tolerance
+        oper.apply(self.tp, x);
 
-            var r: [zdim][]f64 = [1][]f64{&[_]f64{}} ** zdim;
-            var u: [zdim][]f64 = [1][]f64{&[_]f64{}} ** zdim;
+        for (0..self.ndofs) |i| {
+            self.rg[i] = b[i] - self.tp[i];
+        }
 
-            errdefer {
-                for (0..zdim) |i| {
-                    allocator.free(r[i]);
-                    allocator.free(u[i]);
+        @memcpy(self.rh, self.rg);
+        @memset(self.sh, 0.0);
+        @memset(self.ph, 0.0);
+
+        var residual = norm2(self.rg);
+        const tol = residual * @fabs(self.tolerance);
+
+        var iter: usize = 0;
+        var rho0: f64 = 0.0;
+        var rho1: f64 = 0.0;
+        var pra: f64 = 0.0;
+        var prb: f64 = 0.0;
+        var prc: f64 = 0.0;
+
+        while (iter < self.max_iters) : (iter += 1) {
+            std.debug.print("Iteration {}\n", .{iter});
+
+            rho1 = dot(self.rg, self.rh);
+
+            if (rho1 == 0.0) {
+                break;
+            }
+
+            if (iter == 0) {
+                @memcpy(self.pg, self.rg);
+            } else {
+                prb = (rho1 * pra) / (rho0 * prc);
+
+                for (0..self.ndofs) |i| {
+                    self.pg[i] = self.rg[i] + prb * (self.pg[i] - prc * self.vg[i]);
                 }
             }
 
-            for (0..zdim) |i| {
-                r[i] = try allocator.alloc(f64, ndofs);
-                u[i] = try allocator.alloc(f64, ndofs);
-            }
+            rho0 = rho1;
 
-            return Self{
-                .allocator = allocator,
-                .ndofs = ndofs,
-                .max_iters = max_iters,
-                .tolerance = tolerance,
+            // Identity PC
+            @memcpy(self.ph, self.pg);
+            oper.apply(self.vg, self.ph);
 
-                .rtld = rtld,
-                .bp = bp,
-                .t = t,
-                .tp = tp,
-                .xp = xp,
-
-                .r = r,
-                .u = u,
-            };
-        }
-
-        pub fn deinit(self: *Self) void {
-            self.allocator.free(self.rtld);
-            self.allocator.free(self.bp);
-            self.allocator.free(self.t);
-            self.allocator.free(self.tp);
-            self.allocator.free(self.xp);
-
-            for (0..zdim) |i| {
-                self.allocator.free(self.r[i]);
-                self.allocator.free(self.u[i]);
-            }
-        }
-
-        pub fn solve(self: *const Self, oper: anytype, x: []f64, b: []const f64) void {
-            assert(x.len == self.ndofs);
-            assert(b.len == self.ndofs);
-
-            var tau: [zdim * zdim]f64 = undefined;
-            var gamma: [zdim]f64 = undefined;
-            var gamma1: [zdim]f64 = undefined;
-            var gamma2: [zdim]f64 = undefined;
-            var sigma: [zdim]f64 = undefined;
-
-            // Set termination tolerance
-            oper.apply(self.tp, x);
+            pra = rho1 / dot(self.rh, self.vg);
 
             for (0..self.ndofs) |i| {
-                self.r[0][i] = b[i] - self.tp[i];
+                self.sg[i] = self.rg[i] - pra * self.vg[i];
             }
 
-            // Set initial guesses
-            @memcpy(self.rtld, self.r[0]);
-            @memcpy(self.bp, self.r[0]);
-            @memcpy(self.xp, x);
-            @memset(self.u[0], 0.0);
-
-            var nrm2: f64 = norm2(self.r[0]);
-            var ires: f64 = nrm2;
-            _ = ires;
-            var iter: usize = 0;
-
-            end: {
-                var finish_flag: bool = false;
-
-                if (nrm2 == 0.0) {
-                    finish_flag = true;
+            if (norm2(self.sg) <= 1e-30) {
+                for (0..self.ndofs) |i| {
+                    x[i] = x[i] + pra * self.ph[i];
                 }
 
-                if (finish_flag) break :end;
+                oper.apply(self.tp, x);
 
-                // Init
-                var tol: f64 = @fabs(self.tolerance) * nrm2;
-                var alpha: f64 = 0.0;
-                var beta: f64 = 0.0;
-                var omega: f64 = 1.0;
-                var rho0: f64 = 1.0;
-                var rho1: f64 = 0.0;
-
-                while (iter < self.max_iters) : (iter += 1) {
-                    // BiCG Part
-                    // rho0 = -w*rho0
-                    rho0 = -omega * rho0;
-
-                    for (0..L) |j| {
-                        iter += 1;
-
-                        // rho1 = <rtld, r[j]>
-                        rho1 = dot(self.rtld, self.r[j]);
-
-                        // Test for breakdown
-                        if (@fabs(rho1) == 0.0) {
-                            // Precondition (Not implemented yet)
-                            // @memcpy(self.t, self.x);
-                            // @memset(self.t, 0.0);
-
-                            for (x, self.xp) |*xval, xpval| {
-                                xval.* += xpval;
-                            }
-
-                            finish_flag = true;
-                        }
-
-                        if (finish_flag) break :end;
-
-                        // beta = alpha * (rho1/rho0)
-                        // rho0 = rho1
-                        beta = alpha * (rho1 / rho0);
-                        rho0 = rho1;
-
-                        // u[i] = r[i] - beta*u[i] from i in [0, j]
-                        for (0..(j + 1)) |i| {
-                            for (self.u[i], self.r[i]) |*uval, rval| {
-                                uval.* = -beta * uval.* + rval;
-                            }
-                        }
-
-                        // TODO Preconditioning
-
-                        // u[j + 1] = M^-1 * A * u[j]
-                        oper.apply(self.u[j + 1], self.u[j]);
-
-                        // nu = <rtld, u[j + 1]>
-                        const nu = dot(self.rtld, self.u[j + 1]);
-
-                        // Test for breakdown
-                        if (@fabs(nu) == 0.0) {
-                            for (x, self.xp) |*xval, xpval| {
-                                xval.* += xpval;
-                            }
-
-                            finish_flag = true;
-                        }
-
-                        // Alpha = rho1 / nu
-                        alpha = rho1 / nu;
-
-                        // x += alpha * u[0]
-                        for (x, self.u[0]) |*xval, uval| {
-                            xval.* += alpha * uval;
-                        }
-
-                        // r[i] = r[i] - alpha * u[i + 1] for i in [0, j]
-                        for (0..(j + 1)) |i| {
-                            for (self.r[i], self.u[i + 1]) |*rval, uval| {
-                                rval.* += -alpha * uval;
-                            }
-                        }
-
-                        nrm2 = norm2(self.r[0]);
-
-                        // Stopping condition
-                        if (nrm2 <= tol) {
-                            // Precondition (Not implemented yet)
-                            for (x, self.xp) |*xval, xpval| {
-                                xval.* += xpval;
-                            }
-
-                            finish_flag = true;
-                        }
-
-                        if (finish_flag) break :end;
-
-                        // r[j + 1] = M^-1 * A * r[j]
-                        oper.apply(self.r[j + 1], self.r[j]);
-                    }
-
-                    // MR Part
-                    var j: usize = 1;
-                    while (j <= L) : (j += 1) {
-                        var i: usize = 1;
-                        while (i <= j - 1) : (i += 1) {
-                            const nu = dot(self.r[j], self.r[i]) / sigma[i];
-                            tau[i * zdim + j] = nu;
-
-                            for (self.r[j], self.r[i]) |*rj, ri| {
-                                rj.* = rj.* - nu * ri;
-                            }
-                        }
-
-                        sigma[j] = dot(self.r[j], self.r[j]);
-                        const nu = dot(self.r[0], self.r[j]);
-                        gamma1[j] = nu / sigma[j];
-                    }
-
-                    gamma[L] = gamma1[L];
-                    omega = gamma[L];
-
-                    j = L - 1;
-                    while (j >= 1) : (j -= 1) {
-                        var nu: f64 = 0.0;
-                        var i: usize = j + 1;
-                        while (i <= L) : (i += 1) {
-                            nu += tau[j * zdim + i] * gamma[i];
-                        }
-                        gamma[j] = gamma1[j] - nu;
-                    }
-
-                    j = 1;
-                    while (j <= L - 1) : (j += 1) {
-                        var nu: f64 = 0.0;
-                        var i: usize = j + 1;
-                        while (i <= L - 1) : (i += 1) {
-                            nu += tau[j * zdim + i] * gamma[i + 1];
-                        }
-                        gamma2[j] = gamma[j + 1] + nu;
-                    }
-
-                    // Update
-                    axpby(gamma[1], self.r[0], 1, x);
-                    axpby(-gamma1[L], self.r[L], 1, self.r[0]);
-                    axpby(-gamma[L], self.u[L], 1, self.u[0]);
-
-                    j = 1;
-                    while (j <= L - 1) : (j += 1) {
-                        axpby(-gamma[j], self.u[j], 1, self.u[0]);
-                        axpby(gamma2[j], self.r[j], 1, x);
-                        axpby(-gamma1[j], self.r[j], 1, self.r[0]);
-                    }
-
-                    if (nrm2 < tol) {
-                        // Precondition (Not implemented yet)
-                        for (x, self.xp) |*xval, xpval| {
-                            xval.* += xpval;
-                        }
-
-                        finish_flag = true;
-                    }
-
-                    if (finish_flag) break :end;
+                for (0..self.ndofs) |i| {
+                    self.rg[i] = b[i] - self.tp[i];
                 }
+
+                residual = norm2(self.rg);
+
+                break;
             }
 
-            if (iter < self.max_iters) iter += 1;
+            @memcpy(self.sh, self.sg);
+            oper.apply(self.tg, self.sh);
 
-            // self.niters = iter;
-            // self.res = nrm2 / ires;
-        }
-
-        fn norm2(slice: []const f64) f64 {
-            var result: f64 = 0.0;
-
-            for (slice) |s| {
-                result += s * s;
+            prc = dot(self.tg, self.sg) / dot(self.tg, self.tg);
+            for (0..self.ndofs) |i| {
+                x[i] = x[i] + pra * self.ph[i] + prc * self.sh[i];
+                self.rg[i] = self.sg[i] - prc * self.tg[i];
             }
 
-            return result;
+            residual = norm2(self.rg);
+
+            if (residual <= tol) break;
         }
 
-        fn dot(u: []const f64, v: []const f64) f64 {
-            var result: f64 = 0.0;
-            for (u, v) |a, b| {
-                result += a * b;
-            }
-            return result;
-        }
+        if (iter < self.max_iters) iter += 1;
 
-        fn axpby(a: f64, x: []const f64, b: f64, y: []f64) void {
-            for (x, y) |xv, *yv| {
-                yv.* = xv * a + yv.* * b;
-            }
+        // self.niters = iter;
+        // self.res = nrm2 / ires;
+    }
+
+    fn norm2(slice: []const f64) f64 {
+        return dot(slice, slice);
+    }
+
+    fn dot(u: []const f64, v: []const f64) f64 {
+        var result: f64 = 0.0;
+        for (u, v) |a, b| {
+            result += a * b;
         }
-    };
-}
+        return result;
+    }
+
+    fn axpby(a: f64, x: []const f64, b: f64, y: []f64) void {
+        for (x, y) |xv, *yv| {
+            yv.* = xv * a + yv.* * b;
+        }
+    }
+};
 
 test "BiCGStab convergence" {
     const expectEqualSlices = std.testing.expectEqualSlices;
@@ -340,7 +205,7 @@ test "BiCGStab convergence" {
         b[i] = @floatFromInt(i);
     }
 
-    var solver: BiCGStabSolver(2) = try BiCGStabSolver(2).init(allocator, ndofs, 1000, 10e-10);
+    var solver: BiCGStabSolver = try BiCGStabSolver.init(allocator, ndofs, 1000, 10e-10);
     defer solver.deinit();
 
     solver.solve(IdentityMap{}, x, b);

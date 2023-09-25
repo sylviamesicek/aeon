@@ -81,11 +81,18 @@ pub fn ScalarFieldProblem(comptime O: usize) type {
                 const sigma2 = self.sigma * self.sigma;
 
                 const term1: f64 = 2 * self.amplitude;
+                _ = term1;
                 const term2 = 2 * rho2 * rho2 - 6 * rho2 * sigma2 + sigma2 * sigma2 + 2 * rho2 * z2;
+                _ = term2;
                 const term3 = @exp(-(rho2 + z2) / sigma2) / (sigma2 * sigma2 * sigma2);
+                _ = term3;
+
+                // return .{
+                //     .seed = term1 * term2 * term3,
+                // };
 
                 return .{
-                    .seed = term1 * term2 * term3,
+                    .seed = 1.0,
                 };
             }
         };
@@ -127,12 +134,16 @@ pub fn ScalarFieldProblem(comptime O: usize) type {
             }
 
             pub fn condition(_: MetricOperator, pos: [N]f64, face: Face) dofs.SystemBoundaryCondition(System) {
-                if (face.side == false) {
-                    return .{ .factor = BoundaryCondition.nuemann(0.0) };
-                } else {
-                    const r: f64 = @sqrt(pos[0] * pos[0] + pos[1] * pos[1]);
-                    return .{ .factor = BoundaryCondition.robin(1.0 / r, 1.0, 0.0) };
-                }
+                _ = face;
+                _ = pos;
+                return .{ .factor = BoundaryCondition.diritchlet(0.0) };
+
+                // if (face.side == false) {
+                //     return .{ .factor = BoundaryCondition.nuemann(0.0) };
+                // } else {
+                //     const r: f64 = @sqrt(pos[0] * pos[0] + pos[1] * pos[1]);
+                //     return .{ .factor = BoundaryCondition.robin(1.0 / r, 1.0, 0.0) };
+                // }
             }
         };
 
@@ -186,7 +197,7 @@ pub fn ScalarFieldProblem(comptime O: usize) type {
             const file = try std.fs.cwd().createFile("output/seed.vtu", .{});
             defer file.close();
 
-            try dof_handler.writeVtk(false, .{ .seed = seed, .metric = metric }, file.writer());
+            try dof_handler.writeVtk(true, .{ .seed = seed, .metric = metric }, file.writer());
         }
     };
 }
@@ -204,7 +215,7 @@ pub fn ApplyTest(comptime O: usize) type {
         const IndexSpace = geometry.IndexSpace(N);
         const Index = index.Index(N);
 
-        const BiCGStabSolver = lac.BiCGStabSolver(2);
+        const BiCGStabSolver = lac.BiCGStabSolver;
 
         const Mesh = mesh.Mesh(N, O);
 
@@ -233,9 +244,11 @@ pub fn ApplyTest(comptime O: usize) type {
 
             pub fn value(_: RhsFunction, engine: dofs.FunctionEngine(N, O, Input)) system.SystemValue(Output) {
                 const pos = engine.position();
+                _ = pos;
 
                 return .{
-                    .sys = -2 * math.sin(pos[0]) * math.sin(pos[1]),
+                    // .sys = -2 * math.sin(pos[0]) * math.sin(pos[1]),
+                    .sys = 1.0,
                 };
             }
         };
@@ -308,7 +321,7 @@ pub fn ApplyTest(comptime O: usize) type {
             dof_handler.apply(oper, .{ .sys = apply }, .{ .sys = solution }, .{});
 
             // Solver
-            var base_solver = try BiCGStabSolver.init(allocator, ndofs_reduced, 100, 10e-6);
+            var base_solver = try BiCGStabSolver.init(allocator, ndofs_reduced, 100, 10e-3);
             defer base_solver.deinit();
 
             var solver = try MultigridSolver.init(allocator, &dof_handler, &base_solver);
@@ -347,9 +360,9 @@ pub fn main() !void {
     }
 
     // Run main
-    try ScalarFieldProblem(2).run(gpa.allocator());
+    // try ScalarFieldProblem(2).run(gpa.allocator());
 
-    // try ApplyTest(2).run(gpa.allocator());
+    try ApplyTest(2).run(gpa.allocator());
 }
 
 test {

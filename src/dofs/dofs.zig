@@ -383,17 +383,11 @@ pub fn DofHandler(comptime N: usize, comptime O: usize) type {
                         var rhs: f64 = 0.0;
 
                         for (0..N) |i| {
-                            if (extents[i] > 0) {
+                            if (extents[i] != 0) {
                                 const condition: BoundaryCondition = @field(conditions[i], name);
 
                                 v += condition.value;
-                                normals[i] = condition.normal;
-                                rhs += condition.rhs;
-                            } else if (extents[i] < 0) {
-                                const condition: BoundaryCondition = @field(conditions[i], name);
-
-                                v += condition.value;
-                                normals[i] = -condition.normal;
+                                normals[i] = if (extents[i] > 0) condition.normal else -condition.normal;
                                 rhs += condition.rhs;
                             }
                         }

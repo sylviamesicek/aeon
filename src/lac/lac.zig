@@ -2,12 +2,14 @@ const std = @import("std");
 
 // Submodules
 const bicgstab = @import("bicgstab.zig");
+const bicgstabl = @import("bicgstabl.zig");
 
 // ************************
 // Linear Solvers *********
 // ************************
 
 pub const BiCGStabSolver = bicgstab.BiCGStabSolver;
+pub const BiCGStablSolver = bicgstabl.BiCGStablSolver;
 
 // ************************
 // Core traits and types **
@@ -62,6 +64,4 @@ pub const IdentityMap = struct {
 // Propogate testing ***
 // *********************
 
-test {
-    _ = bicgstab;
-}
+test {}
