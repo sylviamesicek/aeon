@@ -128,7 +128,7 @@ pub fn MultigridSolver(comptime N: usize, comptime O: usize, comptime BaseSolver
                 oper: T,
                 context: system.SystemSliceConst(T.Context),
 
-                pub fn apply(wrapper: @This(), output: []f64, input: []const f64) void {
+                pub fn apply(wrapper: *const @This(), output: []f64, input: []const f64) void {
                     // Aliases
                     const self: *const Self = wrapper.self;
                     const stencil_space = self.dof_handler.mesh.baseStencilSpace();
@@ -172,6 +172,10 @@ pub fn MultigridSolver(comptime N: usize, comptime O: usize, comptime BaseSolver
                             output[linear] = @field(wrapper.oper.apply(engine), field_name);
                         }
                     }
+                }
+
+                pub fn callback(_: *const @This(), iteration: usize, residual: f64, _: []const f64) void {
+                    std.debug.print("Iteration: {}, Residual: {}\n", .{ iteration, residual });
                 }
             };
         }

@@ -39,6 +39,10 @@ pub fn Mesh(comptime N: usize, comptime O: usize) type {
         physical_bounds: RealBox,
         /// The number of cells along each time edge.
         tile_width: usize,
+        /// The maximum number of tiles on one edge of a patch.
+        patch_max_tiles: usize,
+        /// The maximum number of tiles on one edge of a block
+        block_max_tiles: usize,
         /// Base level (after performing global_refinement).
         base: Base,
         /// Refined levels
@@ -61,11 +65,15 @@ pub fn Mesh(comptime N: usize, comptime O: usize) type {
             physical_bounds: RealBox,
             index_size: [N]usize,
             tile_width: usize,
+            patch_max_tiles: usize = 32,
+            block_max_tiles: usize = 32,
 
             /// Checks that the given mesh config is valid.
             pub fn check(self: Config) void {
                 assert(self.tile_width >= 1);
                 assert(self.tile_width >= 2 * O);
+                assert(self.patch_max_tiles >= self.block_max_tiles);
+                assert(self.block_max_tiles > 0);
                 for (0..N) |i| {
                     assert(self.index_size[i] > 0);
                     assert(self.physical_bounds.size[i] > 0.0);
@@ -118,6 +126,8 @@ pub fn Mesh(comptime N: usize, comptime O: usize) type {
                 .gpa = allocator,
                 .physical_bounds = config.physical_bounds,
                 .tile_width = config.tile_width,
+                .patch_max_tiles = config.patch_max_tiles,
+                .block_max_tiles = config.block_max_tiles,
                 .base = b,
                 .levels = .{},
                 .active_levels = 0,
@@ -260,9 +270,7 @@ pub fn Mesh(comptime N: usize, comptime O: usize) type {
 
         pub const RegridConfig = struct {
             max_levels: usize,
-            block_max_tiles: usize,
             block_efficiency: f64,
-            patch_max_tiles: usize,
             patch_efficiency: f64,
         };
 
@@ -486,7 +494,7 @@ pub fn Mesh(comptime N: usize, comptime O: usize) type {
                     var cppartitioner = try PartitionSpace.init(scratch, cpbounds.size, upclusters);
                     defer cppartitioner.deinit();
 
-                    try cppartitioner.build(cptags, config.patch_max_tiles, config.patch_efficiency);
+                    try cppartitioner.build(cptags, self.patch_max_tiles, config.patch_efficiency);
 
                     // Iterate computed patches
                     for (cppartitioner.partitions()) |patch| {
@@ -512,7 +520,7 @@ pub fn Mesh(comptime N: usize, comptime O: usize) type {
                         var ppartitioner = try PartitionSpace.init(scratch, pspace.size, &[_]IndexBox{});
                         defer ppartitioner.deinit();
 
-                        try ppartitioner.build(ptags, config.block_max_tiles, config.block_efficiency);
+                        try ppartitioner.build(ptags, self.block_max_tiles, config.block_efficiency);
 
                         // Offset blocks to be in global space
                         var pblocks: []IndexBox = try scratch.alloc(IndexBox, ppartitioner.partitions().len);
@@ -675,6 +683,8 @@ test "mesh regridding" {
         },
         .index_size = [_]usize{ 10, 10 },
         .tile_width = 16,
+        .block_max_tiles = 80,
+        .patch_max_tiles = 80,
     };
 
     var mesh: Mesh2 = Mesh2.init(allocator, config);
@@ -688,9 +698,7 @@ test "mesh regridding" {
 
     try mesh.regrid(tags, .{
         .max_levels = 1,
-        .block_max_tiles = 80,
         .block_efficiency = 0.7,
-        .patch_max_tiles = 80,
         .patch_efficiency = 0.1,
     });
 }

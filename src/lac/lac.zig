@@ -33,6 +33,22 @@ pub fn isLinearMap(comptime T: type) bool {
     return true;
 }
 
+/// Checks if a linear map has a callback. This is invoked after every "iteration" of a given method, providing\
+/// the user access to iteration number, residual error, and the current solution vector.
+pub fn hasLinearMapCallback(comptime T: type) bool {
+    if (!isLinearMap(T)) {
+        return false;
+    }
+
+    const hasFn = std.meta.trait.hasFn;
+
+    if (!(hasFn("callback")(T) and @TypeOf(T.callback) == fn (*const T, usize, f64, []const f64) void)) {
+        return false;
+    }
+
+    return true;
+}
+
 /// A trait which checks if a type is a linear solver. Such a type follows the following set of declarations.
 ///
 /// ```

@@ -211,25 +211,25 @@ pub fn OperatorEngine(comptime N: usize, comptime O: usize, comptime Context: ty
         }
 
         /// Returns the value of the field at the current cell.
-        pub fn value(self: Self, comptime field: Context) f64 {
+        pub fn valueCtx(self: Self, comptime field: Context) f64 {
             const f: []const f64 = @field(self.context, @tagName(field));
             return self.inner.value(f);
         }
 
         /// Returns the value of the field at the current cell.
-        pub fn gradient(self: Self, comptime field: Context) [N]f64 {
+        pub fn gradientCtx(self: Self, comptime field: Context) [N]f64 {
             const f: []const f64 = @field(self.context, @tagName(field));
             return self.inner.gradient(f);
         }
 
         /// Returns the value of the field at the current cell.
-        pub fn hessian(self: Self, comptime field: Context) [N][N]f64 {
+        pub fn hessianCtx(self: Self, comptime field: Context) [N][N]f64 {
             const f: []const f64 = @field(self.context, @tagName(field));
             return self.inner.hessian(f);
         }
 
         /// Returns the value of the field at the current cell.
-        pub fn laplacian(self: Self, comptime field: Context) f64 {
+        pub fn laplacianCtx(self: Self, comptime field: Context) f64 {
             const f: []const f64 = @field(self.context, @tagName(field));
             return self.inner.laplacian(f);
         }

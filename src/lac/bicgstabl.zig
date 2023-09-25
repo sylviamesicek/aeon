@@ -6,6 +6,7 @@ const lac = @import("lac.zig");
 
 const IdentityMap = lac.IdentityMap;
 const isLinearMap = lac.isLinearMap;
+const hasLinearMapCallback = lac.hasLinearMapCallback;
 const isLinearSolver = lac.isLinearSolver;
 
 /// A solver which uses the Bi-conjugate gradient method allong with `L` iterations of
@@ -116,8 +117,6 @@ pub fn BiCGStablSolver(comptime L: usize) type {
             @memset(self.u[0], 0.0);
 
             var nrm2: f64 = norm2(self.r[0]);
-            var ires: f64 = nrm2;
-            _ = ires;
             var iter: usize = 0;
 
             end: {
@@ -138,7 +137,6 @@ pub fn BiCGStablSolver(comptime L: usize) type {
                 var rho1: f64 = 0.0;
 
                 while (iter < self.max_iters) : (iter += 1) {
-                    std.debug.print("Iteration {}\n", .{iter});
                     // BiCG Part
                     // rho0 = -w*rho0
                     rho0 = -omega * rho0;
@@ -277,6 +275,10 @@ pub fn BiCGStablSolver(comptime L: usize) type {
                         axpby(-gamma[j], self.u[j], 1, self.u[0]);
                         axpby(gamma2[j], self.r[j], 1, x);
                         axpby(-gamma1[j], self.r[j], 1, self.r[0]);
+                    }
+
+                    if (comptime hasLinearMapCallback(@TypeOf(oper))) {
+                        oper.callback(iter, nrm2, x);
                     }
 
                     if (nrm2 < tol) {

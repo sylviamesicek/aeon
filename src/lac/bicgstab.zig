@@ -6,6 +6,7 @@ const lac = @import("lac.zig");
 
 const IdentityMap = lac.IdentityMap;
 const isLinearMap = lac.isLinearMap;
+const hasLinearMapCallback = lac.hasLinearMapCallback;
 const isLinearSolver = lac.isLinearSolver;
 
 pub const BiCGStabSolver = struct {
@@ -111,8 +112,6 @@ pub const BiCGStabSolver = struct {
         var prc: f64 = 0.0;
 
         while (iter < self.max_iters) : (iter += 1) {
-            std.debug.print("Iteration {}\n", .{iter});
-
             rho1 = dot(self.rg, self.rh);
 
             if (rho1 == 0.0) {
@@ -168,6 +167,10 @@ pub const BiCGStabSolver = struct {
 
             residual = norm2(self.rg);
 
+            if (comptime hasLinearMapCallback(@TypeOf(oper))) {
+                oper.callback(iter, residual, x);
+            }
+
             if (residual <= tol) break;
         }
 
@@ -178,7 +181,7 @@ pub const BiCGStabSolver = struct {
     }
 
     fn norm2(slice: []const f64) f64 {
-        return @sqrt(dot(slice, slice));
+        return dot(slice, slice);
     }
 
     fn dot(u: []const f64, v: []const f64) f64 {

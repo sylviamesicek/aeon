@@ -105,7 +105,7 @@ pub fn ScalarFieldProblem(comptime O: usize) type {
                 const gradient: [N]f64 = engine.gradientSys(.factor);
                 const value: f64 = engine.valueSys(.factor);
 
-                const seed: f64 = engine.value(.seed);
+                const seed: f64 = engine.valueCtx(.seed);
 
                 const lap = hessian[0][0] + hessian[1][1] + gradient[0] / position[0];
 
@@ -121,7 +121,7 @@ pub fn ScalarFieldProblem(comptime O: usize) type {
                 const gradient: [N]f64 = engine.gradientDiagonal();
                 const value: f64 = engine.valueDiagonal();
 
-                const seed: f64 = engine.value(.seed);
+                const seed: f64 = engine.valueCtx(.seed);
 
                 const lap = hessian[0][0] + hessian[1][1] + gradient[0] / position[0];
 
@@ -143,6 +143,8 @@ pub fn ScalarFieldProblem(comptime O: usize) type {
         // Run
 
         fn run(allocator: Allocator) !void {
+            std.debug.print("Running Elliptic Solver", .{});
+
             var grid = Mesh.init(allocator, .{
                 .physical_bounds = .{
                     .origin = [2]f64{ 0.0, 0.0 },
@@ -159,6 +161,8 @@ pub fn ScalarFieldProblem(comptime O: usize) type {
             const ndofs: usize = dof_handler.ndofs();
             const ndofs_reduced = IndexSpace.fromSize(Index.scaled(grid.base.index_size, grid.tile_width)).total();
 
+            std.debug.print("NDofs: {}", .{ndofs});
+
             var seed: []f64 = try allocator.alloc(f64, ndofs);
             defer allocator.free(seed);
 
@@ -174,7 +178,7 @@ pub fn ScalarFieldProblem(comptime O: usize) type {
 
             const oper = MetricOperator{};
 
-            var base_solver = try BiCGStabSolver.init(allocator, ndofs_reduced, 1000, 10e-6);
+            var base_solver = try BiCGStabSolver.init(allocator, ndofs_reduced, 10000, 10e-10);
             defer base_solver.deinit();
 
             var solver = try MultigridSolver.init(allocator, &dof_handler, &base_solver);
@@ -187,6 +191,8 @@ pub fn ScalarFieldProblem(comptime O: usize) type {
                 .{ .seed = seed },
             );
 
+            std.debug.print("Writing Solution To File\n", .{});
+
             const file = try std.fs.cwd().createFile("output/seed.vtu", .{});
             defer file.close();
 
@@ -195,7 +201,7 @@ pub fn ScalarFieldProblem(comptime O: usize) type {
     };
 }
 
-pub fn ApplyTest(comptime O: usize) type {
+pub fn PoissonEquation(comptime O: usize) type {
     const N = 2;
     return struct {
         const math = std.math;
