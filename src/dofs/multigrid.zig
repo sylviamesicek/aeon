@@ -118,6 +118,8 @@ pub fn MultigridSolver(comptime N: usize, comptime O: usize, comptime BaseSolver
             }
         }
 
+        var iterations: usize = 0;
+
         fn BaseLinearMap(comptime T: type) type {
             const field_name: []const u8 = comptime system.systemFieldNames(T.System)[0];
 

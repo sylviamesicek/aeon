@@ -30,20 +30,28 @@ pub const BiCGStabSolver = struct {
     pub fn init(allocator: Allocator, ndofs: usize, max_iters: usize, tolerance: f64) !Self {
         const rg: []f64 = try allocator.alloc(f64, ndofs);
         errdefer allocator.free(rg);
+
         const rh: []f64 = try allocator.alloc(f64, ndofs);
         errdefer allocator.free(rh);
+
         const pg: []f64 = try allocator.alloc(f64, ndofs);
         errdefer allocator.free(pg);
+
         const ph: []f64 = try allocator.alloc(f64, ndofs);
         errdefer allocator.free(ph);
+
         const sg: []f64 = try allocator.alloc(f64, ndofs);
         errdefer allocator.free(sg);
+
         const sh: []f64 = try allocator.alloc(f64, ndofs);
         errdefer allocator.free(sh);
+
         const tg: []f64 = try allocator.alloc(f64, ndofs);
         errdefer allocator.free(tg);
+
         const vg: []f64 = try allocator.alloc(f64, ndofs);
         errdefer allocator.free(vg);
+
         const tp: []f64 = try allocator.alloc(f64, ndofs);
         errdefer allocator.free(tp);
 
@@ -133,7 +141,7 @@ pub const BiCGStabSolver = struct {
                 self.sg[i] = self.rg[i] - pra * self.vg[i];
             }
 
-            if (norm2(self.sg) <= 1e-30) {
+            if (norm2(self.sg) <= 1e-60) {
                 for (0..self.ndofs) |i| {
                     x[i] = x[i] + pra * self.ph[i];
                 }
@@ -170,7 +178,7 @@ pub const BiCGStabSolver = struct {
     }
 
     fn norm2(slice: []const f64) f64 {
-        return dot(slice, slice);
+        return @sqrt(dot(slice, slice));
     }
 
     fn dot(u: []const f64, v: []const f64) f64 {
@@ -205,7 +213,7 @@ test "BiCGStab convergence" {
         b[i] = @floatFromInt(i);
     }
 
-    var solver: BiCGStabSolver = try BiCGStabSolver.init(allocator, ndofs, 1000, 10e-10);
+    var solver: BiCGStabSolver = try BiCGStabSolver.init(allocator, ndofs, 1000, 1e-10);
     defer solver.deinit();
 
     solver.solve(IdentityMap{}, x, b);

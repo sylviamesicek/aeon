@@ -89,7 +89,6 @@ pub fn DofHandler(comptime N: usize, comptime O: usize) type {
             bound: anytype,
             sys: system.SystemSlice(@TypeOf(bound).System),
         ) void {
-            _ = sys;
             const T = @TypeOf(bound);
 
             if (comptime !isMeshBoundary(N)(T)) {
@@ -98,9 +97,11 @@ pub fn DofHandler(comptime N: usize, comptime O: usize) type {
 
             assert(block_map.len == self.mesh.tile_total);
 
-            self.fillBaseBoundary(bound, system);
+            self.fillBaseBoundary(bound, sys);
 
-            _ = full;
+            for (0..self.mesh.active_levels) |level| {
+                self.fillLevelBoundary(full, level, block_map, bound, sys);
+            }
         }
 
         pub fn fillBaseBoundary(
@@ -379,7 +380,7 @@ pub fn DofHandler(comptime N: usize, comptime O: usize) type {
                         stencil_space.cellSpace().setValue(target, @field(sys, name), 0.0);
 
                         var v: f64 = 0.0;
-                        var normals: [N]f64 = undefined;
+                        var normals: [N]f64 = [1]f64{0.0} ** N;
                         var rhs: f64 = 0.0;
 
                         for (0..N) |i| {
@@ -398,6 +399,13 @@ pub fn DofHandler(comptime N: usize, comptime O: usize) type {
                             @field(sys, name),
                         );
                         var coef: f64 = v * stencil_space.boundaryValueCoef(extents);
+
+                        // var sum: f64 = stencil_space.boundaryValue(
+                        //     extents,
+                        //     cell,
+                        //     @field(sys, name),
+                        // );
+                        // var coef: f64 = stencil_space.boundaryValueCoef(extents);
 
                         inline for (0..N) |i| {
                             if (extents[i] != 0) {
@@ -1002,6 +1010,8 @@ pub fn DofHandler(comptime N: usize, comptime O: usize) type {
             const base_context = system.systemStructSlice(input, base_offset, base_total);
 
             const stencil_space: StencilSpace = self.mesh.baseStencilSpace();
+
+            // TODO Add full vs non full options
 
             var cell_indices = stencil_space.cellSpace().cells();
 

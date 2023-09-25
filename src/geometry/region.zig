@@ -291,4 +291,16 @@ test "region indices" {
     try expectEqualSlices(isize, &[_]isize{ 2, -1 }, &offsets.next().?);
     try expectEqualSlices(isize, &[_]isize{ 2, -2 }, &offsets.next().?);
     try expect(offsets.next() == null);
+
+    const other_region = Region(2){
+        .sides = [_]Side{ .right, .right },
+    };
+
+    var other_offsets = other_region.extentOffsets(2);
+
+    try expectEqualSlices(isize, &[_]isize{ 1, 1 }, &other_offsets.next().?);
+    try expectEqualSlices(isize, &[_]isize{ 1, 2 }, &other_offsets.next().?);
+    try expectEqualSlices(isize, &[_]isize{ 2, 1 }, &other_offsets.next().?);
+    try expectEqualSlices(isize, &[_]isize{ 2, 2 }, &other_offsets.next().?);
+    try expect(offsets.next() == null);
 }
