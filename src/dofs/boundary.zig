@@ -86,9 +86,9 @@ pub fn BoundaryUtils(comptime N: usize, comptime O: usize) type {
             boundary: anytype,
             sys: system.SystemSlice(@TypeOf(boundary).System),
         ) void {
-            if (comptime !isSystemBoundary(N)(@TypeOf(boundary))) {
-                @compileError("Boundary must satisfy isSystemBoundary trait.");
-            }
+            // if (comptime !isSystemBoundary(N)(@TypeOf(boundary))) {
+            //     @compileError("Boundary must satisfy isSystemBoundary trait.");
+            // }
 
             const regions = comptime Region.orderedRegions();
 
@@ -106,9 +106,9 @@ pub fn BoundaryUtils(comptime N: usize, comptime O: usize) type {
         ) void {
             const T = @TypeOf(boundary);
 
-            if (comptime !isSystemBoundary(N)(T)) {
-                @compileError("Boundary must satisfy isSystemBoundary trait.");
-            }
+            // if (comptime !isSystemBoundary(N)(T)) {
+            //     @compileError("Boundary must satisfy isSystemBoundary trait.");
+            // }
 
             var inner_face_cells = region.innerFaceIndices(stencil_space.size);
 
@@ -131,7 +131,7 @@ pub fn BoundaryUtils(comptime N: usize, comptime O: usize) type {
 
                     inline for (0..N) |i| {
                         if (extents[i] != 0) {
-                            conditions[i] = boundary.boundary(pos, Face{
+                            conditions[i] = boundary.boundary(pos, Face(N){
                                 .side = extents[i] > 0,
                                 .axis = i,
                             });

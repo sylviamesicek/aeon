@@ -149,7 +149,7 @@ pub fn ScalarFieldProblem(comptime O: usize) type {
         // Run
 
         fn run(allocator: Allocator) !void {
-            std.debug.print("Running Elliptic Solver", .{});
+            std.debug.print("Running Elliptic Solver\n", .{});
 
             var grid = Mesh.init(allocator, .{
                 .physical_bounds = .{
@@ -176,7 +176,7 @@ pub fn ScalarFieldProblem(comptime O: usize) type {
             var rhs_chunk = try SystemChunk(Metric).init(allocator, chunk_ndofs);
             defer rhs_chunk.deinit();
 
-            std.debug.print("NDofs: {}", .{ndofs});
+            std.debug.print("NDofs: {}\n", .{ndofs});
 
             var seed: []f64 = try allocator.alloc(f64, ndofs);
             defer allocator.free(seed);

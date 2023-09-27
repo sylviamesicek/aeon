@@ -84,7 +84,7 @@ pub fn MultigridSolver(comptime N: usize, comptime O: usize, comptime BaseSolver
                 .oper = oper,
                 .ctx = ctx,
                 .ctx_scratch = ctx_scratch,
-                .x_scratch = x_chunk.slice(stencil_space.cellSpace().total()),
+                .x_scratch = x_chunk,
             };
 
             self.base_solver.solve(base_linear_map, x_field, b_field);
@@ -101,25 +101,21 @@ pub fn MultigridSolver(comptime N: usize, comptime O: usize, comptime BaseSolver
                 x_scratch: SystemChunk(T.System),
 
                 pub fn apply(wrapper: *const @This(), output: []f64, input: []const f64) void {
-                    _ = input;
                     // Aliases
                     const stencil_space = DofUtils.baseStencilSpace(wrapper.self.mesh);
 
                     // Fill base boundary and inner
                     {
-                        var sys: system.SystemSlice(T.System) = undefined;
-                        @field(sys, field_name) = wrapper;
+                        var sys: system.SystemSliceConst(T.System) = undefined;
+                        @field(sys, field_name) = input;
 
-                        DofUtils.fillBaseBoundary(wrapper.self.mesh, DofUtils.operSystemBoundary(wrapper.oper), wrapper.x_scratch.sys, sys);
+                        DofUtils.fillBaseBoundary(wrapper.self.mesh, DofUtils.operSystemBoundary(wrapper.oper), wrapper.x_scratch, sys);
                     }
 
                     // Apply operator
                     {
                         var cells = stencil_space.cellSpace().cells();
                         var linear: usize = 0;
-
-                        var sys: system.SystemSliceConst(T.System) = undefined;
-                        @field(sys, field_name) = wrapper.scratch_x;
 
                         while (cells.next()) |cell| : (linear += 1) {
                             const engine = operator.EngineType(N, O, T){
@@ -128,7 +124,7 @@ pub fn MultigridSolver(comptime N: usize, comptime O: usize, comptime BaseSolver
                                     .cell = cell,
                                 },
                                 .ctx = wrapper.ctx_scratch,
-                                .sys = sys,
+                                .sys = wrapper.x_scratch.sliceConst(stencil_space.cellSpace().total()),
                             };
 
                             output[linear] = @field(wrapper.oper.apply(engine), field_name);
@@ -136,8 +132,25 @@ pub fn MultigridSolver(comptime N: usize, comptime O: usize, comptime BaseSolver
                     }
                 }
 
-                pub fn callback(_: *const @This(), iteration: usize, residual: f64, _: []const f64) void {
+                var iterations: usize = 0;
+
+                pub fn callback(solver: *const @This(), iteration: usize, residual: f64, x: []const f64) void {
                     std.debug.print("Iteration: {}, Residual: {}\n", .{ iteration, residual });
+
+                    const file_name = std.fmt.allocPrint(solver.self.mesh.gpa, "output/elliptic_iteration{}.vtu", .{iterations}) catch {
+                        unreachable;
+                    };
+
+                    const file = std.fs.cwd().createFile(file_name, .{}) catch {
+                        unreachable;
+                    };
+                    defer file.close();
+
+                    DofUtils.writeVtk(solver.self.mesh.gpa, solver.self.mesh, .{ .metric = x }, file.writer()) catch {
+                        unreachable;
+                    };
+
+                    iterations += 1;
                 }
             };
         }

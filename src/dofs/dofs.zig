@@ -150,9 +150,9 @@ pub fn DofUtils(comptime N: usize, comptime O: usize) type {
         ) void {
             const T = @TypeOf(boundary);
 
-            if (comptime !isSystemBoundary(N)(T)) {
-                @compileError("FillBaseBoundary requires boundary satisfy isSystemBoundary trait.");
-            }
+            // if (comptime !isSystemBoundary(N)(T)) {
+            //     @compileError("FillBaseBoundary requires boundary satisfy isSystemBoundary trait.");
+            // }
 
             const stencil_space = baseStencilSpace(mesh);
             const cell_space = stencil_space.cellSpace();
@@ -161,10 +161,10 @@ pub fn DofUtils(comptime N: usize, comptime O: usize) type {
             const base_sys = system.systemStructSlice(sys, 0, base_total);
 
             var cells = cell_space.cells();
-            var linear = 0;
+            var linear: usize = 0;
 
             while (cells.next()) |cell| : (linear += 1) {
-                inline for (system.systemFieldNames(T.System)) |name| {
+                inline for (comptime system.systemFieldNames(T.System)) |name| {
                     cell_space.setValue(
                         cell,
                         @field(base_slice, name),
@@ -405,16 +405,9 @@ pub fn DofUtils(comptime N: usize, comptime O: usize) type {
 
                     const block_field = system.systemStructSlice(data.input, offset, total);
 
-                    var cells = stencil.cellSpace().cells();
-
-                    while (cells.next()) |cell| {
+                    for (0..total) |linear| {
                         inline for (comptime system.systemFieldNames(System), 0..) |name, id| {
-                            data.fields[id].appendAssumeCapacity(
-                                stencil.value(
-                                    cell,
-                                    @field(block_field, name),
-                                ),
-                            );
+                            data.fields[id].appendAssumeCapacity(@field(block_field, name)[linear]);
                         }
                     }
                 }
