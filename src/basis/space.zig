@@ -6,7 +6,7 @@ const lagrange = @import("lagrange.zig");
 const geometry = @import("../geometry/geometry.zig");
 
 /// Provides an interface for interpolating and setting values on a block of a certain size
-/// with a buffer region `2*O` along each axis, to the order `O`.
+/// with a buffer region `E` along each axis, to the order `O`.
 pub fn CellSpace(comptime N: usize, comptime O: usize) type {
     return struct {
         size: [N]usize,
@@ -32,11 +32,15 @@ pub fn CellSpace(comptime N: usize, comptime O: usize) type {
             return IndexSpace.fromSize(self.sizeWithGhost());
         }
 
+        pub fn total(self: Self) usize {
+            return self.indexSpace().total();
+        }
+
         pub fn indexFromCell(cell: [N]isize) [N]usize {
             var index: [N]usize = undefined;
 
             for (0..N) |i| {
-                index[i] = @intCast(2 * @as(isize, @intCast(O)) + cell[i]);
+                index[i] = @intCast(@as(isize, @intCast(2 * O)) + cell[i]);
             }
 
             return index;
@@ -134,44 +138,54 @@ pub fn CellSpace(comptime N: usize, comptime O: usize) type {
             return result;
         }
 
-        pub fn CellIterator(comptime E: usize) type {
-            return struct {
-                inner: IndexSpace.CartesianIterator,
+        pub const CellIterator = struct {
+            inner: IndexSpace.CartesianIterator,
 
-                pub fn init(size: [N]usize) @This() {
-                    var index_size: [N]usize = size;
+            pub fn next(self: *@This()) ?[N]isize {
+                const index = self.inner.next() orelse return null;
 
-                    for (0..N) |i| {
-                        index_size[i] += 2 * E;
-                    }
+                var result: [N]isize = undefined;
 
-                    return .{ .inner = IndexSpace.fromSize(index_size).cartesianIndices() };
+                for (0..N) |i| {
+                    result[i] = @as(isize, @intCast(index[i]));
                 }
 
-                pub fn next(self: *@This()) ?[N]isize {
-                    const index = self.inner.next() orelse return null;
+                return result;
+            }
+        };
 
-                    var result: [N]isize = undefined;
+        pub const FullCellIterator = struct {
+            inner: IndexSpace.CartesianIterator,
 
-                    for (0..N) |i| {
-                        result[i] = @as(isize, @intCast(index[i])) - E;
-                    }
+            pub fn init(size: [N]usize) @This() {
+                var index_size: [N]usize = size;
 
-                    return result;
+                for (0..N) |i| {
+                    index_size[i] += 4 * O;
                 }
-            };
+
+                return .{ .inner = IndexSpace.fromSize(index_size).cartesianIndices() };
+            }
+
+            pub fn next(self: *@This()) ?[N]isize {
+                const index = self.inner.next() orelse return null;
+
+                var result: [N]isize = undefined;
+
+                for (0..N) |i| {
+                    result[i] = @as(isize, @intCast(index[i])) - 2 * O;
+                }
+
+                return result;
+            }
+        };
+
+        pub fn cells(self: Self) CellIterator {
+            return CellIterator{ .inner = IndexSpace.fromSize(self.size).cartesianIndices() };
         }
 
-        pub fn cellsWtihExtent(self: Self, comptime E: usize) CellIterator(E) {
-            return CellIterator(E).init(self.size);
-        }
-
-        pub fn cells(self: Self) CellIterator(0) {
-            return self.cellsWtihExtent(0);
-        }
-
-        pub fn fullCells(self: Self) CellIterator(O) {
-            return self.cellsWtihExtent(O);
+        pub fn fullCells(self: Self) FullCellIterator {
+            return FullCellIterator.init(self.size);
         }
     };
 }

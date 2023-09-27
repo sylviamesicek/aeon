@@ -4,6 +4,8 @@ const basis = @import("../basis/basis.zig");
 const geometry = @import("../geometry/geometry.zig");
 const system = @import("../system.zig");
 
+const Face = geometry.Face;
+
 const boundary = @import("boundary.zig");
 const SystemBoundaryCondition = boundary.SystemBoundaryCondition;
 
@@ -200,7 +202,7 @@ pub fn OperatorEngine(comptime N: usize, comptime O: usize, comptime Context: ty
 
     return struct {
         inner: Engine(N, O),
-        context: system.SystemSliceConst(Context),
+        ctx: system.SystemSliceConst(Context),
         sys: system.SystemSliceConst(System),
 
         // Aliases
@@ -212,25 +214,25 @@ pub fn OperatorEngine(comptime N: usize, comptime O: usize, comptime Context: ty
 
         /// Returns the value of the field at the current cell.
         pub fn valueCtx(self: Self, comptime field: Context) f64 {
-            const f: []const f64 = @field(self.context, @tagName(field));
+            const f: []const f64 = @field(self.ctx, @tagName(field));
             return self.inner.value(f);
         }
 
         /// Returns the value of the field at the current cell.
         pub fn gradientCtx(self: Self, comptime field: Context) [N]f64 {
-            const f: []const f64 = @field(self.context, @tagName(field));
+            const f: []const f64 = @field(self.ctx, @tagName(field));
             return self.inner.gradient(f);
         }
 
         /// Returns the value of the field at the current cell.
         pub fn hessianCtx(self: Self, comptime field: Context) [N][N]f64 {
-            const f: []const f64 = @field(self.context, @tagName(field));
+            const f: []const f64 = @field(self.ctx, @tagName(field));
             return self.inner.hessian(f);
         }
 
         /// Returns the value of the field at the current cell.
         pub fn laplacianCtx(self: Self, comptime field: Context) f64 {
-            const f: []const f64 = @field(self.context, @tagName(field));
+            const f: []const f64 = @field(self.ctx, @tagName(field));
             return self.inner.laplacian(f);
         }
 
@@ -333,6 +335,14 @@ pub fn isMeshOperator(comptime N: usize, comptime O: usize) fn (type) bool {
                 return false;
             }
 
+            if (comptime !(hasFn("boundaryCtx")(T) and @TypeOf(T.boundaryCtx) == fn (T, [N]f64, Face(N)) SystemBoundaryCondition(T.Context))) {
+                return false;
+            }
+
+            if (comptime !(hasFn("boundarySys")(T) and @TypeOf(T.boundarySys) == fn (T, [N]f64, Face(N)) SystemBoundaryCondition(T.System))) {
+                return false;
+            }
+
             return true;
         }
     };
@@ -372,7 +382,11 @@ pub fn isMeshFunction(comptime N: usize, comptime O: usize) fn (type) bool {
                 return false;
             }
 
-            if (comptime !(hasFn("value")(T) and @TypeOf(T.value) == fn (T, FunctionEngine(N, O, T.Input)) system.SystemValue(T.Output))) {
+            if (comptime !(hasFn("apply")(T) and @TypeOf(T.value) == fn (T, FunctionEngine(N, O, T.Input)) system.SystemValue(T.Output))) {
+                return false;
+            }
+
+            if (comptime !(hasFn("boundary")(T) and @TypeOf(T.value) == fn (T, [N]f64, Face(N)) system.SystemValue(T.Input))) {
                 return false;
             }
 
@@ -383,22 +397,8 @@ pub fn isMeshFunction(comptime N: usize, comptime O: usize) fn (type) bool {
     return Closure.trait;
 }
 
-/// A trait which checks if a type is a mesh boundary. Such a type follows the following set of declarations.
-/// ```
-/// const Boundary = struct {
-///     pub const System = enum {
-///         field1,
-///         field2,
-///     }
-///
-///     pub fn condition(self: Boundary, pos: [2]f64, face: Face) SystemStruct(System, BoundaryCondition) {
-///         // ...
-///     }
-/// }
-/// ```
-pub fn isMeshBoundary(comptime N: usize) fn (type) bool {
+pub fn isMeshProjection(comptime N: usize) fn (type) bool {
     const hasFn = std.meta.trait.hasFn;
-    const Face = geometry.Face(N);
 
     const Closure = struct {
         fn trait(comptime T: type) bool {
@@ -406,7 +406,7 @@ pub fn isMeshBoundary(comptime N: usize) fn (type) bool {
                 return false;
             }
 
-            if (comptime !(hasFn("condition")(T) and @TypeOf(T.condition) == fn (T, [N]f64, Face) SystemBoundaryCondition(T.System))) {
+            if (comptime !(hasFn("project")(T) and @TypeOf(T.project) == fn (T, [N]f64) system.SystemValue(T.System))) {
                 return false;
             }
 

@@ -6,7 +6,7 @@ const Allocator = std.mem.Allocator;
 const basis = @import("../basis/basis.zig");
 const geometry = @import("../geometry/geometry.zig");
 
-pub fn Base(comptime N: usize, comptime O: usize) type {
+pub fn Base(comptime N: usize) type {
     return struct {
         index_size: [N]usize,
         cell_total: usize,
@@ -26,7 +26,7 @@ pub fn Base(comptime N: usize, comptime O: usize) type {
         }
 
         pub fn computeOffsets(self: *Self, tile_width: usize) void {
-            self.cell_total = IndexSpace.fromSize(Index.add(Index.scaled(self.index_size, tile_width), Index.splat(4 * O))).total();
+            self.cell_total = IndexSpace.fromSize(Index.scaled(self.index_size, tile_width)).total();
             self.tile_total = IndexSpace.fromSize(self.index_size).total();
         }
     };
@@ -38,7 +38,7 @@ pub fn Block(comptime N: usize) type {
     return struct {
         /// Bounds of this block in level index space.
         bounds: IndexBox,
-        /// Patch this block belongs to
+        /// Patch this block belongs to.
         patch: usize,
         /// Total number of cells in this block (including ghost cells)
         cell_total: usize = 0,
@@ -74,7 +74,7 @@ pub fn Patch(comptime N: usize) type {
 }
 
 /// A single level of a mesh.
-pub fn Level(comptime N: usize, comptime O: usize) type {
+pub fn Level(comptime N: usize) type {
     return struct {
         /// Number of indices on each side in the level index space.
         index_size: [N]usize,
@@ -99,7 +99,6 @@ pub fn Level(comptime N: usize, comptime O: usize) type {
         const IndexBox = geometry.Box(N, usize);
         const IndexSpace = geometry.IndexSpace(N);
         const Index = @import("../index.zig").Index(N);
-        const CellSpace = basis.CellSpace(N, O);
 
         /// Allocates a new level with no data.
         pub fn init(index_size: [N]usize) Self {
@@ -213,7 +212,7 @@ pub fn Level(comptime N: usize, comptime O: usize) type {
 
             for (self.patches.items(.bounds), self.patches.items(.tile_total), self.patches.items(.tile_offset)) |bounds, *total, *offset| {
                 offset.* = tile_offset;
-                total.* = CellSpace.fromSize(Index.scaled(bounds.size, tile_width)).indexSpace().total();
+                total.* = IndexSpace.fromSize(Index.scaled(bounds.size, tile_width)).total();
                 tile_offset += total.*;
             }
 
@@ -221,7 +220,7 @@ pub fn Level(comptime N: usize, comptime O: usize) type {
 
             for (self.blocks.items(.bounds), self.blocks.items(.cell_total), self.blocks.items(.cell_offset)) |bounds, *total, *offset| {
                 offset.* = cell_offset;
-                total.* = CellSpace.fromSize(Index.scaled(bounds.size, tile_width)).indexSpace().total();
+                total.* = IndexSpace.fromSize(Index.scaled(bounds.size, tile_width)).total();
                 cell_offset += total.*;
             }
 

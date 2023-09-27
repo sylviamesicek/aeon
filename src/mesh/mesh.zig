@@ -31,7 +31,7 @@ const levels = @import("levels.zig");
 /// each of which consists of patches of tiles, and blocks of cells. This class handles accessing and
 /// storing data for each cell/tile, allocating ghost cells, and running regridding and
 /// transfer algorithms.
-pub fn Mesh(comptime N: usize, comptime O: usize) type {
+pub fn Mesh(comptime N: usize) type {
     return struct {
         /// Allocator used for various arraylists stored in this struct.
         gpa: Allocator,
@@ -55,8 +55,8 @@ pub fn Mesh(comptime N: usize, comptime O: usize) type {
         cell_total: usize,
 
         // Public types
-        pub const Base = levels.Base(N, O);
-        pub const Level = levels.Level(N, O);
+        pub const Base = levels.Base(N);
+        pub const Level = levels.Level(N);
         pub const Block = levels.Block(N);
         pub const Patch = levels.Patch(N);
 
@@ -65,18 +65,18 @@ pub fn Mesh(comptime N: usize, comptime O: usize) type {
             physical_bounds: RealBox,
             index_size: [N]usize,
             tile_width: usize,
-            patch_max_tiles: usize = 32,
-            block_max_tiles: usize = 32,
+            patch_max_tiles: usize,
+            block_max_tiles: usize,
 
             /// Checks that the given mesh config is valid.
             pub fn check(self: Config) void {
                 assert(self.tile_width >= 1);
-                assert(self.tile_width >= 2 * O);
                 assert(self.patch_max_tiles >= self.block_max_tiles);
                 assert(self.block_max_tiles > 0);
                 for (0..N) |i| {
                     assert(self.index_size[i] > 0);
                     assert(self.physical_bounds.size[i] > 0.0);
+                    assert(self.block_max_tiles >= self.index_size[i]);
                 }
             }
 
@@ -85,7 +85,7 @@ pub fn Mesh(comptime N: usize, comptime O: usize) type {
             }
 
             fn baseCellSpace(self: Config) IndexSpace {
-                return IndexSpace.fromSize(add(scaled(self.index_size, self.tile_width), splat(4 * O)));
+                return IndexSpace.fromSize(scaled(self.index_size, self.tile_width));
             }
         };
 
@@ -97,7 +97,6 @@ pub fn Mesh(comptime N: usize, comptime O: usize) type {
         const IndexSpace = geometry.IndexSpace(N);
         const PartitionSpace = geometry.PartitionSpace(N);
         const Region = geometry.Region(N);
-        const StencilSpace = basis.StencilSpace(N, O);
 
         // Mixins
         const Index = @import("../index.zig").Index(N);
@@ -228,34 +227,26 @@ pub fn Mesh(comptime N: usize, comptime O: usize) type {
         // }
 
         // ***************************
-        // Stencil Spaces ************
+        // Physical Bounds ***********
         // ***************************
 
-        /// Computes the stencil space of the base level.
-        pub fn baseStencilSpace(self: *const Self) StencilSpace {
-            return .{
-                .physical_bounds = self.physical_bounds,
-                .size = scaled(self.base.index_size, self.tile_width),
-            };
+        /// Gets the physical bounds of the base.
+        pub fn basePhysicalBounds(self: *const Self) RealBox {
+            return self.physical_bounds;
         }
 
-        /// Computes the stencil space of a block on a refined level.
-        pub fn levelStencilSpace(self: *const Self, level: usize, block: usize) StencilSpace {
-            const bounds: IndexBox = self.levels.items[level].blocks.items(.bounds)[block];
-            return .{
-                .physical_bounds = self.blockPhysicalBounds(level, bounds),
-                .size = scaled(bounds.size, self.tile_width),
-            };
-        }
+        /// Gets the physical bounds of a higher level
+        pub fn levelPhysicalBounds(self: *const Self, level: usize, block: usize) RealBox {
+            // Get bounds of this block
+            const bounds = self.levels.items[level].blocks.items(.bounds)[block];
 
-        fn blockPhysicalBounds(self: *const Self, level: usize, block: IndexBox) RealBox {
             const index_size: [N]usize = self.levels.items[level].index_size;
 
             var physical_bounds: RealBox = undefined;
 
             for (0..N) |i| {
-                const sratio: f64 = @as(f64, @floatFromInt(block.size[i])) / @as(f64, @floatFromInt(index_size[i]));
-                const oratio: f64 = @as(f64, @floatFromInt(block.origin[i])) / @as(f64, @floatFromInt(index_size[i] - 1));
+                const sratio: f64 = @as(f64, @floatFromInt(bounds.size[i])) / @as(f64, @floatFromInt(index_size[i]));
+                const oratio: f64 = @as(f64, @floatFromInt(bounds.origin[i])) / @as(f64, @floatFromInt(index_size[i] - 1));
 
                 physical_bounds.size[i] = self.physical_bounds.size[i] * sratio;
                 physical_bounds.origin[i] = self.physical_bounds.origin[i] + self.physical_bounds.size[i] * oratio;
@@ -268,20 +259,20 @@ pub fn Mesh(comptime N: usize, comptime O: usize) type {
         // Regridding **************
         // *************************
 
-        pub const RegridConfig = struct {
+        /// Regenerates the current mesh using the set of tags to determine which tiles on each patch
+        /// should be included in the new mesh.
+        pub fn regrid(
+            self: *Self,
+            tags: []bool,
             max_levels: usize,
             block_efficiency: f64,
             patch_efficiency: f64,
-        };
-
-        /// Regenerates the current mesh using the set of tags to determine which tiles on each patch
-        /// should be included in the new mesh.
-        pub fn regrid(self: *Self, tags: []bool, config: RegridConfig) !void {
-            assert(config.max_levels >= self.active_levels);
+        ) !void {
+            assert(max_levels >= self.active_levels);
 
             // 1. Find total number of levels and preallocate dest.
             // **********************************************************
-            const total_levels = self.computeTotalLevels(tags, config);
+            const total_levels = self.computeTotalLevels(tags, max_levels);
             try self.resizeActiveLevels(total_levels);
 
             // 2. Recursively generate levels on new mesh.
@@ -494,7 +485,7 @@ pub fn Mesh(comptime N: usize, comptime O: usize) type {
                     var cppartitioner = try PartitionSpace.init(scratch, cpbounds.size, upclusters);
                     defer cppartitioner.deinit();
 
-                    try cppartitioner.build(cptags, self.patch_max_tiles, config.patch_efficiency);
+                    try cppartitioner.build(cptags, self.patch_max_tiles, patch_efficiency);
 
                     // Iterate computed patches
                     for (cppartitioner.partitions()) |patch| {
@@ -520,7 +511,7 @@ pub fn Mesh(comptime N: usize, comptime O: usize) type {
                         var ppartitioner = try PartitionSpace.init(scratch, pspace.size, &[_]IndexBox{});
                         defer ppartitioner.deinit();
 
-                        try ppartitioner.build(ptags, self.block_max_tiles, config.block_efficiency);
+                        try ppartitioner.build(ptags, self.block_max_tiles, block_efficiency);
 
                         // Offset blocks to be in global space
                         var pblocks: []IndexBox = try scratch.alloc(IndexBox, ppartitioner.partitions().len);
@@ -624,10 +615,10 @@ pub fn Mesh(comptime N: usize, comptime O: usize) type {
             self.tile_total = tile_offset;
         }
 
-        fn computeTotalLevels(self: *const Self, tags: []const bool, config: RegridConfig) usize {
+        fn computeTotalLevels(self: *const Self, tags: []const bool, max_levels: usize) usize {
             // Clamp to max levels
-            if (self.active_levels == config.max_levels) {
-                return config.max_levels;
+            if (self.active_levels == max_levels) {
+                return max_levels;
             }
 
             // Check if any on the highest level is tagged
