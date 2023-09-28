@@ -6,32 +6,6 @@ const Allocator = std.mem.Allocator;
 const basis = @import("../basis/basis.zig");
 const geometry = @import("../geometry/geometry.zig");
 
-pub fn Base(comptime N: usize) type {
-    return struct {
-        index_size: [N]usize,
-        cell_total: usize,
-        tile_total: usize,
-
-        const Self = @This();
-        const Index = @import("../index.zig").Index(N);
-        const IndexSpace = geometry.IndexSpace(N);
-        const RealBox = geometry.Box(N, f64);
-
-        pub fn init(index_size: [N]usize) Self {
-            return .{
-                .index_size = index_size,
-                .cell_total = 0,
-                .tile_total = 0,
-            };
-        }
-
-        pub fn computeOffsets(self: *Self, tile_width: usize) void {
-            self.cell_total = IndexSpace.fromSize(Index.scaled(self.index_size, tile_width)).total();
-            self.tile_total = IndexSpace.fromSize(self.index_size).total();
-        }
-    };
-}
-
 /// Represents a block in a mesh. A block exists in some patch, and is composed of a set of
 /// tiles which are further subdivided into cells.
 pub fn Block(comptime N: usize) type {
@@ -139,22 +113,6 @@ pub fn Level(comptime N: usize) type {
             return self.blocks.len;
         }
 
-        pub fn patchTileOffset(self: *const Self, patch: usize) usize {
-            return self.tile_offset + self.patches.items(.tile_offset)[patch];
-        }
-
-        pub fn patchTileTotal(self: *const Self, patch: usize) usize {
-            return self.patches.items(.tile_total)[patch];
-        }
-
-        pub fn blockCellOffset(self: *const Self, block: usize) usize {
-            return self.cell_offset + self.blocks.items(.cell_offset)[block];
-        }
-
-        pub fn blockCellTotal(self: *const Self, block: usize) usize {
-            return self.blocks.items(.cell_total)[block];
-        }
-
         /// Preallocates a number of total children.
         pub fn setTotalChildren(self: *Self, allocator: Allocator, total: usize) !void {
             try self.parents.resize(allocator, total);
@@ -199,6 +157,38 @@ pub fn Level(comptime N: usize) type {
             }
         }
 
+        pub fn buildBase(self: *Self, allocator: Allocator, index_size: [N]usize, children: usize) !void {
+            self.blocks.shrinkRetainingCapacity(0);
+            self.patches.shrinkRetainingCapacity(0);
+            try self.children.resize(allocator, children);
+            try self.parents.resize(allocator, children);
+
+            for (0..self.children.items.len) |i| {
+                self.children.items[i] = i;
+            }
+
+            @memset(self.parents.items, 0);
+
+            try self.blocks.append(allocator, .{
+                .bounds = .{
+                    .origin = [1]usize{0} ** N,
+                    .size = index_size,
+                },
+                .patch = 0,
+            });
+
+            try self.patches.append(allocator, .{
+                .bounds = .{
+                    .origin = [1]usize{0} ** N,
+                    .size = index_size,
+                },
+                .block_offset = 0,
+                .block_total = 1,
+                .children_offset = 0,
+                .children_total = children,
+            });
+        }
+
         /// Gets a slice of children indices for each patch
         pub fn childrenSlice(self: *const Self, patch: usize) []const usize {
             const offset = self.patches.items(.children_offset)[patch];
@@ -212,7 +202,7 @@ pub fn Level(comptime N: usize) type {
 
             for (self.patches.items(.bounds), self.patches.items(.tile_total), self.patches.items(.tile_offset)) |bounds, *total, *offset| {
                 offset.* = tile_offset;
-                total.* = IndexSpace.fromSize(Index.scaled(bounds.size, tile_width)).total();
+                total.* = IndexSpace.fromSize(bounds.size).total();
                 tile_offset += total.*;
             }
 

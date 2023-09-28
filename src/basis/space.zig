@@ -5,9 +5,9 @@ const std = @import("std");
 const lagrange = @import("lagrange.zig");
 const geometry = @import("../geometry/geometry.zig");
 
-/// Provides an interface for interpolating and setting values on a block of a certain size
-/// with a buffer region `E` along each axis, to the order `O`.
-pub fn CellSpace(comptime N: usize, comptime O: usize) type {
+/// A set of cells over which basic stencils can be applied. This includes a buffer region of
+/// length `E`, and all stencils are built to order `O`.
+pub fn BufferedCellSpace(comptime N: usize, comptime E: usize, comptime O: usize) type {
     return struct {
         size: [N]usize,
 
@@ -22,7 +22,7 @@ pub fn CellSpace(comptime N: usize, comptime O: usize) type {
             var result: [N]usize = undefined;
 
             for (0..N) |i| {
-                result[i] = self.size[i] + 4 * O;
+                result[i] = self.size[i] + 2 * E;
             }
 
             return result;
@@ -71,28 +71,27 @@ pub fn CellSpace(comptime N: usize, comptime O: usize) type {
         /// Prolongs the value of a field to a subcell.
         pub fn prolong(self: Self, subcell: [N]isize, field: []const f64) f64 {
             // Build stencils for both the left and right case at comptime.
-            const lstencil: [2 * O + 1]f64 = prolong(false, O);
-            const rstencil: [2 * O + 1]f64 = prolong(false, O);
-
-            const stencil_space: IndexSpace = IndexSpace.fromSize([1]usize{2 * O + 1} ** N);
-            const index_space: IndexSpace = self.indexSpace();
+            const lstencil: [2 * O + 1]f64 = comptime prolongStencil(false, O);
+            const rstencil: [2 * O + 1]f64 = comptime prolongStencil(false, O);
 
             var result: f64 = 0.0;
 
-            comptime var stencil_indices = stencil_space.cartesianIndices();
+            const index_space: IndexSpace = self.indexSpace();
 
-            inline while (stencil_indices.next()) |stencil_index| {
+            comptime var stencil_indices = IndexSpace.fromSize([1]usize{2 * O + 1} ** N).cartesianIndices();
+
+            inline while (comptime stencil_indices.next()) |stencil_index| {
                 var coef: f64 = 1.0;
 
                 for (0..N) |i| {
-                    if (subcell[i] % 2 == 0) {
+                    if (@mod(subcell[i], 2) == 0) {
                         coef *= rstencil[stencil_index[i]];
                     } else {
                         coef *= lstencil[stencil_index[i]];
                     }
                 }
 
-                var offset_cell: [N]usize = undefined;
+                var offset_cell: [N]isize = undefined;
 
                 inline for (0..N) |i| {
                     offset_cell[i] = @divTrunc(subcell[i] + 1, 2) + stencil_index[i] - O;
@@ -110,8 +109,8 @@ pub fn CellSpace(comptime N: usize, comptime O: usize) type {
         pub fn restrict(self: Self, supercell: [N]usize, field: []const f64) f64 {
             const stencil: [2 * O + 2]f64 = restrictStencil(O);
 
-            const stencil_space: IndexSpace = IndexSpace.fromSize([1]usize{2 * O + 2} ** N);
-            const index_space: IndexSpace = self.indexSpace();
+            const stencil_space: IndexSpace = comptime IndexSpace.fromSize([1]usize{2 * O + 2} ** N);
+            const index_space: IndexSpace = comptime self.indexSpace();
 
             var result: f64 = 0.0;
 
@@ -161,7 +160,7 @@ pub fn CellSpace(comptime N: usize, comptime O: usize) type {
                 var index_size: [N]usize = size;
 
                 for (0..N) |i| {
-                    index_size[i] += 4 * O;
+                    index_size[i] += 2 * E;
                 }
 
                 return .{ .inner = IndexSpace.fromSize(index_size).cartesianIndices() };
@@ -173,7 +172,7 @@ pub fn CellSpace(comptime N: usize, comptime O: usize) type {
                 var result: [N]isize = undefined;
 
                 for (0..N) |i| {
-                    result[i] = @as(isize, @intCast(index[i])) - 2 * O;
+                    result[i] = @as(isize, @intCast(index[i])) - E;
                 }
 
                 return result;
@@ -190,10 +189,18 @@ pub fn CellSpace(comptime N: usize, comptime O: usize) type {
     };
 }
 
+pub fn SimpleCellSpace(comptime N: usize, comptime O: usize) type {
+    return BufferedCellSpace(N, 0, O);
+}
+
+pub fn CellSpace(comptime N: usize, comptime O: usize) type {
+    return BufferedCellSpace(N, 2 * O, O);
+}
+
 /// Manages the application of stencil products on functions. Supports computing values, centered derivatives
 /// positions, boundary positions, boundary values, boundary derivatives, prolongation, and restriction.
 /// If full is false, all cell indices are in standard index space (ie without ghost cells included).
-pub fn StencilSpace(comptime N: usize, comptime O: usize) type {
+pub fn BufferedStencilSpace(comptime N: usize, comptime E: usize, comptime O: usize) type {
     return struct {
         physical_bounds: RealBox,
         size: [N]usize,
@@ -204,7 +211,7 @@ pub fn StencilSpace(comptime N: usize, comptime O: usize) type {
         const IndexSpace = geometry.IndexSpace(N);
         const Region = geometry.Region(N);
         const Face = geometry.Face(N);
-        const CSpace = CellSpace(N, O);
+        const CSpace = BufferedCellSpace(N, E, O);
 
         pub fn cellSpace(self: Self) CSpace {
             return CSpace.fromSize(self.size);
@@ -464,6 +471,14 @@ pub fn StencilSpace(comptime N: usize, comptime O: usize) type {
             return scaled_result;
         }
     };
+}
+
+pub fn SimpleStencilSpace(comptime N: usize, comptime O: usize) type {
+    return BufferedStencilSpace(N, 0, O);
+}
+
+pub fn StencilSpace(comptime N: usize, comptime O: usize) type {
+    return BufferedStencilSpace(N, 2 * O, O);
 }
 
 fn derivativeStencil(comptime R: usize, comptime O: usize) [2 * O + 1]f64 {

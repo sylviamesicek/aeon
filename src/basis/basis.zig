@@ -9,7 +9,10 @@ const space = @import("space.zig");
 // Public exports ************
 // ***************************
 
+pub const SimpleCellSpace = space.SimpleCellSpace;
 pub const CellSpace = space.CellSpace;
+
+pub const SimpleStencilSpace = space.SimpleStencilSpace;
 pub const StencilSpace = space.StencilSpace;
 
 test {

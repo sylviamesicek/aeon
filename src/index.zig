@@ -59,5 +59,13 @@ pub fn Index(comptime N: usize) type {
             }
             return result;
         }
+
+        pub fn toUnsigned(self: [N]isize) [N]usize {
+            var result: [N]usize = undefined;
+            for (0..N) |i| {
+                result[i] = @intCast(self[i]);
+            }
+            return result;
+        }
     };
 }

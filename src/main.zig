@@ -151,7 +151,7 @@ pub fn ScalarFieldProblem(comptime O: usize) type {
         fn run(allocator: Allocator) !void {
             std.debug.print("Running Elliptic Solver\n", .{});
 
-            var grid = Mesh.init(allocator, .{
+            var grid = try Mesh.init(allocator, .{
                 .physical_bounds = .{
                     .origin = [2]f64{ 0.0, 0.0 },
                     .size = [2]f64{ 10.0, 10.0 },
@@ -163,9 +163,13 @@ pub fn ScalarFieldProblem(comptime O: usize) type {
             });
             defer grid.deinit();
 
-            const ndofs: usize = grid.cell_total;
-            const base_ndofs: usize = grid.base.cell_total;
-            const chunk_ndofs = DofUtils.chunkLength(&grid);
+            const block_map: []usize = try allocator.alloc(usize, grid.tile_total);
+            defer allocator.free(block_map);
+
+            grid.buildBlockMap(block_map);
+
+            const ndofs: usize = DofUtils.totalDofs(&grid);
+            const chunk_ndofs = DofUtils.chunkDofs(&grid);
 
             var seed_chunk = try SystemChunk(Seed).init(allocator, chunk_ndofs);
             defer seed_chunk.deinit();
@@ -186,17 +190,17 @@ pub fn ScalarFieldProblem(comptime O: usize) type {
                 .sigma = 1.0,
             };
 
-            DofUtils.projectBase(&grid, seed_proj, .{ .seed = seed });
+            DofUtils.project(&grid, seed_proj, .{ .seed = seed });
 
             var metric: []f64 = try allocator.alloc(f64, ndofs);
             defer allocator.free(metric);
 
             const oper = MetricOperator{};
 
-            var base_solver = try BiCGStabSolver.init(allocator, base_ndofs, 10000, 10e-10);
+            var base_solver = try BiCGStabSolver.init(allocator, ndofs, 10000, 10e-10);
             defer base_solver.deinit();
 
-            var solver = MultigridSolver.init(&grid, &base_solver);
+            var solver = MultigridSolver.init(&grid, block_map, &base_solver);
             defer solver.deinit();
 
             solver.solve(

@@ -60,11 +60,11 @@ pub fn isSystemBoundary(comptime N: usize) fn (comptime T: type) bool {
 
     const Closure = struct {
         fn trait(comptime T: type) bool {
-            if (!(@hasDecl(T, "System") and T.System == type and system.isSystem(T.System))) {
+            if (comptime !(@hasDecl(T, "System") and @TypeOf(T.System) == type and system.isSystem(T.System))) {
                 return false;
             }
 
-            if (!(hasFn("boundary")(T) and T.boundary == fn (T, [N]f64, Face(N)) SystemBoundaryCondition(T.System))) {
+            if (!(hasFn("boundary")(T) and @TypeOf(T.boundary) == fn (T, [N]f64, Face(N)) SystemBoundaryCondition(T.System))) {
                 return false;
             }
 
@@ -86,9 +86,9 @@ pub fn BoundaryUtils(comptime N: usize, comptime O: usize) type {
             boundary: anytype,
             sys: system.SystemSlice(@TypeOf(boundary).System),
         ) void {
-            // if (comptime !isSystemBoundary(N)(@TypeOf(boundary))) {
-            //     @compileError("Boundary must satisfy isSystemBoundary trait.");
-            // }
+            if (comptime !isSystemBoundary(N)(@TypeOf(boundary))) {
+                @compileError("Boundary must satisfy isSystemBoundary trait.");
+            }
 
             const regions = comptime Region.orderedRegions();
 
