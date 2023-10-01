@@ -214,50 +214,42 @@ pub fn OperatorEngine(comptime N: usize, comptime O: usize, comptime Context: ty
 
         /// Returns the value of the field at the current cell.
         pub fn valueCtx(self: Self, comptime field: Context) f64 {
-            const f: []const f64 = @field(self.ctx, @tagName(field));
-            return self.inner.value(f);
+            return self.inner.value(self.ctx.field(field));
         }
 
         /// Returns the value of the field at the current cell.
         pub fn gradientCtx(self: Self, comptime field: Context) [N]f64 {
-            const f: []const f64 = @field(self.ctx, @tagName(field));
-            return self.inner.gradient(f);
+            return self.inner.gradient(self.ctx.field(field));
         }
 
         /// Returns the value of the field at the current cell.
         pub fn hessianCtx(self: Self, comptime field: Context) [N][N]f64 {
-            const f: []const f64 = @field(self.ctx, @tagName(field));
-            return self.inner.hessian(f);
+            return self.inner.hessian(self.ctx.field(field));
         }
 
         /// Returns the value of the field at the current cell.
         pub fn laplacianCtx(self: Self, comptime field: Context) f64 {
-            const f: []const f64 = @field(self.ctx, @tagName(field));
-            return self.inner.laplacian(f);
+            return self.inner.laplacian(self.ctx.field(field));
         }
 
         /// Returns the value of the field at the current cell.
         pub fn valueSys(self: Self, comptime field: System) f64 {
-            const f: []const f64 = @field(self.sys, @tagName(field));
-            return self.inner.value(f);
+            return self.inner.value(self.sys.field(field));
         }
 
         /// Returns the value of the field at the current cell.
         pub fn gradientSys(self: Self, comptime field: System) [N]f64 {
-            const f: []const f64 = @field(self.sys, @tagName(field));
-            return self.inner.gradient(f);
+            return self.inner.gradient(self.sys.field(field));
         }
 
         /// Returns the value of the field at the current cell.
         pub fn hessianSys(self: Self, comptime field: System) [N][N]f64 {
-            const f: []const f64 = @field(self.sys, @tagName(field));
-            return self.inner.hessian(f);
+            return self.inner.hessian(self.sys.field(field));
         }
 
         /// Returns the value of the field at the current cell.
         pub fn laplacianSys(self: Self, comptime field: System) f64 {
-            const f: []const f64 = @field(self.sys, @tagName(field));
-            return self.inner.laplacian(f);
+            return self.inner.laplacian(self.sys.field(field));
         }
 
         /// Returns the value of the field at the current cell.

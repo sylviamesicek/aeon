@@ -22,7 +22,8 @@ pub fn ScalarFieldProblem(comptime O: usize) type {
         const BoundaryCondition = dofs.BoundaryCondition;
         const DofUtils = dofs.DofUtils(N, O);
         const MultigridSolver = dofs.MultigridSolver(N, O, BiCGStabSolver);
-        const SystemChunk = dofs.SystemChunk;
+        const SystemSlice = system.SystemSlice;
+        const SystemSliceConst = system.SystemSliceConst;
 
         const Face = geometry.Face(N);
         const IndexSpace = geometry.IndexSpace(N);
@@ -158,8 +159,6 @@ pub fn ScalarFieldProblem(comptime O: usize) type {
                 },
                 .tile_width = 16,
                 .index_size = [2]usize{ 8, 8 },
-                .block_max_tiles = 8,
-                .patch_max_tiles = 16,
             });
             defer grid.deinit();
 
@@ -168,49 +167,37 @@ pub fn ScalarFieldProblem(comptime O: usize) type {
 
             grid.buildBlockMap(block_map);
 
-            const ndofs: usize = DofUtils.totalDofs(&grid);
-            const chunk_ndofs = DofUtils.chunkDofs(&grid);
+            std.debug.print("NDofs: {}\n", .{grid.cell_total});
 
-            var seed_chunk = try SystemChunk(Seed).init(allocator, chunk_ndofs);
-            defer seed_chunk.deinit();
-
-            var metric_chunk = try SystemChunk(Metric).init(allocator, chunk_ndofs);
-            defer metric_chunk.deinit();
-
-            var rhs_chunk = try SystemChunk(Metric).init(allocator, chunk_ndofs);
-            defer rhs_chunk.deinit();
-
-            std.debug.print("NDofs: {}\n", .{ndofs});
-
-            var seed: []f64 = try allocator.alloc(f64, ndofs);
-            defer allocator.free(seed);
+            var seed = try SystemSlice(Seed).init(allocator, grid.cell_total);
+            defer seed.deinit(allocator);
 
             const seed_proj: SeedLaplacianProjection = .{
                 .amplitude = 1.0,
                 .sigma = 1.0,
             };
 
-            DofUtils.project(&grid, seed_proj, .{ .seed = seed });
+            DofUtils.project(&grid, seed_proj, seed);
 
-            var metric: []f64 = try allocator.alloc(f64, ndofs);
-            defer allocator.free(metric);
+            var metric = try SystemSlice(Metric).init(allocator, grid.cell_total);
+            defer metric.deinit(allocator);
+
+            const rhs = SystemSlice(Metric).view(grid.cell_total, .{ .factor = seed.field(.seed) });
 
             const oper = MetricOperator{};
 
-            var base_solver = try BiCGStabSolver.init(allocator, ndofs, 10000, 10e-10);
+            var base_solver = try BiCGStabSolver.init(allocator, grid.cell_total, 10000, 10e-10);
             defer base_solver.deinit();
 
             var solver = MultigridSolver.init(&grid, block_map, &base_solver);
             defer solver.deinit();
 
-            solver.solve(
+            try solver.solve(
+                allocator,
                 oper,
-                .{ .factor = metric },
-                .{ .factor = seed },
-                .{ .seed = seed },
-                metric_chunk,
-                rhs_chunk,
-                seed_chunk,
+                metric,
+                rhs.toConst(),
+                seed.toConst(),
             );
 
             std.debug.print("Writing Solution To File\n", .{});
@@ -218,7 +205,17 @@ pub fn ScalarFieldProblem(comptime O: usize) type {
             const file = try std.fs.cwd().createFile("output/seed.vtu", .{});
             defer file.close();
 
-            try DofUtils.writeVtk(allocator, &grid, .{ .seed = seed, .metric = metric }, file.writer());
+            const Output = enum {
+                seed,
+                metric,
+            };
+
+            const output = SystemSliceConst(Output).view(grid.cell_total, .{
+                .seed = seed.field(.seed),
+                .metric = metric.field(.factor),
+            });
+
+            try DofUtils.writeVtk(Output, allocator, &grid, output, file.writer());
         }
     };
 }

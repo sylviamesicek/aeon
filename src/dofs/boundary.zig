@@ -11,11 +11,7 @@ const operator = @import("operator.zig");
 
 /// The value of a system at a point.
 pub fn SystemBoundaryCondition(comptime T: type) type {
-    return system.SystemStruct(T, BoundaryCondition);
-}
-
-pub fn isSystemBoundaryCondition(comptime T: type) bool {
-    return system.isSystemStruct(T, BoundaryCondition);
+    return std.enums.EnumFieldStruct(T, BoundaryCondition, null);
 }
 
 /// Represents a boundary condition as returned by a BoundaryOperator. Specifies a robin boundary condition along each
@@ -106,9 +102,9 @@ pub fn BoundaryUtils(comptime N: usize, comptime O: usize) type {
         ) void {
             const T = @TypeOf(boundary);
 
-            // if (comptime !isSystemBoundary(N)(T)) {
-            //     @compileError("Boundary must satisfy isSystemBoundary trait.");
-            // }
+            if (comptime !isSystemBoundary(N)(T)) {
+                @compileError("Boundary must satisfy isSystemBoundary trait.");
+            }
 
             var inner_face_cells = region.innerFaceIndices(stencil_space.size);
 
@@ -138,9 +134,9 @@ pub fn BoundaryUtils(comptime N: usize, comptime O: usize) type {
                         }
                     }
 
-                    inline for (comptime system.systemFieldNames(T.System)) |name| {
+                    inline for (comptime std.enums.values(T.System)) |field| {
                         // Set the fields of the system to be zero at the target.
-                        stencil_space.cellSpace().setValue(target, @field(sys, name), 0.0);
+                        stencil_space.cellSpace().setValue(target, sys.field(field), 0.0);
 
                         var v: f64 = 0.0;
                         var normals: [N]f64 = [1]f64{0.0} ** N;
@@ -148,7 +144,7 @@ pub fn BoundaryUtils(comptime N: usize, comptime O: usize) type {
 
                         for (0..N) |i| {
                             if (extents[i] != 0) {
-                                const condition: BoundaryCondition = @field(conditions[i], name);
+                                const condition: BoundaryCondition = @field(conditions[i], @tagName(field));
 
                                 v += condition.value;
                                 normals[i] = if (extents[i] > 0) condition.normal else -condition.normal;
@@ -159,7 +155,7 @@ pub fn BoundaryUtils(comptime N: usize, comptime O: usize) type {
                         var sum: f64 = v * stencil_space.boundaryValue(
                             extents,
                             cell,
-                            @field(sys, name),
+                            sys.field(field),
                         );
                         var coef: f64 = v * stencil_space.boundaryValueCoef(extents);
 
@@ -168,12 +164,12 @@ pub fn BoundaryUtils(comptime N: usize, comptime O: usize) type {
                                 comptime var ranks: [N]usize = [1]usize{0} ** N;
                                 ranks[i] = 1;
 
-                                sum += normals[i] * stencil_space.boundaryDerivative(ranks, extents, cell, @field(sys, name));
+                                sum += normals[i] * stencil_space.boundaryDerivative(ranks, extents, cell, sys.field(field));
                                 coef += normals[i] * stencil_space.boundaryDerivativeCoef(ranks, extents);
                             }
                         }
 
-                        stencil_space.cellSpace().setValue(target, @field(sys, name), (rhs - sum) / coef);
+                        stencil_space.cellSpace().setValue(target, sys.field(field), (rhs - sum) / coef);
                     }
                 }
             }

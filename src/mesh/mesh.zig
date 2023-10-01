@@ -41,10 +41,6 @@ pub fn Mesh(comptime N: usize) type {
         index_size: [N]usize,
         /// The number of cells along each time edge.
         tile_width: usize,
-        /// The maximum number of tiles on one edge of a patch.
-        patch_max_tiles: usize,
-        /// The maximum number of tiles on one edge of a block
-        block_max_tiles: usize,
         /// Refined levels
         levels: ArrayListUnmanaged(Level),
         /// Number of levels which are currently active.
@@ -64,18 +60,13 @@ pub fn Mesh(comptime N: usize) type {
             physical_bounds: RealBox,
             index_size: [N]usize,
             tile_width: usize,
-            patch_max_tiles: usize,
-            block_max_tiles: usize,
 
             /// Checks that the given mesh config is valid.
             pub fn check(self: Config) void {
                 assert(self.tile_width >= 1);
-                assert(self.patch_max_tiles >= self.block_max_tiles);
-                assert(self.block_max_tiles > 0);
                 for (0..N) |i| {
                     assert(self.index_size[i] > 0);
                     assert(self.physical_bounds.size[i] > 0.0);
-                    assert(self.block_max_tiles >= self.index_size[i]);
                 }
             }
         };
@@ -119,8 +110,6 @@ pub fn Mesh(comptime N: usize) type {
                 .index_size = config.index_size,
                 .physical_bounds = config.physical_bounds,
                 .tile_width = config.tile_width,
-                .patch_max_tiles = config.patch_max_tiles,
-                .block_max_tiles = config.block_max_tiles,
                 .levels = levs,
                 .active_levels = 1,
                 .tile_total = 0,
@@ -266,10 +255,15 @@ pub fn Mesh(comptime N: usize) type {
             self: *Self,
             tags: []bool,
             max_levels: usize,
-            block_efficiency: f64,
             patch_efficiency: f64,
+            patch_max_tiles: usize,
+            block_efficiency: f64,
+            block_max_tiles: usize,
         ) !void {
+            // Check regridding parameter
             assert(max_levels >= self.active_levels);
+            assert(block_max_tiles > 0 and patch_max_tiles > 0 and patch_max_tiles >= block_max_tiles);
+            assert(block_efficiency >= patch_efficiency);
 
             // 1. Find total number of levels and preallocate dest.
             // **********************************************************
@@ -387,7 +381,7 @@ pub fn Mesh(comptime N: usize) type {
                     var cppartitioner = try PartitionSpace.init(scratch, cpbounds.size, upclusters);
                     defer cppartitioner.deinit();
 
-                    try cppartitioner.build(cptags, self.patch_max_tiles, patch_efficiency);
+                    try cppartitioner.build(cptags, patch_max_tiles, patch_efficiency);
 
                     // Iterate computed patches
                     for (cppartitioner.partitions()) |patch| {
@@ -413,7 +407,7 @@ pub fn Mesh(comptime N: usize) type {
                         var ppartitioner = try PartitionSpace.init(scratch, pspace.size, &[_]IndexBox{});
                         defer ppartitioner.deinit();
 
-                        try ppartitioner.build(ptags, self.block_max_tiles, block_efficiency);
+                        try ppartitioner.build(ptags, block_max_tiles, block_efficiency);
 
                         // Offset blocks to be in global space
                         var pblocks: []IndexBox = try scratch.alloc(IndexBox, ppartitioner.partitions().len);
@@ -454,7 +448,7 @@ pub fn Mesh(comptime N: usize) type {
             // Update base
             const base: *Level = &self.levels.items[0];
 
-            if (self.active_levels > 0) {
+            if (self.active_levels > 1) {
                 try base.buildBase(self.gpa, self.index_size, self.getLevel(1).patchTotal());
             } else {
                 try base.buildBase(self.gpa, self.index_size, 0);
@@ -530,16 +524,11 @@ pub fn Mesh(comptime N: usize) type {
         }
 
         fn resizeActiveLevels(self: *Self, total: usize) !void {
+            assert(self.levels.items.len > 0);
             while (total > self.levels.items.len) {
-                if (self.levels.items.len == 0) {
-                    const size: [N]usize = scaled(self.base.index_size, 2);
+                const size: [N]usize = scaled(self.levels.getLast().index_size, 2);
 
-                    try self.levels.append(self.gpa, Level.init(size));
-                } else {
-                    const size: [N]usize = scaled(self.levels.getLast().index_size, 2);
-
-                    try self.levels.append(self.gpa, Level.init(size));
-                }
+                try self.levels.append(self.gpa, Level.init(size));
             }
 
             self.active_levels = total;
@@ -553,20 +542,16 @@ test "mesh regridding" {
 
     const allocator = std.testing.allocator;
 
-    const Mesh2 = Mesh(2, 0);
-
-    const config: Mesh2.Config = .{
+    const config: Mesh(2).Config = .{
         .physical_bounds = .{
             .origin = [_]f64{ 0.0, 0.0 },
             .size = [_]f64{ 1.0, 1.0 },
         },
         .index_size = [_]usize{ 10, 10 },
         .tile_width = 16,
-        .block_max_tiles = 80,
-        .patch_max_tiles = 80,
     };
 
-    var mesh: Mesh2 = Mesh2.init(allocator, config);
+    var mesh: Mesh(2) = try Mesh(2).init(allocator, config);
     defer mesh.deinit();
 
     var tags: []bool = try allocator.alloc(bool, mesh.tile_total);
@@ -575,11 +560,7 @@ test "mesh regridding" {
     // Tag all
     @memset(tags, true);
 
-    try mesh.regrid(tags, .{
-        .max_levels = 1,
-        .block_efficiency = 0.7,
-        .patch_efficiency = 0.1,
-    });
+    try mesh.regrid(tags, 1, 0.1, 80, 0.7, 80);
 }
 
 test {}

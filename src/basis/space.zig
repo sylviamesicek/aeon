@@ -613,7 +613,7 @@ test "basis boundary interpolation" {
 
     var function: [N + 4 * O]f64 = undefined;
 
-    var cells = stencil_space.cellSpace().cellsWtihExtent(2 * O);
+    var cells = stencil_space.cellSpace().fullCells();
 
     while (cells.next()) |cell| {
         const pos = stencil_space.position(cell);

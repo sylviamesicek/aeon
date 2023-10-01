@@ -20,7 +20,6 @@ const system = @import("../system.zig");
 // submodules
 
 const boundaries = @import("boundary.zig");
-const chunks = @import("chunks.zig");
 const multigrid = @import("multigrid.zig");
 const operator = @import("operator.zig");
 
@@ -28,10 +27,7 @@ const operator = @import("operator.zig");
 
 pub const BoundaryCondition = boundaries.BoundaryCondition;
 pub const SystemBoundaryCondition = boundaries.SystemBoundaryCondition;
-pub const isSystemBoundaryCondition = boundaries.isSystemBoundaryCondition;
 pub const isSystemBoundary = boundaries.isSystemBoundary;
-
-pub const SystemChunk = chunks.SystemChunk;
 
 pub const Engine = operator.Engine;
 pub const OperatorEngine = operator.OperatorEngine;
@@ -59,20 +55,24 @@ pub fn DofUtils(comptime N: usize, comptime O: usize) type {
         const Face = geometry.Face(N);
         const Region = geometry.Region(N);
 
-        pub fn chunkDofs(mesh: *const Mesh) usize {
-            const dofs_per_dim: usize = CellSpace.fromSize(Index.splat(mesh.block_max_tiles * mesh.tile_width)).total();
+        /// Computes the number of dofs needed to store a function on the largest block in the mesh.
+        pub fn maxWindowDofs(mesh: *const Mesh) usize {
+            var result: usize = 0;
 
-            var result: usize = 1;
+            for (0..mesh.active_levels) |level| {
+                const target = mesh.getLevel(level);
 
-            inline for (0..N) |_| {
-                result *= dofs_per_dim;
+                for (0..target.blockTotal()) |block| {
+                    result = @max(result, windowDofs(mesh, level, block));
+                }
             }
 
             return result;
         }
 
-        pub fn totalDofs(mesh: *const Mesh) usize {
-            return mesh.cell_total;
+        pub fn windowDofs(mesh: *const Mesh, level: usize, block: usize) usize {
+            const cell_space = CellSpace.fromSize(blockCellSize(mesh, level, block));
+            return cell_space.total();
         }
 
         pub fn blockCellSize(mesh: *const Mesh, level: usize, block: usize) [N]usize {
@@ -153,29 +153,29 @@ pub fn DofUtils(comptime N: usize, comptime O: usize) type {
             mesh: *const Mesh,
             level: usize,
             block: usize,
-            chunk: SystemChunk(System),
-            sys: system.SystemSliceConst(System),
+            dest: system.SystemSlice(System),
+            src: system.SystemSliceConst(System),
         ) void {
             if (comptime !system.isSystem(System)) {
                 @compileError("fillInterior requires System satisfy isSystem trait.");
             }
 
-            const block_sys = system.systemStructSlice(
-                sys,
+            assert(src.len == mesh.cell_total);
+            assert(dest.len == windowDofs(mesh, level, block));
+
+            const block_src = src.slice(
                 mesh.blockCellOffset(level, block),
                 mesh.blockCellTotal(level, block),
             );
 
-            var cell_space = CellSpace.fromSize(blockCellSize(mesh, level, block));
-
-            const chunk_sys = chunk.slice(cell_space.total());
+            const cell_space = CellSpace.fromSize(blockCellSize(mesh, level, block));
 
             var cells = cell_space.cells();
             var linear: usize = 0;
 
             while (cells.next()) |cell| : (linear += 1) {
-                inline for (comptime system.systemFieldNames(System)) |name| {
-                    cell_space.setValue(cell, @field(chunk_sys, name), @field(block_sys, name)[linear]);
+                inline for (comptime std.enums.values(System)) |field| {
+                    cell_space.setValue(cell, dest.field(field), block_src.field(field)[linear]);
                 }
             }
         }
@@ -186,10 +186,10 @@ pub fn DofUtils(comptime N: usize, comptime O: usize) type {
             block: usize,
             block_map: []const usize,
             boundary: anytype,
-            chunk: SystemChunk(@TypeOf(boundary).System),
+            dest: system.SystemSlice(@TypeOf(boundary).System),
             sys: system.SystemSliceConst(@TypeOf(boundary).System),
         ) void {
-            fillBoundaryToExtent(O, mesh, level, block, block_map, boundary, chunk, sys);
+            fillBoundaryToExtent(O, mesh, level, block, block_map, boundary, dest, sys);
         }
 
         pub fn fillBoundaryFull(
@@ -198,10 +198,10 @@ pub fn DofUtils(comptime N: usize, comptime O: usize) type {
             block: usize,
             block_map: []const usize,
             boundary: anytype,
-            chunk: SystemChunk(@TypeOf(boundary).System),
+            dest: system.SystemSlice(@TypeOf(boundary).System),
             sys: system.SystemSliceConst(@TypeOf(boundary).System),
         ) void {
-            fillBoundaryToExtent(2 * O, mesh, level, block, block_map, boundary, chunk, sys);
+            fillBoundaryToExtent(2 * O, mesh, level, block, block_map, boundary, dest, sys);
         }
 
         fn fillBoundaryToExtent(
@@ -211,7 +211,7 @@ pub fn DofUtils(comptime N: usize, comptime O: usize) type {
             block: usize,
             block_map: []const usize,
             boundary: anytype,
-            chunk: SystemChunk(@TypeOf(boundary).System),
+            dest: system.SystemSlice(@TypeOf(boundary).System),
             sys: system.SystemSliceConst(@TypeOf(boundary).System),
         ) void {
             const T = @TypeOf(boundary);
@@ -239,22 +239,23 @@ pub fn DofUtils(comptime N: usize, comptime O: usize) type {
                 if (exterior) {
                     const stencil_space = blockStencilSpace(mesh, level, block);
 
-                    BoundaryUtils.fillBoundary(E, stencil_space, boundary, chunk.slice(stencil_space.cellSpace().total()));
+                    BoundaryUtils.fillBoundaryRegion(E, region, stencil_space, boundary, dest);
                 } else {
-                    fillInteriorBoundary(region, E, mesh, level, block, block_map, chunk, sys);
+                    fillInteriorBoundary(T.System, region, E, mesh, level, block, block_map, dest, sys);
                 }
             }
         }
 
         fn fillInteriorBoundary(
+            comptime System: type,
             comptime region: Region,
             comptime E: usize,
             mesh: *const Mesh,
             level: usize,
             block: usize,
             block_map: []const usize,
-            chunk: anytype,
-            sys: anytype,
+            dest: system.SystemSlice(System),
+            src: system.SystemSliceConst(System),
         ) void {
             const target: *const Level = mesh.getLevel(level);
 
@@ -263,8 +264,6 @@ pub fn DofUtils(comptime N: usize, comptime O: usize) type {
 
             const block_bounds = blocks.items(.bounds)[block];
             const block_cell_space = CellSpace.fromSize(block_bounds.size);
-
-            const block_sys = chunk.slice(block_cell_space.total());
 
             const patch = blocks.items(.patch)[block];
             const patch_bounds: IndexBox = patches.items(.bounds)[patch];
@@ -303,7 +302,7 @@ pub fn DofUtils(comptime N: usize, comptime O: usize) type {
 
                     const coarse_block_offset = coarse.cell_offset + coarse.blocks.items(.cell_offset)[coarse_block];
                     const coarse_block_total = target.blocks.items(.cell_total)[coarse_block];
-                    const coarse_block_sys = system.systemStructSlice(sys, coarse_block_offset, coarse_block_total);
+                    const coarse_block_src = src.slice(coarse_block_offset, coarse_block_total);
 
                     var coarse_relative_block_bounds = coarse.blocks.items(.bounds)[coarse_block].relativeTo(coarse_patch_bounds);
                     coarse_relative_block_bounds.refine();
@@ -319,21 +318,20 @@ pub fn DofUtils(comptime N: usize, comptime O: usize) type {
                         // Cell in neighbor in subcell space
                         const neighbor_cell: [N]isize = CellSpace.offsetFromOrigin(coarse_neighbor_origin, ind);
 
-                        inline for (comptime system.systemFieldNames(@TypeOf(sys))) |name| {
+                        inline for (comptime std.enums.values(System)) |field| {
                             block_cell_space.setValue(
                                 block_cell,
-                                @field(block_sys, name),
+                                dest.field(field),
                                 coarse_block_cell_space.prolong(
                                     neighbor_cell,
-                                    @field(coarse_block_sys, name),
+                                    coarse_block_src.field(field),
                                 ),
                             );
                         }
                     }
                 } else {
                     // Copy from neighbor on same level
-                    const neighbor_sys = system.systemStructSlice(
-                        sys,
+                    const neighbor_src = src.slice(
                         mesh.blockCellOffset(level, neighbor),
                         mesh.blockCellTotal(level, neighbor),
                     );
@@ -349,13 +347,13 @@ pub fn DofUtils(comptime N: usize, comptime O: usize) type {
                         const block_cell: [N]isize = CellSpace.offsetFromOrigin(origin, idx);
                         const neighbor_cell: [N]isize = CellSpace.offsetFromOrigin(neighbor_origin, idx);
 
-                        inline for (comptime system.systemFieldNames(@TypeOf(sys))) |name| {
+                        inline for (comptime std.enums.values(System)) |field| {
                             block_cell_space.setValue(
                                 block_cell,
-                                @field(block_sys, name),
+                                dest.field(field),
                                 neighbor_cell_space.value(
                                     neighbor_cell,
-                                    @field(neighbor_sys, name),
+                                    neighbor_src.field(field),
                                 ),
                             );
                         }
@@ -371,7 +369,7 @@ pub fn DofUtils(comptime N: usize, comptime O: usize) type {
         pub fn project(
             mesh: *const Mesh,
             projection: anytype,
-            sys: system.SystemSlice(@TypeOf(projection).System),
+            dest: system.SystemSlice(@TypeOf(projection).System),
         ) void {
             const T = @TypeOf(projection);
 
@@ -384,7 +382,7 @@ pub fn DofUtils(comptime N: usize, comptime O: usize) type {
                     const stencil_space = blockStencilSpace(mesh, level, block);
                     const cell_space = stencil_space.cellSpace();
 
-                    const level_sys = system.systemStructSlice(sys, mesh.blockCellOffset(level, block), mesh.blockCellTotal(level, block));
+                    const block_dest = dest.slice(mesh.blockCellOffset(level, block), mesh.blockCellTotal(level, block));
 
                     var cells = cell_space.cells();
                     var linear: usize = 0;
@@ -393,8 +391,8 @@ pub fn DofUtils(comptime N: usize, comptime O: usize) type {
                         const pos: [N]f64 = stencil_space.position(cell);
                         const value: system.SystemValue(T.System) = projection.project(pos);
 
-                        inline for (comptime system.systemFieldNames(T.System)) |name| {
-                            @field(level_sys, name)[linear] = @field(value, name);
+                        inline for (comptime std.enums.values(T.System)) |field| {
+                            block_dest.field(field)[linear] = @field(value, @tagName(field));
                         }
                     }
                 }
@@ -405,11 +403,12 @@ pub fn DofUtils(comptime N: usize, comptime O: usize) type {
         // Output ******************
         // *************************
 
-        pub fn writeVtk(allocator: Allocator, mesh: *const Mesh, sys: anytype, out_stream: anytype) !void {
-            const T = @TypeOf(sys);
-            if (comptime !(system.isSystemSliceConst(T) or system.isSystemSlice(T))) {
-                @compileError("Sys must satisfy isSystemSliceConst trait.");
+        pub fn writeVtk(comptime System: type, allocator: Allocator, mesh: *const Mesh, sys: system.SystemSliceConst(System), out_stream: anytype) !void {
+            if (comptime !system.isSystem(System)) {
+                @compileError("System must satisfy isSystem trait.");
             }
+
+            const field_count = comptime std.enums.values(System).len;
 
             const vtkio = @import("../vtkio.zig");
             const VtuMeshOutput = vtkio.VtuMeshOutput;
@@ -429,7 +428,7 @@ pub fn DofUtils(comptime N: usize, comptime O: usize) type {
             var vertices: ArrayListUnmanaged(usize) = .{};
             defer vertices.deinit(allocator);
 
-            var fields = [1]ArrayListUnmanaged(f64){.{}} ** system.systemFieldCount(T);
+            var fields = [1]ArrayListUnmanaged(f64){.{}} ** field_count;
 
             defer {
                 for (&fields) |*field| {
@@ -519,11 +518,11 @@ pub fn DofUtils(comptime N: usize, comptime O: usize) type {
                         try field.ensureUnusedCapacity(allocator, cell_space.total());
                     }
 
-                    const block_field = system.systemStructSlice(sys, level_offset + offset, total);
+                    const block_sys = sys.slice(level_offset + offset, total);
 
                     for (0..total) |linear| {
-                        inline for (comptime system.systemFieldNames(T), 0..) |name, idx| {
-                            fields[idx].appendAssumeCapacity(@field(block_field, name)[linear]);
+                        inline for (comptime std.enums.values(System), 0..) |field, idx| {
+                            fields[idx].appendAssumeCapacity(block_sys.field(field)[linear]);
                         }
                     }
                 }
@@ -536,7 +535,7 @@ pub fn DofUtils(comptime N: usize, comptime O: usize) type {
             });
             defer grid.deinit();
 
-            for (system.systemFieldNames(@TypeOf(sys)), 0..) |name, id| {
+            inline for (comptime std.meta.fieldNames(System), 0..) |name, id| {
                 try grid.addCellField(name, fields[id].items, 1);
             }
 

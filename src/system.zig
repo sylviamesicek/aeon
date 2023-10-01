@@ -14,6 +14,10 @@
 
 const std = @import("std");
 const meta = std.meta;
+const enums = std.enums;
+
+const Allocator = std.mem.Allocator;
+const assert = std.debug.assert;
 
 /// A trait function used for determining if a type desribes a system.
 pub fn isSystem(comptime T: type) bool {
@@ -28,123 +32,122 @@ pub fn isSystem(comptime T: type) bool {
     }
 }
 
-/// Builds a struct type with one named field per variant of T, of type F.
-pub fn SystemStruct(comptime T: type, comptime F: type) type {
-    if (!isSystem(T)) {
-        @compileError("T must satisfy isSystem trait");
-    }
-
-    const field_infos = meta.fields(T);
-
-    if (field_infos.len == 0) {
-        return struct {};
-    }
-
-    var struct_fields: [field_infos.len]std.builtin.Type.StructField = undefined;
-    var decls = [_]std.builtin.Type.Declaration{};
-
-    inline for (field_infos, 0..) |field, i| {
-        struct_fields[i] = .{
-            .name = field.name,
-            .type = F,
-            .default_value = null,
-            .is_comptime = false,
-            .alignment = @alignOf(F),
-        };
-    }
-
-    return @Type(.{
-        .Struct = .{
-            .layout = .Auto,
-            .fields = &struct_fields,
-            .decls = &decls,
-            .is_tuple = false,
-        },
-    });
+/// The value of a system at a point.
+pub fn SystemValue(comptime T: type) type {
+    return enums.EnumFieldStruct(T, f64, null);
 }
 
-/// A trait which determines if a type is a valid system struct.
-pub fn isSystemStruct(comptime T: type, comptime F: type) bool {
-    switch (@typeInfo(T)) {
-        .Struct => |info| {
-            inline for (info.fields) |field| {
-                if (field.type != F) {
-                    return false;
+/// A private impl type for generating the SystemSlice
+/// and SystemSliceConst types.
+fn SystemSliceImpl(comptime T: type, comptime is_const: bool) type {
+    const ManyItemPtr: type = if (is_const) [*]const f64 else [*]f64;
+    const Slice: type = if (is_const) []const f64 else []f64;
+    const Ptrs = enums.EnumFieldStruct(T, ManyItemPtr, null);
+
+    return struct {
+        len: usize,
+        ptrs: Ptrs,
+
+        const Self = @This();
+
+        pub fn init(allocator: Allocator, len: usize) !Self {
+            var ptrs: Ptrs = undefined;
+
+            errdefer {
+                inline for (comptime meta.fieldNames(T)) |name| {
+                    var slice_to_free: Slice = undefined;
+                    slice_to_free.len = len;
+                    slice_to_free.ptr = @field(ptrs, name);
+
+                    allocator.free(slice_to_free);
                 }
             }
 
-            return true;
-        },
-        else => return false,
-    }
+            inline for (comptime meta.fieldNames(T)) |name| {
+                const mem = try allocator.alloc(f64, len);
+                @field(ptrs, name) = mem.ptr;
+            }
+
+            return .{
+                .len = len,
+                .ptrs = ptrs,
+            };
+        }
+
+        pub fn deinit(self: Self, allocator: Allocator) void {
+            inline for (comptime meta.fieldNames(T)) |name| {
+                var slice_to_free: Slice = undefined;
+                slice_to_free.len = self.len;
+                slice_to_free.ptr = @field(self.ptrs, name);
+
+                allocator.free(slice_to_free);
+            }
+        }
+
+        pub fn view(len: usize, slices: enums.EnumFieldStruct(T, Slice, null)) Self {
+            var ptrs: Ptrs = undefined;
+
+            inline for (comptime meta.fieldNames(T)) |name| {
+                assert(@field(slices, name).len == len);
+                @field(ptrs, name) = @field(slices, name).ptr;
+            }
+
+            return .{
+                .len = len,
+                .ptrs = ptrs,
+            };
+        }
+
+        pub fn field(self: Self, comptime sys: T) Slice {
+            const ptr = @field(self.ptrs, @tagName(sys));
+
+            var result: Slice = undefined;
+            result.len = self.len;
+            result.ptr = ptr;
+
+            return result;
+        }
+
+        pub fn slice(self: Self, offset: usize, total: usize) Self {
+            assert(self.len >= offset + total);
+
+            var ptrs: Ptrs = undefined;
+
+            inline for (comptime meta.fieldNames(T)) |name| {
+                const src = @field(self.ptrs, name);
+
+                @field(ptrs, name) = @ptrFromInt(@intFromPtr(src) + offset * @sizeOf(f64));
+            }
+
+            return .{
+                .len = total,
+                .ptrs = ptrs,
+            };
+        }
+
+        pub fn toConst(self: Self) SystemSliceConst(T) {
+            var result: SystemSliceConst(T) = undefined;
+            result.len = self.len;
+
+            inline for (comptime meta.fieldNames(T)) |name| {
+                @field(result.ptrs, name) = @field(self.ptrs, name);
+            }
+
+            return result;
+        }
+    };
 }
 
-/// A mutable slice of a system in SoA storage.
+/// A system slice, ie a memory efficient collection of []f64's for each system,
+/// which can be accessed using the `field()` member function.
 pub fn SystemSlice(comptime T: type) type {
-    return SystemStruct(T, []f64);
+    return SystemSliceImpl(T, false);
 }
 
-pub fn isSystemSlice(comptime T: type) bool {
-    return isSystemStruct(T, []f64);
-}
-
-/// A constant slice of a system in SoA storage.
+/// A system slice const, ie a memory efficient collection of []const f64's for each system,
+/// which can be accessed using the `field()` member function.
 pub fn SystemSliceConst(comptime T: type) type {
-    return SystemStruct(T, []const f64);
-}
-
-pub fn isSystemSliceConst(comptime T: type) bool {
-    return isSystemStruct(T, []const f64);
-}
-
-/// The value of a system at a point.
-pub fn SystemValue(comptime T: type) type {
-    return SystemStruct(T, f64);
-}
-
-pub fn isSystemValue(comptime T: type) bool {
-    return isSystemStruct(T, f64);
-}
-
-/// Returns the total number of fields in a system
-pub fn systemFieldCount(comptime T: type) usize {
-    return meta.fields(T).len;
-}
-
-/// Iterates the names of fields in a system.
-pub fn systemFieldNames(comptime T: type) [systemFieldCount(T)][]const u8 {
-    var result: [systemFieldCount(T)][]const u8 = undefined;
-
-    inline for (meta.fields(T), 0..) |field_info, id| {
-        result[id] = field_info.name;
-    }
-
-    return result;
-}
-
-/// Iterates the fields of a struct system.
-pub fn systemStructFields(comptime T: type, comptime F: type, sys: SystemStruct(T, F)) [systemFieldCount(T)]F {
-    if (!isSystem(T)) {
-        @compileError("systemFields only valid for system types");
-    }
-
-    var result: [systemFieldCount(T)]F = undefined;
-
-    inline for (meta.fields(T), 0..) |field_info, id| {
-        result[id] = @field(sys, field_info.name);
-    }
-
-    return result;
-}
-
-pub fn systemStructSlice(sys: anytype, offset: usize, total: usize) @TypeOf(sys) {
-    var slice: @TypeOf(sys) = undefined;
-
-    inline for (meta.fields(@TypeOf(sys))) |field_info| {
-        @field(slice, field_info.name) = @field(sys, field_info.name)[offset..(offset + total)];
-    }
-
-    return slice;
+    return SystemSliceImpl(T, true);
 }
 
 test "system trait" {

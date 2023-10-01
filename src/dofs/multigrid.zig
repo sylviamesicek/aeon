@@ -9,7 +9,6 @@ const geometry = @import("../geometry/geometry.zig");
 const index = @import("../index.zig");
 
 const boundary = @import("boundary.zig");
-const chunks = @import("chunks.zig");
 const dofs = @import("dofs.zig");
 const operator = @import("operator.zig");
 
@@ -32,7 +31,8 @@ pub fn MultigridSolver(comptime N: usize, comptime O: usize, comptime BaseSolver
         const Index = index.Index(N);
         const CellSpace = basis.CellSpace(N, O, O);
         const StencilSpace = basis.StencilSpace(N, O, O);
-        const SystemChunk = chunks.SystemChunk;
+        const SystemSlice = system.SystemSlice;
+        const SystemSliceConst = system.SystemSliceConst;
 
         pub fn init(mesh: *const Mesh, block_map: []const usize, base_solver: *BaseSolver) Self {
             return .{
@@ -46,15 +46,12 @@ pub fn MultigridSolver(comptime N: usize, comptime O: usize, comptime BaseSolver
 
         pub fn solve(
             self: *Self,
+            allocator: Allocator,
             oper: anytype,
-            x: system.SystemSlice(@TypeOf(oper).System),
-            b: system.SystemSliceConst(@TypeOf(oper).System),
-            ctx: system.SystemSliceConst(@TypeOf(oper).Context),
-            x_chunk: SystemChunk(@TypeOf(oper).System),
-            b_chunk: SystemChunk(@TypeOf(oper).System),
-            ctx_chunk: SystemChunk(@TypeOf(oper).Context),
-        ) void {
-            _ = b_chunk;
+            x: SystemSlice(@TypeOf(oper).System),
+            b: SystemSliceConst(@TypeOf(oper).System),
+            ctx: SystemSliceConst(@TypeOf(oper).Context),
+        ) !void {
             // Alias
             const T = @TypeOf(oper);
 
@@ -62,56 +59,68 @@ pub fn MultigridSolver(comptime N: usize, comptime O: usize, comptime BaseSolver
                 @compileError("Oper must satisfy isMeshOperator traits.");
             }
 
-            if (comptime system.systemFieldCount(T.System) != 1) {
+            if (comptime std.meta.fields(T.System).len != 1) {
                 @compileError("The multigrid solver only supports systems with 1 field currently.");
             }
 
-            const field_name: []const u8 = comptime system.systemFieldNames(T.System)[0];
-            const x_field: []f64 = @field(x, field_name);
-            const b_field: []const f64 = @field(b, field_name);
+            const field: T.System = comptime std.enums.values(T.System)[0];
+            const x_field: []f64 = x.field(field);
+            const b_field: []const f64 = b.field(field);
+
+            const base_window_dofs = DofUtils.windowDofs(self.mesh, 0, 0);
+
+            const ctx_window = try SystemSlice(T.Context).init(allocator, base_window_dofs);
+            defer ctx_window.deinit(allocator);
+
+            const x_window = try SystemSlice(T.System).init(allocator, base_window_dofs);
+            defer x_window.deinit(allocator);
 
             // Solve system using the base solver
             const base_linear_map: BaseLinearMap(T) = .{
                 .self = self,
                 .oper = oper,
                 .ctx = ctx,
-                .ctx_chunk = ctx_chunk,
-                .x_chunk = x_chunk,
+                .ctx_window = ctx_window,
+                .x_window = x_window,
             };
 
             self.base_solver.solve(base_linear_map, x_field, b_field);
         }
 
         fn BaseLinearMap(comptime T: type) type {
-            const field_name: []const u8 = comptime system.systemFieldNames(T.System)[0];
+            const field_name: []const u8 = comptime std.meta.fieldNames(T.System)[0];
 
             return struct {
                 self: *const Self,
                 oper: T,
                 ctx: system.SystemSliceConst(T.Context),
-                ctx_chunk: SystemChunk(T.Context),
-                x_chunk: SystemChunk(T.System),
+                ctx_window: system.SystemSlice(T.Context),
+                x_window: system.SystemSlice(T.System),
 
                 pub fn apply(wrapper: *const @This(), output: []f64, input: []const f64) void {
                     const mesh = wrapper.self.mesh;
                     const block_map = wrapper.self.block_map;
-                    const ctx_chunk = wrapper.ctx_chunk;
-                    const x_chunk = wrapper.x_chunk;
+                    const ctx_window = wrapper.ctx_window;
+                    const x_window = wrapper.x_window;
 
                     // Aliases
                     const stencil_space = DofUtils.blockStencilSpace(mesh, 0, 0);
 
                     // Fill base boundary and inner
                     {
-                        var sys: system.SystemSliceConst(T.System) = undefined;
-                        @field(sys, field_name) = input;
+                        const sys = blk: {
+                            var result: std.enums.EnumFieldStruct(T.System, []const f64, null) = undefined;
+                            @field(result, field_name) = input;
+
+                            break :blk system.SystemSliceConst(T.System).view(input.len, result);
+                        };
 
                         DofUtils.fillInterior(
                             T.System,
                             mesh,
                             0,
                             0,
-                            x_chunk,
+                            x_window,
                             sys,
                         );
                         DofUtils.fillBoundary(
@@ -120,7 +129,7 @@ pub fn MultigridSolver(comptime N: usize, comptime O: usize, comptime BaseSolver
                             0,
                             block_map,
                             DofUtils.operSystemBoundary(wrapper.oper),
-                            x_chunk,
+                            x_window,
                             sys,
                         );
 
@@ -129,7 +138,7 @@ pub fn MultigridSolver(comptime N: usize, comptime O: usize, comptime BaseSolver
                             mesh,
                             0,
                             0,
-                            ctx_chunk,
+                            ctx_window,
                             wrapper.ctx,
                         );
                         DofUtils.fillBoundary(
@@ -138,7 +147,7 @@ pub fn MultigridSolver(comptime N: usize, comptime O: usize, comptime BaseSolver
                             0,
                             block_map,
                             DofUtils.operContextBoundary(wrapper.oper),
-                            ctx_chunk,
+                            ctx_window,
                             wrapper.ctx,
                         );
                     }
@@ -154,8 +163,8 @@ pub fn MultigridSolver(comptime N: usize, comptime O: usize, comptime BaseSolver
                                     .space = stencil_space,
                                     .cell = cell,
                                 },
-                                .ctx = ctx_chunk.sliceConst(stencil_space.cellSpace().total()),
-                                .sys = x_chunk.sliceConst(stencil_space.cellSpace().total()),
+                                .ctx = ctx_window.toConst(),
+                                .sys = x_window.toConst(),
                             };
 
                             output[linear] = @field(wrapper.oper.apply(engine), field_name);
