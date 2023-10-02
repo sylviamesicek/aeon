@@ -177,7 +177,7 @@ pub fn ScalarFieldProblem(comptime O: usize) type {
                 .sigma = 1.0,
             };
 
-            DofUtils.project(&grid, seed_proj, seed);
+            DofUtils.projectCells(&grid, seed_proj, seed);
 
             var metric = try SystemSlice(Metric).init(allocator, grid.cell_total);
             defer metric.deinit(allocator);
