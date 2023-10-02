@@ -192,7 +192,41 @@ pub fn Mesh(comptime N: usize) type {
 
             @memset(map, maxInt(usize));
 
-            for (self.levels.items, 0..) |level, l| {
+            for (self.levels.items[0..self.active_levels], 0..) |level, l| {
+                for (level.blocks.items(.bounds), level.blocks.items(.patch), 0..) |bounds, patch, id| {
+                    const pbounds: IndexBox = level.patches.items(.bounds)[patch];
+                    const tile_to_block: []usize = self.patchTileSlice(l, patch, map);
+                    IndexSpace.fromBox(pbounds).fillWindow(bounds.relativeTo(pbounds), usize, tile_to_block, id);
+                }
+            }
+        }
+
+        /// Builds a block child map. ie a map from each tile in the mesh to the id of the block that covers it
+        /// on the next level, if any.
+        pub fn buildBlockChildMap(self: *const Self, map: []usize) void {
+            assert(map.len == self.tile_total);
+
+            @memset(map, maxInt(usize));
+
+            for (0..self.active_levels - 1) |l| {
+                const level = self.getLevel(l);
+                const refined = self.getLevel(l + 1);
+
+                for (0..level.patchTotal()) |patch| {
+                    const patch_bounds: IndexBox = level.patches.items(.bounds)[patch];
+                    const patch_map: []usize = self.patchTileSlice(l, patch, map);
+                    for (level.childrenSlice(patch)) |child_patch| {
+                        const offset = refined.patches.items(.block_offset)[child_patch];
+                        const total = refined.patches.items(.block_total)[child_patch];
+                        for (offset..offset + total) |child_block| {
+                            var bounds = refined.blocks.items(.bounds)[child_block];
+                            bounds.coarsen();
+
+                            IndexSpace.fromBox(patch_bounds).fillWindow(bounds.relativeTo(patch), usize, patch_map, child_block);
+                        }
+                    }
+                }
+
                 for (level.blocks.items(.bounds), level.blocks.items(.patch), 0..) |bounds, patch, id| {
                     const pbounds: IndexBox = level.patches.items(.bounds)[patch];
                     const tile_to_block: []usize = self.patchTileSlice(l, patch, map);

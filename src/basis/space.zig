@@ -7,7 +7,7 @@ const geometry = @import("../geometry/geometry.zig");
 
 /// A set of cells over which basic stencils can be applied. This includes a buffer region of
 /// length `E`, and all stencils are built to order `O`.
-pub fn BufferedCellSpace(comptime N: usize, comptime E: usize, comptime O: usize) type {
+pub fn CellSpaceWithExtent(comptime N: usize, comptime E: usize, comptime O: usize) type {
     return struct {
         size: [N]usize,
 
@@ -189,18 +189,10 @@ pub fn BufferedCellSpace(comptime N: usize, comptime E: usize, comptime O: usize
     };
 }
 
-pub fn SimpleCellSpace(comptime N: usize, comptime O: usize) type {
-    return BufferedCellSpace(N, 0, O);
-}
-
-pub fn CellSpace(comptime N: usize, comptime O: usize) type {
-    return BufferedCellSpace(N, 2 * O, O);
-}
-
 /// Manages the application of stencil products on functions. Supports computing values, centered derivatives
 /// positions, boundary positions, boundary values, boundary derivatives, prolongation, and restriction.
 /// If full is false, all cell indices are in standard index space (ie without ghost cells included).
-pub fn BufferedStencilSpace(comptime N: usize, comptime E: usize, comptime O: usize) type {
+pub fn StencilSpaceWithExtent(comptime N: usize, comptime E: usize, comptime O: usize) type {
     return struct {
         physical_bounds: RealBox,
         size: [N]usize,
@@ -211,7 +203,7 @@ pub fn BufferedStencilSpace(comptime N: usize, comptime E: usize, comptime O: us
         const IndexSpace = geometry.IndexSpace(N);
         const Region = geometry.Region(N);
         const Face = geometry.Face(N);
-        const CSpace = BufferedCellSpace(N, E, O);
+        const CSpace = CellSpaceWithExtent(N, E, O);
 
         pub fn cellSpace(self: Self) CSpace {
             return CSpace.fromSize(self.size);
@@ -473,14 +465,6 @@ pub fn BufferedStencilSpace(comptime N: usize, comptime E: usize, comptime O: us
     };
 }
 
-pub fn SimpleStencilSpace(comptime N: usize, comptime O: usize) type {
-    return BufferedStencilSpace(N, 0, O);
-}
-
-pub fn StencilSpace(comptime N: usize, comptime O: usize) type {
-    return BufferedStencilSpace(N, 2 * O, O);
-}
-
 fn derivativeStencil(comptime R: usize, comptime O: usize) [2 * O + 1]f64 {
     const grid = cellCenteredGrid(f64, O, O);
 
@@ -603,7 +587,7 @@ test "basis boundary interpolation" {
     const O = 2;
     const N = 50;
 
-    const stencil_space = StencilSpace(1, O){
+    const stencil_space = StencilSpaceWithExtent(1, 2 * O, O){
         .physical_bounds = .{
             .origin = [1]f64{a},
             .size = [1]f64{b - a},

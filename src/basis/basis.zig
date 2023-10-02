@@ -9,11 +9,25 @@ const space = @import("space.zig");
 // Public exports ************
 // ***************************
 
-pub const SimpleCellSpace = space.SimpleCellSpace;
-pub const CellSpace = space.CellSpace;
+pub const CellSpaceWithExtent = space.CellSpaceWithExtent;
 
-pub const SimpleStencilSpace = space.SimpleStencilSpace;
-pub const StencilSpace = space.StencilSpace;
+pub fn SimpleCellSpace(comptime N: usize, comptime O: usize) type {
+    return CellSpaceWithExtent(N, 0, O);
+}
+
+pub fn CellSpace(comptime N: usize, comptime O: usize) type {
+    return CellSpaceWithExtent(N, 2 * O, O);
+}
+
+pub const StencilSpaceWithExtent = space.StencilSpaceWithExtent;
+
+pub fn SimpleStencilSpace(comptime N: usize, comptime O: usize) type {
+    return StencilSpaceWithExtent(N, 0, O);
+}
+
+pub fn StencilSpace(comptime N: usize, comptime O: usize) type {
+    return StencilSpaceWithExtent(N, 2 * O, O);
+}
 
 test {
     _ = lagrange;
