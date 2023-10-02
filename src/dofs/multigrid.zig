@@ -78,18 +78,6 @@ pub fn MultigridSolver(comptime N: usize, comptime O: usize, comptime BaseSolver
             const sys = try SystemSlice(T.System).init(allocator, total_dofs);
             defer sys.deinit(allocator);
 
-            const sys2 = try SystemSlice(T.System).init(allocator, total_dofs);
-            defer sys2.deinit(allocator);
-
-            const ctx = try SystemSlice(T.System).init(allocator, total_dofs);
-            defer ctx.deinit(allocator);
-
-            const tau = try SystemSlice(T.System).init(allocator, total_dofs);
-            defer tau.deinit(allocator);
-
-            // Reset tau correction to 0.0
-            @memset(tau, 0.0);
-
             DofUtils.copyDofsFromCellsAll(
                 T.System,
                 self.mesh,
@@ -105,6 +93,12 @@ pub fn MultigridSolver(comptime N: usize, comptime O: usize, comptime BaseSolver
                 DofUtils.operSystemBoundary(oper),
                 sys,
             );
+
+            const sys2 = try SystemSlice(T.System).init(allocator, total_dofs);
+            defer sys2.deinit(allocator);
+
+            const ctx = try SystemSlice(T.System).init(allocator, total_dofs);
+            defer ctx.deinit(allocator);
 
             DofUtils.copyDofsFromCellsAll(
                 T.Context,
@@ -122,6 +116,15 @@ pub fn MultigridSolver(comptime N: usize, comptime O: usize, comptime BaseSolver
                 ctx,
             );
 
+            const tau = try SystemSlice(T.System).init(allocator, self.mesh.cell_total);
+            defer tau.deinit(allocator);
+
+            // Reset tau correction to 0.0
+            @memset(tau, 0.0);
+
+            const rhs = try SystemSlice(T.System).init(allocator, self.mesh.cell_total);
+            defer rhs.deinit(allocator);
+
             // Run iterations
             var iteration: usize = 0;
 
@@ -133,6 +136,16 @@ pub fn MultigridSolver(comptime N: usize, comptime O: usize, comptime BaseSolver
 
                     // Perform smoothing
                     for (0..target.blockTotal()) |block| {
+                        // Apply tau correction
+                        const cell_offset = self.mesh.blockCellOffset(level, block);
+                        const cell_total = self.mesh.blockCellTotal(level, block);
+
+                        for (cell_offset..cell_offset + cell_total) |idx| {
+                            inline for (comptime std.enums.values(T.System)) |field| {
+                                rhs.field(field)[idx] = b.field(field)[idx] - tau.field(field)[idx];
+                            }
+                        }
+
                         // Smooth and store result in sys2
                         DofUtils.smooth(
                             self.mesh,
@@ -143,7 +156,7 @@ pub fn MultigridSolver(comptime N: usize, comptime O: usize, comptime BaseSolver
                             sys2,
                             sys,
                             ctx,
-                            b,
+                            rhs,
                         );
                         // Copy back to sys
                         DofUtils.copyDofs(
@@ -154,6 +167,16 @@ pub fn MultigridSolver(comptime N: usize, comptime O: usize, comptime BaseSolver
                             block,
                             sys,
                             sys2,
+                        );
+                        // Fill boundaries now that sys has been smoothed
+                        DofUtils.fillBoundary(
+                            self.mesh,
+                            self.block_map,
+                            self.dof_map,
+                            level,
+                            block,
+                            DofUtils.operSystemBoundary(oper),
+                            sys,
                         );
                         // Restrict updated vector.
                         DofUtils.restrict(
@@ -169,9 +192,7 @@ pub fn MultigridSolver(comptime N: usize, comptime O: usize, comptime BaseSolver
 
                     // Compute tau correction
                     for (0..target.blockTotal()) |block| {
-                        const stencil_space = DofUtils.blockStencilSpace(self.mesh, level, block);
-                        _ = stencil_space;
-
+                        // Fill boundaries of sys fully
                         DofUtils.fillBoundaryFull(
                             self.mesh,
                             self.block_map,
@@ -181,7 +202,7 @@ pub fn MultigridSolver(comptime N: usize, comptime O: usize, comptime BaseSolver
                             DofUtils.operSystemBoundary(oper),
                             sys,
                         );
-
+                        // Apply operator fully and store in sys2
                         DofUtils.applyFull(
                             self.mesh,
                             self.dof_map,
@@ -192,15 +213,17 @@ pub fn MultigridSolver(comptime N: usize, comptime O: usize, comptime BaseSolver
                             sys,
                             ctx,
                         );
-
-                        // Restrict to tau
-                        DofUtils.restrict(
-                            T.System,
+                        // Restrict residual and store result in tau
+                        DofUtils.restrictResidual(
                             self.mesh,
                             self.block_map,
                             self.dof_map,
                             level,
                             block,
+                            oper,
+                            tau,
+                            sys,
+                            ctx,
                             sys2,
                         );
                     }

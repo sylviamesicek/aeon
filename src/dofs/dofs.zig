@@ -209,6 +209,7 @@ pub fn DofUtils(comptime N: usize, comptime O: usize) type {
         // Copy *******************
         // ************************
 
+        /// Performs `copyDofsFromCells` for all levels and blocks.
         pub fn copyDofsFromCellsAll(
             comptime System: type,
             mesh: *const Mesh,
@@ -259,6 +260,7 @@ pub fn DofUtils(comptime N: usize, comptime O: usize) type {
             }
         }
 
+        /// Performs `copyCellsFromDofs` for all levels and blocks.
         pub fn copyCellsFromDofsAll(
             comptime System: type,
             mesh: *const Mesh,
@@ -309,6 +311,7 @@ pub fn DofUtils(comptime N: usize, comptime O: usize) type {
             }
         }
 
+        /// Copies data from one dof vector to another at the given block.
         pub fn copyDofs(
             comptime System: type,
             mesh: *const Mesh,
@@ -335,6 +338,7 @@ pub fn DofUtils(comptime N: usize, comptime O: usize) type {
             }
         }
 
+        /// Copies data from one cell vector to another at the given block.
         pub fn copyCells(
             comptime System: type,
             mesh: *const Mesh,
@@ -358,6 +362,7 @@ pub fn DofUtils(comptime N: usize, comptime O: usize) type {
         // Fill Ops ***************
         // ************************
 
+        /// Performs fillBoundary for all levels and blocks.
         pub fn fillBoundaryAll(
             mesh: *const Mesh,
             block_map: []const usize,
@@ -380,7 +385,8 @@ pub fn DofUtils(comptime N: usize, comptime O: usize) type {
             }
         }
 
-        /// Fills the boundary of a block to extent O.
+        /// Given a dof vector, fill all boundary dofs on that vector out to an extent O using the
+        /// supplied boundary conditions.
         pub fn fillBoundary(
             mesh: *const Mesh,
             block_map: []const usize,
@@ -393,6 +399,7 @@ pub fn DofUtils(comptime N: usize, comptime O: usize) type {
             fillBoundaryToExtent(O, mesh, block_map, dof_map, level, block, boundary, sys);
         }
 
+        /// Perfom `fillBoundaryFull` for all levels and blocks.
         pub fn fillBoundaryFullAll(
             mesh: *const Mesh,
             block_map: []const usize,
@@ -415,7 +422,8 @@ pub fn DofUtils(comptime N: usize, comptime O: usize) type {
             }
         }
 
-        /// Fills the boundary of a block to extent 2*O.
+        /// Given a dof vector, fill all boundary dofs on that vector out to an extent 2*O using the
+        /// supplied boundary conditions.
         pub fn fillBoundaryFull(
             mesh: *const Mesh,
             block_map: []const usize,
@@ -428,6 +436,7 @@ pub fn DofUtils(comptime N: usize, comptime O: usize) type {
             fillBoundaryToExtent(2 * O, mesh, block_map, dof_map, level, block, boundary, sys);
         }
 
+        /// Internal helper function for filling boundary dofs to some extent E.
         fn fillBoundaryToExtent(
             comptime E: usize,
             mesh: *const Mesh,
@@ -477,6 +486,7 @@ pub fn DofUtils(comptime N: usize, comptime O: usize) type {
             }
         }
 
+        /// Fills non physical boundaries (ie boundaries within the numerical domain between two blocks).
         fn fillInteriorBoundary(
             comptime System: type,
             comptime region: Region,
@@ -603,7 +613,7 @@ pub fn DofUtils(comptime N: usize, comptime O: usize) type {
         // Restrict / Prolong ******
         // *************************
 
-        /// Restricts data in a window onto underlying blocks in the global vector.
+        /// Given a global dof vector with correct boundary dofs at the given block, restrict the data to all underlying dofs.
         pub fn restrict(
             comptime System: type,
             mesh: *const Mesh,
@@ -677,39 +687,106 @@ pub fn DofUtils(comptime N: usize, comptime O: usize) type {
             }
         }
 
-        // *************************
-        // Projection **************
-        // *************************
-
-        /// Sets the values of a global cells solution vector using a projection function.
-        pub fn projectCells(
+        /// Given a set of dof vectors src, ctx, and b, where src and ctx are filled at all boundaries on level - 1 and b is filled at the
+        /// given block. For each underlying dof set the value of the cell vector at this dof to be the restricted value of b minus the
+        /// application of the operator at the underlying dof.
+        pub fn restrictResidual(
             mesh: *const Mesh,
-            projection: anytype,
-            sys: system.SystemSlice(@TypeOf(projection).System),
+            block_map: []const usize,
+            dof_map: Map,
+            level: usize,
+            block: usize,
+            oper: anytype,
+            dest: SystemSlice(@TypeOf(oper).System),
+            src: SystemSliceConst(@TypeOf(oper).System),
+            ctx: SystemSliceConst(@TypeOf(oper).Context),
+            b: SystemSliceConst(@TypeOf(oper).System),
         ) void {
-            const T = @TypeOf(projection);
+            const T = @TypeOf(oper);
 
-            if (comptime !isMeshProjection(N)(T)) {
-                @compileError("ProjectBase expects projection to satisfy isMeshProjection.");
+            if (comptime !operator.isMeshOperator(N, O)(T)) {
+                @compileError("Oper must satisfy isMeshOperator trait.");
             }
 
-            for (0..mesh.active_levels) |level| {
-                for (0..mesh.getLevel(level).blockTotal()) |block| {
-                    const stencil_space = blockStencilSpace(mesh, level, block);
-                    const cell_space = stencil_space.cellSpace();
+            assert(dest.len == mesh.cell_total);
+            assert(src.len == dof_map.total());
+            assert(b.len == dof_map.total());
 
-                    const block_dest = sys.slice(mesh.blockCellOffset(level, block), mesh.blockCellTotal(level, block));
+            if (level == 0) {
+                return;
+            }
 
-                    var cells = cell_space.cells();
-                    var linear: usize = 0;
+            const cell_space = CellSpace.fromSize(blockCellSize(mesh, level, block));
 
-                    while (cells.next()) |cell| : (linear += 1) {
-                        const pos: [N]f64 = stencil_space.position(cell);
-                        const value: system.SystemValue(T.System) = projection.project(pos);
+            const target = mesh.getLevel(level);
+            const coarse = mesh.getLevel(level - 1);
 
-                        inline for (comptime std.enums.values(T.System)) |field| {
-                            block_dest.field(field)[linear] = @field(value, @tagName(field));
-                        }
+            const patch = coarse.parents.items[target.blocks.items(.patch)[block]];
+            const patch_bounds = coarse.patches.items(.bounds)[patch];
+
+            var bounds = target.blocks.items(.bounds)[block];
+            try bounds.coarsen();
+
+            const patch_space = IndexSpace.fromBox(patch_bounds);
+            const block_space = IndexSpace.fromBox(bounds);
+
+            const block_b = b.slice(
+                dof_map.blockOffset(level, block),
+                dof_map.blockTotal(level, block),
+            );
+
+            const tile_offset = mesh.patchTileOffset(level - 1, patch);
+
+            var tiles = block_space.cartesianIndices();
+
+            while (tiles.next()) |tile| {
+                const relative_tile = patch_bounds.localFromGlobal(bounds.globalFromLocal(tile));
+                const linear = patch_space.linearFromCartesian(relative_tile);
+                const coarse_block = block_map[tile_offset + linear];
+
+                const coarse_bounds = coarse.blocks.items(.bounds)[coarse_block];
+                const coarse_stencil_space = blockStencilSpace(mesh, level - 1, coarse_block);
+                const coarse_index_space = IndexSpace.fromSize(coarse_bounds.size);
+
+                const coarse_cell_offset = dof_map.blockOffset(level - 1, coarse_block);
+                const coarse_cell_total = dof_map.blockTotal(level - 1, coarse_block);
+
+                const coarse_src = src.slice(coarse_cell_offset, coarse_cell_total);
+                const coarse_ctx = ctx.slice(coarse_cell_offset, coarse_cell_total);
+
+                const coarse_dest = dest.slice(
+                    mesh.blockCellOffset(level - 1, coarse_block),
+                    mesh.blockCellTotal(level - 1, coarse_block),
+                );
+
+                const coarse_tile = coarse_bounds.localFromGlobal(bounds.globalFromLocal(tile));
+                const coarse_origin = Index.scaled(coarse_tile, mesh.tile_width);
+
+                const origin = Index.scaled(tile, mesh.tile_width);
+
+                var cells = IndexSpace.fromSize(Index.splat(mesh.tile_width)).cartesianIndices();
+
+                while (cells.next()) |cell| {
+                    const super_cell = Index.toSigned(Index.add(origin, cell));
+                    const coarse_cell = Index.toSigned(Index.add(coarse_origin, cell));
+
+                    const lin = coarse_index_space.linearFromCartesian(Index.toUnsigned(coarse_cell));
+
+                    const engine = operator.EngineType(N, O, T){
+                        .inner = .{
+                            .space = coarse_stencil_space,
+                            .cell = coarse_cell,
+                        },
+                        .ctx = coarse_ctx,
+                        .sys = coarse_src,
+                    };
+
+                    const app = oper.apply(engine);
+
+                    inline for (comptime std.enums.values(@TypeOf(oper).System)) |field| {
+                        const b_val = cell_space.restrict(super_cell, block_b.field(field));
+                        const a_val = @field(app, @tagName(field));
+                        coarse_dest.field(field)[lin] = b_val - a_val;
                     }
                 }
             }
@@ -719,6 +796,8 @@ pub fn DofUtils(comptime N: usize, comptime O: usize) type {
         // Apply *******************
         // *************************
 
+        /// Given two dof vectors src and ctx, where both boundaries have been filled at this block,
+        /// set the value of a destination dof vector to be the application of the operator on src.
         pub fn apply(
             mesh: *const Mesh,
             dof_map: Map,
@@ -743,6 +822,8 @@ pub fn DofUtils(comptime N: usize, comptime O: usize) type {
             applyImpl(false, stencil_space, oper, block_dest, block_src, block_ctx);
         }
 
+        /// Given two dof vectors src and ctx, where both boundaries have been filled fully at this block,
+        /// set the value of a destination dof vector (including an extent O) to be the application of the operator on src.
         pub fn applyFull(
             mesh: *const Mesh,
             dof_map: Map,
@@ -767,6 +848,7 @@ pub fn DofUtils(comptime N: usize, comptime O: usize) type {
             applyImpl(true, stencil_space, oper, block_dest, block_src, block_ctx);
         }
 
+        /// A helper function for applying an operator at a single block.
         fn applyImpl(
             comptime full: bool,
             stencil_space: StencilSpace,
@@ -801,6 +883,8 @@ pub fn DofUtils(comptime N: usize, comptime O: usize) type {
         // *************************
         // Smoothing ***************
         // *************************
+
+        // TODO make smooth dest a cell vector to be more consistent.
 
         pub fn smooth(
             mesh: *const Mesh,
@@ -869,6 +953,44 @@ pub fn DofUtils(comptime N: usize, comptime O: usize) type {
                     const r: f64 = rhs.field(field)[linear];
 
                     stencil_space.setValue(cell, dest.field(field), f + (r - a) / d);
+                }
+            }
+        }
+
+        // *************************
+        // Projection **************
+        // *************************
+
+        /// Sets the values of a global cell solution vector using a projection function.
+        pub fn projectCells(
+            mesh: *const Mesh,
+            projection: anytype,
+            sys: system.SystemSlice(@TypeOf(projection).System),
+        ) void {
+            const T = @TypeOf(projection);
+
+            if (comptime !isMeshProjection(N)(T)) {
+                @compileError("ProjectBase expects projection to satisfy isMeshProjection.");
+            }
+
+            for (0..mesh.active_levels) |level| {
+                for (0..mesh.getLevel(level).blockTotal()) |block| {
+                    const stencil_space = blockStencilSpace(mesh, level, block);
+                    const cell_space = stencil_space.cellSpace();
+
+                    const block_dest = sys.slice(mesh.blockCellOffset(level, block), mesh.blockCellTotal(level, block));
+
+                    var cells = cell_space.cells();
+                    var linear: usize = 0;
+
+                    while (cells.next()) |cell| : (linear += 1) {
+                        const pos: [N]f64 = stencil_space.position(cell);
+                        const value: system.SystemValue(T.System) = projection.project(pos);
+
+                        inline for (comptime std.enums.values(T.System)) |field| {
+                            block_dest.field(field)[linear] = @field(value, @tagName(field));
+                        }
+                    }
                 }
             }
         }
