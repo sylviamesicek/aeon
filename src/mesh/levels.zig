@@ -56,17 +56,17 @@ pub fn Level(comptime N: usize) type {
         blocks: MultiArrayList(Block(N)),
         /// The patches belonging to this level.
         patches: MultiArrayList(Patch(N)),
-        /// Index buffer for children of patches
+        /// Index buffer for children of patches.
         children: ArrayListUnmanaged(usize),
         /// The parent of each child.
         parents: ArrayListUnmanaged(usize),
-        // Total number of tiles in this level
+        // Total number of tiles in this level.
         tile_total: usize,
         // Total number of cells in this level.
         cell_total: usize,
-        // Offset in mesh tile array for this level
+        // Offset in mesh tile array for this level.
         tile_offset: usize,
-        // Offset into mesh cell array for this level
+        // Offset into mesh cell array for this level.
         cell_offset: usize,
 
         const Self = @This();

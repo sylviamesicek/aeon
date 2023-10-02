@@ -11,19 +11,11 @@ const space = @import("space.zig");
 
 pub const CellSpaceWithExtent = space.CellSpaceWithExtent;
 
-pub fn SimpleCellSpace(comptime N: usize, comptime O: usize) type {
-    return CellSpaceWithExtent(N, 0, O);
-}
-
 pub fn CellSpace(comptime N: usize, comptime O: usize) type {
     return CellSpaceWithExtent(N, 2 * O, O);
 }
 
 pub const StencilSpaceWithExtent = space.StencilSpaceWithExtent;
-
-pub fn SimpleStencilSpace(comptime N: usize, comptime O: usize) type {
-    return StencilSpaceWithExtent(N, 0, O);
-}
 
 pub fn StencilSpace(comptime N: usize, comptime O: usize) type {
     return StencilSpaceWithExtent(N, 2 * O, O);
