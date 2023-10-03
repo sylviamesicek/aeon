@@ -106,24 +106,24 @@ pub fn CellSpaceWithExtent(comptime N: usize, comptime E: usize, comptime O: usi
         }
 
         /// Restricts the value of a field to a supercell.
-        pub fn restrict(self: Self, supercell: [N]usize, field: []const f64) f64 {
-            const stencil: [2 * O + 2]f64 = restrictStencil(O);
+        pub fn restrict(self: Self, supercell: [N]isize, field: []const f64) f64 {
+            const stencil: [2 * O + 2]f64 = comptime restrictStencil(O);
 
             const stencil_space: IndexSpace = comptime IndexSpace.fromSize([1]usize{2 * O + 2} ** N);
-            const index_space: IndexSpace = comptime self.indexSpace();
+            const index_space: IndexSpace = self.indexSpace();
 
             var result: f64 = 0.0;
 
             comptime var stencil_indices = stencil_space.cartesianIndices();
 
-            inline while (stencil_indices.next()) |stencil_index| {
+            inline while (comptime stencil_indices.next()) |stencil_index| {
                 comptime var coef: f64 = 1.0;
 
                 inline for (0..N) |i| {
                     coef *= stencil[stencil_index[i]];
                 }
 
-                var offset_cell: [N]usize = undefined;
+                var offset_cell: [N]isize = undefined;
 
                 inline for (0..N) |i| {
                     offset_cell[i] = 2 * supercell[i] + stencil_index[i] - O - 1;
@@ -311,23 +311,23 @@ pub fn StencilSpaceWithExtent(comptime N: usize, comptime E: usize, comptime O: 
             comptime var stencils: [N][2 * O + 1]f64 = undefined;
 
             inline for (0..N) |i| {
-                stencils[i] = derivativeStencil(ranks[i], O);
+                stencils[i] = comptime derivativeStencil(ranks[i], O);
             }
 
             var result: f64 = 1.0;
 
             for (0..N) |i| {
                 if (ranks[i] > 0) {
-                    result *= stencils[O];
+                    result *= stencils[i][O];
                 }
             }
 
             // Covariantly transform result
-            inline for (0..N) |i| {
+            for (0..N) |i| {
                 var scale: f64 = @floatFromInt(self.size[i]);
                 scale /= self.physical_bounds.size[i];
 
-                inline for (0..ranks[i]) |_| {
+                for (0..ranks[i]) |_| {
                     result *= scale;
                 }
             }

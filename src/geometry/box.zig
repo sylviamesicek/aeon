@@ -100,10 +100,14 @@ pub fn Box(comptime N: usize, comptime T: type) type {
         }
 
         /// Coarsens the box by dividing each component by 2.
-        pub fn coarsen(self: *Self) !void {
+        pub fn coarsen(self: *Self) void {
             for (0..N) |axis| {
-                self.origin[axis] = try std.math.divFloor(T, self.origin[axis], 2);
-                self.size[axis] = try std.math.divCeil(T, self.size[axis], 2);
+                self.origin[axis] = std.math.divFloor(T, self.origin[axis], 2) catch {
+                    unreachable;
+                };
+                self.size[axis] = std.math.divCeil(T, self.size[axis], 2) catch {
+                    unreachable;
+                };
             }
         }
 

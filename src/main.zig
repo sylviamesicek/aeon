@@ -20,6 +20,7 @@ pub fn ScalarFieldProblem(comptime O: usize) type {
     const N = 2;
     return struct {
         const BoundaryCondition = dofs.BoundaryCondition;
+        const DofMap = dofs.DofMap(N, O);
         const DofUtils = dofs.DofUtils(N, O);
         const MultigridSolver = dofs.MultigridSolver(N, O, BiCGStabSolver);
         const SystemSlice = system.SystemSlice;
@@ -162,12 +163,19 @@ pub fn ScalarFieldProblem(comptime O: usize) type {
             });
             defer grid.deinit();
 
+            // Build maps
+
             const block_map: []usize = try allocator.alloc(usize, grid.tile_total);
             defer allocator.free(block_map);
 
             grid.buildBlockMap(block_map);
 
+            const dof_map: DofMap = try DofMap.init(allocator, &grid);
+            defer dof_map.deinit(allocator);
+
             std.debug.print("NDofs: {}\n", .{grid.cell_total});
+
+            // Build functions
 
             var seed = try SystemSlice(Seed).init(allocator, grid.cell_total);
             defer seed.deinit(allocator);
@@ -189,11 +197,14 @@ pub fn ScalarFieldProblem(comptime O: usize) type {
             var base_solver = try BiCGStabSolver.init(allocator, grid.cell_total, 10000, 10e-10);
             defer base_solver.deinit();
 
-            var solver = MultigridSolver.init(&grid, block_map, &base_solver);
+            var solver = MultigridSolver.init(10, 10e-6, &base_solver);
             defer solver.deinit();
 
             try solver.solve(
                 allocator,
+                &grid,
+                block_map,
+                dof_map,
                 oper,
                 metric,
                 rhs.toConst(),
