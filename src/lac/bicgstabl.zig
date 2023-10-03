@@ -116,7 +116,7 @@ pub fn BiCGStablSolver(comptime L: usize) type {
             @memcpy(self.xp, x);
             @memset(self.u[0], 0.0);
 
-            var nrm2: f64 = norm2(self.r[0]);
+            var nrm2: f64 = norm(self.r[0]);
             var iter: usize = 0;
 
             end: {
@@ -206,7 +206,7 @@ pub fn BiCGStablSolver(comptime L: usize) type {
                             }
                         }
 
-                        nrm2 = norm2(self.r[0]);
+                        nrm2 = norm(self.r[0]);
 
                         // Stopping condition
                         if (nrm2 <= tol) {
@@ -300,8 +300,8 @@ pub fn BiCGStablSolver(comptime L: usize) type {
             // self.res = nrm2 / ires;
         }
 
-        fn norm2(slice: []const f64) f64 {
-            return dot(slice, slice);
+        fn norm(slice: []const f64) f64 {
+            return @sqrt(dot(slice, slice));
         }
 
         fn dot(u: []const f64, v: []const f64) f64 {

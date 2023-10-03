@@ -125,6 +125,16 @@ pub fn MultigridSolver(comptime N: usize, comptime O: usize, comptime BaseSolver
             const rhs = try SystemSlice(T.System).init(allocator, mesh.cell_total);
             defer rhs.deinit(allocator);
 
+            const ires: f64 = @field(DofUtils.residualNormAll(
+                mesh,
+                dof_map,
+                oper,
+                sys.toConst(),
+                ctx.toConst(),
+                b,
+            ), @tagName(sys_field));
+            const tol: f64 = self.tolerance * @fabs(ires);
+
             // Run iterations
             var iteration: usize = 0;
 
@@ -248,9 +258,8 @@ pub fn MultigridSolver(comptime N: usize, comptime O: usize, comptime BaseSolver
                 // Solve base
                 const base = mesh.getLevel(0);
 
-                const field: T.System = comptime std.enums.values(T.System)[0];
-                const x_field: []f64 = x.field(field)[0..base.cell_total];
-                const rhs_field: []f64 = rhs.field(field)[0..base.cell_total];
+                const x_field: []f64 = x.field(sys_field)[0..base.cell_total];
+                const rhs_field: []f64 = rhs.field(sys_field)[0..base.cell_total];
 
                 // Set x_field and rhs_field
                 const cell_space = CellSpace.fromSize(DofUtils.blockCellSize(mesh, 0, 0));
@@ -340,8 +349,8 @@ pub fn MultigridSolver(comptime N: usize, comptime O: usize, comptime BaseSolver
                         const cell_total = mesh.blockCellTotal(level, block);
 
                         for (cell_offset..cell_offset + cell_total) |idx| {
-                            inline for (comptime std.enums.values(T.System)) |f| {
-                                rhs.field(f)[idx] = b.field(f)[idx] - tau.field(f)[idx];
+                            inline for (comptime std.enums.values(T.System)) |field| {
+                                rhs.field(field)[idx] = b.field(field)[idx] - tau.field(field)[idx];
                             }
                         }
 
@@ -388,9 +397,22 @@ pub fn MultigridSolver(comptime N: usize, comptime O: usize, comptime BaseSolver
                         );
                     }
                 }
+
+                const res = @field(DofUtils.residualNormAll(
+                    mesh,
+                    dof_map,
+                    oper,
+                    sys.toConst(),
+                    ctx.toConst(),
+                    rhs.toConst(),
+                ), @tagName(sys_field));
+
+                if (res <= tol) {
+                    break;
+                }
             }
 
-            // Copy final solution back into x.
+            // Copy solution back into x.
             DofUtils.copyCellsFromDofsAll(
                 T.System,
                 mesh,

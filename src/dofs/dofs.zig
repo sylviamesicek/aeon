@@ -67,7 +67,7 @@ pub fn DofMap(comptime N: usize, comptime O: usize) type {
                 levels[level_ptr] = current + mesh.getLevel(level).blockTotal();
             }
 
-            const offsets = try allocator.alloc(usize, levels[mesh.active_levels]);
+            const offsets = try allocator.alloc(usize, levels[mesh.active_levels] + 1);
             errdefer allocator.free(offsets);
 
             offsets[0] = 0;
@@ -1121,6 +1121,100 @@ pub fn DofUtils(comptime N: usize, comptime O: usize) type {
                     cell_space.setValue(cell, dest.field(field), f + (r - a) / d);
                 }
             }
+        }
+
+        // *************************
+        // Residual ****************
+        // *************************
+
+        pub fn residualNormAll(
+            mesh: *const Mesh,
+            dof_map: Map,
+            oper: anytype,
+            src: SystemSliceConst(@TypeOf(oper).System),
+            ctx: SystemSliceConst(@TypeOf(oper).Context),
+            rhs: SystemSliceConst(@TypeOf(oper).System),
+        ) system.SystemValue(@TypeOf(oper).System) {
+            var result: system.SystemValue(@TypeOf(oper).System) = undefined;
+
+            inline for (comptime std.enums.values(@TypeOf(oper).System)) |field| {
+                @field(result, @tagName(field)) = 0.0;
+            }
+
+            for (0..mesh.active_levels) |level| {
+                for (0..mesh.getLevel(level).blockTotal()) |block| {
+                    const norm = residualNorm(mesh, dof_map, level, block, oper, src, ctx, rhs);
+
+                    inline for (comptime std.enums.values(@TypeOf(oper).System)) |field| {
+                        const n = @field(norm, @tagName(field));
+                        @field(result, @tagName(field)) += n * n;
+                    }
+                }
+            }
+
+            inline for (comptime std.enums.values(@TypeOf(oper).System)) |field| {
+                @field(result, @tagName(field)) = @sqrt(@field(result, @tagName(field)));
+            }
+
+            return result;
+        }
+
+        pub fn residualNorm(
+            mesh: *const Mesh,
+            dof_map: Map,
+            level: usize,
+            block: usize,
+            oper: anytype,
+            src: SystemSliceConst(@TypeOf(oper).System),
+            ctx: SystemSliceConst(@TypeOf(oper).Context),
+            rhs: SystemSliceConst(@TypeOf(oper).System),
+        ) system.SystemValue(@TypeOf(oper).System) {
+            assert(rhs.len == mesh.cell_total);
+            assert(src.len == dof_map.total());
+            assert(ctx.len == dof_map.total());
+
+            var result: system.SystemValue(@TypeOf(oper).System) = undefined;
+
+            inline for (comptime std.enums.values(@TypeOf(oper).System)) |field| {
+                @field(result, @tagName(field)) = 0.0;
+            }
+
+            const stencil_space = blockStencilSpace(mesh, level, block);
+            const cell_offset = dof_map.blockOffset(level, block);
+            const cell_total = dof_map.blockTotal(level, block);
+            const block_src = src.slice(cell_offset, cell_total);
+            _ = block_src;
+            const block_ctx = ctx.slice(cell_offset, cell_total);
+            _ = block_ctx;
+            const block_rhs = rhs.slice(mesh.blockCellOffset(level, block), mesh.blockCellTotal(level, block));
+
+            var cells = stencil_space.cellSpace().cells();
+            var linear: usize = 0;
+
+            while (cells.next()) |cell| : (linear += 1) {
+                const engine = operator.EngineType(N, O, @TypeOf(oper)){
+                    .inner = .{
+                        .space = stencil_space,
+                        .cell = cell,
+                    },
+                    .ctx = ctx,
+                    .sys = src,
+                };
+
+                const app = oper.apply(engine);
+
+                inline for (comptime std.enums.values(@TypeOf(oper).System)) |field| {
+                    const a = @field(app, @tagName(field));
+                    const b = block_rhs.field(field)[linear];
+                    @field(result, @tagName(field)) += (b - a) * (b - a);
+                }
+            }
+
+            inline for (comptime std.enums.values(@TypeOf(oper).System)) |field| {
+                @field(result, @tagName(field)) = @sqrt(@field(result, @tagName(field)));
+            }
+
+            return result;
         }
 
         // *************************
