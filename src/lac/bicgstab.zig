@@ -101,7 +101,7 @@ pub const BiCGStabSolver = struct {
         @memset(self.sh, 0.0);
         @memset(self.ph, 0.0);
 
-        var residual = norm2(self.rg);
+        var residual = norm(self.rg);
         const tol = residual * @fabs(self.tolerance);
 
         var iter: usize = 0;
@@ -140,7 +140,7 @@ pub const BiCGStabSolver = struct {
                 self.sg[i] = self.rg[i] - pra * self.vg[i];
             }
 
-            if (norm2(self.sg) <= 1e-60) {
+            if (norm(self.sg) <= 1e-60) {
                 for (0..self.ndofs) |i| {
                     x[i] = x[i] + pra * self.ph[i];
                 }
@@ -151,7 +151,7 @@ pub const BiCGStabSolver = struct {
                     self.rg[i] = b[i] - self.tp[i];
                 }
 
-                residual = norm2(self.rg);
+                residual = norm(self.rg);
 
                 break;
             }
@@ -165,7 +165,7 @@ pub const BiCGStabSolver = struct {
                 self.rg[i] = self.sg[i] - prc * self.tg[i];
             }
 
-            residual = norm2(self.rg);
+            residual = norm(self.rg);
 
             if (comptime hasLinearMapCallback(@TypeOf(oper))) {
                 oper.callback(iter, residual, x);
@@ -180,8 +180,8 @@ pub const BiCGStabSolver = struct {
         // self.res = nrm2 / ires;
     }
 
-    fn norm2(slice: []const f64) f64 {
-        return dot(slice, slice);
+    fn norm(slice: []const f64) f64 {
+        return @sqrt(dot(slice, slice));
     }
 
     fn dot(u: []const f64, v: []const f64) f64 {

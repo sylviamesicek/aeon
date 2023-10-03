@@ -20,9 +20,6 @@ pub fn MultigridSolver(comptime N: usize, comptime O: usize, comptime BaseSolver
     }
 
     return struct {
-        mesh: *const Mesh,
-        block_map: []const usize,
-        dof_map: DofMap,
         base_solver: *const BaseSolver,
         max_iters: usize,
         tolerance: f64,
@@ -34,16 +31,13 @@ pub fn MultigridSolver(comptime N: usize, comptime O: usize, comptime BaseSolver
         const BoundaryUtils = boundary.BoundaryUtils(N, O);
         const IndexSpace = geometry.IndexSpace(N);
         const Index = index.Index(N);
-        const CellSpace = basis.CellSpace(N, O, O);
-        const StencilSpace = basis.StencilSpace(N, O, O);
+        const CellSpace = basis.CellSpace(N, O);
+        const StencilSpace = basis.StencilSpace(N, O);
         const SystemSlice = system.SystemSlice;
         const SystemSliceConst = system.SystemSliceConst;
 
-        pub fn init(mesh: *const Mesh, block_map: []const usize, dof_map: DofMap, base_solver: *BaseSolver, max_iters: usize, tolerance: f64) Self {
+        pub fn init(max_iters: usize, tolerance: f64, base_solver: *BaseSolver) Self {
             return .{
-                .mesh = mesh,
-                .block_map = block_map,
-                .dof_map = dof_map,
                 .base_solver = base_solver,
                 .max_iters = max_iters,
                 .tolerance = tolerance,
@@ -55,6 +49,9 @@ pub fn MultigridSolver(comptime N: usize, comptime O: usize, comptime BaseSolver
         pub fn solve(
             self: *Self,
             allocator: Allocator,
+            mesh: *const Mesh,
+            block_map: []const usize,
+            dof_map: DofMap,
             oper: anytype,
             x: SystemSlice(@TypeOf(oper).System),
             b: SystemSliceConst(@TypeOf(oper).System),
@@ -75,23 +72,23 @@ pub fn MultigridSolver(comptime N: usize, comptime O: usize, comptime BaseSolver
             const sys_field = comptime std.enums.values(T.System)[0];
 
             // Get total dofs
-            const total_dofs = self.dof_map.total();
+            const total_dofs = dof_map.total();
 
             const sys = try SystemSlice(T.System).init(allocator, total_dofs);
             defer sys.deinit(allocator);
 
             DofUtils.copyDofsFromCellsAll(
                 T.System,
-                self.mesh,
-                self.dof_map,
+                mesh,
+                dof_map,
                 sys,
                 x.toConst(),
             );
 
             DofUtils.fillBoundaryAll(
-                self.mesh,
-                self.block_map,
-                self.dof_map,
+                mesh,
+                block_map,
+                dof_map,
                 DofUtils.operSystemBoundary(oper),
                 sys,
             );
@@ -100,82 +97,96 @@ pub fn MultigridSolver(comptime N: usize, comptime O: usize, comptime BaseSolver
             const sys2 = try SystemSlice(T.System).init(allocator, total_dofs);
             defer sys2.deinit(allocator);
 
-            const ctx = try SystemSlice(T.System).init(allocator, total_dofs);
+            const ctx = try SystemSlice(T.Context).init(allocator, total_dofs);
             defer ctx.deinit(allocator);
 
             DofUtils.copyDofsFromCellsAll(
                 T.Context,
-                self.mesh,
-                self.dof_map,
+                mesh,
+                dof_map,
                 ctx,
                 context.toConst(),
             );
 
             DofUtils.fillBoundaryFullAll(
-                self.mesh,
-                self.block_map,
-                self.dof_map,
+                mesh,
+                block_map,
+                dof_map,
                 DofUtils.operContextBoundary(oper),
                 ctx,
             );
 
-            const tau = try SystemSlice(T.System).init(allocator, self.mesh.cell_total);
+            const tau = try SystemSlice(T.System).init(allocator, mesh.cell_total);
             defer tau.deinit(allocator);
 
             // Reset tau correction to 0.0
-            @memset(tau, 0.0);
+            @memset(tau.field(sys_field), 0.0);
 
-            const rhs = try SystemSlice(T.System).init(allocator, self.mesh.cell_total);
+            const rhs = try SystemSlice(T.System).init(allocator, mesh.cell_total);
             defer rhs.deinit(allocator);
+
+            const ires: f64 = @field(DofUtils.residualNormAll(
+                mesh,
+                dof_map,
+                oper,
+                sys.toConst(),
+                ctx.toConst(),
+                b,
+            ), @tagName(sys_field));
+            const tol: f64 = self.tolerance * @fabs(ires);
 
             // Run iterations
             var iteration: usize = 0;
 
+            // TODO Might require full smoothing to achieve proper accuracy.
+
             while (iteration < self.max_iters) : (iteration += 1) {
                 // Recurse down the mesh to the base level
-                for (1..self.mesh.active_levels) |reverse_level| {
-                    const level: usize = self.mesh.active_levels - 1 - reverse_level;
-                    const target = self.mesh.getLevel(level);
+                for (1..mesh.active_levels) |reverse_level| {
+                    const level: usize = mesh.active_levels - 1 - reverse_level;
+                    const target = mesh.getLevel(level);
 
-                    // Perform smoothing
+                    // Compute rhs
                     for (0..target.blockTotal()) |block| {
                         // Apply tau correction
-                        const cell_offset = self.mesh.blockCellOffset(level, block);
-                        const cell_total = self.mesh.blockCellTotal(level, block);
+                        const cell_offset = mesh.blockCellOffset(level, block);
+                        const cell_total = mesh.blockCellTotal(level, block);
 
                         for (cell_offset..cell_offset + cell_total) |idx| {
                             inline for (comptime std.enums.values(T.System)) |field| {
                                 rhs.field(field)[idx] = b.field(field)[idx] - tau.field(field)[idx];
                             }
                         }
+                    }
 
+                    // Perform smoothing
+                    for (0..target.blockTotal()) |block| {
                         // Smooth and store result in sys2
                         DofUtils.smooth(
-                            self.mesh,
-                            self.dof_map,
+                            mesh,
+                            dof_map,
                             level,
                             block,
                             oper,
                             sys2,
-                            sys,
-                            ctx,
-                            rhs,
+                            sys.toConst(),
+                            ctx.toConst(),
+                            rhs.toConst(),
                         );
                         // Copy back to sys
                         DofUtils.copyDofs(
                             T.System,
-                            self.mesh,
-                            self.dof_map,
+                            dof_map,
                             level,
                             block,
                             sys,
-                            sys2,
+                            sys2.toConst(),
                         );
                         // Fill boundaries now that sys has been smoothed
                         DofUtils.fillBoundary(
-                            self.mesh,
-                            self.block_map,
-                            self.dof_map,
+                            mesh,
+                            block_map,
+                            dof_map,
                             level,
                             block,
                             DofUtils.operSystemBoundary(oper),
@@ -184,9 +195,9 @@ pub fn MultigridSolver(comptime N: usize, comptime O: usize, comptime BaseSolver
                         // Restrict updated vector.
                         DofUtils.restrict(
                             T.System,
-                            self.mesh,
-                            self.block_map,
-                            self.dof_map,
+                            mesh,
+                            block_map,
+                            dof_map,
                             level,
                             block,
                             sys,
@@ -197,9 +208,9 @@ pub fn MultigridSolver(comptime N: usize, comptime O: usize, comptime BaseSolver
                     for (0..target.blockTotal()) |block| {
                         // Fill boundaries of sys fully
                         DofUtils.fillBoundaryFull(
-                            self.mesh,
-                            self.block_map,
-                            self.dof_map,
+                            mesh,
+                            block_map,
+                            dof_map,
                             level,
                             block,
                             DofUtils.operSystemBoundary(oper),
@@ -207,27 +218,27 @@ pub fn MultigridSolver(comptime N: usize, comptime O: usize, comptime BaseSolver
                         );
                         // Apply operator fully and store in sys2
                         DofUtils.applyFull(
-                            self.mesh,
-                            self.dof_map,
+                            mesh,
+                            dof_map,
                             level,
                             block,
                             oper,
                             sys2,
-                            sys,
-                            ctx,
+                            sys.toConst(),
+                            ctx.toConst(),
                         );
                         // Restrict residual and store result in tau
                         DofUtils.restrictResidual(
-                            self.mesh,
-                            self.block_map,
-                            self.dof_map,
+                            mesh,
+                            block_map,
+                            dof_map,
                             level,
                             block,
                             oper,
                             tau,
-                            sys,
-                            ctx,
-                            sys2,
+                            sys.toConst(),
+                            ctx.toConst(),
+                            sys2.toConst(),
                         );
                     }
 
@@ -235,24 +246,23 @@ pub fn MultigridSolver(comptime N: usize, comptime O: usize, comptime BaseSolver
                     for (0..target.blockTotal()) |block| {
                         DofUtils.copyDofs(
                             T.System,
-                            self.mesh,
-                            self.dof_map,
+                            dof_map,
                             level,
                             block,
                             sys2,
-                            sys,
+                            sys.toConst(),
                         );
                     }
                 }
 
                 // Solve base
-                const base = self.mesh.getLevel(0);
+                const base = mesh.getLevel(0);
 
-                const field: T.System = comptime std.enums.values(T.System)[0];
-                const x_field: []f64 = x.field(field)[0..base.cell_total];
-                const rhs_field: []const f64 = rhs.field(field)[0..base.cell_total];
+                const x_field: []f64 = x.field(sys_field)[0..base.cell_total];
+                const rhs_field: []f64 = rhs.field(sys_field)[0..base.cell_total];
 
-                const cell_space = CellSpace.fromSize(DofUtils.blockCellSize(self.mesh, 0, 0));
+                // Set x_field and rhs_field
+                const cell_space = CellSpace.fromSize(DofUtils.blockCellSize(mesh, 0, 0));
 
                 var cells = cell_space.cells();
                 var linear: usize = 0;
@@ -264,7 +274,7 @@ pub fn MultigridSolver(comptime N: usize, comptime O: usize, comptime BaseSolver
 
                 // Solve system using the base solver
                 const base_linear_map: BaseLinearMap(T) = .{
-                    .self = self,
+                    .mesh = mesh,
                     .oper = oper,
                     .ctx = ctx,
                     .sys = sys,
@@ -275,18 +285,18 @@ pub fn MultigridSolver(comptime N: usize, comptime O: usize, comptime BaseSolver
                 // Copy back to sys
                 DofUtils.copyDofsFromCells(
                     T.System,
-                    self.mesh,
-                    self.dof_map,
+                    mesh,
+                    dof_map,
                     0,
                     0,
                     sys,
-                    x_field,
+                    x.toConst(),
                 );
 
                 DofUtils.fillBoundary(
-                    self.mesh,
-                    self.block_map,
-                    self.dof_map,
+                    mesh,
+                    block_map,
+                    dof_map,
                     0,
                     0,
                     DofUtils.operSystemBoundary(oper),
@@ -294,37 +304,37 @@ pub fn MultigridSolver(comptime N: usize, comptime O: usize, comptime BaseSolver
                 );
 
                 // Iterate up, adding correction and performing post smoothing.
-                for (1..self.mesh.active_levels) |level| {
-                    const target = self.mesh.getLevel(level);
+                for (1..mesh.active_levels) |level| {
+                    const target = mesh.getLevel(level);
 
                     for (0..target.blockTotal()) |block| {
                         DofUtils.prolongCorrection(
                             T.System,
-                            self.mesh,
-                            self.block_map,
-                            self.dof_map,
+                            mesh,
+                            block_map,
+                            dof_map,
                             level,
                             block,
                             x,
-                            sys,
-                            sys2,
+                            sys.toConst(),
+                            sys2.toConst(),
                         );
 
                         // Copy back to sys
                         DofUtils.copyDofsFromCells(
                             T.System,
-                            self.mesh,
-                            self.dof_map,
+                            mesh,
+                            dof_map,
                             level,
                             block,
                             sys,
-                            x_field,
+                            x.toConst(),
                         );
 
                         DofUtils.fillBoundary(
-                            self.mesh,
-                            self.block_map,
-                            self.dof_map,
+                            mesh,
+                            block_map,
+                            dof_map,
                             level,
                             block,
                             DofUtils.operSystemBoundary(oper),
@@ -335,42 +345,41 @@ pub fn MultigridSolver(comptime N: usize, comptime O: usize, comptime BaseSolver
                     // Perform smoothing
                     for (0..target.blockTotal()) |block| {
                         // Apply tau correction
-                        const cell_offset = self.mesh.blockCellOffset(level, block);
-                        const cell_total = self.mesh.blockCellTotal(level, block);
+                        const cell_offset = mesh.blockCellOffset(level, block);
+                        const cell_total = mesh.blockCellTotal(level, block);
 
                         for (cell_offset..cell_offset + cell_total) |idx| {
-                            inline for (comptime std.enums.values(T.System)) |f| {
-                                rhs.field(f)[idx] = b.field(f)[idx] - tau.field(f)[idx];
+                            inline for (comptime std.enums.values(T.System)) |field| {
+                                rhs.field(field)[idx] = b.field(field)[idx] - tau.field(field)[idx];
                             }
                         }
 
                         // Smooth and store result in sys2
                         DofUtils.smooth(
-                            self.mesh,
-                            self.dof_map,
+                            mesh,
+                            dof_map,
                             level,
                             block,
                             oper,
                             sys2,
-                            sys,
-                            ctx,
-                            rhs,
+                            sys.toConst(),
+                            ctx.toConst(),
+                            rhs.toConst(),
                         );
                         // Copy back to sys
                         DofUtils.copyDofs(
                             T.System,
-                            self.mesh,
-                            self.dof_map,
+                            dof_map,
                             level,
                             block,
                             sys,
-                            sys2,
+                            sys2.toConst(),
                         );
                         // Fill boundaries now that sys has been smoothed
                         DofUtils.fillBoundary(
-                            self.mesh,
-                            self.block_map,
-                            self.dof_map,
+                            mesh,
+                            block_map,
+                            dof_map,
                             level,
                             block,
                             DofUtils.operSystemBoundary(oper),
@@ -379,24 +388,37 @@ pub fn MultigridSolver(comptime N: usize, comptime O: usize, comptime BaseSolver
                         // Restrict updated vector.
                         DofUtils.restrict(
                             T.System,
-                            self.mesh,
-                            self.block_map,
-                            self.dof_map,
+                            mesh,
+                            block_map,
+                            dof_map,
                             level,
                             block,
                             sys,
                         );
                     }
                 }
+
+                const res = @field(DofUtils.residualNormAll(
+                    mesh,
+                    dof_map,
+                    oper,
+                    sys.toConst(),
+                    ctx.toConst(),
+                    rhs.toConst(),
+                ), @tagName(sys_field));
+
+                if (res <= tol) {
+                    break;
+                }
             }
 
-            // Copy final solution back into x.
+            // Copy solution back into x.
             DofUtils.copyCellsFromDofsAll(
-                T.Context,
-                self.mesh,
-                self.dof_map,
+                T.System,
+                mesh,
+                dof_map,
                 x,
-                sys,
+                sys.toConst(),
             );
         }
 
@@ -404,19 +426,17 @@ pub fn MultigridSolver(comptime N: usize, comptime O: usize, comptime BaseSolver
             const field_name: []const u8 = comptime std.meta.fieldNames(T.System)[0];
 
             return struct {
-                inner: *const Self,
+                mesh: *const Mesh,
                 oper: T,
                 ctx: SystemSlice(T.Context),
                 sys: SystemSlice(T.System),
 
                 pub fn apply(self: *const @This(), output: []f64, input: []const f64) void {
-                    const mesh = self.inner.mesh;
-
                     const sys = self.sys;
                     const ctx = self.ctx;
 
                     // Aliases
-                    const stencil_space = DofUtils.blockStencilSpace(mesh, 0, 0);
+                    const stencil_space = DofUtils.blockStencilSpace(self.mesh, 0, 0);
                     const cell_space = stencil_space.cellSpace();
 
                     const base_dofs = cell_space.total();

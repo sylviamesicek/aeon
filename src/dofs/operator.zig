@@ -45,7 +45,7 @@ pub fn Engine(comptime N: usize, comptime O: usize) type {
         }
 
         /// Returns the hessian diagonal coefficients.
-        pub fn hessianDiagonal(self: Self) [N]f64 {
+        pub fn hessianDiagonal(self: Self) [N][N]f64 {
             var result: [N][N]f64 = undefined;
 
             inline for (0..N) |i| {
@@ -62,7 +62,7 @@ pub fn Engine(comptime N: usize, comptime O: usize) type {
         }
 
         /// Returns the laplacian diagonal coefficients.
-        pub fn laplacianDiagonal(self: Self) [N]f64 {
+        pub fn laplacianDiagonal(self: Self) f64 {
             var result: f64 = 0.0;
 
             inline for (0..N) |i| {
