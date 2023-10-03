@@ -1,3 +1,5 @@
+//! A module for various linear algebra classes, utilities, and solvers.
+
 const std = @import("std");
 
 // Submodules

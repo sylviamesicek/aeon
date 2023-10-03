@@ -1,3 +1,6 @@
+//! A module for various geometry relating data structures and algorithms, including
+//! iterating over index spaces, point clustering, regions of extended blocks, etc.
+
 // Submodules
 const box = @import("box.zig");
 const faces = @import("faces.zig");

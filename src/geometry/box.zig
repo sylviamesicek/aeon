@@ -92,19 +92,26 @@ pub fn Box(comptime N: usize, comptime T: type) type {
         }
 
         /// Refines the box by multiplying each component by 2.
-        pub fn refine(self: *Self) void {
+        pub fn refined(self: *const Self) Self {
+            var result: Self = undefined;
             for (0..N) |axis| {
-                self.origin[axis] *= 2;
-                self.size[axis] *= 2;
+                result.origin[axis] = self.origin[axis] * 2;
+                result.size[axis] = self.size[axis] * 2;
             }
+            return result;
         }
 
-        /// Coarsens the box by dividing each component by 2.
-        pub fn coarsen(self: *Self) !void {
+        pub fn coarsened(self: *const Self) Self {
+            var result: Self = undefined;
             for (0..N) |axis| {
-                self.origin[axis] = try std.math.divFloor(T, self.origin[axis], 2);
-                self.size[axis] = try std.math.divCeil(T, self.size[axis], 2);
+                result.origin[axis] = try std.math.divFloor(self.origin[axis], 2) catch {
+                    unreachable;
+                };
+                result.size[axis] = try std.math.divCeil(self.size[axis], 2) catch {
+                    unreachable;
+                };
             }
+            return result;
         }
 
         /// Moves the box so that its origin is measured relative to the origin of `other`.

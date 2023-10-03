@@ -21,11 +21,55 @@ const geometry = @import("../geometry/geometry.zig");
 
 // Submodules
 
-const levels = @import("levels.zig");
+// const levels = @import("levels.zig");
 
 // ************************
 // Mesh *******************
 // ************************
+
+/// A contigious and uniformly rectangular block of data on the mesh.
+pub fn Block(comptime N: usize) type {
+    return struct {
+        /// Bounds of this block
+        bounds: IndexBox,
+        /// Patch this block belongs to
+        patch: usize,
+        /// Offset into global cell vector
+        cell_offset: usize = 0,
+        /// Total number of cells in this block
+        cell_total: usize = 0,
+
+        const IndexBox = geometry.Box(N, usize);
+    };
+}
+
+pub fn Patch(comptime N: usize) type {
+    return struct {
+        bounds: IndexBox,
+        level: usize,
+        parent: ?usize,
+        children_offset: usize,
+        children_total: usize,
+        block_offset: usize,
+        block_total: usize,
+        tile_offset: usize = 0,
+        tile_total: usize = 0,
+
+        const IndexBox = geometry.Box(N, usize);
+    };
+}
+
+pub fn Level(comptime N: usize) type {
+    return struct {
+        index_size: [N]usize,
+        patch_offset: usize,
+        patch_total: usize,
+        block_offset: usize,
+        block_total: usize,
+
+        const IndexBox = geometry.Box(N, usize);
+    };
+}
 
 /// Represents a mesh, ie a numerical discretisation of a physical domain into a number of levels,
 /// each of which consists of patches of tiles, and blocks of cells. This class handles accessing and
@@ -41,19 +85,18 @@ pub fn Mesh(comptime N: usize) type {
         index_size: [N]usize,
         /// The number of cells along each time edge.
         tile_width: usize,
-        /// Refined levels
-        levels: ArrayListUnmanaged(Level),
-        /// Number of levels which are currently active.
-        active_levels: usize,
         /// Total number of tiles in mesh
-        tile_total: usize,
+        tile_total: usize = 0,
         /// Total number of cells in mesh
-        cell_total: usize,
+        cell_total: usize = 0,
 
-        // Public types
-        pub const Level = levels.Level(N);
-        pub const Block = levels.Block(N);
-        pub const Patch = levels.Patch(N);
+        block_capacity: usize,
+        patch_capacity: usize,
+        level_capacity: usize,
+
+        blocks: []Block(N),
+        patches: []Patch(N),
+        levels: []Level(N),
 
         /// Configuration for a mesh.
         pub const Config = struct {
@@ -80,6 +123,10 @@ pub fn Mesh(comptime N: usize) type {
         const PartitionSpace = geometry.PartitionSpace(N);
         const Region = geometry.Region(N);
 
+        const BlockList = ArrayListUnmanaged(Block(N));
+        const PatchList = ArrayListUnmanaged(Patch(N));
+        const LevelList = ArrayListUnmanaged(Level);
+
         // Mixins
         const Index = @import("../index.zig").Index(N);
 
@@ -94,26 +141,55 @@ pub fn Mesh(comptime N: usize) type {
             // Check config
             config.check();
 
-            var level: Level = Level.init(config.index_size);
-            errdefer level.deinit(allocator);
+            var blocks: BlockList = .{};
+            errdefer blocks.deinit(allocator);
 
-            try level.buildBase(allocator, config.index_size, 0);
-            level.computeOffsets(config.tile_width);
+            var patches: PatchList = .{};
+            errdefer patches.deinit(allocator);
 
-            var levs: ArrayListUnmanaged(Level) = .{};
-            errdefer levs.deinit(allocator);
+            var levels: LevelList = .{};
+            errdefer levels.deinit(allocator);
 
-            try levs.append(allocator, level);
+            try blocks.append(allocator, .{
+                .bounds = .{
+                    .origin = splat(0),
+                    .size = config.index_size,
+                },
+                .patch = 0,
+            });
+
+            try patches.append(allocator, .{
+                .bounds = .{
+                    .origin = splat(0),
+                    .size = config.index_size,
+                },
+                .level = 0,
+                .parent = null,
+                .children_offset = 0,
+                .children_total = 0,
+                .block_offset = 0,
+                .block_total = 1,
+            });
+
+            try levels.append(allocator, .{
+                .index_size = config.index_size,
+                .patch_offset = 0,
+                .patch_total = 1,
+                .block_offset = 0,
+                .block_total = 1,
+            });
 
             var self: Self = .{
                 .gpa = allocator,
                 .index_size = config.index_size,
                 .physical_bounds = config.physical_bounds,
                 .tile_width = config.tile_width,
-                .levels = levs,
-                .active_levels = 1,
-                .tile_total = 0,
-                .cell_total = 0,
+                .block_capacity = blocks.capacity,
+                .patch_capacity = patches.capacity,
+                .level_capacity = levels.capacity,
+                .blocks = blocks.items,
+                .patchs = patches.items,
+                .levels = levels.items,
             };
 
             self.computeOffsets();
@@ -123,117 +199,94 @@ pub fn Mesh(comptime N: usize) type {
 
         /// Deinitalises a mesh.
         pub fn deinit(self: *Self) void {
-            for (self.levels.items) |*level| {
-                level.deinit(self.gpa);
-            }
+            var blocks: BlockList = .{
+                .capacity = self.block_capacity,
+                .items = self.blocks,
+            };
 
-            self.levels.deinit(self.gpa);
+            var patches: PatchList = .{
+                .capacity = self.patch_capacity,
+                .items = self.patches,
+            };
+
+            var levels: LevelList = .{
+                .capacity = self.level_capacity,
+                .items = self.levels,
+            };
+
+            levels.deinit(self.gpa);
+            patches.deinit(self.gpa);
+            blocks.deinit(self.gpa);
         }
 
         // **********************************
         // Helpers **************************
         // **********************************
 
-        /// Get an level of this mesh.
-        pub fn getLevel(self: *const Self, level: usize) *const Level {
-            assert(level < self.active_levels);
-            return &self.levels.items[level];
-        }
+        // pub fn block(self: *const Self, block_id: usize) Block(N) {
+        //     return self.blocks.items[block_id];
+        // }
 
-        pub fn patchTileOffset(self: *const Self, level: usize, patch: usize) usize {
-            const target = self.getLevel(level);
-            const patch_offset = target.patches.items(.tile_offset)[patch];
+        // pub fn patch(self: *const Self, patch_id: usize) Patch(N) {
+        //     return self.patches.items[patch_id];
+        // }
 
-            return target.tile_offset + patch_offset;
-        }
+        // pub fn level(self: *const Self, level_id: usize) Level(N) {
+        //     return self.levels.items[level_id];
+        // }
 
-        pub fn patchTileTotal(self: *const Self, level: usize, patch: usize) usize {
-            const target = self.getLevel(level);
-            return target.patches.items(.tile_total)[patch];
-        }
+        // // *************************
+        // // Block Map ***************
+        // // *************************
 
-        pub fn blockCellOffset(self: *const Self, level: usize, block: usize) usize {
-            const target = self.getLevel(level);
-            const block_offset = target.blocks.items(.cell_offset)[block];
+        // /// Builds a block map, ie a map from each tile in the mesh to the id of the block that tile is in.
+        // pub fn buildBlockMap(self: *const Self, map: []usize) void {
+        //     assert(map.len == self.tile_total);
 
-            return target.cell_offset + block_offset;
-        }
+        //     @memset(map, maxInt(usize));
 
-        pub fn blockCellTotal(self: *const Self, level: usize, block: usize) usize {
-            const target = self.getLevel(level);
-            return target.blocks.items(.cell_total)[block];
-        }
+        //     for (self.levels.items[0..self.active_levels], 0..) |level, l| {
+        //         for (level.blocks.items(.bounds), level.blocks.items(.patch), 0..) |bounds, patch, id| {
+        //             const pbounds: IndexBox = level.patches.items(.bounds)[patch];
+        //             const tile_to_block: []usize = self.patchTileSlice(l, patch, map);
+        //             IndexSpace.fromBox(pbounds).fillWindow(bounds.relativeTo(pbounds), usize, tile_to_block, id);
+        //         }
+        //     }
+        // }
 
-        pub fn patchTileSlice(self: *const Self, level: usize, patch: usize, mesh_slice: anytype) @TypeOf(mesh_slice) {
-            const target = self.getLevel(level);
-            const patch_offset = target.patches.items(.tile_offset)[patch];
-            const patch_total = target.patches.items(.tile_total)[patch];
-            const offset = target.tile_offset + patch_offset;
+        // /// Builds a block child map. ie a map from each tile in the mesh to the id of the block that covers it
+        // /// on the next level, if any.
+        // pub fn buildBlockChildMap(self: *const Self, map: []usize) void {
+        //     assert(map.len == self.tile_total);
 
-            return mesh_slice[offset..patch_total];
-        }
+        //     @memset(map, maxInt(usize));
 
-        pub fn blockCellSlice(self: *const Self, level: usize, block: usize, mesh_slice: anytype) @TypeOf(mesh_slice) {
-            const target = self.getLevel(level);
-            const block_offset = target.blocks.items(.cell_offset)[block];
-            const block_total = target.blocks.items(.cell_total)[block];
-            const offset = target.cell_offset + block_offset;
+        //     for (0..self.active_levels - 1) |l| {
+        //         const level = self.getLevel(l);
+        //         const refined = self.getLevel(l + 1);
 
-            return mesh_slice[offset..block_total];
-        }
+        //         for (0..level.patchTotal()) |patch| {
+        //             const patch_bounds: IndexBox = level.patches.items(.bounds)[patch];
+        //             const patch_map: []usize = self.patchTileSlice(l, patch, map);
+        //             for (level.childrenSlice(patch)) |child_patch| {
+        //                 const offset = refined.patches.items(.block_offset)[child_patch];
+        //                 const total = refined.patches.items(.block_total)[child_patch];
+        //                 for (offset..offset + total) |child_block| {
+        //                     var bounds = refined.blocks.items(.bounds)[child_block];
+        //                     bounds.coarsen();
 
-        // *************************
-        // Block Map ***************
-        // *************************
+        //                     IndexSpace.fromBox(patch_bounds).fillWindow(bounds.relativeTo(patch), usize, patch_map, child_block);
+        //                 }
+        //             }
+        //         }
 
-        /// Builds a block map, ie a map from each tile in the mesh to the id of the block that tile is in.
-        pub fn buildBlockMap(self: *const Self, map: []usize) void {
-            assert(map.len == self.tile_total);
-
-            @memset(map, maxInt(usize));
-
-            for (self.levels.items[0..self.active_levels], 0..) |level, l| {
-                for (level.blocks.items(.bounds), level.blocks.items(.patch), 0..) |bounds, patch, id| {
-                    const pbounds: IndexBox = level.patches.items(.bounds)[patch];
-                    const tile_to_block: []usize = self.patchTileSlice(l, patch, map);
-                    IndexSpace.fromBox(pbounds).fillWindow(bounds.relativeTo(pbounds), usize, tile_to_block, id);
-                }
-            }
-        }
-
-        /// Builds a block child map. ie a map from each tile in the mesh to the id of the block that covers it
-        /// on the next level, if any.
-        pub fn buildBlockChildMap(self: *const Self, map: []usize) void {
-            assert(map.len == self.tile_total);
-
-            @memset(map, maxInt(usize));
-
-            for (0..self.active_levels - 1) |l| {
-                const level = self.getLevel(l);
-                const refined = self.getLevel(l + 1);
-
-                for (0..level.patchTotal()) |patch| {
-                    const patch_bounds: IndexBox = level.patches.items(.bounds)[patch];
-                    const patch_map: []usize = self.patchTileSlice(l, patch, map);
-                    for (level.childrenSlice(patch)) |child_patch| {
-                        const offset = refined.patches.items(.block_offset)[child_patch];
-                        const total = refined.patches.items(.block_total)[child_patch];
-                        for (offset..offset + total) |child_block| {
-                            var bounds = refined.blocks.items(.bounds)[child_block];
-                            bounds.coarsen();
-
-                            IndexSpace.fromBox(patch_bounds).fillWindow(bounds.relativeTo(patch), usize, patch_map, child_block);
-                        }
-                    }
-                }
-
-                for (level.blocks.items(.bounds), level.blocks.items(.patch), 0..) |bounds, patch, id| {
-                    const pbounds: IndexBox = level.patches.items(.bounds)[patch];
-                    const tile_to_block: []usize = self.patchTileSlice(l, patch, map);
-                    IndexSpace.fromBox(pbounds).fillWindow(bounds.relativeTo(pbounds), usize, tile_to_block, id);
-                }
-            }
-        }
+        //         for (level.blocks.items(.bounds), level.blocks.items(.patch), 0..) |bounds, patch, id| {
+        //             const pbounds: IndexBox = level.patches.items(.bounds)[patch];
+        //             const tile_to_block: []usize = self.patchTileSlice(l, patch, map);
+        //             IndexSpace.fromBox(pbounds).fillWindow(bounds.relativeTo(pbounds), usize, tile_to_block, id);
+        //         }
+        //     }
+        // }
 
         // pub fn buildTransferMap(self: *const Self, map: []usize) !void {
         //     assert(map.len == self.transferTotal());
@@ -260,11 +313,13 @@ pub fn Mesh(comptime N: usize) type {
         // ***************************
 
         /// Gets the physical bounds of a higher level
-        pub fn blockPhysicalBounds(self: *const Self, level: usize, block: usize) RealBox {
-            // Get bounds of this block
-            const bounds = self.levels.items[level].blocks.items(.bounds)[block];
+        pub fn blockPhysicalBounds(self: *const Self, block: usize) RealBox {
+            const patch = self.blocks[block].patch;
+            const level = self.patches[patch].level;
+            const index_size: [N]usize = self.levels[level].index_size;
 
-            const index_size: [N]usize = self.levels.items[level].index_size;
+            // Get bounds of this block
+            const bounds = self.blocks[block].bounds;
 
             var physical_bounds: RealBox = undefined;
 
@@ -283,6 +338,146 @@ pub fn Mesh(comptime N: usize) type {
         // Regridding **************
         // *************************
 
+        pub const RegridConfig = struct {
+            max_levels: usize,
+            patch_efficiency: f64,
+            patch_max_tiles: usize,
+            block_efficiency: f64,
+            block_max_tiles: usize,
+        };
+
+        pub fn regrid2(
+            self: *Self,
+            allocator: Allocator,
+            tags: []const bool,
+            config: RegridConfig,
+        ) !void {
+            const total_levels = self.computeTotalLevels(tags, config.max_levels);
+
+            const level_blocks: []BlockList = try allocator.alloc([]BlockList, total_levels);
+            @memset(level_blocks, .{});
+
+            defer {
+                for (level_blocks) |*level_block| {
+                    level_block.deinit(allocator);
+                }
+
+                allocator.free(level_blocks);
+            }
+
+            const level_patches: []PatchList = try allocator.alloc([]Patch(N), total_levels);
+            @memset(level_patches, .{});
+
+            defer {
+                for (level_patches) |*level_patch| {
+                    level_patch.deinit(allocator);
+                }
+
+                allocator.free(level_patches);
+            }
+
+            var levels: LevelList = .{};
+            defer levels.deinit(allocator);
+
+            // Build scratch allocator
+            var arena: ArenaAllocator = ArenaAllocator.init(allocator);
+            defer arena.deinit();
+
+            var scratch: Allocator = arena.allocator();
+
+            // Iterate from total_levels - 1 to 0
+
+            for (0..total_levels) |rev_level_id| {
+                const level_id: usize = total_levels - 1 - rev_level_id;
+                const target_id: usize = level_id + 1;
+
+                const level = self.levels[level_id];
+
+                var block_offset: usize = 0;
+                var patch_offset: usize = 0;
+
+                for (level.patch_offset..level.patch_offset + level.patch_total) |patch_id| {
+                    // Reset arena for new "frame"
+                    defer _ = arena.reset(.retain_capacity);
+
+                    const patch = self.patches[patch_id];
+                    const patch_space: IndexSpace = IndexSpace.fromBox(patch.bounds);
+
+                    const source_tags = tags[patch.tile_offset .. patch.tile_offset + patch.tile_total];
+
+                    const patch_tags = try scratch.alloc(bool, patch.tile_total);
+                    defer scratch.free(patch_tags);
+
+                    @memcpy(patch_tags, source_tags);
+
+                    // First, find the total number of clusters
+
+                    var cluster_count: usize = 0;
+
+                    for (patch.children_offset..patch.children_offset + patch.children_total) |child_id| {
+                        cluster_count += self.patches[child_id].children_total;
+                    }
+
+                    // Now fill clusters
+
+                    const clusters = try scratch.alloc(IndexBox, cluster_count);
+                    defer scratch.free(clusters);
+
+                    // for (patch.children_offset..patch.children_offset + patch.children_total) |child_id| {
+
+                    // }
+
+                    // TODO preprocess patch tags and build clusters
+
+                    var patch_partitioner = try PartitionSpace.init(scratch, patch_space.size, &.{});
+                    defer patch_partitioner.deinit();
+
+                    patch_partitioner.build(patch_tags, config.patch_max_tiles, config.patch_efficiency);
+
+                    // Iterate newly build patches
+                    for (patch_partitioner.partitions()) |partition| {
+                        const partition_bounds = partition.bounds;
+                        const partition_space = IndexSpace.fromBox(partition_bounds);
+
+                        const partition_tags = try scratch.alloc(bool, partition_space.total());
+                        defer scratch.free(partition_tags);
+
+                        patch_space.copyWindow(partition_bounds, bool, partition_tags, source_tags);
+
+                        // TODO preprocess partition tags
+
+                        var partitioner = try PartitionSpace.init(scratch, partition_space.size, &.{});
+                        defer partitioner.deinit();
+
+                        partitioner.build(partition_tags, config.block_max_tiles, config.block_efficiency);
+
+                        const new_patch: Patch(N) = .{
+                            .bounds = partition_bounds.refined(),
+                            .level = target_id,
+                            .parent = null,
+                            .children_offset = 0,
+                            .children_total = 0,
+                            .block_offset = block_offset,
+                            .block_total = partitioner.partitions().len,
+                        };
+
+                        for (partitioner.partitions()) |block| {
+                            try level_blocks[target_id].append(allocator, .{
+                                .bounds = block.bounds.refined(),
+                                .patch = patch_offset,
+                            });
+
+                            block_offset += 1;
+                        }
+
+                        try level_patches[target_id].append(allocator, new_patch);
+
+                        patch_offset += 1;
+                    }
+                }
+            }
+        }
+
         /// Regenerates the current mesh using the set of tags to determine which tiles on each patch
         /// should be included in the new mesh.
         pub fn regrid(
@@ -298,6 +493,7 @@ pub fn Mesh(comptime N: usize) type {
             assert(max_levels >= self.active_levels);
             assert(block_max_tiles > 0 and patch_max_tiles > 0 and patch_max_tiles >= block_max_tiles);
             assert(block_efficiency >= patch_efficiency);
+            assert(tags.len == self.tile_total);
 
             // 1. Find total number of levels and preallocate dest.
             // **********************************************************
@@ -514,61 +710,58 @@ pub fn Mesh(comptime N: usize) type {
         }
 
         fn computeOffsets(self: *Self) void {
-            var tile_offset: usize = 0;
             var cell_offset: usize = 0;
 
-            for (self.levels.items) |*level| {
-                level.computeOffsets(self.tile_width);
+            for (self.blocks) |*block| {
+                const total = IndexSpace.fromSize(scaled(block.bounds.size, self.tile_width)).total();
 
-                level.tile_offset = tile_offset;
-                level.cell_offset = cell_offset;
-
-                tile_offset += level.tile_total;
-                cell_offset += level.cell_total;
+                block.cell_offset = cell_offset;
+                block.cell_total = total;
+                cell_offset += total;
             }
 
             self.cell_total = cell_offset;
+
+            var tile_offset: usize = 0;
+
+            for (self.patches) |*patch| {
+                const total = IndexSpace.fromBox(patch.bounds).total();
+
+                patch.tile_offset = tile_offset;
+                patch.tile_total = total;
+                tile_offset += total;
+            }
+
             self.tile_total = tile_offset;
         }
 
         fn computeTotalLevels(self: *const Self, tags: []const bool, max_levels: usize) usize {
             // Clamp to max levels
-            if (self.active_levels == max_levels) {
+            if (self.levels.items.len >= max_levels) {
                 return max_levels;
             }
 
-            // Check if any on the highest level is tagged
-            if (self.active_levels > 0) {
-                for (tags[self.levels.getLast().tile_offset..]) |tag| {
+            // Get last level
+            const last = self.levels.items[self.levels.items.len - 1];
+
+            for (last.patch_offset..last.patch_offset + last.patch_total) |patch_idx| {
+                const patch = self.patches.items[patch_idx];
+
+                for (tags[patch.tile_offset .. patch.tile_offset + patch.tile_total]) |tag| {
                     if (tag) {
-                        return self.active_levels + 1;
+                        return self.levels.items.len + 1;
                     }
                 }
-
-                return self.active_levels;
-            } else {
-                for (tags) |tag| {
-                    if (tag) {
-                        return self.active_levels + 1;
-                    }
-                }
-
-                return self.active_levels;
-            }
-        }
-
-        fn resizeActiveLevels(self: *Self, total: usize) !void {
-            assert(self.levels.items.len > 0);
-            while (total > self.levels.items.len) {
-                const size: [N]usize = scaled(self.levels.getLast().index_size, 2);
-
-                try self.levels.append(self.gpa, Level.init(size));
             }
 
-            self.active_levels = total;
+            return self.levels.items.len;
         }
     };
 }
+
+// *****************************
+// Transfer Map ****************
+// *****************************
 
 test "mesh regridding" {
     // const expect = std.testing.expect;
