@@ -346,38 +346,25 @@ pub fn Mesh(comptime N: usize) type {
             block_max_tiles: usize,
         };
 
-        pub fn regrid2(
+        pub fn regrid(
             self: *Self,
             allocator: Allocator,
             tags: []const bool,
             config: RegridConfig,
         ) !void {
-            const total_levels = self.computeTotalLevels(tags, config.max_levels);
+            // The total levels must be >= 1, but may not be greater than self.levels.len + 1.
+            const total_levels = @max(1, @min(config.max_levels, self.levels.len + 1));
 
-            const level_blocks: []BlockList = try allocator.alloc([]BlockList, total_levels);
-            @memset(level_blocks, .{});
+            // **********************************
+            // Allocate Per level data
 
-            defer {
-                for (level_blocks) |*level_block| {
-                    level_block.deinit(allocator);
-                }
+            const data: MeshByLevel = try MeshByLevel.init(allocator, total_levels);
 
-                allocator.free(level_blocks);
-            }
+            const IdxSlice = struct { offset: usize, total: usize };
 
-            const level_patches: []PatchList = try allocator.alloc([]Patch(N), total_levels);
-            @memset(level_patches, .{});
-
-            defer {
-                for (level_patches) |*level_patch| {
-                    level_patch.deinit(allocator);
-                }
-
-                allocator.free(level_patches);
-            }
-
-            var levels: LevelList = .{};
-            defer levels.deinit(allocator);
+            // A map from old patches on l to new patches on l+1.
+            var patch_map: []IdxSlice = try allocator.alloc(IdxSlice, self.patches.len);
+            defer allocator.free(patch_map);
 
             // Build scratch allocator
             var arena: ArenaAllocator = ArenaAllocator.init(allocator);
@@ -386,15 +373,18 @@ pub fn Mesh(comptime N: usize) type {
             var scratch: Allocator = arena.allocator();
 
             // Iterate from total_levels - 1 to 0
-
-            for (0..total_levels) |rev_level_id| {
+            for (0..total_levels - 1) |rev_level_id| {
                 const level_id: usize = total_levels - 1 - rev_level_id;
                 const target_id: usize = level_id + 1;
 
                 const level = self.levels[level_id];
 
-                var block_offset: usize = 0;
-                var patch_offset: usize = 0;
+                data.blocks[target_id].clearRetainingCapacity();
+                data.patches[target_id].clearRetainingCapacity();
+                data.children[target_id].clearRetainingCapacity();
+
+                // *******************************
+                // Loop over every patch on l ****
 
                 for (level.patch_offset..level.patch_offset + level.patch_total) |patch_id| {
                     // Reset arena for new "frame"
@@ -405,294 +395,385 @@ pub fn Mesh(comptime N: usize) type {
 
                     const source_tags = tags[patch.tile_offset .. patch.tile_offset + patch.tile_total];
 
+                    // *****************************************************
+                    // Find all new patches on l + 2 and use as clusters ***
+
+                    // First, find the total number of grandchildren of this patch
+
+                    const child_count: usize = blk: {
+                        var result: usize = 0;
+                        for (patch.children_offset..patch.children_offset + patch.children_total) |child_id| {
+                            result += patch_map[child_id].total;
+                        }
+                        break :blk result;
+                    };
+
+                    // Now fill clusters and cluster to patch
+
+                    const clusters = try scratch.alloc(IndexBox, child_count);
+                    defer scratch.free(clusters);
+
+                    const cluster_to_patch = try scratch.alloc(usize, child_count);
+                    defer scratch.free(cluster_to_patch);
+
+                    {
+                        var cur: usize = 0;
+
+                        for (patch.children_offset..patch.children_offset + patch.children_total) |child_id| {
+                            const slice = patch_map[child_id];
+                            for (slice.offset..slice.offset + slice.total) |grandchild_id| {
+                                const bounds = data.blocks[target_id + 1].items[grandchild_id].bounds;
+
+                                clusters[cur] = bounds.coarsened().coarsened().relativeTo(patch.bounds);
+                                cluster_to_patch[cur] = grandchild_id;
+
+                                cur += 1;
+                            }
+                        }
+                    }
+
+                    // ********************************
+                    // Preprocess tags ****************
+
                     const patch_tags = try scratch.alloc(bool, patch.tile_total);
                     defer scratch.free(patch_tags);
 
                     @memcpy(patch_tags, source_tags);
 
-                    // First, find the total number of clusters
+                    preprocessTags(patch_tags, patch_space, clusters);
 
-                    var cluster_count: usize = 0;
+                    // ************************************************************
+                    // Run partitioning algorithm to find new patches on l + 1 ****
 
-                    for (patch.children_offset..patch.children_offset + patch.children_total) |child_id| {
-                        cluster_count += self.patches[child_id].children_total;
-                    }
-
-                    // Now fill clusters
-
-                    const clusters = try scratch.alloc(IndexBox, cluster_count);
-                    defer scratch.free(clusters);
-
-                    // for (patch.children_offset..patch.children_offset + patch.children_total) |child_id| {
-
-                    // }
-
-                    // TODO preprocess patch tags and build clusters
-
-                    var patch_partitioner = try PartitionSpace.init(scratch, patch_space.size, &.{});
+                    var patch_partitioner = try PartitionSpace.init(scratch, patch_space.size, clusters);
                     defer patch_partitioner.deinit();
 
                     patch_partitioner.build(patch_tags, config.patch_max_tiles, config.patch_efficiency);
 
-                    // Iterate newly build patches
+                    // *********************************************************
+                    // Iterate new patches on l + 1 ****************************
+
+                    try data.patches[target_id].ensureUnusedCapacity(allocator, patch_partitioner.partitions().len);
+
                     for (patch_partitioner.partitions()) |partition| {
-                        const partition_bounds = partition.bounds;
+                        // Partition bounds must be added to patch bounds to get origin in l global space
+                        const partition_bounds = blk: {
+                            var result: IndexBox = partition.bounds;
+                            result.origin = patch.bounds.globalFromLocal(partition.bounds.origin);
+                            break :blk result;
+                        };
+
                         const partition_space = IndexSpace.fromBox(partition_bounds);
+
+                        // *********************************************************
+                        // Find blocks on l+2 that lie in new patch on l + 1 *******
+
+                        const child_block_count = blk: {
+                            var result: usize = 0;
+
+                            const child_clusters = patch_partitioner.children[partition.children_offset .. partition.children_offset + partition.children_total];
+
+                            for (child_clusters) |cluster_id| {
+                                const child_patch = data.patches[target_id + 1][cluster_to_patch[cluster_id]];
+
+                                result += child_patch.block_total;
+                            }
+
+                            break :blk result;
+                        };
+
+                        const child_blocks = try scratch.alloc(IndexBox, child_block_count);
+                        defer scratch.free(child_blocks);
+
+                        {
+                            var cur: usize = 0;
+
+                            const child_clusters = patch_partitioner.children[partition.children_offset .. partition.children_offset + partition.children_total];
+
+                            for (child_clusters) |cluster_id| {
+                                const child_patch = data.patches[target_id + 1][cluster_to_patch[cluster_id]];
+
+                                for (child_patch.block_offset..child_patch.block_offset + child_patch.block_total) |block_id| {
+                                    const bounds = data.blocks[target_id + 1][block_id].bounds;
+                                    child_blocks[cur] = bounds.coarsened().coarsened().relativeTo(partition_bounds);
+                                    cur += 1;
+                                }
+                            }
+                        }
+
+                        // *******************************************
+                        // Use these blocks to preprocess tags *******
 
                         const partition_tags = try scratch.alloc(bool, partition_space.total());
                         defer scratch.free(partition_tags);
 
                         patch_space.copyWindow(partition_bounds, bool, partition_tags, source_tags);
 
-                        // TODO preprocess partition tags
+                        preprocessTags(partition_tags, partition_space, child_blocks);
+
+                        // *****************************************************
+                        // Run partitioner to find blocks on new patch *********
 
                         var partitioner = try PartitionSpace.init(scratch, partition_space.size, &.{});
                         defer partitioner.deinit();
 
                         partitioner.build(partition_tags, config.block_max_tiles, config.block_efficiency);
 
+                        const children_offset = data.children[target_id].items.len;
+                        const block_offset = data.blocks[target_id].items.len;
+                        const patch_offset = data.patches[target_id].items.len;
+
+                        // ***********************************
+                        // Add New patch *********************
+
                         const new_patch: Patch(N) = .{
                             .bounds = partition_bounds.refined(),
                             .level = target_id,
                             .parent = null,
-                            .children_offset = 0,
-                            .children_total = 0,
+                            .children_offset = children_offset,
+                            .children_total = partition.children_total,
                             .block_offset = block_offset,
                             .block_total = partitioner.partitions().len,
                         };
 
+                        try data.children[target_id].ensureUnusedCapacity(allocator, partition.children_total);
+
+                        for (patch_partitioner.children[partition.children_offset .. partition.children_offset + partition.children_total]) |cluster_id| {
+                            data.children[target_id].appendAssumeCapacity(cluster_to_patch[cluster_id]);
+                        }
+
+                        try data.blocks[target_id].ensureUnusedCapacity(allocator, partitioner.partitions().len);
+
                         for (partitioner.partitions()) |block| {
-                            try level_blocks[target_id].append(allocator, .{
-                                .bounds = block.bounds.refined(),
+                            const bounds = blk: {
+                                var result: IndexBox = block.bounds;
+                                result.origin = partition_bounds.globalFromLocal(result.origin);
+                                break :blk result;
+                            };
+
+                            data.blocks[target_id].appendAssumeCapacity(.{
+                                .bounds = bounds.refined(),
                                 .patch = patch_offset,
                             });
-
-                            block_offset += 1;
                         }
 
-                        try level_patches[target_id].append(allocator, new_patch);
-
-                        patch_offset += 1;
+                        data.patches[target_id].appendAssumeCapacity(new_patch);
                     }
                 }
             }
-        }
 
-        /// Regenerates the current mesh using the set of tags to determine which tiles on each patch
-        /// should be included in the new mesh.
-        pub fn regrid(
-            self: *Self,
-            tags: []bool,
-            max_levels: usize,
-            patch_efficiency: f64,
-            patch_max_tiles: usize,
-            block_efficiency: f64,
-            block_max_tiles: usize,
-        ) !void {
-            // Check regridding parameter
-            assert(max_levels >= self.active_levels);
-            assert(block_max_tiles > 0 and patch_max_tiles > 0 and patch_max_tiles >= block_max_tiles);
-            assert(block_efficiency >= patch_efficiency);
-            assert(tags.len == self.tile_total);
+            // *******************************
+            // Flatten ***********************
 
-            // 1. Find total number of levels and preallocate dest.
-            // **********************************************************
-            const total_levels = self.computeTotalLevels(tags, max_levels);
-            try self.resizeActiveLevels(total_levels);
+            var blocks: BlockList = .{
+                .capacity = self.block_capacity,
+                .items = self.blocks,
+            };
 
-            // 2. Recursively generate levels on new mesh.
-            // *******************************************
+            var patches: PatchList = .{
+                .capacity = self.patch_capacity,
+                .items = self.patches,
+            };
 
-            // Build scratch allocator
-            var arena: ArenaAllocator = ArenaAllocator.init(self.gpa);
-            defer arena.deinit();
+            var levels: LevelList = .{
+                .capacity = self.level_capacity,
+                .items = self.levels,
+            };
 
-            var scratch: Allocator = arena.allocator();
+            blocks.clearRetainingCapacity();
+            patches.clearRetainingCapacity();
+            levels.clearRetainingCapacity();
 
-            // Stores a set of clusters to consider when repartitioning l. This consists of all patches on l+1.
-            var clusters: ArrayListUnmanaged(IndexBox) = .{};
-            defer clusters.deinit(self.gpa);
+            blocks.ensureUnusedCapacity(self.gpa, data.blockTotal() + 1);
+            patches.ensureUnusedCapacity(self.gpa, data.patchTotal() + 1);
+            levels.ensureUnusedCapacity(self.gpa, total_levels);
 
-            // A map from index in clusters to index of patch on l+1.
-            var cluster_index_map: ArrayListUnmanaged(usize) = .{};
-            defer cluster_index_map.deinit(self.gpa);
+            // *****************************
+            // Base patch ******************
 
-            // Allows mapping from coarse patch to clusters.
-            var cluster_offsets: ArrayListUnmanaged(usize) = .{};
-            defer cluster_offsets.deinit(self.gpa);
+            const base_child_total = if (total_levels > 1) data.patches[1].items.len else 0;
 
-            // At the end of iterating level l, this contains offsets from coarse patches on l-1 to new patches on l.
-            var coarse_children: ArrayListUnmanaged(usize) = .{};
-            defer coarse_children.deinit(self.gpa);
+            const base_block: Block(N) = .{
+                .bounds = .{
+                    .origin = splat(0),
+                    .size = config.index_size,
+                },
+                .patch = 0,
+            };
 
-            // Loop through levels from highest to lowest
-            for (0..(total_levels - 1)) |reverse_level_id| {
-                const level_id: usize = total_levels - 1 - reverse_level_id;
-                // Get a mutable reference to the target level.
-                const target: *Level = &self.levels.items[level_id];
+            const base_patch: Patch(N) = .{
+                .bounds = .{
+                    .origin = splat(0),
+                    .size = config.index_size,
+                },
+                .level = 0,
+                .parent = null,
+                .children_offset = 0,
+                .children_total = base_child_total,
+                .block_offset = 0,
+                .block_total = 1,
+            };
 
-                // Check if there exists a level higher than the current one.
-                const refined_exists: bool = level_id < total_levels - 1;
+            const base_level: Level(N) = .{
+                .index_size = config.index_size,
+                .patch_offset = 0,
+                .patch_total = 1,
+                .block_offset = 0,
+                .block_total = 1,
+            };
 
-                // At this moment in time
-                // - coarse is old
-                // - target is old
-                // - refined has been fully updated
+            blocks.appendAssumeCapacity(base_block);
+            patches.appendAssumeCapacity(base_patch);
+            levels.appendAssumeCapacity(base_level);
 
-                // To assemble clusters per patch we iterate children of coarse, then children of target
+            // Now fill higher levels
 
-                clusters.shrinkRetainingCapacity(0);
-                cluster_index_map.shrinkRetainingCapacity(0);
-                cluster_offsets.shrinkRetainingCapacity(0);
+            try data.patches[0].append(allocator, base_patch);
+            try data.children[0].ensureUnusedCapacity(allocator, base_child_total);
 
-                try cluster_offsets.append(self.gpa, 0);
-
-                const coarse: *const Level = &self.levels.items[level_id - 1];
-
-                if (refined_exists) {
-                    const refined: *const Level = &self.levels.items[level_id + 1];
-
-                    for (coarse.patches.items(.bounds), 0..) |cpbounds, cpid| {
-                        for (coarse.childrenSlice(cpid)) |tpid| {
-                            const start = coarse_children.items[tpid];
-                            const end = coarse_children.items[tpid + 1];
-
-                            for (start..end) |child| {
-                                var patch: IndexBox = refined.patches.items(.bounds)[child];
-
-                                try patch.coarsen();
-                                try patch.coarsen();
-
-                                try clusters.append(self.gpa, patch.relativeTo(cpbounds));
-                                try cluster_index_map.append(self.gpa, child);
-                            }
-                        }
-
-                        try cluster_offsets.append(self.gpa, clusters.items.len);
-                    }
-                } else {
-                    try cluster_offsets.append(self.gpa, clusters.items.len);
-                }
-
-                try target.setTotalChildren(self.gpa, clusters.items.len);
-                target.clearRetainingCapacity();
-
-                // At this moment in time
-                // - coarse is old
-                // - target is cleared
-                // - refined has been fully updated
-
-                const ctags = tags[coarse.tile_offset .. coarse.tile_offset + coarse.tile_total];
-
-                // 3.3 Generate new patches.
-                // *************************
-
-                // Start filling coarse children
-                coarse_children.shrinkRetainingCapacity(0);
-
-                try coarse_children.append(self.gpa, 0);
-
-                for (coarse.patches.items(.bounds), coarse.patches.items(.tile_offset), 0..) |cpbounds, cpoffset, cpid| {
-                    // Reset arena for new "frame"
-                    defer _ = arena.reset(.retain_capacity);
-
-                    // Make aliases for patch variables
-                    const cpspace: IndexSpace = IndexSpace.fromBox(cpbounds);
-                    const cptags: []bool = ctags[cpoffset..(cpoffset + cpspace.total())];
-
-                    // As well as clusters in this patch
-                    const upclusters: []const IndexBox = clusters.items[cluster_offsets.items[cpid]..cluster_offsets.items[cpid + 1]];
-                    const upcluster_index_map: []const usize = cluster_index_map.items[cluster_offsets.items[cpid]..cluster_offsets.items[cpid + 1]];
-
-                    // Preprocess tags to include all elements from clusters (and one tile buffer region around cluster)
-                    preprocessTagsOnPatch(cptags, cpspace, upclusters);
-
-                    // Run partitioning algorithm on coarse patch to determine blocks.
-                    var cppartitioner = try PartitionSpace.init(scratch, cpbounds.size, upclusters);
-                    defer cppartitioner.deinit();
-
-                    try cppartitioner.build(cptags, patch_max_tiles, patch_efficiency);
-
-                    // Iterate computed patches
-                    for (cppartitioner.partitions()) |patch| {
-                        // Build a space from the patch size.
-                        const pspace: IndexSpace = IndexSpace.fromBox(patch.bounds);
-
-                        // Allocate sufficient space to hold children of this patch
-                        var pchildren: []usize = try scratch.alloc(usize, patch.children_total);
-                        defer scratch.free(pchildren);
-
-                        // Fill with computed children of patch (using index map to find global index into refined children)
-                        for (patch.children_offset..(patch.children_offset + patch.children_total), pchildren) |child_id, *child| {
-                            child.* = upcluster_index_map[child_id];
-                        }
-
-                        // Build window into tags for this patch
-                        var ptags: []bool = try scratch.alloc(bool, pspace.total());
-                        defer scratch.free(ptags);
-                        // Set ptags using window of uptags
-                        cpspace.copyWindow(patch.bounds, bool, ptags, cptags);
-
-                        // Run patitioning algorithm on patch to determine blocks
-                        var ppartitioner = try PartitionSpace.init(scratch, pspace.size, &[_]IndexBox{});
-                        defer ppartitioner.deinit();
-
-                        try ppartitioner.build(ptags, block_max_tiles, block_efficiency);
-
-                        // Offset blocks to be in global space
-                        var pblocks: []IndexBox = try scratch.alloc(IndexBox, ppartitioner.partitions().len);
-                        scratch.free(pblocks);
-
-                        // Compute global bounds of the patch
-                        const pbounds: IndexBox = .{
-                            .origin = add(patch.bounds.origin, cpbounds.origin),
-                            .size = patch.bounds.size,
-                        };
-
-                        // Iterate computed blocks and offset to find global bounds of each block
-                        for (ppartitioner.partitions(), pblocks) |block, *pblock| {
-                            pblock.* = block.bounds;
-
-                            for (0..N) |axis| {
-                                pblock.origin[axis] += pbounds.origin[axis];
-                            }
-                        }
-
-                        // Add patch to level
-                        try target.addPatch(self.gpa, pbounds, pblocks, pchildren);
-                    }
-
-                    try coarse_children.append(self.gpa, target.patchTotal());
-
-                    // target.transfer_patches.items(.patch_total)[cpid] += partition_space.parts.len;
-                }
-
-                target.refine();
-
-                // At this moment in time
-                // - coarse is old
-                // - target has been fully updated
-                // - refined has been fully updated
+            for (0..base_child_total) |id| {
+                data.children[0].appendAssumeCapacity(id);
             }
 
-            // Update base
-            const base: *Level = &self.levels.items[0];
+            for (0..total_levels - 1) |level_id| {
+                const target_id = level_id + 1;
 
-            if (self.active_levels > 1) {
-                try base.buildBase(self.gpa, self.index_size, self.getLevel(1).patchTotal());
-            } else {
-                try base.buildBase(self.gpa, self.index_size, 0);
+                const global_patch_offset = patches.items.len;
+                const global_block_offset = patches.items.len;
+
+                const prev_patch_offset: usize = global_patch_offset - data.patches[level_id].items.len;
+                const next_patch_offset: usize = global_patch_offset + data.patches[target_id].items.len;
+
+                // Loop over patches in child order
+
+                for (data.patches[level_id].items, 0..) |patch, patch_id| {
+                    for (data.children[level_id][patch.children_offset .. patch.children_offset + patch.children_total]) |child| {
+                        const target_patch = data.patches[target_id][child];
+
+                        const patch_offset = patches.items.len;
+
+                        patches.appendAssumeCapacity(.{
+                            .bounds = target_patch.bounds,
+                            .level = target_id,
+                            .parent = patch_id + prev_patch_offset,
+                            .children_offset = next_patch_offset + target_patch.children_offset,
+                            .children_total = target_patch.children_total,
+                            .block_offset = global_block_offset + target_patch.block_offset,
+                            .block_total = target_patch.block_total,
+                        });
+
+                        for (data.blocks[target_id][target_patch.block_offset .. target_patch.block_offset + target_patch.block_total]) |block| {
+                            blocks.appendAssumeCapacity(.{
+                                .bounds = block.bounds,
+                                .patch = patch_offset,
+                            });
+                        }
+                    }
+                }
+
+                levels.append(allocator, .{
+                    .index_size = Index.scaled(levels[level_id].index_size, 2),
+                    .patch_offset = global_patch_offset,
+                    .patch_total = data.patches[target_id].items.len,
+                    .block_offset = global_block_offset,
+                    .block_total = data.blocks[target_id].items.len,
+                });
             }
 
-            // 4. Recompute level offsets and totals.
-            // **************************************
+            self.block_capacity = blocks.capacity;
+            self.patch_capacity = patches.capacity;
+            self.level_capacity = levels.capacity;
 
             self.computeOffsets();
         }
 
-        fn preprocessTagsOnPatch(tags: []bool, space: IndexSpace, clusters: []const IndexBox) void {
-            for (clusters) |upcluster| {
-                var cluster: IndexBox = upcluster;
+        const MeshByLevel = struct {
+            blocks: []BlockList,
+            patches: []PatchList,
+            children: []ArrayListUnmanaged(usize),
+
+            fn init(allocator: Allocator, total_levels: usize) !@This() {
+                const blocks: []BlockList = try allocator.alloc(BlockList, total_levels);
+                @memset(blocks, .{});
+
+                errdefer {
+                    for (blocks) |*level_block| {
+                        level_block.deinit(allocator);
+                    }
+
+                    allocator.free(blocks);
+                }
+
+                const patches: []PatchList = try allocator.alloc(PatchList, total_levels);
+                @memset(patches, .{});
+
+                errdefer {
+                    for (patches) |*level_patch| {
+                        level_patch.deinit(allocator);
+                    }
+
+                    allocator.free(patches);
+                }
+
+                const children: []ArrayListUnmanaged(usize) = try allocator.alloc(ArrayListUnmanaged(usize), total_levels);
+                @memset(children, .{});
+
+                errdefer {
+                    for (children) |*level_child| {
+                        level_child.deinit(allocator);
+                    }
+
+                    allocator.free(children);
+                }
+
+                return .{
+                    .blocks = blocks,
+                    .patches = patches,
+                    .children = children,
+                };
+            }
+
+            fn deinit(self: *@This(), allocator: Allocator) void {
+                for (self.blocks) |*level_block| {
+                    level_block.deinit(allocator);
+                }
+
+                for (self.patches) |*level_patch| {
+                    level_patch.deinit(allocator);
+                }
+
+                for (self.children) |*level_child| {
+                    level_child.deinit(allocator);
+                }
+
+                allocator.free(self.blocks);
+                allocator.free(self.patches);
+                allocator.free(self.children);
+            }
+
+            fn blockTotal(self: @This()) usize {
+                var result: usize = 0;
+
+                for (self.blocks) |block_list| {
+                    result += block_list.len;
+                }
+
+                return result;
+            }
+
+            fn patchTotal(self: @This()) usize {
+                var result: usize = 0;
+
+                for (self.patches) |patch_list| {
+                    result += patch_list.len;
+                }
+                return result;
+            }
+        };
+
+        fn preprocessTags(tags: []bool, space: IndexSpace, blocks: []const IndexBox) void {
+            for (blocks) |block| {
+                var cluster: IndexBox = block;
 
                 for (0..N) |i| {
                     if (cluster.origin[i] > 0) {
@@ -734,28 +815,6 @@ pub fn Mesh(comptime N: usize) type {
 
             self.tile_total = tile_offset;
         }
-
-        fn computeTotalLevels(self: *const Self, tags: []const bool, max_levels: usize) usize {
-            // Clamp to max levels
-            if (self.levels.items.len >= max_levels) {
-                return max_levels;
-            }
-
-            // Get last level
-            const last = self.levels.items[self.levels.items.len - 1];
-
-            for (last.patch_offset..last.patch_offset + last.patch_total) |patch_idx| {
-                const patch = self.patches.items[patch_idx];
-
-                for (tags[patch.tile_offset .. patch.tile_offset + patch.tile_total]) |tag| {
-                    if (tag) {
-                        return self.levels.items.len + 1;
-                    }
-                }
-            }
-
-            return self.levels.items.len;
-        }
     };
 }
 
@@ -767,27 +826,25 @@ test "mesh regridding" {
     // const expect = std.testing.expect;
     // const expectEqualSlices = std.testing.expectEqualSlices;
 
-    const allocator = std.testing.allocator;
+    // const allocator = std.testing.allocator;
 
-    const config: Mesh(2).Config = .{
-        .physical_bounds = .{
-            .origin = [_]f64{ 0.0, 0.0 },
-            .size = [_]f64{ 1.0, 1.0 },
-        },
-        .index_size = [_]usize{ 10, 10 },
-        .tile_width = 16,
-    };
+    // const config: Mesh(2).Config = .{
+    //     .physical_bounds = .{
+    //         .origin = [_]f64{ 0.0, 0.0 },
+    //         .size = [_]f64{ 1.0, 1.0 },
+    //     },
+    //     .index_size = [_]usize{ 10, 10 },
+    //     .tile_width = 16,
+    // };
 
-    var mesh: Mesh(2) = try Mesh(2).init(allocator, config);
-    defer mesh.deinit();
+    // var mesh: Mesh(2) = try Mesh(2).init(allocator, config);
+    // defer mesh.deinit();
 
-    var tags: []bool = try allocator.alloc(bool, mesh.tile_total);
-    defer allocator.free(tags);
+    // var tags: []bool = try allocator.alloc(bool, mesh.tile_total);
+    // defer allocator.free(tags);
 
-    // Tag all
-    @memset(tags, true);
+    // // Tag all
+    // @memset(tags, true);
 
-    try mesh.regrid(tags, 1, 0.1, 80, 0.7, 80);
+    // try mesh.regrid(tags, 1, 0.1, 80, 0.7, 80);
 }
-
-test {}

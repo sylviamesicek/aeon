@@ -54,31 +54,31 @@ pub fn DofMap(comptime N: usize, comptime O: usize) type {
         const CellSpace = basis.CellSpace(N, O);
 
         pub fn init(allocator: Allocator, mesh: *const Mesh) !Self {
-            const levels = try allocator.alloc(usize, mesh.active_levels + 1);
+            const levels = try allocator.alloc(usize, mesh.levels.len + 1);
             errdefer allocator.free(levels);
 
-            levels[0] = 0;
+            {
+                levels[0] = 0;
 
-            var level_ptr: usize = 0;
+                var cur: usize = 0;
 
-            for (0..mesh.active_levels) |level| {
-                const current = levels[level_ptr];
-                level_ptr += 1;
-                levels[level_ptr] = current + mesh.getLevel(level).blockTotal();
+                for (mesh.levels) |level| {
+                    levels[cur + 1] = levels[cur] + level.block_total;
+                    cur += 1;
+                }
             }
 
             const offsets = try allocator.alloc(usize, levels[mesh.active_levels] + 1);
             errdefer allocator.free(offsets);
 
-            offsets[0] = 0;
+            {
+                offsets[0] = 0;
 
-            var offset_ptr: usize = 0;
+                var cur: usize = 0;
 
-            for (0..mesh.active_levels) |level| {
-                for (mesh.getLevel(level).blocks.items(.bounds)) |bounds| {
-                    const current = offsets[offset_ptr];
-                    offset_ptr += 1;
-                    offsets[offset_ptr] = current + CellSpace.fromSize(Index.scaled(bounds.size, mesh.tile_width)).total();
+                for (mesh.blocks) |block| {
+                    offsets[cur + 1] = offsets[cur] + CellSpace.fromSize(Index.scaled(block.bounds.size, mesh.tile_width)).total();
+                    cur += 1;
                 }
             }
 
@@ -121,22 +121,21 @@ pub fn DofUtils(comptime N: usize, comptime O: usize) type {
         const IndexSpace = geometry.IndexSpace(N);
         const IndexBox = geometry.Box(N, usize);
         const Mesh = meshes.Mesh(N);
-        const Level = Mesh.Level;
         const BoundaryUtils = boundaries.BoundaryUtils(N, O);
         const Face = geometry.Face(N);
         const Region = geometry.Region(N);
         const Map = DofMap(N, O);
 
         /// Computes the number of cells along each axis for a given block.
-        pub fn blockCellSize(mesh: *const Mesh, level: usize, block: usize) [N]usize {
-            return Index.scaled(mesh.getLevel(level).blocks.items(.bounds)[block].size, mesh.tile_width);
+        pub fn blockCellSize(mesh: *const Mesh, block: usize) [N]usize {
+            return Index.scaled(mesh.blocks[block].bounds.size, mesh.tile_width);
         }
 
         /// Builds a stencil space for the given block.
-        pub fn blockStencilSpace(mesh: *const Mesh, level: usize, block: usize) StencilSpace {
+        pub fn blockStencilSpace(mesh: *const Mesh, block: usize) StencilSpace {
             return .{
-                .physical_bounds = mesh.blockPhysicalBounds(level, block),
-                .size = blockCellSize(mesh, level, block),
+                .physical_bounds = mesh.blockPhysicalBounds(block),
+                .size = blockCellSize(mesh, block),
             };
         }
 
@@ -237,7 +236,6 @@ pub fn DofUtils(comptime N: usize, comptime O: usize) type {
             comptime System: type,
             mesh: *const Mesh,
             dof_map: Map,
-            level: usize,
             block: usize,
             dest: SystemSlice(System),
             src: SystemSliceConst(System),
