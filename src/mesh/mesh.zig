@@ -450,6 +450,10 @@ pub fn Mesh(comptime N: usize) type {
 
                     patch_partitioner.build(patch_tags, config.patch_max_tiles, config.patch_efficiency);
 
+                    // Update patch map
+                    patch_map[patch_id].offset = data.patches[target_id].items.len;
+                    patch_map[patch_id].total = patch_partitioner.partitions().len;
+
                     // *********************************************************
                     // Iterate new patches on l + 1 ****************************
 

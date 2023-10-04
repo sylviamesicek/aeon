@@ -46,7 +46,6 @@ const SystemSliceConst = system.SystemSliceConst;
 pub fn DofMap(comptime N: usize, comptime O: usize) type {
     return struct {
         offsets: []const usize,
-        levels: []const usize,
 
         const Self = @This();
         const Mesh = meshes.Mesh(N);
@@ -54,21 +53,7 @@ pub fn DofMap(comptime N: usize, comptime O: usize) type {
         const CellSpace = basis.CellSpace(N, O);
 
         pub fn init(allocator: Allocator, mesh: *const Mesh) !Self {
-            const levels = try allocator.alloc(usize, mesh.levels.len + 1);
-            errdefer allocator.free(levels);
-
-            {
-                levels[0] = 0;
-
-                var cur: usize = 0;
-
-                for (mesh.levels) |level| {
-                    levels[cur + 1] = levels[cur] + level.block_total;
-                    cur += 1;
-                }
-            }
-
-            const offsets = try allocator.alloc(usize, levels[mesh.active_levels] + 1);
+            const offsets = try allocator.alloc(usize, mesh.blocks.len + 1);
             errdefer allocator.free(offsets);
 
             {
@@ -83,27 +68,23 @@ pub fn DofMap(comptime N: usize, comptime O: usize) type {
             }
 
             return .{
-                .levels = levels,
                 .offsets = offsets,
             };
         }
 
         pub fn deinit(self: Self, allocator: Allocator) void {
-            allocator.free(self.levels);
             allocator.free(self.offsets);
         }
 
-        pub fn blockOffset(self: Self, level: usize, block: usize) usize {
-            const idx = self.levels[level] + block;
-            return self.offsets[idx];
+        pub fn offset(self: Self, block: usize) usize {
+            return self.offsets[block];
         }
 
-        pub fn blockTotal(self: Self, level: usize, block: usize) usize {
-            const idx = self.levels[level] + block;
-            return self.offsets[idx + 1] - self.offsets[idx];
+        pub fn total(self: Self, block: usize) usize {
+            return self.offsets[block + 1] - self.offsets[block];
         }
 
-        pub fn total(self: Self) usize {
+        pub fn ndofs(self: Self) usize {
             return self.offsets[self.offsets.len - 1];
         }
     };
@@ -208,29 +189,6 @@ pub fn DofUtils(comptime N: usize, comptime O: usize) type {
         // Copy *******************
         // ************************
 
-        /// Performs `copyDofsFromCells` for all levels and blocks.
-        pub fn copyDofsFromCellsAll(
-            comptime System: type,
-            mesh: *const Mesh,
-            dof_map: Map,
-            dest: SystemSlice(System),
-            src: SystemSliceConst(System),
-        ) void {
-            for (0..mesh.active_levels) |level| {
-                for (0..mesh.getLevel(level).blockTotal()) |block| {
-                    copyDofsFromCells(
-                        System,
-                        mesh,
-                        dof_map,
-                        level,
-                        block,
-                        dest,
-                        src,
-                    );
-                }
-            }
-        }
-
         /// Copies the data from a vector of cells to a vector of dofs.
         pub fn copyDofsFromCells(
             comptime System: type,
@@ -240,13 +198,13 @@ pub fn DofUtils(comptime N: usize, comptime O: usize) type {
             dest: SystemSlice(System),
             src: SystemSliceConst(System),
         ) void {
-            assert(dest.len == dof_map.total());
+            assert(dest.len == dof_map.ndofs());
             assert(src.len == mesh.cell_total);
 
-            const block_dest = dest.slice(dof_map.blockOffset(level, block), dof_map.blockTotal(level, block));
-            const block_src = src.slice(mesh.blockCellOffset(level, block), mesh.blockCellTotal(level, block));
+            const block_dest = dest.slice(dof_map.offset(block), dof_map.total(block));
+            const block_src = src.slice(mesh.blocks[block].cell_offset, mesh.blocks[block].cell_total);
 
-            const cell_space = CellSpace.fromSize(blockCellSize(mesh, level, block));
+            const cell_space = CellSpace.fromSize(blockCellSize(mesh, block));
 
             var cells = cell_space.cells();
             var linear: usize = 0;
@@ -258,46 +216,22 @@ pub fn DofUtils(comptime N: usize, comptime O: usize) type {
             }
         }
 
-        /// Performs `copyCellsFromDofs` for all levels and blocks.
-        pub fn copyCellsFromDofsAll(
-            comptime System: type,
-            mesh: *const Mesh,
-            dof_map: Map,
-            dest: SystemSlice(System),
-            src: SystemSliceConst(System),
-        ) void {
-            for (0..mesh.active_levels) |level| {
-                for (0..mesh.getLevel(level).blockTotal()) |block| {
-                    copyCellsFromDofs(
-                        System,
-                        mesh,
-                        dof_map,
-                        level,
-                        block,
-                        dest,
-                        src,
-                    );
-                }
-            }
-        }
-
         /// Copies the data from a vector of dofs to a vector of cells.
         pub fn copyCellsFromDofs(
             comptime System: type,
             mesh: *const Mesh,
             dof_map: Map,
-            level: usize,
             block: usize,
             dest: SystemSlice(System),
             src: SystemSliceConst(System),
         ) void {
-            assert(src.len == dof_map.total());
+            assert(src.len == dof_map.ndofs());
             assert(dest.len == mesh.cell_total);
 
-            const block_src = src.slice(dof_map.blockOffset(level, block), dof_map.blockTotal(level, block));
-            const block_dest = dest.slice(mesh.blockCellOffset(level, block), mesh.blockCellTotal(level, block));
+            const block_src = src.slice(dof_map.offset(block), dof_map.total(block));
+            const block_dest = dest.slice(mesh.blocks[block].cell_offset, mesh.blocks[block].cell_total);
 
-            const cell_space = CellSpace.fromSize(blockCellSize(mesh, level, block));
+            const cell_space = CellSpace.fromSize(blockCellSize(mesh, block));
 
             var cells = cell_space.cells();
             var linear: usize = 0;
@@ -313,16 +247,15 @@ pub fn DofUtils(comptime N: usize, comptime O: usize) type {
         pub fn copyDofs(
             comptime System: type,
             dof_map: Map,
-            level: usize,
             block: usize,
             dest: SystemSlice(System),
             src: SystemSliceConst(System),
         ) void {
-            assert(dest.len == dof_map.total());
-            assert(src.len == dof_map.total());
+            assert(dest.len == dof_map.ndofs());
+            assert(src.len == dof_map.ndofs());
 
-            const cell_offset = dof_map.blockOffset(level, block);
-            const cell_total = dof_map.blockTotal(level, block);
+            const cell_offset = dof_map.offset(block);
+            const cell_total = dof_map.total(block);
 
             inline for (comptime std.enums.values(System)) |field| {
                 @memcpy(dest.field(field)[cell_offset .. cell_offset + cell_total], src.field(field)[cell_offset .. cell_offset + cell_total]);
@@ -333,7 +266,6 @@ pub fn DofUtils(comptime N: usize, comptime O: usize) type {
         pub fn copyCells(
             comptime System: type,
             mesh: *const Mesh,
-            level: usize,
             block: usize,
             dest: SystemSlice(System),
             src: SystemSliceConst(System),
@@ -341,8 +273,8 @@ pub fn DofUtils(comptime N: usize, comptime O: usize) type {
             assert(dest.len == mesh.cell_total);
             assert(src == mesh.cell_total);
 
-            const cell_offset = mesh.blockCellOffset(level, block);
-            const cell_total = mesh.blockCellTotal(level, block);
+            const cell_offset = mesh.blocks[block].cell_offset;
+            const cell_total = mesh.blocks[block].cell_total;
 
             inline for (comptime std.enums.values(System)) |field| {
                 @memcpy(dest.field(field)[cell_offset .. cell_offset + cell_total], src.field(field)[cell_offset .. cell_offset + cell_total]);
@@ -353,64 +285,17 @@ pub fn DofUtils(comptime N: usize, comptime O: usize) type {
         // Fill Ops ***************
         // ************************
 
-        /// Performs fillBoundary for all levels and blocks.
-        pub fn fillBoundaryAll(
-            mesh: *const Mesh,
-            block_map: []const usize,
-            dof_map: Map,
-            boundary: anytype,
-            sys: system.SystemSlice(@TypeOf(boundary).System),
-        ) void {
-            for (0..mesh.active_levels) |level| {
-                for (0..mesh.getLevel(level).blockTotal()) |block| {
-                    fillBoundary(
-                        mesh,
-                        block_map,
-                        dof_map,
-                        level,
-                        block,
-                        boundary,
-                        sys,
-                    );
-                }
-            }
-        }
-
         /// Given a dof vector, fill all boundary dofs on that vector out to an extent O using the
         /// supplied boundary conditions.
         pub fn fillBoundary(
             mesh: *const Mesh,
             block_map: []const usize,
             dof_map: Map,
-            level: usize,
             block: usize,
             boundary: anytype,
             sys: system.SystemSlice(@TypeOf(boundary).System),
         ) void {
-            fillBoundaryToExtent(O, mesh, block_map, dof_map, level, block, boundary, sys);
-        }
-
-        /// Perfom `fillBoundaryFull` for all levels and blocks.
-        pub fn fillBoundaryFullAll(
-            mesh: *const Mesh,
-            block_map: []const usize,
-            dof_map: Map,
-            boundary: anytype,
-            sys: system.SystemSlice(@TypeOf(boundary).System),
-        ) void {
-            for (0..mesh.active_levels) |level| {
-                for (0..mesh.getLevel(level).blockTotal()) |block| {
-                    fillBoundaryFull(
-                        mesh,
-                        block_map,
-                        dof_map,
-                        level,
-                        block,
-                        boundary,
-                        sys,
-                    );
-                }
-            }
+            fillBoundaryToExtent(O, mesh, block_map, dof_map, block, boundary, sys);
         }
 
         /// Given a dof vector, fill all boundary dofs on that vector out to an extent 2*O using the
@@ -419,12 +304,11 @@ pub fn DofUtils(comptime N: usize, comptime O: usize) type {
             mesh: *const Mesh,
             block_map: []const usize,
             dof_map: Map,
-            level: usize,
             block: usize,
             boundary: anytype,
             sys: system.SystemSlice(@TypeOf(boundary).System),
         ) void {
-            fillBoundaryToExtent(2 * O, mesh, block_map, dof_map, level, block, boundary, sys);
+            fillBoundaryToExtent(2 * O, mesh, block_map, dof_map, block, boundary, sys);
         }
 
         /// Internal helper function for filling boundary dofs to some extent E.
@@ -433,7 +317,6 @@ pub fn DofUtils(comptime N: usize, comptime O: usize) type {
             mesh: *const Mesh,
             block_map: []const usize,
             dof_map: Map,
-            level: usize,
             block: usize,
             boundary: anytype,
             sys: system.SystemSlice(@TypeOf(boundary).System),
@@ -444,10 +327,10 @@ pub fn DofUtils(comptime N: usize, comptime O: usize) type {
                 @compileError("FillBaseBoundary requires boundary satisfy isSystemBoundary trait.");
             }
 
-            assert(sys.len == dof_map.total());
+            assert(sys.len == dof_map.ndofs());
 
-            const target = mesh.getLevel(level);
-            const bounds: IndexBox = target.blocks.items(.bounds)[block];
+            const bounds: IndexBox = mesh.blocks[block].bounds;
+            const index_size = mesh.levels[mesh.patches[mesh.blocks[block].patch].level].index_size;
 
             const regions = comptime Region.orderedRegions();
 
@@ -457,22 +340,22 @@ pub fn DofUtils(comptime N: usize, comptime O: usize) type {
                 for (0..N) |i| {
                     if (region.sides[i] == .left and bounds.origin[i] == 0) {
                         exterior = true;
-                    } else if (region.sides[i] == .right and bounds.origin[i] + bounds.size[i] == target.index_size[i]) {
+                    } else if (region.sides[i] == .right and bounds.origin[i] + bounds.size[i] == index_size[i]) {
                         exterior = true;
                     }
                 }
 
                 if (exterior) {
-                    const stencil_space = blockStencilSpace(mesh, level, block);
+                    const stencil_space = blockStencilSpace(mesh, block);
 
                     const block_sys = sys.slice(
-                        dof_map.blockOffset(level, block),
-                        dof_map.blockTotal(level, block),
+                        dof_map.offset(block),
+                        dof_map.offset(block),
                     );
 
                     BoundaryUtils.fillBoundaryRegion(E, region, stencil_space, boundary, block_sys);
                 } else {
-                    fillInteriorBoundary(T.System, region, E, mesh, block_map, dof_map, level, block, sys);
+                    fillInteriorBoundary(T.System, region, E, mesh, block_map, dof_map, block, sys);
                 }
             }
         }
@@ -485,28 +368,22 @@ pub fn DofUtils(comptime N: usize, comptime O: usize) type {
             mesh: *const Mesh,
             block_map: []const usize,
             dof_map: Map,
-            level: usize,
-            block: usize,
+            block_id: usize,
             sys: system.SystemSlice(System),
         ) void {
-            const target: *const Level = mesh.getLevel(level);
+            const block = mesh.blocks[block_id];
+            const block_cell_space = CellSpace.fromSize(blockCellSize(mesh, block_id));
 
-            const blocks = target.blocks.slice();
-            const patches = target.patches.slice();
+            const patch_id = mesh.blocks[block].patch;
+            const patch = mesh.patches[patch_id];
+            const patch_space = IndexSpace.fromBox(patch.bounds);
+            const patch_block_map: []const usize = block_map[patch.tile_offset .. patch.tile_offset + patch.tile_total];
 
-            const block_bounds = blocks.items(.bounds)[block];
-            const block_cell_space = CellSpace.fromSize(block_bounds.size);
-
-            const patch = blocks.items(.patch)[block];
-            const patch_bounds: IndexBox = patches.items(.bounds)[patch];
-            const patch_space = IndexSpace.fromBox(patch_bounds);
-            const patch_block_map: []const usize = mesh.patchTileSlice(level, patch, block_map);
-
-            const relative_bounds: IndexBox = block_bounds.relativeTo(patch_bounds);
+            const relative_bounds: IndexBox = block.bounds.relativeTo(patch.bounds);
 
             const block_sys = sys.slice(
-                dof_map.blockOffset(level, block),
-                dof_map.blockTotal(level, block),
+                dof_map.offset(block),
+                dof_map.total(block),
             );
 
             var tiles = region.innerFaceIndices(relative_bounds.size);
@@ -521,32 +398,29 @@ pub fn DofUtils(comptime N: usize, comptime O: usize) type {
                 }
 
                 const origin: [N]usize = Index.scaled(Index.toUnsigned(tile), mesh.tile_width);
-                const neighbor: usize = patch_block_map[patch_space.linearFromCartesian(buffer_tile)];
+                const neighbor_id: usize = patch_block_map[patch_space.linearFromCartesian(buffer_tile)];
 
-                if (neighbor == maxInt(usize)) {
+                if (neighbor_id == maxInt(usize)) {
                     const coarse_buffer_tile: [N]usize = Index.coarsened(buffer_tile);
 
                     // If so cache various coarse variables
-                    const coarse: *const Level = mesh.getLevel(level - 1);
+                    const coarse_patch = mesh.patches[neighbor_id];
+                    const coarse_patch_block_map: []const usize = block_map[coarse_patch.tile_offset .. coarse_patch.tile_offset + coarse_patch.tile_total];
+                    const coarse_patch_space = IndexSpace.fromBox(coarse_patch.bounds);
 
-                    const coarse_patch = coarse.parents.items[patch];
-                    const coarse_patch_block_map: []const usize = mesh.patchTileSlice(level - 1, coarse_patch, block_map);
-                    const coarse_patch_bounds = coarse.patches.items(.bounds)[coarse_patch];
-                    const coarse_patch_space = IndexSpace.fromBox(coarse_patch_bounds);
-
-                    const coarse_block = coarse_patch_block_map[coarse_patch_space.linearFromCartesian(coarse_buffer_tile)];
-                    const coarse_block_cell_space: CellSpace = CellSpace.fromSize(coarse.blocks.items(.bounds)[coarse_block].size);
+                    const coarse_block_id = coarse_patch_block_map[coarse_patch_space.linearFromCartesian(coarse_buffer_tile)];
+                    const coarse_block = mesh.blocks[coarse_block_id];
+                    const coarse_block_cell_space: CellSpace = CellSpace.fromSize(coarse_block.bounds.size);
 
                     const coarse_block_sys = sys.slice(
-                        dof_map.blockOffset(level - 1, coarse_block),
-                        dof_map.blockTotal(level - 1, coarse_block),
+                        dof_map.offset(coarse_block_id),
+                        dof_map.total(coarse_block_id),
                     );
 
-                    var coarse_relative_block_bounds = coarse.blocks.items(.bounds)[coarse_block].relativeTo(coarse_patch_bounds);
-                    coarse_relative_block_bounds.refine();
+                    const coarse_relative_bounds = coarse_block.bounds.relativeTo(coarse_patch.bounds).refined();
 
                     // Neighbor origin in subcell space
-                    const coarse_neighbor_origin: [N]usize = Index.scaled(coarse_relative_block_bounds.localFromGlobal(relative_tile), mesh.tile_width);
+                    const coarse_neighbor_origin: [N]usize = Index.scaled(coarse_relative_bounds.localFromGlobal(relative_tile), mesh.tile_width);
 
                     var indices = region.cartesianIndices(E, Index.splat(mesh.tile_width));
 
@@ -570,14 +444,14 @@ pub fn DofUtils(comptime N: usize, comptime O: usize) type {
                 } else {
                     // Copy from neighbor on same level
                     const neighbor_sys = sys.slice(
-                        dof_map.blockOffset(level, neighbor),
-                        dof_map.blockTotal(level, neighbor),
+                        dof_map.offset(neighbor_id),
+                        dof_map.total(neighbor_id),
                     );
 
-                    const neighbor_bounds: IndexBox = blocks.items(.bounds)[neighbor].relativeTo(patch_bounds);
-                    const neighbor_cell_space: CellSpace = CellSpace.fromSize(neighbor_bounds.size);
+                    const neighbor = mesh.blocks[neighbor_id];
+                    const neighbor_cell_space: CellSpace = CellSpace.fromSize(neighbor.bounds.size);
 
-                    const neighbor_origin: [N]usize = Index.scaled(neighbor_bounds.localFromGlobal(relative_tile), mesh.tile_width);
+                    const neighbor_origin: [N]usize = Index.scaled(neighbor.bounds.localFromGlobal(relative_tile), mesh.tile_width);
 
                     var indices = region.cartesianIndices(E, Index.splat(mesh.tile_width));
 
@@ -610,54 +484,50 @@ pub fn DofUtils(comptime N: usize, comptime O: usize) type {
             mesh: *const Mesh,
             block_map: []const usize,
             dof_map: Map,
-            level: usize,
-            block: usize,
+            block_id: usize,
             sys: SystemSlice(System),
         ) void {
             if (comptime !system.isSystem(System)) {
                 @compileError("System must satisfy isSystem trait.");
             }
 
-            assert(sys.len == dof_map.total());
+            assert(sys.len == dof_map.ndofs());
 
             const block_sys = sys.slice(
-                dof_map.blockOffset(level, block),
-                dof_map.blockTotal(level, block),
+                dof_map.offset(block_id),
+                dof_map.offset(block_id),
             );
 
-            if (level == 0) {
+            const block = mesh.blocks[block_id];
+            const patch = mesh.patches[block.patch];
+
+            if (patch.parent == null) {
                 return;
             }
 
-            const cell_space = CellSpace.fromSize(blockCellSize(mesh, level, block));
+            const cell_space = CellSpace.fromSize(blockCellSize(mesh, block));
 
-            const target = mesh.getLevel(level);
-            const coarse = mesh.getLevel(level - 1);
+            const coarse_patch = mesh.patches[patch.parent.?];
 
-            const patch = coarse.parents.items[target.blocks.items(.patch)[block]];
-            var patch_bounds = coarse.patches.items(.bounds)[patch];
-            patch_bounds.coarsen();
-
-            var bounds = target.blocks.items(.bounds)[block];
-            bounds.coarsen();
+            const patch_bounds = coarse_patch.bounds;
+            const bounds = block.bounds.coarsened();
 
             const patch_space = IndexSpace.fromBox(patch_bounds);
             const block_space = IndexSpace.fromBox(bounds);
 
-            const tile_offset = mesh.patchTileOffset(level - 1, patch);
-
             var tiles = block_space.cartesianIndices();
 
             while (tiles.next()) |tile| {
-                const relative_tile = patch_bounds.localFromGlobal(bounds.globalFromLocal(tile));
+                const relative_tile = .localFromGlobal(bounds.globalFromLocal(tile));
                 const linear = patch_space.linearFromCartesian(relative_tile);
-                const coarse_block = block_map[tile_offset + linear];
+                const coarse_block_id = block_map[coarse_patch.tile_offset + linear];
 
-                const coarse_bounds = coarse.blocks.items(.bounds)[coarse_block];
-                const coarse_cell_space = CellSpace.fromSize(blockCellSize(mesh, level - 1, coarse_block));
+                const coarse_block = mesh.blocks[coarse_block_id];
 
-                const coarse_dofs_offset = dof_map.blockOffset(level - 1, coarse_block);
-                const coarse_dofs_total = dof_map.blockTotal(level - 1, coarse_block);
+                const coarse_cell_space = CellSpace.fromSize(blockCellSize(mesh, coarse_block_id));
+
+                const coarse_dofs_offset = dof_map.offset(coarse_block_id);
+                const coarse_dofs_total = dof_map.total(coarse_block_id);
 
                 const coarse_tile = coarse_bounds.localFromGlobal(bounds.globalFromLocal(tile));
                 const coarse_origin = Index.scaled(coarse_tile, mesh.tile_width);
