@@ -194,7 +194,7 @@ pub fn ScalarFieldProblem(comptime O: usize) type {
 
             const oper = MetricOperator{};
 
-            var base_solver = try BiCGStabSolver.init(allocator, grid.getLevel(0).cell_total, 10000, 10e-10);
+            var base_solver = try BiCGStabSolver.init(allocator, grid.blocks[0].cell_total, 10000, 10e-10);
             defer base_solver.deinit();
 
             var solver = MultigridSolver.init(1, 10e-10, &base_solver);

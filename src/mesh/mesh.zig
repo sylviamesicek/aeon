@@ -235,24 +235,25 @@ pub fn Mesh(comptime N: usize) type {
         //     return self.levels.items[level_id];
         // }
 
-        // // *************************
-        // // Block Map ***************
-        // // *************************
+        // *************************
+        // Block Map ***************
+        // *************************
 
-        // /// Builds a block map, ie a map from each tile in the mesh to the id of the block that tile is in.
-        // pub fn buildBlockMap(self: *const Self, map: []usize) void {
-        //     assert(map.len == self.tile_total);
+        /// Builds a block map, ie a map from each tile in the mesh to the id of the block that tile is in.
+        pub fn buildBlockMap(self: *const Self, map: []usize) void {
+            assert(map.len == self.tile_total);
 
-        //     @memset(map, maxInt(usize));
+            @memset(map, maxInt(usize));
 
-        //     for (self.levels.items[0..self.active_levels], 0..) |level, l| {
-        //         for (level.blocks.items(.bounds), level.blocks.items(.patch), 0..) |bounds, patch, id| {
-        //             const pbounds: IndexBox = level.patches.items(.bounds)[patch];
-        //             const tile_to_block: []usize = self.patchTileSlice(l, patch, map);
-        //             IndexSpace.fromBox(pbounds).fillWindow(bounds.relativeTo(pbounds), usize, tile_to_block, id);
-        //         }
-        //     }
-        // }
+            for (self.patches) |patch| {
+                const tile_to_block: []usize = map[patch.tile_offset .. patch.tile_offset + patch.tile_total];
+
+                for (patch.block_offset..patch.block_total + patch.block_offset) |block_id| {
+                    const block = self.blocks[block_id];
+                    IndexSpace.fromBox(patch.bounds).fillWindow(block.bounds.relativeTo(patch.bounds), usize, tile_to_block, block_id);
+                }
+            }
+        }
 
         // /// Builds a block child map. ie a map from each tile in the mesh to the id of the block that covers it
         // /// on the next level, if any.

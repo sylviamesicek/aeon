@@ -529,7 +529,7 @@ pub fn DofUtils(comptime N: usize, comptime O: usize) type {
                 const coarse_dofs_offset = dof_map.offset(coarse_block_id);
                 const coarse_dofs_total = dof_map.total(coarse_block_id);
 
-                const coarse_tile = coarse_bounds.localFromGlobal(bounds.globalFromLocal(tile));
+                const coarse_tile = coarse_block.bounds.localFromGlobal(bounds.globalFromLocal(tile));
                 const coarse_origin = Index.scaled(coarse_tile, mesh.tile_width);
 
                 const origin = Index.scaled(tile, mesh.tile_width);
@@ -539,11 +539,11 @@ pub fn DofUtils(comptime N: usize, comptime O: usize) type {
                 var cells = IndexSpace.fromSize(Index.splat(mesh.tile_width)).cartesianIndices();
 
                 while (cells.next()) |cell| {
-                    const supercell = Index.toSigned(Index.add(origin, cell));
-                    const coarsecell = Index.toSigned(Index.add(coarse_origin, cell));
+                    const super_cell = Index.toSigned(Index.add(origin, cell));
+                    const coarse_cell = Index.toSigned(Index.add(coarse_origin, cell));
 
                     inline for (comptime std.enums.values(System)) |field| {
-                        coarse_cell_space.setValue(coarsecell, coarse_sys.field(field), cell_space.restrict(supercell, block_sys.field(field)));
+                        coarse_cell_space.setValue(coarse_cell, coarse_sys.field(field), cell_space.restrict(super_cell, block_sys.field(field)));
                     }
                 }
             }
@@ -556,8 +556,7 @@ pub fn DofUtils(comptime N: usize, comptime O: usize) type {
             mesh: *const Mesh,
             block_map: []const usize,
             dof_map: Map,
-            level: usize,
-            block: usize,
+            block_id: usize,
             oper: anytype,
             dest: SystemSlice(@TypeOf(oper).System),
             src: SystemSliceConst(@TypeOf(oper).System),
@@ -571,52 +570,50 @@ pub fn DofUtils(comptime N: usize, comptime O: usize) type {
             }
 
             assert(dest.len == mesh.cell_total);
-            assert(src.len == dof_map.total());
-            assert(b.len == dof_map.total());
+            assert(src.len == dof_map.ndofs());
+            assert(ctx.len == dof_map.ndofs());
+            assert(b.len == dof_map.ndofs());
 
             const block_b = b.slice(
-                dof_map.blockOffset(level, block),
-                dof_map.blockTotal(level, block),
+                dof_map.offset(block_id),
+                dof_map.total(block_id),
             );
 
-            if (level == 0) {
+            const block = mesh.blocks[block_id];
+            const patch = mesh.patches[block.patch];
+
+            if (patch.parent == null) {
                 return;
             }
 
-            const cell_space = CellSpace.fromSize(blockCellSize(mesh, level, block));
+            const cell_space = CellSpace.fromSize(blockCellSize(mesh, block));
 
-            const target = mesh.getLevel(level);
-            const coarse = mesh.getLevel(level - 1);
+            const coarse_patch = mesh.patches[patch.parent.?];
 
-            const patch = coarse.parents.items[target.blocks.items(.patch)[block]];
-            var patch_bounds = coarse.patches.items(.bounds)[patch];
-            patch_bounds.coarsen();
-
-            var bounds = target.blocks.items(.bounds)[block];
-            bounds.coarsen();
+            const patch_bounds = coarse_patch.bounds;
+            const bounds = block.bounds.coarsened();
 
             const patch_space = IndexSpace.fromBox(patch_bounds);
             const block_space = IndexSpace.fromBox(bounds);
 
-            const tile_offset = mesh.patchTileOffset(level - 1, patch);
-
             var tiles = block_space.cartesianIndices();
 
             while (tiles.next()) |tile| {
-                const relative_tile = patch_bounds.localFromGlobal(bounds.globalFromLocal(tile));
+                const relative_tile = .localFromGlobal(bounds.globalFromLocal(tile));
                 const linear = patch_space.linearFromCartesian(relative_tile);
-                const coarse_block = block_map[tile_offset + linear];
+                const coarse_block_id = block_map[coarse_patch.tile_offset + linear];
 
-                const coarse_bounds = coarse.blocks.items(.bounds)[coarse_block];
-                const coarse_stencil_space = blockStencilSpace(mesh, level - 1, coarse_block);
-                const coarse_index_space = IndexSpace.fromSize(coarse_bounds.size);
+                const coarse_block = mesh.blocks[coarse_block_id];
 
-                const coarse_dofs_offset = dof_map.blockOffset(level - 1, coarse_block);
-                const coarse_dofs_total = dof_map.blockTotal(level - 1, coarse_block);
-                const coarse_cell_offset = mesh.blockCellOffset(level - 1, coarse_block);
-                const coarse_cell_total = mesh.blockCellTotal(level - 1, coarse_block);
+                const coarse_stencil_space = blockStencilSpace(mesh, coarse_block_id);
+                const coarse_index_space = IndexSpace.fromSize(coarse_stencil_space.size);
 
-                const coarse_tile = coarse_bounds.localFromGlobal(bounds.globalFromLocal(tile));
+                const coarse_dofs_offset = dof_map.offset(coarse_block_id);
+                const coarse_dofs_total = dof_map.total(coarse_block_id);
+                const coarse_cell_offset = coarse_block.cell_offset;
+                const coarse_cell_total = coarse_block.cell_total;
+
+                const coarse_tile = coarse_block.bounds.localFromGlobal(bounds.globalFromLocal(tile));
                 const coarse_origin = Index.scaled(coarse_tile, mesh.tile_width);
 
                 const origin = Index.scaled(tile, mesh.tile_width);
@@ -632,15 +629,15 @@ pub fn DofUtils(comptime N: usize, comptime O: usize) type {
                 var cells = IndexSpace.fromSize(Index.splat(mesh.tile_width)).cartesianIndices();
 
                 while (cells.next()) |cell| {
-                    const super_cell = Index.toSigned(Index.add(origin, cell));
-                    const coarse_cell = Index.toSigned(Index.add(coarse_origin, cell));
+                    const supercell = Index.toSigned(Index.add(origin, cell));
+                    const coarsecell = Index.toSigned(Index.add(coarse_origin, cell));
 
-                    const lin = coarse_index_space.linearFromCartesian(Index.toUnsigned(coarse_cell));
+                    const lin = coarse_index_space.linearFromCartesian(Index.toUnsigned(coarsecell));
 
                     const engine = operator.EngineType(N, O, T){
                         .inner = .{
                             .space = coarse_stencil_space,
-                            .cell = coarse_cell,
+                            .cell = coarsecell,
                         },
                         .ctx = coarse_ctx,
                         .sys = coarse_src,
@@ -649,7 +646,7 @@ pub fn DofUtils(comptime N: usize, comptime O: usize) type {
                     const app = oper.apply(engine);
 
                     inline for (comptime std.enums.values(@TypeOf(oper).System)) |field| {
-                        const b_val = cell_space.restrict(super_cell, block_b.field(field));
+                        const b_val = cell_space.restrict(supercell, block_b.field(field));
                         const a_val = @field(app, @tagName(field));
                         coarse_dest.field(field)[lin] = b_val - a_val;
                     }
@@ -663,8 +660,7 @@ pub fn DofUtils(comptime N: usize, comptime O: usize) type {
             mesh: *const Mesh,
             block_map: []const usize,
             dof_map: Map,
-            level: usize,
-            block: usize,
+            block_id: usize,
             sys: SystemSlice(System),
         ) void {
             if (comptime !system.isSystem(System)) {
@@ -673,47 +669,42 @@ pub fn DofUtils(comptime N: usize, comptime O: usize) type {
 
             assert(sys.len == dof_map.total());
 
-            if (level == 0) {
+            const block = mesh.blocks[block_id];
+            const patch = mesh.patches[block.patch];
+
+            if (patch.parent == null) {
                 return;
             }
 
-            const cell_space = CellSpace.fromSize(blockCellSize(mesh, level, block));
+            const cell_space = CellSpace.fromSize(blockCellSize(mesh, block_id));
 
-            const target = mesh.getLevel(level);
-            const coarse = mesh.getLevel(level - 1);
+            const coarse_patch = mesh.patches[patch.parent.?];
 
-            const patch = coarse.parents.items[target.blocks.items(.patch)[block]];
-            const patch_bounds = coarse.patches.items(.bounds)[patch];
-            const bounds = target.blocks.items(.bounds)[block];
-
-            const patch_space = IndexSpace.fromBox(patch_bounds);
-            const block_space = IndexSpace.fromBox(bounds);
+            const patch_space = IndexSpace.fromBox(patch.bounds);
+            const block_space = IndexSpace.fromBox(block.bounds);
 
             const block_sys = sys.slice(
-                dof_map.blockOffset(level, block),
-                dof_map.blockTotal(level, block),
+                dof_map.offset(block_id),
+                dof_map.total(block_id),
             );
-
-            const tile_offset = mesh.patchTileOffset(level - 1, patch);
 
             var tiles = block_space.cartesianIndices();
 
             while (tiles.next()) |tile| {
-                const relative_tile = patch_bounds.localFromGlobal(bounds.globalFromLocal(tile));
+                const relative_tile = patch.bounds.localFromGlobal(block.bounds.globalFromLocal(tile));
                 const linear = patch_space.linearFromCartesian(relative_tile);
-                const coarse_block = block_map[tile_offset + linear];
+                const coarse_block_id = block_map[coarse_patch.tile_offset + linear];
 
-                var coarse_bounds = coarse.blocks.items(.bounds)[coarse_block];
-                coarse_bounds.refine();
+                const coarse_block = mesh.blocks[coarse_block_id];
 
-                const coarse_cell_space = CellSpace.fromSize(blockCellSize(mesh, level - 1, coarse_block));
+                const coarse_cell_space = CellSpace.fromSize(blockCellSize(mesh, coarse_block_id));
 
-                const coarse_cell_offset = dof_map.blockOffset(level - 1, coarse_block);
-                const coarse_cell_total = dof_map.blockTotal(level - 1, coarse_block);
+                const coarse_cell_offset = dof_map.offset(coarse_block_id);
+                const coarse_cell_total = dof_map.total(coarse_block_id);
 
                 const coarse_sys = sys.slice(coarse_cell_offset, coarse_cell_total);
 
-                const coarse_tile = coarse_bounds.localFromGlobal(bounds.globalFromLocal(tile));
+                const coarse_tile = coarse_block.bounds.refined().localFromGlobal(block.bounds.globalFromLocal(tile));
                 const coarse_origin = Index.scaled(coarse_tile, mesh.tile_width);
 
                 const origin = Index.scaled(tile, mesh.tile_width);
@@ -735,13 +726,13 @@ pub fn DofUtils(comptime N: usize, comptime O: usize) type {
             }
         }
 
+        /// Prolongs a correction to the given block. Sys and diff must be dof vectors filled on l - 1. Dest is a cell vector.
         pub fn prolongCorrection(
             comptime System: type,
             mesh: *const Mesh,
             block_map: []const usize,
             dof_map: Map,
-            level: usize,
-            block: usize,
+            block_id: usize,
             dest: SystemSlice(System),
             sys: SystemSliceConst(System),
             diff: SystemSliceConst(System),
@@ -751,57 +742,51 @@ pub fn DofUtils(comptime N: usize, comptime O: usize) type {
             }
 
             assert(dest.len == mesh.cell_total);
-            assert(sys.len == dof_map.total());
-            assert(diff.len == dof_map.total());
+            assert(sys.len == dof_map.ndofs());
+            assert(diff.len == dof_map.ndofs());
 
-            if (level == 0) {
+            const block = mesh.blocks[block_id];
+            const patch = mesh.patches[block.patch];
+
+            if (patch.parent == null) {
                 return;
             }
 
-            const cell_space = CellSpace.fromSize(blockCellSize(mesh, level, block));
-            const index_space = IndexSpace.fromSize(cell_space.size);
+            const cell_space = CellSpace.fromSize(blockCellSize(mesh, block_id));
 
-            const target = mesh.getLevel(level);
-            const coarse = mesh.getLevel(level - 1);
+            const coarse_patch = mesh.patches[patch.parent.?];
 
-            const patch = coarse.parents.items[target.blocks.items(.patch)[block]];
-            const patch_bounds = coarse.patches.items(.bounds)[patch];
-            const bounds = target.blocks.items(.bounds)[block];
-
-            const patch_space = IndexSpace.fromBox(patch_bounds);
-            const block_space = IndexSpace.fromBox(bounds);
+            const patch_space = IndexSpace.fromBox(patch.bounds);
+            const block_space = IndexSpace.fromBox(block.bounds);
 
             const block_sys = sys.slice(
-                dof_map.blockOffset(level, block),
-                dof_map.blockTotal(level, block),
+                dof_map.offset(block_id),
+                dof_map.total(block_id),
             );
 
             const block_dest = dest.slice(
-                mesh.blockCellOffset(level, block),
-                mesh.blockCellTotal(level, block),
+                block.cell_offset,
+                block.cell_total,
             );
-
-            const tile_offset = mesh.patchTileOffset(level - 1, patch);
 
             var tiles = block_space.cartesianIndices();
 
             while (tiles.next()) |tile| {
-                const relative_tile = patch_bounds.localFromGlobal(bounds.globalFromLocal(tile));
+                const relative_tile = patch.bounds.localFromGlobal(block.bounds.globalFromLocal(tile));
                 const linear = patch_space.linearFromCartesian(relative_tile);
-                const coarse_block = block_map[tile_offset + linear];
+                const coarse_block_id = block_map[coarse_patch.tile_offset + linear];
 
-                var coarse_bounds = coarse.blocks.items(.bounds)[coarse_block];
-                coarse_bounds.refine();
+                const coarse_block = mesh.blocks[coarse_block_id];
 
-                const coarse_cell_space = CellSpace.fromSize(blockCellSize(mesh, level - 1, coarse_block));
+                const coarse_cell_space = CellSpace.fromSize(blockCellSize(mesh, coarse_block_id));
 
-                const coarse_cell_offset = dof_map.blockOffset(level - 1, coarse_block);
-                const coarse_cell_total = dof_map.blockTotal(level - 1, coarse_block);
+                const coarse_cell_offset = dof_map.offset(coarse_block_id);
+                const coarse_cell_total = dof_map.total(coarse_block_id);
 
                 const coarse_sys = sys.slice(coarse_cell_offset, coarse_cell_total);
                 const coarse_diff = diff.slice(coarse_cell_offset, coarse_cell_total);
 
-                const coarse_tile = coarse_bounds.localFromGlobal(bounds.globalFromLocal(tile));
+                const coarse_tile = coarse_block.bounds.refined().localFromGlobal(block.bounds.globalFromLocal(tile));
                 const coarse_origin = Index.scaled(coarse_tile, mesh.tile_width);
 
                 const origin = Index.scaled(tile, mesh.tile_width);
@@ -809,16 +794,16 @@ pub fn DofUtils(comptime N: usize, comptime O: usize) type {
                 var cells = IndexSpace.fromSize(Index.splat(mesh.tile_width)).cartesianIndices();
 
                 while (cells.next()) |cell| {
-                    const globalcell = Index.toSigned(Index.add(origin, cell));
-                    const subcell = Index.toSigned(Index.add(coarse_origin, cell));
+                    const global_cell = Index.toSigned(Index.add(origin, cell));
+                    const sub_cell = Index.toSigned(Index.add(coarse_origin, cell));
 
-                    const lin = index_space.linearFromCartesian(Index.toUnsigned(globalcell));
+                    const lin = block_space.linearFromCartesian(Index.toUnsigned(global_cell));
 
                     inline for (comptime std.enums.values(System)) |field| {
-                        const u = coarse_cell_space.prolong(subcell, coarse_sys.field(field));
-                        const v = coarse_cell_space.prolong(subcell, coarse_diff.field(field));
+                        const u = coarse_cell_space.prolong(sub_cell, coarse_sys.field(field));
+                        const v = coarse_cell_space.prolong(sub_cell, coarse_diff.field(field));
 
-                        block_dest.field(field)[lin] = cell_space.value(globalcell, block_sys.field(field)) + u - v;
+                        block_dest.field(field)[lin] = cell_space.value(global_cell, block_sys.field(field)) + u - v;
                     }
                 }
             }
@@ -833,23 +818,22 @@ pub fn DofUtils(comptime N: usize, comptime O: usize) type {
         pub fn apply(
             mesh: *const Mesh,
             dof_map: Map,
-            level: usize,
-            block: usize,
+            block_id: usize,
             oper: anytype,
             dest: SystemSlice(@TypeOf(oper).System),
             src: SystemSliceConst(@TypeOf(oper).System),
             ctx: SystemSliceConst(@TypeOf(oper).Context),
         ) void {
-            assert(dest.len == dof_map.total());
-            assert(src.len == dof_map.total());
-            assert(ctx.len == dof_map.total());
+            assert(dest.len == dof_map.ndofs());
+            assert(src.len == dof_map.ndofs());
+            assert(ctx.len == dof_map.ndofs());
 
-            const stencil_space = blockStencilSpace(mesh, level, block);
-            const cell_offset = dof_map.blockOffset(level, block);
-            const cell_total = dof_map.blockTotal(level, block);
-            const block_dest = dest.slice(cell_offset, cell_total);
-            const block_src = src.slice(cell_offset, cell_total);
-            const block_ctx = ctx.slice(cell_offset, cell_total);
+            const stencil_space = blockStencilSpace(mesh, block_id);
+            const dof_offset = dof_map.offset(block_id);
+            const dof_total = dof_map.total(block_id);
+            const block_dest = dest.slice(dof_offset, dof_total);
+            const block_src = src.slice(dof_offset, dof_total);
+            const block_ctx = ctx.slice(dof_offset, dof_total);
 
             applyImpl(false, stencil_space, oper, block_dest, block_src, block_ctx);
         }
@@ -859,23 +843,22 @@ pub fn DofUtils(comptime N: usize, comptime O: usize) type {
         pub fn applyFull(
             mesh: *const Mesh,
             dof_map: Map,
-            level: usize,
-            block: usize,
+            block_id: usize,
             oper: anytype,
             dest: SystemSlice(@TypeOf(oper).System),
             src: SystemSliceConst(@TypeOf(oper).System),
             ctx: SystemSliceConst(@TypeOf(oper).Context),
         ) void {
-            assert(dest.len == dof_map.total());
-            assert(src.len == dof_map.total());
-            assert(ctx.len == dof_map.total());
+            assert(dest.len == dof_map.ndofs());
+            assert(src.len == dof_map.ndofs());
+            assert(ctx.len == dof_map.ndofs());
 
-            const stencil_space = blockStencilSpace(mesh, level, block);
-            const cell_offset = dof_map.blockOffset(level, block);
-            const cell_total = dof_map.blockTotal(level, block);
-            const block_dest = dest.slice(cell_offset, cell_total);
-            const block_src = src.slice(cell_offset, cell_total);
-            const block_ctx = ctx.slice(cell_offset, cell_total);
+            const stencil_space = blockStencilSpace(mesh, block_id);
+            const dof_offset = dof_map.offset(block_id);
+            const dof_total = dof_map.total(block_id);
+            const block_dest = dest.slice(dof_offset, dof_total);
+            const block_src = src.slice(dof_offset, dof_total);
+            const block_ctx = ctx.slice(dof_offset, dof_total);
 
             applyImpl(true, stencil_space, oper, block_dest, block_src, block_ctx);
         }
@@ -921,28 +904,29 @@ pub fn DofUtils(comptime N: usize, comptime O: usize) type {
         pub fn smooth(
             mesh: *const Mesh,
             dof_map: Map,
-            level: usize,
-            block: usize,
+            block_id: usize,
             oper: anytype,
             dest: SystemSlice(@TypeOf(oper).System),
             src: SystemSliceConst(@TypeOf(oper).System),
             ctx: SystemSliceConst(@TypeOf(oper).Context),
             rhs: SystemSliceConst(@TypeOf(oper).System),
         ) void {
-            assert(dest.len == dof_map.total());
-            assert(src.len == dof_map.total());
-            assert(ctx.len == dof_map.total());
+            assert(dest.len == dof_map.ndofs());
+            assert(src.len == dof_map.ndofs());
+            assert(ctx.len == dof_map.ndofs());
             assert(rhs.len == mesh.cell_total);
 
-            const stencil_space = blockStencilSpace(mesh, level, block);
-            const cell_offset = dof_map.blockOffset(level, block);
-            const cell_total = dof_map.blockTotal(level, block);
-            const block_dest = dest.slice(cell_offset, cell_total);
-            const block_src = src.slice(cell_offset, cell_total);
-            const block_ctx = ctx.slice(cell_offset, cell_total);
+            const block = mesh.blocks[block_id];
+
+            const stencil_space = blockStencilSpace(mesh, block_id);
+            const dof_offset = dof_map.offset(block_id);
+            const dof_total = dof_map.total(block_id);
+            const block_dest = dest.slice(dof_offset, dof_total);
+            const block_src = src.slice(dof_offset, dof_total);
+            const block_ctx = ctx.slice(dof_offset, dof_total);
             const block_rhs = rhs.slice(
-                mesh.blockCellOffset(level, block),
-                mesh.blockCellTotal(level, block),
+                block.cell_offset,
+                block.cell_total,
             );
 
             smoothImpl(stencil_space, oper, block_dest, block_src, block_ctx, block_rhs);
@@ -995,7 +979,7 @@ pub fn DofUtils(comptime N: usize, comptime O: usize) type {
         // Residual ****************
         // *************************
 
-        pub fn residualNormAll(
+        pub fn residualNorm(
             mesh: *const Mesh,
             dof_map: Map,
             oper: anytype,
@@ -1009,14 +993,11 @@ pub fn DofUtils(comptime N: usize, comptime O: usize) type {
                 @field(result, @tagName(field)) = 0.0;
             }
 
-            for (0..mesh.active_levels) |level| {
-                for (0..mesh.getLevel(level).blockTotal()) |block| {
-                    const norm = residualNorm(mesh, dof_map, level, block, oper, src, ctx, rhs);
+            for (0..mesh.blocks.len) |block| {
+                const norm = residualNormSq(mesh, dof_map, block, oper, src, ctx, rhs);
 
-                    inline for (comptime std.enums.values(@TypeOf(oper).System)) |field| {
-                        const n = @field(norm, @tagName(field));
-                        @field(result, @tagName(field)) += n * n;
-                    }
+                inline for (comptime std.enums.values(@TypeOf(oper).System)) |field| {
+                    @field(result, @tagName(field)) += @field(norm, @tagName(field));
                 }
             }
 
@@ -1027,19 +1008,18 @@ pub fn DofUtils(comptime N: usize, comptime O: usize) type {
             return result;
         }
 
-        pub fn residualNorm(
+        fn residualNormSq(
             mesh: *const Mesh,
             dof_map: Map,
-            level: usize,
-            block: usize,
+            block_id: usize,
             oper: anytype,
             src: SystemSliceConst(@TypeOf(oper).System),
             ctx: SystemSliceConst(@TypeOf(oper).Context),
             rhs: SystemSliceConst(@TypeOf(oper).System),
         ) system.SystemValue(@TypeOf(oper).System) {
             assert(rhs.len == mesh.cell_total);
-            assert(src.len == dof_map.total());
-            assert(ctx.len == dof_map.total());
+            assert(src.len == dof_map.ndofs());
+            assert(ctx.len == dof_map.ndofs());
 
             var result: system.SystemValue(@TypeOf(oper).System) = undefined;
 
@@ -1047,14 +1027,14 @@ pub fn DofUtils(comptime N: usize, comptime O: usize) type {
                 @field(result, @tagName(field)) = 0.0;
             }
 
-            const stencil_space = blockStencilSpace(mesh, level, block);
-            const cell_offset = dof_map.blockOffset(level, block);
-            const cell_total = dof_map.blockTotal(level, block);
+            const block = mesh.blocks[block_id];
+
+            const stencil_space = blockStencilSpace(mesh, block_id);
+            const cell_offset = dof_map.offset(block_id);
+            const cell_total = dof_map.total(block_id);
             const block_src = src.slice(cell_offset, cell_total);
-            _ = block_src;
             const block_ctx = ctx.slice(cell_offset, cell_total);
-            _ = block_ctx;
-            const block_rhs = rhs.slice(mesh.blockCellOffset(level, block), mesh.blockCellTotal(level, block));
+            const block_rhs = rhs.slice(block.cell_offset, block.cell_total);
 
             var cells = stencil_space.cellSpace().cells();
             var linear: usize = 0;
@@ -1065,8 +1045,8 @@ pub fn DofUtils(comptime N: usize, comptime O: usize) type {
                         .space = stencil_space,
                         .cell = cell,
                     },
-                    .ctx = ctx,
-                    .sys = src,
+                    .ctx = block_ctx,
+                    .sys = block_src,
                 };
 
                 const app = oper.apply(engine);
@@ -1076,10 +1056,6 @@ pub fn DofUtils(comptime N: usize, comptime O: usize) type {
                     const b = block_rhs.field(field)[linear];
                     @field(result, @tagName(field)) += (b - a) * (b - a);
                 }
-            }
-
-            inline for (comptime std.enums.values(@TypeOf(oper).System)) |field| {
-                @field(result, @tagName(field)) = @sqrt(@field(result, @tagName(field)));
             }
 
             return result;
@@ -1101,23 +1077,23 @@ pub fn DofUtils(comptime N: usize, comptime O: usize) type {
                 @compileError("ProjectBase expects projection to satisfy isMeshProjection.");
             }
 
-            for (0..mesh.active_levels) |level| {
-                for (0..mesh.getLevel(level).blockTotal()) |block| {
-                    const stencil_space = blockStencilSpace(mesh, level, block);
-                    const cell_space = stencil_space.cellSpace();
+            for (0..mesh.blocks.len) |block_id| {
+                const block = mesh.blocks[block_id];
 
-                    const block_dest = sys.slice(mesh.blockCellOffset(level, block), mesh.blockCellTotal(level, block));
+                const stencil_space = blockStencilSpace(mesh, block_id);
+                const cell_space = stencil_space.cellSpace();
 
-                    var cells = cell_space.cells();
-                    var linear: usize = 0;
+                const block_dest = sys.slice(block.cell_offset, block.cell_total);
 
-                    while (cells.next()) |cell| : (linear += 1) {
-                        const pos: [N]f64 = stencil_space.position(cell);
-                        const value: system.SystemValue(T.System) = projection.project(pos);
+                var cells = cell_space.cells();
+                var linear: usize = 0;
 
-                        inline for (comptime std.enums.values(T.System)) |field| {
-                            block_dest.field(field)[linear] = @field(value, @tagName(field));
-                        }
+                while (cells.next()) |cell| : (linear += 1) {
+                    const pos: [N]f64 = stencil_space.position(cell);
+                    const value: system.SystemValue(T.System) = projection.project(pos);
+
+                    inline for (comptime std.enums.values(T.System)) |field| {
+                        block_dest.field(field)[linear] = @field(value, @tagName(field));
                     }
                 }
             }
@@ -1160,94 +1136,87 @@ pub fn DofUtils(comptime N: usize, comptime O: usize) type {
                 }
             }
 
-            for (0..mesh.active_levels) |level| {
-                const target: *const Level = mesh.getLevel(level);
-                const level_offset = target.cell_offset;
-                const block_offsets = target.blocks.items(.cell_offset);
-                const block_totals = target.blocks.items(.cell_total);
+            for (mesh.blocks, 0..) |block, block_id| {
+                const stencil: StencilSpace = blockStencilSpace(mesh, block_id);
 
-                for (block_offsets, block_totals, 0..) |offset, total, block| {
-                    const stencil: StencilSpace = blockStencilSpace(mesh, level, block);
+                const cell_size = stencil.size;
+                const point_size = Index.add(cell_size, Index.splat(1));
 
-                    const cell_size = stencil.size;
-                    const point_size = Index.add(cell_size, Index.splat(1));
+                const cell_space: IndexSpace = IndexSpace.fromSize(cell_size);
+                const point_space: IndexSpace = IndexSpace.fromSize(point_size);
 
-                    const cell_space: IndexSpace = IndexSpace.fromSize(cell_size);
-                    const point_space: IndexSpace = IndexSpace.fromSize(point_size);
+                const point_offset: usize = positions.items.len;
 
-                    const point_offset: usize = positions.items.len;
+                try positions.ensureUnusedCapacity(allocator, N * point_space.total());
+                try vertices.ensureUnusedCapacity(allocator, cell_type.nvertices() * cell_space.total());
 
-                    try positions.ensureUnusedCapacity(allocator, N * point_space.total());
-                    try vertices.ensureUnusedCapacity(allocator, cell_type.nvertices() * cell_space.total());
+                // Fill positions and vertices
+                var points = point_space.cartesianIndices();
 
-                    // Fill positions and vertices
-                    var points = point_space.cartesianIndices();
-
-                    while (points.next()) |point| {
-                        const pos = stencil.vertexPosition(Index.toSigned(point));
-                        for (0..N) |i| {
-                            positions.appendAssumeCapacity(pos[i]);
-                        }
+                while (points.next()) |point| {
+                    const pos = stencil.vertexPosition(Index.toSigned(point));
+                    for (0..N) |i| {
+                        positions.appendAssumeCapacity(pos[i]);
                     }
+                }
 
-                    if (N == 1) {
-                        var cells = cell_space.cartesianIndices();
+                if (N == 1) {
+                    var cells = cell_space.cartesianIndices();
 
-                        while (cells.next()) |cell| {
-                            const v1: usize = point_space.linearFromCartesian(cell);
-                            const v2: usize = point_space.linearFromCartesian(Index.add(cell, Index.splat(1)));
+                    while (cells.next()) |cell| {
+                        const v1: usize = point_space.linearFromCartesian(cell);
+                        const v2: usize = point_space.linearFromCartesian(Index.add(cell, Index.splat(1)));
 
-                            vertices.appendAssumeCapacity(point_offset + v1);
-                            vertices.appendAssumeCapacity(point_offset + v2);
-                        }
-                    } else if (N == 2) {
-                        var cells = cell_space.cartesianIndices();
-
-                        while (cells.next()) |cell| {
-                            const v1: usize = point_space.linearFromCartesian(cell);
-                            const v2: usize = point_space.linearFromCartesian(Index.add(cell, [2]usize{ 0, 1 }));
-                            const v3: usize = point_space.linearFromCartesian(Index.add(cell, [2]usize{ 1, 1 }));
-                            const v4: usize = point_space.linearFromCartesian(Index.add(cell, [2]usize{ 1, 0 }));
-
-                            vertices.appendAssumeCapacity(point_offset + v1);
-                            vertices.appendAssumeCapacity(point_offset + v2);
-                            vertices.appendAssumeCapacity(point_offset + v3);
-                            vertices.appendAssumeCapacity(point_offset + v4);
-                        }
-                    } else if (N == 3) {
-                        var cells = cell_space.cartesianIndices();
-
-                        while (cells.next()) |cell| {
-                            const v1: usize = point_space.linearFromCartesian(cell);
-                            const v2: usize = point_space.linearFromCartesian(Index.add(cell, [3]usize{ 0, 1, 0 }));
-                            const v3: usize = point_space.linearFromCartesian(Index.add(cell, [3]usize{ 1, 1, 0 }));
-                            const v4: usize = point_space.linearFromCartesian(Index.add(cell, [3]usize{ 1, 0, 0 }));
-                            const v5: usize = point_space.linearFromCartesian(Index.add(cell, [3]usize{ 0, 0, 1 }));
-                            const v6: usize = point_space.linearFromCartesian(Index.add(cell, [3]usize{ 0, 1, 3 }));
-                            const v7: usize = point_space.linearFromCartesian(Index.add(cell, [3]usize{ 1, 1, 3 }));
-                            const v8: usize = point_space.linearFromCartesian(Index.add(cell, [3]usize{ 1, 0, 3 }));
-
-                            vertices.appendAssumeCapacity(point_offset + v1);
-                            vertices.appendAssumeCapacity(point_offset + v2);
-                            vertices.appendAssumeCapacity(point_offset + v3);
-                            vertices.appendAssumeCapacity(point_offset + v4);
-                            vertices.appendAssumeCapacity(point_offset + v5);
-                            vertices.appendAssumeCapacity(point_offset + v6);
-                            vertices.appendAssumeCapacity(point_offset + v7);
-                            vertices.appendAssumeCapacity(point_offset + v8);
-                        }
+                        vertices.appendAssumeCapacity(point_offset + v1);
+                        vertices.appendAssumeCapacity(point_offset + v2);
                     }
+                } else if (N == 2) {
+                    var cells = cell_space.cartesianIndices();
 
-                    for (&fields) |*field| {
-                        try field.ensureUnusedCapacity(allocator, cell_space.total());
+                    while (cells.next()) |cell| {
+                        const v1: usize = point_space.linearFromCartesian(cell);
+                        const v2: usize = point_space.linearFromCartesian(Index.add(cell, [2]usize{ 0, 1 }));
+                        const v3: usize = point_space.linearFromCartesian(Index.add(cell, [2]usize{ 1, 1 }));
+                        const v4: usize = point_space.linearFromCartesian(Index.add(cell, [2]usize{ 1, 0 }));
+
+                        vertices.appendAssumeCapacity(point_offset + v1);
+                        vertices.appendAssumeCapacity(point_offset + v2);
+                        vertices.appendAssumeCapacity(point_offset + v3);
+                        vertices.appendAssumeCapacity(point_offset + v4);
                     }
+                } else if (N == 3) {
+                    var cells = cell_space.cartesianIndices();
 
-                    const block_sys = sys.slice(level_offset + offset, total);
+                    while (cells.next()) |cell| {
+                        const v1: usize = point_space.linearFromCartesian(cell);
+                        const v2: usize = point_space.linearFromCartesian(Index.add(cell, [3]usize{ 0, 1, 0 }));
+                        const v3: usize = point_space.linearFromCartesian(Index.add(cell, [3]usize{ 1, 1, 0 }));
+                        const v4: usize = point_space.linearFromCartesian(Index.add(cell, [3]usize{ 1, 0, 0 }));
+                        const v5: usize = point_space.linearFromCartesian(Index.add(cell, [3]usize{ 0, 0, 1 }));
+                        const v6: usize = point_space.linearFromCartesian(Index.add(cell, [3]usize{ 0, 1, 3 }));
+                        const v7: usize = point_space.linearFromCartesian(Index.add(cell, [3]usize{ 1, 1, 3 }));
+                        const v8: usize = point_space.linearFromCartesian(Index.add(cell, [3]usize{ 1, 0, 3 }));
 
-                    for (0..total) |linear| {
-                        inline for (comptime std.enums.values(System), 0..) |field, idx| {
-                            fields[idx].appendAssumeCapacity(block_sys.field(field)[linear]);
-                        }
+                        vertices.appendAssumeCapacity(point_offset + v1);
+                        vertices.appendAssumeCapacity(point_offset + v2);
+                        vertices.appendAssumeCapacity(point_offset + v3);
+                        vertices.appendAssumeCapacity(point_offset + v4);
+                        vertices.appendAssumeCapacity(point_offset + v5);
+                        vertices.appendAssumeCapacity(point_offset + v6);
+                        vertices.appendAssumeCapacity(point_offset + v7);
+                        vertices.appendAssumeCapacity(point_offset + v8);
+                    }
+                }
+
+                for (&fields) |*field| {
+                    try field.ensureUnusedCapacity(allocator, cell_space.total());
+                }
+
+                const block_sys = sys.slice(block.cell_offset, block.cell_total);
+
+                for (0..block.cell_total) |linear| {
+                    inline for (comptime std.enums.values(System), 0..) |field, idx| {
+                        fields[idx].appendAssumeCapacity(block_sys.field(field)[linear]);
                     }
                 }
             }

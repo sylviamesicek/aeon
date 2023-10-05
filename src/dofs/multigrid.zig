@@ -77,21 +77,20 @@ pub fn MultigridSolver(comptime N: usize, comptime O: usize, comptime BaseSolver
             const sys = try SystemSlice(T.System).init(allocator, total_dofs);
             defer sys.deinit(allocator);
 
-            DofUtils.copyDofsFromCellsAll(
-                T.System,
-                mesh,
-                dof_map,
-                sys,
-                x.toConst(),
-            );
+            for (0..mesh.blocks.len) |block_id| {
+                DofUtils.copyDofsFromCells(T.System, mesh, dof_map, block_id, sys, x.toConst());
+            }
 
-            DofUtils.fillBoundaryAll(
-                mesh,
-                block_map,
-                dof_map,
-                DofUtils.operSystemBoundary(oper),
-                sys,
-            );
+            for (0..mesh.blocks.len) |block_id| {
+                DofUtils.fillBoundary(
+                    mesh,
+                    block_map,
+                    dof_map,
+                    block_id,
+                    DofUtils.operSystemBoundary(oper),
+                    sys,
+                );
+            }
 
             // Scratch dof vector
             const sys2 = try SystemSlice(T.System).init(allocator, total_dofs);
@@ -100,21 +99,20 @@ pub fn MultigridSolver(comptime N: usize, comptime O: usize, comptime BaseSolver
             const ctx = try SystemSlice(T.Context).init(allocator, total_dofs);
             defer ctx.deinit(allocator);
 
-            DofUtils.copyDofsFromCellsAll(
-                T.Context,
-                mesh,
-                dof_map,
-                ctx,
-                context.toConst(),
-            );
+            for (0..mesh.blocks.len) |block_id| {
+                DofUtils.copyDofsFromCells(T.Context, mesh, dof_map, block_id, ctx, context.toConst());
+            }
 
-            DofUtils.fillBoundaryFullAll(
-                mesh,
-                block_map,
-                dof_map,
-                DofUtils.operContextBoundary(oper),
-                ctx,
-            );
+            for (0..mesh.blocks.len) |block_id| {
+                DofUtils.fillBoundary(
+                    mesh,
+                    block_map,
+                    dof_map,
+                    block_id,
+                    DofUtils.operContextBoundary(oper),
+                    ctx,
+                );
+            }
 
             const tau = try SystemSlice(T.System).init(allocator, mesh.cell_total);
             defer tau.deinit(allocator);
@@ -125,7 +123,7 @@ pub fn MultigridSolver(comptime N: usize, comptime O: usize, comptime BaseSolver
             const rhs = try SystemSlice(T.System).init(allocator, mesh.cell_total);
             defer rhs.deinit(allocator);
 
-            const ires: f64 = @field(DofUtils.residualNormAll(
+            const ires: f64 = @field(DofUtils.residualNorm(
                 mesh,
                 dof_map,
                 oper,
@@ -142,17 +140,14 @@ pub fn MultigridSolver(comptime N: usize, comptime O: usize, comptime BaseSolver
 
             while (iteration < self.max_iters) : (iteration += 1) {
                 // Recurse down the mesh to the base level
-                for (1..mesh.active_levels) |reverse_level| {
-                    const level: usize = mesh.active_levels - 1 - reverse_level;
-                    const target = mesh.getLevel(level);
+                for (1..mesh.levels.len) |reverse_level| {
+                    const level_id: usize = mesh.levels.len - 1 - reverse_level;
+                    const level = mesh.levels[level_id];
 
                     // Compute rhs
-                    for (0..target.blockTotal()) |block| {
+                    for (mesh.blocks[level.block_offset .. level.block_offset + level.block_total]) |block| {
                         // Apply tau correction
-                        const cell_offset = mesh.blockCellOffset(level, block);
-                        const cell_total = mesh.blockCellTotal(level, block);
-
-                        for (cell_offset..cell_offset + cell_total) |idx| {
+                        for (block.cell_offset..block.cell_offset + block.cell_total) |idx| {
                             inline for (comptime std.enums.values(T.System)) |field| {
                                 rhs.field(field)[idx] = b.field(field)[idx] - tau.field(field)[idx];
                             }
@@ -160,13 +155,12 @@ pub fn MultigridSolver(comptime N: usize, comptime O: usize, comptime BaseSolver
                     }
 
                     // Perform smoothing
-                    for (0..target.blockTotal()) |block| {
+                    for (level.block_offset..level.block_offset + level.block_total) |block_id| {
                         // Smooth and store result in sys2
                         DofUtils.smooth(
                             mesh,
                             dof_map,
-                            level,
-                            block,
+                            block_id,
                             oper,
                             sys2,
                             sys.toConst(),
@@ -177,8 +171,7 @@ pub fn MultigridSolver(comptime N: usize, comptime O: usize, comptime BaseSolver
                         DofUtils.copyDofs(
                             T.System,
                             dof_map,
-                            level,
-                            block,
+                            block_id,
                             sys,
                             sys2.toConst(),
                         );
@@ -187,8 +180,7 @@ pub fn MultigridSolver(comptime N: usize, comptime O: usize, comptime BaseSolver
                             mesh,
                             block_map,
                             dof_map,
-                            level,
-                            block,
+                            block_id,
                             DofUtils.operSystemBoundary(oper),
                             sys,
                         );
@@ -198,21 +190,19 @@ pub fn MultigridSolver(comptime N: usize, comptime O: usize, comptime BaseSolver
                             mesh,
                             block_map,
                             dof_map,
-                            level,
-                            block,
+                            block_id,
                             sys,
                         );
                     }
 
                     // Compute tau correction
-                    for (0..target.blockTotal()) |block| {
+                    for (level.block_offset..level.block_offset + level.block_total) |block_id| {
                         // Fill boundaries of sys fully
                         DofUtils.fillBoundaryFull(
                             mesh,
                             block_map,
                             dof_map,
-                            level,
-                            block,
+                            block_id,
                             DofUtils.operSystemBoundary(oper),
                             sys,
                         );
@@ -220,8 +210,7 @@ pub fn MultigridSolver(comptime N: usize, comptime O: usize, comptime BaseSolver
                         DofUtils.applyFull(
                             mesh,
                             dof_map,
-                            level,
-                            block,
+                            block_id,
                             oper,
                             sys2,
                             sys.toConst(),
@@ -232,8 +221,7 @@ pub fn MultigridSolver(comptime N: usize, comptime O: usize, comptime BaseSolver
                             mesh,
                             block_map,
                             dof_map,
-                            level,
-                            block,
+                            block_id,
                             oper,
                             tau,
                             sys.toConst(),
@@ -243,12 +231,11 @@ pub fn MultigridSolver(comptime N: usize, comptime O: usize, comptime BaseSolver
                     }
 
                     // Copy data from sys to sys2
-                    for (0..target.blockTotal()) |block| {
+                    for (level.block_offset..level.block_offset + level.block_total) |block_id| {
                         DofUtils.copyDofs(
                             T.System,
                             dof_map,
-                            level,
-                            block,
+                            block_id,
                             sys2,
                             sys.toConst(),
                         );
@@ -256,13 +243,13 @@ pub fn MultigridSolver(comptime N: usize, comptime O: usize, comptime BaseSolver
                 }
 
                 // Solve base
-                const base = mesh.getLevel(0);
+                const base = mesh.blocks[0];
 
                 const x_field: []f64 = x.field(sys_field)[0..base.cell_total];
                 const rhs_field: []f64 = rhs.field(sys_field)[0..base.cell_total];
 
                 // Set x_field and rhs_field
-                const cell_space = CellSpace.fromSize(DofUtils.blockCellSize(mesh, 0, 0));
+                const cell_space = CellSpace.fromSize(DofUtils.blockCellSize(mesh, 0));
 
                 var cells = cell_space.cells();
                 var linear: usize = 0;
@@ -288,7 +275,6 @@ pub fn MultigridSolver(comptime N: usize, comptime O: usize, comptime BaseSolver
                     mesh,
                     dof_map,
                     0,
-                    0,
                     sys,
                     x.toConst(),
                 );
@@ -298,23 +284,21 @@ pub fn MultigridSolver(comptime N: usize, comptime O: usize, comptime BaseSolver
                     block_map,
                     dof_map,
                     0,
-                    0,
                     DofUtils.operSystemBoundary(oper),
                     sys,
                 );
 
                 // Iterate up, adding correction and performing post smoothing.
-                for (1..mesh.active_levels) |level| {
-                    const target = mesh.getLevel(level);
+                for (1..mesh.levels.len) |level_id| {
+                    const level = mesh.levels[level_id];
 
-                    for (0..target.blockTotal()) |block| {
+                    for (level.block_offset..level.block_offset + level.block_total) |block_id| {
                         DofUtils.prolongCorrection(
                             T.System,
                             mesh,
                             block_map,
                             dof_map,
-                            level,
-                            block,
+                            block_id,
                             x,
                             sys.toConst(),
                             sys2.toConst(),
@@ -325,8 +309,7 @@ pub fn MultigridSolver(comptime N: usize, comptime O: usize, comptime BaseSolver
                             T.System,
                             mesh,
                             dof_map,
-                            level,
-                            block,
+                            block_id,
                             sys,
                             x.toConst(),
                         );
@@ -335,20 +318,18 @@ pub fn MultigridSolver(comptime N: usize, comptime O: usize, comptime BaseSolver
                             mesh,
                             block_map,
                             dof_map,
-                            level,
-                            block,
+                            block_id,
                             DofUtils.operSystemBoundary(oper),
                             sys,
                         );
                     }
 
                     // Perform smoothing
-                    for (0..target.blockTotal()) |block| {
+                    for (level.block_offset..level.block_offset + level.block_total) |block_id| {
                         // Apply tau correction
-                        const cell_offset = mesh.blockCellOffset(level, block);
-                        const cell_total = mesh.blockCellTotal(level, block);
+                        const block = mesh.blocks[block_id];
 
-                        for (cell_offset..cell_offset + cell_total) |idx| {
+                        for (block.cell_offset..block.cell_offset + block.cell_total) |idx| {
                             inline for (comptime std.enums.values(T.System)) |field| {
                                 rhs.field(field)[idx] = b.field(field)[idx] - tau.field(field)[idx];
                             }
@@ -358,8 +339,7 @@ pub fn MultigridSolver(comptime N: usize, comptime O: usize, comptime BaseSolver
                         DofUtils.smooth(
                             mesh,
                             dof_map,
-                            level,
-                            block,
+                            block_id,
                             oper,
                             sys2,
                             sys.toConst(),
@@ -370,8 +350,7 @@ pub fn MultigridSolver(comptime N: usize, comptime O: usize, comptime BaseSolver
                         DofUtils.copyDofs(
                             T.System,
                             dof_map,
-                            level,
-                            block,
+                            block_id,
                             sys,
                             sys2.toConst(),
                         );
@@ -380,8 +359,7 @@ pub fn MultigridSolver(comptime N: usize, comptime O: usize, comptime BaseSolver
                             mesh,
                             block_map,
                             dof_map,
-                            level,
-                            block,
+                            block_id,
                             DofUtils.operSystemBoundary(oper),
                             sys,
                         );
@@ -391,14 +369,13 @@ pub fn MultigridSolver(comptime N: usize, comptime O: usize, comptime BaseSolver
                             mesh,
                             block_map,
                             dof_map,
-                            level,
-                            block,
+                            block_id,
                             sys,
                         );
                     }
                 }
 
-                const res = @field(DofUtils.residualNormAll(
+                const res = @field(DofUtils.residualNorm(
                     mesh,
                     dof_map,
                     oper,
@@ -413,13 +390,9 @@ pub fn MultigridSolver(comptime N: usize, comptime O: usize, comptime BaseSolver
             }
 
             // Copy solution back into x.
-            DofUtils.copyCellsFromDofsAll(
-                T.System,
-                mesh,
-                dof_map,
-                x,
-                sys.toConst(),
-            );
+            for (0..mesh.blocks.len) |block_id| {
+                DofUtils.copyCellsFromDofs(T.System, mesh, dof_map, block_id, x, sys.toConst());
+            }
         }
 
         fn BaseLinearMap(comptime T: type) type {
@@ -436,7 +409,7 @@ pub fn MultigridSolver(comptime N: usize, comptime O: usize, comptime BaseSolver
                     const ctx = self.ctx;
 
                     // Aliases
-                    const stencil_space = DofUtils.blockStencilSpace(self.mesh, 0, 0);
+                    const stencil_space = DofUtils.blockStencilSpace(self.mesh, 0);
                     const cell_space = stencil_space.cellSpace();
 
                     const base_dofs = cell_space.total();
