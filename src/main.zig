@@ -159,9 +159,26 @@ pub fn ScalarFieldProblem(comptime O: usize) type {
                     .size = [2]f64{ 10.0, 10.0 },
                 },
                 .tile_width = 16,
-                .index_size = [2]usize{ 8, 8 },
+                .index_size = [2]usize{ 1, 1 },
             });
             defer grid.deinit();
+
+            // Globally refine three times
+
+            for (0..3) |_| {
+                var tags = try allocator.alloc(bool, grid.tile_total);
+                defer allocator.free(tags);
+
+                @memset(tags, true);
+
+                try grid.regrid(allocator, tags, .{
+                    .max_levels = 4,
+                    .patch_efficiency = 0.1,
+                    .patch_max_tiles = 100,
+                    .block_efficiency = 0.7,
+                    .block_max_tiles = 100,
+                });
+            }
 
             // Build maps
 
@@ -197,7 +214,7 @@ pub fn ScalarFieldProblem(comptime O: usize) type {
             var base_solver = try BiCGStabSolver.init(allocator, grid.blocks[0].cell_total, 10000, 10e-10);
             defer base_solver.deinit();
 
-            var solver = MultigridSolver.init(1, 10e-10, &base_solver);
+            var solver = MultigridSolver.init(10, 10e-10, &base_solver);
             defer solver.deinit();
 
             try solver.solve(

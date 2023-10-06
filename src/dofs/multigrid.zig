@@ -324,7 +324,7 @@ pub fn MultigridSolver(comptime N: usize, comptime O: usize, comptime BaseSolver
                         );
                     }
 
-                    // Perform smoothing
+                    // Perform post smoothing
                     for (level.block_offset..level.block_offset + level.block_total) |block_id| {
                         // Apply tau correction
                         const block = mesh.blocks[block_id];

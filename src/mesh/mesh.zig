@@ -40,6 +40,24 @@ pub fn Block(comptime N: usize) type {
         cell_total: usize = 0,
 
         const IndexBox = geometry.Box(N, usize);
+
+        // pub fn format(
+        //     self: @This(),
+        //     comptime fmt: []const u8,
+        //     options: std.fmt.FormatOptions,
+        //     writer: anytype,
+        // ) !void {
+        //     _ = options;
+        //     _ = fmt;
+        //     _ = self;
+
+        //     try writer.print(
+        //         \\Block:
+        //         \\    Origin: {any}, Size: {any},
+        //         \\    Patch: {}
+        //         \\    Cell
+        //     , .{});
+        // }
     };
 }
 
@@ -255,6 +273,41 @@ pub fn Mesh(comptime N: usize) type {
             }
         }
 
+        pub fn buildTagsFromCells(self: *const Self, dest: []bool, src: []const bool) void {
+            @memset(dest, false);
+
+            for (self.blocks) |block| {
+                const patch = self.patches[block.patch];
+
+                const block_src = src[block.cell_offset .. block.cell_offset + block.cell_total];
+                const block_dest = dest[patch.tile_offset .. patch.tile_offset + patch.tile_total];
+
+                const patch_space = IndexSpace.fromBox(patch.bounds);
+                const block_space = IndexSpace.fromBox(block.bounds);
+                const cell_space = IndexSpace.fromSize(Index.scaled(block.bounds.size, self.tile_width));
+
+                var tiles = block_space.cartesianIndices();
+
+                while (tiles.next()) |tile| {
+                    const origin = Index.scaled(tile, self.tile_width);
+
+                    const patch_tile = patch.bounds.localFromGlobal(block.bounds.globalFromLocal(tile));
+                    const patch_linear = patch_space.linearFromCartesian(patch_tile);
+
+                    var cells = IndexSpace.fromSize(splat(self.tile_width)).cartesianIndices();
+
+                    while (cells.next()) |cell| {
+                        const global_cell = Index.add(origin, cell);
+
+                        if (block_src[cell_space.linearFromCartesian(global_cell)]) {
+                            block_dest[patch_linear] = true;
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+
         // /// Builds a block child map. ie a map from each tile in the mesh to the id of the block that covers it
         // /// on the next level, if any.
         // pub fn buildBlockChildMap(self: *const Self, map: []usize) void {
@@ -326,7 +379,7 @@ pub fn Mesh(comptime N: usize) type {
 
             for (0..N) |i| {
                 const sratio: f64 = @as(f64, @floatFromInt(bounds.size[i])) / @as(f64, @floatFromInt(index_size[i]));
-                const oratio: f64 = @as(f64, @floatFromInt(bounds.origin[i])) / @as(f64, @floatFromInt(index_size[i] - 1));
+                const oratio: f64 = @as(f64, @floatFromInt(bounds.origin[i])) / @as(f64, @floatFromInt(index_size[i]));
 
                 physical_bounds.size[i] = self.physical_bounds.size[i] * sratio;
                 physical_bounds.origin[i] = self.physical_bounds.origin[i] + self.physical_bounds.size[i] * oratio;
@@ -359,7 +412,8 @@ pub fn Mesh(comptime N: usize) type {
             // **********************************
             // Allocate Per level data
 
-            const data: MeshByLevel = try MeshByLevel.init(allocator, total_levels);
+            var data: MeshByLevel = try MeshByLevel.init(allocator, total_levels);
+            defer data.deinit(allocator);
 
             const IdxSlice = struct { offset: usize, total: usize };
 
@@ -375,7 +429,7 @@ pub fn Mesh(comptime N: usize) type {
 
             // Iterate from total_levels - 1 to 0
             for (0..total_levels - 1) |rev_level_id| {
-                const level_id: usize = total_levels - 1 - rev_level_id;
+                const level_id: usize = total_levels - 2 - rev_level_id;
                 const target_id: usize = level_id + 1;
 
                 const level = self.levels[level_id];
@@ -410,7 +464,6 @@ pub fn Mesh(comptime N: usize) type {
                     };
 
                     // Now fill clusters and cluster to patch
-
                     const clusters = try scratch.alloc(IndexBox, child_count);
                     defer scratch.free(clusters);
 
@@ -449,7 +502,7 @@ pub fn Mesh(comptime N: usize) type {
                     var patch_partitioner = try PartitionSpace.init(scratch, patch_space.size, clusters);
                     defer patch_partitioner.deinit();
 
-                    patch_partitioner.build(patch_tags, config.patch_max_tiles, config.patch_efficiency);
+                    try patch_partitioner.build(patch_tags, config.patch_max_tiles, config.patch_efficiency);
 
                     // Update patch map
                     patch_map[patch_id].offset = data.patches[target_id].items.len;
@@ -479,7 +532,7 @@ pub fn Mesh(comptime N: usize) type {
                             const child_clusters = patch_partitioner.children[partition.children_offset .. partition.children_offset + partition.children_total];
 
                             for (child_clusters) |cluster_id| {
-                                const child_patch = data.patches[target_id + 1][cluster_to_patch[cluster_id]];
+                                const child_patch = data.patches[target_id + 1].items[cluster_to_patch[cluster_id]];
 
                                 result += child_patch.block_total;
                             }
@@ -496,10 +549,10 @@ pub fn Mesh(comptime N: usize) type {
                             const child_clusters = patch_partitioner.children[partition.children_offset .. partition.children_offset + partition.children_total];
 
                             for (child_clusters) |cluster_id| {
-                                const child_patch = data.patches[target_id + 1][cluster_to_patch[cluster_id]];
+                                const child_patch = data.patches[target_id + 1].items[cluster_to_patch[cluster_id]];
 
                                 for (child_patch.block_offset..child_patch.block_offset + child_patch.block_total) |block_id| {
-                                    const bounds = data.blocks[target_id + 1][block_id].bounds;
+                                    const bounds = data.blocks[target_id + 1].items[block_id].bounds;
                                     child_blocks[cur] = bounds.coarsened().coarsened().relativeTo(partition_bounds);
                                     cur += 1;
                                 }
@@ -522,7 +575,7 @@ pub fn Mesh(comptime N: usize) type {
                         var partitioner = try PartitionSpace.init(scratch, partition_space.size, &.{});
                         defer partitioner.deinit();
 
-                        partitioner.build(partition_tags, config.block_max_tiles, config.block_efficiency);
+                        try partitioner.build(partition_tags, config.block_max_tiles, config.block_efficiency);
 
                         const children_offset = data.children[target_id].items.len;
                         const block_offset = data.blocks[target_id].items.len;
@@ -589,38 +642,39 @@ pub fn Mesh(comptime N: usize) type {
             patches.clearRetainingCapacity();
             levels.clearRetainingCapacity();
 
-            blocks.ensureUnusedCapacity(self.gpa, data.blockTotal() + 1);
-            patches.ensureUnusedCapacity(self.gpa, data.patchTotal() + 1);
-            levels.ensureUnusedCapacity(self.gpa, total_levels);
+            try blocks.ensureUnusedCapacity(self.gpa, data.blockTotal() + 1);
+            try patches.ensureUnusedCapacity(self.gpa, data.patchTotal() + 1);
+            try levels.ensureUnusedCapacity(self.gpa, total_levels);
 
             // *****************************
             // Base patch ******************
 
+            const base_child_offset: usize = if (total_levels > 1) 1 else 0;
             const base_child_total = if (total_levels > 1) data.patches[1].items.len else 0;
 
             const base_block: Block(N) = .{
                 .bounds = .{
                     .origin = splat(0),
-                    .size = config.index_size,
+                    .size = self.index_size,
                 },
                 .patch = 0,
             };
 
-            const base_patch: Patch(N) = .{
+            var base_patch: Patch(N) = .{
                 .bounds = .{
                     .origin = splat(0),
-                    .size = config.index_size,
+                    .size = self.index_size,
                 },
                 .level = 0,
                 .parent = null,
-                .children_offset = 0,
+                .children_offset = base_child_offset,
                 .children_total = base_child_total,
                 .block_offset = 0,
                 .block_total = 1,
             };
 
             const base_level: Level(N) = .{
-                .index_size = config.index_size,
+                .index_size = self.index_size,
                 .patch_offset = 0,
                 .patch_total = 1,
                 .block_offset = 0,
@@ -632,7 +686,7 @@ pub fn Mesh(comptime N: usize) type {
             levels.appendAssumeCapacity(base_level);
 
             // Now fill higher levels
-
+            base_patch.children_offset = 0;
             try data.patches[0].append(allocator, base_patch);
             try data.children[0].ensureUnusedCapacity(allocator, base_child_total);
 
@@ -652,8 +706,10 @@ pub fn Mesh(comptime N: usize) type {
                 // Loop over patches in child order
 
                 for (data.patches[level_id].items, 0..) |patch, patch_id| {
-                    for (data.children[level_id][patch.children_offset .. patch.children_offset + patch.children_total]) |child| {
-                        const target_patch = data.patches[target_id][child];
+                    for (patch.children_offset..patch.children_offset + patch.children_total) |child_id| {
+                        const child = data.children[level_id].items[child_id];
+
+                        const target_patch = data.patches[target_id].items[child];
 
                         const patch_offset = patches.items.len;
 
@@ -667,7 +723,7 @@ pub fn Mesh(comptime N: usize) type {
                             .block_total = target_patch.block_total,
                         });
 
-                        for (data.blocks[target_id][target_patch.block_offset .. target_patch.block_offset + target_patch.block_total]) |block| {
+                        for (data.blocks[target_id].items[target_patch.block_offset .. target_patch.block_offset + target_patch.block_total]) |block| {
                             blocks.appendAssumeCapacity(.{
                                 .bounds = block.bounds,
                                 .patch = patch_offset,
@@ -676,8 +732,8 @@ pub fn Mesh(comptime N: usize) type {
                     }
                 }
 
-                levels.append(allocator, .{
-                    .index_size = Index.scaled(levels[level_id].index_size, 2),
+                levels.appendAssumeCapacity(.{
+                    .index_size = Index.scaled(levels.items[level_id].index_size, 2),
                     .patch_offset = global_patch_offset,
                     .patch_total = data.patches[target_id].items.len,
                     .block_offset = global_block_offset,
@@ -688,6 +744,9 @@ pub fn Mesh(comptime N: usize) type {
             self.block_capacity = blocks.capacity;
             self.patch_capacity = patches.capacity;
             self.level_capacity = levels.capacity;
+            self.blocks = blocks.items;
+            self.patches = patches.items;
+            self.levels = levels.items;
 
             self.computeOffsets();
         }
@@ -760,7 +819,7 @@ pub fn Mesh(comptime N: usize) type {
                 var result: usize = 0;
 
                 for (self.blocks) |block_list| {
-                    result += block_list.len;
+                    result += block_list.items.len;
                 }
 
                 return result;
@@ -770,7 +829,7 @@ pub fn Mesh(comptime N: usize) type {
                 var result: usize = 0;
 
                 for (self.patches) |patch_list| {
-                    result += patch_list.len;
+                    result += patch_list.items.len;
                 }
                 return result;
             }

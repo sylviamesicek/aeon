@@ -40,7 +40,7 @@ pub fn CellSpaceWithExtent(comptime N: usize, comptime E: usize, comptime O: usi
             var index: [N]usize = undefined;
 
             for (0..N) |i| {
-                index[i] = @intCast(@as(isize, @intCast(2 * O)) + cell[i]);
+                index[i] = @intCast(@as(isize, @intCast(E)) + cell[i]);
             }
 
             return index;
@@ -137,54 +137,48 @@ pub fn CellSpaceWithExtent(comptime N: usize, comptime E: usize, comptime O: usi
             return result;
         }
 
-        pub const CellIterator = struct {
-            inner: IndexSpace.CartesianIterator,
-
-            pub fn next(self: *@This()) ?[N]isize {
-                const index = self.inner.next() orelse return null;
-
-                var result: [N]isize = undefined;
-
-                for (0..N) |i| {
-                    result[i] = @as(isize, @intCast(index[i]));
-                }
-
-                return result;
-            }
-        };
-
-        pub const FullCellIterator = struct {
-            inner: IndexSpace.CartesianIterator,
-
-            pub fn init(size: [N]usize) @This() {
-                var index_size: [N]usize = size;
-
-                for (0..N) |i| {
-                    index_size[i] += 2 * E;
-                }
-
-                return .{ .inner = IndexSpace.fromSize(index_size).cartesianIndices() };
+        pub fn CellIterator(comptime F: usize) type {
+            if (comptime F > E) {
+                @compileError("F must be less than or equal to E.");
             }
 
-            pub fn next(self: *@This()) ?[N]isize {
-                const index = self.inner.next() orelse return null;
+            return struct {
+                inner: IndexSpace.CartesianIterator,
 
-                var result: [N]isize = undefined;
+                pub fn init(size: [N]usize) @This() {
+                    var index_size: [N]usize = size;
 
-                for (0..N) |i| {
-                    result[i] = @as(isize, @intCast(index[i])) - E;
+                    for (0..N) |i| {
+                        index_size[i] += 2 * F;
+                    }
+
+                    return .{ .inner = IndexSpace.fromSize(index_size).cartesianIndices() };
                 }
 
-                return result;
-            }
-        };
+                pub fn next(self: *@This()) ?[N]isize {
+                    const index = self.inner.next() orelse return null;
 
-        pub fn cells(self: Self) CellIterator {
-            return CellIterator{ .inner = IndexSpace.fromSize(self.size).cartesianIndices() };
+                    var result: [N]isize = undefined;
+
+                    for (0..N) |i| {
+                        result[i] = @as(isize, @intCast(index[i])) - F;
+                    }
+
+                    return result;
+                }
+            };
         }
 
-        pub fn fullCells(self: Self) FullCellIterator {
-            return FullCellIterator.init(self.size);
+        pub fn cellsToExtent(self: Self, comptime F: usize) CellIterator(F) {
+            return CellIterator(F).init(self.size);
+        }
+
+        pub fn cells(self: Self) CellIterator(0) {
+            return self.cellsToExtent(0);
+        }
+
+        pub fn fullCells(self: Self) CellIterator(E) {
+            return self.cellsToExtent(E);
         }
     };
 }
@@ -281,7 +275,6 @@ pub fn StencilSpaceWithExtent(comptime N: usize, comptime E: usize, comptime O: 
 
                 inline for (0..N) |i| {
                     if (ranks[i] != 0) {
-                        // This actually has an additional term -O (to correctly offset from center).
                         offset_cell[i] = cell[i] + stencil_index[i] - O;
                     } else {
                         offset_cell[i] = cell[i];

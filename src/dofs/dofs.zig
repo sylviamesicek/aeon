@@ -495,7 +495,7 @@ pub fn DofUtils(comptime N: usize, comptime O: usize) type {
 
             const block_sys = sys.slice(
                 dof_map.offset(block_id),
-                dof_map.offset(block_id),
+                dof_map.total(block_id),
             );
 
             const block = mesh.blocks[block_id];
@@ -874,7 +874,7 @@ pub fn DofUtils(comptime N: usize, comptime O: usize) type {
         ) void {
             const T = @TypeOf(oper);
 
-            var cells = if (full) stencil_space.cellSpace().fullCells() else stencil_space.cellSpace().cells();
+            var cells = if (full) stencil_space.cellSpace().cellsToExtent(O) else stencil_space.cellSpace().cells();
             var linear: usize = 0;
 
             while (cells.next()) |cell| : (linear += 1) {
@@ -1136,7 +1136,14 @@ pub fn DofUtils(comptime N: usize, comptime O: usize) type {
                 }
             }
 
-            for (mesh.blocks, 0..) |block, block_id| {
+            // Temporary
+            // TODO fix to print all exposed blocks
+
+            const top_level = mesh.levels[mesh.levels.len - 1];
+
+            for (top_level.block_offset..top_level.block_offset + top_level.block_total) |block_id| {
+                const block = mesh.blocks[block_id];
+
                 const stencil: StencilSpace = blockStencilSpace(mesh, block_id);
 
                 const cell_size = stencil.size;
@@ -1145,7 +1152,7 @@ pub fn DofUtils(comptime N: usize, comptime O: usize) type {
                 const cell_space: IndexSpace = IndexSpace.fromSize(cell_size);
                 const point_space: IndexSpace = IndexSpace.fromSize(point_size);
 
-                const point_offset: usize = positions.items.len;
+                const point_offset: usize = positions.items.len / N;
 
                 try positions.ensureUnusedCapacity(allocator, N * point_space.total());
                 try vertices.ensureUnusedCapacity(allocator, cell_type.nvertices() * cell_space.total());
