@@ -350,7 +350,7 @@ pub fn DofUtils(comptime N: usize, comptime O: usize) type {
 
                     const block_sys = sys.slice(
                         dof_map.offset(block),
-                        dof_map.offset(block),
+                        dof_map.total(block),
                     );
 
                     BoundaryUtils.fillBoundaryRegion(E, region, stencil_space, boundary, block_sys);
@@ -374,7 +374,7 @@ pub fn DofUtils(comptime N: usize, comptime O: usize) type {
             const block = mesh.blocks[block_id];
             const block_cell_space = CellSpace.fromSize(blockCellSize(mesh, block_id));
 
-            const patch_id = mesh.blocks[block].patch;
+            const patch_id = mesh.blocks[block_id].patch;
             const patch = mesh.patches[patch_id];
             const patch_space = IndexSpace.fromBox(patch.bounds);
             const patch_block_map: []const usize = block_map[patch.tile_offset .. patch.tile_offset + patch.tile_total];
@@ -382,8 +382,8 @@ pub fn DofUtils(comptime N: usize, comptime O: usize) type {
             const relative_bounds: IndexBox = block.bounds.relativeTo(patch.bounds);
 
             const block_sys = sys.slice(
-                dof_map.offset(block),
-                dof_map.total(block),
+                dof_map.offset(block_id),
+                dof_map.total(block_id),
             );
 
             var tiles = region.innerFaceIndices(relative_bounds.size);
@@ -505,7 +505,7 @@ pub fn DofUtils(comptime N: usize, comptime O: usize) type {
                 return;
             }
 
-            const cell_space = CellSpace.fromSize(blockCellSize(mesh, block));
+            const cell_space = CellSpace.fromSize(blockCellSize(mesh, block_id));
 
             const coarse_patch = mesh.patches[patch.parent.?];
 
@@ -518,7 +518,7 @@ pub fn DofUtils(comptime N: usize, comptime O: usize) type {
             var tiles = block_space.cartesianIndices();
 
             while (tiles.next()) |tile| {
-                const relative_tile = .localFromGlobal(bounds.globalFromLocal(tile));
+                const relative_tile = patch.bounds.localFromGlobal(bounds.globalFromLocal(tile));
                 const linear = patch_space.linearFromCartesian(relative_tile);
                 const coarse_block_id = block_map[coarse_patch.tile_offset + linear];
 
@@ -586,7 +586,7 @@ pub fn DofUtils(comptime N: usize, comptime O: usize) type {
                 return;
             }
 
-            const cell_space = CellSpace.fromSize(blockCellSize(mesh, block));
+            const cell_space = CellSpace.fromSize(blockCellSize(mesh, block_id));
 
             const coarse_patch = mesh.patches[patch.parent.?];
 
@@ -599,7 +599,7 @@ pub fn DofUtils(comptime N: usize, comptime O: usize) type {
             var tiles = block_space.cartesianIndices();
 
             while (tiles.next()) |tile| {
-                const relative_tile = .localFromGlobal(bounds.globalFromLocal(tile));
+                const relative_tile = patch.bounds.localFromGlobal(bounds.globalFromLocal(tile));
                 const linear = patch_space.linearFromCartesian(relative_tile);
                 const coarse_block_id = block_map[coarse_patch.tile_offset + linear];
 

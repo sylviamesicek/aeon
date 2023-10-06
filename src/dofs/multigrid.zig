@@ -72,7 +72,7 @@ pub fn MultigridSolver(comptime N: usize, comptime O: usize, comptime BaseSolver
             const sys_field = comptime std.enums.values(T.System)[0];
 
             // Get total dofs
-            const total_dofs = dof_map.total();
+            const total_dofs = dof_map.ndofs();
 
             const sys = try SystemSlice(T.System).init(allocator, total_dofs);
             defer sys.deinit(allocator);

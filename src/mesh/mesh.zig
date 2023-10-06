@@ -125,7 +125,7 @@ pub fn Mesh(comptime N: usize) type {
 
         const BlockList = ArrayListUnmanaged(Block(N));
         const PatchList = ArrayListUnmanaged(Patch(N));
-        const LevelList = ArrayListUnmanaged(Level);
+        const LevelList = ArrayListUnmanaged(Level(N));
 
         // Mixins
         const Index = @import("../index.zig").Index(N);
@@ -188,7 +188,7 @@ pub fn Mesh(comptime N: usize) type {
                 .patch_capacity = patches.capacity,
                 .level_capacity = levels.capacity,
                 .blocks = blocks.items,
-                .patchs = patches.items,
+                .patches = patches.items,
                 .levels = levels.items,
             };
 
