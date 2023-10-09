@@ -72,7 +72,7 @@ pub fn CellSpaceWithExtent(comptime N: usize, comptime E: usize, comptime O: usi
         pub fn prolong(self: Self, subcell: [N]isize, field: []const f64) f64 {
             // Build stencils for both the left and right case at comptime.
             const lstencil: [2 * O + 1]f64 = comptime prolongStencil(false, O);
-            const rstencil: [2 * O + 1]f64 = comptime prolongStencil(false, O);
+            const rstencil: [2 * O + 1]f64 = comptime prolongStencil(true, O);
 
             var result: f64 = 0.0;
 
@@ -84,7 +84,7 @@ pub fn CellSpaceWithExtent(comptime N: usize, comptime E: usize, comptime O: usi
                 var coef: f64 = 1.0;
 
                 for (0..N) |i| {
-                    if (@mod(subcell[i], 2) == 0) {
+                    if (@mod(subcell[i], 2) == 1) {
                         coef *= rstencil[stencil_index[i]];
                     } else {
                         coef *= lstencil[stencil_index[i]];
@@ -94,7 +94,7 @@ pub fn CellSpaceWithExtent(comptime N: usize, comptime E: usize, comptime O: usi
                 var offset_cell: [N]isize = undefined;
 
                 inline for (0..N) |i| {
-                    offset_cell[i] = @divTrunc(subcell[i] + 1, 2) + stencil_index[i] - O;
+                    offset_cell[i] = @divTrunc(subcell[i], 2) + stencil_index[i] - O;
                 }
 
                 const linear = index_space.linearFromCartesian(indexFromCell(offset_cell));
@@ -569,6 +569,8 @@ test "basis stencils" {
     try expectEqualSlices(f64, &[_]f64{ 0.15625, 0.9375, -0.09375 }, &prolongStencil(false, 1));
     try expectEqualSlices(f64, &[_]f64{ -0.09375, 0.9375, 0.15625 }, &prolongStencil(true, 1));
     try expectEqualSlices(f64, &[_]f64{ -0.0625, 0.5625, 0.5625, -0.0625 }, &restrictStencil(1));
+
+    // std.debug.print("{any}", .{prolongStencil(true, 2)});
 }
 
 test "basis boundary interpolation" {

@@ -7,10 +7,10 @@ pub fn Index(comptime N: usize) type {
         }
 
         pub fn add(v: [N]usize, u: [N]usize) [N]usize {
-            var res: [N]usize = v;
+            var res: [N]usize = undefined;
 
             for (0..N) |i| {
-                res[i] += u[i];
+                res[i] = v[i] + u[i];
             }
 
             return res;

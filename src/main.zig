@@ -214,7 +214,7 @@ pub fn ScalarFieldProblem(comptime O: usize) type {
             var base_solver = try BiCGStabSolver.init(allocator, grid.blocks[0].cell_total, 10000, 10e-10);
             defer base_solver.deinit();
 
-            var solver = MultigridSolver.init(10, 10e-10, &base_solver);
+            var solver = MultigridSolver.init(1, 10e-10, &base_solver);
             defer solver.deinit();
 
             try solver.solve(
@@ -243,176 +243,195 @@ pub fn ScalarFieldProblem(comptime O: usize) type {
                 .metric = metric.field(.factor),
             });
 
-            try DofUtils.writeVtk(Output, allocator, &grid, output, file.writer());
+            try DofUtils.writeCellsToVtk(Output, allocator, &grid, output, file.writer());
         }
     };
 }
 
-// pub fn PoissonEquation(comptime O: usize) type {
-//     const N = 2;
-//     return struct {
-//         const math = std.math;
+pub fn PoissonEquation(comptime O: usize) type {
+    const N = 2;
+    return struct {
+        const BoundaryCondition = dofs.BoundaryCondition;
+        const DofMap = dofs.DofMap(N, O);
+        const DofUtils = dofs.DofUtils(N, O);
+        const MultigridSolver = dofs.MultigridSolver(N, O, BiCGStabSolver);
+        const SystemSlice = system.SystemSlice;
+        const SystemSliceConst = system.SystemSliceConst;
 
-//         const BoundaryCondition = dofs.BoundaryCondition;
-//         const DofHandler = dofs.DofHandler(N, O);
-//         const MultigridSolver = dofs.MultigridSolver(N, O, BiCGStabSolver);
+        const Face = geometry.Face(N);
+        const IndexSpace = geometry.IndexSpace(N);
+        const Index = index.Index(N);
 
-//         const Face = geometry.Face(N);
-//         const IndexSpace = geometry.IndexSpace(N);
-//         const Index = index.Index(N);
+        const BiCGStabSolver = lac.BiCGStablSolver(2);
 
-//         const BiCGStabSolver = lac.BiCGStablSolver(2);
+        const Mesh = mesh.Mesh(N);
 
-//         const Mesh = mesh.Mesh(N, O);
+        pub const Empty = enum {};
 
-//         pub const MySystem = enum {
-//             sys,
-//         };
+        pub const Function = enum {
+            func,
+        };
 
-//         // Solution Function
-//         pub const SolutionFunction = struct {
-//             pub const Input = enum {};
-//             pub const Output = MySystem;
+        // Seed Function
+        pub const RhsProjection = struct {
+            amplitude: f64,
 
-//             pub fn value(_: SolutionFunction, engine: dofs.FunctionEngine(N, O, Input)) system.SystemValue(Output) {
-//                 const pos = engine.position();
+            pub const System = Function;
 
-//                 return .{
-//                     .sys = math.sin(pos[0]) * math.sin(pos[1]),
-//                     // .sys = (1.0 - pos[0] * pos[0]) * (1.0 - pos[1] * pos[1]),
-//                     // .sys = 0.0,
-//                 };
-//             }
-//         };
+            pub fn project(self: RhsProjection, pos: [N]f64) system.SystemValue(Function) {
+                return .{
+                    .func = self.amplitude * std.math.sin(pos[0]) * std.math.sin(pos[1]),
+                };
+            }
+        };
 
-//         // Function
-//         pub const RhsFunction = struct {
-//             pub const Input = enum {};
-//             pub const Output = MySystem;
+        pub const PoissonOperator = struct {
+            pub const Context = Empty;
+            pub const System = Function;
 
-//             pub fn value(_: RhsFunction, engine: dofs.FunctionEngine(N, O, Input)) system.SystemValue(Output) {
-//                 const pos = engine.position();
+            pub fn apply(_: PoissonOperator, engine: dofs.OperatorEngine(N, O, Context, System)) system.SystemValue(System) {
+                const lap = engine.laplacianSys(.func);
 
-//                 return .{
-//                     .sys = -2 * math.sin(pos[0]) * math.sin(pos[1]),
+                return .{
+                    .func = -lap,
+                };
+            }
 
-//                     // .sys = 1.0,
-//                 };
-//             }
-//         };
+            pub fn applyDiagonal(_: PoissonOperator, engine: dofs.OperatorEngine(N, O, Context, System)) system.SystemValue(System) {
+                return .{
+                    .func = -engine.laplacianDiagonal(),
+                };
+            }
 
-//         pub const PoissonOperator = struct {
-//             pub const Context = enum {};
-//             pub const System = MySystem;
+            pub fn boundarySys(_: PoissonOperator, _: [N]f64, _: Face) dofs.SystemBoundaryCondition(System) {
+                return .{
+                    .func = BoundaryCondition.diritchlet(0.0),
+                };
+            }
 
-//             pub fn apply(_: PoissonOperator, engine: dofs.OperatorEngine(N, O, Context, System)) system.SystemValue(System) {
-//                 return .{
-//                     .sys = engine.laplacianSys(.sys),
-//                 };
-//             }
+            pub fn boundaryCtx(_: PoissonOperator, _: [N]f64, _: Face) dofs.SystemBoundaryCondition(Context) {
+                return .{};
+            }
+        };
 
-//             pub fn applyDiagonal(_: PoissonOperator, engine: dofs.OperatorEngine(N, O, Context, System)) system.SystemValue(System) {
-//                 return .{
-//                     .sys = engine.laplacianDiagonal(),
-//                 };
-//             }
+        // Run
 
-//             pub fn condition(_: PoissonOperator, _: [N]f64, _: Face) dofs.SystemBoundaryCondition(System) {
-//                 return .{
-//                     .sys = BoundaryCondition.diritchlet(0.0),
-//                 };
-//             }
-//         };
+        fn run(allocator: Allocator) !void {
+            std.debug.print("Running Poisson Elliptic Solver\n", .{});
 
-//         // Run
+            var grid = try Mesh.init(allocator, .{
+                .physical_bounds = .{
+                    .origin = [2]f64{ 0.0, 0.0 },
+                    .size = [2]f64{ std.math.pi, std.math.pi },
+                },
+                .tile_width = 16,
+                .index_size = [2]usize{ 1, 1 },
+            });
+            defer grid.deinit();
 
-//         fn run(allocator: Allocator) !void {
-//             var grid = Mesh.init(allocator, .{
-//                 .physical_bounds = .{
-//                     .origin = [1]f64{0.0} ** N,
-//                     .size = [1]f64{2.0 * math.pi} ** N,
-//                 },
-//                 .tile_width = 16,
-//                 .index_size = [1]usize{2} ** N,
-//             });
-//             defer grid.deinit();
+            // Globally refine three times
 
-//             var dof_handler = DofHandler.init(allocator, &grid);
-//             defer dof_handler.deinit();
+            for (0..1) |_| {
+                var tags = try allocator.alloc(bool, grid.tile_total);
+                defer allocator.free(tags);
 
-//             const ndofs: usize = dof_handler.ndofs();
-//             const ndofs_reduced = IndexSpace.fromSize(Index.scaled(grid.base.index_size, grid.tile_width)).total();
-//             _ = ndofs_reduced;
+                @memset(tags, true);
 
-//             // Projection solution
-//             var solution: []f64 = try allocator.alloc(f64, ndofs);
-//             defer allocator.free(solution);
+                try grid.regrid(allocator, tags, .{
+                    .max_levels = 4,
+                    .patch_efficiency = 0.1,
+                    .patch_max_tiles = 100,
+                    .block_efficiency = 0.7,
+                    .block_max_tiles = 100,
+                });
+            }
 
-//             dof_handler.project(SolutionFunction{}, .{ .sys = solution }, .{});
+            for (grid.blocks) |block| {
+                std.debug.print("Block {}\n", .{block});
+            }
 
-//             // Right hand side
-//             var rhs: []f64 = try allocator.alloc(f64, ndofs);
-//             defer allocator.free(rhs);
+            // Build maps
 
-//             dof_handler.project(RhsFunction{}, .{ .sys = rhs }, .{});
+            const block_map: []usize = try allocator.alloc(usize, grid.tile_total);
+            defer allocator.free(block_map);
 
-//             // Operator
-//             const oper = PoissonOperator{};
+            grid.buildBlockMap(block_map);
 
-//             dof_handler.fillBaseBoundary(oper, .{ .sys = solution });
-//             dof_handler.fillBaseBoundary(oper, .{ .sys = rhs });
+            const dof_map: DofMap = try DofMap.init(allocator, &grid);
+            defer dof_map.deinit(allocator);
 
-//             // Solution vectors
-//             var numerical_from_apply: []f64 = try allocator.alloc(f64, ndofs);
-//             defer allocator.free(numerical_from_apply);
+            std.debug.print("NDofs: {}\n", .{grid.cell_total});
 
-//             var numerical_from_project: []f64 = try allocator.alloc(f64, ndofs);
-//             defer allocator.free(numerical_from_project);
+            // Build functions
 
-//             dof_handler.project(RhsFunction{}, .{ .sys = numerical_from_project }, .{});
-//             dof_handler.apply(oper, .{ .sys = numerical_from_apply }, .{ .sys = solution }, .{});
-//             // dof_handler.fillBaseBoundary(oper, .{ .sys = numerical });
+            var rhs = try SystemSlice(Function).init(allocator, grid.cell_total);
+            defer rhs.deinit(allocator);
 
-//             var err: []f64 = try allocator.alloc(f64, ndofs);
-//             defer allocator.free(err);
+            var rhs_proj: RhsProjection = .{ .amplitude = 2.0 };
 
-//             for (0..ndofs) |i| {
-//                 err[i] = numerical_from_apply[i] - rhs[i];
-//             }
+            DofUtils.projectCells(&grid, rhs_proj, rhs);
 
-//             // var apply: []f64 = try allocator.alloc(f64, ndofs);
-//             // defer allocator.free(apply);
+            var sol = try SystemSlice(Function).init(allocator, grid.cell_total);
+            defer sol.deinit(allocator);
 
-//             // dof_handler.fillBaseBoundary(oper, .{ .sys = numerical });
-//             // dof_handler.apply(oper, .{ .sys = apply }, .{ .sys = numerical }, .{});
+            rhs_proj.amplitude = 1.0;
 
-//             // Solver
-//             // var base_solver = try BiCGStabSolver.init(allocator, ndofs_reduced, 1000, 1e-10);
-//             // defer base_solver.deinit();
+            DofUtils.projectCells(&grid, rhs_proj, sol);
 
-//             // var solver = try MultigridSolver.init(allocator, &dof_handler, &base_solver);
-//             // defer solver.deinit();
+            var err = try SystemSlice(Function).init(allocator, grid.cell_total);
+            defer err.deinit(allocator);
 
-//             // solver.solve(
-//             //     oper,
-//             //     .{ .sys = numerical },
-//             //     .{ .sys = rhs },
-//             //     .{},
-//             // );
+            var numerical = try SystemSlice(Function).init(allocator, grid.cell_total);
+            defer numerical.deinit(allocator);
 
-//             const file = try std.fs.cwd().createFile("output/apply.vtu", .{});
-//             defer file.close();
+            @memset(numerical.field(.func), 0.0);
 
-//             try dof_handler.writeVtk(true, .{
-//                 .numerical_from_apply = numerical_from_apply,
-//                 .numerical_from_project = numerical_from_project,
-//                 .rhs = rhs,
-//                 .solution = solution,
-//                 .err = err,
-//             }, file.writer());
-//         }
-//     };
-// }
+            const oper = PoissonOperator{};
+
+            var base_solver = try BiCGStabSolver.init(allocator, grid.blocks[0].cell_total, 10000, 10e-10);
+            defer base_solver.deinit();
+
+            var solver = MultigridSolver.init(1, 10e-10, &base_solver);
+            defer solver.deinit();
+
+            try solver.solve(
+                allocator,
+                &grid,
+                block_map,
+                dof_map,
+                oper,
+                numerical,
+                rhs.toConst(),
+                SystemSliceConst(Empty).view(grid.cell_total, .{}),
+            );
+
+            for (0..grid.cell_total) |i| {
+                err.field(.func)[i] = numerical.field(.func)[i] - sol.field(.func)[i];
+            }
+
+            std.debug.print("Writing Solution To File\n", .{});
+
+            const file = try std.fs.cwd().createFile("output/poisson.vtu", .{});
+            defer file.close();
+
+            const Output = enum {
+                num,
+                exact,
+                err,
+                rhs,
+            };
+
+            const output = SystemSliceConst(Output).view(grid.cell_total, .{
+                .num = numerical.field(.func),
+                .exact = sol.field(.func),
+                .err = err.field(.func),
+                .rhs = rhs.field(.func),
+            });
+
+            try DofUtils.writeCellsToVtk(Output, allocator, &grid, output, file.writer());
+        }
+    };
+}
 
 /// Actual main function (with allocator and leak detection boilerplate)
 pub fn main() !void {
@@ -427,9 +446,9 @@ pub fn main() !void {
     }
 
     // Run main
-    try ScalarFieldProblem(2).run(gpa.allocator());
+    // try ScalarFieldProblem(2).run(gpa.allocator());
 
-    // try ApplyTest(1).run(gpa.allocator());
+    try PoissonEquation(1).run(gpa.allocator());
 }
 
 test {

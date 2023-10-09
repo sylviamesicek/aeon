@@ -104,12 +104,8 @@ pub fn Box(comptime N: usize, comptime T: type) type {
         pub fn coarsened(self: *const Self) Self {
             var result: Self = undefined;
             for (0..N) |axis| {
-                result.origin[axis] = std.math.divFloor(T, self.origin[axis], 2) catch {
-                    unreachable;
-                };
-                result.size[axis] = std.math.divCeil(T, self.size[axis], 2) catch {
-                    unreachable;
-                };
+                result.origin[axis] = self.origin[axis] / 2;
+                result.size[axis] = self.size[axis] / 2;
             }
             return result;
         }
