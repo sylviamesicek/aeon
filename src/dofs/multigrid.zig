@@ -98,6 +98,9 @@ pub fn MultigridSolver(comptime N: usize, comptime O: usize, comptime BaseSolver
             const sys2 = try SystemSlice(T.System).init(allocator, total_dofs);
             defer sys2.deinit(allocator);
 
+            const old_sys = try SystemSlice(T.System).init(allocator, total_dofs);
+            defer old_sys.deinit(allocator);
+
             const ctx = try SystemSlice(T.Context).init(allocator, total_dofs);
             defer ctx.deinit(allocator);
 
@@ -106,7 +109,7 @@ pub fn MultigridSolver(comptime N: usize, comptime O: usize, comptime BaseSolver
             }
 
             for (0..mesh.blocks.len) |block_id| {
-                DofUtils.fillBoundary(
+                DofUtils.fillBoundaryFull(
                     mesh,
                     block_map,
                     dof_map,
@@ -135,21 +138,24 @@ pub fn MultigridSolver(comptime N: usize, comptime O: usize, comptime BaseSolver
             ), @tagName(sys_field));
             const tol: f64 = self.tolerance * @fabs(ires);
 
+            std.debug.print("Multigrid Tolerance {}\n", .{tol});
+
             // Run iterations
             var iteration: usize = 0;
 
             // TODO Might require full smoothing to achieve proper accuracy.
 
-            // const DebugOutput = enum {
-            //     sol,
-            // };
-            // _ = DebugOutput;
+            const DebugOutput = enum {
+                sol,
+            };
+            _ = DebugOutput;
 
             while (iteration < self.max_iters) : (iteration += 1) {
                 // Recurse down the mesh to the base level
                 for (1..mesh.levels.len) |reverse_level| {
                     const level_id: usize = mesh.levels.len - reverse_level;
                     const level = mesh.levels[level_id];
+                    const coarse = mesh.levels[level_id - 1];
 
                     // Compute rhs
                     for (mesh.blocks[level.block_offset .. level.block_offset + level.block_total]) |block| {
@@ -160,8 +166,6 @@ pub fn MultigridSolver(comptime N: usize, comptime O: usize, comptime BaseSolver
                             }
                         }
                     }
-
-                    std.debug.print("Presmoothing Level {}\n", .{level_id});
 
                     // Perform smoothing
                     for (level.block_offset..level.block_offset + level.block_total) |block_id| {
@@ -184,6 +188,9 @@ pub fn MultigridSolver(comptime N: usize, comptime O: usize, comptime BaseSolver
                             sys,
                             sys2.toConst(),
                         );
+                    }
+
+                    for (level.block_offset..level.block_offset + level.block_total) |block_id| {
                         // Fill boundaries now that sys has been smoothed
                         DofUtils.fillBoundary(
                             mesh,
@@ -193,7 +200,10 @@ pub fn MultigridSolver(comptime N: usize, comptime O: usize, comptime BaseSolver
                             DofUtils.operSystemBoundary(oper),
                             sys,
                         );
-                        // Restrict updated vector.
+                    }
+
+                    // Restrict data down a level now that we have smoothed everything
+                    for (level.block_offset..level.block_offset + level.block_total) |block_id| {
                         DofUtils.restrict(
                             T.System,
                             mesh,
@@ -204,63 +214,58 @@ pub fn MultigridSolver(comptime N: usize, comptime O: usize, comptime BaseSolver
                         );
                     }
 
-                    // // const file_name = try std.fmt.allocPrint(allocator, "output/multigrid_down_{}.vtu", .{level_id});
-                    // // defer allocator.free(file_name);
+                    // Fill sys boundary on restricted level
+                    for (coarse.block_offset..coarse.block_offset + coarse.block_total) |block_id| {
+                        DofUtils.fillBoundary(
+                            mesh,
+                            block_map,
+                            dof_map,
+                            block_id,
+                            DofUtils.operSystemBoundary(oper),
+                            sys,
+                        );
+                    }
 
-                    // // const file = try std.fs.cwd().createFile(file_name, .{});
-                    // // defer file.close();
+                    // We now have a "guess" for the value of sys of the coarser level, which we will later use to
+                    // correct sys.
+                    for (coarse.block_offset..coarse.block_offset + coarse.block_total) |block_id| {
+                        DofUtils.copyDofs(T.System, dof_map, block_id, old_sys, sys.toConst());
+                    }
 
-                    // // const debug_output = SystemSliceConst(DebugOutput).view(total_dofs, .{
-                    // //     .sol = sys.field(sys_field),
-                    // // });
-
-                    // // try DofUtils.writeDofsToVtk(DebugOutput, allocator, mesh, level_id, dof_map, debug_output, file.writer());
-
-                    // // Compute tau correction
-                    // for (level.block_offset..level.block_offset + level.block_total) |block_id| {
-                    //     // Fill boundaries of sys fully
-                    //     DofUtils.fillBoundaryFull(
-                    //         mesh,
-                    //         block_map,
-                    //         dof_map,
-                    //         block_id,
-                    //         DofUtils.operSystemBoundary(oper),
-                    //         sys,
-                    //     );
-                    //     // Apply operator fully and store in sys2
-                    //     DofUtils.applyFull(
-                    //         mesh,
-                    //         dof_map,
-                    //         block_id,
-                    //         oper,
-                    //         sys2,
-                    //         sys.toConst(),
-                    //         ctx.toConst(),
-                    //     );
-                    //     // Restrict residual and store result in tau
-                    //     DofUtils.restrictResidual(
-                    //         mesh,
-                    //         block_map,
-                    //         dof_map,
-                    //         block_id,
-                    //         oper,
-                    //         tau,
-                    //         sys.toConst(),
-                    //         ctx.toConst(),
-                    //         sys2.toConst(),
-                    //     );
-                    // }
-
-                    // // Copy data from sys to sys2
-                    // for (level.block_offset..level.block_offset + level.block_total) |block_id| {
-                    //     DofUtils.copyDofs(
-                    //         T.System,
-                    //         dof_map,
-                    //         block_id,
-                    //         sys2,
-                    //         sys.toConst(),
-                    //     );
-                    // }
+                    // Compute tau correction
+                    for (level.block_offset..level.block_offset + level.block_total) |block_id| {
+                        // Fill boundaries of sys fully
+                        DofUtils.fillBoundaryFull(
+                            mesh,
+                            block_map,
+                            dof_map,
+                            block_id,
+                            DofUtils.operSystemBoundary(oper),
+                            sys,
+                        );
+                        // Apply operator fully and store in sys2
+                        DofUtils.applyFull(
+                            mesh,
+                            dof_map,
+                            block_id,
+                            oper,
+                            sys2,
+                            sys.toConst(),
+                            ctx.toConst(),
+                        );
+                        // Restrict residual and store result in tau
+                        DofUtils.restrictResidual(
+                            mesh,
+                            block_map,
+                            dof_map,
+                            block_id,
+                            oper,
+                            tau,
+                            sys.toConst(),
+                            ctx.toConst(),
+                            sys2.toConst(),
+                        );
+                    }
                 }
 
                 std.debug.print("Solving Level {}\n", .{0});
@@ -279,8 +284,7 @@ pub fn MultigridSolver(comptime N: usize, comptime O: usize, comptime BaseSolver
 
                 while (cells.next()) |cell| : (linear += 1) {
                     x_field[linear] = cell_space.value(cell, sys.field(sys_field)); // Value from sys
-                    // rhs_field[linear] = b.field(sys_field)[linear] - tau.field(sys_field)[linear];
-                    rhs_field[linear] = b.field(sys_field)[linear];
+                    rhs_field[linear] = b.field(sys_field)[linear] - tau.field(sys_field)[linear];
                 }
 
                 // Solve system using the base solver
@@ -312,54 +316,37 @@ pub fn MultigridSolver(comptime N: usize, comptime O: usize, comptime BaseSolver
                     sys,
                 );
 
-                {
-                    // const file_name = try std.fmt.allocPrint(allocator, "output/multigrid_base.vtu", .{});
-                    // defer allocator.free(file_name);
+                // {
+                //     const file_name = try std.fmt.allocPrint(allocator, "output/multigrid_tau.vtu", .{});
+                //     defer allocator.free(file_name);
 
-                    // const file = try std.fs.cwd().createFile(file_name, .{});
-                    // defer file.close();
+                //     const file = try std.fs.cwd().createFile(file_name, .{});
+                //     defer file.close();
 
-                    // const debug_output = SystemSliceConst(DebugOutput).view(total_dofs, .{
-                    //     .sol = sys.field(sys_field),
-                    // });
+                //     const debug_output = SystemSliceConst(DebugOutput).view(mesh.cell_total, .{
+                //         .sol = tau.field(sys_field),
+                //     });
 
-                    // try DofUtils.writeDofsToVtk(DebugOutput, allocator, mesh, 0, dof_map, debug_output, file.writer());
-                }
+                //     try DofUtils.writeLevelCellsToVtk(DebugOutput, allocator, mesh, 0, debug_output, file.writer());
+                // }
 
                 // Iterate up, adding correction and performing post smoothing.
                 for (1..mesh.levels.len) |level_id| {
                     const level = mesh.levels[level_id];
 
                     for (level.block_offset..level.block_offset + level.block_total) |block_id| {
-                        DofUtils.prolong(
+                        DofUtils.prolongCorrection(
                             T.System,
                             mesh,
                             block_map,
                             dof_map,
                             block_id,
                             sys,
+                            old_sys.toConst(),
                         );
-                        // DofUtils.prolongCorrection(
-                        //     T.System,
-                        //     mesh,
-                        //     block_map,
-                        //     dof_map,
-                        //     block_id,
-                        //     x,
-                        //     sys.toConst(),
-                        //     sys2.toConst(),
-                        // );
+                    }
 
-                        // // Copy back to sys
-                        // DofUtils.copyDofsFromCells(
-                        //     T.System,
-                        //     mesh,
-                        //     dof_map,
-                        //     block_id,
-                        //     sys,
-                        //     x.toConst(),
-                        // );
-
+                    for (level.block_offset..level.block_offset + level.block_total) |block_id| {
                         DofUtils.fillBoundary(
                             mesh,
                             block_map,
@@ -379,8 +366,7 @@ pub fn MultigridSolver(comptime N: usize, comptime O: usize, comptime BaseSolver
 
                         for (block.cell_offset..block.cell_offset + block.cell_total) |idx| {
                             inline for (comptime std.enums.values(T.System)) |field| {
-                                // rhs.field(field)[idx] = b.field(field)[idx] - tau.field(field)[idx];
-                                rhs.field(field)[idx] = b.field(field)[idx];
+                                rhs.field(field)[idx] = b.field(field)[idx] - tau.field(field)[idx];
                             }
                         }
 
@@ -403,7 +389,9 @@ pub fn MultigridSolver(comptime N: usize, comptime O: usize, comptime BaseSolver
                             sys,
                             sys2.toConst(),
                         );
-                        // Fill boundaries now that sys has been smoothed
+                    }
+
+                    for (level.block_offset..level.block_offset + level.block_total) |block_id| {
                         DofUtils.fillBoundary(
                             mesh,
                             block_map,
@@ -412,7 +400,10 @@ pub fn MultigridSolver(comptime N: usize, comptime O: usize, comptime BaseSolver
                             DofUtils.operSystemBoundary(oper),
                             sys,
                         );
-                        // Restrict updated vector.
+                    }
+
+                    // Restrict data down a level now that we have smoothed everything
+                    for (level.block_offset..level.block_offset + level.block_total) |block_id| {
                         DofUtils.restrict(
                             T.System,
                             mesh,

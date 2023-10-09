@@ -126,7 +126,7 @@ pub fn CellSpaceWithExtent(comptime N: usize, comptime E: usize, comptime O: usi
                 var offset_cell: [N]isize = undefined;
 
                 inline for (0..N) |i| {
-                    offset_cell[i] = 2 * supercell[i] + stencil_index[i] - O - 1;
+                    offset_cell[i] = 2 * supercell[i] + stencil_index[i] - O;
                 }
 
                 const linear = index_space.linearFromCartesian(indexFromCell(offset_cell));
