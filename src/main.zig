@@ -262,7 +262,7 @@ pub fn PoissonEquation(comptime O: usize) type {
         const IndexSpace = geometry.IndexSpace(N);
         const Index = index.Index(N);
 
-        const BiCGStabSolver = lac.BiCGStablSolver(2);
+        const BiCGStabSolver = lac.BiCGStabSolver;
 
         const Mesh = mesh.Mesh(N);
 
@@ -290,10 +290,8 @@ pub fn PoissonEquation(comptime O: usize) type {
             pub const System = Function;
 
             pub fn apply(_: PoissonOperator, engine: dofs.OperatorEngine(N, O, Context, System)) system.SystemValue(System) {
-                const lap = engine.laplacianSys(.func);
-
                 return .{
-                    .func = -lap,
+                    .func = -engine.laplacianSys(.func),
                 };
             }
 
@@ -391,7 +389,7 @@ pub fn PoissonEquation(comptime O: usize) type {
             var base_solver = try BiCGStabSolver.init(allocator, grid.blocks[0].cell_total, 10000, 10e-10);
             defer base_solver.deinit();
 
-            var solver = MultigridSolver.init(2, 10e-10, &base_solver);
+            var solver = MultigridSolver.init(5, 10e-10, &base_solver);
             defer solver.deinit();
 
             try solver.solve(
