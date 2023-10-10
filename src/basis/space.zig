@@ -361,7 +361,7 @@ pub fn StencilSpaceWithExtent(comptime N: usize, comptime E: usize, comptime O: 
 
         /// Computes the derivative at a bounday of a field.
         pub fn boundaryDerivative(self: Self, comptime ranks: [N]usize, comptime extents: [N]isize, cell: [N]isize, field: []const f64) f64 {
-            comptime var stencils: [N][4 * O]f64 = undefined;
+            comptime var stencils: [N][4 * O + 1]f64 = undefined;
 
             inline for (0..N) |i| {
                 stencils[i] = comptime boundaryDerivativeStencil(ranks[i], extents[i], O);
@@ -373,7 +373,7 @@ pub fn StencilSpaceWithExtent(comptime N: usize, comptime E: usize, comptime O: 
                 if (extents[i] == 0) {
                     stencil_sizes[i] = 1;
                 } else {
-                    stencil_sizes[i] = comptime 2 * O + absSigned(extents[i]);
+                    stencil_sizes[i] = comptime 2 * O + absSigned(extents[i]) + 1;
                 }
             }
 
@@ -397,7 +397,7 @@ pub fn StencilSpaceWithExtent(comptime N: usize, comptime E: usize, comptime O: 
 
                 inline for (0..N) |i| {
                     if (extents[i] > 0) {
-                        offset_cell[i] = cell[i] + stencil_index[i] - @as(isize, @intCast(2 * O)) + 1;
+                        offset_cell[i] = cell[i] + stencil_index[i] - @as(isize, @intCast(2 * O));
                     } else if (extents[i] < 0) {
                         offset_cell[i] = cell[i] + stencil_index[i] + extents[i];
                     } else {
@@ -425,7 +425,7 @@ pub fn StencilSpaceWithExtent(comptime N: usize, comptime E: usize, comptime O: 
 
         /// Computes the outmost coefficient of a boundary derivative stencil.
         pub fn boundaryDerivativeCoef(self: Self, comptime ranks: [N]usize, comptime extents: [N]isize) f64 {
-            comptime var stencils: [N][4 * O]f64 = undefined;
+            comptime var stencils: [N][4 * O + 1]f64 = undefined;
 
             inline for (0..N) |i| {
                 stencils[i] = comptime boundaryDerivativeStencil(ranks[i], extents[i], O);
@@ -435,7 +435,7 @@ pub fn StencilSpaceWithExtent(comptime N: usize, comptime E: usize, comptime O: 
 
             inline for (0..N) |i| {
                 if (extents[i] > 0) {
-                    result *= comptime stencils[i][2 * O + extents[i] - 1];
+                    result *= comptime stencils[i][2 * O + extents[i]];
                 } else if (extents[i] < 0) {
                     result *= comptime stencils[i][0];
                 }
@@ -473,15 +473,16 @@ fn absSigned(i: isize) isize {
     return if (i < 0) -i else i;
 }
 
-fn boundaryDerivativeStencil(comptime R: usize, comptime extent: isize, comptime O: usize) [4 * O]f64 {
+fn boundaryDerivativeStencil(comptime R: usize, comptime extent: isize, comptime O: usize) [4 * O + 1]f64 {
+    @setEvalBranchQuota(10000);
     if (extent > 2 * O) {
         @compileError("Extent must be <= 2*O");
     }
 
-    var result: [4 * O]f64 = [1]f64{0.0} ** (4 * O);
+    var result: [4 * O + 1]f64 = [1]f64{0.0} ** (4 * O + 1);
 
     if (extent <= 0) {
-        const grid = vertexCenteredGrid(f64, @intCast(-extent), 2 * O);
+        const grid = vertexCenteredGrid(f64, @intCast(-extent), 2 * O + 1);
 
         const stencil = switch (R) {
             0 => lagrange.valueStencil(f64, grid.len, grid, 0.0),
@@ -494,7 +495,7 @@ fn boundaryDerivativeStencil(comptime R: usize, comptime extent: isize, comptime
             result[i] = s;
         }
     } else if (extent > 0) {
-        const grid = vertexCenteredGrid(f64, 2 * O, @intCast(extent));
+        const grid = vertexCenteredGrid(f64, 2 * O + 1, @intCast(extent));
 
         const stencil = switch (R) {
             0 => lagrange.valueStencil(f64, grid.len, grid, 0.0),
@@ -570,49 +571,50 @@ test "basis stencils" {
     try expectEqualSlices(f64, &[_]f64{ -0.09375, 0.9375, 0.15625 }, &prolongStencil(true, 1));
     try expectEqualSlices(f64, &[_]f64{ -0.0625, 0.5625, 0.5625, -0.0625 }, &restrictStencil(1));
 
-    // std.debug.print("{any}", .{prolongStencil(true, 2)});
+    // std.debug.print("{any}\n", .{boundaryDerivativeStencil(0, 1, 1)});
+    // std.debug.print("{any}\n", .{boundaryDerivativeStencil(0, 2, 1)});
 }
 
-test "basis boundary interpolation" {
-    const math = std.math;
+// test "basis boundary interpolation" {
+//     const math = std.math;
 
-    const a = 0.0;
-    const b = 2.0 * math.pi;
+//     const a = 0.0;
+//     const b = 2.0 * math.pi;
 
-    const O = 2;
-    const N = 50;
+//     const O = 2;
+//     const N = 50;
 
-    const stencil_space = StencilSpaceWithExtent(1, 2 * O, O){
-        .physical_bounds = .{
-            .origin = [1]f64{a},
-            .size = [1]f64{b - a},
-        },
-        .size = [1]usize{N},
-    };
+//     const stencil_space = StencilSpaceWithExtent(1, 2 * O, O){
+//         .physical_bounds = .{
+//             .origin = [1]f64{a},
+//             .size = [1]f64{b - a},
+//         },
+//         .size = [1]usize{N},
+//     };
 
-    var function: [N + 4 * O]f64 = undefined;
+//     var function: [N + 4 * O]f64 = undefined;
 
-    var cells = stencil_space.cellSpace().fullCells();
+//     var cells = stencil_space.cellSpace().fullCells();
 
-    while (cells.next()) |cell| {
-        const pos = stencil_space.position(cell);
-        stencil_space.cellSpace().setValue(cell, &function, math.sin(pos[0]));
-    }
+//     while (cells.next()) |cell| {
+//         const pos = stencil_space.position(cell);
+//         stencil_space.cellSpace().setValue(cell, &function, math.sin(pos[0]));
+//     }
 
-    // std.debug.print("Lagrange {any}", .{lagrange.valueStencil(f64, 2, [2]f64{ -0.5, 0.5 }, 0.0)});
+//     std.debug.print("Lagrange {any}", .{lagrange.valueStencil(f64, 2, [2]f64{ -0.5, 0.5 }, 0.0)});
 
-    // std.debug.print("Boundary Value at a {}\n", .{
-    //     stencil_space.boundaryValue([1]isize{-1}, [1]isize{0}, &function),
-    // });
+//     std.debug.print("Boundary Value at a {}\n", .{
+//         stencil_space.boundaryValue([1]isize{-1}, [1]isize{0}, &function),
+//     });
 
-    // std.debug.print("Boundary Nuemann at a {}\n", .{
-    //     stencil_space.boundaryDerivative([1]usize{1}, [1]isize{-1}, [1]isize{0}, &function),
-    // });
+//     std.debug.print("Boundary Nuemann at a {}\n", .{
+//         stencil_space.boundaryDerivative([1]usize{1}, [1]isize{-1}, [1]isize{0}, &function),
+//     });
 
-    // std.debug.print("Nuemann Stencil at a {any}\n", .{boundaryDerivativeStencil(1, -1, O)});
-    // std.debug.print("Value Stencil at a {any}\n", .{boundaryDerivativeStencil(0, 2, 1)});
+//     std.debug.print("Nuemann Stencil at a {any}\n", .{boundaryDerivativeStencil(1, -1, O)});
+//     std.debug.print("Value Stencil at a {any}\n", .{boundaryDerivativeStencil(0, -2, O)});
 
-    // std.debug.print("Boundary Nuemann at b {}\n", .{
-    //     stencil_space.boundaryDerivative([1]usize{1}, [1]isize{1}, [1]isize{N - 1}, &function),
-    // });
-}
+//     std.debug.print("Boundary Nuemann at b {}\n", .{
+//         stencil_space.boundaryDerivative([1]usize{1}, [1]isize{1}, [1]isize{N - 1}, &function),
+//     });
+// }

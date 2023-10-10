@@ -1397,3 +1397,7 @@ pub fn DofUtils(comptime N: usize, comptime O: usize) type {
         }
     };
 }
+
+test {
+    _ = boundaries;
+}

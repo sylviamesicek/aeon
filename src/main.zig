@@ -30,7 +30,7 @@ pub fn ScalarFieldProblem(comptime O: usize) type {
         const IndexSpace = geometry.IndexSpace(N);
         const Index = index.Index(N);
 
-        const BiCGStabSolver = lac.BiCGStablSolver(2);
+        const BiCGStabSolver = lac.BiCGStabSolver;
 
         const Mesh = mesh.Mesh(N);
 
@@ -165,7 +165,7 @@ pub fn ScalarFieldProblem(comptime O: usize) type {
 
             // Globally refine three times
 
-            for (0..3) |_| {
+            for (0..1) |_| {
                 var tags = try allocator.alloc(bool, grid.tile_total);
                 defer allocator.free(tags);
 
@@ -214,7 +214,7 @@ pub fn ScalarFieldProblem(comptime O: usize) type {
             var base_solver = try BiCGStabSolver.init(allocator, grid.blocks[0].cell_total, 10000, 10e-10);
             defer base_solver.deinit();
 
-            var solver = MultigridSolver.init(10, 10e-10, &base_solver);
+            var solver = MultigridSolver.init(200, 10e-10, &base_solver);
             defer solver.deinit();
 
             try solver.solve(
@@ -279,8 +279,10 @@ pub fn PoissonEquation(comptime O: usize) type {
             pub const System = Function;
 
             pub fn project(self: RhsProjection, pos: [N]f64) system.SystemValue(Function) {
+                _ = pos;
                 return .{
-                    .func = self.amplitude * std.math.sin(pos[0]) * std.math.sin(pos[1]),
+                    // .func = self.amplitude * std.math.sin(pos[0]) * std.math.sin(pos[1]),
+                    .func = self.amplitude,
                 };
             }
         };
@@ -320,16 +322,16 @@ pub fn PoissonEquation(comptime O: usize) type {
             var grid = try Mesh.init(allocator, .{
                 .physical_bounds = .{
                     .origin = [2]f64{ 0.0, 0.0 },
-                    .size = [2]f64{ std.math.pi, std.math.pi },
+                    .size = [2]f64{ 1.0, 1.0 },
                 },
-                .tile_width = 16,
+                .tile_width = 128,
                 .index_size = [2]usize{ 1, 1 },
             });
             defer grid.deinit();
 
             // Globally refine three times
 
-            for (0..1) |_| {
+            for (0..0) |_| {
                 var tags = try allocator.alloc(bool, grid.tile_total);
                 defer allocator.free(tags);
 
@@ -389,7 +391,7 @@ pub fn PoissonEquation(comptime O: usize) type {
             var base_solver = try BiCGStabSolver.init(allocator, grid.blocks[0].cell_total, 10000, 10e-10);
             defer base_solver.deinit();
 
-            var solver = MultigridSolver.init(5, 10e-10, &base_solver);
+            var solver = MultigridSolver.init(100, 10e-10, &base_solver);
             defer solver.deinit();
 
             try solver.solve(
@@ -452,6 +454,7 @@ pub fn main() !void {
 test {
     _ = basis;
     _ = geometry;
+    _ = dofs;
     _ = mesh;
     _ = vtkio;
     _ = lac;

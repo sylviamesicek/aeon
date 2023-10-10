@@ -176,3 +176,55 @@ pub fn BoundaryUtils(comptime N: usize, comptime O: usize) type {
         }
     };
 }
+
+test "boundary filling" {
+    const TestSystem = enum {
+        func,
+    };
+
+    const Diritchlet = struct {
+        pub const System = TestSystem;
+
+        pub fn boundary(self: @This(), pos: [1]f64, face: Face(1)) SystemBoundaryCondition(System) {
+            _ = face;
+            _ = pos;
+            _ = self;
+            return .{
+                .func = BoundaryCondition.diritchlet(0.0),
+            };
+        }
+    };
+
+    const math = std.math;
+    const allocator = std.testing.allocator;
+
+    const a = 0.0;
+    const b = 2.0 * math.pi;
+
+    const total_cells = 32;
+
+    const stencil_space = basis.StencilSpace(1, 2){
+        .physical_bounds = .{
+            .origin = [1]f64{a},
+            .size = [1]f64{b - a},
+        },
+        .size = [1]usize{total_cells},
+    };
+    const cell_space = stencil_space.cellSpace();
+
+    var func = try system.SystemSlice(TestSystem).init(allocator, cell_space.total());
+    defer func.deinit(allocator);
+
+    var cells = cell_space.cells();
+
+    while (cells.next()) |cell| {
+        const pos = stencil_space.position(cell);
+        cell_space.setValue(cell, func.field(.func), math.sin(pos[0]));
+    }
+
+    BoundaryUtils(1, 2).fillBoundary(4, stencil_space, Diritchlet{}, func);
+
+    const slice = func.field(.func)[0..8];
+
+    std.debug.print("Slice {any}", .{slice.*});
+}
