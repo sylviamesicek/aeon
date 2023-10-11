@@ -335,13 +335,13 @@ pub fn DofUtils(comptime N: usize, comptime O: usize) type {
             const regions = comptime Region.orderedRegions();
 
             inline for (comptime regions[1..]) |region| {
-                var exterior: bool = false;
+                var exterior: bool = true;
 
                 for (0..N) |i| {
-                    if (region.sides[i] == .left and bounds.origin[i] == 0) {
-                        exterior = true;
-                    } else if (region.sides[i] == .right and bounds.origin[i] + bounds.size[i] == index_size[i]) {
-                        exterior = true;
+                    if (region.sides[i] == .left and bounds.origin[i] != 0) {
+                        exterior = false;
+                    } else if (region.sides[i] == .right and bounds.origin[i] + bounds.size[i] != index_size[i]) {
+                        exterior = false;
                     }
                 }
 

@@ -364,6 +364,8 @@ pub fn StencilSpaceWithExtent(comptime N: usize, comptime E: usize, comptime O: 
             comptime var stencils: [N][2 * O + L]f64 = undefined;
             comptime var stencil_lens: [N]usize = undefined;
 
+            // std.debug.print("Computing Boundary Derivative of {any}\n with ranks {any} and extents {any}\n", .{ cell, ranks, extents });
+
             inline for (0..N) |i| {
                 const stencil = comptime boundaryStencil(ranks[i], absSigned(extents[i]), L);
 
@@ -408,8 +410,12 @@ pub fn StencilSpaceWithExtent(comptime N: usize, comptime E: usize, comptime O: 
 
                 const linear = index_space.linearFromCartesian(CSpace.indexFromCell(offset_cell));
 
+                // std.debug.print("Cell: {any}, Coef: {}, Value: {}\n", .{ offset_cell, coef, field[linear] });
+
                 result += coef * field[linear];
             }
+
+            // std.debug.print("Result: {}\n", .{result});
 
             // Covariantly transform result
             inline for (0..N) |i| {

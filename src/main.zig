@@ -390,7 +390,7 @@ pub fn PoissonEquation(comptime O: usize) type {
             var base_solver = try BiCGStabSolver.init(allocator, grid.blocks[0].cell_total, 10000, 10e-10);
             defer base_solver.deinit();
 
-            var solver = MultigridSolver.init(100, 10e-10, &base_solver);
+            var solver = MultigridSolver.init(20, 10e-10, &base_solver);
             defer solver.deinit();
 
             try solver.solve(
@@ -484,7 +484,7 @@ pub fn LetsFindABug(comptime O: usize) type {
                     .origin = [2]f64{ 0.0, 0.0 },
                     .size = [2]f64{ 2.0 * std.math.pi, 2.0 * std.math.pi },
                 },
-                .tile_width = 32,
+                .tile_width = 16,
                 .index_size = [2]usize{ 1, 1 },
             });
             defer grid.deinit();
@@ -564,7 +564,7 @@ pub fn main() !void {
     // Run main
     // try ScalarFieldProblem(2).run(gpa.allocator());
 
-    try PoissonEquation(1).run(gpa.allocator());
+    try PoissonEquation(2).run(gpa.allocator());
 
     // try LetsFindABug(1).run(gpa.allocator());
 }

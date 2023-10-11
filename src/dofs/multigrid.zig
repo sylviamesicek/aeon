@@ -164,7 +164,6 @@ pub fn MultigridSolver(comptime N: usize, comptime O: usize, comptime BaseSolver
                         for (block.cell_offset..block.cell_offset + block.cell_total) |idx| {
                             inline for (comptime std.enums.values(T.System)) |field| {
                                 rhs.field(field)[idx] = b.field(field)[idx] - tau.field(field)[idx];
-                                rhs.field(field)[idx] = b.field(field)[idx];
                             }
                         }
                     }
@@ -461,7 +460,13 @@ pub fn MultigridSolver(comptime N: usize, comptime O: usize, comptime BaseSolver
                 }
 
                 {
-                    const target_id = 0;
+                    const target_id = 1;
+
+                    // DofUtils.copyCellsFromDofs(T.System, mesh, dof_map, target_id, x, sys.toConst());
+
+                    // @memset(sys.slice(dof_map.offset(target_id), dof_map.total(target_id)).field(.func), 0.0);
+
+                    // DofUtils.copyDofsFromCells(T.System, mesh, dof_map, target_id, sys, x.toConst());
 
                     DofUtils.fillBoundaryFull(
                         mesh,
@@ -481,13 +486,6 @@ pub fn MultigridSolver(comptime N: usize, comptime O: usize, comptime BaseSolver
                     });
                     std.debug.print("Extent 2: {}\n", .{
                         stencil_space.boundaryValue([2]isize{ -2, -2 }, 2 * O + 1, [2]isize{ 0, 0 }, field),
-                    });
-
-                    std.debug.print("Extent 1: {}\n", .{
-                        stencil_space.boundaryValue([2]isize{ -1, -1 }, 2 * O + 2, [2]isize{ 0, 0 }, field),
-                    });
-                    std.debug.print("Extent 2: {}\n", .{
-                        stencil_space.boundaryValue([2]isize{ -2, -2 }, 2 * O + 2, [2]isize{ 0, 0 }, field),
                     });
 
                     std.debug.print("Extent Coef 1: {}\n", .{

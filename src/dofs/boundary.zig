@@ -114,6 +114,7 @@ pub fn BoundaryUtils(comptime N: usize, comptime O: usize) type {
                 comptime var extent_indices = region.extentOffsets(E);
 
                 inline while (comptime extent_indices.next()) |extents| {
+
                     // Compute target cell for the given extent indices
                     var target: [N]isize = undefined;
 
@@ -153,6 +154,11 @@ pub fn BoundaryUtils(comptime N: usize, comptime O: usize) type {
                                 rhs += condition.rhs;
                             }
                         }
+
+                        // if (region.adjacency() == 2) {
+                        //     std.debug.print("BOUNDARY ON CORNER\n", .{});
+                        //     std.debug.print("Extent: {any}\n", .{extents});
+                        // }
 
                         var sum: f64 = v * stencil_space.boundaryValue(
                             extents,
