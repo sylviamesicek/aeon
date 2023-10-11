@@ -7,8 +7,6 @@ const system = @import("../system.zig");
 
 const Face = geometry.Face;
 
-const operator = @import("operator.zig");
-
 /// The value of a system at a point.
 pub fn SystemBoundaryCondition(comptime T: type) type {
     return std.enums.EnumFieldStruct(T, BoundaryCondition, null);

@@ -1,3 +1,7 @@
+//! A module for managing and handling degrees of freedom defined on a mesh,
+//! transforming cell bases representations of functions to dof based ones,
+//! filling ghost dofs, restricting, prolonging, smoothing, and applying operators.
+
 // std imports
 const std = @import("std");
 const Allocator = std.mem.Allocator;
@@ -17,32 +21,29 @@ const index = @import("../index.zig");
 const meshes = @import("../mesh/mesh.zig");
 const system = @import("../system.zig");
 
-// submodules
-
-const boundaries = @import("boundary.zig");
-const multigrid = @import("multigrid.zig");
-const operator = @import("operator.zig");
-
-// Public Exports
-
-pub const BoundaryCondition = boundaries.BoundaryCondition;
-pub const SystemBoundaryCondition = boundaries.SystemBoundaryCondition;
-pub const isSystemBoundary = boundaries.isSystemBoundary;
-
-pub const Engine = operator.Engine;
-pub const OperatorEngine = operator.OperatorEngine;
-pub const FunctionEngine = operator.FunctionEngine;
-pub const EngineType = operator.EngineType;
-pub const isMeshFunction = operator.isMeshFunction;
-pub const isMeshOperator = operator.isMeshOperator;
-pub const isMeshProjection = operator.isMeshProjection;
-
-pub const MultigridSolver = multigrid.MultigridSolver;
-
+const Face = geometry.Face;
 const SystemSlice = system.SystemSlice;
 const SystemSliceConst = system.SystemSliceConst;
 
-/// A map from a level and block to a the offset and total dofs.
+// submodules
+
+const boundaries = @import("boundary.zig");
+const engines = @import("engine.zig");
+
+// *********************************
+// Public API **********************
+// *********************************
+
+pub const BoundaryCondition = boundaries.BoundaryCondition;
+pub const BoundaryUtils = boundaries.BoundaryUtils;
+pub const SystemBoundaryCondition = boundaries.SystemBoundaryCondition;
+pub const isSystemBoundary = boundaries.isSystemBoundary;
+
+pub const Engine = engines.Engine;
+
+/// A map from each block to a corresponding dof offset and total. This
+/// is similar to the `cell_offset`/`cell_total` field of a `Block(N)`, but
+/// accounts for up to 4*O additional ghost dofs along each axis.
 pub fn DofMap(comptime N: usize, comptime O: usize) type {
     return struct {
         offsets: []const usize,
@@ -102,8 +103,6 @@ pub fn DofUtils(comptime N: usize, comptime O: usize) type {
         const IndexSpace = geometry.IndexSpace(N);
         const IndexBox = geometry.Box(N, usize);
         const Mesh = meshes.Mesh(N);
-        const BoundaryUtils = boundaries.BoundaryUtils(N, O);
-        const Face = geometry.Face(N);
         const Region = geometry.Region(N);
         const Map = DofMap(N, O);
 
@@ -127,7 +126,7 @@ pub fn DofUtils(comptime N: usize, comptime O: usize) type {
 
                 pub const System = T.System;
 
-                pub fn boundary(self: @This(), pos: [N]f64, face: Face) SystemBoundaryCondition(System) {
+                pub fn boundary(self: @This(), pos: [N]f64, face: Face(N)) SystemBoundaryCondition(System) {
                     return self.oper.boundarySys(pos, face);
                 }
             };
@@ -135,7 +134,7 @@ pub fn DofUtils(comptime N: usize, comptime O: usize) type {
 
         /// Extracts the context boundary conditions from an operator.
         pub fn OperContextBoundary(comptime T: type) type {
-            if (comptime !(operator.isMeshOperator(N, O)(T))) {
+            if (comptime !(isSystemOperator(N, O)(T))) {
                 @compileError("Oper must satisfy isMeshOperator traits.");
             }
 
@@ -144,25 +143,8 @@ pub fn DofUtils(comptime N: usize, comptime O: usize) type {
 
                 pub const System = T.Context;
 
-                pub fn boundary(self: @This(), pos: [N]f64, face: Face) SystemBoundaryCondition(System) {
+                pub fn boundary(self: @This(), pos: [N]f64, face: Face(N)) SystemBoundaryCondition(System) {
                     return self.oper.boundaryCtx(pos, face);
-                }
-            };
-        }
-
-        /// Extracts the boundary conditions from a mesh function.
-        pub fn FuncBoundary(comptime T: type) type {
-            if (comptime !(operator.isMeshFunction(N, O)(T))) {
-                @compileError("Oper must satisfy isMeshFunction traits.");
-            }
-
-            return struct {
-                func: T,
-
-                pub const System = T.Input;
-
-                pub fn boundary(self: @This(), pos: [N]f64, face: Face) SystemBoundaryCondition(System) {
-                    return self.oper.boundary(pos, face);
                 }
             };
         }
@@ -176,12 +158,6 @@ pub fn DofUtils(comptime N: usize, comptime O: usize) type {
         pub fn operContextBoundary(oper: anytype) OperContextBoundary(@TypeOf(oper)) {
             return .{
                 .oper = oper,
-            };
-        }
-
-        pub fn funcBoundary(func: anytype) FuncBoundary(@TypeOf(func)) {
-            return .{
-                .func = func,
             };
         }
 
@@ -353,7 +329,7 @@ pub fn DofUtils(comptime N: usize, comptime O: usize) type {
                         dof_map.total(block),
                     );
 
-                    BoundaryUtils.fillBoundaryRegion(E, region, stencil_space, boundary, block_sys);
+                    BoundaryUtils(N, O).fillBoundaryRegion(E, region, stencil_space, boundary, block_sys);
                 } else {
                     fillInteriorBoundary(T.System, region, E, mesh, block_map, dof_map, block, sys);
                 }
@@ -563,7 +539,7 @@ pub fn DofUtils(comptime N: usize, comptime O: usize) type {
         ) void {
             const T = @TypeOf(oper);
 
-            if (comptime !operator.isMeshOperator(N, O)(T)) {
+            if (comptime !isSystemOperator(N, O)(T)) {
                 @compileError("Oper must satisfy isMeshOperator trait.");
             }
 
@@ -630,14 +606,12 @@ pub fn DofUtils(comptime N: usize, comptime O: usize) type {
 
                     const lin = coarse_index_space.linearFromCartesian(Index.toUnsigned(coarsecell));
 
-                    const engine = operator.EngineType(N, O, T){
-                        .inner = .{
-                            .space = coarse_stencil_space,
-                            .cell = coarsecell,
-                        },
-                        .ctx = coarse_ctx,
-                        .sys = coarse_src,
-                    };
+                    const engine = Engine(N, O, T.System, T.Context).new(
+                        coarse_stencil_space,
+                        coarsecell,
+                        coarse_src,
+                        coarse_ctx,
+                    );
 
                     const app = oper.apply(engine);
 
@@ -852,14 +826,12 @@ pub fn DofUtils(comptime N: usize, comptime O: usize) type {
             var cells = if (full) stencil_space.cellSpace().cellsToExtent(O) else stencil_space.cellSpace().cells();
 
             while (cells.next()) |cell| {
-                const engine = operator.EngineType(N, O, T){
-                    .inner = .{
-                        .space = stencil_space,
-                        .cell = cell,
-                    },
-                    .ctx = ctx,
-                    .sys = src,
-                };
+                const engine = Engine(N, O, T.System, T.Context).new(
+                    stencil_space,
+                    cell,
+                    src,
+                    ctx,
+                );
 
                 const app = oper.apply(engine);
 
@@ -917,8 +889,8 @@ pub fn DofUtils(comptime N: usize, comptime O: usize) type {
             rhs: SystemSliceConst(@TypeOf(oper).System),
         ) void {
             const T = @TypeOf(oper);
-            if (comptime !operator.isMeshOperator(N, O)(T)) {
-                @compileError("Oper must satisfy isMeshOperator trait.");
+            if (comptime !isSystemOperator(N, O)(T)) {
+                @compileError("Oper must satisfy isSystemOperator trait.");
             }
 
             const cell_space = stencil_space.cellSpace();
@@ -927,14 +899,12 @@ pub fn DofUtils(comptime N: usize, comptime O: usize) type {
             var linear: usize = 0;
 
             while (cells.next()) |cell| : (linear += 1) {
-                const engine = EngineType(N, O, T){
-                    .inner = .{
-                        .space = stencil_space,
-                        .cell = cell,
-                    },
-                    .ctx = ctx,
-                    .sys = src,
-                };
+                const engine = Engine(N, O, T.System, T.Context).new(
+                    stencil_space,
+                    cell,
+                    src,
+                    ctx,
+                );
 
                 const app: system.SystemValue(T.System) = oper.apply(engine);
                 const diag: system.SystemValue(T.System) = oper.applyDiagonal(engine);
@@ -992,6 +962,7 @@ pub fn DofUtils(comptime N: usize, comptime O: usize) type {
             ctx: SystemSliceConst(@TypeOf(oper).Context),
             rhs: SystemSliceConst(@TypeOf(oper).System),
         ) system.SystemValue(@TypeOf(oper).System) {
+            const T = @TypeOf(oper);
             assert(rhs.len == mesh.cell_total);
             assert(src.len == dof_map.ndofs());
             assert(ctx.len == dof_map.ndofs());
@@ -1015,14 +986,12 @@ pub fn DofUtils(comptime N: usize, comptime O: usize) type {
             var linear: usize = 0;
 
             while (cells.next()) |cell| : (linear += 1) {
-                const engine = operator.EngineType(N, O, @TypeOf(oper)){
-                    .inner = .{
-                        .space = stencil_space,
-                        .cell = cell,
-                    },
-                    .ctx = block_ctx,
-                    .sys = block_src,
-                };
+                const engine = Engine(N, O, T.System, T.Context).new(
+                    stencil_space,
+                    cell,
+                    block_src,
+                    block_ctx,
+                );
 
                 const app = oper.apply(engine);
 
@@ -1048,7 +1017,7 @@ pub fn DofUtils(comptime N: usize, comptime O: usize) type {
         ) void {
             const T = @TypeOf(projection);
 
-            if (comptime !isMeshProjection(N)(T)) {
+            if (comptime !isSystemProjection(N)(T)) {
                 @compileError("ProjectBase expects projection to satisfy isMeshProjection.");
             }
 
@@ -1396,6 +1365,84 @@ pub fn DofUtils(comptime N: usize, comptime O: usize) type {
             return block_map[coarse_patch.tile_offset + linear];
         }
     };
+}
+
+/// A trait which checks if a type is an operator. Such a type follows the following set of declarations.
+/// ```
+/// const Operator = struct {
+///     pub const Context = enum {
+///         field1,
+///         field2,
+///         // ...
+///     };
+///
+///     pub const System = enum {
+///         result,
+///     };
+///
+///     pub fn apply(self: Operator, engine: OperatorEngine(2, 2, Context, System)) SystemValue(System) {
+///         // ...
+///     }
+///
+///     pub fn applyDiagonal(self: Operator, engine: OperatorEngine(2, 2, Context, System)) SystemValue(System) {
+///         // ...
+///     }
+/// };
+/// ```
+pub fn isSystemOperator(comptime N: usize, comptime O: usize) fn (type) bool {
+    const hasFn = std.meta.trait.hasFn;
+
+    const Closure = struct {
+        fn trait(comptime T: type) bool {
+            if (comptime !(@hasDecl(T, "Context") and @TypeOf(T.Context) == type and system.isSystem(T.Context))) {
+                return false;
+            }
+
+            if (comptime !(@hasDecl(T, "System") and @TypeOf(T.System) == type and system.isSystem(T.System))) {
+                return false;
+            }
+
+            if (comptime !(hasFn("apply")(T) and @TypeOf(T.apply) == fn (T, Engine(N, O, T.System, T.Context)) system.SystemValue(T.System))) {
+                return false;
+            }
+
+            if (comptime !(hasFn("applyDiagonal")(T) and @TypeOf(T.applyDiagonal) == fn (T, Engine(N, O, T.System, T.Context)) system.SystemValue(T.System))) {
+                return false;
+            }
+
+            if (comptime !(hasFn("boundaryCtx")(T) and @TypeOf(T.boundaryCtx) == fn (T, [N]f64, Face(N)) SystemBoundaryCondition(T.Context))) {
+                return false;
+            }
+
+            if (comptime !(hasFn("boundarySys")(T) and @TypeOf(T.boundarySys) == fn (T, [N]f64, Face(N)) SystemBoundaryCondition(T.System))) {
+                return false;
+            }
+
+            return true;
+        }
+    };
+
+    return Closure.trait;
+}
+
+pub fn isSystemProjection(comptime N: usize) fn (type) bool {
+    const hasFn = std.meta.trait.hasFn;
+
+    const Closure = struct {
+        fn trait(comptime T: type) bool {
+            if (comptime !(@hasDecl(T, "System") and @TypeOf(T.System) == type and system.isSystem(T.System))) {
+                return false;
+            }
+
+            if (comptime !(hasFn("project")(T) and @TypeOf(T.project) == fn (T, [N]f64) system.SystemValue(T.System))) {
+                return false;
+            }
+
+            return true;
+        }
+    };
+
+    return Closure.trait;
 }
 
 test {

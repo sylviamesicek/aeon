@@ -2,19 +2,16 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 
 const basis = @import("../basis/basis.zig");
+const dofs = @import("../dofs/dofs.zig");
 const lac = @import("../lac/lac.zig");
 const system = @import("../system.zig");
 const meshes = @import("../mesh/mesh.zig");
 const geometry = @import("../geometry/geometry.zig");
 const index = @import("../index.zig");
 
-const boundary = @import("boundary.zig");
-const dofs = @import("dofs.zig");
-const operator = @import("operator.zig");
-
 /// A multigrid based elliptic solver which uses the given base solver to approximate the solution
 /// on the lowest level of the mesh.
-pub fn MultigridSolver(comptime N: usize, comptime O: usize, comptime BaseSolver: type) type {
+pub fn MultigridMethod(comptime N: usize, comptime O: usize, comptime BaseSolver: type) type {
     if (comptime !lac.isLinearSolver(BaseSolver)) {
         @compileError("Base solver must satisfy the a linear solver requirement.");
     }
@@ -28,7 +25,7 @@ pub fn MultigridSolver(comptime N: usize, comptime O: usize, comptime BaseSolver
         const Mesh = meshes.Mesh(N);
         const DofMap = dofs.DofMap(N, O);
         const DofUtils = dofs.DofUtils(N, O);
-        const BoundaryUtils = boundary.BoundaryUtils(N, O);
+        const BoundaryUtils = dofs.BoundaryUtils(N, O);
         const IndexSpace = geometry.IndexSpace(N);
         const Index = index.Index(N);
         const CellSpace = basis.CellSpace(N, O);
@@ -61,7 +58,7 @@ pub fn MultigridSolver(comptime N: usize, comptime O: usize, comptime BaseSolver
             const T = @TypeOf(oper);
 
             // Check trait constraints
-            if (comptime !(operator.isMeshOperator(N, O)(T))) {
+            if (comptime !(dofs.isSystemOperator(N, O)(T))) {
                 @compileError("Oper must satisfy isMeshOperator traits.");
             }
 
@@ -459,58 +456,58 @@ pub fn MultigridSolver(comptime N: usize, comptime O: usize, comptime BaseSolver
                     // try DofUtils.writeDofsToVtk(DebugOutput, allocator, mesh, level_id, dof_map, debug_output, file.writer());
                 }
 
-                {
-                    const target_id = 1;
+                // {
+                //     const target_id = 1;
 
-                    // DofUtils.copyCellsFromDofs(T.System, mesh, dof_map, target_id, x, sys.toConst());
+                //     // DofUtils.copyCellsFromDofs(T.System, mesh, dof_map, target_id, x, sys.toConst());
 
-                    // @memset(sys.slice(dof_map.offset(target_id), dof_map.total(target_id)).field(.func), 0.0);
+                //     // @memset(sys.slice(dof_map.offset(target_id), dof_map.total(target_id)).field(.func), 0.0);
 
-                    // DofUtils.copyDofsFromCells(T.System, mesh, dof_map, target_id, sys, x.toConst());
+                //     // DofUtils.copyDofsFromCells(T.System, mesh, dof_map, target_id, sys, x.toConst());
 
-                    DofUtils.fillBoundaryFull(
-                        mesh,
-                        block_map,
-                        dof_map,
-                        target_id,
-                        DofUtils.operSystemBoundary(oper),
-                        sys,
-                    );
+                //     DofUtils.fillBoundaryFull(
+                //         mesh,
+                //         block_map,
+                //         dof_map,
+                //         target_id,
+                //         DofUtils.operSystemBoundary(oper),
+                //         sys,
+                //     );
 
-                    const stencil_space = DofUtils.blockStencilSpace(mesh, target_id);
+                //     const stencil_space = DofUtils.blockStencilSpace(mesh, target_id);
 
-                    const field = sys.slice(dof_map.offset(target_id), dof_map.total(target_id)).field(sys_field);
+                //     const field = sys.slice(dof_map.offset(target_id), dof_map.total(target_id)).field(sys_field);
 
-                    std.debug.print("Extent 1: {}\n", .{
-                        stencil_space.boundaryValue([2]isize{ -1, -1 }, 2 * O + 1, [2]isize{ 0, 0 }, field),
-                    });
-                    std.debug.print("Extent 2: {}\n", .{
-                        stencil_space.boundaryValue([2]isize{ -2, -2 }, 2 * O + 1, [2]isize{ 0, 0 }, field),
-                    });
+                //     std.debug.print("Extent 1: {}\n", .{
+                //         stencil_space.boundaryValue([2]isize{ -1, -1 }, 2 * O + 1, [2]isize{ 0, 0 }, field),
+                //     });
+                //     std.debug.print("Extent 2: {}\n", .{
+                //         stencil_space.boundaryValue([2]isize{ -2, -2 }, 2 * O + 1, [2]isize{ 0, 0 }, field),
+                //     });
 
-                    std.debug.print("Extent Coef 1: {}\n", .{
-                        stencil_space.boundaryValueCoef([2]isize{ -1, -1 }, 2 * O + 1),
-                    });
-                    std.debug.print("Extent Coef 2: {}\n", .{
-                        stencil_space.boundaryValueCoef([2]isize{ -2, -2 }, 2 * O + 1),
-                    });
+                //     std.debug.print("Extent Coef 1: {}\n", .{
+                //         stencil_space.boundaryValueCoef([2]isize{ -1, -1 }, 2 * O + 1),
+                //     });
+                //     std.debug.print("Extent Coef 2: {}\n", .{
+                //         stencil_space.boundaryValueCoef([2]isize{ -2, -2 }, 2 * O + 1),
+                //     });
 
-                    const DebugOutput = enum {
-                        sys,
-                    };
+                //     const DebugOutput = enum {
+                //         sys,
+                //     };
 
-                    const file_name = try std.fmt.allocPrint(allocator, "output/multigrid_iteration_{}.vtu", .{iteration});
-                    defer allocator.free(file_name);
+                //     const file_name = try std.fmt.allocPrint(allocator, "output/multigrid_iteration_{}.vtu", .{iteration});
+                //     defer allocator.free(file_name);
 
-                    const file = try std.fs.cwd().createFile(file_name, .{});
-                    defer file.close();
+                //     const file = try std.fs.cwd().createFile(file_name, .{});
+                //     defer file.close();
 
-                    const debug_output = SystemSliceConst(DebugOutput).view(total_dofs, .{
-                        .sys = sys.field(sys_field),
-                    });
+                //     const debug_output = SystemSliceConst(DebugOutput).view(total_dofs, .{
+                //         .sys = sys.field(sys_field),
+                //     });
 
-                    try DofUtils.writeDofsToVtk(DebugOutput, allocator, mesh, target_id, dof_map, debug_output, file.writer());
-                }
+                //     try DofUtils.writeDofsToVtk(DebugOutput, allocator, mesh, target_id, dof_map, debug_output, file.writer());
+                // }
 
                 const res = @field(DofUtils.residualNorm(
                     mesh,
@@ -616,14 +613,12 @@ pub fn MultigridSolver(comptime N: usize, comptime O: usize, comptime BaseSolver
                         var linear: usize = 0;
 
                         while (cells.next()) |cell| : (linear += 1) {
-                            const engine = operator.EngineType(N, O, T){
-                                .inner = .{
-                                    .space = stencil_space,
-                                    .cell = cell,
-                                },
-                                .ctx = ctx.slice(0, base_dofs).toConst(),
-                                .sys = sys.slice(0, base_dofs).toConst(),
-                            };
+                            const engine = dofs.Engine(N, O, T.System, T.Context).new(
+                                stencil_space,
+                                cell,
+                                sys.slice(0, base_dofs).toConst(),
+                                ctx.slice(0, base_dofs).toConst(),
+                            );
 
                             const app = self.oper.apply(engine);
                             output[linear] = @field(app, field_name);
@@ -634,9 +629,7 @@ pub fn MultigridSolver(comptime N: usize, comptime O: usize, comptime BaseSolver
                 // var iterations: usize = 0;
 
                 pub fn callback(_: *const @This(), iteration: usize, residual: f64, _: []const f64) void {
-                    _ = residual;
-                    _ = iteration;
-                    // std.debug.print("Iteration: {}, Residual: {}\n", .{ iteration, residual });
+                    std.debug.print("Iteration: {}, Residual: {}\n", .{ iteration, residual });
 
                     // const file_name = std.fmt.allocPrint(solver.self.mesh.gpa, "output/elliptic_iteration{}.vtu", .{iterations}) catch {
                     //     unreachable;

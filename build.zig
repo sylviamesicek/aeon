@@ -15,47 +15,52 @@ pub fn build(b: *std.Build) void {
     // set a preferred release mode, allowing the user to decide how to optimize.
     const optimize = b.standardOptimizeOption(.{});
 
-    const exe = b.addExecutable(.{
-        .name = "aeon",
-        // In this case the main source file is merely a path, however, in more
-        // complicated build scripts, this could be a generated file.
-        .root_source_file = .{ .path = "src/main.zig" },
-        .target = target,
-        .optimize = optimize,
+    // Builds the aeon module/library
+    const aeon_mod = b.addModule("aeon", .{
+        .source_file = .{ .path = "src/aeon.zig" },
     });
 
-    // This declares intent for the executable to be installed into the
-    // standard location when the user invokes the "install" step (the default
-    // step when running `zig build`).
-    b.installArtifact(exe);
+    // *******************************
+    // Examples **********************
+    // *******************************
 
-    // This *creates* a Run step in the build graph, to be executed when another
-    // step is evaluated that depends on it. The next line below will establish
-    // such a dependency.
-    const run_cmd = b.addRunArtifact(exe);
+    const examples = [_][]const u8{
+        "brill",
+        "poisson",
+    };
 
-    // By making the run step depend on the install step, it will be run from the
-    // installation directory rather than directly from within the cache directory.
-    // This is not necessary, however, if the application depends on other installed
-    // files, this ensures they will be present and in the expected location.
-    run_cmd.step.dependOn(b.getInstallStep());
+    inline for (examples) |example| {
+        const exe = b.addExecutable(.{
+            .name = example,
+            .root_source_file = .{ .path = "examples/" ++ example ++ ".zig" },
+            .target = target,
+            .optimize = optimize,
+        });
+        // Dependent modules
+        exe.addModule("aeon", aeon_mod);
+        // Install artifact
+        b.installArtifact(exe);
 
-    // This allows the user to pass arguments to the application in the build
-    // command itself, like this: `zig build run -- arg1 arg2 etc`
-    if (b.args) |args| {
-        run_cmd.addArgs(args);
+        // Add run command
+        const run_cmd = b.addRunArtifact(exe);
+        run_cmd.step.dependOn(b.getInstallStep());
+
+        if (b.args) |args| {
+            run_cmd.addArgs(args);
+        }
+
+        const run_step = b.step("run-" ++ example, "Run " ++ example);
+        run_step.dependOn(&run_cmd.step);
     }
 
-    // This creates a build step. It will be visible in the `zig build --help` menu,
-    // and can be selected like this: `zig build run`
-    // This will evaluate the `run` step rather than the default, which is "install".
-    const run_step = b.step("run", "Run the app");
-    run_step.dependOn(&run_cmd.step);
+    // *********************************
+    // Unit tests **********************
+    // *********************************
 
     // Creates a step for unit testing. This only builds the test executable
     // but does not run it.
     const unit_tests = b.addTest(.{
-        .root_source_file = .{ .path = "src/main.zig" },
+        .root_source_file = .{ .path = "src/aeon.zig" },
         .target = target,
         .optimize = optimize,
     });
