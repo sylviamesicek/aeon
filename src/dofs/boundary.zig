@@ -149,7 +149,7 @@ pub fn BoundaryUtils(comptime N: usize, comptime O: usize) type {
                                 const condition: BoundaryCondition = @field(conditions[i], @tagName(field));
 
                                 v += condition.value;
-                                normals[i] = if (extents[i] > 0) condition.normal else -condition.normal;
+                                normals[i] = condition.normal;
                                 rhs += condition.rhs;
                             }
                         }
@@ -188,7 +188,7 @@ test "boundary filling" {
     const Diritchlet = struct {
         pub const System = TestSystem;
 
-        pub fn boundary(self: @This(), pos: [1]f64, face: Face(1)) SystemBoundaryCondition(System) {
+        pub fn boundary(self: @This(), pos: [2]f64, face: Face(2)) SystemBoundaryCondition(System) {
             _ = face;
             _ = pos;
             _ = self;
@@ -206,12 +206,12 @@ test "boundary filling" {
 
     const total_cells = 32;
 
-    const stencil_space = basis.StencilSpace(1, 2){
+    const stencil_space = basis.StencilSpace(2, 1){
         .physical_bounds = .{
-            .origin = [1]f64{a},
-            .size = [1]f64{b - a},
+            .origin = [1]f64{a} ** 2,
+            .size = [1]f64{b - a} ** 2,
         },
-        .size = [1]usize{total_cells},
+        .size = [1]usize{total_cells} ** 2,
     };
     const cell_space = stencil_space.cellSpace();
 
@@ -222,12 +222,23 @@ test "boundary filling" {
 
     while (cells.next()) |cell| {
         const pos = stencil_space.position(cell);
-        cell_space.setValue(cell, func.field(.func), math.sin(pos[0]));
+        cell_space.setValue(cell, func.field(.func), math.sin(pos[0]) * math.sin(pos[1]));
     }
 
-    BoundaryUtils(1, 2).fillBoundary(4, stencil_space, Diritchlet{}, func);
+    BoundaryUtils(2, 1).fillBoundary(2, stencil_space, Diritchlet{}, func);
 
-    const slice = func.field(.func)[0..8];
+    // for (0..4) |i| {
+    //     for (0..4) |j| {
+    //         const is: isize = @intCast(i);
+    //         const js: isize = @intCast(j);
 
-    std.debug.print("Slice {any}", .{slice.*});
+    //         const cell = [2]isize{ is - 2, js - 2 };
+    //         std.debug.print("Cell {any}, value {}\n", .{ cell, cell_space.value(cell, func.field(.func)) });
+    //     }
+    // }
+
+    const ext = cell_space.value([2]isize{ -2, -2 }, func.field(.func));
+    const int = cell_space.value([2]isize{ 1, 1 }, func.field(.func));
+
+    std.debug.print("Exterior {} Interior {}", .{ ext, int });
 }

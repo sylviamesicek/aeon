@@ -473,17 +473,29 @@ pub fn MultigridSolver(comptime N: usize, comptime O: usize, comptime BaseSolver
                     );
 
                     const stencil_space = DofUtils.blockStencilSpace(mesh, target_id);
-                    _ = stencil_space;
 
                     const field = sys.slice(dof_map.offset(target_id), dof_map.total(target_id)).field(sys_field);
-                    _ = field;
 
-                    // std.debug.print("Extent 1: {}\n", .{
-                    //     stencil_space.boundaryValue([2]isize{ -1, -1 }, [2]isize{ 0, 0 }, field),
-                    // });
-                    // std.debug.print("Extent 2: {}\n", .{
-                    //     stencil_space.boundaryValue([2]isize{ -2, -2 }, [2]isize{ 0, 0 }, field),
-                    // });
+                    std.debug.print("Extent 1: {}\n", .{
+                        stencil_space.boundaryValue([2]isize{ -1, -1 }, 2 * O + 1, [2]isize{ 0, 0 }, field),
+                    });
+                    std.debug.print("Extent 2: {}\n", .{
+                        stencil_space.boundaryValue([2]isize{ -2, -2 }, 2 * O + 1, [2]isize{ 0, 0 }, field),
+                    });
+
+                    std.debug.print("Extent 1: {}\n", .{
+                        stencil_space.boundaryValue([2]isize{ -1, -1 }, 2 * O + 2, [2]isize{ 0, 0 }, field),
+                    });
+                    std.debug.print("Extent 2: {}\n", .{
+                        stencil_space.boundaryValue([2]isize{ -2, -2 }, 2 * O + 2, [2]isize{ 0, 0 }, field),
+                    });
+
+                    std.debug.print("Extent Coef 1: {}\n", .{
+                        stencil_space.boundaryValueCoef([2]isize{ -1, -1 }, 2 * O + 1),
+                    });
+                    std.debug.print("Extent Coef 2: {}\n", .{
+                        stencil_space.boundaryValueCoef([2]isize{ -2, -2 }, 2 * O + 1),
+                    });
 
                     const DebugOutput = enum {
                         sys,

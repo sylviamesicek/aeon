@@ -398,9 +398,9 @@ pub fn StencilSpaceWithExtent(comptime N: usize, comptime E: usize, comptime O: 
 
                 inline for (0..N) |i| {
                     if (extents[i] > 0) {
-                        offset_cell[i] = cell[i] + stencil_index[i] - L + 1;
+                        offset_cell[i] = @as(isize, @intCast(self.size[i] - 1)) + stencil_index[i] - L + 1;
                     } else if (extents[i] < 0) {
-                        offset_cell[i] = cell[i] + L - 1 - stencil_index[i];
+                        offset_cell[i] = @as(isize, @intCast(L - 1)) - stencil_index[i];
                     } else {
                         offset_cell[i] = cell[i];
                     }
@@ -429,9 +429,11 @@ pub fn StencilSpaceWithExtent(comptime N: usize, comptime E: usize, comptime O: 
             comptime var result: f64 = 1.0;
 
             inline for (0..N) |i| {
-                const stencil = comptime boundaryStencil(ranks[i], absSigned(extents[i]), L);
+                if (extents[i] != 0) {
+                    const stencil = comptime boundaryStencil(ranks[i], absSigned(extents[i]), L);
 
-                result *= stencil[stencil.len - 1];
+                    result *= stencil[stencil.len - 1];
+                }
             }
 
             var scaled_result = result;
@@ -467,6 +469,8 @@ fn absSigned(i: isize) isize {
 }
 
 fn boundaryStencil(comptime R: usize, comptime M: usize, comptime L: usize) [M + L]f64 {
+    @setEvalBranchQuota(10000);
+
     const grid = vertexCenteredGrid(f64, L, M);
 
     return switch (R) {
@@ -536,8 +540,9 @@ test "basis stencils" {
     try expectEqualSlices(f64, &[_]f64{ -0.09375, 0.9375, 0.15625 }, &prolongStencil(true, 1));
     try expectEqualSlices(f64, &[_]f64{ -0.0625, 0.5625, 0.5625, -0.0625 }, &restrictStencil(1));
 
-    // std.debug.print("{any}\n", .{boundaryDerivativeStencil(0, 1, 1)});
-    // std.debug.print("{any}\n", .{boundaryDerivativeStencil(0, 2, 1)});
+    std.debug.print("{any}\n", .{boundaryStencil(0, 1, 1)});
+    std.debug.print("{any}\n", .{boundaryStencil(0, 1, 2)});
+    std.debug.print("{any}\n", .{boundaryStencil(0, 1, 3)});
 }
 
 // test "basis boundary interpolation" {
