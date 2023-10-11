@@ -82,4 +82,7 @@ pub const IdentityMap = struct {
 // Propogate testing ***
 // *********************
 
-test {}
+test {
+    _ = bicgstab;
+    _ = bicgstabl;
+}
