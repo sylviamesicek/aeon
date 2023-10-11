@@ -100,6 +100,8 @@ pub fn BoundaryUtils(comptime N: usize, comptime O: usize) type {
             boundary: anytype,
             sys: system.SystemSlice(@TypeOf(boundary).System),
         ) void {
+            const L = 2 * O + 1;
+
             const T = @TypeOf(boundary);
 
             if (comptime !isSystemBoundary(N)(T)) {
@@ -154,18 +156,19 @@ pub fn BoundaryUtils(comptime N: usize, comptime O: usize) type {
 
                         var sum: f64 = v * stencil_space.boundaryValue(
                             extents,
+                            L,
                             cell,
                             sys.field(field),
                         );
-                        var coef: f64 = v * stencil_space.boundaryValueCoef(extents);
+                        var coef: f64 = v * stencil_space.boundaryValueCoef(extents, L);
 
                         inline for (0..N) |i| {
                             if (extents[i] != 0) {
                                 comptime var ranks: [N]usize = [1]usize{0} ** N;
                                 ranks[i] = 1;
 
-                                sum += normals[i] * stencil_space.boundaryDerivative(ranks, extents, cell, sys.field(field));
-                                coef += normals[i] * stencil_space.boundaryDerivativeCoef(ranks, extents);
+                                sum += normals[i] * stencil_space.boundaryDerivative(ranks, extents, L, cell, sys.field(field));
+                                coef += normals[i] * stencil_space.boundaryDerivativeCoef(ranks, extents, L);
                             }
                         }
 

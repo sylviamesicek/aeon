@@ -350,34 +350,35 @@ pub fn StencilSpaceWithExtent(comptime N: usize, comptime E: usize, comptime O: 
         }
 
         /// Computes the value at a boundary of a field.
-        pub fn boundaryValue(self: Self, comptime extents: [N]isize, cell: [N]isize, field: []const f64) f64 {
-            return self.boundaryDerivative([1]usize{0} ** N, extents, cell, field);
+        pub fn boundaryValue(self: Self, comptime extents: [N]isize, comptime L: usize, cell: [N]isize, field: []const f64) f64 {
+            return self.boundaryDerivative([1]usize{0} ** N, extents, L, cell, field);
         }
 
         /// Computes the outmost coefficient of a boundary stencil.
-        pub fn boundaryValueCoef(self: Self, comptime extents: [N]isize) f64 {
-            return self.boundaryDerivativeCoef([1]usize{0} ** N, extents);
+        pub fn boundaryValueCoef(self: Self, comptime extents: [N]isize, comptime L: usize) f64 {
+            return self.boundaryDerivativeCoef([1]usize{0} ** N, extents, L);
         }
 
         /// Computes the derivative at a bounday of a field.
-        pub fn boundaryDerivative(self: Self, comptime ranks: [N]usize, comptime extents: [N]isize, cell: [N]isize, field: []const f64) f64 {
-            comptime var stencils: [N][4 * O + 1]f64 = undefined;
+        pub fn boundaryDerivative(self: Self, comptime ranks: [N]usize, comptime extents: [N]isize, comptime L: usize, cell: [N]isize, field: []const f64) f64 {
+            comptime var stencils: [N][2 * O + L]f64 = undefined;
+            comptime var stencil_lens: [N]usize = undefined;
 
             inline for (0..N) |i| {
-                stencils[i] = comptime boundaryDerivativeStencil(ranks[i], extents[i], O);
-            }
+                const stencil = comptime boundaryStencil(ranks[i], absSigned(extents[i]), L);
 
-            comptime var stencil_sizes: [N]usize = undefined;
+                inline for (0..stencil.len) |j| {
+                    stencils[i][j] = stencil[j];
+                }
 
-            inline for (0..N) |i| {
                 if (extents[i] == 0) {
-                    stencil_sizes[i] = 1;
+                    stencil_lens[i] = 1;
                 } else {
-                    stencil_sizes[i] = comptime 2 * O + absSigned(extents[i]) + 1;
+                    stencil_lens[i] = stencil.len;
                 }
             }
 
-            const stencil_space: IndexSpace = comptime IndexSpace.fromSize(stencil_sizes);
+            const stencil_space: IndexSpace = comptime IndexSpace.fromSize(stencil_lens);
             const index_space: IndexSpace = CSpace.fromSize(self.size).indexSpace();
 
             var result: f64 = 0.0;
@@ -397,9 +398,9 @@ pub fn StencilSpaceWithExtent(comptime N: usize, comptime E: usize, comptime O: 
 
                 inline for (0..N) |i| {
                     if (extents[i] > 0) {
-                        offset_cell[i] = cell[i] + stencil_index[i] - @as(isize, @intCast(2 * O));
+                        offset_cell[i] = cell[i] + stencil_index[i] - L + 1;
                     } else if (extents[i] < 0) {
-                        offset_cell[i] = cell[i] + stencil_index[i] + extents[i];
+                        offset_cell[i] = cell[i] + L - 1 - stencil_index[i];
                     } else {
                         offset_cell[i] = cell[i];
                     }
@@ -424,21 +425,13 @@ pub fn StencilSpaceWithExtent(comptime N: usize, comptime E: usize, comptime O: 
         }
 
         /// Computes the outmost coefficient of a boundary derivative stencil.
-        pub fn boundaryDerivativeCoef(self: Self, comptime ranks: [N]usize, comptime extents: [N]isize) f64 {
-            comptime var stencils: [N][4 * O + 1]f64 = undefined;
-
-            inline for (0..N) |i| {
-                stencils[i] = comptime boundaryDerivativeStencil(ranks[i], extents[i], O);
-            }
-
+        pub fn boundaryDerivativeCoef(self: Self, comptime ranks: [N]usize, comptime extents: [N]isize, comptime L: usize) f64 {
             comptime var result: f64 = 1.0;
 
             inline for (0..N) |i| {
-                if (extents[i] > 0) {
-                    result *= comptime stencils[i][2 * O + extents[i]];
-                } else if (extents[i] < 0) {
-                    result *= comptime stencils[i][0];
-                }
+                const stencil = comptime boundaryStencil(ranks[i], absSigned(extents[i]), L);
+
+                result *= stencil[stencil.len - 1];
             }
 
             var scaled_result = result;
@@ -473,43 +466,15 @@ fn absSigned(i: isize) isize {
     return if (i < 0) -i else i;
 }
 
-fn boundaryDerivativeStencil(comptime R: usize, comptime extent: isize, comptime O: usize) [4 * O + 1]f64 {
-    @setEvalBranchQuota(10000);
-    if (extent > 2 * O) {
-        @compileError("Extent must be <= 2*O");
-    }
+fn boundaryStencil(comptime R: usize, comptime M: usize, comptime L: usize) [M + L]f64 {
+    const grid = vertexCenteredGrid(f64, L, M);
 
-    var result: [4 * O + 1]f64 = [1]f64{0.0} ** (4 * O + 1);
-
-    if (extent <= 0) {
-        const grid = vertexCenteredGrid(f64, @intCast(-extent), 2 * O + 1);
-
-        const stencil = switch (R) {
-            0 => lagrange.valueStencil(f64, grid.len, grid, 0.0),
-            1 => lagrange.derivativeStencil(f64, grid.len, grid, 0.0),
-            2 => lagrange.secondDerivativeStencil(f64, grid.len, grid, 0.0),
-            else => @compileError("Rank of boundary derivative stencil must be <= 2"),
-        };
-
-        for (stencil, 0..) |s, i| {
-            result[i] = s;
-        }
-    } else if (extent > 0) {
-        const grid = vertexCenteredGrid(f64, 2 * O + 1, @intCast(extent));
-
-        const stencil = switch (R) {
-            0 => lagrange.valueStencil(f64, grid.len, grid, 0.0),
-            1 => lagrange.derivativeStencil(f64, grid.len, grid, 0.0),
-            2 => lagrange.secondDerivativeStencil(f64, grid.len, grid, 0.0),
-            else => @compileError("Rank of boundary derivative stencil must be <= 2"),
-        };
-
-        for (stencil, 0..) |s, i| {
-            result[i] = s;
-        }
-    }
-
-    return result;
+    return switch (R) {
+        0 => lagrange.valueStencil(f64, grid.len, grid, 0.0),
+        1 => lagrange.derivativeStencil(f64, grid.len, grid, 0.0),
+        2 => lagrange.secondDerivativeStencil(f64, grid.len, grid, 0.0),
+        else => @compileError("Boundary stencil only supports R <= 2."),
+    };
 }
 
 fn prolongStencil(comptime side: bool, comptime O: usize) [2 * O + 1]f64 {
