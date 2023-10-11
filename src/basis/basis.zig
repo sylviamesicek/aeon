@@ -2,26 +2,21 @@
 //! building numerical stencils, approximating derivatives, interpolating values,
 //! and extrapolating from boundary conditions.
 
+const grids = @import("grids.zig");
 const lagrange = @import("lagrange.zig");
-const space = @import("space.zig");
+const nodes = @import("nodes.zig");
+const stencils = @import("stencils.zig");
 
 // ***************************
 // Public exports ************
 // ***************************
 
-pub const CellSpaceWithExtent = space.CellSpaceWithExtent;
-
-pub fn CellSpace(comptime N: usize, comptime O: usize) type {
-    return CellSpaceWithExtent(N, 2 * O, O);
-}
-
-pub const StencilSpaceWithExtent = space.StencilSpaceWithExtent;
-
-pub fn StencilSpace(comptime N: usize, comptime O: usize) type {
-    return StencilSpaceWithExtent(N, 2 * O, O);
-}
+pub const CellSpace = nodes.NodeSpace;
+pub const StencilSpace = stencils.StencilSpace;
 
 test {
+    _ = grids;
     _ = lagrange;
-    _ = space;
+    _ = nodes;
+    _ = stencils;
 }

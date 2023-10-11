@@ -9,7 +9,6 @@ const index = aeon.index;
 const lac = aeon.lac;
 const mesh = aeon.mesh;
 const methods = aeon.methods;
-const system = aeon.system;
 
 // ***********************
 // Temp Main Code ********
@@ -22,9 +21,9 @@ pub fn BrillInitialData(comptime O: usize) type {
         const DofMap = dofs.DofMap(N, O);
         const DofUtils = dofs.DofUtils(N, O);
         const MultigridMethod = methods.MultigridMethod(N, O, BiCGStabSolver);
-        const SystemSlice = system.SystemSlice;
-        const SystemSliceConst = system.SystemSliceConst;
-        const SystemValue = system.SystemValue;
+        const SystemSlice = aeon.SystemSlice;
+        const SystemSliceConst = aeon.SystemSliceConst;
+        const SystemValue = aeon.SystemValue;
         const SystemBoundaryCondition = dofs.SystemBoundaryCondition;
 
         const Face = geometry.Face(N);
@@ -80,7 +79,7 @@ pub fn BrillInitialData(comptime O: usize) type {
                 const z2 = z * z;
                 const sigma2 = self.sigma * self.sigma;
 
-                const term1: f64 = 2 * self.amplitude;
+                const term1: f64 = 0.5 * self.amplitude;
                 const term2 = 2 * rho2 * rho2 - 6 * rho2 * sigma2 + sigma2 * sigma2 + 2 * rho2 * z2;
                 const term3 = @exp(-(rho2 + z2) / sigma2) / (sigma2 * sigma2 * sigma2);
 
@@ -155,7 +154,7 @@ pub fn BrillInitialData(comptime O: usize) type {
                     .origin = [2]f64{ 0.0, 0.0 },
                     .size = [2]f64{ 10.0, 10.0 },
                 },
-                .tile_width = 1024,
+                .tile_width = 256,
                 .index_size = [2]usize{ 1, 1 },
             });
             defer grid.deinit();
@@ -191,7 +190,7 @@ pub fn BrillInitialData(comptime O: usize) type {
 
             const oper = MetricOperator{};
 
-            var base_solver = try BiCGStabSolver.init(allocator, grid.blocks[0].cell_total, 1000000, 10e-10);
+            var base_solver = try BiCGStabSolver.init(allocator, grid.blocks[0].cell_total, 1000000, 10e-12);
             defer base_solver.deinit();
 
             var solver = MultigridMethod.init(1, 10e-10, &base_solver);

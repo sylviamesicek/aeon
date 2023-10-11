@@ -584,13 +584,13 @@ pub fn MultigridMethod(comptime N: usize, comptime O: usize, comptime BaseSolver
 
                     // Aliases
                     const stencil_space = DofUtils.blockStencilSpace(self.mesh, 0);
-                    const cell_space = stencil_space.cellSpace();
+                    const cell_space = stencil_space.nodeSpace();
 
                     const base_dofs = cell_space.total();
 
                     // Fill base boundary and inner
                     {
-                        var cells = cell_space.cells();
+                        var cells = cell_space.nodes();
                         var linear: usize = 0;
 
                         while (cells.next()) |cell| : (linear += 1) {
@@ -609,7 +609,7 @@ pub fn MultigridMethod(comptime N: usize, comptime O: usize, comptime BaseSolver
 
                     // Apply operator and store in output.
                     {
-                        var cells = stencil_space.cellSpace().cells();
+                        var cells = stencil_space.nodeSpace().nodes();
                         var linear: usize = 0;
 
                         while (cells.next()) |cell| : (linear += 1) {

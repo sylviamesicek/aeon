@@ -1,11 +1,11 @@
 const std = @import("std");
 
 /// Computes the interpolation stencil given a grid and a point.
-pub fn valueStencil(comptime T: type, comptime L: usize, grid: [L]T, point: T) [L]T {
-    var stencil: [L]T = undefined;
+pub fn valueStencil(comptime L: usize, grid: [L]f64, point: f64) [L]f64 {
+    var stencil: [L]f64 = undefined;
 
     for (0..L) |i| {
-        stencil[i] = @as(T, 1);
+        stencil[i] = 1.0;
 
         for (0..L) |j| {
             if (i != j) {
@@ -18,15 +18,15 @@ pub fn valueStencil(comptime T: type, comptime L: usize, grid: [L]T, point: T) [
 }
 
 /// Computes the derivative stencil given a grid and a point.
-pub fn derivativeStencil(comptime T: type, comptime L: usize, grid: [L]T, point: T) [L]T {
-    var stencil: [L]T = undefined;
+pub fn derivativeStencil(comptime L: usize, grid: [L]f64, point: f64) [L]f64 {
+    var stencil: [L]f64 = undefined;
 
     for (0..L) |i| {
-        stencil[i] = @as(T, 0);
+        stencil[i] = 0.0;
 
         for (0..L) |j| {
             if (i != j) {
-                var result = @as(T, 1);
+                var result: f64 = 1.0;
 
                 for (0..L) |k| {
                     if (i != k and j != k) {
@@ -43,19 +43,19 @@ pub fn derivativeStencil(comptime T: type, comptime L: usize, grid: [L]T, point:
 }
 
 /// Computes the second derivative stencil given a grid and a point.
-pub fn secondDerivativeStencil(comptime T: type, comptime L: usize, grid: [L]T, point: T) [L]T {
-    var stencil: [L]T = undefined;
+pub fn secondDerivativeStencil(comptime L: usize, grid: [L]f64, point: f64) [L]f64 {
+    var stencil: [L]f64 = undefined;
 
     for (0..L) |i| {
-        stencil[i] = @as(T, 0);
+        stencil[i] = 0.0;
 
         for (0..L) |j| {
             if (i != j) {
-                var result1 = @as(T, 0);
+                var result1: f64 = 0.0;
 
                 for (0..L) |k| {
                     if (k != i and k != j) {
-                        var result2 = @as(T, 1);
+                        var result2: f64 = 1.0;
 
                         for (0..L) |l| {
                             if (l != i and l != j and l != k) {
@@ -74,3 +74,11 @@ pub fn secondDerivativeStencil(comptime T: type, comptime L: usize, grid: [L]T, 
 
     return stencil;
 }
+
+// test "lagrange stencils" {
+//     const expectEqualSlices = std.testing.expectEqualSlices;
+
+//     const grid = [_]f64{ -0.5, 0.5 };
+
+//     try expectEqualSlices(f64, &[_]f64{ 0.5, 0.5 }, &valueStencil(grid.len, grid, 0.0));
+// }

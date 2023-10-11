@@ -1,3 +1,5 @@
+//! Handles elliptic equation solving and hyperbolic intergration.
+
 const std = @import("std");
 const system = @import("../system.zig");
 

@@ -182,7 +182,7 @@ pub fn DofUtils(comptime N: usize, comptime O: usize) type {
 
             const cell_space = CellSpace.fromSize(blockCellSize(mesh, block));
 
-            var cells = cell_space.cells();
+            var cells = cell_space.nodes();
             var linear: usize = 0;
 
             while (cells.next()) |cell| : (linear += 1) {
@@ -209,7 +209,7 @@ pub fn DofUtils(comptime N: usize, comptime O: usize) type {
 
             const cell_space = CellSpace.fromSize(blockCellSize(mesh, block));
 
-            var cells = cell_space.cells();
+            var cells = cell_space.nodes();
             var linear: usize = 0;
 
             while (cells.next()) |cell| : (linear += 1) {
@@ -823,7 +823,7 @@ pub fn DofUtils(comptime N: usize, comptime O: usize) type {
         ) void {
             const T = @TypeOf(oper);
 
-            var cells = if (full) stencil_space.cellSpace().cellsToExtent(O) else stencil_space.cellSpace().cells();
+            var cells = if (full) stencil_space.nodeSpace().nodesToExtent(O) else stencil_space.nodeSpace().nodes();
 
             while (cells.next()) |cell| {
                 const engine = Engine(N, O, T.System, T.Context).new(
@@ -837,7 +837,7 @@ pub fn DofUtils(comptime N: usize, comptime O: usize) type {
 
                 inline for (comptime std.enums.values(@TypeOf(oper).System)) |field| {
                     const a_val = @field(app, @tagName(field));
-                    stencil_space.cellSpace().setValue(cell, dest.field(field), a_val);
+                    stencil_space.nodeSpace().setValue(cell, dest.field(field), a_val);
                 }
             }
         }
@@ -893,9 +893,9 @@ pub fn DofUtils(comptime N: usize, comptime O: usize) type {
                 @compileError("Oper must satisfy isSystemOperator trait.");
             }
 
-            const cell_space = stencil_space.cellSpace();
+            const cell_space = stencil_space.nodeSpace();
 
-            var cells = cell_space.cells();
+            var cells = cell_space.nodes();
             var linear: usize = 0;
 
             while (cells.next()) |cell| : (linear += 1) {
@@ -982,7 +982,7 @@ pub fn DofUtils(comptime N: usize, comptime O: usize) type {
             const block_ctx = ctx.slice(cell_offset, cell_total);
             const block_rhs = rhs.slice(block.cell_offset, block.cell_total);
 
-            var cells = stencil_space.cellSpace().cells();
+            var cells = stencil_space.nodeSpace().nodes();
             var linear: usize = 0;
 
             while (cells.next()) |cell| : (linear += 1) {
@@ -1025,11 +1025,11 @@ pub fn DofUtils(comptime N: usize, comptime O: usize) type {
                 const block = mesh.blocks[block_id];
 
                 const stencil_space = blockStencilSpace(mesh, block_id);
-                const cell_space = stencil_space.cellSpace();
+                const cell_space = stencil_space.nodeSpace();
 
                 const block_dest = sys.slice(block.cell_offset, block.cell_total);
 
-                var cells = cell_space.cells();
+                var cells = cell_space.nodes();
                 var linear: usize = 0;
 
                 while (cells.next()) |cell| : (linear += 1) {
@@ -1415,6 +1415,26 @@ pub fn isSystemOperator(comptime N: usize, comptime O: usize) fn (type) bool {
             }
 
             if (comptime !(hasFn("boundarySys")(T) and @TypeOf(T.boundarySys) == fn (T, [N]f64, Face(N)) SystemBoundaryCondition(T.System))) {
+                return false;
+            }
+
+            return true;
+        }
+    };
+
+    return Closure.trait;
+}
+
+pub fn hasSystemOperatorCallback(comptime N: usize, comptime O: usize) bool {
+    const Closure = struct {
+        fn trait(comptime T: type) bool {
+            if (!isSystemOperator(N, O)(T)) {
+                return false;
+            }
+
+            const hasFn = std.meta.trait.hasFn;
+
+            if (!(hasFn("callback")(T) and @TypeOf(T.callback) == fn (*const T, usize, f64, SystemSliceConst(T.System)) void)) {
                 return false;
             }
 

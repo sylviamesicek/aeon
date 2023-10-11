@@ -5,11 +5,9 @@ const Allocator = std.mem.Allocator;
 const aeon = @import("aeon");
 const dofs = aeon.dofs;
 const geometry = aeon.geometry;
-const index = aeon.index;
 const lac = aeon.lac;
 const mesh = aeon.mesh;
 const methods = aeon.methods;
-const system = aeon.system;
 
 pub fn PoissonEquation(comptime O: usize) type {
     const N = 2;
@@ -18,12 +16,13 @@ pub fn PoissonEquation(comptime O: usize) type {
         const DofMap = dofs.DofMap(N, O);
         const DofUtils = dofs.DofUtils(N, O);
         const MultigridMethod = methods.MultigridMethod(N, O, BiCGStabSolver);
-        const SystemSlice = system.SystemSlice;
-        const SystemSliceConst = system.SystemSliceConst;
+        const SystemSlice = aeon.SystemSlice;
+        const SystemSliceConst = aeon.SystemSliceConst;
+        const SystemValue = aeon.SystemValue;
 
         const Face = geometry.Face(N);
         const IndexSpace = geometry.IndexSpace(N);
-        const Index = index.Index(N);
+        const Index = aeon.Index(N);
 
         const BiCGStabSolver = lac.BiCGStabSolver;
 
@@ -41,7 +40,7 @@ pub fn PoissonEquation(comptime O: usize) type {
 
             pub const System = Function;
 
-            pub fn project(self: RhsProjection, pos: [N]f64) system.SystemValue(Function) {
+            pub fn project(self: RhsProjection, pos: [N]f64) SystemValue(Function) {
                 return .{
                     .func = self.amplitude * std.math.sin(pos[0]) * std.math.sin(pos[1]),
                     // .func = self.amplitude,
@@ -53,13 +52,13 @@ pub fn PoissonEquation(comptime O: usize) type {
             pub const Context = Empty;
             pub const System = Function;
 
-            pub fn apply(_: PoissonOperator, engine: dofs.Engine(N, O, System, Context)) system.SystemValue(System) {
+            pub fn apply(_: PoissonOperator, engine: dofs.Engine(N, O, System, Context)) aeon.SystemValue(System) {
                 return .{
                     .func = -engine.laplacianSys(.func),
                 };
             }
 
-            pub fn applyDiagonal(_: PoissonOperator, engine: dofs.Engine(N, O, System, Context)) system.SystemValue(System) {
+            pub fn applyDiagonal(_: PoissonOperator, engine: dofs.Engine(N, O, System, Context)) aeon.SystemValue(System) {
                 return .{
                     .func = -engine.laplacianDiagonal(),
                 };

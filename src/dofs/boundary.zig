@@ -137,7 +137,7 @@ pub fn BoundaryUtils(comptime N: usize, comptime O: usize) type {
 
                     inline for (comptime std.enums.values(T.System)) |field| {
                         // Set the fields of the system to be zero at the target.
-                        stencil_space.cellSpace().setValue(target, sys.field(field), 0.0);
+                        stencil_space.nodeSpace().setValue(target, sys.field(field), 0.0);
 
                         var v: f64 = 0.0;
                         var normals: [N]f64 = [1]f64{0.0} ** N;
@@ -176,7 +176,7 @@ pub fn BoundaryUtils(comptime N: usize, comptime O: usize) type {
                             }
                         }
 
-                        stencil_space.cellSpace().setValue(target, sys.field(field), (rhs - sum) / coef);
+                        stencil_space.nodeSpace().setValue(target, sys.field(field), (rhs - sum) / coef);
                     }
                 }
             }
@@ -217,12 +217,12 @@ test "boundary filling" {
         },
         .size = [1]usize{total_cells} ** 2,
     };
-    const cell_space = stencil_space.cellSpace();
+    const cell_space = stencil_space.nodeSpace();
 
     var func = try system.SystemSlice(TestSystem).init(allocator, cell_space.total());
     defer func.deinit(allocator);
 
-    var cells = cell_space.cells();
+    var cells = cell_space.nodes();
 
     while (cells.next()) |cell| {
         const pos = stencil_space.position(cell);
@@ -242,7 +242,9 @@ test "boundary filling" {
     // }
 
     const ext = cell_space.value([2]isize{ -2, -2 }, func.field(.func));
+    _ = ext;
     const int = cell_space.value([2]isize{ 1, 1 }, func.field(.func));
+    _ = int;
 
-    std.debug.print("Exterior {} Interior {}", .{ ext, int });
+    // std.debug.print("Exterior {} Interior {}", .{ ext, int });
 }
