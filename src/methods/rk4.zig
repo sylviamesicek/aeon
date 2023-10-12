@@ -8,6 +8,7 @@ const methods = @import("methods.zig");
 pub fn RungeKutta4Integrator(comptime System: type) type {
     return struct {
         allocator: Allocator,
+        sys: SystemSlice,
         scratch: SystemSlice,
         k1: SystemSlice,
         k2: SystemSlice,
@@ -20,6 +21,9 @@ pub fn RungeKutta4Integrator(comptime System: type) type {
         const SystemSliceConst = system.SystemSliceConst(System);
 
         pub fn init(allocator: Allocator, ndofs: usize) !Self {
+            var sys = try SystemSlice.init(allocator, ndofs);
+            errdefer sys.deinit(allocator);
+
             var scratch = try SystemSlice.init(allocator, ndofs);
             errdefer scratch.deinit(allocator);
 
@@ -37,6 +41,7 @@ pub fn RungeKutta4Integrator(comptime System: type) type {
 
             return .{
                 .allocator = allocator,
+                .sys = sys,
                 .scratch = scratch,
                 .k1 = k1,
                 .k2 = k2,
@@ -53,17 +58,17 @@ pub fn RungeKutta4Integrator(comptime System: type) type {
             self.k4.deinit(self.allocator);
         }
 
-        pub fn step(self: *Self, sys: SystemSlice, deriv: anytype, h: f64) void {
+        pub fn step(self: *Self, deriv: anytype, h: f64) void {
             if (comptime !(methods.isSystemDerivative(@TypeOf(deriv)) and @TypeOf(deriv).System == System)) {
                 @compileError("Derivative type must satisfy isMeshDerivative trait.");
             }
 
             // Calculate k1
-            deriv.derivative(self.k1, sys.toConst(), self.time);
+            deriv.derivative(self.k1, self.sys.toConst(), self.time);
             // Calculate k2
             inline for (comptime std.enums.values(System)) |field| {
                 for (0..self.sys.len) |idx| {
-                    self.scratch.field(field)[idx] = sys.field(field)[idx] + h / 2.0 * self.k1.field(field)[idx];
+                    self.scratch.field(field)[idx] = self.sys.field(field)[idx] + h / 2.0 * self.k1.field(field)[idx];
                 }
             }
 
@@ -71,7 +76,7 @@ pub fn RungeKutta4Integrator(comptime System: type) type {
             // Calculate k3
             inline for (comptime std.enums.values(System)) |field| {
                 for (0..self.sys.len) |idx| {
-                    self.scratch.field(field)[idx] = sys.field(field)[idx] + h / 2.0 * self.k2.field(field)[idx];
+                    self.scratch.field(field)[idx] = self.sys.field(field)[idx] + h / 2.0 * self.k2.field(field)[idx];
                 }
             }
 
@@ -79,7 +84,7 @@ pub fn RungeKutta4Integrator(comptime System: type) type {
             // Calculate k4
             inline for (comptime std.enums.values(System)) |field| {
                 for (0..self.sys.len) |idx| {
-                    self.scratch.field(field)[idx] = sys.field(field)[idx] + h * self.k3.field(field)[idx];
+                    self.scratch.field(field)[idx] = self.sys.field(field)[idx] + h * self.k3.field(field)[idx];
                 }
             }
 
@@ -88,7 +93,7 @@ pub fn RungeKutta4Integrator(comptime System: type) type {
             // Update sys
             inline for (comptime std.enums.values(System)) |field| {
                 for (0..self.sys.len) |idx| {
-                    sys.field(field)[idx] += h / 6.0 * (self.k1.field(field)[idx] + 2.0 * self.k2.field(field)[idx] + 2.0 * self.k3.field(field)[idx] + self.k4.field(field)[idx]);
+                    self.sys.field(field)[idx] += h / 6.0 * (self.k1.field(field)[idx] + 2.0 * self.k2.field(field)[idx] + 2.0 * self.k3.field(field)[idx] + self.k4.field(field)[idx]);
                 }
             }
 

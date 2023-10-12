@@ -51,7 +51,7 @@ pub fn DofMap(comptime N: usize, comptime O: usize) type {
         const Self = @This();
         const Mesh = meshes.Mesh(N);
         const Index = index.Index(N);
-        const CellSpace = basis.CellSpace(N, O);
+        const CellSpace = basis.NodeSpace(N, O);
 
         pub fn init(allocator: Allocator, mesh: *const Mesh) !Self {
             const offsets = try allocator.alloc(usize, mesh.blocks.len + 1);
@@ -97,7 +97,7 @@ pub fn DofMap(comptime N: usize, comptime O: usize) type {
 /// local windows. All functions which take in stencil spaces act on windows only.
 pub fn DofUtils(comptime N: usize, comptime O: usize) type {
     return struct {
-        const CellSpace = basis.CellSpace(N, O);
+        const CellSpace = basis.NodeSpace(N, O);
         const StencilSpace = basis.StencilSpace(N, O);
         const Index = index.Index(N);
         const IndexSpace = geometry.IndexSpace(N);

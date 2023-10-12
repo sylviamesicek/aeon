@@ -192,3 +192,56 @@ fn restrictStencil(comptime O: usize) [2 * O + 2]f64 {
     const vgrid = grids.vertexCenteredGrid(f64, O + 1, O + 1);
     return lagrange.valueStencil(2 * O + 2, vgrid, 0.0);
 }
+
+test "node iteration" {
+    const expectEqualSlices = std.testing.expectEqualSlices;
+
+    const node_space = NodeSpace(2, 2).fromSize([_]usize{ 1, 2 });
+
+    const expected = [_][2]isize{
+        [2]isize{ -2, -2 },
+        [2]isize{ -2, -1 },
+        [2]isize{ -2, 0 },
+        [2]isize{ -2, 1 },
+        [2]isize{ -2, 2 },
+        [2]isize{ -2, 3 },
+        [2]isize{ -1, -2 },
+        [2]isize{ -1, -1 },
+        [2]isize{ -1, 0 },
+        [2]isize{ -1, 1 },
+        [2]isize{ -1, 2 },
+        [2]isize{ -1, 3 },
+        [2]isize{ 0, -2 },
+        [2]isize{ 0, -1 },
+        [2]isize{ 0, 0 },
+        [2]isize{ 0, 1 },
+        [2]isize{ 0, 2 },
+        [2]isize{ 0, 3 },
+        [2]isize{ 1, -2 },
+        [2]isize{ 1, -1 },
+        [2]isize{ 1, 0 },
+        [2]isize{ 1, 1 },
+        [2]isize{ 1, 2 },
+        [2]isize{ 1, 3 },
+        [2]isize{ 2, -2 },
+        [2]isize{ 2, -1 },
+        [2]isize{ 2, 0 },
+        [2]isize{ 2, 1 },
+        [2]isize{ 2, 2 },
+        [2]isize{ 2, 3 },
+    };
+
+    var nodes = node_space.nodesToExtent(2);
+    var index: usize = 0;
+
+    while (nodes.next()) |node| : (index += 1) {
+        try expectEqualSlices(isize, &node, &expected[index]);
+    }
+}
+
+test "interpolation stencils" {
+    const expectEqualSlices = std.testing.expectEqualSlices;
+
+    try expectEqualSlices(f64, &[_]f64{ 0.5, 0.5 }, &restrictStencil(0));
+    try expectEqualSlices(f64, &[_]f64{ -1.0 / 16.0, 9.0 / 16.0, 9.0 / 16.0, -1.0 / 16.0 }, &restrictStencil(1));
+}

@@ -11,7 +11,7 @@ const stencils = @import("stencils.zig");
 // Public exports ************
 // ***************************
 
-pub const CellSpace = nodes.NodeSpace;
+pub const NodeSpace = nodes.NodeSpace;
 pub const StencilSpace = stencils.StencilSpace;
 
 test {

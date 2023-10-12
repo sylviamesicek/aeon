@@ -3,9 +3,11 @@
 const std = @import("std");
 const system = @import("../system.zig");
 
+const linear = @import("linear.zig");
 const multigrid = @import("multigrid.zig");
 const rk4 = @import("rk4.zig");
 
+pub const LinearMapMethod = linear.LinearMapMethod;
 pub const MultigridMethod = multigrid.MultigridMethod;
 pub const RungeKutta4Integrator = rk4.RungeKutta4Integrator;
 

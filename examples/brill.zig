@@ -20,7 +20,7 @@ pub fn BrillInitialData(comptime O: usize) type {
         const BoundaryCondition = dofs.BoundaryCondition;
         const DofMap = dofs.DofMap(N, O);
         const DofUtils = dofs.DofUtils(N, O);
-        const MultigridMethod = methods.MultigridMethod(N, O, BiCGStabSolver);
+        const LinearMapMethod = methods.LinearMapMethod(N, O, BiCGStabSolver);
         const SystemSlice = aeon.SystemSlice;
         const SystemSliceConst = aeon.SystemSliceConst;
         const SystemValue = aeon.SystemValue;
@@ -42,7 +42,6 @@ pub fn BrillInitialData(comptime O: usize) type {
             factor,
         };
 
-        // Seed Function
         pub const SeedProjection = struct {
             amplitude: f64,
             sigma: f64,
@@ -50,28 +49,6 @@ pub fn BrillInitialData(comptime O: usize) type {
             pub const System = Seed;
 
             pub fn project(self: SeedProjection, pos: [N]f64) SystemValue(System) {
-                const rho = pos[0];
-                const z = pos[1];
-
-                const rho2 = rho * rho;
-                const z2 = z * z;
-                const sigma2 = self.sigma * self.sigma;
-
-                const val = self.amplitude * rho2 / sigma2 * @exp(-(rho2 + z2) / sigma2);
-
-                return .{
-                    .seed = val,
-                };
-            }
-        };
-
-        pub const SeedLaplacianProjection = struct {
-            amplitude: f64,
-            sigma: f64,
-
-            pub const System = Seed;
-
-            pub fn project(self: SeedLaplacianProjection, pos: [N]f64) SystemValue(System) {
                 const rho = pos[0];
                 const z = pos[1];
 
@@ -154,7 +131,7 @@ pub fn BrillInitialData(comptime O: usize) type {
                     .origin = [2]f64{ 0.0, 0.0 },
                     .size = [2]f64{ 10.0, 10.0 },
                 },
-                .tile_width = 256,
+                .tile_width = 128,
                 .index_size = [2]usize{ 1, 1 },
             });
             defer grid.deinit();
@@ -176,7 +153,7 @@ pub fn BrillInitialData(comptime O: usize) type {
             var seed = try SystemSlice(Seed).init(allocator, grid.cell_total);
             defer seed.deinit(allocator);
 
-            const seed_proj: SeedLaplacianProjection = .{
+            const seed_proj: SeedProjection = .{
                 .amplitude = 1.0,
                 .sigma = 1.0,
             };
@@ -190,11 +167,7 @@ pub fn BrillInitialData(comptime O: usize) type {
 
             const oper = MetricOperator{};
 
-            var base_solver = try BiCGStabSolver.init(allocator, grid.blocks[0].cell_total, 1000000, 10e-12);
-            defer base_solver.deinit();
-
-            var solver = MultigridMethod.init(1, 10e-10, &base_solver);
-            defer solver.deinit();
+            var solver = LinearMapMethod.new(BiCGStabSolver.new(1000000, 10e-12));
 
             try solver.solve(
                 allocator,

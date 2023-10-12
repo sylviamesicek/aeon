@@ -27,7 +27,7 @@ pub fn IndexSpace(comptime N: usize) type {
             var linear: usize = 0;
 
             for (0..N) |i| {
-                // Iterate in reverse order (as last index is most significant).
+                // Iterate in reverse order (as last index is least significant).
                 const axis = N - 1 - i;
 
                 linear += stride * cartesian[axis];

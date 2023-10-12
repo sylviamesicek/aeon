@@ -74,11 +74,3 @@ pub fn secondDerivativeStencil(comptime L: usize, grid: [L]f64, point: f64) [L]f
 
     return stencil;
 }
-
-// test "lagrange stencils" {
-//     const expectEqualSlices = std.testing.expectEqualSlices;
-
-//     const grid = [_]f64{ -0.5, 0.5 };
-
-//     try expectEqualSlices(f64, &[_]f64{ 0.5, 0.5 }, &valueStencil(grid.len, grid, 0.0));
-// }

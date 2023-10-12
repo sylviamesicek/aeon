@@ -1,17 +1,18 @@
 //! A module for various linear algebra classes, utilities, and solvers.
 
 const std = @import("std");
+const Allocator = std.mem.Allocator;
 
 // Submodules
 const bicgstab = @import("bicgstab.zig");
-const bicgstabl = @import("bicgstabl.zig");
+// const bicgstabl = @import("bicgstabl.zig");
 
 // ************************
 // Linear Solvers *********
 // ************************
 
 pub const BiCGStabSolver = bicgstab.BiCGStabSolver;
-pub const BiCGStablSolver = bicgstabl.BiCGStablSolver;
+// pub const BiCGStablSolver = bicgstabl.BiCGStablSolver;
 
 // ************************
 // Core traits and types **
@@ -63,7 +64,11 @@ pub fn hasLinearMapCallback(comptime T: type) bool {
 pub fn isLinearSolver(comptime T: type) bool {
     const hasFn = std.meta.trait.hasFn;
 
-    if (!(hasFn("solve")(T) and @TypeOf(T.solve) == fn (*const T, anytype, []f64, []const f64) void)) {
+    if (!(@hasDecl(T, "Error") and @TypeOf(T.Error) == type)) {
+        return false;
+    }
+
+    if (!(hasFn("solve")(T) and @TypeOf(T.solve) == fn (*const T, Allocator, anytype, []f64, []const f64) T.Error!void)) {
         return false;
     }
 
@@ -84,5 +89,4 @@ pub const IdentityMap = struct {
 
 test {
     _ = bicgstab;
-    _ = bicgstabl;
 }

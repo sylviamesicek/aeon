@@ -308,3 +308,11 @@ fn boundaryStencil(comptime R: usize, comptime M: usize, comptime L: usize) [M +
         else => @compileError("Boundary stencil only supports R <= 2."),
     };
 }
+
+test "derivative stencils" {
+    const expectEqualSlices = std.testing.expectEqualSlices;
+
+    try expectEqualSlices(f64, &[_]f64{ 0.0, 1.0, 0.0 }, &derivativeStencil(0, 1));
+    try expectEqualSlices(f64, &[_]f64{ -0.5, 0.0, 0.5 }, &derivativeStencil(1, 1));
+    try expectEqualSlices(f64, &[_]f64{ 1.0, -2.0, 1.0 }, &derivativeStencil(2, 1));
+}

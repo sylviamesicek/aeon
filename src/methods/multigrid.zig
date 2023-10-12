@@ -1,5 +1,6 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
+const ArenaAllocator = std.heap.ArenaAllocator;
 
 const basis = @import("../basis/basis.zig");
 const dofs = @import("../dofs/dofs.zig");
@@ -17,7 +18,7 @@ pub fn MultigridMethod(comptime N: usize, comptime O: usize, comptime BaseSolver
     }
 
     return struct {
-        base_solver: *const BaseSolver,
+        base_solver: BaseSolver,
         max_iters: usize,
         tolerance: f64,
 
@@ -28,20 +29,17 @@ pub fn MultigridMethod(comptime N: usize, comptime O: usize, comptime BaseSolver
         const BoundaryUtils = dofs.BoundaryUtils(N, O);
         const IndexSpace = geometry.IndexSpace(N);
         const Index = index.Index(N);
-        const CellSpace = basis.CellSpace(N, O);
         const StencilSpace = basis.StencilSpace(N, O);
         const SystemSlice = system.SystemSlice;
         const SystemSliceConst = system.SystemSliceConst;
 
-        pub fn init(max_iters: usize, tolerance: f64, base_solver: *BaseSolver) Self {
+        pub fn new(max_iters: usize, tolerance: f64, base_solver: BaseSolver) Self {
             return .{
                 .base_solver = base_solver,
                 .max_iters = max_iters,
                 .tolerance = tolerance,
             };
         }
-
-        pub fn deinit(_: *Self) void {}
 
         pub fn solve(
             self: *Self,
@@ -143,12 +141,20 @@ pub fn MultigridMethod(comptime N: usize, comptime O: usize, comptime BaseSolver
 
             std.debug.print("Multigrid Tolerance {}\n", .{tol});
 
+            // Build scratch allocator
+            var arena: ArenaAllocator = ArenaAllocator.init(allocator);
+            defer arena.deinit();
+
+            const scratch: Allocator = arena.allocator();
+
             // Run iterations
             var iteration: usize = 0;
 
             // TODO Might require full smoothing to achieve proper accuracy.
 
             while (iteration < self.max_iters) : (iteration += 1) {
+                defer _ = arena.reset(.retain_capacity);
+
                 // Recurse down the mesh to the base level
                 for (1..mesh.levels.len) |reverse_level| {
                     const level_id: usize = mesh.levels.len - reverse_level;
@@ -316,7 +322,7 @@ pub fn MultigridMethod(comptime N: usize, comptime O: usize, comptime BaseSolver
                     .sys = sys,
                 };
 
-                self.base_solver.solve(base_linear_map, x_field, rhs_field);
+                try self.base_solver.solve(scratch, base_linear_map, x_field, rhs_field);
 
                 // Copy back to sys
                 DofUtils.copyDofsFromCells(
@@ -624,27 +630,6 @@ pub fn MultigridMethod(comptime N: usize, comptime O: usize, comptime BaseSolver
                             output[linear] = @field(app, field_name);
                         }
                     }
-                }
-
-                // var iterations: usize = 0;
-
-                pub fn callback(_: *const @This(), iteration: usize, residual: f64, _: []const f64) void {
-                    std.debug.print("Iteration: {}, Residual: {}\n", .{ iteration, residual });
-
-                    // const file_name = std.fmt.allocPrint(solver.self.mesh.gpa, "output/elliptic_iteration{}.vtu", .{iterations}) catch {
-                    //     unreachable;
-                    // };
-
-                    // const file = std.fs.cwd().createFile(file_name, .{}) catch {
-                    //     unreachable;
-                    // };
-                    // defer file.close();
-
-                    // DofUtils.writeVtk(solver.self.mesh.gpa, solver.self.mesh, .{ .metric = x }, file.writer()) catch {
-                    //     unreachable;
-                    // };
-
-                    // iterations += 1;
                 }
             };
         }

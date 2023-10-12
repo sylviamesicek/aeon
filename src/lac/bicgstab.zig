@@ -10,98 +10,67 @@ const hasLinearMapCallback = lac.hasLinearMapCallback;
 const isLinearSolver = lac.isLinearSolver;
 
 pub const BiCGStabSolver = struct {
-    allocator: Allocator,
-    ndofs: usize,
     max_iters: usize,
     tolerance: f64,
 
-    // Scratch vectors
-    rg: []f64,
-    rh: []f64,
-    pg: []f64,
-    ph: []f64,
-    sg: []f64,
-    sh: []f64,
-    tg: []f64,
-    vg: []f64,
-    tp: []f64,
-
+    // Alias
     const Self = @This();
 
-    pub fn init(allocator: Allocator, ndofs: usize, max_iters: usize, tolerance: f64) !Self {
-        const rg: []f64 = try allocator.alloc(f64, ndofs);
-        errdefer allocator.free(rg);
-
-        const rh: []f64 = try allocator.alloc(f64, ndofs);
-        errdefer allocator.free(rh);
-
-        const pg: []f64 = try allocator.alloc(f64, ndofs);
-        errdefer allocator.free(pg);
-
-        const ph: []f64 = try allocator.alloc(f64, ndofs);
-        errdefer allocator.free(ph);
-
-        const sg: []f64 = try allocator.alloc(f64, ndofs);
-        errdefer allocator.free(sg);
-
-        const sh: []f64 = try allocator.alloc(f64, ndofs);
-        errdefer allocator.free(sh);
-
-        const tg: []f64 = try allocator.alloc(f64, ndofs);
-        errdefer allocator.free(tg);
-
-        const vg: []f64 = try allocator.alloc(f64, ndofs);
-        errdefer allocator.free(vg);
-
-        const tp: []f64 = try allocator.alloc(f64, ndofs);
-        errdefer allocator.free(tp);
-
-        return Self{
-            .allocator = allocator,
-            .ndofs = ndofs,
+    // Constructs a new bicgstab solver
+    pub fn new(max_iters: usize, tolerance: f64) Self {
+        return .{
             .max_iters = max_iters,
             .tolerance = tolerance,
-
-            .rg = rg,
-            .rh = rh,
-            .pg = pg,
-            .ph = ph,
-            .sg = sg,
-            .sh = sh,
-            .tg = tg,
-            .vg = vg,
-            .tp = tp,
         };
     }
 
-    pub fn deinit(self: *Self) void {
-        self.allocator.free(self.rg);
-        self.allocator.free(self.rh);
-        self.allocator.free(self.pg);
-        self.allocator.free(self.ph);
-        self.allocator.free(self.sg);
-        self.allocator.free(self.sh);
-        self.allocator.free(self.tg);
-        self.allocator.free(self.vg);
-        self.allocator.free(self.tp);
-    }
+    pub const Error = error{OutOfMemory};
 
-    pub fn solve(self: *const Self, oper: anytype, x: []f64, b: []const f64) void {
-        assert(x.len == self.ndofs);
-        assert(b.len == self.ndofs);
+    pub fn solve(self: *const Self, allocator: Allocator, oper: anytype, x: []f64, b: []const f64) Error!void {
+        assert(x.len == b.len);
+
+        // Allocate scratch vectors
+        const ndofs = x.len;
+
+        const rg: []f64 = try allocator.alloc(f64, ndofs);
+        defer allocator.free(rg);
+
+        const rh: []f64 = try allocator.alloc(f64, ndofs);
+        defer allocator.free(rh);
+
+        const pg: []f64 = try allocator.alloc(f64, ndofs);
+        defer allocator.free(pg);
+
+        const ph: []f64 = try allocator.alloc(f64, ndofs);
+        defer allocator.free(ph);
+
+        const sg: []f64 = try allocator.alloc(f64, ndofs);
+        defer allocator.free(sg);
+
+        const sh: []f64 = try allocator.alloc(f64, ndofs);
+        defer allocator.free(sh);
+
+        const tg: []f64 = try allocator.alloc(f64, ndofs);
+        defer allocator.free(tg);
+
+        const vg: []f64 = try allocator.alloc(f64, ndofs);
+        defer allocator.free(vg);
+
+        const tp: []f64 = try allocator.alloc(f64, ndofs);
+        defer allocator.free(tp);
 
         // Set termination tolerance
-        oper.apply(self.tp, x);
+        oper.apply(tp, x);
 
-        for (0..self.ndofs) |i| {
-            self.rg[i] = b[i] - self.tp[i];
+        for (0..ndofs) |i| {
+            rg[i] = b[i] - tp[i];
         }
 
-        @memcpy(self.rh, self.rg);
-        @memset(self.sh, 0.0);
-        @memset(self.ph, 0.0);
+        @memcpy(rh, rg);
+        @memset(sh, 0.0);
+        @memset(ph, 0.0);
 
-        var residual = norm(self.rg);
+        var residual = norm(rg);
         const tol = residual * @fabs(self.tolerance);
 
         var iter: usize = 0;
@@ -112,60 +81,60 @@ pub const BiCGStabSolver = struct {
         var prc: f64 = 0.0;
 
         while (iter < self.max_iters) : (iter += 1) {
-            rho1 = dot(self.rg, self.rh);
+            rho1 = dot(rg, rh);
 
             if (rho1 == 0.0) {
                 break;
             }
 
             if (iter == 0) {
-                @memcpy(self.pg, self.rg);
+                @memcpy(pg, rg);
             } else {
                 prb = (rho1 * pra) / (rho0 * prc);
 
-                for (0..self.ndofs) |i| {
-                    self.pg[i] = self.rg[i] + prb * (self.pg[i] - prc * self.vg[i]);
+                for (0..ndofs) |i| {
+                    pg[i] = rg[i] + prb * (pg[i] - prc * vg[i]);
                 }
             }
 
             rho0 = rho1;
 
             // Identity PC
-            @memcpy(self.ph, self.pg);
-            oper.apply(self.vg, self.ph);
+            @memcpy(ph, pg);
+            oper.apply(vg, ph);
 
-            pra = rho1 / dot(self.rh, self.vg);
+            pra = rho1 / dot(rh, vg);
 
-            for (0..self.ndofs) |i| {
-                self.sg[i] = self.rg[i] - pra * self.vg[i];
+            for (0..ndofs) |i| {
+                sg[i] = rg[i] - pra * vg[i];
             }
 
-            if (norm(self.sg) <= 1e-60) {
-                for (0..self.ndofs) |i| {
-                    x[i] = x[i] + pra * self.ph[i];
+            if (norm(sg) <= 1e-60) {
+                for (0..ndofs) |i| {
+                    x[i] = x[i] + pra * ph[i];
                 }
 
-                oper.apply(self.tp, x);
+                oper.apply(tp, x);
 
-                for (0..self.ndofs) |i| {
-                    self.rg[i] = b[i] - self.tp[i];
+                for (0..ndofs) |i| {
+                    rg[i] = b[i] - tp[i];
                 }
 
-                residual = norm(self.rg);
+                residual = norm(rg);
 
                 break;
             }
 
-            @memcpy(self.sh, self.sg);
-            oper.apply(self.tg, self.sh);
+            @memcpy(sh, sg);
+            oper.apply(tg, sh);
 
-            prc = dot(self.tg, self.sg) / dot(self.tg, self.tg);
-            for (0..self.ndofs) |i| {
-                x[i] = x[i] + pra * self.ph[i] + prc * self.sh[i];
-                self.rg[i] = self.sg[i] - prc * self.tg[i];
+            prc = dot(tg, sg) / dot(tg, tg);
+            for (0..ndofs) |i| {
+                x[i] = x[i] + pra * ph[i] + prc * sh[i];
+                rg[i] = sg[i] - prc * tg[i];
             }
 
-            residual = norm(self.rg);
+            residual = norm(rg);
 
             if (comptime hasLinearMapCallback(@TypeOf(oper))) {
                 oper.callback(iter, residual, x);
@@ -175,9 +144,6 @@ pub const BiCGStabSolver = struct {
         }
 
         if (iter < self.max_iters) iter += 1;
-
-        // self.niters = iter;
-        // self.res = nrm2 / ires;
     }
 
     fn norm(slice: []const f64) f64 {
@@ -200,7 +166,10 @@ pub const BiCGStabSolver = struct {
 };
 
 test "BiCGStab convergence" {
+    const expect = std.testing.expect;
     const expectEqualSlices = std.testing.expectEqualSlices;
+
+    try expect(isLinearSolver(BiCGStabSolver));
 
     const allocator = std.testing.allocator;
     const ndofs = 100;
@@ -216,10 +185,9 @@ test "BiCGStab convergence" {
         b[i] = @floatFromInt(i);
     }
 
-    var solver: BiCGStabSolver = try BiCGStabSolver.init(allocator, ndofs, 1000, 1e-10);
-    defer solver.deinit();
+    const solver = BiCGStabSolver.new(1000, 1e-10);
 
-    solver.solve(IdentityMap{}, x, b);
+    try solver.solve(allocator, IdentityMap{}, x, b);
 
     try expectEqualSlices(f64, b, x);
 }

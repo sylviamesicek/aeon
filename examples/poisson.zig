@@ -149,11 +149,7 @@ pub fn PoissonEquation(comptime O: usize) type {
 
             const oper = PoissonOperator{};
 
-            var base_solver = try BiCGStabSolver.init(allocator, grid.blocks[0].cell_total, 10000, 10e-10);
-            defer base_solver.deinit();
-
-            var solver = MultigridMethod.init(20, 10e-10, &base_solver);
-            defer solver.deinit();
+            var solver = MultigridMethod.new(20, 10e-10, BiCGStabSolver.new(10000, 10e-10));
 
             try solver.solve(
                 allocator,
