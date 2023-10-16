@@ -45,7 +45,6 @@ pub fn MultigridMethod(comptime N: usize, comptime O: usize, comptime BaseSolver
             self: *Self,
             allocator: Allocator,
             mesh: *const Mesh,
-            block_map: []const usize,
             dof_map: DofMap,
             oper: anytype,
             x: SystemSlice(@TypeOf(oper).System),
@@ -56,9 +55,9 @@ pub fn MultigridMethod(comptime N: usize, comptime O: usize, comptime BaseSolver
             const T = @TypeOf(oper);
 
             // Check trait constraints
-            if (comptime !(dofs.isSystemOperator(N, O)(T))) {
-                @compileError("Oper must satisfy isMeshOperator traits.");
-            }
+            // if (comptime !(dofs.isSystemOperator(N, O)(T))) {
+            //     @compileError("Oper must satisfy isMeshOperator traits.");
+            // }
 
             if (comptime std.meta.fields(T.System).len != 1) {
                 @compileError("The multigrid solver only supports systems with 1 field currently.");
@@ -81,7 +80,6 @@ pub fn MultigridMethod(comptime N: usize, comptime O: usize, comptime BaseSolver
             for (0..mesh.blocks.len) |block_id| {
                 DofUtils.fillBoundary(
                     mesh,
-                    block_map,
                     dof_map,
                     block_id,
                     DofUtils.operSystemBoundary(oper),
@@ -106,7 +104,6 @@ pub fn MultigridMethod(comptime N: usize, comptime O: usize, comptime BaseSolver
             for (0..mesh.blocks.len) |block_id| {
                 DofUtils.fillBoundaryFull(
                     mesh,
-                    block_map,
                     dof_map,
                     block_id,
                     DofUtils.operContextBoundary(oper),
@@ -198,7 +195,6 @@ pub fn MultigridMethod(comptime N: usize, comptime O: usize, comptime BaseSolver
                         // Fill boundaries now that sys has been smoothed
                         DofUtils.fillBoundaryFull(
                             mesh,
-                            block_map,
                             dof_map,
                             block_id,
                             DofUtils.operSystemBoundary(oper),
@@ -211,7 +207,7 @@ pub fn MultigridMethod(comptime N: usize, comptime O: usize, comptime BaseSolver
                         DofUtils.restrict(
                             T.System,
                             mesh,
-                            block_map,
+
                             dof_map,
                             block_id,
                             sys,
@@ -222,7 +218,7 @@ pub fn MultigridMethod(comptime N: usize, comptime O: usize, comptime BaseSolver
                     for (coarse.block_offset..coarse.block_offset + coarse.block_total) |block_id| {
                         DofUtils.fillBoundary(
                             mesh,
-                            block_map,
+
                             dof_map,
                             block_id,
                             DofUtils.operSystemBoundary(oper),
@@ -262,7 +258,7 @@ pub fn MultigridMethod(comptime N: usize, comptime O: usize, comptime BaseSolver
                         // Restrict residual and store result in tau
                         DofUtils.restrictResidual(
                             mesh,
-                            block_map,
+
                             dof_map,
                             block_id,
                             oper,
@@ -336,7 +332,7 @@ pub fn MultigridMethod(comptime N: usize, comptime O: usize, comptime BaseSolver
 
                 DofUtils.fillBoundary(
                     mesh,
-                    block_map,
+
                     dof_map,
                     0,
                     DofUtils.operSystemBoundary(oper),
@@ -373,7 +369,7 @@ pub fn MultigridMethod(comptime N: usize, comptime O: usize, comptime BaseSolver
                         DofUtils.prolongCorrection(
                             T.System,
                             mesh,
-                            block_map,
+
                             dof_map,
                             block_id,
                             sys,
@@ -384,7 +380,7 @@ pub fn MultigridMethod(comptime N: usize, comptime O: usize, comptime BaseSolver
                     for (level.block_offset..level.block_offset + level.block_total) |block_id| {
                         DofUtils.fillBoundary(
                             mesh,
-                            block_map,
+
                             dof_map,
                             block_id,
                             DofUtils.operSystemBoundary(oper),
@@ -429,7 +425,7 @@ pub fn MultigridMethod(comptime N: usize, comptime O: usize, comptime BaseSolver
                     for (level.block_offset..level.block_offset + level.block_total) |block_id| {
                         DofUtils.fillBoundary(
                             mesh,
-                            block_map,
+
                             dof_map,
                             block_id,
                             DofUtils.operSystemBoundary(oper),
@@ -442,7 +438,7 @@ pub fn MultigridMethod(comptime N: usize, comptime O: usize, comptime BaseSolver
                         DofUtils.restrict(
                             T.System,
                             mesh,
-                            block_map,
+
                             dof_map,
                             block_id,
                             sys,

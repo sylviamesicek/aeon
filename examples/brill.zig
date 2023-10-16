@@ -20,6 +20,7 @@ pub fn BrillInitialData(comptime O: usize) type {
         const BoundaryCondition = dofs.BoundaryCondition;
         const DofMap = dofs.DofMap(N, O);
         const DofUtils = dofs.DofUtils(N, O);
+        const DofUtilsTotal = dofs.DofUtilsTotal(N, O);
         const LinearMapMethod = methods.LinearMapMethod(N, O, BiCGStabSolver);
         const SystemSlice = aeon.SystemSlice;
         const SystemSliceConst = aeon.SystemSliceConst;
@@ -74,8 +75,8 @@ pub fn BrillInitialData(comptime O: usize) type {
         };
 
         pub const MetricOperator = struct {
-            pub const Context = Seed;
             pub const System = Metric;
+            pub const Context = Seed;
 
             pub fn apply(_: MetricOperator, engine: dofs.Engine(N, O, System, Context)) SystemValue(System) {
                 const position: [N]f64 = engine.position();
@@ -145,11 +146,6 @@ pub fn BrillInitialData(comptime O: usize) type {
 
             // Build maps
 
-            const block_map: []usize = try allocator.alloc(usize, grid.tile_total);
-            defer allocator.free(block_map);
-
-            grid.buildBlockMap(block_map);
-
             const dof_map: DofMap = try DofMap.init(allocator, &grid);
             defer dof_map.deinit(allocator);
 
@@ -165,7 +161,7 @@ pub fn BrillInitialData(comptime O: usize) type {
                 .sigma = 1.0,
             };
 
-            DofUtils.projectCells(&grid, dof_map, seed_proj, seed, aeon.EmptySystem.sliceConst(dof_map.ndofs()));
+            DofUtilsTotal.projectCells(&grid, dof_map, seed_proj, seed, aeon.EmptySystem.sliceConst());
 
             var metric = try SystemSlice(Metric).init(allocator, grid.cell_total);
             defer metric.deinit(allocator);
@@ -179,7 +175,6 @@ pub fn BrillInitialData(comptime O: usize) type {
             try solver.solve(
                 allocator,
                 &grid,
-                block_map,
                 dof_map,
                 oper,
                 metric,
@@ -202,7 +197,7 @@ pub fn BrillInitialData(comptime O: usize) type {
                 .metric = metric.field(.factor),
             });
 
-            try DofUtils.writeCellsToVtk(Output, allocator, &grid, output, file.writer());
+            try DofUtilsTotal.writeCellsToVtk(Output, allocator, &grid, output, file.writer());
         }
     };
 }

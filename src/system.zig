@@ -19,13 +19,13 @@ const enums = std.enums;
 const Allocator = std.mem.Allocator;
 const assert = std.debug.assert;
 
-pub const Empty = enum {
-    pub fn slice(len: usize) SystemSlice(@This()) {
-        return SystemSlice(@This()).view(len, .{});
+pub const EmptySystem = enum {
+    pub fn slice() SystemSlice(@This()) {
+        return SystemSlice(@This()).view(0, .{});
     }
 
-    pub fn sliceConst(len: usize) SystemSliceConst(@This()) {
-        return SystemSliceConst(@This()).view(len, .{});
+    pub fn sliceConst() SystemSliceConst(@This()) {
+        return SystemSliceConst(@This()).view(0, .{});
     }
 };
 
@@ -144,6 +144,10 @@ fn SystemSliceImpl(comptime T: type, comptime is_const: bool) type {
             }
 
             return result;
+        }
+
+        pub fn assertLen(self: Self, len: usize) void {
+            assert(std.meta.fieldNames(T).len == 0 or self.len == len);
         }
     };
 }

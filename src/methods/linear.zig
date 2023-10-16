@@ -39,7 +39,6 @@ pub fn LinearMapMethod(comptime N: usize, comptime O: usize, comptime InnerSolve
             self: Self,
             allocator: Allocator,
             mesh: *const Mesh,
-            block_map: []const usize,
             dof_map: DofMap,
             oper: anytype,
             x: SystemSlice(@TypeOf(oper).System),
@@ -77,7 +76,6 @@ pub fn LinearMapMethod(comptime N: usize, comptime O: usize, comptime InnerSolve
             for (0..mesh.blocks.len) |block_id| {
                 DofUtils.fillBoundary(
                     mesh,
-                    block_map,
                     dof_map,
                     block_id,
                     DofUtils.operContextBoundary(oper),
@@ -92,7 +90,6 @@ pub fn LinearMapMethod(comptime N: usize, comptime O: usize, comptime InnerSolve
 
             const map = LinearMap(T){
                 .mesh = mesh,
-                .block_map = block_map,
                 .dof_map = dof_map,
                 .oper = oper,
                 .sys = sys,
@@ -110,7 +107,6 @@ pub fn LinearMapMethod(comptime N: usize, comptime O: usize, comptime InnerSolve
 
             return struct {
                 mesh: *const Mesh,
-                block_map: []const usize,
                 dof_map: DofMap,
                 oper: T,
                 ctx: SystemSlice(T.Context),
@@ -140,7 +136,6 @@ pub fn LinearMapMethod(comptime N: usize, comptime O: usize, comptime InnerSolve
                     for (0..self.mesh.blocks.len) |block_id| {
                         DofUtils.fillBoundary(
                             self.mesh,
-                            self.block_map,
                             self.dof_map,
                             block_id,
                             DofUtils.operSystemBoundary(self.oper),
@@ -153,7 +148,6 @@ pub fn LinearMapMethod(comptime N: usize, comptime O: usize, comptime InnerSolve
                         DofUtils.restrict(
                             T.System,
                             self.mesh,
-                            self.block_map,
                             self.dof_map,
                             block_id,
                             self.sys,

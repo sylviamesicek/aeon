@@ -24,6 +24,8 @@ const system = @import("../system.zig");
 const Face = geometry.Face;
 const SystemSlice = system.SystemSlice;
 const SystemSliceConst = system.SystemSliceConst;
+const SystemValue = system.SystemValue;
+const EmptySystem = system.EmptySystem;
 
 // submodules
 
@@ -478,7 +480,6 @@ pub fn DofUtils(comptime N: usize, comptime O: usize) type {
         pub fn restrict(
             comptime System: type,
             mesh: *const Mesh,
-            block_map: []const usize,
             dof_map: Map,
             block_id: usize,
             sys: SystemSlice(System),
@@ -514,7 +515,7 @@ pub fn DofUtils(comptime N: usize, comptime O: usize) type {
             while (tiles.next()) |tile| {
                 const relative_tile = coarse_patch.bounds.localFromGlobal(bounds.globalFromLocal(tile));
                 const linear = patch_space.linearFromCartesian(relative_tile);
-                const coarse_block_id = block_map[coarse_patch.tile_offset + linear];
+                const coarse_block_id = mesh.block_map[coarse_patch.tile_offset + linear];
                 const coarse_block = mesh.blocks[coarse_block_id];
 
                 const coarse_cell_space = CellSpace.fromSize(blockCellSize(mesh, coarse_block_id));
@@ -548,7 +549,6 @@ pub fn DofUtils(comptime N: usize, comptime O: usize) type {
         /// application of the operator at the underlying dof.
         pub fn restrictResidual(
             mesh: *const Mesh,
-            block_map: []const usize,
             dof_map: Map,
             block_id: usize,
             oper: anytype,
@@ -593,7 +593,7 @@ pub fn DofUtils(comptime N: usize, comptime O: usize) type {
             while (tiles.next()) |tile| {
                 const relative_tile = coarse_patch.bounds.localFromGlobal(bounds.globalFromLocal(tile));
                 const linear = patch_space.linearFromCartesian(relative_tile);
-                const coarse_block_id = block_map[coarse_patch.tile_offset + linear];
+                const coarse_block_id = mesh.block_map[coarse_patch.tile_offset + linear];
 
                 const coarse_block = mesh.blocks[coarse_block_id];
 
@@ -648,7 +648,6 @@ pub fn DofUtils(comptime N: usize, comptime O: usize) type {
         pub fn prolong(
             comptime System: type,
             mesh: *const Mesh,
-            block_map: []const usize,
             dof_map: Map,
             block_id: usize,
             sys: SystemSlice(System),
@@ -677,7 +676,7 @@ pub fn DofUtils(comptime N: usize, comptime O: usize) type {
 
             while (tiles.next()) |tile| {
                 // Find underlying block
-                const coarse_block_id = underlyingBlock(mesh, block_map, block_id, tile);
+                const coarse_block_id = underlyingBlock(mesh, block_id, tile);
 
                 const coarse_block = mesh.blocks[coarse_block_id];
 
@@ -714,7 +713,6 @@ pub fn DofUtils(comptime N: usize, comptime O: usize) type {
         pub fn prolongCorrection(
             comptime System: type,
             mesh: *const Mesh,
-            block_map: []const usize,
             dof_map: Map,
             block_id: usize,
             sys: SystemSlice(System),
@@ -744,7 +742,7 @@ pub fn DofUtils(comptime N: usize, comptime O: usize) type {
             var tiles = IndexSpace.fromBox(block.bounds).cartesianIndices();
 
             while (tiles.next()) |tile| {
-                const coarse_block_id = underlyingBlock(mesh, block_map, block_id, tile);
+                const coarse_block_id = underlyingBlock(mesh, block_id, tile);
 
                 const coarse_block = mesh.blocks[coarse_block_id];
 
@@ -928,6 +926,11 @@ pub fn DofUtils(comptime N: usize, comptime O: usize) type {
             assert(ctx.len == dof_map.ndofs());
             assert(rhs.len == mesh.cell_total);
 
+            dest.assertLen(dof_map.ndofs());
+            src.assertLen(dof_map.ndofs());
+            ctx.assertLen(dof_map.ndofs());
+            rhs.assertLen(mesh.cell_total);
+
             const block = mesh.blocks[block_id];
 
             const stencil_space = blockStencilSpace(mesh, block_id);
@@ -989,36 +992,7 @@ pub fn DofUtils(comptime N: usize, comptime O: usize) type {
         // Residual ****************
         // *************************
 
-        pub fn residualNorm(
-            mesh: *const Mesh,
-            dof_map: Map,
-            oper: anytype,
-            src: SystemSliceConst(@TypeOf(oper).System),
-            ctx: SystemSliceConst(@TypeOf(oper).Context),
-            rhs: SystemSliceConst(@TypeOf(oper).System),
-        ) system.SystemValue(@TypeOf(oper).System) {
-            var result: system.SystemValue(@TypeOf(oper).System) = undefined;
-
-            inline for (comptime std.enums.values(@TypeOf(oper).System)) |field| {
-                @field(result, @tagName(field)) = 0.0;
-            }
-
-            for (0..mesh.blocks.len) |block| {
-                const norm = residualNormSq(mesh, dof_map, block, oper, src, ctx, rhs);
-
-                inline for (comptime std.enums.values(@TypeOf(oper).System)) |field| {
-                    @field(result, @tagName(field)) += @field(norm, @tagName(field));
-                }
-            }
-
-            inline for (comptime std.enums.values(@TypeOf(oper).System)) |field| {
-                @field(result, @tagName(field)) = @sqrt(@field(result, @tagName(field)));
-            }
-
-            return result;
-        }
-
-        fn residualNormSq(
+        fn residualNorm(
             mesh: *const Mesh,
             dof_map: Map,
             block_id: usize,
@@ -1028,9 +1002,10 @@ pub fn DofUtils(comptime N: usize, comptime O: usize) type {
             rhs: SystemSliceConst(@TypeOf(oper).System),
         ) system.SystemValue(@TypeOf(oper).System) {
             const T = @TypeOf(oper);
-            assert(rhs.len == mesh.cell_total);
-            assert(src.len == dof_map.ndofs());
-            assert(ctx.len == dof_map.ndofs());
+
+            rhs.assertLen(mesh.cell_total);
+            src.assertLen(dof_map.ndofs());
+            ctx.assertLen(dof_map.ndofs());
 
             var result: system.SystemValue(@TypeOf(oper).System) = undefined;
 
@@ -1067,8 +1042,49 @@ pub fn DofUtils(comptime N: usize, comptime O: usize) type {
                 }
             }
 
+            inline for (comptime std.meta.fieldNames(T.System)) |field_name| {
+                @field(result, field_name) = @sqrt(@field(result, field_name));
+            }
+
             return result;
         }
+
+        // ******************************
+        // Helpers **********************
+        // ******************************
+
+        /// Finds the coarse block underlying the given tile in the given refined block. Returns `maxInt(usize)` if
+        /// no such coarse block exists.
+        fn underlyingBlock(mesh: *const Mesh, block_id: usize, tile: [N]usize) usize {
+            const block = mesh.blocks[block_id];
+            const patch = mesh.patches[block.patch];
+            const coarse_patch = mesh.patches[
+                patch.parent orelse {
+                    return std.math.maxInt(usize);
+                }
+            ];
+
+            const coarse_tile_space = IndexSpace.fromBox(coarse_patch.bounds);
+            const coarse_tile = Index.coarsened(coarse_patch.bounds.refined().localFromGlobal(block.bounds.globalFromLocal(tile)));
+
+            const linear = coarse_tile_space.linearFromCartesian(coarse_tile);
+            return mesh.block_map[coarse_patch.tile_offset + linear];
+        }
+    };
+}
+
+/// A namespace for routines which run over the whole mesh.
+pub fn DofUtilsTotal(comptime N: usize, comptime O: usize) type {
+    return struct {
+        const CellSpace = basis.NodeSpace(N, O);
+        const StencilSpace = basis.StencilSpace(N, O);
+        const Index = index.Index(N);
+        const IndexSpace = geometry.IndexSpace(N);
+        const IndexBox = geometry.Box(N, usize);
+        const Mesh = meshes.Mesh(N);
+        const Region = geometry.Region(N);
+        const Map = DofMap(N, O);
+        const Utils = DofUtils(N, O);
 
         // *************************
         // Projection **************
@@ -1079,19 +1095,22 @@ pub fn DofUtils(comptime N: usize, comptime O: usize) type {
             mesh: *const Mesh,
             dof_map: Map,
             projection: anytype,
-            dest: system.SystemSlice(@TypeOf(projection).System),
-            ctx: system.SystemSliceConst(@TypeOf(projection).Context),
+            dest: SystemSlice(@TypeOf(projection).System),
+            ctx: SystemSliceConst(@TypeOf(projection).Context),
         ) void {
             const T = @TypeOf(projection);
 
-            if (comptime !isSystemProjection(N)(T)) {
-                @compileError("ProjectBase expects projection to satisfy isMeshProjection.");
-            }
+            // if (comptime !isSystemProjection(N, O)(T)) {
+            //     @compileError("ProjectBase expects projection to satisfy isMeshProjection.");
+            // }
+
+            dest.assertLen(mesh.cell_total);
+            ctx.assertLen(dof_map.ndofs());
 
             for (0..mesh.blocks.len) |block_id| {
                 const block = mesh.blocks[block_id];
 
-                const stencil_space = blockStencilSpace(mesh, block_id);
+                const stencil_space = Utils.blockStencilSpace(mesh, block_id);
                 const cell_space = stencil_space.nodeSpace();
 
                 const block_dest = dest.slice(block.cell_offset, block.cell_total);
@@ -1101,20 +1120,122 @@ pub fn DofUtils(comptime N: usize, comptime O: usize) type {
                 var linear: usize = 0;
 
                 while (cells.next()) |cell| : (linear += 1) {
-                    const engine = Engine(N, O, system.Empty, T.Context).new(
+                    const engine = ProjectionEngine(N, O, T.Context).new(
                         stencil_space,
                         cell,
-                        system.Empty.sliceConst(block_ctx.len),
+                        EmptySystem.sliceConst(),
                         block_ctx,
                     );
 
-                    const value: system.SystemValue(T.System) = projection.project(engine);
+                    const value: SystemValue(T.System) = projection.project(engine);
 
                     inline for (comptime std.enums.values(T.System)) |field| {
                         block_dest.field(field)[linear] = @field(value, @tagName(field));
                     }
                 }
             }
+        }
+
+        /// Sets the values of a global dof solution vector using a projection function.
+        pub fn projectDofs(
+            mesh: *const Mesh,
+            dof_map: Map,
+            projection: anytype,
+            dest: SystemSlice(@TypeOf(projection).System),
+            ctx: SystemSliceConst(@TypeOf(projection).Context),
+        ) void {
+            const T = @TypeOf(projection);
+
+            if (comptime !isSystemProjection(N, O)(T)) {
+                @compileError("ProjectBase expects projection to satisfy isMeshProjection.");
+            }
+
+            dest.assertLen(dof_map.ndofs());
+            ctx.assertLen(dof_map.ndofs());
+
+            for (0..mesh.blocks.len) |block_id| {
+                const stencil_space = Utils.blockStencilSpace(mesh, block_id);
+                const cell_space = stencil_space.nodeSpace();
+
+                const block_dest = dest.slice(dof_map.offset(block_id), dof_map.total(block_id));
+                const block_ctx = ctx.slice(dof_map.offset(block_id), dof_map.total(block_id));
+
+                var cells = cell_space.nodes();
+                var linear: usize = 0;
+
+                while (cells.next()) |cell| : (linear += 1) {
+                    const engine = ProjectionEngine(N, O, T.Context).new(
+                        stencil_space,
+                        cell,
+                        EmptySystem.sliceConst(),
+                        block_ctx,
+                    );
+
+                    const value: SystemValue(T.System) = projection.project(engine);
+
+                    inline for (comptime std.enums.values(T.System)) |field| {
+                        cell_space.setValue(cell, block_dest.field(field), @field(value, @tagName(field)));
+                    }
+                }
+            }
+        }
+
+        /// Computes the difference between the cell vector rhs, and the application of oper on a given source dof vector.
+        pub fn residualNorm(
+            mesh: *const Mesh,
+            dof_map: Map,
+            oper: anytype,
+            src: SystemSliceConst(@TypeOf(oper).System),
+            ctx: SystemSliceConst(@TypeOf(oper).Context),
+            rhs: SystemSliceConst(@TypeOf(oper).System),
+        ) system.SystemValue(@TypeOf(oper).System) {
+            const T = @TypeOf(oper);
+            rhs.assertLen(mesh.cell_total);
+            src.assertLen(dof_map.ndofs());
+            ctx.assertLen(dof_map.ndofs());
+
+            var result: system.SystemValue(@TypeOf(oper).System) = undefined;
+
+            inline for (comptime std.enums.values(@TypeOf(oper).System)) |field| {
+                @field(result, @tagName(field)) = 0.0;
+            }
+
+            for (0..mesh.blocks.len) |block_id| {
+                const block = mesh.blocks[block_id];
+
+                const stencil_space = Utils.blockStencilSpace(mesh, block_id);
+                const cell_offset = dof_map.offset(block_id);
+                const cell_total = dof_map.total(block_id);
+                const block_src = src.slice(cell_offset, cell_total);
+                const block_ctx = ctx.slice(cell_offset, cell_total);
+                const block_rhs = rhs.slice(block.cell_offset, block.cell_total);
+
+                var cells = stencil_space.nodeSpace().nodes();
+                var linear: usize = 0;
+
+                while (cells.next()) |cell| : (linear += 1) {
+                    const engine = Engine(N, O, T.System, T.Context).new(
+                        stencil_space,
+                        cell,
+                        block_src,
+                        block_ctx,
+                    );
+
+                    const app = oper.apply(engine);
+
+                    inline for (comptime std.enums.values(@TypeOf(oper).System)) |field| {
+                        const a = @field(app, @tagName(field));
+                        const b = block_rhs.field(field)[linear];
+                        @field(result, @tagName(field)) += (b - a) * (b - a);
+                    }
+                }
+            }
+
+            inline for (comptime std.enums.values(@TypeOf(oper).System)) |field| {
+                @field(result, @tagName(field)) = @sqrt(@field(result, @tagName(field)));
+            }
+
+            return result;
         }
 
         // *************************
@@ -1162,7 +1283,7 @@ pub fn DofUtils(comptime N: usize, comptime O: usize) type {
             for (top_level.block_offset..top_level.block_offset + top_level.block_total) |block_id| {
                 const block = mesh.blocks[block_id];
 
-                const stencil: StencilSpace = blockStencilSpace(mesh, block_id);
+                const stencil: StencilSpace = Utils.blockStencilSpace(mesh, block_id);
 
                 const cell_size = stencil.size;
                 const point_size = Index.add(cell_size, Index.splat(1));
@@ -1264,12 +1385,12 @@ pub fn DofUtils(comptime N: usize, comptime O: usize) type {
             try writeCellsToVtkOnLevel(System, allocator, mesh, mesh.levels.len - 1, sys, out_stream);
         }
 
-        pub fn writeDofsToVtk(
+        pub fn writeDofsToVtkOnLevel(
             comptime System: type,
             allocator: Allocator,
             mesh: *const Mesh,
+            dof_map: Map,
             level: usize,
-            dof_map: DofMap(N, O),
             sys: system.SystemSliceConst(System),
             out_stream: anytype,
         ) !void {
@@ -1311,7 +1432,7 @@ pub fn DofUtils(comptime N: usize, comptime O: usize) type {
                 const block = mesh.blocks[block_id];
                 _ = block;
 
-                const stencil: StencilSpace = blockStencilSpace(mesh, block_id);
+                const stencil: StencilSpace = Utils.blockStencilSpace(mesh, block_id);
 
                 const cell_size = stencil.cellSpace().sizeWithGhost();
                 const point_size = Index.add(cell_size, Index.splat(1));
@@ -1416,39 +1537,11 @@ pub fn DofUtils(comptime N: usize, comptime O: usize) type {
 
             try grid.write(out_stream);
         }
-
-        // ******************************
-        // Helpers **********************
-        // ******************************
-
-        /// Finds the coarse block underlying the given tile in the given refined block. Returns `maxInt(usize)` if
-        /// no such coarse block exists.
-        fn underlyingBlock(mesh: *const Mesh, block_map: []const usize, block_id: usize, tile: [N]usize) usize {
-            const block = mesh.blocks[block_id];
-            const patch = mesh.patches[block.patch];
-            const coarse_patch = mesh.patches[
-                patch.parent orelse {
-                    return std.math.maxInt(usize);
-                }
-            ];
-
-            const coarse_tile_space = IndexSpace.fromBox(coarse_patch.bounds);
-            const coarse_tile = Index.coarsened(coarse_patch.bounds.refined().localFromGlobal(block.bounds.globalFromLocal(tile)));
-
-            const linear = coarse_tile_space.linearFromCartesian(coarse_tile);
-            return block_map[coarse_patch.tile_offset + linear];
-        }
     };
 }
 
-pub fn DofUtilsTotal(comptime N: usize, comptime O: usize) type {
-    _ = O;
-    _ = N;
-    return struct {};
-}
-
 pub fn ProjectionEngine(comptime N: usize, comptime O: usize, comptime Context: type) type {
-    return Engine(N, O, system.Empty, Context);
+    return Engine(N, O, system.EmptySystem, Context);
 }
 
 /// A trait which checks if a type is an operator. Such a type follows the following set of declarations.
@@ -1478,11 +1571,11 @@ pub fn isSystemOperator(comptime N: usize, comptime O: usize) fn (type) bool {
 
     const Closure = struct {
         fn trait(comptime T: type) bool {
-            if (comptime !(@hasDecl(T, "Context") and @TypeOf(T.Context) == type and system.isSystem(T.Context))) {
+            if (comptime !(@hasDecl(T, "System") and @TypeOf(T.System) == type and system.isSystem(T.System))) {
                 return false;
             }
 
-            if (comptime !(@hasDecl(T, "System") and @TypeOf(T.System) == type and system.isSystem(T.System))) {
+            if (comptime !(@hasDecl(T, "Context") and @TypeOf(T.Context) == type and system.isSystem(T.Context))) {
                 return false;
             }
 
@@ -1494,11 +1587,11 @@ pub fn isSystemOperator(comptime N: usize, comptime O: usize) fn (type) bool {
                 return false;
             }
 
-            if (comptime !(hasFn("boundaryCtx")(T) and @TypeOf(T.boundaryCtx) == fn (T, [N]f64, Face(N)) SystemBoundaryCondition(T.Context))) {
+            if (comptime !(hasFn("boundarySys")(T) and @TypeOf(T.boundarySys) == fn (T, [N]f64, Face(N)) SystemBoundaryCondition(T.System))) {
                 return false;
             }
 
-            if (comptime !(hasFn("boundarySys")(T) and @TypeOf(T.boundarySys) == fn (T, [N]f64, Face(N)) SystemBoundaryCondition(T.System))) {
+            if (comptime !(hasFn("boundaryCtx")(T) and @TypeOf(T.boundaryCtx) == fn (T, [N]f64, Face(N)) SystemBoundaryCondition(T.Context))) {
                 return false;
             }
 
@@ -1542,7 +1635,7 @@ pub fn isSystemProjection(comptime N: usize, comptime O: usize) fn (type) bool {
                 return false;
             }
 
-            if (comptime !(hasFn("project")(T) and @TypeOf(T.project) == fn (T, Engine(N, O, system.Empty, T.Context)) system.SystemValue(T.System))) {
+            if (comptime !(hasFn("project")(T) and @TypeOf(T.project) == fn (T, Engine(N, O, system.EmptySystem, T.Context)) system.SystemValue(T.System))) {
                 return false;
             }
 

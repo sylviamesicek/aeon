@@ -15,6 +15,7 @@ pub fn PoissonEquation(comptime O: usize) type {
         const BoundaryCondition = dofs.BoundaryCondition;
         const DofMap = dofs.DofMap(N, O);
         const DofUtils = dofs.DofUtils(N, O);
+        const DofUtilsTotal = dofs.DofUtilsTotal(N, O);
         const MultigridMethod = methods.MultigridMethod(N, O, BiCGStabSolver);
         const SystemSlice = aeon.SystemSlice;
         const SystemSliceConst = aeon.SystemSliceConst;
@@ -119,11 +120,6 @@ pub fn PoissonEquation(comptime O: usize) type {
 
             // Build maps
 
-            const block_map: []usize = try allocator.alloc(usize, grid.tile_total);
-            defer allocator.free(block_map);
-
-            grid.buildBlockMap(block_map);
-
             const dof_map: DofMap = try DofMap.init(allocator, &grid);
             defer dof_map.deinit(allocator);
 
@@ -136,14 +132,14 @@ pub fn PoissonEquation(comptime O: usize) type {
 
             var rhs_proj: RhsProjection = .{ .amplitude = 2.0 };
 
-            DofUtils.projectCells(&grid, dof_map, rhs_proj, rhs, aeon.EmptySystem.sliceConst(dof_map.ndofs()));
+            DofUtilsTotal.projectCells(&grid, dof_map, rhs_proj, rhs, aeon.EmptySystem.sliceConst());
 
             var sol = try SystemSlice(Function).init(allocator, grid.cell_total);
             defer sol.deinit(allocator);
 
             rhs_proj.amplitude = 1.0;
 
-            DofUtils.projectCells(&grid, rhs_proj, sol);
+            DofUtilsTotal.projectCells(&grid, dof_map, rhs_proj, sol, aeon.EmptySystem.sliceConst());
 
             var err = try SystemSlice(Function).init(allocator, grid.cell_total);
             defer err.deinit(allocator);
@@ -160,12 +156,11 @@ pub fn PoissonEquation(comptime O: usize) type {
             try solver.solve(
                 allocator,
                 &grid,
-                block_map,
                 dof_map,
                 oper,
                 numerical,
                 rhs.toConst(),
-                aeon.EmptySystem.slice(grid.cell_total),
+                aeon.EmptySystem.sliceConst(),
             );
 
             for (0..grid.cell_total) |i| {

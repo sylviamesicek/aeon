@@ -210,6 +210,7 @@ pub fn Mesh(comptime N: usize) type {
                 .blocks = blocks.items,
                 .patches = patches.items,
                 .levels = levels.items,
+                .block_map = &.{},
             };
 
             self.computeOffsets();
