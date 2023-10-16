@@ -1,23 +1,25 @@
 import h5py
+import numpy as np
+
 filename = "solution_10.h5"
+outputfilename = "solution_10.txt"
 
 with h5py.File(filename, "r") as f:
     # Print all root level object names (aka keys) 
     # these can be group or dataset names 
     print("Keys: %s" % f.keys())
-    # get first object name/key; may or may NOT be a group
-    a_group_key = list(f.keys())[0]
 
-    # get the object type for a_group_key: usually group or dataset
-    print(type(f[a_group_key])) 
+    h = 10.0 / 1024
 
-    # If a_group_key is a group name, 
-    # this gets the object names in the group and returns as a list
-    data = list(f[a_group_key])
+    center_rho = f['center_rho'][()]
+    center_z = f['center_z'][()]
+    center_value = f['center_value'][()]
 
-    # If a_group_key is a dataset name, 
-    # this gets the dataset values and returns as a list
-    data = list(f[a_group_key])
-    # preferred methods to get dataset values:
-    ds_obj = f[a_group_key]      # returns as a h5py dataset object
-    ds_arr = f[a_group_key][()]  # returns as a numpy array
+    center_rho_index = (center_rho - h/2) * 1024
+    center_z_index = (center_z - h/2)* 1024
+
+    data = np.transpose(np.asarray((center_rho_index, center_z_index, center_value)))
+
+
+
+    np.savetxt(outputfilename, data, delimiter=',')
