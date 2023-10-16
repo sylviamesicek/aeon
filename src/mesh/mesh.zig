@@ -116,6 +116,8 @@ pub fn Mesh(comptime N: usize) type {
         patches: []Patch(N),
         levels: []Level(N),
 
+        block_map: []usize,
+
         /// Configuration for a mesh.
         pub const Config = struct {
             physical_bounds: RealBox,
@@ -212,6 +214,12 @@ pub fn Mesh(comptime N: usize) type {
 
             self.computeOffsets();
 
+            // Reset and free block map
+            self.block_map = try self.gpa.alloc(usize, self.tile_total);
+            errdefer self.gpa.free(self.block_map);
+
+            self.buildBlockMap();
+
             return self;
         }
 
@@ -235,43 +243,13 @@ pub fn Mesh(comptime N: usize) type {
             levels.deinit(self.gpa);
             patches.deinit(self.gpa);
             blocks.deinit(self.gpa);
+
+            self.gpa.free(self.block_map);
         }
-
-        // **********************************
-        // Helpers **************************
-        // **********************************
-
-        // pub fn block(self: *const Self, block_id: usize) Block(N) {
-        //     return self.blocks.items[block_id];
-        // }
-
-        // pub fn patch(self: *const Self, patch_id: usize) Patch(N) {
-        //     return self.patches.items[patch_id];
-        // }
-
-        // pub fn level(self: *const Self, level_id: usize) Level(N) {
-        //     return self.levels.items[level_id];
-        // }
 
         // *************************
         // Block Map ***************
         // *************************
-
-        /// Builds a block map, ie a map from each tile in the mesh to the id of the block that tile is in.
-        pub fn buildBlockMap(self: *const Self, map: []usize) void {
-            assert(map.len == self.tile_total);
-
-            @memset(map, maxInt(usize));
-
-            for (self.patches) |patch| {
-                const tile_to_block: []usize = map[patch.tile_offset .. patch.tile_offset + patch.tile_total];
-
-                for (patch.block_offset..patch.block_total + patch.block_offset) |block_id| {
-                    const block = self.blocks[block_id];
-                    IndexSpace.fromBox(patch.bounds).fillWindow(block.bounds.relativeTo(patch.bounds), usize, tile_to_block, block_id);
-                }
-            }
-        }
 
         pub fn buildTagsFromCells(self: *const Self, dest: []bool, src: []const bool) void {
             @memset(dest, false);
@@ -749,6 +727,21 @@ pub fn Mesh(comptime N: usize) type {
             self.levels = levels.items;
 
             self.computeOffsets();
+
+            // TODO Replace with array list unmanaged
+
+            const block_map = try self.gpa.alloc(usize, self.tile_total);
+            errdefer self.gpa.free(block_map);
+
+            self.gpa.free(self.block_map);
+
+            self.block_map = block_map;
+
+            // Reset and free block map
+            self.gpa.free(self.block_map);
+            self.block_map = try self.gpa.alloc(usize, self.tile_total);
+
+            self.buildBlockMap();
         }
 
         const MeshByLevel = struct {
@@ -878,6 +871,22 @@ pub fn Mesh(comptime N: usize) type {
             }
 
             self.tile_total = tile_offset;
+        }
+
+        /// Builds a block map, ie a map from each tile in the mesh to the id of the block that tile is in.
+        fn buildBlockMap(self: *Self) void {
+            assert(self.block_map.len == self.tile_total);
+
+            @memset(self.block_map, maxInt(usize));
+
+            for (self.patches) |patch| {
+                const tile_to_block: []usize = self.block_map[patch.tile_offset .. patch.tile_offset + patch.tile_total];
+
+                for (patch.block_offset..patch.block_total + patch.block_offset) |block_id| {
+                    const block = self.blocks[block_id];
+                    IndexSpace.fromBox(patch.bounds).fillWindow(block.bounds.relativeTo(patch.bounds), usize, tile_to_block, block_id);
+                }
+            }
         }
     };
 }

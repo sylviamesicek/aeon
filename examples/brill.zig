@@ -47,8 +47,11 @@ pub fn BrillInitialData(comptime O: usize) type {
             sigma: f64,
 
             pub const System = Seed;
+            pub const Context = aeon.EmptySystem;
 
-            pub fn project(self: SeedProjection, pos: [N]f64) SystemValue(System) {
+            pub fn project(self: SeedProjection, engine: dofs.ProjectionEngine(N, O, Context)) SystemValue(System) {
+                const pos = engine.position();
+
                 const rho = pos[0];
                 const z = pos[1];
 
@@ -63,6 +66,10 @@ pub fn BrillInitialData(comptime O: usize) type {
                 return .{
                     .seed = term1 * term2 * term3,
                 };
+            }
+
+            pub fn boundaryCtx(_: SeedProjection, _: [N]f64, _: Face) SystemBoundaryCondition(Context) {
+                return .{};
             }
         };
 
@@ -158,7 +165,7 @@ pub fn BrillInitialData(comptime O: usize) type {
                 .sigma = 1.0,
             };
 
-            DofUtils.projectCells(&grid, seed_proj, seed);
+            DofUtils.projectCells(&grid, dof_map, seed_proj, seed, aeon.EmptySystem.sliceConst(dof_map.ndofs()));
 
             var metric = try SystemSlice(Metric).init(allocator, grid.cell_total);
             defer metric.deinit(allocator);
@@ -182,7 +189,7 @@ pub fn BrillInitialData(comptime O: usize) type {
 
             std.debug.print("Writing Solution To File\n", .{});
 
-            const file = try std.fs.cwd().createFile("output/seed.vtu", .{});
+            const file = try std.fs.cwd().createFile("output/brillinitial.vtu", .{});
             defer file.close();
 
             const Output = enum {

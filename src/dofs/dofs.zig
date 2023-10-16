@@ -149,6 +149,22 @@ pub fn DofUtils(comptime N: usize, comptime O: usize) type {
             };
         }
 
+        pub fn ProjContextBoundary(comptime T: type) type {
+            if (comptime !(isSystemProjection(N, O)(T))) {
+                @compileError("Oper must satisfy isMeshOperator traits.");
+            }
+
+            return struct {
+                proj: T,
+
+                pub const System = T.Context;
+
+                pub fn boundary(self: @This(), pos: [N]f64, face: Face(N)) SystemBoundaryCondition(System) {
+                    return self.proj.boundaryCtx(pos, face);
+                }
+            };
+        }
+
         pub fn operSystemBoundary(oper: anytype) OperSystemBoundary(@TypeOf(oper)) {
             return .{
                 .oper = oper,
@@ -158,6 +174,12 @@ pub fn DofUtils(comptime N: usize, comptime O: usize) type {
         pub fn operContextBoundary(oper: anytype) OperContextBoundary(@TypeOf(oper)) {
             return .{
                 .oper = oper,
+            };
+        }
+
+        pub fn projContextBoundary(proj: anytype) ProjContextBoundary(@TypeOf(proj)) {
+            return .{
+                .proj = proj,
             };
         }
 
@@ -265,33 +287,30 @@ pub fn DofUtils(comptime N: usize, comptime O: usize) type {
         /// supplied boundary conditions.
         pub fn fillBoundary(
             mesh: *const Mesh,
-            block_map: []const usize,
             dof_map: Map,
             block: usize,
             boundary: anytype,
             sys: system.SystemSlice(@TypeOf(boundary).System),
         ) void {
-            fillBoundaryToExtent(O, mesh, block_map, dof_map, block, boundary, sys);
+            fillBoundaryToExtent(O, mesh, dof_map, block, boundary, sys);
         }
 
         /// Given a dof vector, fill all boundary dofs on that vector out to an extent 2*O using the
         /// supplied boundary conditions.
         pub fn fillBoundaryFull(
             mesh: *const Mesh,
-            block_map: []const usize,
             dof_map: Map,
             block: usize,
             boundary: anytype,
             sys: system.SystemSlice(@TypeOf(boundary).System),
         ) void {
-            fillBoundaryToExtent(2 * O, mesh, block_map, dof_map, block, boundary, sys);
+            fillBoundaryToExtent(2 * O, mesh, dof_map, block, boundary, sys);
         }
 
         /// Internal helper function for filling boundary dofs to some extent E.
         fn fillBoundaryToExtent(
             comptime E: usize,
             mesh: *const Mesh,
-            block_map: []const usize,
             dof_map: Map,
             block: usize,
             boundary: anytype,
@@ -331,7 +350,7 @@ pub fn DofUtils(comptime N: usize, comptime O: usize) type {
 
                     BoundaryUtils(N, O).fillBoundaryRegion(E, region, stencil_space, boundary, block_sys);
                 } else {
-                    fillInteriorBoundary(T.System, region, E, mesh, block_map, dof_map, block, sys);
+                    fillInteriorBoundary(T.System, region, E, mesh, dof_map, block, sys);
                 }
             }
         }
@@ -342,11 +361,12 @@ pub fn DofUtils(comptime N: usize, comptime O: usize) type {
             comptime region: Region,
             comptime E: usize,
             mesh: *const Mesh,
-            block_map: []const usize,
             dof_map: Map,
             block_id: usize,
             sys: system.SystemSlice(System),
         ) void {
+            const block_map = mesh.block_map;
+
             const block = mesh.blocks[block_id];
             const block_cell_space = CellSpace.fromSize(blockCellSize(mesh, block_id));
 
@@ -762,9 +782,54 @@ pub fn DofUtils(comptime N: usize, comptime O: usize) type {
         // Apply *******************
         // *************************
 
+        /// Applies an operator to a source dof vector and context, storing the result in the given dest cell vector.
+        pub fn applyCells(
+            mesh: *const Mesh,
+            dof_map: Map,
+            block_id: usize,
+            oper: anytype,
+            dest: SystemSlice(@TypeOf(oper).System),
+            src: SystemSliceConst(@TypeOf(oper).System),
+            ctx: SystemSliceConst(@TypeOf(oper).Context),
+        ) void {
+            assert(dest.len == mesh.cell_total);
+            assert(src.len == dof_map.ndofs());
+            assert(ctx.len == dof_map.ndofs());
+
+            const block = mesh.blocks[mesh];
+
+            const stencil_space = blockStencilSpace(mesh, block_id);
+            const dof_offset = dof_map.offset(block_id);
+            const dof_total = dof_map.total(block_id);
+            const block_dest = dest.slice(block.cell_offset, block.cell_total);
+            const block_src = src.slice(dof_offset, dof_total);
+            const block_ctx = ctx.slice(dof_offset, dof_total);
+
+            const T = @TypeOf(oper);
+
+            var nodes = stencil_space.nodeSpace().nodes();
+            var linear: usize = 0;
+
+            while (nodes.next()) |node| : (linear += 1) {
+                const engine = Engine(N, O, T.System, T.Context).new(
+                    stencil_space,
+                    node,
+                    block_src,
+                    block_ctx,
+                );
+
+                const app = oper.apply(engine);
+
+                inline for (comptime std.enums.values(@TypeOf(oper).System)) |field| {
+                    const a_val = @field(app, @tagName(field));
+                    block_dest.field(field)[linear] = a_val;
+                }
+            }
+        }
+
         /// Given two dof vectors src and ctx, where both boundaries have been filled at this block,
         /// set the value of a destination dof vector to be the application of the operator on src.
-        pub fn apply(
+        pub fn applyDofs(
             mesh: *const Mesh,
             dof_map: Map,
             block_id: usize,
@@ -789,7 +854,7 @@ pub fn DofUtils(comptime N: usize, comptime O: usize) type {
 
         /// Given two dof vectors src and ctx, where both boundaries have been filled fully at this block,
         /// set the value of a destination dof vector (including an extent O) to be the application of the operator on src.
-        pub fn applyFull(
+        pub fn applyDofsFull(
             mesh: *const Mesh,
             dof_map: Map,
             block_id: usize,
@@ -1012,8 +1077,10 @@ pub fn DofUtils(comptime N: usize, comptime O: usize) type {
         /// Sets the values of a global cell solution vector using a projection function.
         pub fn projectCells(
             mesh: *const Mesh,
+            dof_map: Map,
             projection: anytype,
-            sys: system.SystemSlice(@TypeOf(projection).System),
+            dest: system.SystemSlice(@TypeOf(projection).System),
+            ctx: system.SystemSliceConst(@TypeOf(projection).Context),
         ) void {
             const T = @TypeOf(projection);
 
@@ -1027,14 +1094,21 @@ pub fn DofUtils(comptime N: usize, comptime O: usize) type {
                 const stencil_space = blockStencilSpace(mesh, block_id);
                 const cell_space = stencil_space.nodeSpace();
 
-                const block_dest = sys.slice(block.cell_offset, block.cell_total);
+                const block_dest = dest.slice(block.cell_offset, block.cell_total);
+                const block_ctx = ctx.slice(dof_map.offset(block_id), dof_map.total(block_id));
 
                 var cells = cell_space.nodes();
                 var linear: usize = 0;
 
                 while (cells.next()) |cell| : (linear += 1) {
-                    const pos: [N]f64 = stencil_space.position(cell);
-                    const value: system.SystemValue(T.System) = projection.project(pos);
+                    const engine = Engine(N, O, system.Empty, T.Context).new(
+                        stencil_space,
+                        cell,
+                        system.Empty.sliceConst(block_ctx.len),
+                        block_ctx,
+                    );
+
+                    const value: system.SystemValue(T.System) = projection.project(engine);
 
                     inline for (comptime std.enums.values(T.System)) |field| {
                         block_dest.field(field)[linear] = @field(value, @tagName(field));
@@ -1367,6 +1441,16 @@ pub fn DofUtils(comptime N: usize, comptime O: usize) type {
     };
 }
 
+pub fn DofUtilsTotal(comptime N: usize, comptime O: usize) type {
+    _ = O;
+    _ = N;
+    return struct {};
+}
+
+pub fn ProjectionEngine(comptime N: usize, comptime O: usize, comptime Context: type) type {
+    return Engine(N, O, system.Empty, Context);
+}
+
 /// A trait which checks if a type is an operator. Such a type follows the following set of declarations.
 /// ```
 /// const Operator = struct {
@@ -1445,7 +1529,7 @@ pub fn hasSystemOperatorCallback(comptime N: usize, comptime O: usize) bool {
     return Closure.trait;
 }
 
-pub fn isSystemProjection(comptime N: usize) fn (type) bool {
+pub fn isSystemProjection(comptime N: usize, comptime O: usize) fn (type) bool {
     const hasFn = std.meta.trait.hasFn;
 
     const Closure = struct {
@@ -1454,7 +1538,15 @@ pub fn isSystemProjection(comptime N: usize) fn (type) bool {
                 return false;
             }
 
-            if (comptime !(hasFn("project")(T) and @TypeOf(T.project) == fn (T, [N]f64) system.SystemValue(T.System))) {
+            if (comptime !(@hasDecl(T, "Context") and @TypeOf(T.Context) == type and system.isSystem(T.Context))) {
+                return false;
+            }
+
+            if (comptime !(hasFn("project")(T) and @TypeOf(T.project) == fn (T, Engine(N, O, system.Empty, T.Context)) system.SystemValue(T.System))) {
+                return false;
+            }
+
+            if (comptime !(hasFn("boundaryCtx")(T) and @TypeOf(T.boundaryCtx) == fn (T, [N]f64, Face(N)) SystemBoundaryCondition(T.Context))) {
                 return false;
             }
 

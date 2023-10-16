@@ -19,6 +19,7 @@ pub const isSystem = system.isSystem;
 pub const SystemSlice = system.SystemSlice;
 pub const SystemSliceConst = system.SystemSliceConst;
 pub const SystemValue = system.SystemValue;
+pub const EmptySystem = system.Empty;
 
 test {
     _ = basis;

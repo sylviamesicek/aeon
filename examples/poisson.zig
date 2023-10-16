@@ -19,6 +19,7 @@ pub fn PoissonEquation(comptime O: usize) type {
         const SystemSlice = aeon.SystemSlice;
         const SystemSliceConst = aeon.SystemSliceConst;
         const SystemValue = aeon.SystemValue;
+        const SystemBoundaryCondition = dofs.SystemBoundaryCondition;
 
         const Face = geometry.Face(N);
         const IndexSpace = geometry.IndexSpace(N);
@@ -27,8 +28,6 @@ pub fn PoissonEquation(comptime O: usize) type {
         const BiCGStabSolver = lac.BiCGStabSolver;
 
         const Mesh = mesh.Mesh(N);
-
-        pub const Empty = enum {};
 
         pub const Function = enum {
             func,
@@ -39,18 +38,25 @@ pub fn PoissonEquation(comptime O: usize) type {
             amplitude: f64,
 
             pub const System = Function;
+            pub const Context = aeon.EmptySystem;
 
-            pub fn project(self: RhsProjection, pos: [N]f64) SystemValue(Function) {
+            pub fn project(self: RhsProjection, engine: dofs.ProjectionEngine(N, O, Context)) SystemValue(Function) {
+                const pos = engine.position();
+
                 return .{
                     .func = self.amplitude * std.math.sin(pos[0]) * std.math.sin(pos[1]),
                     // .func = self.amplitude,
                 };
             }
+
+            pub fn boundaryCtx(_: RhsProjection, _: [N]f64, _: Face) SystemBoundaryCondition(Context) {
+                return .{};
+            }
         };
 
         pub const PoissonOperator = struct {
-            pub const Context = Empty;
             pub const System = Function;
+            pub const Context = aeon.EmptySystem;
 
             pub fn apply(_: PoissonOperator, engine: dofs.Engine(N, O, System, Context)) aeon.SystemValue(System) {
                 return .{
@@ -130,7 +136,7 @@ pub fn PoissonEquation(comptime O: usize) type {
 
             var rhs_proj: RhsProjection = .{ .amplitude = 2.0 };
 
-            DofUtils.projectCells(&grid, rhs_proj, rhs);
+            DofUtils.projectCells(&grid, dof_map, rhs_proj, rhs, aeon.EmptySystem.sliceConst(dof_map.ndofs()));
 
             var sol = try SystemSlice(Function).init(allocator, grid.cell_total);
             defer sol.deinit(allocator);
@@ -159,7 +165,7 @@ pub fn PoissonEquation(comptime O: usize) type {
                 oper,
                 numerical,
                 rhs.toConst(),
-                SystemSliceConst(Empty).view(grid.cell_total, .{}),
+                aeon.EmptySystem.slice(grid.cell_total),
             );
 
             for (0..grid.cell_total) |i| {

@@ -19,6 +19,16 @@ const enums = std.enums;
 const Allocator = std.mem.Allocator;
 const assert = std.debug.assert;
 
+pub const Empty = enum {
+    pub fn slice(len: usize) SystemSlice(@This()) {
+        return SystemSlice(@This()).view(len, .{});
+    }
+
+    pub fn sliceConst(len: usize) SystemSliceConst(@This()) {
+        return SystemSliceConst(@This()).view(len, .{});
+    }
+};
+
 /// A trait function used for determining if a type desribes a system.
 pub fn isSystem(comptime T: type) bool {
     switch (@typeInfo(T)) {
