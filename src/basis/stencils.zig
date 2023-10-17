@@ -8,7 +8,7 @@ const nodes = @import("nodes.zig");
 /// Manages the application of stencil products on functions. Supports computing values, centered derivatives
 /// positions, boundary positions, boundary values, boundary derivatives, prolongation, and restriction.
 /// If full is false, all cell indices are in standard index space (ie without ghost cells included).
-pub fn StencilSpace(comptime N: usize, comptime O: usize) type {
+pub fn StencilSpace(comptime N: usize, comptime E: usize) type {
     return struct {
         physical_bounds: RealBox,
         size: [N]usize,
@@ -19,7 +19,7 @@ pub fn StencilSpace(comptime N: usize, comptime O: usize) type {
         const IndexSpace = geometry.IndexSpace(N);
         const Region = geometry.Region(N);
         const Face = geometry.Face(N);
-        const NodeSpace = nodes.NodeSpace(N, O);
+        const NodeSpace = nodes.NodeSpace(N, E);
 
         pub fn nodeSpace(self: Self) NodeSpace {
             return NodeSpace.fromSize(self.size);
@@ -64,7 +64,7 @@ pub fn StencilSpace(comptime N: usize, comptime O: usize) type {
         }
 
         /// Computes the derivative of a field at a cell.
-        pub fn derivative(self: Self, comptime ranks: [N]usize, node: [N]isize, field: []const f64) f64 {
+        pub fn derivative(self: Self, comptime O: usize, comptime ranks: [N]usize, node: [N]isize, field: []const f64) f64 {
             comptime var stencil_sizes: [N]usize = undefined;
 
             inline for (0..N) |i| {
@@ -74,7 +74,7 @@ pub fn StencilSpace(comptime N: usize, comptime O: usize) type {
             comptime var stencils: [N][2 * O + 1]f64 = undefined;
 
             inline for (0..N) |i| {
-                stencils[i] = comptime derivativeStencil(ranks[i], O);
+                stencils[i] = comptime derivativeStencil(O, ranks[i]);
             }
 
             const stencil_space: IndexSpace = comptime IndexSpace.fromSize(stencil_sizes);
@@ -122,11 +122,11 @@ pub fn StencilSpace(comptime N: usize, comptime O: usize) type {
         }
 
         /// Computes the diagonal coefficient of the derivative stencil.
-        pub fn derivativeDiagonal(self: Self, comptime ranks: [N]usize) f64 {
+        pub fn derivativeDiagonal(self: Self, comptime O: usize, comptime ranks: [N]usize) f64 {
             comptime var stencils: [N][2 * O + 1]f64 = undefined;
 
             inline for (0..N) |i| {
-                stencils[i] = comptime derivativeStencil(ranks[i], O);
+                stencils[i] = comptime derivativeStencil(O, ranks[i]);
             }
 
             var result: f64 = 1.0;
@@ -172,24 +172,41 @@ pub fn StencilSpace(comptime N: usize, comptime O: usize) type {
         }
 
         /// Computes the value at a boundary of a field.
-        pub fn boundaryValue(self: Self, comptime extents: [N]isize, comptime L: usize, node: [N]isize, field: []const f64) f64 {
-            return self.boundaryDerivative([1]usize{0} ** N, extents, L, node, field);
+        pub fn boundaryValue(
+            self: Self,
+            comptime L: usize,
+            comptime extents: [N]isize,
+            node: [N]isize,
+            field: []const f64,
+        ) f64 {
+            return self.boundaryDerivative(L, extents, [1]usize{0} ** N, node, field);
         }
 
         /// Computes the outmost coefficient of a boundary stencil.
-        pub fn boundaryValueCoef(self: Self, comptime extents: [N]isize, comptime L: usize) f64 {
-            return self.boundaryDerivativeCoef([1]usize{0} ** N, extents, L);
+        pub fn boundaryValueCoef(
+            self: Self,
+            comptime L: usize,
+            comptime extents: [N]isize,
+        ) f64 {
+            return self.boundaryDerivativeCoef(L, extents, [1]usize{0} ** N);
         }
 
         /// Computes the derivative at a bounday of a field.
-        pub fn boundaryDerivative(self: Self, comptime ranks: [N]usize, comptime extents: [N]isize, comptime L: usize, node: [N]isize, field: []const f64) f64 {
-            comptime var stencils: [N][2 * O + L]f64 = undefined;
+        pub fn boundaryDerivative(
+            self: Self,
+            comptime L: usize,
+            comptime extents: [N]isize,
+            comptime ranks: [N]usize,
+            node: [N]isize,
+            field: []const f64,
+        ) f64 {
+            comptime var stencils: [N][2 * L]f64 = undefined;
             comptime var stencil_lens: [N]usize = undefined;
 
             // std.debug.print("Computing Boundary Derivative of {any}\n with ranks {any} and extents {any}\n", .{ cell, ranks, extents });
 
             inline for (0..N) |i| {
-                const stencil = comptime boundaryStencil(ranks[i], absSigned(extents[i]), L);
+                const stencil = comptime boundaryStencil(L, absSigned(extents[i]), ranks[i]);
 
                 inline for (0..stencil.len) |j| {
                     stencils[i][j] = stencil[j];
@@ -253,12 +270,17 @@ pub fn StencilSpace(comptime N: usize, comptime O: usize) type {
         }
 
         /// Computes the outmost coefficient of a boundary derivative stencil.
-        pub fn boundaryDerivativeCoef(self: Self, comptime ranks: [N]usize, comptime extents: [N]isize, comptime L: usize) f64 {
+        pub fn boundaryDerivativeCoef(
+            self: Self,
+            comptime L: usize,
+            comptime extents: [N]isize,
+            comptime ranks: [N]usize,
+        ) f64 {
             comptime var result: f64 = 1.0;
 
             inline for (0..N) |i| {
                 if (extents[i] != 0) {
-                    const stencil = comptime boundaryStencil(ranks[i], absSigned(extents[i]), L);
+                    const stencil = comptime boundaryStencil(L, absSigned(extents[i]), ranks[i]);
 
                     result *= stencil[stencil.len - 1];
                 }
@@ -281,7 +303,7 @@ pub fn StencilSpace(comptime N: usize, comptime O: usize) type {
     };
 }
 
-fn derivativeStencil(comptime R: usize, comptime O: usize) [2 * O + 1]f64 {
+fn derivativeStencil(comptime O: usize, comptime R: usize) [2 * O + 1]f64 {
     const grid = grids.nodeCenteredGrid(f64, O, O);
 
     return switch (R) {
@@ -296,7 +318,7 @@ fn absSigned(i: isize) isize {
     return if (i < 0) -i else i;
 }
 
-fn boundaryStencil(comptime R: usize, comptime M: usize, comptime L: usize) [M + L]f64 {
+fn boundaryStencil(comptime L: usize, comptime M: usize, comptime R: usize) [M + L]f64 {
     @setEvalBranchQuota(10000);
 
     const grid = grids.vertexCenteredGrid(f64, L, M);
@@ -312,7 +334,7 @@ fn boundaryStencil(comptime R: usize, comptime M: usize, comptime L: usize) [M +
 test "derivative stencils" {
     const expectEqualSlices = std.testing.expectEqualSlices;
 
-    try expectEqualSlices(f64, &[_]f64{ 0.0, 1.0, 0.0 }, &derivativeStencil(0, 1));
+    try expectEqualSlices(f64, &[_]f64{ 0.0, 1.0, 0.0 }, &derivativeStencil(1, 0));
     try expectEqualSlices(f64, &[_]f64{ -0.5, 0.0, 0.5 }, &derivativeStencil(1, 1));
-    try expectEqualSlices(f64, &[_]f64{ 1.0, -2.0, 1.0 }, &derivativeStencil(2, 1));
+    try expectEqualSlices(f64, &[_]f64{ 1.0, -2.0, 1.0 }, &derivativeStencil(1, 2));
 }

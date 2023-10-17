@@ -1,13 +1,22 @@
 const std = @import("std");
 
 const basis = @import("../basis/basis.zig");
-const geometry = @import("../geometry/geometry.zig");
-const system = @import("../system.zig");
 
+const geometry = @import("../geometry/geometry.zig");
 const Face = geometry.Face;
+
+const system = @import("../system.zig");
+const SystemSlice = system.SystemSlice;
+const SystemSliceConst = system.SystemSliceConst;
+const isSystem = system.isSystem;
 
 const boundary = @import("boundary.zig");
 const SystemBoundaryCondition = boundary.SystemBoundaryCondition;
+
+pub const EngineSetting = enum {
+    normal,
+    diagonal,
+};
 
 /// An `Engine` which can compute operations on elements of a given context system, as well as on
 /// a given operated system. This is an API for bridging the gap between systems (consisting of
@@ -15,21 +24,22 @@ const SystemBoundaryCondition = boundary.SystemBoundaryCondition;
 pub fn Engine(
     comptime N: usize,
     comptime O: usize,
+    comptime Setting: EngineSetting,
     comptime System: type,
     comptime Context: type,
 ) type {
-    if (!system.isSystem(Context)) {
-        @compileError("Context must satisfy isSystem trait.");
+    if (!isSystem(System)) {
+        @compileError("Operated must satisfy isSystem trait.");
     }
 
-    if (!system.isSystem(System)) {
-        @compileError("Operated must satisfy isSystem trait.");
+    if (!isSystem(Context)) {
+        @compileError("Context must satisfy isSystem trait.");
     }
 
     return struct {
         inner: EngineImpl(N, O),
-        ctx: system.SystemSliceConst(Context),
-        sys: system.SystemSliceConst(System),
+        sys: SystemSliceConst(System),
+        ctx: SystemSliceConst(Context),
 
         // Aliases
         const Self = @This();
@@ -72,42 +82,34 @@ pub fn Engine(
 
         /// Returns the value of the field at the current cell.
         pub fn valueSys(self: Self, comptime field: System) f64 {
-            return self.inner.value(self.sys.field(field));
+            return switch (Setting) {
+                .normal => self.inner.value(self.sys.field(field)),
+                .diagonal => self.inner.valueDiagonal(),
+            };
         }
 
         /// Returns the value of the field at the current cell.
         pub fn gradientSys(self: Self, comptime field: System) [N]f64 {
-            return self.inner.gradient(self.sys.field(field));
+            return switch (Setting) {
+                .normal => self.inner.gradient(self.sys.field(field)),
+                .diagonal => self.inner.gradientDiagonal(),
+            };
         }
 
         /// Returns the value of the field at the current cell.
         pub fn hessianSys(self: Self, comptime field: System) [N][N]f64 {
-            return self.inner.hessian(self.sys.field(field));
+            return switch (Setting) {
+                .normal => self.inner.hessian(self.sys.field(field)),
+                .diagonal => self.inner.hessianDiagonal(),
+            };
         }
 
         /// Returns the value of the field at the current cell.
         pub fn laplacianSys(self: Self, comptime field: System) f64 {
-            return self.inner.laplacian(self.sys.field(field));
-        }
-
-        /// Returns the value of the field at the current cell.
-        pub fn valueDiagonal(self: Self) f64 {
-            return self.inner.valueDiagonal();
-        }
-
-        /// Returns the value of the field at the current cell.
-        pub fn gradientDiagonal(self: Self) [N]f64 {
-            return self.inner.gradientDiagonal();
-        }
-
-        /// Returns the value of the field at the current cell.
-        pub fn hessianDiagonal(self: Self) [N][N]f64 {
-            return self.inner.hessianDiagonal();
-        }
-
-        /// Returns the value of the field at the current cell.
-        pub fn laplacianDiagonal(self: Self) f64 {
-            return self.inner.laplacianDiagonal();
+            return switch (Setting) {
+                .normal => self.inner.laplacian(self.sys.field(field)),
+                .diagonal => self.inner.laplacianDiagonal(),
+            };
         }
     };
 }
@@ -139,7 +141,7 @@ fn EngineImpl(comptime N: usize, comptime O: usize) type {
                 comptime var ranks: [N]usize = [1]usize{0} ** N;
                 ranks[i] += 1;
 
-                result[i] = self.space.derivativeDiagonal(ranks);
+                result[i] = self.space.derivativeDiagonal(O, ranks);
             }
 
             return result;
@@ -155,7 +157,7 @@ fn EngineImpl(comptime N: usize, comptime O: usize) type {
                     ranks[i] += 1;
                     ranks[j] += 1;
 
-                    result[i][j] = self.space.derivativeDiagonal(ranks);
+                    result[i][j] = self.space.derivativeDiagonal(O, ranks);
                 }
             }
 
@@ -170,7 +172,7 @@ fn EngineImpl(comptime N: usize, comptime O: usize) type {
                 comptime var ranks: [N]usize = [1]usize{0} ** N;
                 ranks[i] = 2;
 
-                result += self.space.derivativeDiagonal(ranks);
+                result += self.space.derivativeDiagonal(O, ranks);
             }
 
             return result;
@@ -189,7 +191,7 @@ fn EngineImpl(comptime N: usize, comptime O: usize) type {
                 comptime var ranks: [N]usize = [1]usize{0} ** N;
                 ranks[i] += 1;
 
-                result[i] = self.space.derivative(ranks, self.cell, field);
+                result[i] = self.space.derivative(O, ranks, self.cell, field);
             }
 
             return result;
@@ -205,7 +207,7 @@ fn EngineImpl(comptime N: usize, comptime O: usize) type {
                     ranks[i] += 1;
                     ranks[j] += 1;
 
-                    result[i][j] = self.space.derivative(ranks, self.cell, field);
+                    result[i][j] = self.space.derivative(O, ranks, self.cell, field);
                 }
             }
 
@@ -220,7 +222,7 @@ fn EngineImpl(comptime N: usize, comptime O: usize) type {
                 comptime var ranks: [N]usize = [1]usize{0} ** N;
                 ranks[i] = 2;
 
-                result += self.space.derivative(ranks, self.cell, field);
+                result += self.space.derivative(O, ranks, self.cell, field);
             }
 
             return result;

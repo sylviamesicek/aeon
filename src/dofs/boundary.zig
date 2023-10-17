@@ -153,26 +153,21 @@ pub fn BoundaryUtils(comptime N: usize, comptime O: usize) type {
                             }
                         }
 
-                        // if (region.adjacency() == 2) {
-                        //     std.debug.print("BOUNDARY ON CORNER\n", .{});
-                        //     std.debug.print("Extent: {any}\n", .{extents});
-                        // }
-
                         var sum: f64 = v * stencil_space.boundaryValue(
-                            extents,
                             L,
+                            extents,
                             cell,
                             sys.field(field),
                         );
-                        var coef: f64 = v * stencil_space.boundaryValueCoef(extents, L);
+                        var coef: f64 = v * stencil_space.boundaryValueCoef(L, extents);
 
                         inline for (0..N) |i| {
                             if (extents[i] != 0) {
                                 comptime var ranks: [N]usize = [1]usize{0} ** N;
                                 ranks[i] = 1;
 
-                                sum += normals[i] * stencil_space.boundaryDerivative(ranks, extents, L, cell, sys.field(field));
-                                coef += normals[i] * stencil_space.boundaryDerivativeCoef(ranks, extents, L);
+                                sum += normals[i] * stencil_space.boundaryDerivative(L, extents, ranks, cell, sys.field(field));
+                                coef += normals[i] * stencil_space.boundaryDerivativeCoef(L, extents, ranks);
                             }
                         }
 

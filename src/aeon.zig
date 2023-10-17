@@ -6,15 +6,16 @@ pub const geometry = @import("geometry/geometry.zig");
 pub const lac = @import("lac/lac.zig");
 pub const mesh = @import("mesh/mesh.zig");
 pub const methods = @import("methods/methods.zig");
-pub const vtkio = @import("vtkio.zig");
 
 // Global exports.
 
-const system = @import("system.zig");
 const index = @import("index.zig");
-
 pub const Index = index.Index;
 
+const io = @import("io/io.zig");
+pub const DataOut = io.DataOut;
+
+const system = @import("system.zig");
 pub const isSystem = system.isSystem;
 pub const SystemSlice = system.SystemSlice;
 pub const SystemSliceConst = system.SystemSliceConst;
@@ -26,8 +27,8 @@ test {
     _ = dofs;
     _ = geometry;
     _ = index;
+    _ = io;
     _ = mesh;
-    _ = vtkio;
     _ = lac;
     _ = system;
 }

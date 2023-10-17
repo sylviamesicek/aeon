@@ -16,16 +16,20 @@ const maxInt = std.math.maxInt;
 // root imports
 
 const basis = @import("../basis/basis.zig");
-const geometry = @import("../geometry/geometry.zig");
-const index = @import("../index.zig");
-const meshes = @import("../mesh/mesh.zig");
-const system = @import("../system.zig");
 
+const geometry = @import("../geometry/geometry.zig");
 const Face = geometry.Face;
+
+const index = @import("../index.zig");
+
+const meshes = @import("../mesh/mesh.zig");
+
+const system = @import("../system.zig");
 const SystemSlice = system.SystemSlice;
 const SystemSliceConst = system.SystemSliceConst;
 const SystemValue = system.SystemValue;
 const EmptySystem = system.EmptySystem;
+const isSystem = system.isSystem;
 
 // submodules
 
@@ -53,7 +57,7 @@ pub fn DofMap(comptime N: usize, comptime O: usize) type {
         const Self = @This();
         const Mesh = meshes.Mesh(N);
         const Index = index.Index(N);
-        const CellSpace = basis.NodeSpace(N, O);
+        const NodeSpace = basis.NodeSpace(N, O);
 
         pub fn init(allocator: Allocator, mesh: *const Mesh) !Self {
             const offsets = try allocator.alloc(usize, mesh.blocks.len + 1);
@@ -65,7 +69,7 @@ pub fn DofMap(comptime N: usize, comptime O: usize) type {
                 var cur: usize = 0;
 
                 for (mesh.blocks) |block| {
-                    offsets[cur + 1] = offsets[cur] + CellSpace.fromSize(Index.scaled(block.bounds.size, mesh.tile_width)).total();
+                    offsets[cur + 1] = offsets[cur] + NodeSpace.fromSize(Index.scaled(block.bounds.size, mesh.tile_width)).total();
                     cur += 1;
                 }
             }
@@ -99,14 +103,15 @@ pub fn DofMap(comptime N: usize, comptime O: usize) type {
 /// local windows. All functions which take in stencil spaces act on windows only.
 pub fn DofUtils(comptime N: usize, comptime O: usize) type {
     return struct {
-        const CellSpace = basis.NodeSpace(N, O);
+        const Map = DofMap(N, O);
+
+        const NodeSpace = basis.NodeSpace(N, O);
         const StencilSpace = basis.StencilSpace(N, O);
         const Index = index.Index(N);
         const IndexSpace = geometry.IndexSpace(N);
         const IndexBox = geometry.Box(N, usize);
-        const Mesh = meshes.Mesh(N);
         const Region = geometry.Region(N);
-        const Map = DofMap(N, O);
+        const Mesh = meshes.Mesh(N);
 
         /// Computes the number of cells along each axis for a given block.
         pub fn blockCellSize(mesh: *const Mesh, block: usize) [N]usize {
@@ -198,20 +203,20 @@ pub fn DofUtils(comptime N: usize, comptime O: usize) type {
             dest: SystemSlice(System),
             src: SystemSliceConst(System),
         ) void {
-            assert(dest.len == dof_map.ndofs());
-            assert(src.len == mesh.cell_total);
+            dest.assertLen(dof_map.ndofs());
+            src.assertLen(mesh.cell_total);
 
             const block_dest = dest.slice(dof_map.offset(block), dof_map.total(block));
             const block_src = src.slice(mesh.blocks[block].cell_offset, mesh.blocks[block].cell_total);
 
-            const cell_space = CellSpace.fromSize(blockCellSize(mesh, block));
+            const node_space = NodeSpace.fromSize(blockCellSize(mesh, block));
 
-            var cells = cell_space.nodes();
+            var nodes = node_space.nodes();
             var linear: usize = 0;
 
-            while (cells.next()) |cell| : (linear += 1) {
+            while (nodes.next()) |node| : (linear += 1) {
                 inline for (comptime std.enums.values(System)) |field| {
-                    cell_space.setValue(cell, block_dest.field(field), block_src.field(field)[linear]);
+                    node_space.setValue(node, block_dest.field(field), block_src.field(field)[linear]);
                 }
             }
         }
@@ -225,20 +230,20 @@ pub fn DofUtils(comptime N: usize, comptime O: usize) type {
             dest: SystemSlice(System),
             src: SystemSliceConst(System),
         ) void {
-            assert(src.len == dof_map.ndofs());
-            assert(dest.len == mesh.cell_total);
+            dest.assertLen(mesh.cell_total);
+            src.assertLen(dof_map.ndofs());
 
             const block_src = src.slice(dof_map.offset(block), dof_map.total(block));
             const block_dest = dest.slice(mesh.blocks[block].cell_offset, mesh.blocks[block].cell_total);
 
-            const cell_space = CellSpace.fromSize(blockCellSize(mesh, block));
+            const node_space = NodeSpace.fromSize(blockCellSize(mesh, block));
 
-            var cells = cell_space.nodes();
+            var nodes = node_space.nodes();
             var linear: usize = 0;
 
-            while (cells.next()) |cell| : (linear += 1) {
+            while (nodes.next()) |node| : (linear += 1) {
                 inline for (comptime std.enums.values(System)) |field| {
-                    block_dest.field(field)[linear] = cell_space.value(cell, block_src.field(field));
+                    block_dest.field(field)[linear] = node_space.value(node, block_src.field(field));
                 }
             }
         }
@@ -251,8 +256,8 @@ pub fn DofUtils(comptime N: usize, comptime O: usize) type {
             dest: SystemSlice(System),
             src: SystemSliceConst(System),
         ) void {
-            assert(dest.len == dof_map.ndofs());
-            assert(src.len == dof_map.ndofs());
+            dest.assertLen(dof_map.ndofs());
+            src.assertLen(dof_map.ndofs());
 
             const cell_offset = dof_map.offset(block);
             const cell_total = dof_map.total(block);
@@ -270,8 +275,8 @@ pub fn DofUtils(comptime N: usize, comptime O: usize) type {
             dest: SystemSlice(System),
             src: SystemSliceConst(System),
         ) void {
-            assert(dest.len == mesh.cell_total);
-            assert(src == mesh.cell_total);
+            dest.assertLen(mesh.cell_total);
+            src.assertLen(mesh.cell_total);
 
             const cell_offset = mesh.blocks[block].cell_offset;
             const cell_total = mesh.blocks[block].cell_total;
@@ -297,18 +302,6 @@ pub fn DofUtils(comptime N: usize, comptime O: usize) type {
             fillBoundaryToExtent(O, mesh, dof_map, block, boundary, sys);
         }
 
-        /// Given a dof vector, fill all boundary dofs on that vector out to an extent 2*O using the
-        /// supplied boundary conditions.
-        pub fn fillBoundaryFull(
-            mesh: *const Mesh,
-            dof_map: Map,
-            block: usize,
-            boundary: anytype,
-            sys: system.SystemSlice(@TypeOf(boundary).System),
-        ) void {
-            fillBoundaryToExtent(2 * O, mesh, dof_map, block, boundary, sys);
-        }
-
         /// Internal helper function for filling boundary dofs to some extent E.
         fn fillBoundaryToExtent(
             comptime E: usize,
@@ -324,7 +317,7 @@ pub fn DofUtils(comptime N: usize, comptime O: usize) type {
                 @compileError("FillBaseBoundary requires boundary satisfy isSystemBoundary trait.");
             }
 
-            assert(sys.len == dof_map.ndofs());
+            sys.assertLen(dof_map.ndofs());
 
             const bounds: IndexBox = mesh.blocks[block].bounds;
             const index_size = mesh.levels[mesh.patches[mesh.blocks[block].patch].level].index_size;
@@ -370,7 +363,7 @@ pub fn DofUtils(comptime N: usize, comptime O: usize) type {
             const block_map = mesh.block_map;
 
             const block = mesh.blocks[block_id];
-            const block_cell_space = CellSpace.fromSize(blockCellSize(mesh, block_id));
+            const block_cell_space = NodeSpace.fromSize(blockCellSize(mesh, block_id));
 
             const patch_id = mesh.blocks[block_id].patch;
             const patch = mesh.patches[patch_id];
@@ -408,7 +401,7 @@ pub fn DofUtils(comptime N: usize, comptime O: usize) type {
 
                     const coarse_block_id = coarse_patch_block_map[coarse_patch_space.linearFromCartesian(coarse_buffer_tile)];
                     const coarse_block = mesh.blocks[coarse_block_id];
-                    const coarse_block_cell_space: CellSpace = CellSpace.fromSize(coarse_block.bounds.size);
+                    const coarse_block_cell_space: NodeSpace = NodeSpace.fromSize(coarse_block.bounds.size);
 
                     const coarse_block_sys = sys.slice(
                         dof_map.offset(coarse_block_id),
@@ -424,9 +417,9 @@ pub fn DofUtils(comptime N: usize, comptime O: usize) type {
 
                     while (indices.next()) |ind| {
                         // Cell in subcell space
-                        const block_cell: [N]isize = CellSpace.offsetFromOrigin(origin, ind);
+                        const block_cell: [N]isize = NodeSpace.offsetFromOrigin(origin, ind);
                         // Cell in neighbor in subcell space
-                        const neighbor_cell: [N]isize = CellSpace.offsetFromOrigin(coarse_neighbor_origin, ind);
+                        const neighbor_cell: [N]isize = NodeSpace.offsetFromOrigin(coarse_neighbor_origin, ind);
 
                         inline for (comptime std.enums.values(System)) |field| {
                             block_cell_space.setValue(
@@ -447,15 +440,15 @@ pub fn DofUtils(comptime N: usize, comptime O: usize) type {
                     );
 
                     const neighbor = mesh.blocks[neighbor_id];
-                    const neighbor_cell_space: CellSpace = CellSpace.fromSize(neighbor.bounds.size);
+                    const neighbor_cell_space: NodeSpace = NodeSpace.fromSize(neighbor.bounds.size);
 
                     const neighbor_origin: [N]usize = Index.scaled(neighbor.bounds.localFromGlobal(relative_tile), mesh.tile_width);
 
                     var indices = region.cartesianIndices(E, Index.splat(mesh.tile_width));
 
                     while (indices.next()) |idx| {
-                        const block_cell: [N]isize = CellSpace.offsetFromOrigin(origin, idx);
-                        const neighbor_cell: [N]isize = CellSpace.offsetFromOrigin(neighbor_origin, idx);
+                        const block_cell: [N]isize = NodeSpace.offsetFromOrigin(origin, idx);
+                        const neighbor_cell: [N]isize = NodeSpace.offsetFromOrigin(neighbor_origin, idx);
 
                         inline for (comptime std.enums.values(System)) |field| {
                             block_cell_space.setValue(
@@ -488,7 +481,7 @@ pub fn DofUtils(comptime N: usize, comptime O: usize) type {
                 @compileError("System must satisfy isSystem trait.");
             }
 
-            assert(sys.len == dof_map.ndofs());
+            sys.assertLen(dof_map.ndofs());
 
             const block_sys = sys.slice(
                 dof_map.offset(block_id),
@@ -502,7 +495,7 @@ pub fn DofUtils(comptime N: usize, comptime O: usize) type {
                 return;
             }
 
-            const cell_space = CellSpace.fromSize(blockCellSize(mesh, block_id));
+            const cell_space = NodeSpace.fromSize(blockCellSize(mesh, block_id));
 
             const coarse_patch = mesh.patches[patch.parent.?];
 
@@ -518,7 +511,7 @@ pub fn DofUtils(comptime N: usize, comptime O: usize) type {
                 const coarse_block_id = mesh.block_map[coarse_patch.tile_offset + linear];
                 const coarse_block = mesh.blocks[coarse_block_id];
 
-                const coarse_cell_space = CellSpace.fromSize(blockCellSize(mesh, coarse_block_id));
+                const coarse_cell_space = NodeSpace.fromSize(blockCellSize(mesh, coarse_block_id));
 
                 const coarse_dofs_offset = dof_map.offset(coarse_block_id);
                 const coarse_dofs_total = dof_map.total(coarse_block_id);
@@ -537,7 +530,7 @@ pub fn DofUtils(comptime N: usize, comptime O: usize) type {
                     const coarse_cell = Index.toSigned(Index.add(coarse_origin, cell));
 
                     inline for (comptime std.enums.values(System)) |field| {
-                        const v = cell_space.restrict(super_cell, block_sys.field(field));
+                        const v = cell_space.restrict(0, super_cell, block_sys.field(field));
                         coarse_cell_space.setValue(coarse_cell, coarse_sys.field(field), v);
                     }
                 }
@@ -563,10 +556,10 @@ pub fn DofUtils(comptime N: usize, comptime O: usize) type {
                 @compileError("Oper must satisfy isMeshOperator trait.");
             }
 
-            assert(dest.len == mesh.cell_total);
-            assert(src.len == dof_map.ndofs());
-            assert(ctx.len == dof_map.ndofs());
-            assert(b.len == dof_map.ndofs());
+            dest.assertLen(mesh.cell_total);
+            src.assertLen(dof_map.ndofs());
+            ctx.assertLen(dof_map.ndofs());
+            b.assertLen(dof_map.ndofs());
 
             const block_b = b.slice(
                 dof_map.offset(block_id),
@@ -580,7 +573,7 @@ pub fn DofUtils(comptime N: usize, comptime O: usize) type {
                 return;
             }
 
-            const cell_space = CellSpace.fromSize(blockCellSize(mesh, block_id));
+            const cell_space = NodeSpace.fromSize(blockCellSize(mesh, block_id));
 
             const coarse_patch = mesh.patches[patch.parent.?];
 
@@ -636,7 +629,7 @@ pub fn DofUtils(comptime N: usize, comptime O: usize) type {
                     const app = oper.apply(engine);
 
                     inline for (comptime std.enums.values(@TypeOf(oper).System)) |field| {
-                        const b_val = cell_space.restrict(supercell, block_b.field(field));
+                        const b_val = cell_space.restrict(0, supercell, block_b.field(field));
                         const a_val = @field(app, @tagName(field));
                         coarse_dest.field(field)[lin] = b_val - a_val;
                     }
@@ -656,7 +649,7 @@ pub fn DofUtils(comptime N: usize, comptime O: usize) type {
                 @compileError("System must satisfy isSystem trait.");
             }
 
-            assert(sys.len == dof_map.ndofs());
+            sys.assertLen(dof_map.ndofs());
 
             const block = mesh.blocks[block_id];
             const patch = mesh.patches[block.patch];
@@ -665,7 +658,7 @@ pub fn DofUtils(comptime N: usize, comptime O: usize) type {
                 return;
             }
 
-            const cell_space = CellSpace.fromSize(blockCellSize(mesh, block_id));
+            const cell_space = NodeSpace.fromSize(blockCellSize(mesh, block_id));
 
             const block_sys = sys.slice(
                 dof_map.offset(block_id),
@@ -680,7 +673,7 @@ pub fn DofUtils(comptime N: usize, comptime O: usize) type {
 
                 const coarse_block = mesh.blocks[coarse_block_id];
 
-                const coarse_cell_space = CellSpace.fromSize(blockCellSize(mesh, coarse_block_id));
+                const coarse_cell_space = NodeSpace.fromSize(blockCellSize(mesh, coarse_block_id));
 
                 const coarse_cell_offset = dof_map.offset(coarse_block_id);
                 const coarse_cell_total = dof_map.total(coarse_block_id);
@@ -722,8 +715,8 @@ pub fn DofUtils(comptime N: usize, comptime O: usize) type {
                 @compileError("System must satisfy isSystem trait.");
             }
 
-            assert(sys.len == dof_map.ndofs());
-            assert(sys_old.len == dof_map.ndofs());
+            sys.assertLen(dof_map.ndofs());
+            sys_old.assertLen(dof_map.ndofs());
 
             const block = mesh.blocks[block_id];
             const patch = mesh.patches[block.patch];
@@ -732,7 +725,7 @@ pub fn DofUtils(comptime N: usize, comptime O: usize) type {
                 return;
             }
 
-            const cell_space = CellSpace.fromSize(blockCellSize(mesh, block_id));
+            const cell_space = NodeSpace.fromSize(blockCellSize(mesh, block_id));
 
             const block_sys = sys.slice(
                 dof_map.offset(block_id),
@@ -746,7 +739,7 @@ pub fn DofUtils(comptime N: usize, comptime O: usize) type {
 
                 const coarse_block = mesh.blocks[coarse_block_id];
 
-                const coarse_cell_space = CellSpace.fromSize(blockCellSize(mesh, coarse_block_id));
+                const coarse_cell_space = NodeSpace.fromSize(blockCellSize(mesh, coarse_block_id));
 
                 const coarse_dof_offset = dof_map.offset(coarse_block_id);
                 const coarse_dof_total = dof_map.total(coarse_block_id);
@@ -1237,306 +1230,6 @@ pub fn DofUtilsTotal(comptime N: usize, comptime O: usize) type {
 
             return result;
         }
-
-        // *************************
-        // Output ******************
-        // *************************
-
-        pub fn writeCellsToVtkOnLevel(comptime System: type, allocator: Allocator, mesh: *const Mesh, level: usize, sys: system.SystemSliceConst(System), out_stream: anytype) !void {
-            if (comptime !system.isSystem(System)) {
-                @compileError("System must satisfy isSystem trait.");
-            }
-
-            const field_count = comptime std.enums.values(System).len;
-
-            const vtkio = @import("../vtkio.zig");
-            const VtuMeshOutput = vtkio.VtuMeshOutput;
-            const VtkCellType = vtkio.VtkCellType;
-
-            // Global Constants
-            const cell_type: VtkCellType = switch (N) {
-                1 => .line,
-                2 => .quad,
-                3 => .hexa,
-                else => @compileError("Vtk Output not supported for N > 3"),
-            };
-
-            var positions: ArrayListUnmanaged(f64) = .{};
-            defer positions.deinit(allocator);
-
-            var vertices: ArrayListUnmanaged(usize) = .{};
-            defer vertices.deinit(allocator);
-
-            var fields = [1]ArrayListUnmanaged(f64){.{}} ** field_count;
-
-            defer {
-                for (&fields) |*field| {
-                    field.deinit(allocator);
-                }
-            }
-
-            // Temporary
-            // TODO fix to print all exposed blocks
-
-            const top_level = mesh.levels[level];
-
-            for (top_level.block_offset..top_level.block_offset + top_level.block_total) |block_id| {
-                const block = mesh.blocks[block_id];
-
-                const stencil: StencilSpace = Utils.blockStencilSpace(mesh, block_id);
-
-                const cell_size = stencil.size;
-                const point_size = Index.add(cell_size, Index.splat(1));
-
-                const cell_space: IndexSpace = IndexSpace.fromSize(cell_size);
-                const point_space: IndexSpace = IndexSpace.fromSize(point_size);
-
-                const point_offset: usize = positions.items.len / N;
-
-                try positions.ensureUnusedCapacity(allocator, N * point_space.total());
-                try vertices.ensureUnusedCapacity(allocator, cell_type.nvertices() * cell_space.total());
-
-                // Fill positions and vertices
-                var points = point_space.cartesianIndices();
-
-                while (points.next()) |point| {
-                    const pos = stencil.vertexPosition(Index.toSigned(point));
-                    for (0..N) |i| {
-                        positions.appendAssumeCapacity(pos[i]);
-                    }
-                }
-
-                if (N == 1) {
-                    var cells = cell_space.cartesianIndices();
-
-                    while (cells.next()) |cell| {
-                        const v1: usize = point_space.linearFromCartesian(cell);
-                        const v2: usize = point_space.linearFromCartesian(Index.add(cell, Index.splat(1)));
-
-                        vertices.appendAssumeCapacity(point_offset + v1);
-                        vertices.appendAssumeCapacity(point_offset + v2);
-                    }
-                } else if (N == 2) {
-                    var cells = cell_space.cartesianIndices();
-
-                    while (cells.next()) |cell| {
-                        const v1: usize = point_space.linearFromCartesian(cell);
-                        const v2: usize = point_space.linearFromCartesian(Index.add(cell, [2]usize{ 0, 1 }));
-                        const v3: usize = point_space.linearFromCartesian(Index.add(cell, [2]usize{ 1, 1 }));
-                        const v4: usize = point_space.linearFromCartesian(Index.add(cell, [2]usize{ 1, 0 }));
-
-                        vertices.appendAssumeCapacity(point_offset + v1);
-                        vertices.appendAssumeCapacity(point_offset + v2);
-                        vertices.appendAssumeCapacity(point_offset + v3);
-                        vertices.appendAssumeCapacity(point_offset + v4);
-                    }
-                } else if (N == 3) {
-                    var cells = cell_space.cartesianIndices();
-
-                    while (cells.next()) |cell| {
-                        const v1: usize = point_space.linearFromCartesian(cell);
-                        const v2: usize = point_space.linearFromCartesian(Index.add(cell, [3]usize{ 0, 1, 0 }));
-                        const v3: usize = point_space.linearFromCartesian(Index.add(cell, [3]usize{ 1, 1, 0 }));
-                        const v4: usize = point_space.linearFromCartesian(Index.add(cell, [3]usize{ 1, 0, 0 }));
-                        const v5: usize = point_space.linearFromCartesian(Index.add(cell, [3]usize{ 0, 0, 1 }));
-                        const v6: usize = point_space.linearFromCartesian(Index.add(cell, [3]usize{ 0, 1, 3 }));
-                        const v7: usize = point_space.linearFromCartesian(Index.add(cell, [3]usize{ 1, 1, 3 }));
-                        const v8: usize = point_space.linearFromCartesian(Index.add(cell, [3]usize{ 1, 0, 3 }));
-
-                        vertices.appendAssumeCapacity(point_offset + v1);
-                        vertices.appendAssumeCapacity(point_offset + v2);
-                        vertices.appendAssumeCapacity(point_offset + v3);
-                        vertices.appendAssumeCapacity(point_offset + v4);
-                        vertices.appendAssumeCapacity(point_offset + v5);
-                        vertices.appendAssumeCapacity(point_offset + v6);
-                        vertices.appendAssumeCapacity(point_offset + v7);
-                        vertices.appendAssumeCapacity(point_offset + v8);
-                    }
-                }
-
-                for (&fields) |*field| {
-                    try field.ensureUnusedCapacity(allocator, cell_space.total());
-                }
-
-                const block_sys = sys.slice(block.cell_offset, block.cell_total);
-
-                for (0..block.cell_total) |linear| {
-                    inline for (comptime std.enums.values(System), 0..) |field, idx| {
-                        fields[idx].appendAssumeCapacity(block_sys.field(field)[linear]);
-                    }
-                }
-            }
-
-            var grid: VtuMeshOutput = try VtuMeshOutput.init(allocator, .{
-                .points = positions.items,
-                .vertices = vertices.items,
-                .cell_type = cell_type,
-            });
-            defer grid.deinit();
-
-            inline for (comptime std.meta.fieldNames(System), 0..) |name, id| {
-                try grid.addCellField(name, fields[id].items, 1);
-            }
-
-            try grid.write(out_stream);
-        }
-
-        pub fn writeCellsToVtk(comptime System: type, allocator: Allocator, mesh: *const Mesh, sys: system.SystemSliceConst(System), out_stream: anytype) !void {
-            try writeCellsToVtkOnLevel(System, allocator, mesh, mesh.levels.len - 1, sys, out_stream);
-        }
-
-        pub fn writeDofsToVtkOnLevel(
-            comptime System: type,
-            allocator: Allocator,
-            mesh: *const Mesh,
-            dof_map: Map,
-            level: usize,
-            sys: system.SystemSliceConst(System),
-            out_stream: anytype,
-        ) !void {
-            if (comptime !system.isSystem(System)) {
-                @compileError("System must satisfy isSystem trait.");
-            }
-
-            const field_count = comptime std.enums.values(System).len;
-
-            const vtkio = @import("../vtkio.zig");
-            const VtuMeshOutput = vtkio.VtuMeshOutput;
-            const VtkCellType = vtkio.VtkCellType;
-
-            // Global Constants
-            const cell_type: VtkCellType = switch (N) {
-                1 => .line,
-                2 => .quad,
-                3 => .hexa,
-                else => @compileError("Vtk Output not supported for N > 3"),
-            };
-
-            var positions: ArrayListUnmanaged(f64) = .{};
-            defer positions.deinit(allocator);
-
-            var vertices: ArrayListUnmanaged(usize) = .{};
-            defer vertices.deinit(allocator);
-
-            var fields = [1]ArrayListUnmanaged(f64){.{}} ** field_count;
-
-            defer {
-                for (&fields) |*field| {
-                    field.deinit(allocator);
-                }
-            }
-
-            const top_level = mesh.levels[level];
-
-            for (top_level.block_offset..top_level.block_offset + top_level.block_total) |block_id| {
-                const block = mesh.blocks[block_id];
-                _ = block;
-
-                const stencil: StencilSpace = Utils.blockStencilSpace(mesh, block_id);
-
-                const cell_size = stencil.cellSpace().sizeWithGhost();
-                const point_size = Index.add(cell_size, Index.splat(1));
-
-                const cell_space: IndexSpace = IndexSpace.fromSize(cell_size);
-                const point_space: IndexSpace = IndexSpace.fromSize(point_size);
-
-                const point_offset: usize = positions.items.len / N;
-
-                try positions.ensureUnusedCapacity(allocator, N * point_space.total());
-                try vertices.ensureUnusedCapacity(allocator, cell_type.nvertices() * cell_space.total());
-
-                // Fill positions and vertices
-                var points = point_space.cartesianIndices();
-
-                while (points.next()) |point| {
-                    var idx = Index.toSigned(point);
-
-                    for (0..N) |i| {
-                        idx[i] -= 2 * O;
-                    }
-
-                    const pos = stencil.vertexPosition(idx);
-
-                    for (0..N) |i| {
-                        positions.appendAssumeCapacity(pos[i]);
-                    }
-                }
-
-                if (N == 1) {
-                    var cells = cell_space.cartesianIndices();
-
-                    while (cells.next()) |cell| {
-                        const v1: usize = point_space.linearFromCartesian(cell);
-                        const v2: usize = point_space.linearFromCartesian(Index.add(cell, Index.splat(1)));
-
-                        vertices.appendAssumeCapacity(point_offset + v1);
-                        vertices.appendAssumeCapacity(point_offset + v2);
-                    }
-                } else if (N == 2) {
-                    var cells = cell_space.cartesianIndices();
-
-                    while (cells.next()) |cell| {
-                        const v1: usize = point_space.linearFromCartesian(cell);
-                        const v2: usize = point_space.linearFromCartesian(Index.add(cell, [2]usize{ 0, 1 }));
-                        const v3: usize = point_space.linearFromCartesian(Index.add(cell, [2]usize{ 1, 1 }));
-                        const v4: usize = point_space.linearFromCartesian(Index.add(cell, [2]usize{ 1, 0 }));
-
-                        vertices.appendAssumeCapacity(point_offset + v1);
-                        vertices.appendAssumeCapacity(point_offset + v2);
-                        vertices.appendAssumeCapacity(point_offset + v3);
-                        vertices.appendAssumeCapacity(point_offset + v4);
-                    }
-                } else if (N == 3) {
-                    var cells = cell_space.cartesianIndices();
-
-                    while (cells.next()) |cell| {
-                        const v1: usize = point_space.linearFromCartesian(cell);
-                        const v2: usize = point_space.linearFromCartesian(Index.add(cell, [3]usize{ 0, 1, 0 }));
-                        const v3: usize = point_space.linearFromCartesian(Index.add(cell, [3]usize{ 1, 1, 0 }));
-                        const v4: usize = point_space.linearFromCartesian(Index.add(cell, [3]usize{ 1, 0, 0 }));
-                        const v5: usize = point_space.linearFromCartesian(Index.add(cell, [3]usize{ 0, 0, 1 }));
-                        const v6: usize = point_space.linearFromCartesian(Index.add(cell, [3]usize{ 0, 1, 3 }));
-                        const v7: usize = point_space.linearFromCartesian(Index.add(cell, [3]usize{ 1, 1, 3 }));
-                        const v8: usize = point_space.linearFromCartesian(Index.add(cell, [3]usize{ 1, 0, 3 }));
-
-                        vertices.appendAssumeCapacity(point_offset + v1);
-                        vertices.appendAssumeCapacity(point_offset + v2);
-                        vertices.appendAssumeCapacity(point_offset + v3);
-                        vertices.appendAssumeCapacity(point_offset + v4);
-                        vertices.appendAssumeCapacity(point_offset + v5);
-                        vertices.appendAssumeCapacity(point_offset + v6);
-                        vertices.appendAssumeCapacity(point_offset + v7);
-                        vertices.appendAssumeCapacity(point_offset + v8);
-                    }
-                }
-
-                for (&fields) |*field| {
-                    try field.ensureUnusedCapacity(allocator, cell_space.total());
-                }
-
-                const block_sys = sys.slice(
-                    dof_map.offset(block_id),
-                    dof_map.total(block_id),
-                );
-
-                inline for (comptime std.enums.values(System), 0..) |field, idx| {
-                    fields[idx].appendSliceAssumeCapacity(block_sys.field(field));
-                }
-            }
-
-            var grid: VtuMeshOutput = try VtuMeshOutput.init(allocator, .{
-                .points = positions.items,
-                .vertices = vertices.items,
-                .cell_type = cell_type,
-            });
-            defer grid.deinit();
-
-            inline for (comptime std.meta.fieldNames(System), 0..) |name, id| {
-                try grid.addCellField(name, fields[id].items, 1);
-            }
-
-            try grid.write(out_stream);
-        }
     };
 }
 
@@ -1580,10 +1273,6 @@ pub fn isSystemOperator(comptime N: usize, comptime O: usize) fn (type) bool {
             }
 
             if (comptime !(hasFn("apply")(T) and @TypeOf(T.apply) == fn (T, Engine(N, O, T.System, T.Context)) system.SystemValue(T.System))) {
-                return false;
-            }
-
-            if (comptime !(hasFn("applyDiagonal")(T) and @TypeOf(T.applyDiagonal) == fn (T, Engine(N, O, T.System, T.Context)) system.SystemValue(T.System))) {
                 return false;
             }
 
@@ -1635,11 +1324,7 @@ pub fn isSystemProjection(comptime N: usize, comptime O: usize) fn (type) bool {
                 return false;
             }
 
-            if (comptime !(hasFn("project")(T) and @TypeOf(T.project) == fn (T, Engine(N, O, system.EmptySystem, T.Context)) system.SystemValue(T.System))) {
-                return false;
-            }
-
-            if (comptime !(hasFn("boundaryCtx")(T) and @TypeOf(T.boundaryCtx) == fn (T, [N]f64, Face(N)) SystemBoundaryCondition(T.Context))) {
+            if (comptime !(hasFn("project")(T) and @TypeOf(T.project) == fn (T, ProjectionEngine(N, O, T.Context)) SystemValue(T.System))) {
                 return false;
             }
 

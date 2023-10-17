@@ -1,6 +1,3 @@
-//! A module for interacting with and producing vtk files for use with tools like
-//! Paraview and VisIt.
-
 const std = @import("std");
 const ArrayListUnmanaged = std.ArrayListUnmanaged;
 const Allocator = std.mem.Allocator;

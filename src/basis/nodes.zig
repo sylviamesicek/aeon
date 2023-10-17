@@ -5,8 +5,8 @@ const grids = @import("grids.zig");
 const lagrange = @import("lagrange.zig");
 
 /// A set of cells over which basic stencils can be applied. This includes a buffer region of
-/// length `E`, and all stencils are built to order `O`.
-pub fn NodeSpace(comptime N: usize, comptime O: usize) type {
+/// length `E`.
+pub fn NodeSpace(comptime N: usize, comptime E: usize) type {
     return struct {
         size: [N]usize,
 
@@ -21,7 +21,7 @@ pub fn NodeSpace(comptime N: usize, comptime O: usize) type {
             var result: [N]usize = undefined;
 
             for (0..N) |i| {
-                result[i] = self.size[i] + 4 * O;
+                result[i] = self.size[i] + 2 * E;
             }
 
             return result;
@@ -39,7 +39,7 @@ pub fn NodeSpace(comptime N: usize, comptime O: usize) type {
             var index: [N]usize = undefined;
 
             for (0..N) |i| {
-                index[i] = @intCast(@as(isize, @intCast(2 * O)) + node[i]);
+                index[i] = @intCast(@as(isize, @intCast(E)) + node[i]);
             }
 
             return index;
@@ -68,7 +68,7 @@ pub fn NodeSpace(comptime N: usize, comptime O: usize) type {
         }
 
         /// Prolongs the value of a field to a subcell.
-        pub fn prolong(self: Self, subcell: [N]isize, field: []const f64) f64 {
+        pub fn prolong(self: Self, comptime O: usize, subcell: [N]isize, field: []const f64) f64 {
             // Build stencils for both the left and right case at comptime.
             const lstencil: [2 * O + 1]f64 = comptime prolongStencil(false, O);
             const rstencil: [2 * O + 1]f64 = comptime prolongStencil(true, O);
@@ -105,8 +105,8 @@ pub fn NodeSpace(comptime N: usize, comptime O: usize) type {
         }
 
         /// Restricts the value of a field to a supercell.
-        pub fn restrict(self: Self, supercell: [N]isize, field: []const f64) f64 {
-            const stencil: [2 * O + 2]f64 = comptime restrictStencil(O);
+        pub fn restrict(self: Self, comptime O: usize, supercell: [N]isize, field: []const f64) f64 {
+            const stencil: [2 * O + 2]f64 = comptime restrictStencil(O + 1);
 
             const stencil_space: IndexSpace = comptime IndexSpace.fromSize([1]usize{2 * O + 2} ** N);
             const index_space: IndexSpace = self.indexSpace();
@@ -137,7 +137,7 @@ pub fn NodeSpace(comptime N: usize, comptime O: usize) type {
         }
 
         pub fn NodeIterator(comptime F: usize) type {
-            if (comptime F > 2 * O) {
+            if (comptime F > E) {
                 @compileError("F must be less than or equal to E.");
             }
 
@@ -168,16 +168,8 @@ pub fn NodeSpace(comptime N: usize, comptime O: usize) type {
             };
         }
 
-        pub fn nodesToExtent(self: Self, comptime F: usize) NodeIterator(F) {
+        pub fn nodes(self: Self, comptime F: usize) NodeIterator(F) {
             return NodeIterator(F).init(self.size);
-        }
-
-        pub fn nodes(self: Self) NodeIterator(0) {
-            return self.nodesToExtent(0);
-        }
-
-        pub fn fullNodes(self: Self) NodeIterator(2 * O) {
-            return self.nodesToExtent(2 * O);
         }
     };
 }
@@ -188,15 +180,15 @@ fn prolongStencil(comptime side: bool, comptime O: usize) [2 * O + 1]f64 {
     return lagrange.valueStencil(2 * O + 1, ngrid, point);
 }
 
-fn restrictStencil(comptime O: usize) [2 * O + 2]f64 {
-    const vgrid = grids.vertexCenteredGrid(f64, O + 1, O + 1);
-    return lagrange.valueStencil(2 * O + 2, vgrid, 0.0);
+fn restrictStencil(comptime O: usize) [2 * O]f64 {
+    const vgrid = grids.vertexCenteredGrid(f64, O, O);
+    return lagrange.valueStencil(2 * O, vgrid, 0.0);
 }
 
 test "node iteration" {
     const expectEqualSlices = std.testing.expectEqualSlices;
 
-    const node_space = NodeSpace(2, 2).fromSize([_]usize{ 1, 2 });
+    const node_space = NodeSpace(2, 4).fromSize([_]usize{ 1, 2 });
 
     const expected = [_][2]isize{
         [2]isize{ -2, -2 },
@@ -242,6 +234,6 @@ test "node iteration" {
 test "interpolation stencils" {
     const expectEqualSlices = std.testing.expectEqualSlices;
 
-    try expectEqualSlices(f64, &[_]f64{ 0.5, 0.5 }, &restrictStencil(0));
-    try expectEqualSlices(f64, &[_]f64{ -1.0 / 16.0, 9.0 / 16.0, 9.0 / 16.0, -1.0 / 16.0 }, &restrictStencil(1));
+    try expectEqualSlices(f64, &[_]f64{ 0.5, 0.5 }, &restrictStencil(1));
+    try expectEqualSlices(f64, &[_]f64{ -1.0 / 16.0, 9.0 / 16.0, 9.0 / 16.0, -1.0 / 16.0 }, &restrictStencil(2));
 }
