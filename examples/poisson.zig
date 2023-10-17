@@ -5,9 +5,6 @@ const Allocator = std.mem.Allocator;
 const aeon = @import("aeon");
 const dofs = aeon.dofs;
 const geometry = aeon.geometry;
-const lac = aeon.lac;
-const mesh = aeon.mesh;
-const methods = aeon.methods;
 
 pub fn PoissonEquation(comptime O: usize) type {
     const N = 2;
@@ -16,7 +13,9 @@ pub fn PoissonEquation(comptime O: usize) type {
         const DofMap = dofs.DofMap(N, O);
         const DofUtils = dofs.DofUtils(N, O);
         const DofUtilsTotal = dofs.DofUtilsTotal(N, O);
-        const MultigridMethod = methods.MultigridMethod(N, O, BiCGStabSolver);
+        const DataOut = aeon.DataOut(N);
+        const MultigridMethod = aeon.methods.MultigridMethod(N, O, BiCGStabSolver);
+        const LinearMapMethod = aeon.methods.LinearMapMethod(N, O, BiCGStabSolver);
         const SystemSlice = aeon.SystemSlice;
         const SystemSliceConst = aeon.SystemSliceConst;
         const SystemValue = aeon.SystemValue;
@@ -26,9 +25,9 @@ pub fn PoissonEquation(comptime O: usize) type {
         const IndexSpace = geometry.IndexSpace(N);
         const Index = aeon.Index(N);
 
-        const BiCGStabSolver = lac.BiCGStabSolver;
+        const BiCGStabSolver = aeon.lac.BiCGStabSolver;
 
-        const Mesh = mesh.Mesh(N);
+        const Mesh = aeon.mesh.Mesh(N);
 
         pub const Function = enum {
             func,
@@ -41,7 +40,7 @@ pub fn PoissonEquation(comptime O: usize) type {
             pub const System = Function;
             pub const Context = aeon.EmptySystem;
 
-            pub fn project(self: RhsProjection, engine: dofs.ProjectionEngine(N, O, Context)) SystemValue(Function) {
+            pub fn project(self: RhsProjection, engine: dofs.ProjectionEngine(N, O, Context)) SystemValue(System) {
                 const pos = engine.position();
 
                 return .{
@@ -49,25 +48,19 @@ pub fn PoissonEquation(comptime O: usize) type {
                     // .func = self.amplitude,
                 };
             }
-
-            pub fn boundaryCtx(_: RhsProjection, _: [N]f64, _: Face) SystemBoundaryCondition(Context) {
-                return .{};
-            }
         };
 
         pub const PoissonOperator = struct {
             pub const System = Function;
             pub const Context = aeon.EmptySystem;
 
-            pub fn apply(_: PoissonOperator, engine: dofs.Engine(N, O, System, Context)) aeon.SystemValue(System) {
+            pub fn apply(
+                _: PoissonOperator,
+                comptime Setting: dofs.EngineSetting,
+                engine: dofs.Engine(N, O, Setting, System, Context),
+            ) SystemValue(System) {
                 return .{
                     .func = -engine.laplacianSys(.func),
-                };
-            }
-
-            pub fn applyDiagonal(_: PoissonOperator, engine: dofs.Engine(N, O, System, Context)) aeon.SystemValue(System) {
-                return .{
-                    .func = -engine.laplacianDiagonal(),
                 };
             }
 
@@ -87,7 +80,7 @@ pub fn PoissonEquation(comptime O: usize) type {
         fn run(allocator: Allocator) !void {
             std.debug.print("Running Poisson Elliptic Solver\n", .{});
 
-            var grid = try Mesh.init(allocator, .{
+            var mesh = try Mesh.init(allocator, .{
                 .physical_bounds = .{
                     .origin = [2]f64{ 0.0, 0.0 },
                     .size = [2]f64{ 2.0 * std.math.pi, 2.0 * std.math.pi },
@@ -95,17 +88,17 @@ pub fn PoissonEquation(comptime O: usize) type {
                 .tile_width = 32,
                 .index_size = [2]usize{ 1, 1 },
             });
-            defer grid.deinit();
+            defer mesh.deinit();
 
             // Globally refine three times
 
-            for (0..1) |_| {
-                var tags = try allocator.alloc(bool, grid.tile_total);
+            for (0..0) |_| {
+                var tags = try allocator.alloc(bool, mesh.tile_total);
                 defer allocator.free(tags);
 
                 @memset(tags, true);
 
-                try grid.regrid(allocator, tags, .{
+                try mesh.regrid(allocator, tags, .{
                     .max_levels = 4,
                     .patch_efficiency = 0.1,
                     .patch_max_tiles = 100,
@@ -114,58 +107,78 @@ pub fn PoissonEquation(comptime O: usize) type {
                 });
             }
 
-            for (grid.blocks) |block| {
+            for (mesh.blocks) |block| {
                 std.debug.print("Block {}\n", .{block});
             }
 
             // Build maps
 
-            const dof_map: DofMap = try DofMap.init(allocator, &grid);
+            const dof_map: DofMap = try DofMap.init(allocator, &mesh);
             defer dof_map.deinit(allocator);
 
-            std.debug.print("NDofs: {}\n", .{grid.cell_total});
+            std.debug.print("NDofs: {}\n", .{mesh.cell_total});
 
             // Build functions
 
-            var rhs = try SystemSlice(Function).init(allocator, grid.cell_total);
+            // Project right hand side function
+
+            const rhs = try SystemSlice(Function).init(allocator, mesh.cell_total);
             defer rhs.deinit(allocator);
 
-            var rhs_proj: RhsProjection = .{ .amplitude = 2.0 };
+            DofUtilsTotal.project(
+                &mesh,
+                dof_map,
+                RhsProjection{ .amplitude = 2.0 },
+                rhs,
+                aeon.EmptySystem.sliceConst(),
+            );
 
-            DofUtilsTotal.projectCells(&grid, dof_map, rhs_proj, rhs, aeon.EmptySystem.sliceConst());
-
-            var sol = try SystemSlice(Function).init(allocator, grid.cell_total);
+            const sol = try SystemSlice(Function).init(allocator, mesh.cell_total);
             defer sol.deinit(allocator);
 
-            rhs_proj.amplitude = 1.0;
+            // As well as the solution function
 
-            DofUtilsTotal.projectCells(&grid, dof_map, rhs_proj, sol, aeon.EmptySystem.sliceConst());
+            DofUtilsTotal.project(
+                &mesh,
+                dof_map,
+                RhsProjection{ .amplitude = 1.0 },
+                sol,
+                aeon.EmptySystem.sliceConst(),
+            );
 
-            var err = try SystemSlice(Function).init(allocator, grid.cell_total);
-            defer err.deinit(allocator);
+            // Allocate memory for the numerical solution, and set initial guess.
 
-            var numerical = try SystemSlice(Function).init(allocator, grid.cell_total);
+            var numerical = try SystemSlice(Function).init(allocator, mesh.cell_total);
             defer numerical.deinit(allocator);
 
             @memset(numerical.field(.func), 0.0);
 
-            const oper = PoissonOperator{};
+            // Run multigrid method
 
             var solver = MultigridMethod.new(20, 10e-10, BiCGStabSolver.new(10000, 10e-10));
 
+            // var solver = LinearMapMethod.new(BiCGStabSolver.new(10000, 10e-10));
+
             try solver.solve(
                 allocator,
-                &grid,
+                &mesh,
                 dof_map,
-                oper,
+                PoissonOperator{},
                 numerical,
-                rhs.toConst(),
                 aeon.EmptySystem.sliceConst(),
+                rhs.toConst(),
             );
 
-            for (0..grid.cell_total) |i| {
+            // Compute error
+
+            var err = try SystemSlice(Function).init(allocator, mesh.cell_total);
+            defer err.deinit(allocator);
+
+            for (0..mesh.cell_total) |i| {
                 err.field(.func)[i] = numerical.field(.func)[i] - sol.field(.func)[i];
             }
+
+            // Output results
 
             std.debug.print("Writing Solution To File\n", .{});
 
@@ -179,14 +192,14 @@ pub fn PoissonEquation(comptime O: usize) type {
                 rhs,
             };
 
-            const output = SystemSliceConst(Output).view(grid.cell_total, .{
+            const output = SystemSliceConst(Output).view(mesh.cell_total, .{
                 .num = numerical.field(.func),
                 .exact = sol.field(.func),
                 .err = err.field(.func),
                 .rhs = rhs.field(.func),
             });
 
-            try DofUtils.writeCellsToVtk(Output, allocator, &grid, output, file.writer());
+            try DataOut.writeVtk(Output, allocator, &mesh, output, file.writer());
         }
     };
 }

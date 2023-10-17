@@ -5,6 +5,7 @@ const ArenaAllocator = std.heap.ArenaAllocator;
 const basis = @import("../basis/basis.zig");
 const dofs = @import("../dofs/dofs.zig");
 const lac = @import("../lac/lac.zig");
+const io = @import("../io/io.zig");
 const system = @import("../system.zig");
 const meshes = @import("../mesh/mesh.zig");
 const geometry = @import("../geometry/geometry.zig");
@@ -24,6 +25,7 @@ pub fn MultigridMethod(comptime N: usize, comptime O: usize, comptime BaseSolver
 
         const Self = @This();
         const Mesh = meshes.Mesh(N);
+        const DataOut = io.DataOut(N);
         const DofMap = dofs.DofMap(N, O);
         const DofUtils = dofs.DofUtils(N, O);
         const BoundaryUtils = dofs.BoundaryUtils(N, O);
@@ -48,16 +50,16 @@ pub fn MultigridMethod(comptime N: usize, comptime O: usize, comptime BaseSolver
             dof_map: DofMap,
             oper: anytype,
             x: SystemSlice(@TypeOf(oper).System),
-            b: SystemSliceConst(@TypeOf(oper).System),
             context: SystemSliceConst(@TypeOf(oper).Context),
+            b: SystemSliceConst(@TypeOf(oper).System),
         ) !void {
             // Alias
             const T = @TypeOf(oper);
 
             // Check trait constraints
-            // if (comptime !(dofs.isSystemOperator(N, O)(T))) {
-            //     @compileError("Oper must satisfy isMeshOperator traits.");
-            // }
+            if (comptime !(dofs.isSystemOperator(N, O)(T))) {
+                @compileError("Oper must satisfy isMeshOperator traits.");
+            }
 
             if (comptime std.meta.fields(T.System).len != 1) {
                 @compileError("The multigrid solver only supports systems with 1 field currently.");
@@ -70,11 +72,19 @@ pub fn MultigridMethod(comptime N: usize, comptime O: usize, comptime BaseSolver
             // Get total dofs
             const total_dofs = dof_map.ndofs();
 
+            // Stores the system in a dof vector
             const sys = try SystemSlice(T.System).init(allocator, total_dofs);
             defer sys.deinit(allocator);
 
             for (0..mesh.blocks.len) |block_id| {
-                DofUtils.copyDofsFromCells(T.System, mesh, dof_map, block_id, sys, x.toConst());
+                DofUtils.copyDofsFromCells(
+                    T.System,
+                    mesh,
+                    dof_map,
+                    block_id,
+                    sys,
+                    x.toConst(),
+                );
             }
 
             for (0..mesh.blocks.len) |block_id| {
@@ -87,13 +97,11 @@ pub fn MultigridMethod(comptime N: usize, comptime O: usize, comptime BaseSolver
                 );
             }
 
-            // Scratch dof vector
-            const sys2 = try SystemSlice(T.System).init(allocator, total_dofs);
-            defer sys2.deinit(allocator);
-
+            // Stores a copy of the system from the down cycle in order to compute the correction
             const sys_old = try SystemSlice(T.System).init(allocator, total_dofs);
             defer sys_old.deinit(allocator);
 
+            // The dof vector context (filled at start of iteration and then immutable);
             const ctx = try SystemSlice(T.Context).init(allocator, total_dofs);
             defer ctx.deinit(allocator);
 
@@ -102,7 +110,7 @@ pub fn MultigridMethod(comptime N: usize, comptime O: usize, comptime BaseSolver
             }
 
             for (0..mesh.blocks.len) |block_id| {
-                DofUtils.fillBoundaryFull(
+                DofUtils.fillBoundary(
                     mesh,
                     dof_map,
                     block_id,
@@ -111,29 +119,33 @@ pub fn MultigridMethod(comptime N: usize, comptime O: usize, comptime BaseSolver
                 );
             }
 
-            const tau = try SystemSlice(T.System).init(allocator, mesh.cell_total);
-            defer tau.deinit(allocator);
-
-            // Reset tau correction to 0.0
-            @memset(tau.field(sys_field), 0.0);
-
-            const applythenrestrict = try SystemSlice(T.System).init(allocator, total_dofs);
-            defer applythenrestrict.deinit(allocator);
-
-            const restrictthenapply = try SystemSlice(T.System).init(allocator, total_dofs);
-            defer restrictthenapply.deinit(allocator);
-
+            // Stores the right hand side of the equations
             const rhs = try SystemSlice(T.System).init(allocator, mesh.cell_total);
             defer rhs.deinit(allocator);
 
-            const ires: f64 = @field(DofUtils.residualNorm(
-                mesh,
-                dof_map,
-                oper,
-                sys.toConst(),
-                ctx.toConst(),
-                b,
-            ), @tagName(sys_field));
+            for (0..mesh.blocks.len) |block_id| {
+                DofUtils.copyCells(T.System, mesh, block_id, rhs, b);
+            }
+
+            // Stores the residual (i.e. b - Ax).
+            const res = try SystemSlice(T.System).init(allocator, mesh.cell_total);
+            defer res.deinit(allocator);
+
+            for (0..mesh.blocks.len) |block_id| {
+                DofUtils.residual(
+                    mesh,
+                    dof_map,
+                    block_id,
+                    oper,
+                    res,
+                    rhs.toConst(),
+                    sys.toConst(),
+                    ctx.toConst(),
+                );
+            }
+
+            // Use initial residual to set tolerance.
+            const ires: f64 = norm(res.field(sys_field));
             const tol: f64 = self.tolerance * @fabs(ires);
 
             std.debug.print("Multigrid Tolerance {}\n", .{tol});
@@ -147,8 +159,6 @@ pub fn MultigridMethod(comptime N: usize, comptime O: usize, comptime BaseSolver
             // Run iterations
             var iteration: usize = 0;
 
-            // TODO Might require full smoothing to achieve proper accuracy.
-
             while (iteration < self.max_iters) : (iteration += 1) {
                 defer _ = arena.reset(.retain_capacity);
 
@@ -158,42 +168,32 @@ pub fn MultigridMethod(comptime N: usize, comptime O: usize, comptime BaseSolver
                     const level = mesh.levels[level_id];
                     const coarse = mesh.levels[level_id - 1];
 
-                    // Compute rhs
-                    for (mesh.blocks[level.block_offset .. level.block_offset + level.block_total]) |block| {
-                        // Apply tau correction
-                        for (block.cell_offset..block.cell_offset + block.cell_total) |idx| {
-                            inline for (comptime std.enums.values(T.System)) |field| {
-                                rhs.field(field)[idx] = b.field(field)[idx] - tau.field(field)[idx];
-                            }
-                        }
-                    }
-
-                    // Perform smoothing
+                    // Perform presmoothing
                     for (level.block_offset..level.block_offset + level.block_total) |block_id| {
-                        // Smooth and store result in sys2
                         DofUtils.smooth(
                             mesh,
                             dof_map,
                             block_id,
                             oper,
-                            sys2,
+                            x,
+                            rhs.toConst(),
                             sys.toConst(),
                             ctx.toConst(),
-                            rhs.toConst(),
                         );
-                        // Copy back to sys
-                        DofUtils.copyDofs(
+
+                        DofUtils.copyDofsFromCells(
                             T.System,
+                            mesh,
                             dof_map,
                             block_id,
                             sys,
-                            sys2.toConst(),
+                            x.toConst(),
                         );
                     }
 
                     for (level.block_offset..level.block_offset + level.block_total) |block_id| {
                         // Fill boundaries now that sys has been smoothed
-                        DofUtils.fillBoundaryFull(
+                        DofUtils.fillBoundary(
                             mesh,
                             dof_map,
                             block_id,
@@ -207,7 +207,6 @@ pub fn MultigridMethod(comptime N: usize, comptime O: usize, comptime BaseSolver
                         DofUtils.restrict(
                             T.System,
                             mesh,
-
                             dof_map,
                             block_id,
                             sys,
@@ -229,72 +228,39 @@ pub fn MultigridMethod(comptime N: usize, comptime O: usize, comptime BaseSolver
                     // We now have a "guess" for the value of sys of the coarser level, which we will later use to
                     // correct sys.
                     for (coarse.block_offset..coarse.block_offset + coarse.block_total) |block_id| {
-                        DofUtils.copyDofs(T.System, dof_map, block_id, sys_old, sys.toConst());
-                        // DofUtils.fillBoundary(mesh, block_map, dof_map, block_id, DofUtils.operSystemBoundary(oper), sys_old);
+                        DofUtils.copyDofs(
+                            T.System,
+                            dof_map,
+                            block_id,
+                            sys_old,
+                            sys.toConst(),
+                        );
                     }
 
-                    // Compute tau correction
+                    // Compute corrected rhs
                     for (level.block_offset..level.block_offset + level.block_total) |block_id| {
-                        // Apply operator fully and store in sys2
-                        DofUtils.applyFull(
+                        DofUtils.residual(
                             mesh,
                             dof_map,
                             block_id,
                             oper,
-                            sys2,
+                            res,
+                            rhs.toConst(),
                             sys.toConst(),
                             ctx.toConst(),
                         );
 
-                        // DofUtils.restrict(
-                        //     T.System,
-                        //     mesh,
-                        //     block_map,
-                        //     dof_map,
-                        //     block_id,
-                        //     sys2,
-                        // );
-
-                        // Restrict residual and store result in tau
-                        DofUtils.restrictResidual(
+                        DofUtils.restrictRhs(
                             mesh,
-
                             dof_map,
                             block_id,
                             oper,
-                            tau,
+                            rhs,
+                            res.toConst(),
                             sys.toConst(),
                             ctx.toConst(),
-                            sys2.toConst(),
                         );
                     }
-
-                    // for (coarse.block_offset..coarse.block_offset + coarse.block_total) |block_id| {
-                    //     DofUtils.copyDofs(
-                    //         T.System,
-                    //         dof_map,
-                    //         block_id,
-                    //         applythenrestrict,
-                    //         sys2.toConst(),
-                    //     );
-                    //     DofUtils.fillBoundaryFull(
-                    //         mesh,
-                    //         block_map,
-                    //         dof_map,
-                    //         block_id,
-                    //         DofUtils.operSystemBoundary(oper),
-                    //         sys,
-                    //     );
-                    //     DofUtils.apply(
-                    //         mesh,
-                    //         dof_map,
-                    //         block_id,
-                    //         oper,
-                    //         restrictthenapply,
-                    //         sys.toConst(),
-                    //         ctx.toConst(),
-                    //     );
-                    // }
                 }
 
                 std.debug.print("Solving Level {}\n", .{0});
@@ -302,20 +268,25 @@ pub fn MultigridMethod(comptime N: usize, comptime O: usize, comptime BaseSolver
                 // Solve base
                 const base = mesh.blocks[0];
 
+                DofUtils.copyCellsFromDofs(
+                    T.System,
+                    mesh,
+                    dof_map,
+                    0,
+                    x,
+                    sys.toConst(),
+                );
+
                 const x_field: []f64 = x.field(sys_field)[0..base.cell_total];
                 const rhs_field: []f64 = rhs.field(sys_field)[0..base.cell_total];
-
-                for (0..base.cell_total) |idx| {
-                    // x_field[idx] = 0.0;
-                    rhs_field[idx] = b.field(sys_field)[idx] - tau.field(sys_field)[idx];
-                }
 
                 // Solve system using the base solver
                 const base_linear_map: BaseLinearMap(T) = .{
                     .mesh = mesh,
+                    .dof_map = dof_map,
                     .oper = oper,
-                    .ctx = ctx,
                     .sys = sys,
+                    .ctx = ctx.toConst(),
                 };
 
                 try self.base_solver.solve(scratch, base_linear_map, x_field, rhs_field);
@@ -332,7 +303,6 @@ pub fn MultigridMethod(comptime N: usize, comptime O: usize, comptime BaseSolver
 
                 DofUtils.fillBoundary(
                     mesh,
-
                     dof_map,
                     0,
                     DofUtils.operSystemBoundary(oper),
@@ -341,9 +311,8 @@ pub fn MultigridMethod(comptime N: usize, comptime O: usize, comptime BaseSolver
 
                 // {
                 //     const DebugOutput = enum {
-                //         applythenrestrict,
-                //         restrictthenapply,
-                //         restrictinitial,
+                //         sys,
+                //         rhs,
                 //     };
 
                 //     const file_name = try std.fmt.allocPrint(allocator, "output/multigrid_base_{}.vtu", .{iteration});
@@ -352,13 +321,12 @@ pub fn MultigridMethod(comptime N: usize, comptime O: usize, comptime BaseSolver
                 //     const file = try std.fs.cwd().createFile(file_name, .{});
                 //     defer file.close();
 
-                //     const debug_output = SystemSliceConst(DebugOutput).view(total_dofs, .{
-                //         .applythenrestrict = applythenrestrict.field(sys_field),
-                //         .restrictthenapply = restrictthenapply.field(sys_field),
-                //         .restrictinitial = sys_old.field(sys_field),
+                //     const debug_output = SystemSliceConst(DebugOutput).view(mesh.cell_total, .{
+                //         .sys = x.field(sys_field),
+                //         .rhs = rhs.field(sys_field),
                 //     });
 
-                //     try DofUtils.writeDofsToVtk(DebugOutput, allocator, mesh, 0, dof_map, debug_output, file.writer());
+                //     try DataOut.writeVtkLevel(DebugOutput, allocator, mesh, 0, debug_output, file.writer());
                 // }
 
                 // Iterate up, adding correction and performing post smoothing.
@@ -369,7 +337,6 @@ pub fn MultigridMethod(comptime N: usize, comptime O: usize, comptime BaseSolver
                         DofUtils.prolongCorrection(
                             T.System,
                             mesh,
-
                             dof_map,
                             block_id,
                             sys,
@@ -388,37 +355,26 @@ pub fn MultigridMethod(comptime N: usize, comptime O: usize, comptime BaseSolver
                         );
                     }
 
-                    std.debug.print("Postsmoothing Level {}\n", .{level_id});
-
                     // Perform post smoothing
                     for (level.block_offset..level.block_offset + level.block_total) |block_id| {
-                        // Apply tau correction
-                        const block = mesh.blocks[block_id];
-
-                        for (block.cell_offset..block.cell_offset + block.cell_total) |idx| {
-                            inline for (comptime std.enums.values(T.System)) |field| {
-                                rhs.field(field)[idx] = b.field(field)[idx] - tau.field(field)[idx];
-                            }
-                        }
-
-                        // Smooth and store result in sys2
                         DofUtils.smooth(
                             mesh,
                             dof_map,
                             block_id,
                             oper,
-                            sys2,
+                            x,
+                            rhs.toConst(),
                             sys.toConst(),
                             ctx.toConst(),
-                            rhs.toConst(),
                         );
-                        // Copy back to sys
-                        DofUtils.copyDofs(
+
+                        DofUtils.copyDofsFromCells(
                             T.System,
+                            mesh,
                             dof_map,
                             block_id,
                             sys,
-                            sys2.toConst(),
+                            x.toConst(),
                         );
                     }
 
@@ -438,7 +394,6 @@ pub fn MultigridMethod(comptime N: usize, comptime O: usize, comptime BaseSolver
                         DofUtils.restrict(
                             T.System,
                             mesh,
-
                             dof_map,
                             block_id,
                             sys,
@@ -458,78 +413,38 @@ pub fn MultigridMethod(comptime N: usize, comptime O: usize, comptime BaseSolver
                     // try DofUtils.writeDofsToVtk(DebugOutput, allocator, mesh, level_id, dof_map, debug_output, file.writer());
                 }
 
-                // {
-                //     const target_id = 1;
+                for (0..mesh.blocks.len) |block_id| {
+                    DofUtils.residual(
+                        mesh,
+                        dof_map,
+                        block_id,
+                        oper,
+                        res,
+                        rhs.toConst(),
+                        sys.toConst(),
+                        ctx.toConst(),
+                    );
+                }
 
-                //     // DofUtils.copyCellsFromDofs(T.System, mesh, dof_map, target_id, x, sys.toConst());
+                const res_norm = norm(res.field(sys_field));
 
-                //     // @memset(sys.slice(dof_map.offset(target_id), dof_map.total(target_id)).field(.func), 0.0);
+                std.debug.print("Multigrid Iteration: {}, Residual: {}\n", .{ iteration, res_norm });
 
-                //     // DofUtils.copyDofsFromCells(T.System, mesh, dof_map, target_id, sys, x.toConst());
-
-                //     DofUtils.fillBoundaryFull(
-                //         mesh,
-                //         block_map,
-                //         dof_map,
-                //         target_id,
-                //         DofUtils.operSystemBoundary(oper),
-                //         sys,
-                //     );
-
-                //     const stencil_space = DofUtils.blockStencilSpace(mesh, target_id);
-
-                //     const field = sys.slice(dof_map.offset(target_id), dof_map.total(target_id)).field(sys_field);
-
-                //     std.debug.print("Extent 1: {}\n", .{
-                //         stencil_space.boundaryValue([2]isize{ -1, -1 }, 2 * O + 1, [2]isize{ 0, 0 }, field),
-                //     });
-                //     std.debug.print("Extent 2: {}\n", .{
-                //         stencil_space.boundaryValue([2]isize{ -2, -2 }, 2 * O + 1, [2]isize{ 0, 0 }, field),
-                //     });
-
-                //     std.debug.print("Extent Coef 1: {}\n", .{
-                //         stencil_space.boundaryValueCoef([2]isize{ -1, -1 }, 2 * O + 1),
-                //     });
-                //     std.debug.print("Extent Coef 2: {}\n", .{
-                //         stencil_space.boundaryValueCoef([2]isize{ -2, -2 }, 2 * O + 1),
-                //     });
-
-                //     const DebugOutput = enum {
-                //         sys,
-                //     };
-
-                //     const file_name = try std.fmt.allocPrint(allocator, "output/multigrid_iteration_{}.vtu", .{iteration});
-                //     defer allocator.free(file_name);
-
-                //     const file = try std.fs.cwd().createFile(file_name, .{});
-                //     defer file.close();
-
-                //     const debug_output = SystemSliceConst(DebugOutput).view(total_dofs, .{
-                //         .sys = sys.field(sys_field),
-                //     });
-
-                //     try DofUtils.writeDofsToVtk(DebugOutput, allocator, mesh, target_id, dof_map, debug_output, file.writer());
-                // }
-
-                const res = @field(DofUtils.residualNorm(
-                    mesh,
-                    dof_map,
-                    oper,
-                    sys.toConst(),
-                    ctx.toConst(),
-                    rhs.toConst(),
-                ), @tagName(sys_field));
-
-                std.debug.print("Multigrid Iteration: {}, Residual: {}\n", .{ iteration, res });
-
-                if (res <= tol) {
+                if (res_norm <= tol) {
                     break;
                 }
             }
 
             // Copy solution back into x.
             for (0..mesh.blocks.len) |block_id| {
-                DofUtils.copyCellsFromDofs(T.System, mesh, dof_map, block_id, x, sys.toConst());
+                DofUtils.copyCellsFromDofs(
+                    T.System,
+                    mesh,
+                    dof_map,
+                    block_id,
+                    x,
+                    sys.toConst(),
+                );
             }
         }
 
@@ -576,58 +491,65 @@ pub fn MultigridMethod(comptime N: usize, comptime O: usize, comptime BaseSolver
 
             return struct {
                 mesh: *const Mesh,
+                dof_map: DofMap,
                 oper: T,
-                ctx: SystemSlice(T.Context),
                 sys: SystemSlice(T.System),
+                ctx: SystemSliceConst(T.Context),
 
                 pub fn apply(self: *const @This(), output: []f64, input: []const f64) void {
-                    const sys = self.sys;
-                    const ctx = self.ctx;
+                    // Build systems slices which mirror input and output.
+                    var input_sys: SystemSliceConst(T.System) = undefined;
+                    input_sys.len = input.len;
+                    @field(input_sys.ptrs, field_name) = input.ptr;
 
-                    // Aliases
-                    const stencil_space = DofUtils.blockStencilSpace(self.mesh, 0);
-                    const cell_space = stencil_space.nodeSpace();
+                    var output_sys: SystemSlice(T.System) = undefined;
+                    output_sys.len = output.len;
+                    @field(output_sys.ptrs, field_name) = output.ptr;
 
-                    const base_dofs = cell_space.total();
+                    DofUtils.copyDofsFromCells(
+                        T.System,
+                        self.mesh,
+                        self.dof_map,
+                        0,
+                        self.sys,
+                        input_sys,
+                    );
 
-                    // Fill base boundary and inner
-                    {
-                        var cells = cell_space.nodes();
-                        var linear: usize = 0;
+                    DofUtils.fillBoundary(
+                        self.mesh,
+                        self.dof_map,
+                        0,
+                        DofUtils.operSystemBoundary(self.oper),
+                        self.sys,
+                    );
 
-                        while (cells.next()) |cell| : (linear += 1) {
-                            inline for (comptime std.enums.values(T.System)) |field| {
-                                cell_space.setValue(cell, sys.field(field), input[linear]);
-                            }
-                        }
-
-                        BoundaryUtils.fillBoundary(
-                            O,
-                            stencil_space,
-                            DofUtils.operSystemBoundary(self.oper),
-                            sys.slice(0, base_dofs),
-                        );
-                    }
-
-                    // Apply operator and store in output.
-                    {
-                        var cells = stencil_space.nodeSpace().nodes();
-                        var linear: usize = 0;
-
-                        while (cells.next()) |cell| : (linear += 1) {
-                            const engine = dofs.Engine(N, O, T.System, T.Context).new(
-                                stencil_space,
-                                cell,
-                                sys.slice(0, base_dofs).toConst(),
-                                ctx.slice(0, base_dofs).toConst(),
-                            );
-
-                            const app = self.oper.apply(engine);
-                            output[linear] = @field(app, field_name);
-                        }
-                    }
+                    DofUtils.apply(
+                        self.mesh,
+                        self.dof_map,
+                        0,
+                        self.oper,
+                        output_sys,
+                        self.sys.toConst(),
+                        self.ctx,
+                    );
                 }
+
+                // pub fn callback(_: *const @This(), iteration: usize, residual: f64, _: []const f64) void {
+                //     std.debug.print("Iteration: {}, Residual: {}\n", .{ iteration, residual });
+                // }
             };
+        }
+
+        fn dot(u: []const f64, v: []const f64) f64 {
+            var result: f64 = 0.0;
+            for (u, v) |a, b| {
+                result += a * b;
+            }
+            return result;
+        }
+
+        fn norm(slice: []const f64) f64 {
+            return @sqrt(dot(slice, slice));
         }
     };
 }

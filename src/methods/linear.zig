@@ -42,8 +42,8 @@ pub fn LinearMapMethod(comptime N: usize, comptime O: usize, comptime InnerSolve
             dof_map: DofMap,
             oper: anytype,
             x: SystemSlice(@TypeOf(oper).System),
-            b: SystemSliceConst(@TypeOf(oper).System),
             context: SystemSliceConst(@TypeOf(oper).Context),
+            b: SystemSliceConst(@TypeOf(oper).System),
         ) !void {
             const T = @TypeOf(oper);
 
@@ -61,6 +61,9 @@ pub fn LinearMapMethod(comptime N: usize, comptime O: usize, comptime InnerSolve
 
             const ctx = try SystemSlice(T.Context).init(allocator, dof_map.ndofs());
             defer ctx.deinit(allocator);
+
+            const sys = try SystemSlice(T.System).init(allocator, dof_map.ndofs());
+            defer sys.deinit(allocator);
 
             for (0..mesh.blocks.len) |block_id| {
                 DofUtils.copyDofsFromCells(
@@ -85,9 +88,6 @@ pub fn LinearMapMethod(comptime N: usize, comptime O: usize, comptime InnerSolve
 
             // Allocate sys vector
 
-            const sys = try SystemSlice(T.System).init(allocator, dof_map.ndofs());
-            defer sys.deinit(allocator);
-
             const map = LinearMap(T){
                 .mesh = mesh,
                 .dof_map = dof_map,
@@ -103,7 +103,6 @@ pub fn LinearMapMethod(comptime N: usize, comptime O: usize, comptime InnerSolve
 
         fn LinearMap(comptime T: type) type {
             const field_name: []const u8 = comptime std.meta.fieldNames(T.System)[0];
-            const sys_field: T.System = comptime std.enums.values(T.System)[0];
 
             return struct {
                 mesh: *const Mesh,
@@ -122,6 +121,7 @@ pub fn LinearMapMethod(comptime N: usize, comptime O: usize, comptime InnerSolve
                     output_sys.len = output.len;
                     @field(output_sys.ptrs, field_name) = output.ptr;
 
+                    // Transfer input to sys dof vector
                     for (0..self.mesh.blocks.len) |block_id| {
                         DofUtils.copyDofsFromCells(
                             T.System,
@@ -143,8 +143,29 @@ pub fn LinearMapMethod(comptime N: usize, comptime O: usize, comptime InnerSolve
                         );
                     }
 
+                    for (0..self.mesh.blocks.len) |block_id| {
+                        DofUtils.apply(
+                            self.mesh,
+                            self.dof_map,
+                            block_id,
+                            self.oper,
+                            output_sys,
+                            self.sys.toConst(),
+                            self.ctx.toConst(),
+                        );
+                    }
+
                     for (0..self.mesh.blocks.len) |reverse_block_id| {
                         const block_id = self.mesh.blocks.len - 1 - reverse_block_id;
+                        DofUtils.copyDofsFromCells(
+                            T.System,
+                            self.mesh,
+                            self.dof_map,
+                            block_id,
+                            self.sys,
+                            output_sys.toConst(),
+                        );
+
                         DofUtils.restrict(
                             T.System,
                             self.mesh,
@@ -152,35 +173,15 @@ pub fn LinearMapMethod(comptime N: usize, comptime O: usize, comptime InnerSolve
                             block_id,
                             self.sys,
                         );
-                    }
 
-                    for (0..self.mesh.blocks.len) |block_id| {
-                        const dof_offset = self.dof_map.offset(block_id);
-                        const dof_total = self.dof_map.total(block_id);
-
-                        const cell_offset = self.mesh.blocks[block_id].cell_offset;
-                        const cell_total = self.mesh.blocks[block_id].cell_total;
-
-                        const block_sys = self.sys.slice(dof_offset, dof_total);
-                        const block_ctx = self.ctx.slice(dof_offset, dof_total);
-                        const block_output = output_sys.slice(cell_offset, cell_total);
-
-                        const stencil_space = DofUtils.blockStencilSpace(self.mesh, block_id);
-
-                        var cells = stencil_space.nodeSpace().nodes();
-                        var linear: usize = 0;
-
-                        while (cells.next()) |cell| : (linear += 1) {
-                            const engine = dofs.Engine(N, O, T.System, T.Context).new(
-                                stencil_space,
-                                cell,
-                                block_sys.toConst(),
-                                block_ctx.toConst(),
-                            );
-
-                            const app = self.oper.apply(engine);
-                            block_output.field(sys_field)[linear] = @field(app, field_name);
-                        }
+                        DofUtils.copyCellsFromDofs(
+                            T.System,
+                            self.mesh,
+                            self.dof_map,
+                            block_id,
+                            output_sys,
+                            self.sys.toConst(),
+                        );
                     }
                 }
 

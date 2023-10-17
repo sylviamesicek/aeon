@@ -22,11 +22,7 @@ const dofs = @import("../dofs/dofs.zig");
 const DofUtils = dofs.DofUtils;
 
 const geometry = @import("../geometry/geometry.zig");
-const IndexSpace = geometry.IndexSpace;
-
 const index = @import("../index.zig");
-const Index = index.Index;
-
 const meshes = @import("../mesh/mesh.zig");
 
 const system = @import("../system.zig");
@@ -37,10 +33,9 @@ const isSystem = system.isSystem;
 /// A namespace for outputting data defined on a mesh.
 pub fn DataOut(comptime N: usize) type {
     return struct {
+        const Index = index.Index(N);
+        const IndexSpace = geometry.IndexSpace(N);
         const Mesh = meshes.Mesh(N);
-
-        // Temporary
-        // TODO fix to print all exposed blocks
 
         pub fn writeVtkLevel(comptime System: type, allocator: Allocator, mesh: *const Mesh, level_id: usize, sys: SystemSliceConst(System), out_stream: anytype) !void {
             if (comptime !isSystem(System)) {
@@ -77,10 +72,10 @@ pub fn DataOut(comptime N: usize) type {
                 const stencil_space = DofUtils(N, 0).blockStencilSpace(mesh, block_id);
 
                 const cell_size = stencil_space.size;
-                const point_size = Index(N).add(cell_size, Index(N).splat(1));
+                const point_size = Index.add(cell_size, Index.splat(1));
 
-                const cell_space = IndexSpace(N).fromSize(cell_size);
-                const point_space = IndexSpace(N).fromSize(point_size);
+                const cell_space = IndexSpace.fromSize(cell_size);
+                const point_space = IndexSpace.fromSize(point_size);
 
                 const point_offset: usize = positions.items.len / N;
 
@@ -147,7 +142,7 @@ pub fn DataOut(comptime N: usize) type {
             }
 
             inline for (comptime std.enums.values(System), 0..) |field, idx| {
-                try fields[idx].appendSlice(sys.field(field));
+                try fields[idx].appendSlice(allocator, sys.field(field));
             }
 
             var grid: VtuMeshOutput = try VtuMeshOutput.init(allocator, .{

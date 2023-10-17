@@ -33,7 +33,7 @@ pub const EmptySystem = enum {
 pub fn isSystem(comptime T: type) bool {
     switch (@typeInfo(T)) {
         .Enum => |info| {
-            if (info.decls.len == 0 and info.is_exhaustive) {
+            if (info.is_exhaustive) {
                 return true;
             }
             return false;
@@ -119,7 +119,7 @@ fn SystemSliceImpl(comptime T: type, comptime is_const: bool) type {
         }
 
         pub fn slice(self: Self, offset: usize, total: usize) Self {
-            assert(self.len >= offset + total);
+            assert(std.meta.fieldNames(T).len == 0 or self.len >= offset + total);
 
             var ptrs: Ptrs = undefined;
 
