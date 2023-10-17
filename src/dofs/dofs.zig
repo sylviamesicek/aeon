@@ -113,6 +113,9 @@ pub fn DofUtils(comptime N: usize, comptime O: usize) type {
         const Region = geometry.Region(N);
         const Mesh = meshes.Mesh(N);
 
+        const RO = 0;
+        const PO = 1;
+
         /// Computes the number of cells along each axis for a given block.
         pub fn blockCellSize(mesh: *const Mesh, block: usize) [N]usize {
             return Index.scaled(mesh.blocks[block].bounds.size, mesh.tile_width);
@@ -404,7 +407,7 @@ pub fn DofUtils(comptime N: usize, comptime O: usize) type {
                                 block_cell,
                                 block_sys.field(field),
                                 coarse_block_cell_space.prolong(
-                                    1,
+                                    PO,
                                     neighbor_cell,
                                     coarse_block_sys.field(field),
                                 ),
@@ -509,7 +512,7 @@ pub fn DofUtils(comptime N: usize, comptime O: usize) type {
                     const coarse_cell = Index.toSigned(Index.add(coarse_origin, cell));
 
                     inline for (comptime std.enums.values(System)) |field| {
-                        const v = cell_space.restrict(0, super_cell, block_sys.field(field));
+                        const v = cell_space.restrict(RO, super_cell, block_sys.field(field));
                         coarse_cell_space.setValue(coarse_cell, coarse_sys.field(field), v);
                     }
                 }
@@ -609,7 +612,7 @@ pub fn DofUtils(comptime N: usize, comptime O: usize) type {
                     const app = oper.apply(.normal, coarse_engine);
 
                     inline for (comptime std.enums.values(@TypeOf(oper).System)) |field| {
-                        const res_val = cell_space.restrict(0, supercell, block_res.field(field));
+                        const res_val = cell_space.restrict(RO, supercell, block_res.field(field));
                         const a_val = @field(app, @tagName(field));
                         coarse_rhs.field(field)[lin] = res_val + a_val;
                     }
@@ -675,7 +678,7 @@ pub fn DofUtils(comptime N: usize, comptime O: usize) type {
                         cell_space.setValue(
                             globalcell,
                             block_sys.field(field),
-                            coarse_cell_space.prolong(1, subcell, coarse_sys.field(field)),
+                            coarse_cell_space.prolong(PO, subcell, coarse_sys.field(field)),
                         );
                     }
                 }
@@ -739,8 +742,8 @@ pub fn DofUtils(comptime N: usize, comptime O: usize) type {
                     const sub_cell = Index.toSigned(Index.add(coarse_origin, cell));
 
                     inline for (comptime std.enums.values(System)) |field| {
-                        const u = coarse_cell_space.prolong(1, sub_cell, coarse_sys.field(field));
-                        const v = coarse_cell_space.prolong(1, sub_cell, coarse_old_sys.field(field));
+                        const u = coarse_cell_space.prolong(PO, sub_cell, coarse_sys.field(field));
+                        const v = coarse_cell_space.prolong(PO, sub_cell, coarse_old_sys.field(field));
 
                         const sys_val = cell_space.value(global_cell, block_sys.field(field));
                         cell_space.setValue(global_cell, block_sys.field(field), sys_val + u - v);
@@ -978,13 +981,12 @@ pub fn DofUtilsTotal(comptime N: usize, comptime O: usize) type {
             for (0..mesh.blocks.len) |block_id| {
                 const block = mesh.blocks[block_id];
 
-                const stencil_space = Utils.blockStencilSpace(mesh, block_id);
-                const cell_space = stencil_space.nodeSpace();
-
                 const block_dest = dest.slice(block.cell_offset, block.cell_total);
                 const block_ctx = ctx.slice(dof_map.offset(block_id), dof_map.total(block_id));
 
-                var cells = cell_space.nodes(0);
+                const stencil_space = Utils.blockStencilSpace(mesh, block_id);
+
+                var cells = stencil_space.nodeSpace().nodes(0);
                 var linear: usize = 0;
 
                 while (cells.next()) |cell| : (linear += 1) {

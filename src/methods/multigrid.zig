@@ -217,7 +217,6 @@ pub fn MultigridMethod(comptime N: usize, comptime O: usize, comptime BaseSolver
                     for (coarse.block_offset..coarse.block_offset + coarse.block_total) |block_id| {
                         DofUtils.fillBoundary(
                             mesh,
-
                             dof_map,
                             block_id,
                             DofUtils.operSystemBoundary(oper),
@@ -309,25 +308,25 @@ pub fn MultigridMethod(comptime N: usize, comptime O: usize, comptime BaseSolver
                     sys,
                 );
 
-                // {
-                //     const DebugOutput = enum {
-                //         sys,
-                //         rhs,
-                //     };
+                {
+                    const DebugOutput = enum {
+                        sys,
+                        rhs,
+                    };
 
-                //     const file_name = try std.fmt.allocPrint(allocator, "output/multigrid_base_{}.vtu", .{iteration});
-                //     defer allocator.free(file_name);
+                    const file_name = try std.fmt.allocPrint(allocator, "output/multigrid_base_{}.vtu", .{iteration});
+                    defer allocator.free(file_name);
 
-                //     const file = try std.fs.cwd().createFile(file_name, .{});
-                //     defer file.close();
+                    const file = try std.fs.cwd().createFile(file_name, .{});
+                    defer file.close();
 
-                //     const debug_output = SystemSliceConst(DebugOutput).view(mesh.cell_total, .{
-                //         .sys = x.field(sys_field),
-                //         .rhs = rhs.field(sys_field),
-                //     });
+                    const debug_output = SystemSliceConst(DebugOutput).view(mesh.cell_total, .{
+                        .sys = x.field(sys_field),
+                        .rhs = rhs.field(sys_field),
+                    });
 
-                //     try DataOut.writeVtkLevel(DebugOutput, allocator, mesh, 0, debug_output, file.writer());
-                // }
+                    try DataOut.writeVtkLevel(DebugOutput, allocator, mesh, 0, debug_output, file.writer());
+                }
 
                 // Iterate up, adding correction and performing post smoothing.
                 for (1..mesh.levels.len) |level_id| {
@@ -347,7 +346,6 @@ pub fn MultigridMethod(comptime N: usize, comptime O: usize, comptime BaseSolver
                     for (level.block_offset..level.block_offset + level.block_total) |block_id| {
                         DofUtils.fillBoundary(
                             mesh,
-
                             dof_map,
                             block_id,
                             DofUtils.operSystemBoundary(oper),
@@ -381,7 +379,6 @@ pub fn MultigridMethod(comptime N: usize, comptime O: usize, comptime BaseSolver
                     for (level.block_offset..level.block_offset + level.block_total) |block_id| {
                         DofUtils.fillBoundary(
                             mesh,
-
                             dof_map,
                             block_id,
                             DofUtils.operSystemBoundary(oper),
@@ -429,6 +426,28 @@ pub fn MultigridMethod(comptime N: usize, comptime O: usize, comptime BaseSolver
                 const res_norm = norm(res.field(sys_field));
 
                 std.debug.print("Multigrid Iteration: {}, Residual: {}\n", .{ iteration, res_norm });
+
+                {
+                    const DebugOutput = enum {
+                        sys,
+                        rhs,
+                        res,
+                    };
+
+                    const file_name = try std.fmt.allocPrint(allocator, "output/multigrid_iteration_{}.vtu", .{iteration});
+                    defer allocator.free(file_name);
+
+                    const file = try std.fs.cwd().createFile(file_name, .{});
+                    defer file.close();
+
+                    const debug_output = SystemSliceConst(DebugOutput).view(mesh.cell_total, .{
+                        .sys = x.field(sys_field),
+                        .rhs = rhs.field(sys_field),
+                        .res = res.field(sys_field),
+                    });
+
+                    try DataOut.writeVtk(DebugOutput, allocator, mesh, debug_output, file.writer());
+                }
 
                 if (res_norm <= tol) {
                     break;
@@ -499,11 +518,11 @@ pub fn MultigridMethod(comptime N: usize, comptime O: usize, comptime BaseSolver
                 pub fn apply(self: *const @This(), output: []f64, input: []const f64) void {
                     // Build systems slices which mirror input and output.
                     var input_sys: SystemSliceConst(T.System) = undefined;
-                    input_sys.len = input.len;
+                    input_sys.len = self.mesh.cell_total; // This is basically just asking for there to be a problem
                     @field(input_sys.ptrs, field_name) = input.ptr;
 
                     var output_sys: SystemSlice(T.System) = undefined;
-                    output_sys.len = output.len;
+                    output_sys.len = self.mesh.cell_total;
                     @field(output_sys.ptrs, field_name) = output.ptr;
 
                     DofUtils.copyDofsFromCells(

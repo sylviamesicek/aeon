@@ -85,14 +85,14 @@ pub fn PoissonEquation(comptime O: usize) type {
                     .origin = [2]f64{ 0.0, 0.0 },
                     .size = [2]f64{ 2.0 * std.math.pi, 2.0 * std.math.pi },
                 },
-                .tile_width = 32,
+                .tile_width = 4,
                 .index_size = [2]usize{ 1, 1 },
             });
             defer mesh.deinit();
 
             // Globally refine three times
 
-            for (0..0) |_| {
+            for (0..2) |_| {
                 var tags = try allocator.alloc(bool, mesh.tile_total);
                 defer allocator.free(tags);
 
@@ -217,5 +217,5 @@ pub fn main() !void {
     }
 
     // Run main
-    try PoissonEquation(2).run(gpa.allocator());
+    try PoissonEquation(1).run(gpa.allocator());
 }

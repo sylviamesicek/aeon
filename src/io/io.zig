@@ -42,6 +42,8 @@ pub fn DataOut(comptime N: usize) type {
                 @compileError("System must satisfy isSystem trait.");
             }
 
+            sys.assertLen(mesh.cell_total);
+
             const field_count = comptime std.enums.values(System).len;
 
             // Global Constants
@@ -69,6 +71,8 @@ pub fn DataOut(comptime N: usize) type {
             const level = mesh.levels[level_id];
 
             for (level.block_offset..level.block_offset + level.block_total) |block_id| {
+                const block = mesh.blocks[block_id];
+
                 const stencil_space = DofUtils(N, 0).blockStencilSpace(mesh, block_id);
 
                 const cell_size = stencil_space.size;
@@ -81,6 +85,8 @@ pub fn DataOut(comptime N: usize) type {
 
                 try positions.ensureUnusedCapacity(allocator, N * point_space.total());
                 try vertices.ensureUnusedCapacity(allocator, cell_type.nvertices() * cell_space.total());
+
+                const block_sys = sys.slice(block.cell_offset, block.cell_total);
 
                 // Fill positions and vertices
                 var points = point_space.cartesianIndices();
@@ -139,10 +145,10 @@ pub fn DataOut(comptime N: usize) type {
                         vertices.appendAssumeCapacity(point_offset + v8);
                     }
                 }
-            }
 
-            inline for (comptime std.enums.values(System), 0..) |field, idx| {
-                try fields[idx].appendSlice(allocator, sys.field(field));
+                inline for (comptime std.enums.values(System), 0..) |field, idx| {
+                    try fields[idx].appendSlice(allocator, block_sys.field(field));
+                }
             }
 
             var grid: VtuMeshOutput = try VtuMeshOutput.init(allocator, .{
@@ -167,7 +173,7 @@ pub fn DataOut(comptime N: usize) type {
         //     comptime System: type,
         //     allocator: Allocator,
         //     mesh: *const Mesh,
-        //     dof_map: Map,
+        //     dof_map: DofMap(N, O),
         //     level: usize,
         //     sys: system.SystemSliceConst(System),
         //     out_stream: anytype,
