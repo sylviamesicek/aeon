@@ -67,22 +67,58 @@ pub fn NodeSpace(comptime N: usize, comptime E: usize) type {
             field[linear] = v;
         }
 
-        /// Prolongs the value of a field to a subcell.
+        // /// Prolongs the value of a field to a subcell.
+        // pub fn prolong(self: Self, comptime O: usize, subcell: [N]isize, field: []const f64) f64 {
+        //     // Build stencils for both the left and right case at comptime.
+        //     const lstencil: [2 * O + 2]f64 = comptime prolongStencil2(false, O + 1);
+        //     const rstencil: [2 * O + 2]f64 = comptime prolongStencil2(true, O + 1);
+
+        //     const index_space: IndexSpace = self.indexSpace();
+
+        //     var result: f64 = 0.0;
+
+        //     comptime var stencil_indices = IndexSpace.fromSize([1]usize{2 * O + 2} ** N).cartesianIndices();
+
+        //     inline while (comptime stencil_indices.next()) |stencil_index| {
+        //         var coef: f64 = 1.0;
+
+        //         for (0..N) |i| {
+        //             if (@mod(subcell[i], 2) == 0) {
+        //                 coef *= rstencil[stencil_index[i]];
+        //             } else {
+        //                 coef *= lstencil[stencil_index[i]];
+        //             }
+        //         }
+
+        //         var offset_cell: [N]isize = undefined;
+
+        //         inline for (0..N) |i| {
+        //             offset_cell[i] = @divFloor(subcell[i] - 1, 2) + stencil_index[i] - O;
+        //         }
+
+        //         const linear = index_space.linearFromCartesian(indexFromNode(offset_cell));
+
+        //         result += coef * field[linear];
+        //     }
+
+        //     return result;
+        // }
+
         pub fn prolong(self: Self, comptime O: usize, subcell: [N]isize, field: []const f64) f64 {
             // Build stencils for both the left and right case at comptime.
             const lstencil: [2 * O + 1]f64 = comptime prolongStencil(false, O);
             const rstencil: [2 * O + 1]f64 = comptime prolongStencil(true, O);
 
-            var result: f64 = 0.0;
-
             const index_space: IndexSpace = self.indexSpace();
+
+            var result: f64 = 0.0;
 
             comptime var stencil_indices = IndexSpace.fromSize([1]usize{2 * O + 1} ** N).cartesianIndices();
 
             inline while (comptime stencil_indices.next()) |stencil_index| {
                 var coef: f64 = 1.0;
 
-                for (0..N) |i| {
+                inline for (0..N) |i| {
                     if (@mod(subcell[i], 2) == 1) {
                         coef *= rstencil[stencil_index[i]];
                     } else {
@@ -93,7 +129,7 @@ pub fn NodeSpace(comptime N: usize, comptime E: usize) type {
                 var offset_cell: [N]isize = undefined;
 
                 inline for (0..N) |i| {
-                    offset_cell[i] = @divTrunc(subcell[i], 2) + stencil_index[i] - O;
+                    offset_cell[i] = @divFloor(subcell[i], 2) + stencil_index[i] - O;
                 }
 
                 const linear = index_space.linearFromCartesian(indexFromNode(offset_cell));
@@ -175,9 +211,19 @@ pub fn NodeSpace(comptime N: usize, comptime E: usize) type {
 }
 
 fn prolongStencil(comptime side: bool, comptime O: usize) [2 * O + 1]f64 {
+    // if (O == 1) {
+    //     return if (side) [_]f64{ -1.0 / 8.0, 1.0, 1.0 / 8.0 } else [_]f64{ 1.0 / 8.0, 1.0, -1.0 / 8.0 };
+    // }
+
     const ngrid = grids.nodeCenteredGrid(f64, O, O);
     const point = if (side) 0.25 else -0.25;
     return lagrange.valueStencil(2 * O + 1, ngrid, point);
+}
+
+fn prolongStencil2(comptime side: bool, comptime O: usize) [2 * O]f64 {
+    const point = if (side) 0.25 else -0.25;
+    const vgrid = grids.vertexCenteredGrid(f64, O, O);
+    return lagrange.valueStencil(2 * O, vgrid, point);
 }
 
 fn restrictStencil(comptime O: usize) [2 * O]f64 {

@@ -6,7 +6,7 @@ const aeon = @import("aeon");
 const dofs = aeon.dofs;
 const geometry = aeon.geometry;
 
-pub fn PoissonEquation(comptime O: usize) type {
+pub fn Prolongation(comptime O: usize) type {
     const N = 2;
     return struct {
         const BoundaryCondition = dofs.BoundaryCondition;
@@ -34,44 +34,31 @@ pub fn PoissonEquation(comptime O: usize) type {
         };
 
         // Seed Function
-        pub const RhsProjection = struct {
+        pub const Projection = struct {
             amplitude: f64,
 
             pub const System = Function;
             pub const Context = aeon.EmptySystem;
 
-            pub fn project(self: RhsProjection, engine: dofs.ProjectionEngine(N, O, Context)) SystemValue(System) {
+            pub fn project(self: Projection, engine: dofs.ProjectionEngine(N, O, Context)) SystemValue(System) {
                 const pos = engine.position();
 
                 return .{
                     .func = self.amplitude * std.math.sin(pos[0]) * std.math.sin(pos[1]),
-                    // .func = self.amplitude,
                 };
             }
         };
 
-        pub const PoissonOperator = struct {
+        pub const Boundary = struct {
             pub const System = Function;
-            pub const Context = aeon.EmptySystem;
 
-            pub fn apply(
-                _: PoissonOperator,
-                comptime Setting: dofs.EngineSetting,
-                engine: dofs.Engine(N, O, Setting, System, Context),
-            ) SystemValue(System) {
-                return .{
-                    .func = -engine.laplacianSys(.func),
-                };
-            }
-
-            pub fn boundarySys(_: PoissonOperator, _: [N]f64, _: Face) dofs.SystemBoundaryCondition(System) {
+            pub fn boundary(self: Boundary, pos: [N]f64, face: Face) dofs.SystemBoundaryCondition(System) {
+                _ = face;
+                _ = pos;
+                _ = self;
                 return .{
                     .func = BoundaryCondition.diritchlet(0.0),
                 };
-            }
-
-            pub fn boundaryCtx(_: PoissonOperator, _: [N]f64, _: Face) dofs.SystemBoundaryCondition(Context) {
-                return .{};
             }
         };
 
@@ -85,7 +72,7 @@ pub fn PoissonEquation(comptime O: usize) type {
                     .origin = [2]f64{ 0.0, 0.0 },
                     .size = [2]f64{ 2.0 * std.math.pi, 2.0 * std.math.pi },
                 },
-                .tile_width = 32,
+                .tile_width = 16,
                 .index_size = [2]usize{ 1, 1 },
             });
             defer mesh.deinit();
@@ -101,9 +88,9 @@ pub fn PoissonEquation(comptime O: usize) type {
                 try mesh.regrid(allocator, tags, .{
                     .max_levels = 4,
                     .patch_efficiency = 0.1,
-                    .patch_max_tiles = 100,
+                    .patch_max_tiles = 1000,
                     .block_efficiency = 0.7,
-                    .block_max_tiles = 100,
+                    .block_max_tiles = 1000,
                 });
             }
 
@@ -122,81 +109,102 @@ pub fn PoissonEquation(comptime O: usize) type {
 
             // Project right hand side function
 
-            const rhs = try SystemSlice(Function).init(allocator, mesh.cell_total);
-            defer rhs.deinit(allocator);
+            const exact = try SystemSlice(Function).init(allocator, mesh.cell_total);
+            defer exact.deinit(allocator);
 
             DofUtilsTotal.project(
                 &mesh,
                 dof_map,
-                RhsProjection{ .amplitude = 2.0 },
-                rhs,
+                Projection{ .amplitude = 1.0 },
+                exact,
                 aeon.EmptySystem.sliceConst(),
             );
 
-            const sol = try SystemSlice(Function).init(allocator, mesh.cell_total);
-            defer sol.deinit(allocator);
-
-            // As well as the solution function
+            const func = try SystemSlice(Function).init(allocator, mesh.cell_total);
+            defer func.deinit(allocator);
 
             DofUtilsTotal.project(
                 &mesh,
                 dof_map,
-                RhsProjection{ .amplitude = 1.0 },
-                sol,
+                Projection{ .amplitude = 1.0 },
+                func,
                 aeon.EmptySystem.sliceConst(),
             );
 
-            // Allocate memory for the numerical solution, and set initial guess.
+            const func_dofs = try SystemSlice(Function).init(allocator, dof_map.ndofs());
+            defer func_dofs.deinit(allocator);
 
-            var numerical = try SystemSlice(Function).init(allocator, mesh.cell_total);
-            defer numerical.deinit(allocator);
+            for (0..mesh.blocks.len) |block_id| {
+                DofUtils.copyDofsFromCells(
+                    Function,
+                    &mesh,
+                    dof_map,
+                    block_id,
+                    func_dofs,
+                    func.toConst(),
+                );
+            }
 
-            @memset(numerical.field(.func), 0.0);
+            for (1..mesh.levels.len) |level_id| {
+                const coarse = mesh.levels[level_id - 1];
+                const level = mesh.levels[level_id];
 
-            // Run multigrid method
+                for (coarse.block_offset..coarse.block_offset + coarse.block_total) |block_id| {
+                    DofUtils.fillBoundary(
+                        &mesh,
+                        dof_map,
+                        block_id,
+                        Boundary{},
+                        func_dofs,
+                    );
+                }
 
-            var solver = MultigridMethod.new(20, 10e-10, BiCGStabSolver.new(10000, 10e-10));
+                for (level.block_offset..level.block_offset + level.block_total) |block_id| {
+                    DofUtils.prolong(
+                        Function,
+                        &mesh,
+                        dof_map,
+                        block_id,
+                        func_dofs,
+                    );
+                }
+            }
 
-            // var solver = LinearMapMethod.new(BiCGStabSolver.new(10000, 10e-10));
+            for (0..mesh.blocks.len) |block_id| {
+                DofUtils.copyCellsFromDofs(
+                    Function,
+                    &mesh,
+                    dof_map,
+                    block_id,
+                    func,
+                    func_dofs.toConst(),
+                );
+            }
 
-            try solver.solve(
-                allocator,
-                &mesh,
-                dof_map,
-                PoissonOperator{},
-                numerical,
-                aeon.EmptySystem.sliceConst(),
-                rhs.toConst(),
-            );
-
-            // Compute error
-
-            var err = try SystemSlice(Function).init(allocator, mesh.cell_total);
+            const err = try SystemSlice(Function).init(allocator, mesh.cell_total);
             defer err.deinit(allocator);
 
             for (0..mesh.cell_total) |i| {
-                err.field(.func)[i] = numerical.field(.func)[i] - sol.field(.func)[i];
+                err.field(.func)[i] = func.field(.func)[i] - exact.field(.func)[i];
             }
 
             // Output results
 
             std.debug.print("Writing Solution To File\n", .{});
 
-            const file = try std.fs.cwd().createFile("output/poisson.vtu", .{});
+            const file = try std.fs.cwd().createFile("output/prolong.vtu", .{});
             defer file.close();
 
             const Output = enum {
-                num,
                 exact,
+                func,
                 err,
-                rhs,
             };
 
             const output = SystemSliceConst(Output).view(mesh.cell_total, .{
-                .num = numerical.field(.func),
-                .exact = sol.field(.func),
+                .func = func.field(.func),
+                .exact = exact.field(.func),
                 .err = err.field(.func),
-                .rhs = rhs.field(.func),
             });
 
             try DataOut.writeVtk(Output, allocator, &mesh, output, file.writer());
@@ -217,5 +225,5 @@ pub fn main() !void {
     }
 
     // Run main
-    try PoissonEquation(2).run(gpa.allocator());
+    try Prolongation(2).run(gpa.allocator());
 }
