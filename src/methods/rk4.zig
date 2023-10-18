@@ -47,6 +47,7 @@ pub fn RungeKutta4Integrator(comptime System: type) type {
                 .k2 = k2,
                 .k3 = k3,
                 .k4 = k4,
+                .time = 0.0,
             };
         }
 

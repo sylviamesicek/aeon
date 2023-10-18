@@ -188,7 +188,9 @@ pub fn LinearMapMethod(comptime N: usize, comptime O: usize, comptime InnerSolve
                 // var iterations: usize = 0;
 
                 pub fn callback(_: *const @This(), iteration: usize, residual: f64, _: []const f64) void {
-                    std.debug.print("Iteration: {}, Residual: {}\n", .{ iteration, residual });
+                    _ = residual;
+                    _ = iteration;
+                    // std.debug.print("Iteration: {}, Residual: {}\n", .{ iteration, residual });
 
                     // const file_name = std.fmt.allocPrint(solver.self.mesh.gpa, "output/elliptic_iteration{}.vtu", .{iterations}) catch {
                     //     unreachable;
