@@ -330,7 +330,7 @@ pub fn BrillEvolution(comptime O: usize) type {
                 const u_grad = engine.gradientCtx(.u);
 
                 return .{
-                    .shift_z = 2.0 * lapse_val * x_grad[1] + 2.0 * lapse_grad[1] * x_val - lapse_val * u_grad[0] - lapse_grad[0] * u_val,
+                    .shift_z = 2.0 * lapse_val * x_grad[0] + 2.0 * lapse_grad[0] * x_val - lapse_val * u_grad[1] - lapse_grad[1] * u_val,
                 };
             }
         };
