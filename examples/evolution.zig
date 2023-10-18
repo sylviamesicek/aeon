@@ -365,6 +365,47 @@ pub fn BrillEvolution(comptime O: usize) type {
             }
         };
 
+        pub const Constraint = struct {
+            pub const System = enum {
+                constraint,
+            };
+            pub const Context = Hyperbolic;
+
+            pub fn project(_: Constraint, engine: dofs.ProjectionEngine(N, O, Context)) SystemValue(System) {
+                const pos = engine.position();
+                const r = pos[0];
+
+                const psi_val = engine.valueCtx(.psi) + 1.0;
+                const psi_grad = engine.gradientCtx(.psi);
+                const psi_hessian = engine.hessianCtx(.psi);
+
+                const s_val = engine.valueCtx(.s);
+                const s_grad = engine.gradientCtx(.s);
+                const s_hessian = engine.hessianCtx(.s);
+
+                const psi = psi_val;
+                const psi_r = psi_grad[0];
+                const psi_rr = psi_hessian[0][0];
+                const psi_zz = psi_hessian[1][1];
+
+                const s = s_val;
+                const s_r = s_grad[0];
+                const s_rr = s_hessian[0][0];
+                const s_zz = s_hessian[1][1];
+
+                const u = engine.valueCtx(.u);
+                const y = engine.valueCtx(.y);
+                const x = engine.valueCtx(.x);
+
+                const term1 = psi_rr + psi_r / r + psi_zz + 0.25 * psi * (r * s_rr + 2 * s_r + r * s_zz);
+                const scale = psi * psi * psi * psi * psi * @exp(2 * r * s);
+                const term2 = 1.0 / 3.0 * (u - 0.5 * r * y) * (u - 0.5 * r * y);
+                const term3 = 0.25 * r * r * y * y + x * x;
+
+                return .{ .constraint = term1 + scale * (term2 + term3) };
+            }
+        };
+
         pub const EllipticBoundary = struct {
             pub const System = Elliptic;
 
@@ -484,7 +525,7 @@ pub fn BrillEvolution(comptime O: usize) type {
                     // TODO Check this.
                     const term1 = shift_r * psi_r + shift_z * psi_z;
                     const term2 = psi * shift_r / (2.0 * r);
-                    const term3 = lapse * (u - 2 * r * y) / 6.0;
+                    const term3 = psi * lapse * (u - 2.0 * r * y) / 6.0;
 
                     break :blk term1 + term2 + term3;
                 };
@@ -497,17 +538,25 @@ pub fn BrillEvolution(comptime O: usize) type {
                 };
 
                 const y_deriv = blk: {
+                    // const term1 = shift_r * y_r + shift_z * y_z + y * shift_r / r;
+                    // const term2 = -x * (shift_z_r - shift_r_z) / r;
+                    // const term3 = conformal * (lapse_rr / r - lapse_r / r2 - lapse_r / r * (r * s_r + s + 4.0 * psi_r / psi) + lapse_z * s_z);
+                    // const term4 = lapse * conformal * (2.0 / psi * (psi_rr / r - psi_r / r2) + s_rr + s_zz + s_r / r - s / r2 - 2.0 * psi_r / (r * psi) * (r * s_r + s + 3.0 * psi_r / psi) + 2.0 * psi_z * s_z / psi);
+                    // break :blk term1 + term2 + term3 + term4;
+
                     const term1 = shift_r * y_r + shift_z * y_z + y * shift_r / r;
                     const term2 = -x * (shift_z_r - shift_r_z) / r;
                     const term3 = conformal * (lapse_rr / r - lapse_r / r2 - lapse_r / r * (r * s_r + s + 4.0 * psi_r / psi) + lapse_z * s_z);
-                    const term4 = lapse * conformal * (2.0 / psi * (psi_rr / r - psi_r / r2) + s_rr + s_zz + s_r / r - s / r2 - 2.0 * psi_r * (r * s_r + s + 3.0 * psi_r / psi) / (r * psi) + 2 * psi_z * s_z / psi);
-                    break :blk term1 + term2 + term3 + term4;
+                    _ = term3;
+                    const term4 = lapse * conformal * (2.0 / psi * (psi_rr / r - psi_r / r2) + s_rr + s_zz + s_r / r - s / r2 - 2.0 * psi_r / (r * psi) * (r * s_r + s + 3.0 * psi_r / psi) + 2.0 * psi_z * s_z / psi);
+                    _ = term4;
+                    break :blk term1 + term2;
                 };
 
                 const u_deriv = blk: {
                     const term1 = shift_r * u_r + shift_z * u_z + 2.0 * x * (shift_r_z - shift_z_r);
-                    const term2 = conformal * (2.0 * lapse_z * (2.0 * psi_z / psi + r * s_z) - 2.0 * lapse_r * (2 * psi_r / psi + r * s_r + s) + lapse_rr + lapse_zz);
-                    const term3 = -2.0 * lapse * conformal * (-psi_rr / psi + psi_zz / psi + s_r + s / r + psi_r / psi * (3.0 * psi_r / psi + 2.0 * r * s_r + 2.0 * s) - psi_z / psi * (3.0 * psi_z / psi + 2 * r * s_z));
+                    const term2 = conformal * (2.0 * lapse_z * (2.0 * psi_z / psi + r * s_z) - 2.0 * lapse_r * (2.0 * psi_r / psi + r * s_r + s) + lapse_rr + lapse_zz);
+                    const term3 = -2.0 * lapse * conformal * (-psi_rr / psi + psi_zz / psi + s_r + s / r + psi_r / psi * (3.0 * psi_r / psi + 2.0 * r * s_r + 2.0 * s) - psi_z / psi * (3.0 * psi_z / psi + 2.0 * r * s_z));
                     break :blk term1 + term2 + term3;
                 };
 
@@ -788,6 +837,9 @@ pub fn BrillEvolution(comptime O: usize) type {
             var gauge_rhs = try SystemSlice(Elliptic).init(allocator, mesh.cell_total);
             defer gauge_rhs.deinit(allocator);
 
+            const constraint = try SystemSlice(Constraint.System).init(allocator, mesh.cell_total);
+            defer constraint.deinit(allocator);
+
             // ***************************
             // Solver ********************
             // ***************************
@@ -870,14 +922,57 @@ pub fn BrillEvolution(comptime O: usize) type {
             // Evolve **********************
             // *****************************
 
-            const steps: usize = 100;
+            const steps: usize = 200;
             const h: f64 = 0.01;
 
             for (0..steps) |step| {
                 std.debug.print("Running Step {}\n", .{step});
+
+                // **************************
+                // Constraint Violation *****
+                // **************************
+
+                for (0..mesh.blocks.len) |block_id| {
+                    DofUtils.copyDofsFromCells(
+                        Hyperbolic,
+                        &mesh,
+                        dof_map,
+                        block_id,
+                        dynamic,
+                        rk4.sys.toConst(),
+                    );
+                }
+
+                for (0..mesh.blocks.len) |block_id| {
+                    DofUtils.fillBoundary(
+                        &mesh,
+                        dof_map,
+                        block_id,
+                        HyperbolicBoundary{},
+                        dynamic,
+                    );
+                }
+
+                DofUtilsTotal.project(
+                    &mesh,
+                    dof_map,
+                    Constraint{},
+                    constraint,
+                    dynamic.toConst(),
+                );
+
                 // **************************
                 // Output *******************
                 // **************************
+
+                const Output = enum {
+                    constraint,
+                    psi,
+                    s,
+                    u,
+                    y,
+                    x,
+                };
 
                 const file_name = try std.fmt.allocPrint(allocator, "output/evolution_{}.vtu", .{step});
                 defer allocator.free(file_name);
@@ -885,7 +980,16 @@ pub fn BrillEvolution(comptime O: usize) type {
                 const file = try std.fs.cwd().createFile(file_name, .{});
                 defer file.close();
 
-                try DataOut.writeVtk(Hyperbolic, allocator, &mesh, rk4.sys.toConst(), file.writer());
+                const output = SystemSliceConst(Output).view(mesh.cell_total, .{
+                    .constraint = constraint.field(.constraint),
+                    .psi = rk4.sys.field(.psi),
+                    .s = rk4.sys.field(.s),
+                    .u = rk4.sys.field(.u),
+                    .y = rk4.sys.field(.y),
+                    .x = rk4.sys.field(.x),
+                });
+
+                try DataOut.writeVtk(Output, allocator, &mesh, output, file.writer());
 
                 // Step
 
