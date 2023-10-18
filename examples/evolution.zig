@@ -33,7 +33,7 @@ pub fn BrillEvolution(comptime O: usize) type {
         const Mesh = aeon.mesh.Mesh(N);
 
         fn evenBoundaryCondition(pos: [N]f64, face: Face) BoundaryCondition {
-            if (face.side == false) {
+            if (face.side == false and face.axis == 0) {
                 return BoundaryCondition.nuemann(0.0);
             } else {
                 const r: f64 = @sqrt(pos[0] * pos[0] + pos[1] * pos[1]);
@@ -42,7 +42,7 @@ pub fn BrillEvolution(comptime O: usize) type {
         }
 
         fn oddBoundaryCondition(pos: [N]f64, face: Face) BoundaryCondition {
-            if (face.side == false) {
+            if (face.side == false and face.axis == 0) {
                 return BoundaryCondition.diritchlet(0.0);
             } else {
                 const r: f64 = @sqrt(pos[0] * pos[0] + pos[1] * pos[1]);
@@ -93,14 +93,28 @@ pub fn BrillEvolution(comptime O: usize) type {
             }
         };
 
-        pub const MetricInitialData = struct {
+        pub const InitialDataRhs = struct {
+            pub const System = InitialDataOperator.System;
+            pub const Context = InitialDataOperator.Context;
+
+            pub fn project(_: InitialDataRhs, engine: dofs.ProjectionEngine(N, O, Context)) SystemValue(System) {
+                const s_hessian: [N][N]f64 = engine.hessianCtx(.s);
+                const s_lap = s_hessian[0][0] + s_hessian[1][1];
+
+                return .{
+                    .psi = s_lap,
+                };
+            }
+        };
+
+        pub const InitialDataOperator = struct {
             pub const System = enum {
                 psi,
             };
 
             pub const Context = SProjection.System;
 
-            pub fn apply(_: MetricInitialData, comptime Setting: dofs.EngineSetting, engine: dofs.Engine(N, O, Setting, System, Context)) SystemValue(System) {
+            pub fn apply(_: InitialDataOperator, comptime Setting: dofs.EngineSetting, engine: dofs.Engine(N, O, Setting, System, Context)) SystemValue(System) {
                 const position: [N]f64 = engine.position();
 
                 const hessian: [N][N]f64 = engine.hessianSys(.psi);
@@ -117,13 +131,13 @@ pub fn BrillEvolution(comptime O: usize) type {
                 };
             }
 
-            pub fn boundarySys(_: MetricInitialData, pos: [N]f64, face: Face) SystemBoundaryCondition(System) {
+            pub fn boundarySys(_: InitialDataOperator, pos: [N]f64, face: Face) SystemBoundaryCondition(System) {
                 return .{
                     .psi = evenBoundaryCondition(pos, face),
                 };
             }
 
-            pub fn boundaryCtx(_: MetricInitialData, pos: [N]f64, face: Face) SystemBoundaryCondition(Context) {
+            pub fn boundaryCtx(_: InitialDataOperator, pos: [N]f64, face: Face) SystemBoundaryCondition(Context) {
                 return .{
                     .s = oddBoundaryCondition(pos, face),
                 };
@@ -140,16 +154,16 @@ pub fn BrillEvolution(comptime O: usize) type {
 
                 const psi_val = engine.valueCtx(.psi) + 1.0;
 
-                const seed = engine.valueCtx(.s);
+                const s = engine.valueCtx(.s);
                 const u = engine.valueCtx(.u);
                 const y = engine.valueCtx(.y);
                 const x = engine.valueCtx(.x);
 
                 const psi = psi_val;
 
-                const scale = psi * psi * psi * psi * @exp(2 * r * seed);
+                const scale = psi * psi * psi * psi * @exp(2 * r * s);
 
-                const term3 = (u - 0.5 * r * y) * (u - 0.5 * r * y);
+                const term3 = 2.0 / 3.0 * (u - 0.5 * r * y) * (u - 0.5 * r * y);
                 const term4 = 0.5 * r * r * y * y;
                 const term5 = 2.0 * x * x;
 
@@ -203,7 +217,7 @@ pub fn BrillEvolution(comptime O: usize) type {
                 const psi_val = engine.valueCtx(.psi) + 1.0;
                 const psi_grad = engine.gradientCtx(.psi);
 
-                const seed = engine.valueCtx(.s);
+                const s = engine.valueCtx(.s);
                 const u = engine.valueCtx(.u);
                 const y = engine.valueCtx(.y);
                 const x = engine.valueCtx(.x);
@@ -215,14 +229,14 @@ pub fn BrillEvolution(comptime O: usize) type {
                 const term1 = lapse_rr + lapse_r / r + lapse_zz;
                 const term2 = 2.0 / psi * (psi_r * lapse_r + psi_z * lapse_z);
 
-                const scale = lapse * psi * psi * psi * psi * @exp(2 * r * seed);
+                const scale = -lapse * psi * psi * psi * psi * @exp(2 * r * s);
 
-                const term3 = (u - 0.5 * r * y) * (u - 0.5 * r * y);
+                const term3 = 2.0 / 3.0 * (u - 0.5 * r * y) * (u - 0.5 * r * y);
                 const term4 = 0.5 * r * r * y * y;
                 const term5 = 2.0 * x * x;
 
                 return .{
-                    .lapse = term1 + term2 - scale * (term3 + term4 + term5),
+                    .lapse = term1 + term2 + scale * (term3 + term4 + term5),
                 };
             }
 
@@ -288,7 +302,7 @@ pub fn BrillEvolution(comptime O: usize) type {
 
             pub fn boundarySys(_: ShiftROperator, pos: [N]f64, face: Face) SystemBoundaryCondition(System) {
                 return .{
-                    .shift_r = evenBoundaryCondition(pos, face),
+                    .shift_r = oddBoundaryCondition(pos, face),
                 };
             }
 
@@ -316,7 +330,7 @@ pub fn BrillEvolution(comptime O: usize) type {
                 const u_grad = engine.gradientCtx(.u);
 
                 return .{
-                    .shift_z = lapse_val * x_grad[1] + lapse_grad[1] * x_val - lapse_val * u_grad[0] - lapse_grad[0] * u_val,
+                    .shift_z = 2.0 * lapse_val * x_grad[1] + 2.0 * lapse_grad[1] * x_val - lapse_val * u_grad[0] - lapse_grad[0] * u_val,
                 };
             }
         };
@@ -342,7 +356,7 @@ pub fn BrillEvolution(comptime O: usize) type {
 
             pub fn boundarySys(_: ShiftZOperator, pos: [N]f64, face: Face) SystemBoundaryCondition(System) {
                 return .{
-                    .shift_z = oddBoundaryCondition(pos, face),
+                    .shift_z = evenBoundaryCondition(pos, face),
                 };
             }
 
@@ -568,9 +582,8 @@ pub fn BrillEvolution(comptime O: usize) type {
                 @memset(self.gauge_cells.field(.shift_r), 0.0);
                 @memset(self.gauge_cells.field(.shift_z), 0.0);
 
-                // Solve Lapse
+                // Solve Lapse RHS
 
-                const lapse_view = SystemSlice(LapseRhs.System).view(self.mesh.cell_total, .{ .lapse = self.gauge_cells.field(.lapse) });
                 const lapse_rhs = SystemSlice(LapseRhs.System).view(self.mesh.cell_total, .{ .lapse = self.gause_rhs.field(.lapse) });
                 const lapse_ctx = SystemSliceConst(LapseRhs.Context).view(self.dof_map.ndofs(), .{
                     .psi = self.dynamic.field(.psi),
@@ -588,17 +601,31 @@ pub fn BrillEvolution(comptime O: usize) type {
                     lapse_ctx,
                 );
 
+                // Solve Lapse
+
+                const lapse_view = SystemSlice(LapseRhs.System).view(self.mesh.cell_total, .{ .lapse = self.gauge_cells.field(.lapse) });
+
+                const lapse_solve_ctx = SystemSliceConst(LapseOperator.Context).view(self.mesh.cell_total, .{
+                    .psi = src.field(.psi),
+                    .s = src.field(.s),
+                    .u = src.field(.u),
+                    .x = src.field(.x),
+                    .y = src.field(.y),
+                });
+
                 self.solver.solve(
                     self.allocator,
                     self.mesh,
                     self.dof_map,
                     LapseOperator{},
                     lapse_view,
-                    lapse_ctx,
+                    lapse_solve_ctx,
                     lapse_rhs.toConst(),
                 ) catch {
                     unreachable;
                 };
+
+                // Fill `gauge.field(.lapse)`
 
                 const gauge_lapse = SystemSlice(LapseOperator.System).view(self.dof_map.ndofs(), .{ .lapse = self.gauge.field(.lapse) });
 
@@ -731,8 +758,8 @@ pub fn BrillEvolution(comptime O: usize) type {
 
             var mesh = try Mesh.init(allocator, .{
                 .physical_bounds = .{
-                    .origin = [2]f64{ 0.0, 0.0 },
-                    .size = [2]f64{ 10.0, 10.0 },
+                    .origin = [2]f64{ 0.0, -10.0 },
+                    .size = [2]f64{ 20.0, 20.0 },
                 },
                 .tile_width = 64,
                 .index_size = [2]usize{ 1, 1 },
@@ -777,42 +804,73 @@ pub fn BrillEvolution(comptime O: usize) type {
 
             std.debug.print("Solving Initial Data\n", .{});
 
-            const seed = SystemSlice(MetricInitialData.Context).view(mesh.cell_total, .{
+            // Project initial s value
+
+            const s = SystemSlice(InitialDataOperator.Context).view(mesh.cell_total, .{
                 .s = rk4.sys.field(.s),
             });
 
             DofUtilsTotal.project(&mesh, dof_map, SProjection{
                 .amplitude = 1.0,
                 .sigma = 1.0,
-            }, seed, aeon.EmptySystem.sliceConst());
+            }, s, aeon.EmptySystem.sliceConst());
 
-            const rhs = SystemSlice(MetricInitialData.System).view(mesh.cell_total, .{
-                .psi = rk4.sys.field(.s),
-            });
+            // Project rhs value
 
-            const metric = SystemSlice(MetricInitialData.System).view(mesh.cell_total, .{
+            const rhs = try SystemSlice(InitialDataOperator.System).init(allocator, mesh.cell_total);
+            defer rhs.deinit(allocator);
+
+            {
+                const s_dofs = try SystemSlice(InitialDataOperator.Context).init(allocator, dof_map.ndofs());
+                defer s_dofs.deinit(allocator);
+
+                for (0..mesh.blocks.len) |block_id| {
+                    DofUtils.copyDofsFromCells(
+                        InitialDataOperator.Context,
+                        &mesh,
+                        dof_map,
+                        block_id,
+                        s_dofs,
+                        s.toConst(),
+                    );
+                }
+
+                for (0..mesh.blocks.len) |block_id| {
+                    DofUtils.fillBoundary(
+                        &mesh,
+                        dof_map,
+                        block_id,
+                        DofUtils.operContextBoundary(InitialDataOperator{}),
+                        s_dofs,
+                    );
+                }
+
+                DofUtilsTotal.project(&mesh, dof_map, InitialDataRhs{}, rhs, s_dofs.toConst());
+            }
+
+            const metric = SystemSlice(InitialDataOperator.System).view(mesh.cell_total, .{
                 .psi = rk4.sys.field(.psi),
             });
 
             @memset(rk4.sys.field(.psi), 0.0);
 
-            // TODO Boundary conditions
-
             try solver.solve(
                 allocator,
                 &mesh,
                 dof_map,
-                MetricInitialData{},
+                InitialDataOperator{},
                 metric,
-                seed.toConst(),
+                s.toConst(),
                 rhs.toConst(),
             );
+
+            std.debug.print("Initial Data Solved\n", .{});
 
             // *****************************
             // Evolve **********************
             // *****************************
 
-            const steps: usize = 10;
+            const steps: usize = 100;
             const h: f64 = 0.01;
 
             for (0..steps) |step| {
