@@ -44,6 +44,7 @@ pub fn derivativeStencil(comptime L: usize, grid: [L]f64, point: f64) [L]f64 {
 
 /// Computes the second derivative stencil given a grid and a point.
 pub fn secondDerivativeStencil(comptime L: usize, grid: [L]f64, point: f64) [L]f64 {
+    @setEvalBranchQuota(10000);
     var stencil: [L]f64 = undefined;
 
     for (0..L) |i| {

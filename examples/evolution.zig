@@ -98,11 +98,18 @@ pub fn BrillEvolution(comptime O: usize) type {
             pub const Context = InitialDataOperator.Context;
 
             pub fn project(_: InitialDataRhs, engine: dofs.ProjectionEngine(N, O, Context)) SystemValue(System) {
+                const pos = engine.position();
+                const r = pos[0];
+
                 const s_hessian: [N][N]f64 = engine.hessianCtx(.s);
-                const s_lap = s_hessian[0][0] + s_hessian[1][1];
+                const s_grad: [N]f64 = engine.gradientCtx(.s);
+
+                const s_rr = s_hessian[0][0];
+                const s_zz = s_hessian[1][1];
+                const s_r = s_grad[0];
 
                 return .{
-                    .psi = s_lap,
+                    .psi = -0.25 * (r * s_rr + 2.0 * s_r + r * s_zz),
                 };
             }
         };
@@ -116,18 +123,26 @@ pub fn BrillEvolution(comptime O: usize) type {
 
             pub fn apply(_: InitialDataOperator, comptime Setting: dofs.EngineSetting, engine: dofs.Engine(N, O, Setting, System, Context)) SystemValue(System) {
                 const position: [N]f64 = engine.position();
+                const r = position[0];
 
                 const hessian: [N][N]f64 = engine.hessianSys(.psi);
-                const gradient: [N]f64 = engine.gradientSys(.psi);
-                const value: f64 = engine.valueSys(.psi);
+                const grad: [N]f64 = engine.gradientSys(.psi);
+                const val: f64 = engine.valueSys(.psi);
 
-                const lap = hessian[0][0] + hessian[1][1] + gradient[0] / position[0];
+                const psi = val;
+                const psi_r = grad[0];
+                const psi_rr = hessian[0][0];
+                const psi_zz = hessian[1][1];
 
                 const s_hessian: [N][N]f64 = engine.hessianCtx(.s);
-                const s_lap = s_hessian[0][0] + s_hessian[1][1];
+                const s_grad: [N]f64 = engine.gradientCtx(.s);
+
+                const s_rr = s_hessian[0][0];
+                const s_zz = s_hessian[1][1];
+                const s_r = s_grad[0];
 
                 return .{
-                    .psi = -lap - s_lap * value,
+                    .psi = psi_rr + psi_r / r + psi_zz + psi * 0.25 * (r * s_rr + 2.0 * s_r + r * s_zz),
                 };
             }
 
@@ -169,16 +184,6 @@ pub fn BrillEvolution(comptime O: usize) type {
 
                 return .{
                     .lapse = scale * (term3 + term4 + term5),
-                };
-            }
-
-            pub fn boundaryCtx(_: LapseRhs, pos: [N]f64, face: Face) SystemBoundaryCondition(Context) {
-                return .{
-                    .psi = evenBoundaryCondition(pos, face),
-                    .s = oddBoundaryCondition(pos, face),
-                    .u = evenBoundaryCondition(pos, face),
-                    .x = oddBoundaryCondition(pos, face),
-                    .y = oddBoundaryCondition(pos, face),
                 };
             }
         };
@@ -275,6 +280,10 @@ pub fn BrillEvolution(comptime O: usize) type {
                 const u_val = engine.valueCtx(.u);
                 const u_grad = engine.gradientCtx(.u);
 
+                // return .{
+                //     .shift_r = lapse_val * x_grad[1] + lapse_grad[1] * x_val - lapse_val * u_grad[0] - lapse_grad[0] * u_val,
+                // };
+
                 return .{
                     .shift_r = 2.0 * lapse_val * x_grad[1] + 2.0 * lapse_grad[1] * x_val - lapse_val * u_grad[0] - lapse_grad[0] * u_val,
                 };
@@ -330,7 +339,7 @@ pub fn BrillEvolution(comptime O: usize) type {
                 const u_grad = engine.gradientCtx(.u);
 
                 return .{
-                    .shift_z = 2.0 * lapse_val * x_grad[0] + 2.0 * lapse_grad[0] * x_val - lapse_val * u_grad[1] - lapse_grad[1] * u_val,
+                    .shift_z = 2.0 * lapse_val * x_grad[0] + 2.0 * lapse_grad[0] * x_val + lapse_val * u_grad[1] + lapse_grad[1] * u_val,
                 };
             }
         };
@@ -397,7 +406,7 @@ pub fn BrillEvolution(comptime O: usize) type {
                 const y = engine.valueCtx(.y);
                 const x = engine.valueCtx(.x);
 
-                const term1 = psi_rr + psi_r / r + psi_zz + 0.25 * psi * (r * s_rr + 2 * s_r + r * s_zz);
+                const term1 = psi_rr + psi_r / r + psi_zz + 0.25 * psi * (r * s_rr + 2.0 * s_r + r * s_zz);
                 const scale = psi * psi * psi * psi * psi * @exp(2 * r * s);
                 const term2 = 1.0 / 3.0 * (u - 0.5 * r * y) * (u - 0.5 * r * y);
                 const term3 = 0.25 * r * r * y * y + x * x;
@@ -443,16 +452,14 @@ pub fn BrillEvolution(comptime O: usize) type {
             ) SystemValue(System) {
                 const pos = engine.position();
                 const r = pos[0];
-                const z = pos[1];
-                _ = z;
 
                 const r2 = r * r;
 
-                const psi_val = engine.valueSys(.psi);
+                const psi_val = engine.valueSys(.psi) + 1.0;
                 const psi_grad = engine.gradientSys(.psi);
                 const psi_hessian = engine.hessianSys(.psi);
 
-                const psi = psi_val + 1.0;
+                const psi = psi_val;
                 const psi_r = psi_grad[0];
                 const psi_z = psi_grad[1];
                 const psi_rr = psi_hessian[0][0];
@@ -493,11 +500,11 @@ pub fn BrillEvolution(comptime O: usize) type {
                 const x_r = x_grad[0];
                 const x_z = x_grad[1];
 
-                const lapse_val = engine.valueCtx(.lapse);
+                const lapse_val = engine.valueCtx(.lapse) + 1.0;
                 const lapse_grad = engine.gradientCtx(.lapse);
                 const lapse_hessian = engine.hessianCtx(.lapse);
 
-                const lapse = lapse_val + 1.0;
+                const lapse = lapse_val;
                 const lapse_r = lapse_grad[0];
                 const lapse_z = lapse_grad[1];
                 const lapse_rr = lapse_hessian[0][0];
@@ -516,8 +523,6 @@ pub fn BrillEvolution(comptime O: usize) type {
 
                 const shift_z = shift_z_val;
                 const shift_z_r = shift_z_grad[0];
-                const shift_z_z = shift_z_grad[1];
-                _ = shift_z_z;
 
                 const conformal = @exp(-2.0 * r * s) / psi4;
 
@@ -538,24 +543,23 @@ pub fn BrillEvolution(comptime O: usize) type {
                 };
 
                 const y_deriv = blk: {
-                    // const term1 = shift_r * y_r + shift_z * y_z + y * shift_r / r;
-                    // const term2 = -x * (shift_z_r - shift_r_z) / r;
-                    // const term3 = conformal * (lapse_rr / r - lapse_r / r2 - lapse_r / r * (r * s_r + s + 4.0 * psi_r / psi) + lapse_z * s_z);
-                    // const term4 = lapse * conformal * (2.0 / psi * (psi_rr / r - psi_r / r2) + s_rr + s_zz + s_r / r - s / r2 - 2.0 * psi_r / (r * psi) * (r * s_r + s + 3.0 * psi_r / psi) + 2.0 * psi_z * s_z / psi);
-                    // break :blk term1 + term2 + term3 + term4;
-
                     const term1 = shift_r * y_r + shift_z * y_z + y * shift_r / r;
                     const term2 = -x * (shift_z_r - shift_r_z) / r;
                     const term3 = conformal * (lapse_rr / r - lapse_r / r2 - lapse_r / r * (r * s_r + s + 4.0 * psi_r / psi) + lapse_z * s_z);
-                    _ = term3;
                     const term4 = lapse * conformal * (2.0 / psi * (psi_rr / r - psi_r / r2) + s_rr + s_zz + s_r / r - s / r2 - 2.0 * psi_r / (r * psi) * (r * s_r + s + 3.0 * psi_r / psi) + 2.0 * psi_z * s_z / psi);
-                    _ = term4;
-                    break :blk term1 + term2;
+                    break :blk term1 + term2 + term3 + term4;
                 };
+
+                // const u_deriv = blk: {
+                //     const term1 = shift_r * u_r + shift_z * u_z + 2.0 * x * (shift_r_z - shift_z_r);
+                //     const term2 = conformal * (2.0 * lapse_z * (2.0 * psi_z / psi + r * s_z) - 2.0 * lapse_r * (2.0 * psi_r / psi + r * s_r + s) + lapse_rr + lapse_zz);
+                //     const term3 = -2.0 * lapse * conformal * (-psi_rr / psi + psi_zz / psi + s_r + s / r + psi_r / psi * (3.0 * psi_r / psi + 2.0 * r * s_r + 2.0 * s) - psi_z / psi * (3.0 * psi_z / psi + 2.0 * r * s_z));
+                //     break :blk term1 + term2 + term3;
+                // };
 
                 const u_deriv = blk: {
                     const term1 = shift_r * u_r + shift_z * u_z + 2.0 * x * (shift_r_z - shift_z_r);
-                    const term2 = conformal * (2.0 * lapse_z * (2.0 * psi_z / psi + r * s_z) - 2.0 * lapse_r * (2.0 * psi_r / psi + r * s_r + s) + lapse_rr + lapse_zz);
+                    const term2 = conformal * (2.0 * lapse_z * (2.0 * psi_z / psi + r * s_z) - 2.0 * lapse_r * (2.0 * psi_r / psi + r * s_r + s) + lapse_rr - lapse_zz);
                     const term3 = -2.0 * lapse * conformal * (-psi_rr / psi + psi_zz / psi + s_r + s / r + psi_r / psi * (3.0 * psi_r / psi + 2.0 * r * s_r + 2.0 * s) - psi_z / psi * (3.0 * psi_z / psi + 2.0 * r * s_z));
                     break :blk term1 + term2 + term3;
                 };
@@ -627,7 +631,7 @@ pub fn BrillEvolution(comptime O: usize) type {
 
                 // Set initial guess for elliptic cells
 
-                @memset(self.gauge_cells.field(.lapse), 1.0);
+                @memset(self.gauge_cells.field(.lapse), 0.0);
                 @memset(self.gauge_cells.field(.shift_r), 0.0);
                 @memset(self.gauge_cells.field(.shift_z), 0.0);
 

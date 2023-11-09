@@ -36,53 +36,45 @@ pub fn BrillInitialData(comptime O: usize) type {
 
         const Mesh = mesh.Mesh(N);
 
-        pub const Seed = enum {
-            seed,
-        };
-
         pub const Metric = enum {
             factor,
         };
 
-        pub const SeedProjection = struct {
-            amplitude: f64,
-            sigma: f64,
-
-            pub const System = Seed;
+        pub const RhsProjection = struct {
+            pub const System = Metric;
             pub const Context = aeon.EmptySystem;
 
-            pub fn project(self: SeedProjection, engine: dofs.ProjectionEngine(N, O, Context)) SystemValue(System) {
+            pub fn project(_: RhsProjection, engine: dofs.ProjectionEngine(N, O, Context)) SystemValue(System) {
                 const pos = engine.position();
 
-                const rho = pos[0];
+                const r = pos[0];
                 const z = pos[1];
 
-                const rho2 = rho * rho;
-                const z2 = z * z;
-                const sigma2 = self.sigma * self.sigma;
+                return .{
+                    .factor = @cos(z) * (4 * @cos(r) - 5 * @sin(r) * r),
+                };
+            }
+        };
 
-                const term1: f64 = 2.0 * self.amplitude;
-                _ = term1;
-                const term2 = 2 * rho2 * rho2 - 6 * rho2 * sigma2 + sigma2 * sigma2 + 2 * rho2 * z2;
-                _ = term2;
-                const term3 = @exp(-(rho2 + z2) / sigma2) / (sigma2 * sigma2 * sigma2);
-                _ = term3;
+        pub const ExactProjection = struct {
+            pub const System = Metric;
+            pub const Context = aeon.EmptySystem;
 
-                // return .{
-                //     .seed = term1 * term2 * term3,
-                // };
+            pub fn project(_: ExactProjection, engine: dofs.ProjectionEngine(N, O, Context)) SystemValue(System) {
+                const pos = engine.position();
 
-                const e = @sqrt(rho2 / 0.5 + z2) - 1.0;
+                const r = pos[0];
+                const z = pos[1];
 
                 return .{
-                    .seed = z * @exp(-(e * e)),
+                    .factor = @cos(z) * @cos(r) * r * r,
                 };
             }
         };
 
         pub const MetricOperator = struct {
             pub const System = Metric;
-            pub const Context = Seed;
+            pub const Context = aeon.EmptySystem;
 
             pub fn apply(_: MetricOperator, comptime Setting: dofs.EngineSetting, engine: dofs.Engine(N, O, Setting, System, Context)) SystemValue(System) {
                 const position: [N]f64 = engine.position();
@@ -91,31 +83,47 @@ pub fn BrillInitialData(comptime O: usize) type {
                 const gradient: [N]f64 = engine.gradientSys(.factor);
                 const value: f64 = engine.valueSys(.factor);
 
-                const seed: f64 = engine.valueCtx(.seed);
-
                 const lap = hessian[0][0] + hessian[1][1] + gradient[0] / position[0];
 
                 return .{
-                    .factor = -lap - 0.25 * seed * value,
+                    .factor = lap + 2 * value,
                 };
             }
 
             pub fn boundarySys(_: MetricOperator, pos: [N]f64, face: Face) SystemBoundaryCondition(System) {
+                const r = pos[0];
+                const z = pos[1];
+
+                const r_deriv = -@cos(z) * r * (r * @sin(r) - 2 * @sin(r));
+                _ = r_deriv;
+                const z_deriv = -r * r * @cos(r) * @sin(z);
+                _ = z_deriv;
+
                 if (face.side == false) {
-                    return .{ .factor = BoundaryCondition.nuemann(0.0) };
+                    return .{
+                        .factor = BoundaryCondition.nuemann(0.0),
+                    };
                 } else {
-                    const r: f64 = @sqrt(pos[0] * pos[0] + pos[1] * pos[1]);
-                    return .{ .factor = BoundaryCondition.robin(1.0 / r, 1.0, 0.0) };
+                    return .{
+                        .factor = BoundaryCondition.diritchlet(0.0),
+                    };
                 }
+
+                // if (face.axis == 0) {
+                //     return .{
+                //         .factor = BoundaryCondition.nuemann(r_deriv),
+                //     };
+                // } else {
+                //     return .{
+                //         .factor = BoundaryCondition.nuemann(z_deriv),
+                //     };
+                // }
             }
 
             pub fn boundaryCtx(_: MetricOperator, pos: [N]f64, face: Face) SystemBoundaryCondition(Context) {
-                if (face.side == false) {
-                    return .{ .seed = BoundaryCondition.nuemann(0.0) };
-                } else {
-                    const r: f64 = @sqrt(pos[0] * pos[0] + pos[1] * pos[1]);
-                    return .{ .seed = BoundaryCondition.robin(1.0 / r, 1.0, 0.0) };
-                }
+                _ = face;
+                _ = pos;
+                return .{};
             }
         };
 
@@ -127,9 +135,9 @@ pub fn BrillInitialData(comptime O: usize) type {
             var grid = try Mesh.init(allocator, .{
                 .physical_bounds = .{
                     .origin = [2]f64{ 0.0, 0.0 },
-                    .size = [2]f64{ 10.0, 10.0 },
+                    .size = [2]f64{ std.math.pi / 2.0, std.math.pi / 2.0 },
                 },
-                .tile_width = 512,
+                .tile_width = 1024,
                 .index_size = [2]usize{ 1, 1 },
             });
             defer grid.deinit();
@@ -143,24 +151,17 @@ pub fn BrillInitialData(comptime O: usize) type {
 
             // Build functions
 
-            var seed = try SystemSlice(Seed).init(allocator, grid.cell_total);
-            defer seed.deinit(allocator);
+            var rhs = try SystemSlice(Metric).init(allocator, grid.cell_total);
+            defer rhs.deinit(allocator);
 
-            const seed_proj: SeedProjection = .{
-                .amplitude = 1.0,
-                .sigma = 1.0,
-            };
-
-            DofUtilsTotal.project(&grid, dof_map, seed_proj, seed, aeon.EmptySystem.sliceConst());
+            DofUtilsTotal.project(&grid, dof_map, RhsProjection{}, rhs, aeon.EmptySystem.sliceConst());
 
             var metric = try SystemSlice(Metric).init(allocator, grid.cell_total);
             defer metric.deinit(allocator);
 
-            const rhs = SystemSlice(Metric).view(grid.cell_total, .{ .factor = seed.field(.seed) });
-
             const oper = MetricOperator{};
 
-            var solver = LinearMapMethod.new(BiCGStabSolver.new(1000000, 10e-12));
+            var solver = LinearMapMethod.new(BiCGStabSolver.new(1000000, 10e-15));
 
             try solver.solve(
                 allocator,
@@ -168,23 +169,49 @@ pub fn BrillInitialData(comptime O: usize) type {
                 dof_map,
                 oper,
                 metric,
-                seed.toConst(),
+                aeon.EmptySystem.sliceConst(),
                 rhs.toConst(),
             );
 
+            var exact = try SystemSlice(Metric).init(allocator, grid.cell_total);
+            defer exact.deinit(allocator);
+
+            DofUtilsTotal.project(&grid, dof_map, ExactProjection{}, exact, aeon.EmptySystem.sliceConst());
+
+            var err = try SystemSlice(Metric).init(allocator, grid.cell_total);
+            defer err.deinit(allocator);
+
+            for (0..grid.cell_total) |i| {
+                err.field(.factor)[i] = exact.field(.factor)[i] - metric.field(.factor)[i];
+            }
+
+            var residual: f64 = 0.0;
+
+            for (0..grid.cell_total) |i| {
+                const f = err.field(.factor)[i];
+                // residual += f * f;
+                residual = @max(residual, f * f);
+            }
+
+            std.debug.print("Residual: {}\n", .{@sqrt(residual)});
+
             std.debug.print("Writing Solution To File\n", .{});
 
-            const file = try std.fs.cwd().createFile("output/brillinitial.vtu", .{});
+            const file = try std.fs.cwd().createFile("output/toyproblem.vtu", .{});
             defer file.close();
 
             const Output = enum {
-                seed,
+                exact,
                 metric,
+                err,
+                rhs,
             };
 
             const output = SystemSliceConst(Output).view(grid.cell_total, .{
-                .seed = seed.field(.seed),
+                .exact = exact.field(.factor),
                 .metric = metric.field(.factor),
+                .err = err.field(.factor),
+                .rhs = rhs.field(.factor),
             });
 
             try DataOut.writeVtk(Output, allocator, &grid, output, file.writer());

@@ -200,6 +200,7 @@ pub fn StencilSpace(comptime N: usize, comptime E: usize) type {
             node: [N]isize,
             field: []const f64,
         ) f64 {
+            @setEvalBranchQuota(10000);
             comptime var stencils: [N][2 * L]f64 = undefined;
             comptime var stencil_lens: [N]usize = undefined;
 

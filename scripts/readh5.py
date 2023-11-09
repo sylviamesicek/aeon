@@ -15,8 +15,8 @@ with h5py.File(filename, "r") as f:
     center_z = f['center_z'][()]
     center_value = f['center_value'][()]
 
-    center_rho_index = np.rint((center_rho - h/2) * 1024).astype(int)
-    center_z_index = np.rint((center_z - h/2)* 1024).astype(int)
+    center_rho_index = np.rint((center_rho - h/2) * 1024 / 10.0).astype(int)
+    center_z_index = np.rint((center_z - h/2)* 1024 / 10.0).astype(int)
 
     data = np.column_stack((center_rho_index, center_z_index, center_value))
 

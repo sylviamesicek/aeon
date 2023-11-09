@@ -114,7 +114,7 @@ pub fn DofUtils(comptime N: usize, comptime O: usize) type {
         const Mesh = meshes.Mesh(N);
 
         const RO = 0;
-        const PO = 1;
+        const PO = O;
 
         /// Computes the number of cells along each axis for a given block.
         pub fn blockCellSize(mesh: *const Mesh, block: usize) [N]usize {
