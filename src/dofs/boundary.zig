@@ -218,7 +218,7 @@ test "boundary filling" {
     var func = try system.SystemSlice(TestSystem).init(allocator, cell_space.total());
     defer func.deinit(allocator);
 
-    var cells = cell_space.nodes();
+    var cells = cell_space.nodes(0);
 
     while (cells.next()) |cell| {
         const pos = stencil_space.position(cell);

@@ -140,7 +140,7 @@ pub fn Mesh(comptime N: usize) type {
         const RealBox = geometry.Box(N, f64);
         const Face = geometry.Face(N);
         const IndexSpace = geometry.IndexSpace(N);
-        const PartitionSpace = geometry.PartitionSpace(N);
+        const Partitions = geometry.Partitions(N);
         const Region = geometry.Region(N);
 
         const BlockList = ArrayListUnmanaged(Block(N));
@@ -478,25 +478,26 @@ pub fn Mesh(comptime N: usize) type {
                     // ************************************************************
                     // Run partitioning algorithm to find new patches on l + 1 ****
 
-                    var patch_partitioner = try PartitionSpace.init(scratch, patch_space.size, clusters);
-                    defer patch_partitioner.deinit();
-
-                    try patch_partitioner.build(patch_tags, config.patch_max_tiles, config.patch_efficiency);
+                    const patch_partitions = try Partitions.init(scratch, patch_space.size, patch_tags, clusters, config.patch_max_tiles, config.patch_efficiency);
+                    defer patch_partitions.deinit(allocator);
 
                     // Update patch map
                     patch_map[patch_id].offset = data.patches[target_id].items.len;
-                    patch_map[patch_id].total = patch_partitioner.partitions().len;
+                    patch_map[patch_id].total = patch_partitions.len();
 
                     // *********************************************************
                     // Iterate new patches on l + 1 ****************************
 
-                    try data.patches[target_id].ensureUnusedCapacity(allocator, patch_partitioner.partitions().len);
+                    try data.patches[target_id].ensureUnusedCapacity(allocator, patch_partitions.len());
 
-                    for (patch_partitioner.partitions()) |partition| {
+                    for (0..patch_partitions.len()) |idx| {
+                        const patch_children = patch_partitions.children[idx];
+                        const patch_children_total = patch_children.end - patch_children.start;
+
                         // Partition bounds must be added to patch bounds to get origin in l global space
                         const partition_bounds = blk: {
-                            var result: IndexBox = partition.bounds;
-                            result.origin = patch.bounds.globalFromLocal(partition.bounds.origin);
+                            var result: IndexBox = patch_partitions.bounds[idx];
+                            result.origin = patch.bounds.globalFromLocal(patch_partitions.bounds[idx].origin);
                             break :blk result;
                         };
 
@@ -508,7 +509,7 @@ pub fn Mesh(comptime N: usize) type {
                         const child_block_count = blk: {
                             var result: usize = 0;
 
-                            const child_clusters = patch_partitioner.children[partition.children_offset .. partition.children_offset + partition.children_total];
+                            const child_clusters = patch_partitions.buffer[patch_children.start..patch_children.end];
 
                             for (child_clusters) |cluster_id| {
                                 const child_patch = data.patches[target_id + 1].items[cluster_to_patch[cluster_id]];
@@ -525,7 +526,7 @@ pub fn Mesh(comptime N: usize) type {
                         {
                             var cur: usize = 0;
 
-                            const child_clusters = patch_partitioner.children[partition.children_offset .. partition.children_offset + partition.children_total];
+                            const child_clusters = patch_partitions.buffer[patch_children.start..patch_children.end];
 
                             for (child_clusters) |cluster_id| {
                                 const child_patch = data.patches[target_id + 1].items[cluster_to_patch[cluster_id]];
@@ -551,10 +552,8 @@ pub fn Mesh(comptime N: usize) type {
                         // *****************************************************
                         // Run partitioner to find blocks on new patch *********
 
-                        var partitioner = try PartitionSpace.init(scratch, partition_space.size, &.{});
-                        defer partitioner.deinit();
-
-                        try partitioner.build(partition_tags, config.block_max_tiles, config.block_efficiency);
+                        const partitions = try Partitions.init(scratch, partition_space.size, partition_tags, &.{}, config.block_max_tiles, config.block_efficiency);
+                        defer partitions.deinit(allocator);
 
                         const children_offset = data.children[target_id].items.len;
                         const block_offset = data.blocks[target_id].items.len;
@@ -568,22 +567,22 @@ pub fn Mesh(comptime N: usize) type {
                             .level = target_id,
                             .parent = null,
                             .children_offset = children_offset,
-                            .children_total = partition.children_total,
+                            .children_total = patch_children.end - patch_children.start,
                             .block_offset = block_offset,
-                            .block_total = partitioner.partitions().len,
+                            .block_total = partitions.len(),
                         };
 
-                        try data.children[target_id].ensureUnusedCapacity(allocator, partition.children_total);
+                        try data.children[target_id].ensureUnusedCapacity(allocator, patch_children_total);
 
-                        for (patch_partitioner.children[partition.children_offset .. partition.children_offset + partition.children_total]) |cluster_id| {
+                        for (patch_partitions.buffer[patch_children.start..patch_children.end]) |cluster_id| {
                             data.children[target_id].appendAssumeCapacity(cluster_to_patch[cluster_id]);
                         }
 
-                        try data.blocks[target_id].ensureUnusedCapacity(allocator, partitioner.partitions().len);
+                        try data.blocks[target_id].ensureUnusedCapacity(allocator, partitions.len());
 
-                        for (partitioner.partitions()) |block| {
+                        for (partitions.bounds) |block| {
                             const bounds = blk: {
-                                var result: IndexBox = block.bounds;
+                                var result: IndexBox = block;
                                 result.origin = partition_bounds.globalFromLocal(result.origin);
                                 break :blk result;
                             };

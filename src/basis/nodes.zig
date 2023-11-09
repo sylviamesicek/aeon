@@ -269,7 +269,7 @@ test "node iteration" {
         [2]isize{ 2, 3 },
     };
 
-    var nodes = node_space.nodesToExtent(2);
+    var nodes = node_space.nodes(2);
     var index: usize = 0;
 
     while (nodes.next()) |node| : (index += 1) {

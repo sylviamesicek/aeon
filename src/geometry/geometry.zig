@@ -13,7 +13,7 @@ pub const Box = box.Box;
 pub const SplitIndex = box.SplitIndex;
 pub const Face = faces.Face;
 pub const IndexSpace = space.IndexSpace;
-pub const PartitionSpace = partitions.PartitionSpace;
+pub const Partitions = partitions.Partitions;
 pub const Region = region.Region;
 
 test {
