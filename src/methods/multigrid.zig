@@ -9,7 +9,6 @@ const io = @import("../io/io.zig");
 const system = @import("../system.zig");
 const meshes = @import("../mesh/mesh.zig");
 const geometry = @import("../geometry/geometry.zig");
-const index = @import("../index.zig");
 
 /// A multigrid based elliptic solver which uses the given base solver to approximate the solution
 /// on the lowest level of the mesh.
@@ -30,7 +29,7 @@ pub fn MultigridMethod(comptime N: usize, comptime O: usize, comptime BaseSolver
         const DofUtils = dofs.DofUtils(N, O);
         const BoundaryUtils = dofs.BoundaryUtils(N, O);
         const IndexSpace = geometry.IndexSpace(N);
-        const Index = index.Index(N);
+        const Index = geometry.Index(N);
         const StencilSpace = basis.StencilSpace(N, O);
         const SystemSlice = system.SystemSlice;
         const SystemSliceConst = system.SystemSliceConst;

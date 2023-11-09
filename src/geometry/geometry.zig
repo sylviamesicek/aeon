@@ -4,7 +4,7 @@
 // Submodules
 const box = @import("box.zig");
 const faces = @import("faces.zig");
-const space = @import("space.zig");
+const index = @import("index.zig");
 const partitions = @import("partitions.zig");
 const region = @import("region.zig");
 
@@ -12,14 +12,15 @@ const region = @import("region.zig");
 pub const Box = box.Box;
 pub const SplitIndex = box.SplitIndex;
 pub const Face = faces.Face;
-pub const IndexSpace = space.IndexSpace;
+pub const Index = index.Index;
+pub const IndexSpace = index.IndexSpace;
 pub const Partitions = partitions.Partitions;
 pub const Region = region.Region;
 
 test {
     _ = box;
     _ = faces;
-    _ = space;
+    _ = index;
     _ = partitions;
     _ = region;
 }

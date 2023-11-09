@@ -27,7 +27,7 @@ pub fn Partitions(comptime N: usize) type {
 
         const Self = @This();
         const IndexBox = Box(N, usize);
-        const IndexSpace = @import("space.zig").IndexSpace(N);
+        const IndexSpace = @import("index.zig").IndexSpace(N);
 
         pub const Range = struct {
             start: usize,
@@ -517,7 +517,7 @@ pub fn Partitions(comptime N: usize) type {
 }
 
 fn buildTags(comptime N: usize, allocator: Allocator, size: [N]usize, tagged: []const [N]usize) ![]bool {
-    const IndexSpace = @import("space.zig").IndexSpace(N);
+    const IndexSpace = @import("index.zig").IndexSpace(N);
 
     const space: IndexSpace = .{ .size = size };
     const total = space.total();

@@ -1,6 +1,77 @@
 const std = @import("std");
 const assert = std.debug.assert;
 
+/// A mixin for common manipulation indices (`[N]usize`).
+pub fn Index(comptime N: usize) type {
+    return struct {
+        pub fn splat(v: usize) [N]usize {
+            return [1]usize{v} ** N;
+        }
+
+        pub fn add(v: [N]usize, u: [N]usize) [N]usize {
+            var res: [N]usize = undefined;
+
+            for (0..N) |i| {
+                res[i] = v[i] + u[i];
+            }
+
+            return res;
+        }
+
+        pub fn sub(v: [N]usize, u: [N]usize) [N]usize {
+            var res: [N]usize = v;
+
+            for (0..N) |i| {
+                res[i] -= u[i];
+            }
+
+            return res;
+        }
+
+        pub fn scaled(v: [N]usize, u: usize) [N]usize {
+            var res: [N]usize = v;
+
+            for (0..N) |i| {
+                res[i] *= u;
+            }
+
+            return res;
+        }
+
+        pub fn refined(self: [N]usize) [N]usize {
+            var result: [N]usize = undefined;
+            for (0..N) |i| {
+                result[i] = self[i] * 2;
+            }
+            return result;
+        }
+
+        pub fn coarsened(self: [N]usize) [N]usize {
+            var result: [N]usize = undefined;
+            for (0..N) |i| {
+                result[i] = self[i] / 2;
+            }
+            return result;
+        }
+
+        pub fn toSigned(self: [N]usize) [N]isize {
+            var result: [N]isize = undefined;
+            for (0..N) |i| {
+                result[i] = @intCast(self[i]);
+            }
+            return result;
+        }
+
+        pub fn toUnsigned(self: [N]isize) [N]usize {
+            var result: [N]usize = undefined;
+            for (0..N) |i| {
+                result[i] = @intCast(self[i]);
+            }
+            return result;
+        }
+    };
+}
+
 /// Describes an abstract index space, ie an N-dimensional space with
 /// size[i] discrete cells on each axis. Contains helpers for converting
 /// between cartesian and linear indices, as well as iterator over the space.
@@ -13,10 +84,12 @@ pub fn IndexSpace(comptime N: usize) type {
         const Self = @This();
         const IndexBox = @import("box.zig").Box(N, usize);
 
+        /// Constructs an IndexSpace with the given size.
         pub fn fromSize(size: [N]usize) Self {
             return .{ .size = size };
         }
 
+        /// Constructs an IndexSpace with the same size as an IndexBox.
         pub fn fromBox(box: IndexBox) Self {
             return .{ .size = box.size };
         }

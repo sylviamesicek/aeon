@@ -97,6 +97,13 @@ pub fn BiCGStablSolver(comptime L: usize) type {
             assert(x.len == self.ndofs);
             assert(b.len == self.ndofs);
 
+            const tol: f64 = @fabs(self.tolerance) * norm(b);
+
+            if (norm(b) <= 1e-60) {
+                @memset(x, 0.0);
+                return;
+            }
+
             var tau: [zdim * zdim]f64 = undefined;
             var gamma: [zdim]f64 = undefined;
             var gamma1: [zdim]f64 = undefined;
@@ -129,7 +136,7 @@ pub fn BiCGStablSolver(comptime L: usize) type {
                 if (finish_flag) break :end;
 
                 // Init
-                var tol: f64 = @fabs(self.tolerance) * nrm2;
+
                 var alpha: f64 = 0.0;
                 var beta: f64 = 0.0;
                 var omega: f64 = 1.0;

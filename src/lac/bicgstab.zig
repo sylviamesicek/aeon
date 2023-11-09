@@ -29,6 +29,14 @@ pub const BiCGStabSolver = struct {
     pub fn solve(self: *const Self, allocator: Allocator, oper: anytype, x: []f64, b: []const f64) Error!void {
         assert(x.len == b.len);
 
+        // Compute tolerance
+        const tol = @fabs(self.tolerance) * norm(b);
+
+        if (norm(b) <= 1e-60) {
+            @memset(x, 0.0);
+            return;
+        }
+
         // Allocate scratch vectors
         const ndofs = x.len;
 
@@ -71,7 +79,6 @@ pub const BiCGStabSolver = struct {
         @memset(ph, 0.0);
 
         var residual = norm(rg);
-        const tol = residual * @fabs(self.tolerance);
 
         var iter: usize = 0;
         var rho0: f64 = 0.0;

@@ -22,8 +22,6 @@ const StencilSpace = basis.StencilSpace;
 const geometry = @import("../geometry/geometry.zig");
 const Face = geometry.Face;
 
-const index = @import("../index.zig");
-
 const meshes = @import("../mesh/mesh.zig");
 
 const system = @import("../system.zig");
@@ -59,7 +57,7 @@ pub fn DofMap(comptime N: usize, comptime O: usize) type {
 
         const Self = @This();
         const Mesh = meshes.Mesh(N);
-        const Index = index.Index(N);
+        const Index = geometry.Index(N);
 
         pub fn init(allocator: Allocator, mesh: *const Mesh) !Self {
             const offsets = try allocator.alloc(usize, mesh.blocks.len + 1);
@@ -107,7 +105,7 @@ pub fn DofUtils(comptime N: usize, comptime O: usize) type {
     return struct {
         const Map = DofMap(N, O);
 
-        const Index = index.Index(N);
+        const Index = geometry.Index(N);
         const IndexSpace = geometry.IndexSpace(N);
         const IndexBox = geometry.Box(N, usize);
         const Region = geometry.Region(N);
@@ -949,7 +947,7 @@ pub fn DofUtilsTotal(comptime N: usize, comptime O: usize) type {
     return struct {
         const CellSpace = basis.NodeSpace(N, O);
         const StencilSpace = basis.StencilSpace(N, O);
-        const Index = index.Index(N);
+        const Index = geometry.Index(N);
         const IndexSpace = geometry.IndexSpace(N);
         const IndexBox = geometry.Box(N, usize);
         const Mesh = meshes.Mesh(N);

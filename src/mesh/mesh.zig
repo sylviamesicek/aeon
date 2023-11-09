@@ -89,7 +89,7 @@ pub fn Level(comptime N: usize) type {
     };
 }
 
-/// Represents a mesh, ie a numerical discretisation of a physical domain into a number of levels,
+/// Represents a block structured mesh, ie a numerical discretisation of a physical domain into a number of levels,
 /// each of which consists of patches of tiles, and blocks of cells. This class handles accessing and
 /// storing data for each cell/tile, allocating ghost cells, and running regridding and
 /// transfer algorithms.
@@ -148,7 +148,7 @@ pub fn Mesh(comptime N: usize) type {
         const LevelList = ArrayListUnmanaged(Level(N));
 
         // Mixins
-        const Index = @import("../index.zig").Index(N);
+        const Index = geometry.Index(N);
 
         const add = Index.add;
         const sub = Index.sub;

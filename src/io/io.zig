@@ -22,7 +22,6 @@ const dofs = @import("../dofs/dofs.zig");
 const DofUtils = dofs.DofUtils;
 
 const geometry = @import("../geometry/geometry.zig");
-const index = @import("../index.zig");
 const meshes = @import("../mesh/mesh.zig");
 
 const system = @import("../system.zig");
@@ -33,7 +32,7 @@ const isSystem = system.isSystem;
 /// A namespace for outputting data defined on a mesh.
 pub fn DataOut(comptime N: usize) type {
     return struct {
-        const Index = index.Index(N);
+        const Index = geometry.Index(N);
         const IndexSpace = geometry.IndexSpace(N);
         const Mesh = meshes.Mesh(N);
 

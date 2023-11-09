@@ -1,5 +1,5 @@
 const std = @import("std");
-const IndexSpace = @import("space.zig").IndexSpace;
+const IndexSpace = @import("index.zig").IndexSpace;
 
 /// Represents an index into the 2^N subcells formed
 /// when dividing a hyper box along each axis.

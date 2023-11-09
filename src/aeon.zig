@@ -9,8 +9,7 @@ pub const methods = @import("methods/methods.zig");
 
 // Global exports.
 
-const index = @import("index.zig");
-pub const Index = index.Index;
+pub const Index = geometry.Index;
 
 const io = @import("io/io.zig");
 pub const DataOut = io.DataOut;
@@ -26,7 +25,6 @@ test {
     _ = basis;
     _ = dofs;
     _ = geometry;
-    _ = index;
     _ = io;
     _ = mesh;
     _ = lac;
