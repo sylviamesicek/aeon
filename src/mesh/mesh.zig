@@ -479,7 +479,7 @@ pub fn Mesh(comptime N: usize) type {
                     // Run partitioning algorithm to find new patches on l + 1 ****
 
                     const patch_partitions = try Partitions.init(scratch, patch_space.size, patch_tags, clusters, config.patch_max_tiles, config.patch_efficiency);
-                    defer patch_partitions.deinit(allocator);
+                    defer patch_partitions.deinit(scratch);
 
                     // Update patch map
                     patch_map[patch_id].offset = data.patches[target_id].items.len;
@@ -553,7 +553,7 @@ pub fn Mesh(comptime N: usize) type {
                         // Run partitioner to find blocks on new patch *********
 
                         const partitions = try Partitions.init(scratch, partition_space.size, partition_tags, &.{}, config.block_max_tiles, config.block_efficiency);
-                        defer partitions.deinit(allocator);
+                        defer partitions.deinit(scratch);
 
                         const children_offset = data.children[target_id].items.len;
                         const block_offset = data.blocks[target_id].items.len;

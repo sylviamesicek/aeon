@@ -9,6 +9,8 @@ const isLinearMap = lac.isLinearMap;
 const hasLinearMapCallback = lac.hasLinearMapCallback;
 const isLinearSolver = lac.isLinearSolver;
 
+/// A linear solver class implementing the stabilized biconjugate gradient
+/// method.
 pub const BiCGStabSolver = struct {
     max_iters: usize,
     tolerance: f64,
@@ -16,7 +18,7 @@ pub const BiCGStabSolver = struct {
     // Alias
     const Self = @This();
 
-    // Constructs a new bicgstab solver
+    // Constructs a new bicgstab solver.
     pub fn new(max_iters: usize, tolerance: f64) Self {
         return .{
             .max_iters = max_iters,

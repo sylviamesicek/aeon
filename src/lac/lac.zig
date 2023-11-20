@@ -5,14 +5,14 @@ const Allocator = std.mem.Allocator;
 
 // Submodules
 const bicgstab = @import("bicgstab.zig");
-// const bicgstabl = @import("bicgstabl.zig");
+const bicgstabl = @import("bicgstabl.zig");
 
 // ************************
 // Linear Solvers *********
 // ************************
 
 pub const BiCGStabSolver = bicgstab.BiCGStabSolver;
-// pub const BiCGStablSolver = bicgstabl.BiCGStablSolver;
+pub const BiCGStablSolver = bicgstabl.BiCGStablSolver;
 
 // ************************
 // Core traits and types **
@@ -36,7 +36,7 @@ pub fn isLinearMap(comptime T: type) bool {
     return true;
 }
 
-/// Checks if a linear map has a callback. This is invoked after every "iteration" of a given method, providing\
+/// Checks if a linear map has a callback. This is invoked after every "iteration" of a given method, providing
 /// the user access to iteration number, residual error, and the current solution vector.
 pub fn hasLinearMapCallback(comptime T: type) bool {
     if (!isLinearMap(T)) {

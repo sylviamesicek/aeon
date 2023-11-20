@@ -1,8 +1,10 @@
 const std = @import("std");
 const geometry = @import("../geometry/geometry.zig");
 
-const grids = @import("grids.zig");
 const lagrange = @import("lagrange.zig");
+
+const Lagrange = lagrange.Lagrange;
+const Stencils = @import("stencils.zig").Stencils;
 
 /// A set of cells over which basic stencils can be applied. This includes a buffer region of
 /// length `E`.
@@ -211,24 +213,15 @@ pub fn NodeSpace(comptime N: usize, comptime E: usize) type {
 }
 
 fn prolongStencil(comptime side: bool, comptime O: usize) [2 * O + 1]f64 {
-    // if (O == 1) {
-    //     return if (side) [_]f64{ -1.0 / 8.0, 1.0, 1.0 / 8.0 } else [_]f64{ 1.0 / 8.0, 1.0, -1.0 / 8.0 };
-    // }
-
-    const ngrid = grids.nodeCenteredGrid(f64, O, O);
-    const point = if (side) 0.25 else -0.25;
-    return lagrange.valueStencil(2 * O + 1, ngrid, point);
+    return Stencils(O).prolongCell(side);
 }
 
 fn prolongStencil2(comptime side: bool, comptime O: usize) [2 * O]f64 {
-    const point = if (side) 0.25 else -0.25;
-    const vgrid = grids.vertexCenteredGrid(f64, O, O);
-    return lagrange.valueStencil(2 * O, vgrid, point);
+    return Stencils(O).prolongVertex(side);
 }
 
 fn restrictStencil(comptime O: usize) [2 * O]f64 {
-    const vgrid = grids.vertexCenteredGrid(f64, O, O);
-    return lagrange.valueStencil(2 * O, vgrid, 0.0);
+    return Stencils(O).restrict();
 }
 
 test "node iteration" {

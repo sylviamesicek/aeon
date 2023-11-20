@@ -206,7 +206,7 @@ test "boundary filling" {
 
     const total_cells = 32;
 
-    const stencil_space = basis.StencilSpace(2, 1){
+    const stencil_space = basis.StencilSpace(2, 2){
         .physical_bounds = .{
             .origin = [1]f64{a} ** 2,
             .size = [1]f64{b - a} ** 2,
@@ -225,7 +225,7 @@ test "boundary filling" {
         cell_space.setValue(cell, func.field(.func), math.sin(pos[0]) * math.sin(pos[1]));
     }
 
-    BoundaryUtils(2, 1).fillBoundary(2, stencil_space, Diritchlet{}, func);
+    BoundaryUtils(2, 2).fillBoundary(2, stencil_space, Diritchlet{}, func);
 
     // for (0..4) |i| {
     //     for (0..4) |j| {

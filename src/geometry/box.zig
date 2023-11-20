@@ -1,8 +1,54 @@
 const std = @import("std");
 const IndexSpace = @import("index.zig").IndexSpace;
 
+const assert = std.debug.assert;
+
+/// Identifies a face by axis and side (false is left, true is right).
+pub fn FaceIndex(comptime N: usize) type {
+    return struct {
+        side: bool,
+        axis: usize,
+
+        /// Returns a linear index corresponding to this face.
+        pub fn toLinear(self: @This()) usize {
+            return if (self.side) .{ .index = self.axis + N } else .{ .index = self.axis };
+        }
+
+        /// Builds a face index from a linear index.
+        pub fn fromLinear(index: usize) @This() {
+            assert(index < comptime numFaces(N));
+
+            return if (index >= N)
+                .{ .side = true, .axis = index - N }
+            else
+                .{ .side = false, .axis = index };
+        }
+    };
+}
+
+/// Returns the total number of faces for a given dimension..=
+pub fn numFaces(n: usize) usize {
+    return 2 * n;
+}
+
+test "face index" {
+    const expectEqual = std.testing.expectEqual;
+
+    try expectEqual(numFaces(2), 4);
+
+    const face = FaceIndex(2).fromLinear(2);
+
+    try expectEqual(face.side, true);
+    try expectEqual(face.axis, 0);
+}
+
 /// Represents an index into the 2^N subcells formed
-/// when dividing a hyper box along each axis.
+/// when dividing a hyper box along each axis. It is essentially
+/// a bitvector which can be packed and unpacked from a `[N]bool`,
+/// `array[i] == false` indicates that the subcell is on the left of
+/// the `i`th axis, and `array[i] == true` indicates the subcell is on the
+/// right. The split index can also be converted to and from a linear index,
+/// to allow for storing subcell linearly (e.g. in an octree).
 pub fn SplitIndex(comptime N: usize) type {
     if (N > 16) {
         @compileError("Split index is only defined for values of N <= 16");
@@ -18,33 +64,49 @@ pub fn SplitIndex(comptime N: usize) type {
         pub fn fromCartesian(cart: [N]bool) Self {
             var linear: u16 = 0x0;
 
-            for (0..N) |i| {
-                linear |= @as(u16, cart[i]) << i;
+            inline for (0..N) |i| {
+                linear |= @as(u16, @intFromBool(cart[i])) << i;
             }
 
-            return linear;
+            return .{ .linear = linear };
         }
 
         /// Converts a linear `SplitIndex` to a cartesian implementation.
         pub fn toCartesian(self: Self) [N]bool {
             var cart: [N]bool = undefined;
 
-            for (0..N) |i| {
-                cart[i] = self.linear & (1 << i) > 0;
+            inline for (0..N) |i| {
+                cart[i] = self.linear & (@as(u16, 1) << i) > 0;
             }
 
             return cart;
         }
 
+        /// Finds the mirrored index along this axis.
         pub fn reverseAxis(self: Self, axis: usize) Self {
+            assert(axis < N);
+
             return .{
-                .linear = self.linear ^ (1 << axis),
+                .linear = self.linear ^ (@as(u16, 1) << @as(u4, @intCast(axis))),
             };
         }
     };
 }
 
-/// A N-dimensional axis aligned bounding box over a field T.
+test "split index" {
+    const expectEqualDeep = std.testing.expectEqualDeep;
+
+    const split = SplitIndex(2).fromCartesian([_]bool{ false, true });
+    // Make sure that from/toCartesian are inverses
+    try expectEqualDeep(split.toCartesian(), [_]bool{ false, true });
+    // Test reverse axis
+    try expectEqualDeep(split.reverseAxis(0).toCartesian(), [_]bool{ true, true });
+    // Check linear representation
+    try expectEqualDeep(split.linear, 2);
+}
+
+/// A N-dimensional axis aligned bounding box. This can be used for
+/// floating point numbers as well as integers (e.g. as an `IndexBox`).
 pub fn Box(comptime N: usize, comptime T: type) type {
     return struct {
         origin: [N]T,
@@ -125,13 +187,13 @@ pub fn Box(comptime N: usize, comptime T: type) type {
 
 test "box" {
     const expect = std.testing.expect;
-    const eql = std.meta.eql;
+    const expectEqualDeep = std.testing.expectEqualDeep;
 
     const unit: Box(2, f64) = .{
         .origin = [2]f64{ 0.0, 0.0 },
         .size = [2]f64{ 1.0, 1.0 },
     };
 
-    try expect(eql(unit.center(), [2]f64{ 0.5, 0.5 }));
+    try expectEqualDeep([_]f64{ 0.5, 0.5 }, unit.center());
     try expect(unit.contains([2]f64{ 0.5, 0.5 }));
 }

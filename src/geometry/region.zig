@@ -18,10 +18,6 @@ const geometry = @import("../geometry/geometry.zig");
 /// cells within a given region. Most functions and iterators accept an extent parameter `E` which determines the
 /// additional width of these buffer regions and a `block` parameter which describes the size of the central block.
 pub fn Region(comptime N: usize) type {
-    const Count = powi(usize, 3, N) catch {
-        @compileError("Invalid N for Region type");
-    };
-
     return struct {
         sides: [N]Side,
 
@@ -41,7 +37,7 @@ pub fn Region(comptime N: usize) type {
             var res: usize = 0;
 
             for (0..N) |i| {
-                if (self.sides[i] == .left or self.sides[i] == .right) {
+                if (self.sides[i] != .middle) {
                     res += 1;
                 }
             }
@@ -54,7 +50,7 @@ pub fn Region(comptime N: usize) type {
             var size: [N]usize = undefined;
 
             for (0..N) |i| {
-                if (self.sides[i] == .left or self.sides[i] == .right) {
+                if (self.sides[i] != .middle) {
                     size[i] = E;
                 } else {
                     size[i] = block[i];
@@ -203,8 +199,8 @@ pub fn Region(comptime N: usize) type {
         // ************************
 
         /// Assembles an array of all valid regions.
-        pub fn regions() [Count]Region(N) {
-            var regs: [Count]Region(N) = undefined;
+        pub fn regions() [numRegions(N)]Region(N) {
+            var regs: [numRegions(N)]Region(N) = undefined;
 
             const rspace = IndexSpace.fromSize([1]usize{3} ** N);
 
@@ -227,8 +223,8 @@ pub fn Region(comptime N: usize) type {
         }
 
         /// Constructs an array of regions ordered by adjacency.
-        pub fn orderedRegions() [Count]Region(N) {
-            var regs: [Count]Region(N) = regions();
+        pub fn orderedRegions() [numRegions(N)]Region(N) {
+            var regs: [numRegions(N)]Region(N) = regions();
             insertion(Region(N), &regs, {}, lessThanFn);
             return regs;
         }
@@ -237,6 +233,16 @@ pub fn Region(comptime N: usize) type {
             return lhs.adjacency() < rhs.adjacency();
         }
     };
+}
+
+pub fn numRegions(n: usize) usize {
+    var result: usize = 1;
+
+    for (0..n) |_| {
+        result *= 3;
+    }
+
+    return result;
 }
 
 test "region adjacency" {
