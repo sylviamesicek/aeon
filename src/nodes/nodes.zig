@@ -405,18 +405,24 @@ pub fn NodeSpace(comptime N: usize, comptime M: usize) type {
             const regions = comptime Region.orderedRegions();
 
             inline for (comptime regions[1..]) |region| {
-                std.debug.print("Filling Boundary Region {any}\n", .{region.sides});
                 self.fillBoundaryRegion(region, bound, field);
             }
         }
 
         pub fn fillBoundaryRegion(self: Self, comptime region: Region, bound: anytype, field: []f64) void {
+            // Short circuit if the region does not actually have any boundary nodes
+            if (comptime region.adjacency() == 0) {
+                return;
+            }
+
             // Loop over the cells touching this face.
-            var inner_face_cells = region.innerFaceIndices(self.size);
+            var inner_face_cells = region.innerFaceCells(self.size);
 
             while (inner_face_cells.next()) |cell| {
+                // Cast to signed node index.
+                const node = toSigned(cell);
                 // Find position of boundary
-                const pos: [N]f64 = self.boundaryPosition(region, toUnsigned(cell));
+                const pos: [N]f64 = self.boundaryPosition(region, cell);
 
                 // Cache robin boundary conditions (if any)
                 var robin: [N]Robin = undefined;
@@ -442,7 +448,7 @@ pub fn NodeSpace(comptime N: usize, comptime M: usize) type {
                     var target: [N]isize = undefined;
 
                     inline for (0..N) |i| {
-                        target[i] = cell[i] + extents[i];
+                        target[i] = node[i] + extents[i];
                     }
 
                     // Set target to zero
@@ -464,9 +470,9 @@ pub fn NodeSpace(comptime N: usize, comptime M: usize) type {
                                 var source: [N]isize = target;
 
                                 if (comptime extents[axis] > 0) {
-                                    source[axis] = cell[axis] + 1 - extents[axis];
+                                    source[axis] = node[axis] + 1 - extents[axis];
                                 } else {
-                                    source[axis] = cell[axis] - extents[axis] - 1;
+                                    source[axis] = node[axis] - extents[axis] - 1;
                                 }
 
                                 const source_value: f64 = self.nodeValue(source, field);
@@ -475,8 +481,8 @@ pub fn NodeSpace(comptime N: usize, comptime M: usize) type {
                                 result += fsign * source_value;
                             },
                             .robin => {
-                                const vres: f64 = robin[axis].value * self.boundaryOp(extents, null, toUnsigned(cell), field);
-                                const fres: f64 = robin[axis].flux * self.boundaryOp(extents, axis, toUnsigned(cell), field);
+                                const vres: f64 = robin[axis].value * self.boundaryOp(extents, null, cell, field);
+                                const fres: f64 = robin[axis].flux * self.boundaryOp(extents, axis, cell, field);
 
                                 const vcoef: f64 = robin[axis].value * self.boundaryOpCoef(extents, null);
                                 const fcoef: f64 = robin[axis].flux * self.boundaryOpCoef(extents, axis);
@@ -552,7 +558,7 @@ pub fn NodeSpace(comptime N: usize, comptime M: usize) type {
             const stencils = comptime boundaryStencils(extents, flux);
             const stencil_lens = comptime boundaryStencilLens(extents);
 
-            comptime var coef: f64 = 0.0;
+            comptime var coef: f64 = 1.0;
 
             inline for (0..N) |i| {
                 if (extents[i] != 0) {
@@ -660,13 +666,15 @@ test "node iteration" {
 }
 
 test "node space" {
+    const IndexBox = geometry.IndexBox(2);
     const IndexSpace = geometry.IndexSpace(2);
+    _ = IndexSpace;
     const FaceIndex = geometry.FaceIndex(2);
     const RealBox = geometry.RealBox(2);
     const Nodes = NodeSpace(2, 2);
 
+    const expect = std.testing.expect;
     const allocator = std.testing.allocator;
-
     const pi = std.math.pi;
 
     const domain: RealBox = .{ .origin = .{ 0.0, 0.0 }, .size = .{ pi, pi } };
@@ -688,11 +696,30 @@ test "node space" {
         node_space.setValue(cell, field, @sin(pos[0]) * @sin(pos[1]));
     }
 
+    // ********************************
+    // Set exact values ***************
+
+    const exact: []f64 = try allocator.alloc(f64, node_space.numNodes());
+    defer allocator.free(exact);
+
+    var nodes = node_space.nodes(2);
+
+    while (nodes.next()) |node| {
+        const pos = domain.transformPos(node_space.nodePosition(node));
+
+        node_space.setNodeValue(node, exact, @sin(pos[0]) * @sin(pos[1]));
+    }
+
+    try expect(@fabs(node_space.boundaryOp([2]isize{ -1, 0 }, null, [2]usize{ 0, 50 }, exact)) < 1e-10);
+    try expect(@fabs(node_space.boundaryOp([2]isize{ -2, 0 }, null, [2]usize{ 0, 50 }, exact)) < 1e-10);
+    try expect(@fabs(node_space.boundaryOp([2]isize{ -1, -1 }, null, [2]usize{ 0, 0 }, exact)) < 1e-10);
+    try expect(@fabs(node_space.boundaryOp([2]isize{ -2, -2 }, null, [2]usize{ 0, 0 }, exact)) < 1e-10);
+
     // *********************************
 
     const DiritchletBC = struct {
         pub fn kind(_: usize) BoundaryKind {
-            return BoundaryKind.robin;
+            return .robin;
         }
 
         pub fn condition(_: @This(), _: [2]f64, _: FaceIndex) Robin {
@@ -704,18 +731,25 @@ test "node space" {
 
     // **********************************
 
-    const window = IndexSpace.fromSize([2]usize{ 4, 4 });
+    const window = IndexBox{
+        .origin = .{ 0, 0 },
+        .size = .{ 4, 4 },
+    };
 
-    var indices = window.cartesianIndices();
+    const field_window: []f64 = try allocator.alloc(f64, 16);
+    defer allocator.free(field_window);
 
-    while (indices.next()) |cell| {
-        var node: [2]isize = geometry.IndexMixin(2).toSigned(cell);
+    node_space.indexSpace().copyWindow(window, f64, field_window, field);
 
-        for (0..2) |axis| {
-            node[axis] -= 2;
-        }
+    const exact_window: []f64 = try allocator.alloc(f64, 16);
+    defer allocator.free(exact_window);
 
-        std.debug.print("Node: {any}, Value: {}\n", .{ node, node_space.nodeValue(node, field) });
+    node_space.indexSpace().copyWindow(window, f64, exact_window, exact);
+
+    for (0..16) |i| {
+        const diff = field_window[i] - exact_window[i];
+        // std.debug.print("diff {}\n", .{diff});
+        try expect(@fabs(diff) < 1e-10);
     }
 }
 

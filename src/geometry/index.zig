@@ -165,7 +165,7 @@ pub fn IndexSpace(comptime N: usize) type {
 
             while (indices.next()) |local| {
                 const global: [N]usize = bounds.globalFromLocal(local);
-                dest[i] = src[space.linearFromCartesian(global)];
+                dest[i] = src[self.linearFromCartesian(global)];
 
                 i += 1;
             }

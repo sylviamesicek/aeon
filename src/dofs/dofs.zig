@@ -392,7 +392,7 @@ pub fn DofUtils(comptime N: usize, comptime O: usize) type {
                     // Neighbor origin in subcell space
                     const coarse_neighbor_origin: [N]usize = Index.scaled(coarse_relative_bounds.localFromGlobal(relative_tile), mesh.tile_width);
 
-                    var indices = region.cartesianIndices(E, Index.splat(mesh.tile_width));
+                    var indices = region.nodes(E, Index.splat(mesh.tile_width));
 
                     while (indices.next()) |ind| {
                         // Cell in subcell space
@@ -424,7 +424,7 @@ pub fn DofUtils(comptime N: usize, comptime O: usize) type {
 
                     const neighbor_origin: [N]usize = Index.scaled(neighbor.bounds.localFromGlobal(relative_tile), mesh.tile_width);
 
-                    var indices = region.cartesianIndices(E, Index.splat(mesh.tile_width));
+                    var indices = region.nodes(E, Index.splat(mesh.tile_width));
 
                     while (indices.next()) |idx| {
                         const block_cell: [N]isize = NodeSpace(N, O).offsetFromOrigin(origin, idx);

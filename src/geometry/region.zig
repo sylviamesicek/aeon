@@ -60,12 +60,12 @@ pub fn Region(comptime N: usize) type {
             return IndexSpace.fromSize(size);
         }
 
-        pub const CartesianIterator = struct {
+        pub const NodeIterator = struct {
             inner: IndexSpace.CartesianIterator,
             block: [N]usize,
             sides: [N]Side,
 
-            pub fn next(self: *CartesianIterator) ?[N]isize {
+            pub fn next(self: *NodeIterator) ?[N]isize {
                 if (self.inner.next()) |cart| {
                     var result: [N]isize = undefined;
 
@@ -84,8 +84,8 @@ pub fn Region(comptime N: usize) type {
             }
         };
 
-        /// Iterates all cell indices (in ghost space) in this region.
-        pub fn cartesianIndices(self: Self, comptime E: usize, block: [N]usize) CartesianIterator {
+        /// Iterates all ghost nodes in this region out to a given extent.
+        pub fn nodes(self: Self, comptime E: usize, block: [N]usize) NodeIterator {
             return .{
                 .inner = self.space(E, block).cartesianIndices(),
                 .block = block,
@@ -98,15 +98,15 @@ pub fn Region(comptime N: usize) type {
             block: [N]usize,
             sides: [N]Side,
 
-            pub fn next(self: *InnerFaceIterator) ?[N]isize {
+            pub fn next(self: *InnerFaceIterator) ?[N]usize {
                 if (self.inner.next()) |cart| {
-                    var result: [N]isize = undefined;
+                    var result: [N]usize = undefined;
 
                     for (0..N) |i| {
                         switch (self.sides[i]) {
                             .left => result[i] = 0,
-                            .right => result[i] = @as(isize, @intCast(self.block[i])) - 1,
-                            else => result[i] = @as(isize, @intCast(cart[i])),
+                            .right => result[i] = self.block[i] - 1,
+                            else => result[i] = cart[i],
                         }
                     }
 
@@ -117,8 +117,8 @@ pub fn Region(comptime N: usize) type {
             }
         };
 
-        /// Iterates over all indices on the inner face.
-        pub fn innerFaceIndices(self: Self, block: [N]usize) InnerFaceIterator {
+        /// Iterates over all cells on the inner face.
+        pub fn innerFaceCells(self: Self, block: [N]usize) InnerFaceIterator {
             var size: [N]usize = undefined;
 
             for (0..N) |i| {
@@ -277,7 +277,7 @@ test "region indices" {
 
     try expect(region.adjacency() == 2);
 
-    var indices = region.cartesianIndices(2, block);
+    var indices = region.nodes(2, block);
 
     try expectEqualSlices(isize, &[_]isize{ 2, -1 }, &indices.next().?);
     try expectEqualSlices(isize, &[_]isize{ 2, -2 }, &indices.next().?);
@@ -285,10 +285,10 @@ test "region indices" {
     try expectEqualSlices(isize, &[_]isize{ 3, -2 }, &indices.next().?);
     try expect(indices.next() == null);
 
-    var inner_indices = region.innerFaceIndices(block);
+    var inner_cells = region.innerFaceCells(block);
 
-    try expectEqualSlices(isize, &[_]isize{ 1, 0 }, &inner_indices.next().?);
-    try expect(inner_indices.next() == null);
+    try expectEqualSlices(usize, &[_]usize{ 1, 0 }, &inner_cells.next().?);
+    try expect(inner_cells.next() == null);
 
     var offsets = region.extentOffsets(2);
 
