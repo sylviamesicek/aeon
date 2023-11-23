@@ -6,10 +6,9 @@ pub const geometry = @import("geometry/geometry.zig");
 pub const lac = @import("lac/lac.zig");
 pub const mesh = @import("mesh/mesh.zig");
 pub const methods = @import("methods/methods.zig");
+pub const nodes = @import("nodes/nodes.zig");
 
 // Global exports.
-
-pub const Index = geometry.Index;
 
 const io = @import("io/io.zig");
 pub const DataOut = io.DataOut;
@@ -27,6 +26,7 @@ test {
     _ = geometry;
     _ = io;
     _ = mesh;
+    _ = nodes;
     _ = lac;
     _ = system;
 }

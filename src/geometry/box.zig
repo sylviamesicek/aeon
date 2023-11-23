@@ -105,57 +105,44 @@ test "split index" {
     try expectEqualDeep(split.linear, 2);
 }
 
-/// A N-dimensional axis aligned bounding box. This can be used for
-/// floating point numbers as well as integers (e.g. as an `IndexBox`).
-pub fn Box(comptime N: usize, comptime T: type) type {
+/// An N-dimensional subregion of some larger index space.
+pub fn IndexBox(comptime N: usize) type {
     return struct {
-        origin: [N]T,
-        size: [N]T,
+        origin: [N]usize,
+        size: [N]usize,
 
-        const Self = @This();
-
-        /// Returns the position of the center of the box.
-        pub fn center(self: Self) [N]T {
-            var result: [N]T = undefined;
-
-            for (0..N) |i| {
-                result[i] = self.origin[i] + self.size[i] / @as(T, 2);
-            }
-
-            return result;
-        }
-
-        /// Checks if the given position is contained by the box.
-        pub fn contains(self: Self, x: [N]T) bool {
-            var result = true;
-
-            for (0..N) |i| {
-                result = result and self.origin[i] <= x[i] and x[i] <= self.origin[i] + self.size[i];
-            }
-
-            return result;
-        }
-
-        /// Transforms a local position into a global one.
-        pub fn globalFromLocal(self: Self, local: [N]T) [N]T {
-            var global: [N]T = undefined;
+        /// Transforms a local index into a global one.
+        pub fn globalFromLocal(self: @This(), local: [N]usize) [N]usize {
+            var global: [N]usize = undefined;
             for (0..N) |axis| {
                 global[axis] = self.origin[axis] + local[axis];
             }
             return global;
         }
 
-        pub fn localFromGlobal(self: Self, global: [N]T) [N]T {
-            var local: [N]T = undefined;
+        /// Transforms a global index into a local one
+        pub fn localFromGlobal(self: @This(), global: [N]usize) [N]usize {
+            var local: [N]usize = undefined;
             for (0..N) |axis| {
                 local[axis] = global[axis] - self.origin[axis];
             }
             return local;
         }
 
+        /// Checks if the given index is contained in the box.
+        pub fn contains(self: @This(), index: [N]usize) bool {
+            var result = true;
+
+            inline for (0..N) |i| {
+                result = result and self.origin[i] <= index[i] and index[i] <= self.origin[i] + self.size[i];
+            }
+
+            return result;
+        }
+
         /// Refines the box by multiplying each component by 2.
-        pub fn refined(self: *const Self) Self {
-            var result: Self = undefined;
+        pub fn refined(self: @This()) @This() {
+            var result: @This() = undefined;
             for (0..N) |axis| {
                 result.origin[axis] = self.origin[axis] * 2;
                 result.size[axis] = self.size[axis] * 2;
@@ -163,8 +150,9 @@ pub fn Box(comptime N: usize, comptime T: type) type {
             return result;
         }
 
-        pub fn coarsened(self: *const Self) Self {
-            var result: Self = undefined;
+        /// Coarsens the box by dividing each component by 2 (and rounding down).
+        pub fn coarsened(self: @This()) @This() {
+            var result: @This() = undefined;
             for (0..N) |axis| {
                 result.origin[axis] = self.origin[axis] / 2;
                 result.size[axis] = self.size[axis] / 2;
@@ -173,8 +161,8 @@ pub fn Box(comptime N: usize, comptime T: type) type {
         }
 
         /// Moves the box so that its origin is measured relative to the origin of `other`.
-        pub fn relativeTo(self: Self, other: Self) Self {
-            var result: Self = self;
+        pub fn relativeTo(self: @This(), other: @This()) @This() {
+            var result: @This() = self;
 
             for (0..N) |i| {
                 result.origin[i] -= other.origin[i];
@@ -185,11 +173,62 @@ pub fn Box(comptime N: usize, comptime T: type) type {
     };
 }
 
+pub fn RealBox(comptime N: usize) type {
+    return struct {
+        origin: [N]f64,
+        size: [N]f64,
+
+        /// Returns the position of the center of the box.
+        pub fn center(self: @This()) [N]f64 {
+            var result: [N]f64 = undefined;
+
+            for (0..N) |i| {
+                result[i] = self.origin[i] + self.size[i] / 2.0;
+            }
+
+            return result;
+        }
+
+        /// Checks if the given position is contained by the box.
+        pub fn contains(self: @This(), x: [N]f64) bool {
+            var result = true;
+
+            for (0..N) |i| {
+                result = result and self.origin[i] <= x[i] and x[i] <= self.origin[i] + self.size[i];
+            }
+
+            return result;
+        }
+
+        pub fn transformPos(self: @This(), x: [N]f64) [N]f64 {
+            var result: [N]f64 = undefined;
+
+            for (0..N) |i| {
+                result[i] = self.origin[i] + self.size[i] * x[i];
+            }
+
+            return result;
+        }
+
+        pub fn transformOp(self: @This(), comptime ranks: [N]usize, v: f64) f64 {
+            var res: f64 = v;
+
+            inline for (0..N) |i| {
+                inline for (0..ranks[i]) |_| {
+                    res /= self.physical_bounds.size[i];
+                }
+            }
+
+            return res;
+        }
+    };
+}
+
 test "box" {
     const expect = std.testing.expect;
     const expectEqualDeep = std.testing.expectEqualDeep;
 
-    const unit: Box(2, f64) = .{
+    const unit: RealBox(2) = .{
         .origin = [2]f64{ 0.0, 0.0 },
         .size = [2]f64{ 1.0, 1.0 },
     };

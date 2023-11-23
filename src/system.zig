@@ -29,6 +29,18 @@ pub const EmptySystem = enum {
     }
 };
 
+pub fn isSystemTag(comptime T: type) bool {
+    switch (@typeInfo(T)) {
+        .Enum => |info| {
+            if (info.is_exhaustive) {
+                return true;
+            }
+            return false;
+        },
+        else => return false,
+    }
+}
+
 /// A trait function used for determining if a type desribes a system.
 pub fn isSystem(comptime T: type) bool {
     switch (@typeInfo(T)) {

@@ -7,8 +7,6 @@ const ArrayList = std.ArrayList;
 const ArrayListUnmanaged = std.ArrayListUnmanaged;
 const MultiArrayList = std.MultiArrayList;
 
-const Box = @import("box.zig").Box;
-
 /// A set of tiles in some index space, grouped into several partitions.
 /// Individual tiles may be "tagged" as active, and this object provides an
 /// interface into grouping active tiles into partitions as well as specify "clusters" of
@@ -26,7 +24,7 @@ pub fn Partitions(comptime N: usize) type {
         buffer: []const usize,
 
         const Self = @This();
-        const IndexBox = Box(N, usize);
+        const IndexBox = @import("box.zig").IndexBox(N);
         const IndexSpace = @import("index.zig").IndexSpace(N);
 
         pub const Range = struct {

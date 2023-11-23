@@ -2,7 +2,7 @@ const std = @import("std");
 const assert = std.debug.assert;
 
 /// A mixin for common manipulation indices (`[N]usize`).
-pub fn Index(comptime N: usize) type {
+pub fn IndexMixin(comptime N: usize) type {
     return struct {
         pub fn splat(v: usize) [N]usize {
             return [1]usize{v} ** N;
@@ -82,7 +82,7 @@ pub fn IndexSpace(comptime N: usize) type {
         size: [N]usize,
 
         const Self = @This();
-        const IndexBox = @import("box.zig").Box(N, usize);
+        const IndexBox = @import("box.zig").IndexBox(N);
 
         /// Constructs an IndexSpace with the given size.
         pub fn fromSize(size: [N]usize) Self {

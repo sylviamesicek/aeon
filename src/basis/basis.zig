@@ -18,6 +18,5 @@ pub const StencilSpace = stencils.StencilSpace;
 
 test {
     _ = lagrange;
-    _ = nodes;
     _ = stencils;
 }

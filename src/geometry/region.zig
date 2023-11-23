@@ -2,7 +2,7 @@ const std = @import("std");
 const insertion = std.sort.insertion;
 const powi = std.math.powi;
 
-const geometry = @import("../geometry/geometry.zig");
+const geometry = @import("geometry.zig");
 
 /// Defines an extended region around a block that can optionally include ghost nodes. In 2D, a region subdivision looks like
 ///
@@ -29,7 +29,7 @@ pub fn Region(comptime N: usize) type {
         };
 
         const Self = @This();
-        const IndexBox = @import("box.zig").Box(N, usize);
+        const IndexBox = @import("box.zig").IndexBox(N);
         const IndexSpace = @import("index.zig").IndexSpace(N);
 
         /// How many steps of adjacency to reach the middle region.

@@ -8,12 +8,13 @@ const partitions = @import("partitions.zig");
 const region = @import("region.zig");
 
 // Public Exports
-pub const Box = box.Box;
-pub const SplitIndex = box.SplitIndex;
 pub const FaceIndex = box.FaceIndex;
+pub const IndexBox = box.IndexBox;
+pub const RealBox = box.RealBox;
+pub const SplitIndex = box.SplitIndex;
 pub const numFaces = box.numFaces;
 
-pub const Index = index.Index;
+pub const IndexMixin = index.IndexMixin;
 pub const IndexSpace = index.IndexSpace;
 
 pub const Partitions = partitions.Partitions;

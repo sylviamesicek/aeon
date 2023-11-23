@@ -224,52 +224,6 @@ fn restrictStencil(comptime O: usize) [2 * O]f64 {
     return Stencils(O).restrict();
 }
 
-test "node iteration" {
-    const expectEqualSlices = std.testing.expectEqualSlices;
-
-    const node_space = NodeSpace(2, 4).fromSize([_]usize{ 1, 2 });
-
-    const expected = [_][2]isize{
-        [2]isize{ -2, -2 },
-        [2]isize{ -2, -1 },
-        [2]isize{ -2, 0 },
-        [2]isize{ -2, 1 },
-        [2]isize{ -2, 2 },
-        [2]isize{ -2, 3 },
-        [2]isize{ -1, -2 },
-        [2]isize{ -1, -1 },
-        [2]isize{ -1, 0 },
-        [2]isize{ -1, 1 },
-        [2]isize{ -1, 2 },
-        [2]isize{ -1, 3 },
-        [2]isize{ 0, -2 },
-        [2]isize{ 0, -1 },
-        [2]isize{ 0, 0 },
-        [2]isize{ 0, 1 },
-        [2]isize{ 0, 2 },
-        [2]isize{ 0, 3 },
-        [2]isize{ 1, -2 },
-        [2]isize{ 1, -1 },
-        [2]isize{ 1, 0 },
-        [2]isize{ 1, 1 },
-        [2]isize{ 1, 2 },
-        [2]isize{ 1, 3 },
-        [2]isize{ 2, -2 },
-        [2]isize{ 2, -1 },
-        [2]isize{ 2, 0 },
-        [2]isize{ 2, 1 },
-        [2]isize{ 2, 2 },
-        [2]isize{ 2, 3 },
-    };
-
-    var nodes = node_space.nodes(2);
-    var index: usize = 0;
-
-    while (nodes.next()) |node| : (index += 1) {
-        try expectEqualSlices(isize, &node, &expected[index]);
-    }
-}
-
 test "interpolation stencils" {
     const expectEqualSlices = std.testing.expectEqualSlices;
 
