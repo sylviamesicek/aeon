@@ -1,6 +1,7 @@
 // Submodules
 
 pub const basis = @import("basis/basis.zig");
+pub const bsamr = @import("bsamr/bsamr.zig");
 pub const dofs = @import("dofs/dofs.zig");
 pub const geometry = @import("geometry/geometry.zig");
 pub const lac = @import("lac/lac.zig");
