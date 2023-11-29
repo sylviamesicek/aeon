@@ -22,17 +22,6 @@ pub const isBoundary = boundary.isBoundary;
 pub const NodeMap = struct {
     offsets: []const usize,
 
-    /// Initialises a `NodeMap` for a given number of blocks. This is most often called by a specfic mesh routine
-    /// responsible for building the node map.
-    pub fn init(allocator: Allocator, blocks: usize) !NodeMap {
-        const offsets = try allocator.alloc(usize, blocks + 1);
-        errdefer allocator.free(offsets);
-
-        return .{
-            .offsets = offsets,
-        };
-    }
-
     /// Frees a `NodeMap`.
     pub fn deinit(self: NodeMap, allocator: Allocator) void {
         allocator.free(self.offsets);

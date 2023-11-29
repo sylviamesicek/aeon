@@ -362,7 +362,7 @@ pub fn RegridManager(comptime N: usize) type {
             grid.block_map_capacity = block_map.capacity;
             grid.block_map = block_map.items;
 
-            grid.buildBlockMap();
+            grid.computeBlockMap();
         }
 
         /// An unflattened representation of a block structured mesh.

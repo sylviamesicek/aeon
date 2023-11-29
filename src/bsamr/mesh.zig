@@ -12,6 +12,7 @@ const maxInt = std.math.maxInt;
 
 const basis = @import("../basis/basis.zig");
 const geometry = @import("../geometry/geometry.zig");
+const nodes = @import("../nodes/nodes.zig");
 
 // ************************
 // Mesh *******************
@@ -124,6 +125,9 @@ pub fn Mesh(comptime N: usize) type {
         const splat = IndexMixin.splat;
         const toSigned = IndexMixin.toSigned;
 
+        const NodeMap = nodes.NodeMap;
+        const NodeSpace = nodes.NodeSpace;
+
         /// Initialises a new mesh with an general purpose allocator, subject to the given configuration.
         pub fn init(allocator: Allocator, config: Config) !Self {
             // Check config
@@ -190,7 +194,7 @@ pub fn Mesh(comptime N: usize) type {
 
             try block_map.resize(allocator, self.tile_total);
 
-            self.buildBlockMap();
+            self.computeBlockMap();
 
             return self;
         }
@@ -227,6 +231,10 @@ pub fn Mesh(comptime N: usize) type {
         // Block Map ***************
         // *************************
 
+        /// Builds a tile vector of tags from a cell vector of tags. This is used to
+        /// construct tile tags from per-cell refinement criteria (for instance the local gradient
+        /// difference with underlying mesh, etc.), and is simply the composite `or` operator
+        /// applied to every cell for each tile.
         pub fn buildTagsFromCells(self: *const Self, dest: []bool, src: []const bool) void {
             @memset(dest, false);
 
@@ -238,12 +246,12 @@ pub fn Mesh(comptime N: usize) type {
 
                 const patch_space = IndexSpace.fromBox(patch.bounds);
                 const block_space = IndexSpace.fromBox(block.bounds);
-                const cell_space = IndexSpace.fromSize(IndexMixin.scaled(block.bounds.size, self.tile_width));
+                const cell_space = IndexSpace.fromSize(scaled(block.bounds.size, self.tile_width));
 
                 var tiles = block_space.cartesianIndices();
 
                 while (tiles.next()) |tile| {
-                    const origin = IndexMixin.scaled(tile, self.tile_width);
+                    const origin = scaled(tile, self.tile_width);
 
                     const patch_tile = patch.bounds.localFromGlobal(block.bounds.globalFromLocal(tile));
                     const patch_linear = patch_space.linearFromCartesian(patch_tile);
@@ -342,6 +350,35 @@ pub fn Mesh(comptime N: usize) type {
             return physical_bounds;
         }
 
+        /// Computes the number of cells along each axis for a given block.
+        pub fn blockCellSize(mesh: *const Self, block: usize) [N]usize {
+            return scaled(mesh.blocks[block].bounds.size, mesh.tile_width);
+        }
+
+        // *********************************
+        // Nodes ***************************
+        // *********************************
+
+        /// Initialises and fills a node map corresponding to this mesh with the given inner extents.
+        /// The memory is owned (and must be free by) the caller.
+        pub fn nodeMap(self: *const Self, comptime M: usize, allocator: Allocator) !NodeMap {
+            const offsets = try allocator.alloc(usize, self.blocks + 1);
+            errdefer allocator.free(offsets);
+
+            offsets[0] = 0;
+
+            var cur: usize = 0;
+
+            for (self.blocks) |block| {
+                offsets[cur + 1] = offsets[cur] + NodeSpace(N, M).fromSize(self.blockCellSize(block)).total();
+                cur += 1;
+            }
+
+            return .{
+                .offsets = offsets,
+            };
+        }
+
         // *********************************
         // Offsets *************************
         // *********************************
@@ -379,7 +416,7 @@ pub fn Mesh(comptime N: usize) type {
         // *********************************
 
         /// Builds a block map, ie a map from each tile in the mesh to the id of the block that tile is in.
-        pub fn buildBlockMap(self: *Self) void {
+        pub fn computeBlockMap(self: *Self) void {
             assert(self.block_map.len == self.tile_total);
 
             @memset(self.block_map, maxInt(usize));
