@@ -210,11 +210,11 @@ pub fn RealBox(comptime N: usize) type {
             return result;
         }
 
-        pub fn transformOp(self: @This(), comptime ranks: [N]usize, v: f64) f64 {
+        pub fn transformOp(self: @This(), ranks: [N]usize, v: f64) f64 {
             var res: f64 = v;
 
-            inline for (0..N) |i| {
-                inline for (0..ranks[i]) |_| {
+            for (0..N) |i| {
+                for (0..ranks[i]) |_| {
                     res /= self.physical_bounds.size[i];
                 }
             }

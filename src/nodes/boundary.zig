@@ -39,14 +39,18 @@ pub const Robin = struct {
     }
 };
 
+/// A trait for defining boundaries.
 pub fn isBoundary(comptime N: usize) fn (comptime T: type) bool {
     const FaceIndex = geometry.FaceIndex(N);
-    _ = FaceIndex;
     const hasFn = std.meta.trait.hasFn;
 
     const Closure = struct {
         fn trait(comptime T: type) bool {
             if (!(hasFn("kind") and @TypeOf(T.kind) == fn (usize) BoundaryKind)) {
+                return false;
+            }
+
+            if (!(hasFn("robin") and @TypeOf(T.robin) == fn (T, [N]f64, FaceIndex) Robin)) {
                 return false;
             }
 

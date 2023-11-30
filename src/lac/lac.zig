@@ -89,4 +89,5 @@ pub const IdentityMap = struct {
 
 test {
     _ = bicgstab;
+    _ = bicgstabl;
 }

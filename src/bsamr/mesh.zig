@@ -12,7 +12,14 @@ const maxInt = std.math.maxInt;
 
 const basis = @import("../basis/basis.zig");
 const geometry = @import("../geometry/geometry.zig");
+const mesh = @import("../mesh/mesh.zig");
 const nodes = @import("../nodes/nodes.zig");
+
+const CellMap = mesh.CellMap;
+const TileMap = mesh.TileMap;
+
+const NodeMap = nodes.NodeMap;
+const NodeSpace = nodes.NodeSpace;
 
 // ************************
 // Mesh *******************
@@ -25,15 +32,12 @@ pub fn Block(comptime N: usize) type {
         bounds: IndexBox,
         /// Patch this block belongs to
         patch: usize,
-        /// Offset into global cell vector
-        cell_offset: usize = 0,
-        /// Total number of cells in this block
-        cell_total: usize = 0,
 
         const IndexBox = geometry.IndexBox(N);
     };
 }
 
+/// A grouping of multiple nearby blocks on a single level, arranged into a hierarchy between levels.
 pub fn Patch(comptime N: usize) type {
     return struct {
         bounds: IndexBox,
@@ -43,16 +47,15 @@ pub fn Patch(comptime N: usize) type {
         children_total: usize,
         block_offset: usize,
         block_total: usize,
-        tile_offset: usize = 0,
-        tile_total: usize = 0,
 
         const IndexBox = geometry.IndexBox(N);
     };
 }
 
+/// A collection of blocks and patches with the same grid spacing.
 pub fn Level(comptime N: usize) type {
     return struct {
-        index_size: [N]usize,
+        tile_size: [N]usize,
         patch_offset: usize,
         patch_total: usize,
         block_offset: usize,
@@ -74,23 +77,16 @@ pub fn Mesh(comptime N: usize) type {
         index_size: [N]usize,
         /// The number of cells along each time edge.
         tile_width: usize,
-        /// Total number of tiles in mesh
-        tile_total: usize = 0,
-        /// Total number of cells in mesh
-        cell_total: usize = 0,
 
+        // Block ArrayListUnmanaged
         block_capacity: usize,
-        patch_capacity: usize,
-        level_capacity: usize,
-
         blocks: []Block(N),
+        // Patch ArrayListUnmanaged
+        patch_capacity: usize,
         patches: []Patch(N),
+        // Level ArrayListUnmanaged
+        level_capacity: usize,
         levels: []Level(N),
-
-        block_map_capacity: usize,
-
-        // A map from tile to block
-        block_map: []usize,
 
         /// Configuration for a mesh.
         pub const Config = struct {
@@ -124,9 +120,6 @@ pub fn Mesh(comptime N: usize) type {
         const scaled = IndexMixin.scaled;
         const splat = IndexMixin.splat;
         const toSigned = IndexMixin.toSigned;
-
-        const NodeMap = nodes.NodeMap;
-        const NodeSpace = nodes.NodeSpace;
 
         /// Initialises a new mesh with an general purpose allocator, subject to the given configuration.
         pub fn init(allocator: Allocator, config: Config) !Self {
@@ -171,7 +164,7 @@ pub fn Mesh(comptime N: usize) type {
                 .block_total = 1,
             });
 
-            var self: Self = .{
+            return .{
                 .gpa = allocator,
                 .index_size = config.index_size,
                 .physical_bounds = config.physical_bounds,
@@ -182,21 +175,7 @@ pub fn Mesh(comptime N: usize) type {
                 .blocks = blocks.items,
                 .patches = patches.items,
                 .levels = levels.items,
-                .block_map_capacity = 0,
-                .block_map = &.{},
             };
-
-            self.computeCellOffsets();
-            self.computeTileOffsets();
-
-            const block_map: ArrayListUnmanaged(usize) = .{};
-            errdefer block_map.deinit(allocator);
-
-            try block_map.resize(allocator, self.tile_total);
-
-            self.computeBlockMap();
-
-            return self;
         }
 
         /// Deinitalises a mesh.
@@ -216,15 +195,9 @@ pub fn Mesh(comptime N: usize) type {
                 .items = self.levels,
             };
 
-            var block_map: ArrayListUnmanaged(usize) = .{
-                .capacity = self.block_map_capacity,
-                .items = self.block_map,
-            };
-
             levels.deinit(self.gpa);
             patches.deinit(self.gpa);
             blocks.deinit(self.gpa);
-            block_map.deinit(self.gpa);
         }
 
         // *************************
@@ -332,7 +305,7 @@ pub fn Mesh(comptime N: usize) type {
         pub fn blockPhysicalBounds(self: *const Self, block: usize) RealBox {
             const patch = self.blocks[block].patch;
             const level = self.patches[patch].level;
-            const index_size: [N]usize = self.levels[level].index_size;
+            const index_size: [N]usize = self.levels[level].tile_size;
 
             // Get bounds of this block
             const bounds = self.blocks[block].bounds;
@@ -351,78 +324,87 @@ pub fn Mesh(comptime N: usize) type {
         }
 
         /// Computes the number of cells along each axis for a given block.
-        pub fn blockCellSize(mesh: *const Self, block: usize) [N]usize {
-            return scaled(mesh.blocks[block].bounds.size, mesh.tile_width);
+        pub fn blockCellSize(self: *const Self, block: usize) [N]usize {
+            return scaled(self.blocks[block].bounds.size, self.tile_width);
+        }
+
+        /// Finds the level a block resides on.
+        pub fn blockLevel(self: *const Self, block: usize) [N]usize {
+            return self.patches[self.blocks[block].patch].level;
         }
 
         // *********************************
-        // Nodes ***************************
+        // Maps ****************************
         // *********************************
 
-        /// Initialises and fills a node map corresponding to this mesh with the given inner extents.
-        /// The memory is owned (and must be free by) the caller.
-        pub fn nodeMap(self: *const Self, comptime M: usize, allocator: Allocator) !NodeMap {
-            const offsets = try allocator.alloc(usize, self.blocks + 1);
-            errdefer allocator.free(offsets);
+        /// Caches node offsets for each block.
+        pub fn buildNodeMap(self: *const Self, comptime M: usize, node_map: *NodeMap) !void {
+            try node_map.offsets.resize(self.blocks.len + 1);
 
-            offsets[0] = 0;
-
+            var off: usize = 0;
             var cur: usize = 0;
 
-            for (self.blocks) |block| {
-                offsets[cur + 1] = offsets[cur] + NodeSpace(N, M).fromSize(self.blockCellSize(block)).total();
+            for (0..self.blocks.len) |block| {
+                const total = NodeSpace(N, M).fromSize(self.blockCellSize(block)).total();
+
+                node_map.offsets[cur] = off;
+
+                off += total;
                 cur += 1;
             }
 
-            return .{
-                .offsets = offsets,
-            };
+            node_map.offsets[cur] = off;
         }
 
-        // *********************************
-        // Offsets *************************
-        // *********************************
+        /// Caches cell offsets for each block.
+        pub fn buildCellMap(self: *const Self, cell_map: *CellMap) !void {
+            try cell_map.offsets.resize(self.blocks.len + 1);
 
-        pub fn computeCellOffsets(self: *Self) void {
-            var cell_offset: usize = 0;
+            var off: usize = 0;
+            var cur: usize = 0;
 
-            for (self.blocks) |*block| {
-                const total = IndexSpace.fromSize(scaled(block.bounds.size, self.tile_width)).total();
+            for (0..self.blocks.len) |block| {
+                const total = IndexSpace.fromSize(self.blockCellSize(block)).total();
 
-                block.cell_offset = cell_offset;
-                block.cell_total = total;
-                cell_offset += total;
+                cell_map.offsets.items[cur] = off;
+
+                off += total;
+                cur += 1;
             }
 
-            self.cell_total = cell_offset;
+            cell_map.offsets.items[cur] = off;
         }
 
-        pub fn computeTileOffsets(self: *Self) void {
-            var tile_offset: usize = 0;
+        /// Caches tile offsets for each block.
+        pub fn buildTileMap(self: *const Self, tile_map: *TileMap) !void {
+            try tile_map.offsets.resize(self.patches.len + 1);
 
-            for (self.patches) |*patch| {
+            var off: usize = 0;
+            var cur: usize = 0;
+
+            for (self.patches) |patch| {
                 const total = IndexSpace.fromBox(patch.bounds).total();
 
-                patch.tile_offset = tile_offset;
-                patch.tile_total = total;
-                tile_offset += total;
+                tile_map.offsets.items[cur] = off;
+
+                off += total;
+                cur += 1;
             }
 
-            self.tile_total = tile_offset;
+            tile_map.offsets.items[cur] = off;
         }
 
         // *********************************
-        // Block Maps **********************
+        // Tile to Block ********************
         // *********************************
 
         /// Builds a block map, ie a map from each tile in the mesh to the id of the block that tile is in.
-        pub fn computeBlockMap(self: *Self) void {
-            assert(self.block_map.len == self.tile_total);
-
+        pub fn tileToBlock(self: *const Self, tile_map: TileMap, tile_to_blocks: []usize) void {
+            _ = tile_map;
             @memset(self.block_map, maxInt(usize));
 
             for (self.patches) |patch| {
-                const tile_to_block: []usize = self.block_map[patch.tile_offset .. patch.tile_offset + patch.tile_total];
+                const tile_to_block: []usize = tile_to_blocks[patch.tile_offset .. patch.tile_offset + patch.tile_total];
 
                 for (patch.block_offset..patch.block_total + patch.block_offset) |block_id| {
                     const block = self.blocks[block_id];

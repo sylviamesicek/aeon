@@ -6,6 +6,7 @@
 
 const std = @import("std");
 const Allocator = std.mem.Allocator;
+const ArrayList = std.ArrayList;
 const panic = std.debug.panic;
 
 const basis = @import("../basis/basis.zig");
@@ -20,31 +21,36 @@ pub const isBoundary = boundary.isBoundary;
 
 /// A map from blocks (defined in a mesh agnostic way) into `NodeVector`s. This is filled by the appropriate mesh routine.
 pub const NodeMap = struct {
-    offsets: []const usize,
+    offsets: ArrayList(usize),
+
+    pub fn init(allocator: Allocator) NodeMap {
+        const offsets = ArrayList(usize).init(allocator);
+        return .{ .offsets = offsets };
+    }
 
     /// Frees a `NodeMap`.
-    pub fn deinit(self: NodeMap, allocator: Allocator) void {
-        allocator.free(self.offsets);
+    pub fn deinit(self: *NodeMap) void {
+        self.offsets.deinit();
     }
 
     /// Returns the node offset for a given block.
     pub fn offset(self: NodeMap, block: usize) usize {
-        return self.offsets[block];
+        return self.offsets.items[block];
     }
 
     /// Returns the total number of nodes in a given block.
     pub fn total(self: NodeMap, block: usize) usize {
-        return self.offsets[block + 1] - self.offsets[block];
+        return self.offsets.items[block + 1] - self.offsets.items[block];
     }
 
     /// Returns of slice of nodes for a given block.
     pub fn slice(self: NodeMap, block: usize, nodes: anytype) @TypeOf(nodes) {
-        return nodes[self.offsets[block]..self.offsets[block + 1]];
+        return nodes[self.offsets.items[block]..self.offsets.items[block + 1]];
     }
 
     /// Returns the number of nodes in the total map.
     pub fn numNodes(self: NodeMap) usize {
-        return self.offsets[self.offsets.len - 1];
+        return self.offsets.items[self.offsets.len - 1];
     }
 };
 

@@ -1,11 +1,12 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 
-const system = @import("../system.zig");
+const system = @import("system.zig");
+const System = system.System;
 
 const methods = @import("methods.zig");
 
-pub fn RungeKutta4Integrator(comptime System: type) type {
+pub fn RungeKutta4Integrator(comptime Tag: type) type {
     return struct {
         allocator: Allocator,
         sys: SystemSlice,
@@ -16,9 +17,7 @@ pub fn RungeKutta4Integrator(comptime System: type) type {
         k4: SystemSlice,
         time: f64,
 
-        const Self = @This();
-        const SystemSlice = system.SystemSlice(System);
-        const SystemSliceConst = system.SystemSliceConst(System);
+        const SystemSlice = System(Tag, []f64);
 
         pub fn init(allocator: Allocator, ndofs: usize) !Self {
             var sys = try SystemSlice.init(allocator, ndofs);
