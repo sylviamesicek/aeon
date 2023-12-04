@@ -2,40 +2,39 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 
 const system = @import("system.zig");
-const System = system.System;
-
 const methods = @import("methods.zig");
 
 pub fn RungeKutta4Integrator(comptime Tag: type) type {
     return struct {
         allocator: Allocator,
-        sys: SystemSlice,
-        scratch: SystemSlice,
-        k1: SystemSlice,
-        k2: SystemSlice,
-        k3: SystemSlice,
-        k4: SystemSlice,
+        sys: System,
+        scratch: System,
+        k1: System,
+        k2: System,
+        k3: System,
+        k4: System,
         time: f64,
 
-        const SystemSlice = System(Tag, []f64);
+        const System = system.System(Tag);
+        const SystemConst = system.SystemConst(Tag);
 
-        pub fn init(allocator: Allocator, ndofs: usize) !Self {
-            var sys = try SystemSlice.init(allocator, ndofs);
+        pub fn init(allocator: Allocator, ndofs: usize) !@This() {
+            var sys = try System.init(allocator, ndofs);
             errdefer sys.deinit(allocator);
 
-            var scratch = try SystemSlice.init(allocator, ndofs);
+            var scratch = try System.init(allocator, ndofs);
             errdefer scratch.deinit(allocator);
 
-            var k1 = try SystemSlice.init(allocator, ndofs);
+            var k1 = try System.init(allocator, ndofs);
             errdefer k1.deinit(allocator);
 
-            var k2 = try SystemSlice.init(allocator, ndofs);
+            var k2 = try System.init(allocator, ndofs);
             errdefer k2.deinit(allocator);
 
-            var k3 = try SystemSlice.init(allocator, ndofs);
+            var k3 = try System.init(allocator, ndofs);
             errdefer k3.deinit(allocator);
 
-            var k4 = try SystemSlice.init(allocator, ndofs);
+            var k4 = try System.init(allocator, ndofs);
             errdefer k4.deinit(allocator);
 
             return .{
@@ -50,7 +49,7 @@ pub fn RungeKutta4Integrator(comptime Tag: type) type {
             };
         }
 
-        pub fn deinit(self: *Self) void {
+        pub fn deinit(self: *@This()) void {
             self.scratch.deinit(self.allocator);
             self.k1.deinit(self.allocator);
             self.k2.deinit(self.allocator);
@@ -58,9 +57,9 @@ pub fn RungeKutta4Integrator(comptime Tag: type) type {
             self.k4.deinit(self.allocator);
         }
 
-        pub fn step(self: *Self, deriv: anytype, h: f64) void {
-            if (comptime !(methods.isSystemDerivative(@TypeOf(deriv)) and @TypeOf(deriv).System == System)) {
-                @compileError("Derivative type must satisfy isMeshDerivative trait.");
+        pub fn step(self: *@This(), deriv: anytype, h: f64) void {
+            if (comptime !(methods.isTemporalDerivative(@TypeOf(deriv))) and @TypeOf(deriv).Tag == Tag) {
+                @compileError("Derivative type must satisfy isTemporalDerivative trait.");
             }
 
             // Calculate k1

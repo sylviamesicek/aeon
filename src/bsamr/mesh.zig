@@ -400,11 +400,10 @@ pub fn Mesh(comptime N: usize) type {
 
         /// Builds a block map, ie a map from each tile in the mesh to the id of the block that tile is in.
         pub fn tileToBlock(self: *const Self, tile_map: TileMap, tile_to_blocks: []usize) void {
-            _ = tile_map;
             @memset(self.block_map, maxInt(usize));
 
-            for (self.patches) |patch| {
-                const tile_to_block: []usize = tile_to_blocks[patch.tile_offset .. patch.tile_offset + patch.tile_total];
+            for (self.patches, 0..) |patch, patch_id| {
+                const tile_to_block: []usize = tile_map.slice(patch_id, tile_to_blocks);
 
                 for (patch.block_offset..patch.block_total + patch.block_offset) |block_id| {
                     const block = self.blocks[block_id];

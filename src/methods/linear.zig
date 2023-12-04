@@ -3,14 +3,14 @@ const Allocator = std.mem.Allocator;
 const ArenaAllocator = std.heap.ArenaAllocator;
 
 const basis = @import("../basis/basis.zig");
-const dofs = @import("../dofs/dofs.zig");
-const lac = @import("../lac/lac.zig");
-const system = @import("../system.zig");
-const meshes = @import("../mesh/mesh.zig");
+const bsamr = @import("../bsamr/bsamr.zig");
 const geometry = @import("../geometry/geometry.zig");
+const lac = @import("../lac/lac.zig");
+const mesh = @import("../mesh/mesh.zig");
+const nodes = @import("../nodes/nodes.zig");
 
 /// An elliptic method which simply wraps an underlying linear solver.
-pub fn LinearMapMethod(comptime N: usize, comptime O: usize, comptime InnerSolver: type) type {
+pub fn LinearMapMethod(comptime N: usize, comptime M: usize, comptime InnerSolver: type) type {
     if (comptime !lac.isLinearSolver(InnerSolver)) {
         @compileError("Base solver must satisfy the a linear solver requirement.");
     }
@@ -26,162 +26,70 @@ pub fn LinearMapMethod(comptime N: usize, comptime O: usize, comptime InnerSolve
             };
         }
 
-        const Mesh = meshes.Mesh(N);
-        const DofMap = dofs.DofMap(N, O);
-        const DofUtils = dofs.DofUtils(N, O);
-        const BoundaryUtils = dofs.BoundaryUtils(N, O);
+        const Mesh = bsamr.Mesh(N);
+        const DofManager = bsamr.DofManager(N, M);
         const IndexSpace = geometry.IndexSpace(N);
-        const StencilSpace = basis.StencilSpace(N, O);
-        const SystemSlice = system.SystemSlice;
-        const SystemSliceConst = system.SystemSliceConst;
 
         pub fn solve(
             self: Self,
             allocator: Allocator,
-            mesh: *const Mesh,
-            dof_map: DofMap,
-            oper: anytype,
-            x: SystemSlice(@TypeOf(oper).System),
-            context: SystemSliceConst(@TypeOf(oper).Context),
-            b: SystemSliceConst(@TypeOf(oper).System),
+            grid: *const Mesh,
+            dofs: DofManager,
+            operator: anytype,
+            boundary: anytype,
+            x: []f64,
+            rhs: []const f64,
         ) !void {
-            const T = @TypeOf(oper);
+            const Op = @TypeOf(operator);
+            const Bound = @TypeOf(boundary);
 
-            if (comptime !(dofs.isSystemOperator(N, O)(T))) {
-                @compileError("oper must satisfy isMeshOperator traits.");
+            if (comptime !(mesh.isOperator(N, M)(Op))) {
+                @compileError("operator must satisfy isOperator trait.");
             }
 
-            if (comptime std.enums.values(T.System).len != 1) {
-                @compileError("The linear map method only supports systems with 1 field currently.");
+            if (comptime !(nodes.isBoundary(N)(Bound))) {
+                @compileError("boundary must satisfy isBoundary trait.");
             }
 
-            const sys_field: T.System = comptime std.enums.values(T.System)[0];
+            // Allocate and fill x nodes
 
-            // Allocate and fill ctx
-
-            const ctx = try SystemSlice(T.Context).init(allocator, dof_map.ndofs());
-            defer ctx.deinit(allocator);
-
-            const sys = try SystemSlice(T.System).init(allocator, dof_map.ndofs());
-            defer sys.deinit(allocator);
-
-            for (0..mesh.blocks.len) |block_id| {
-                DofUtils.copyDofsFromCells(
-                    T.Context,
-                    mesh,
-                    dof_map,
-                    block_id,
-                    ctx,
-                    context,
-                );
-            }
-
-            for (0..mesh.blocks.len) |block_id| {
-                DofUtils.fillBoundary(
-                    mesh,
-                    dof_map,
-                    block_id,
-                    DofUtils.operContextBoundary(oper),
-                    ctx,
-                );
-            }
+            const nodes_ = try allocator.alloc(f64, dofs.numNodes());
+            defer allocator.free(nodes_);
 
             // Allocate sys vector
 
-            const map = LinearMap(T){
-                .mesh = mesh,
-                .dof_map = dof_map,
-                .oper = oper,
-                .sys = sys,
-                .ctx = ctx,
+            const map = LinearMap(Op, Bound){
+                .grid = grid,
+                .dofs = dofs,
+                .operator = operator,
+                .boundary = boundary,
+                .nodes_ = nodes_,
             };
 
             // Solve using inner
-
-            try self.inner.solve(allocator, map, x.field(sys_field), b.field(sys_field));
+            try self.inner.solve(allocator, map, x, rhs);
         }
 
-        fn LinearMap(comptime T: type) type {
-            const field_name: []const u8 = comptime std.meta.fieldNames(T.System)[0];
-
+        fn LinearMap(comptime Op: type, comptime Bound: type) type {
             return struct {
-                mesh: *const Mesh,
-                dof_map: DofMap,
-                oper: T,
-                ctx: SystemSlice(T.Context),
-                sys: SystemSlice(T.System),
+                grid: *const Mesh,
+                dofs: DofManager,
+                operator: Op,
+                boundary: Bound,
+                nodes_: []f64,
 
-                pub fn apply(self: *const @This(), output: []f64, input: []const f64) void {
-                    // Build systems slices which mirror input and output.
-                    var input_sys: SystemSliceConst(T.System) = undefined;
-                    input_sys.len = input.len;
-                    @field(input_sys.ptrs, field_name) = input.ptr;
-
-                    var output_sys: SystemSlice(T.System) = undefined;
-                    output_sys.len = output.len;
-                    @field(output_sys.ptrs, field_name) = output.ptr;
-
-                    // Transfer input to sys dof vector
-                    for (0..self.mesh.blocks.len) |block_id| {
-                        DofUtils.copyDofsFromCells(
-                            T.System,
-                            self.mesh,
-                            self.dof_map,
-                            block_id,
-                            self.sys,
-                            input_sys,
-                        );
-                    }
+                pub fn apply(self: *const @This(), out: []f64, in: []const f64) void {
+                    // Cells -> Nodes
+                    self.dofs.transfer(self.grid, self.boundary, self.nodes_, in);
 
                     for (0..self.mesh.blocks.len) |block_id| {
-                        DofUtils.fillBoundary(
-                            self.mesh,
-                            self.dof_map,
-                            block_id,
-                            DofUtils.operSystemBoundary(self.oper),
-                            self.sys,
-                        );
+                        self.dofs.applyCells(self.grid, block_id, self.operator, out, self.nodes_);
                     }
 
-                    for (0..self.mesh.blocks.len) |block_id| {
-                        DofUtils.apply(
-                            self.mesh,
-                            self.dof_map,
-                            block_id,
-                            self.oper,
-                            output_sys,
-                            self.sys.toConst(),
-                            self.ctx.toConst(),
-                        );
-                    }
+                    for (0..self.mesh.blocks.len) |rev_block_id| {
+                        const block_id = self.mesh.blocks.len - 1 - rev_block_id;
 
-                    for (0..self.mesh.blocks.len) |reverse_block_id| {
-                        const block_id = self.mesh.blocks.len - 1 - reverse_block_id;
-                        DofUtils.copyDofsFromCells(
-                            T.System,
-                            self.mesh,
-                            self.dof_map,
-                            block_id,
-                            self.sys,
-                            output_sys.toConst(),
-                        );
-
-                        DofUtils.restrict(
-                            T.System,
-                            self.mesh,
-                            self.dof_map,
-                            block_id,
-                            self.sys,
-                        );
-
-                        DofUtils.copyCellsFromDofs(
-                            T.System,
-                            self.mesh,
-                            self.dof_map,
-                            block_id,
-                            output_sys,
-                            self.sys.toConst(),
-                        );
+                        self.dofs.restrictCells(self.grid, block_id, out);
                     }
                 }
 

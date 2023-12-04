@@ -13,14 +13,16 @@
 //! individual cells, slices of the systems in a SoA storage, ect.
 
 const std = @import("std");
+const Allocator = std.mem.Allocator;
+const assert = std.debug.assert;
 
-pub fn System(comptime Tag: type, comptime Payload: type) type {
-    if (comptime !isSystemTag(Tag)) {
-        @compileError("Tag must satisfy isSystemTag trait.");
-    }
+// pub fn System(comptime Tag: type, comptime Payload: type) type {
+//     if (comptime !isSystemTag(Tag)) {
+//         @compileError("Tag must satisfy isSystemTag trait.");
+//     }
 
-    return std.enums.EnumFieldStruct(Tag, Payload, null);
-}
+//     return std.enums.EnumFieldStruct(Tag, Payload, null);
+// }
 
 pub fn isSystemTag(comptime T: type) bool {
     switch (@typeInfo(T)) {
@@ -34,12 +36,108 @@ pub fn isSystemTag(comptime T: type) bool {
     }
 }
 
-pub fn SystemSlice(comptime Tag: type) type {
-    return System(Tag, []f64);
+fn SystemImpl(comptime Tag: type, comptime is_const: bool) type {
+    const ManyItemPtr: type = if (is_const) [*]const f64 else [*]f64;
+    const Slice: type = if (is_const) []const f64 else []f64;
+    const Slices = std.enums.EnumFieldStruct(Tag, Slice, null);
+    const Ptrs = std.enums.EnumFieldStruct(Tag, ManyItemPtr, null);
+
+    const fields = std.meta.fieldNames(Tag);
+
+    return struct {
+        len: usize,
+        ptrs: Ptrs,
+
+        pub fn init(allocator: Allocator, len: usize) !@This() {
+            var slices: Slices = undefined;
+
+            inline for (fields) |name| {
+                @field(slices, name) = &.{};
+            }
+
+            errdefer {
+                inline for (fields) |name| {
+                    allocator.free(@field(slices, name));
+                }
+            }
+
+            inline for (fields) |name| {
+                @field(slices, name) = try allocator.alloc(f64, len);
+            }
+
+            return view(len, slices);
+        }
+
+        pub fn deinit(self: @This(), allocator: Allocator) void {
+            inline for (fields) |name| {
+                var slice_to_free: Slice = undefined;
+                slice_to_free.len = self.len;
+                slice_to_free.ptr = @field(self.ptrs, name);
+
+                allocator.free(slice_to_free);
+            }
+        }
+
+        pub fn view(len: usize, slices: Slices) @This() {
+            var ptrs: Ptrs = undefined;
+
+            inline for (fields) |name| {
+                assert(@field(slices, name).len == len);
+                @field(ptrs, name) = @field(slices, name).ptr;
+            }
+
+            return .{
+                .len = len,
+                .ptrs = ptrs,
+            };
+        }
+
+        pub fn field(self: @This(), comptime sys: Tag) Slice {
+            const ptr = @field(self.ptrs, @tagName(sys));
+
+            var result: Slice = undefined;
+            result.len = self.len;
+            result.ptr = ptr;
+
+            return result;
+        }
+
+        pub fn slice(self: @This(), offset: usize, total: usize) @This() {
+            assert(self.len >= offset + total);
+
+            var ptrs: Ptrs = undefined;
+
+            inline for (fields) |name| {
+                const src = @field(self.ptrs, name);
+
+                @field(ptrs, name) = @ptrFromInt(@intFromPtr(src) + offset * @sizeOf(f64));
+            }
+
+            return .{
+                .len = total,
+                .ptrs = ptrs,
+            };
+        }
+
+        pub fn toConst(self: @This()) SystemImpl(Tag, true) {
+            var result: SystemImpl(Tag, true) = undefined;
+            result.len = self.len;
+
+            inline for (fields) |name| {
+                @field(result.ptrs, name) = @field(self.ptrs, name);
+            }
+
+            return result;
+        }
+    };
 }
 
-pub fn SystemSliceConst(comptime Tag: type) type {
-    return System(Tag, []const f64);
+pub fn System(comptime Tag: type) type {
+    return SystemImpl(Tag, false);
+}
+
+pub fn SystemConst(comptime Tag: type) type {
+    return SystemImpl(Tag, true);
 }
 
 test "system trait" {

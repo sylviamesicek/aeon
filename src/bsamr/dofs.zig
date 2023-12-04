@@ -54,6 +54,8 @@ pub fn DofManager(comptime N: usize, comptime M: usize) type {
         const toUnsigned = IndexMixin.toUnsigned;
         const toSigned = IndexMixin.toSigned;
 
+        const Engine = mesh.Engine(N, M);
+
         const Mesh = mesh_.Mesh(N);
 
         const NodeSpace = nodes.NodeSpace(N, M);
@@ -107,6 +109,29 @@ pub fn DofManager(comptime N: usize, comptime M: usize) type {
                 return null;
             } else {
                 return res;
+            }
+        }
+
+        // *******************************
+        // Transfer **********************
+        // *******************************
+
+        pub fn transfer(
+            self: Self,
+            grid: *const Mesh,
+            boundary: anytype,
+            dest: []f64,
+            src: []f64,
+        ) void {
+            assert(dest.len == self.numNodes());
+            assert(src.len == self.numCells());
+
+            for (0..grid.blocks.len) |block_id| {
+                self.copyNodesFromCells(grid, block_id, dest, src);
+            }
+
+            for (0..grid.blocks.len) |block_id| {
+                self.fillBoundary(grid, block_id, boundary, dest);
             }
         }
 
@@ -274,6 +299,87 @@ pub fn DofManager(comptime N: usize, comptime M: usize) type {
         }
 
         // *************************
+        // Copy ********************
+        // *************************
+
+        // Fills interior nodes of the given block using cell data.
+        pub fn copyNodesFromCells(
+            self: Self,
+            grid: *const Mesh,
+            block_id: usize,
+            dest: []f64,
+            src: []const f64,
+        ) void {
+            assert(dest.len == self.numNodes());
+            assert(src.len == self.numCells());
+
+            const block_dest: []const f64 = self.node_map.slice(block_id, dest);
+            const block_src: []f64 = self.cell_map.slice(block_id, dest);
+
+            const node_space = NodeSpace.fromCellSize(grid.blockCellSize(block_id));
+
+            var cells = node_space.cellSpace().cartesianIndices();
+            var linear: usize = 0;
+
+            while (cells.next()) |cell| : (linear += 1) {
+                node_space.setValue(cell, block_dest, block_src[linear]);
+            }
+        }
+
+        pub fn copyCellsFromNodes(
+            self: Self,
+            grid: *const Mesh,
+            block_id: usize,
+            dest: []f64,
+            src: []const f64,
+        ) void {
+            assert(dest.len == self.numCells());
+            assert(src.len == self.numNodes());
+
+            const block_dest: []const f64 = self.cell_map.slice(block_id, dest);
+            const block_src: []f64 = self.node_map.slice(block_id, dest);
+
+            const node_space = NodeSpace.fromCellSize(grid.blockCellSize(block_id));
+
+            var cells = node_space.cellSpace().cartesianIndices();
+            var linear: usize = 0;
+
+            while (cells.next()) |cell| : (linear += 1) {
+                block_dest[linear] = node_space.value(cell, block_src);
+            }
+        }
+
+        pub fn copyCells(
+            self: Self,
+            block_id: usize,
+            dest: []f64,
+            src: []const f64,
+        ) void {
+            assert(dest.len == self.numCells());
+            assert(src.len == self.numCells());
+
+            const block_dest: []const f64 = self.cell_map.slice(block_id, dest);
+            const block_src: []f64 = self.cell_map.slice(block_id, dest);
+
+            @memcpy(block_dest, block_src);
+        }
+
+        pub fn copyNodes(
+            self: Self,
+            block_id: usize,
+            dest: []f64,
+            src: []const f64,
+        ) void {
+            assert(dest.len == self.numNodes());
+            assert(src.len == self.numNodes());
+
+            const block_dest: []const f64 = self.node_map.slice(block_id, dest);
+            const block_src: []f64 = self.node_map.slice(block_id, dest);
+
+            @memcpy(block_dest, block_src);
+        }
+
+        // *************************
         // Restrict / Prolong ******
         // *************************
 
@@ -411,6 +517,53 @@ pub fn DofManager(comptime N: usize, comptime M: usize) type {
                     const v = node_space.restrict(super_cell, block_field);
                     coarse_node_space.setValue(coarse_cell, coarse_block_field, v);
                 }
+            }
+        }
+
+        // ******************************
+        // Operator *********************
+        // ******************************
+
+        pub fn applyCells(
+            self: @This(),
+            grid: *const Mesh,
+            block_id: usize,
+            operator: anytype,
+            dest: []f64,
+            src: []const f64,
+        ) void {
+            const Op = @TypeOf(operator);
+
+            if (comptime !mesh.isOperator(N, M)(Op)) {
+                @compileError("Operator must satisfy isOperator trait.");
+            }
+
+            assert(dest.len == self.numCells());
+            assert(src.len == self.numNodes());
+
+            const block_dest: []const f64 = self.cell_map.slice(block_id, dest);
+            const block_src: []const f64 = self.node_map.slice(block_id, src);
+
+            const node_space = NodeSpace.fromCellSize(grid.blockCellSize(block_id));
+
+            const offset = self.node_map.offset(block_id);
+            const total = self.node_map.total(block_id);
+
+            const bounds = grid.blocks[block_id].bounds;
+
+            var cells = node_space.cellSpace().cartesianIndices();
+            var linear: usize = 0;
+
+            while (cells.next()) |cell| : (linear += 1) {
+                const engine: Engine = .{
+                    .bounds = bounds,
+                    .space = node_space,
+                    .offset = offset,
+                    .total = total,
+                    .cell = cell,
+                };
+
+                block_dest[linear] = operator.apply(engine, block_src);
             }
         }
 

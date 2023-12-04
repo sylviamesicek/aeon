@@ -5,6 +5,7 @@ pub const bsamr = @import("bsamr/bsamr.zig");
 pub const geometry = @import("geometry/geometry.zig");
 pub const lac = @import("lac/lac.zig");
 pub const mesh = @import("mesh/mesh.zig");
+pub const methods = @import("methods/methods.zig");
 pub const nodes = @import("nodes/nodes.zig");
 
 // Global exports.

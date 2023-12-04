@@ -4,9 +4,16 @@ const std = @import("std");
 
 // Submodules
 
+const linear = @import("linear.zig");
+const rk4 = @import("rk4.zig");
 const system = @import("system.zig");
 
+pub const LinearMapMethod = linear.LinearMapMethod;
+
+pub const RungeKutta4Integrator = rk4.RungeKutta4Integrator;
+
 pub const System = system.System;
+pub const SystemConst = system.SystemConst;
 pub const isSystemTag = system.isSystemTag;
 
 // ************************************
@@ -20,7 +27,7 @@ pub fn isTemporalDerivative(comptime T: type) bool {
         return false;
     }
 
-    if (comptime !(hasFn("derivative")(T) and @TypeOf(T.derivative) == fn (T, System([]f64, T.Tag), System([]const f64, T.Tag), f64) void)) {
+    if (comptime !(hasFn("derivative")(T) and @TypeOf(T.derivative) == fn (T, System(T.Tag), SystemConst(T.Tag), f64) void)) {
         return false;
     }
 
