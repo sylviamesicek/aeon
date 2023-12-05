@@ -43,7 +43,7 @@ pub fn MultigridMethod(comptime N: usize, comptime M: usize, comptime BaseSolver
             operator: anytype,
             boundary: anytype,
             x: []f64,
-            rhs: []const f64,
+            b: []const f64,
         ) !void {
             // Trait bounds
             const Op = @TypeOf(operator);
@@ -59,86 +59,38 @@ pub fn MultigridMethod(comptime N: usize, comptime M: usize, comptime BaseSolver
 
             std.debug.print("Running Multigrid Solver\n", .{});
 
-            const sys_field = comptime std.enums.values(T.System)[0];
+            // Allocates a node vector for storing the system
+            // and cell vectors for the corrected right hand side
+            // and residual.
 
-            // Get total dofs
-            const total_dofs = dof_map.ndofs();
+            const sys = try allocator.alloc(f64, dofs.numNodes());
+            defer allocator.free(sys);
 
-            // Stores the system in a dof vector
-            const sys = try SystemSlice(T.System).init(allocator, total_dofs);
-            defer sys.deinit(allocator);
+            const res = try allocator.alloc(f64, dofs.numCells());
+            defer allocator.free(res);
 
-            for (0..mesh.blocks.len) |block_id| {
-                DofUtils.copyDofsFromCells(
-                    T.System,
-                    mesh,
-                    dof_map,
-                    block_id,
-                    sys,
-                    x.toConst(),
-                );
+            const rhs = try allocator.alloc(f64, dofs.numCells());
+            defer allocator.free(rhs);
+
+            const err = try allocator.alloc(f64, dofs.numNodes());
+            defer allocator.free(err);
+
+            dofs.transfer(grid, boundary, sys, x);
+            dofs.residual(grid, operator, res, sys, rhs);
+            @memcpy(rhs, b);
+
+            // // A scratch cell vector
+            // const scratch_cells = try allocator.alloc(f64, dofs.numNodes());
+            // defer allocator.free(scratch_cells);
+
+            // Use initial right hand side to set tolerance.
+            const irhs = norm(rhs);
+            const tol: f64 = self.tolerance * @fabs(irhs);
+
+            if (irhs <= 1e-60) {
+                @memset(x, 0.0);
+                return;
             }
-
-            for (0..mesh.blocks.len) |block_id| {
-                DofUtils.fillBoundary(
-                    mesh,
-                    dof_map,
-                    block_id,
-                    DofUtils.operSystemBoundary(oper),
-                    sys,
-                );
-            }
-
-            // Stores a copy of the system from the down cycle in order to compute the correction
-            const sys_old = try SystemSlice(T.System).init(allocator, total_dofs);
-            defer sys_old.deinit(allocator);
-
-            // The dof vector context (filled at start of iteration and then immutable);
-            const ctx = try SystemSlice(T.Context).init(allocator, total_dofs);
-            defer ctx.deinit(allocator);
-
-            for (0..mesh.blocks.len) |block_id| {
-                DofUtils.copyDofsFromCells(T.Context, mesh, dof_map, block_id, ctx, context.toConst());
-            }
-
-            for (0..mesh.blocks.len) |block_id| {
-                DofUtils.fillBoundary(
-                    mesh,
-                    dof_map,
-                    block_id,
-                    DofUtils.operContextBoundary(oper),
-                    ctx,
-                );
-            }
-
-            // Stores the right hand side of the equations
-            const rhs = try SystemSlice(T.System).init(allocator, mesh.cell_total);
-            defer rhs.deinit(allocator);
-
-            for (0..mesh.blocks.len) |block_id| {
-                DofUtils.copyCells(T.System, mesh, block_id, rhs, b);
-            }
-
-            // Stores the residual (i.e. b - Ax).
-            const res = try SystemSlice(T.System).init(allocator, mesh.cell_total);
-            defer res.deinit(allocator);
-
-            for (0..mesh.blocks.len) |block_id| {
-                DofUtils.residual(
-                    mesh,
-                    dof_map,
-                    block_id,
-                    oper,
-                    res,
-                    rhs.toConst(),
-                    sys.toConst(),
-                    ctx.toConst(),
-                );
-            }
-
-            // Use initial residual to set tolerance.
-            const ires: f64 = norm(res.field(sys_field));
-            const tol: f64 = self.tolerance * @fabs(ires);
 
             std.debug.print("Multigrid Tolerance {}\n", .{tol});
 
@@ -147,6 +99,7 @@ pub fn MultigridMethod(comptime N: usize, comptime M: usize, comptime BaseSolver
             defer arena.deinit();
 
             const scratch: Allocator = arena.allocator();
+            _ = scratch;
 
             // Run iterations
             var iteration: usize = 0;
@@ -154,400 +107,228 @@ pub fn MultigridMethod(comptime N: usize, comptime M: usize, comptime BaseSolver
             while (iteration < self.max_iters) : (iteration += 1) {
                 defer _ = arena.reset(.retain_capacity);
 
-                // Recurse down the mesh to the base level
-                for (1..mesh.levels.len) |reverse_level| {
-                    const level_id: usize = mesh.levels.len - reverse_level;
-                    const level = mesh.levels[level_id];
-                    const coarse = mesh.levels[level_id - 1];
+                // const res_norm = norm(res.field(sys_field));
+
+                // std.debug.print("Multigrid Iteration: {}, Residual: {}\n", .{ iteration, res_norm });
+
+                // {
+                //     const DebugOutput = enum {
+                //         sys,
+                //         rhs,
+                //         res,
+                //     };
+
+                //     const file_name = try std.fmt.allocPrint(allocator, "output/multigrid_iteration_{}.vtu", .{iteration});
+                //     defer allocator.free(file_name);
+
+                //     const file = try std.fs.cwd().createFile(file_name, .{});
+                //     defer file.close();
+
+                //     const debug_output = SystemSliceConst(DebugOutput).view(mesh.cell_total, .{
+                //         .sys = x.field(sys_field),
+                //         .rhs = rhs.field(sys_field),
+                //         .res = res.field(sys_field),
+                //     });
+
+                //     try DataOut.writeVtk(DebugOutput, allocator, mesh, debug_output, file.writer());
+                // }
+
+                // if (res_norm <= tol) {
+                //     break;
+                // }
+            }
+        }
+
+        fn Worker(comptime Op: type, comptime Bound: type) type {
+            return struct {
+                grid: *const Mesh,
+                dofs: *const DofManager,
+                operator: Op,
+                boundary: Bound,
+                x: []f64,
+                rhs: []f64,
+                res: []f64,
+                rhs: []f64,
+                sys: []f64,
+                old: []f64,
+                err: []f64,
+
+                // Runs a multigrid iteration on the level. This approximates the solution to
+                // A(sys) = rhs on the given level. This leaves sys
+                fn iterate(self: @This(), allocator: Allocator, level_id: usize) void {
+                    // Aliases
+                    const grid = self.grid;
+                    const dofs = self.dofs;
+                    const operator = self.operator;
+                    const boundary = self.boundary;
+                    const x = self.x;
+                    const rhs = self.rhs;
+                    const res = self.res;
+                    const sys = self.sys;
+                    const old = self.old;
+                    const err = self.err;
+
+                    if (level_id == 0) {
+                        // Solve base
+                        dofs.copyBlockCellsFromNodes(grid, 0, x, sys);
+
+                        const cell_total = dofs.cell_map.total(0);
+
+                        const x_base = x[0..cell_total];
+                        const rhs_base = rhs[0..cell_total];
+
+                        // Solve system using the base solver
+                        const base_linear_map: BaseLinearMap(Op, Bound) = .{
+                            .mesh = grid,
+                            .dofs = dofs,
+                            .operator = operator,
+                            .boundary = boundary,
+                            .sys = sys,
+                        };
+
+                        try self.base_solver.solve(allocator, base_linear_map, x_base, rhs_base);
+
+                        // Copy back to system
+                        dofs.copyBlockNodesFromCells(grid, 0, sys, x);
+
+                        return;
+                    }
+
+                    const level = grid.levels[level_id];
+                    const coarse = grid.levels[level_id - 1];
 
                     // Perform presmoothing
                     for (level.block_offset..level.block_offset + level.block_total) |block_id| {
-                        DofUtils.smooth(
-                            mesh,
-                            dof_map,
-                            block_id,
-                            oper,
-                            x,
-                            rhs.toConst(),
-                            sys.toConst(),
-                            ctx.toConst(),
-                        );
-
-                        DofUtils.copyDofsFromCells(
-                            T.System,
-                            mesh,
-                            dof_map,
-                            block_id,
-                            sys,
-                            x.toConst(),
-                        );
+                        dofs.fillBlockBoundary(grid, block_id, boundary, sys);
                     }
 
                     for (level.block_offset..level.block_offset + level.block_total) |block_id| {
-                        // Fill boundaries now that sys has been smoothed
-                        DofUtils.fillBoundary(
-                            mesh,
-                            dof_map,
-                            block_id,
-                            DofUtils.operSystemBoundary(oper),
-                            sys,
-                        );
+                        dofs.smoothBlock(grid, block_id, operator, x, sys, rhs);
+                        dofs.copyBlockNodesFromCells(grid, block_id, sys, x);
+                    }
+
+                    for (level.block_offset..level.block_offset + level.block_total) |block_id| {
+                        dofs.fillBlockBoundary(grid, block_id, boundary, sys);
                     }
 
                     // Restrict data down a level now that we have smoothed everything
                     for (level.block_offset..level.block_offset + level.block_total) |block_id| {
-                        DofUtils.restrict(
-                            T.System,
-                            mesh,
-                            dof_map,
-                            block_id,
-                            sys,
-                        );
+                        dofs.restrictBlock(grid, block_id, sys);
+                    }
+
+                    // // We now have a "guess" for the value of sys of the coarser level, which we will later use to
+                    // // correct sys.
+                    // for (coarse.block_offset..coarse.block_offset + coarse.block_total) |block_id| {
+                    //     dofs.copyBlockNodes(block_id, old_nodes, x_nodes);
+                    // }
+
+                    // Compute corrected rhs
+                    for (level.block_offset..level.block_offset + level.block_total) |block_id| {
+                        dofs.residualBlock(grid, block_id, operator, res, sys, rhs);
+                        dofs.restrictBlockCells(grid, block_id, res);
                     }
 
                     // Fill sys boundary on restricted level
                     for (coarse.block_offset..coarse.block_offset + coarse.block_total) |block_id| {
-                        DofUtils.fillBoundary(
-                            mesh,
-                            dof_map,
-                            block_id,
-                            DofUtils.operSystemBoundary(oper),
-                            sys,
-                        );
+                        dofs.fillBlockBoundary(grid, block_id, boundary, sys);
                     }
 
-                    // We now have a "guess" for the value of sys of the coarser level, which we will later use to
-                    // correct sys.
+                    // Fill right hand side on coarse level
                     for (coarse.block_offset..coarse.block_offset + coarse.block_total) |block_id| {
-                        DofUtils.copyDofs(
-                            T.System,
-                            dof_map,
-                            block_id,
-                            sys_old,
-                            sys.toConst(),
-                        );
+                        dofs.applyBlock(grid, block_id, operator, rhs, sys);
+
+                        for (dofs.cell_map.offset(block_id)..dofs.cell_map.offset(block_id + 1)) |idx| {
+                            rhs[idx] += res[idx];
+                        }
                     }
 
-                    // Compute corrected rhs
-                    for (level.block_offset..level.block_offset + level.block_total) |block_id| {
-                        DofUtils.residual(
-                            mesh,
-                            dof_map,
-                            block_id,
-                            oper,
-                            res,
-                            rhs.toConst(),
-                            sys.toConst(),
-                            ctx.toConst(),
-                        );
-
-                        DofUtils.restrictRhs(
-                            mesh,
-                            dof_map,
-                            block_id,
-                            oper,
-                            rhs,
-                            res.toConst(),
-                            sys.toConst(),
-                            ctx.toConst(),
-                        );
+                    // Cache current coarse solution
+                    for (coarse.block_offset..coarse.block_offset + coarse.block_total) |block_id| {
+                        dofs.copyBlockNodes(block_id, old, sys);
                     }
-                }
 
-                std.debug.print("Solving Level {}\n", .{0});
+                    // Recurse
+                    self.iterate(allocator, level_id - 1);
 
-                // Solve base
-                const base = mesh.blocks[0];
+                    // Fill sys boundaries on coarse level
+                    for (coarse.block_offset..coarse.block_offset + coarse.block_total) |block_id| {
+                        dofs.fillBlockBoundary(grid, block_id, boundary, sys);
+                    }
 
-                DofUtils.copyCellsFromDofs(
-                    T.System,
-                    mesh,
-                    dof_map,
-                    0,
-                    x,
-                    sys.toConst(),
-                );
-
-                const x_field: []f64 = x.field(sys_field)[0..base.cell_total];
-                const rhs_field: []f64 = rhs.field(sys_field)[0..base.cell_total];
-
-                // Solve system using the base solver
-                const base_linear_map: BaseLinearMap(T) = .{
-                    .mesh = mesh,
-                    .dof_map = dof_map,
-                    .oper = oper,
-                    .sys = sys,
-                    .ctx = ctx.toConst(),
-                };
-
-                try self.base_solver.solve(scratch, base_linear_map, x_field, rhs_field);
-
-                // Copy back to sys
-                DofUtils.copyDofsFromCells(
-                    T.System,
-                    mesh,
-                    dof_map,
-                    0,
-                    sys,
-                    x.toConst(),
-                );
-
-                DofUtils.fillBoundary(
-                    mesh,
-                    dof_map,
-                    0,
-                    DofUtils.operSystemBoundary(oper),
-                    sys,
-                );
-
-                {
-                    const DebugOutput = enum {
-                        sys,
-                        rhs,
-                    };
-
-                    const file_name = try std.fmt.allocPrint(allocator, "output/multigrid_base_{}.vtu", .{iteration});
-                    defer allocator.free(file_name);
-
-                    const file = try std.fs.cwd().createFile(file_name, .{});
-                    defer file.close();
-
-                    const debug_output = SystemSliceConst(DebugOutput).view(mesh.cell_total, .{
-                        .sys = x.field(sys_field),
-                        .rhs = rhs.field(sys_field),
-                    });
-
-                    try DataOut.writeVtkLevel(DebugOutput, allocator, mesh, 0, debug_output, file.writer());
-                }
-
-                // Iterate up, adding correction and performing post smoothing.
-                for (1..mesh.levels.len) |level_id| {
-                    const level = mesh.levels[level_id];
-
-                    for (level.block_offset..level.block_offset + level.block_total) |block_id| {
-                        DofUtils.prolongCorrection(
-                            T.System,
-                            mesh,
-                            dof_map,
-                            block_id,
-                            sys,
-                            sys_old.toConst(),
-                        );
+                    // Compute and prolong err
+                    for (coarse.block_offset..coarse.block_offset + coarse.block_total) |block_id| {
+                        for (dofs.node_map.offset(block_id)..dofs.node_map.offset(block_id + 1)) |idx| {
+                            err[idx] = sys[idx] - old[idx];
+                        }
                     }
 
                     for (level.block_offset..level.block_offset + level.block_total) |block_id| {
-                        DofUtils.fillBoundary(
-                            mesh,
-                            dof_map,
-                            block_id,
-                            DofUtils.operSystemBoundary(oper),
-                            sys,
-                        );
+                        dofs.prolongBlock(grid, block_id, err);
+                    }
+
+                    // Correct system
+                    for (level.block_offset..level.block_offset + level.block_total) |block_id| {
+                        for (dofs.node_map.offset(block_id)..dofs.node_map.offset(block_id + 1)) |idx| {
+                            sys[idx] += err[idx];
+                        }
+                    }
+
+                    // Fill new boundaries
+                    for (level.block_offset..level.block_offset + level.block_total) |block_id| {
+                        dofs.fillBlockBoundary(grid, block_id, boundary, sys);
                     }
 
                     // Perform post smoothing
                     for (level.block_offset..level.block_offset + level.block_total) |block_id| {
-                        DofUtils.smooth(
-                            mesh,
-                            dof_map,
-                            block_id,
-                            oper,
-                            x,
-                            rhs.toConst(),
-                            sys.toConst(),
-                            ctx.toConst(),
-                        );
-
-                        DofUtils.copyDofsFromCells(
-                            T.System,
-                            mesh,
-                            dof_map,
-                            block_id,
-                            sys,
-                            x.toConst(),
-                        );
+                        dofs.smoothBlock(grid, block_id, operator, x, sys, rhs);
+                        dofs.copyBlockNodesFromCells(grid, block_id, sys, x);
                     }
-
-                    for (level.block_offset..level.block_offset + level.block_total) |block_id| {
-                        DofUtils.fillBoundary(
-                            mesh,
-                            dof_map,
-                            block_id,
-                            DofUtils.operSystemBoundary(oper),
-                            sys,
-                        );
-                    }
-
-                    // Restrict data down a level now that we have smoothed everything
-                    for (level.block_offset..level.block_offset + level.block_total) |block_id| {
-                        DofUtils.restrict(
-                            T.System,
-                            mesh,
-                            dof_map,
-                            block_id,
-                            sys,
-                        );
-                    }
-
-                    // const file_name = try std.fmt.allocPrint(allocator, "output/multigrid_up_{}.vtu", .{level_id});
-                    // defer allocator.free(file_name);
-
-                    // const file = try std.fs.cwd().createFile(file_name, .{});
-                    // defer file.close();
-
-                    // const debug_output = SystemSliceConst(DebugOutput).view(total_dofs, .{
-                    //     .sol = sys.field(sys_field),
-                    // });
-
-                    // try DofUtils.writeDofsToVtk(DebugOutput, allocator, mesh, level_id, dof_map, debug_output, file.writer());
                 }
-
-                for (0..mesh.blocks.len) |block_id| {
-                    DofUtils.residual(
-                        mesh,
-                        dof_map,
-                        block_id,
-                        oper,
-                        res,
-                        rhs.toConst(),
-                        sys.toConst(),
-                        ctx.toConst(),
-                    );
-                }
-
-                const res_norm = norm(res.field(sys_field));
-
-                std.debug.print("Multigrid Iteration: {}, Residual: {}\n", .{ iteration, res_norm });
-
-                {
-                    const DebugOutput = enum {
-                        sys,
-                        rhs,
-                        res,
-                    };
-
-                    const file_name = try std.fmt.allocPrint(allocator, "output/multigrid_iteration_{}.vtu", .{iteration});
-                    defer allocator.free(file_name);
-
-                    const file = try std.fs.cwd().createFile(file_name, .{});
-                    defer file.close();
-
-                    const debug_output = SystemSliceConst(DebugOutput).view(mesh.cell_total, .{
-                        .sys = x.field(sys_field),
-                        .rhs = rhs.field(sys_field),
-                        .res = res.field(sys_field),
-                    });
-
-                    try DataOut.writeVtk(DebugOutput, allocator, mesh, debug_output, file.writer());
-                }
-
-                if (res_norm <= tol) {
-                    break;
-                }
-            }
-
-            // Copy solution back into x.
-            for (0..mesh.blocks.len) |block_id| {
-                DofUtils.copyCellsFromDofs(
-                    T.System,
-                    mesh,
-                    dof_map,
-                    block_id,
-                    x,
-                    sys.toConst(),
-                );
-            }
+            };
         }
 
-        // fn Worker(comptime T: type) type {
-        //     const sys_field = comptime std.enums.values(T.System)[0];
-
-        //     return struct {
-        //         base_solver: BaseSolver,
-        //         mesh: *const Mesh,
-        //         block_map: []const usize,
-        //         dof_map: DofMap,
-        //         oper: T,
-        //         sys: SystemSlice(T.System),
-        //         ctx: SystemSlice(T.Context),
-        //         rhs: SystemSlice(T.System),
-        //         x: SystemSlice(T.System),
-
-        //         fn cycle(self: *const @This(), level_id: usize) !void {
-        //             if (level_id == 0) {
-        //                 // Solve base
-        //                 const base = self.mesh.blocks[0];
-
-        //                 DofUtils.copyCellsFromDofs(T.System, self.mesh, self.dof_map, 0, self.x, self.sys.toConst());
-
-        //                 const x_field: []f64 = self.x.field(sys_field)[0..base.cell_total];
-        //                 const rhs_field: []f64 = self.rhs.field(sys_field)[0..base.cell_total];
-
-        //                 // Solve system using the base solver
-        //                 const base_linear_map: BaseLinearMap(T) = .{ .mesh = self.mesh, .oper = self.oper, .ctx = self.ctx, .sys = self.sys };
-
-        //                 self.base_solver.solve(base_linear_map, x_field, rhs_field);
-
-        //                 DofUtils.copyDofsFromCells(T.System, self.mesh, self.dof_map, 0, self.sys, self.x.toConst());
-        //                 DofUtils.fillBoundary(self.mesh, self.block_map, self.dof_map, 0, DofUtils.operSystemBoundary(self.oper), self.sys);
-        //             } else {
-
-        //             }
-        //         }
-        //     };
-        // }
-
-        fn BaseLinearMap(comptime T: type) type {
-            const field_name: []const u8 = comptime std.meta.fieldNames(T.System)[0];
-
+        fn BaseLinearMap(comptime Op: type, comptime Bound: type) type {
             return struct {
-                mesh: *const Mesh,
-                dof_map: DofMap,
-                oper: T,
-                sys: SystemSlice(T.System),
-                ctx: SystemSliceConst(T.Context),
+                grid: *const Mesh,
+                dofs: *const DofManager,
+                operator: Op,
+                boundary: Bound,
+                sys: []f64,
 
-                pub fn apply(self: *const @This(), output: []f64, input: []const f64) void {
-                    // Build systems slices which mirror input and output.
-                    var input_sys: SystemSliceConst(T.System) = undefined;
-                    input_sys.len = self.mesh.cell_total; // This is basically just asking for there to be a problem
-                    @field(input_sys.ptrs, field_name) = input.ptr;
+                pub fn apply(self: *const @This(), out: []f64, in: []const f64) void {
+                    var aout: []f64 = out;
+                    var ain: []f64 = in;
 
-                    var output_sys: SystemSlice(T.System) = undefined;
-                    output_sys.len = self.mesh.cell_total;
-                    @field(output_sys.ptrs, field_name) = output.ptr;
+                    aout.len = self.dofs.numCells();
+                    ain.len = self.dofs.numCells();
 
-                    DofUtils.copyDofsFromCells(
-                        T.System,
-                        self.mesh,
-                        self.dof_map,
-                        0,
-                        self.sys,
-                        input_sys,
-                    );
-
-                    DofUtils.fillBoundary(
-                        self.mesh,
-                        self.dof_map,
-                        0,
-                        DofUtils.operSystemBoundary(self.oper),
-                        self.sys,
-                    );
-
-                    DofUtils.apply(
-                        self.mesh,
-                        self.dof_map,
-                        0,
-                        self.oper,
-                        output_sys,
-                        self.sys.toConst(),
-                        self.ctx,
-                    );
+                    // Cells -> Nodes
+                    self.dofs.copyBlockNodesFromCells(self.grid, 0, self.sys, ain);
+                    self.dofs.fillBlockBoundary(self.grid, 0, self.boundary, self.sys);
+                    // (Apply) Nodes => Cells
+                    self.dofs.applyBlock(self.grid, 0, self.operator, aout, self.sys);
                 }
 
-                // pub fn callback(_: *const @This(), iteration: usize, residual: f64, _: []const f64) void {
-                //     std.debug.print("Iteration: {}, Residual: {}\n", .{ iteration, residual });
-                // }
+                // var iterations: usize = 0;
+
+                pub fn callback(_: *const @This(), iteration: usize, residual: f64, _: []const f64) void {
+                    std.debug.print("Iteration: {}, Residual: {}\n", .{ iteration, residual });
+
+                    // const file_name = std.fmt.allocPrint(solver.self.mesh.gpa, "output/elliptic_iteration{}.vtu", .{iterations}) catch {
+                    //     unreachable;
+                    // };
+
+                    // const file = std.fs.cwd().createFile(file_name, .{}) catch {
+                    //     unreachable;
+                    // };
+                    // defer file.close();
+
+                    // DofUtils.writeVtk(solver.self.mesh.gpa, solver.self.mesh, .{ .metric = x }, file.writer()) catch {
+                    //     unreachable;
+                    // };
+
+                    // iterations += 1;
+                }
             };
         }
 

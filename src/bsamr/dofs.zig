@@ -612,6 +612,65 @@ pub fn DofManager(comptime N: usize, comptime M: usize) type {
             }
         }
 
+        pub fn residual(
+            self: *const Self,
+            grid: *const Mesh,
+            operator: anytype,
+            dest: []f64,
+            src: []const f64,
+            rhs: []const f64,
+        ) void {
+            for (0..grid.blocks.len) |block_id| {
+                self.residualBlock(grid, block_id, operator, dest, src, rhs);
+            }
+        }
+
+        pub fn residualBlock(
+            self: *const Self,
+            grid: *const Mesh,
+            block_id: usize,
+            operator: anytype,
+            dest: []f64,
+            src: []const f64,
+            rhs: []const f64,
+        ) void {
+            const Op = @TypeOf(operator);
+
+            if (comptime !mesh.isOperator(N, M)(Op)) {
+                @compileError("Operator must satisfy isOperator trait.");
+            }
+
+            assert(dest.len == self.numCells());
+            assert(src.len == self.numNodes());
+            assert(rhs.len == self.numCells());
+
+            const block_dest: []const f64 = self.cell_map.slice(block_id, dest);
+            const block_src: []const f64 = self.node_map.slice(block_id, src);
+            const block_rhs: []const f64 = self.cell_map.slice(block_id, rhs);
+
+            const node_space = NodeSpace.fromCellSize(grid.blockCellSize(block_id));
+
+            const offset = self.node_map.offset(block_id);
+            const total = self.node_map.total(block_id);
+
+            const bounds = grid.blocks[block_id].bounds;
+
+            var cells = node_space.cellSpace().cartesianIndices();
+            var linear: usize = 0;
+
+            while (cells.next()) |cell| : (linear += 1) {
+                const engine: Engine = .{
+                    .bounds = bounds,
+                    .space = node_space,
+                    .offset = offset,
+                    .total = total,
+                    .cell = cell,
+                };
+
+                block_dest[linear] = block_rhs[linear] - operator.apply(engine, block_src);
+            }
+        }
+
         pub fn smooth(
             self: *const Self,
             grid: *const Mesh,
