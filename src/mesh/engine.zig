@@ -12,6 +12,7 @@ pub fn Engine(comptime N: usize, comptime M: usize) type {
         cell: [N]usize,
         offset: usize,
         total: usize,
+        diag: bool = false,
 
         const NodeSpace = nodes.NodeSpace(N, M);
         const RealBox = geometry.RealBox(N);
@@ -22,11 +23,16 @@ pub fn Engine(comptime N: usize, comptime M: usize) type {
         }
 
         pub fn value(self: @This(), field: []const f64) f64 {
-            return self.space.value(self.cell, field[self.offset .. self.offset + self.total]);
+            if (self.diag) {
+                return 1.0;
+            } else {
+                return self.space.value(self.cell, field[self.offset .. self.offset + self.total]);
+            }
         }
 
         pub fn op(self: @This(), comptime ranks: [N]usize, field: []const usize) f64 {
-            const v = self.space.op(ranks, self.cell, field[self.offset .. self.offset + self.total]);
+            const v = if (self.diag) self.space.opDiagonal(ranks) else self.space.op(ranks, self.cell, field[self.offset .. self.offset + self.total]);
+
             return self.bounds.transformOp(ranks, v);
         }
 

@@ -34,7 +34,7 @@ pub fn LinearMapMethod(comptime N: usize, comptime M: usize, comptime InnerSolve
             self: Self,
             allocator: Allocator,
             grid: *const Mesh,
-            dofs: DofManager,
+            dofs: *const DofManager,
             operator: anytype,
             boundary: anytype,
             x: []f64,
@@ -73,7 +73,7 @@ pub fn LinearMapMethod(comptime N: usize, comptime M: usize, comptime InnerSolve
         fn LinearMap(comptime Op: type, comptime Bound: type) type {
             return struct {
                 grid: *const Mesh,
-                dofs: DofManager,
+                dofs: *const DofManager,
                 operator: Op,
                 boundary: Bound,
                 nodes_: []f64,
@@ -81,16 +81,8 @@ pub fn LinearMapMethod(comptime N: usize, comptime M: usize, comptime InnerSolve
                 pub fn apply(self: *const @This(), out: []f64, in: []const f64) void {
                     // Cells -> Nodes
                     self.dofs.transfer(self.grid, self.boundary, self.nodes_, in);
-
-                    for (0..self.mesh.blocks.len) |block_id| {
-                        self.dofs.applyCells(self.grid, block_id, self.operator, out, self.nodes_);
-                    }
-
-                    for (0..self.mesh.blocks.len) |rev_block_id| {
-                        const block_id = self.mesh.blocks.len - 1 - rev_block_id;
-
-                        self.dofs.restrictCells(self.grid, block_id, out);
-                    }
+                    self.dofs.apply(self.grid, self.operator, out, self.nodes_);
+                    self.dofs.restrictCells(self.grid, out);
                 }
 
                 // var iterations: usize = 0;

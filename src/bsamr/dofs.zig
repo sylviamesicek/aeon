@@ -99,11 +99,11 @@ pub fn DofManager(comptime N: usize, comptime M: usize) type {
             }
         }
 
-        pub fn tileToBlock(self: Self, tile: usize) usize {
+        pub fn tileToBlock(self: *const Self, tile: usize) usize {
             return self.tile_to_block.items[tile];
         }
 
-        pub fn tileToBlockOrNull(self: Self, tile: usize) ?usize {
+        pub fn tileToBlockOrNull(self: *const Self, tile: usize) ?usize {
             const res = self.tile_to_block.items[tile];
             if (res == maxInt(usize)) {
                 return null;
@@ -117,7 +117,7 @@ pub fn DofManager(comptime N: usize, comptime M: usize) type {
         // *******************************
 
         pub fn transfer(
-            self: Self,
+            self: *const Self,
             grid: *const Mesh,
             boundary: anytype,
             dest: []f64,
@@ -131,7 +131,7 @@ pub fn DofManager(comptime N: usize, comptime M: usize) type {
             }
 
             for (0..grid.blocks.len) |block_id| {
-                self.fillBoundary(grid, block_id, boundary, dest);
+                self.fillBlockBoundary(grid, block_id, boundary, dest);
             }
         }
 
@@ -161,8 +161,8 @@ pub fn DofManager(comptime N: usize, comptime M: usize) type {
         }
 
         /// Fills the boundary values of a node vector.
-        pub fn fillBoundary(
-            self: Self,
+        pub fn fillBlockBoundary(
+            self: *const Self,
             grid: *const Mesh,
             block: usize,
             boundary: anytype,
@@ -196,13 +196,13 @@ pub fn DofManager(comptime N: usize, comptime M: usize) type {
                     const node_space = NodeSpace.fromCellSize(bounds.size);
                     node_space.fillBoundaryRegion(region, wrapped, self.node_map.slice(block, field));
                 } else {
-                    self.fillInteriorBoundary(region, grid, block, field);
+                    self.fillBlockIntBoundary(region, grid, block, field);
                 }
             }
         }
 
-        fn fillInteriorBoundary(
-            self: Self,
+        fn fillBlockIntBoundary(
+            self: *const Self,
             comptime region: Region,
             grid: *const Mesh,
             block_id: usize,
@@ -302,9 +302,31 @@ pub fn DofManager(comptime N: usize, comptime M: usize) type {
         // Copy ********************
         // *************************
 
-        // Fills interior nodes of the given block using cell data.
         pub fn copyNodesFromCells(
-            self: Self,
+            self: *const Self,
+            grid: *const Mesh,
+            dest: []f64,
+            src: []const f64,
+        ) void {
+            for (0..grid.blocks.len) |block_id| {
+                self.copyBlockNodesFromCells(grid, block_id, dest, src);
+            }
+        }
+
+        pub fn copyCellsFromNodes(
+            self: *const Self,
+            grid: *const Mesh,
+            dest: []f64,
+            src: []const f64,
+        ) void {
+            for (0..grid.blocks.len) |block_id| {
+                self.copyBlockCellsFromNodes(grid, block_id, dest, src);
+            }
+        }
+
+        // Fills interior nodes of the given block using cell data.
+        pub fn copyBlockNodesFromCells(
+            self: *const Self,
             grid: *const Mesh,
             block_id: usize,
             dest: []f64,
@@ -326,8 +348,8 @@ pub fn DofManager(comptime N: usize, comptime M: usize) type {
             }
         }
 
-        pub fn copyCellsFromNodes(
-            self: Self,
+        pub fn copyBlockCellsFromNodes(
+            self: *const Self,
             grid: *const Mesh,
             block_id: usize,
             dest: []f64,
@@ -349,8 +371,8 @@ pub fn DofManager(comptime N: usize, comptime M: usize) type {
             }
         }
 
-        pub fn copyCells(
-            self: Self,
+        pub fn copyBlockCells(
+            self: *const Self,
             block_id: usize,
             dest: []f64,
             src: []const f64,
@@ -364,8 +386,8 @@ pub fn DofManager(comptime N: usize, comptime M: usize) type {
             @memcpy(block_dest, block_src);
         }
 
-        pub fn copyNodes(
-            self: Self,
+        pub fn copyBlockNodes(
+            self: *const Self,
             block_id: usize,
             dest: []f64,
             src: []const f64,
@@ -384,8 +406,8 @@ pub fn DofManager(comptime N: usize, comptime M: usize) type {
         // *************************
 
         /// Given a node vector with correct boundary node at the given block, restrict the data to all underlying dofs.
-        pub fn restrict(
-            self: Self,
+        pub fn restrictBlock(
+            self: *const Self,
             grid: *const Mesh,
             block_id: usize,
             field: []f64,
@@ -430,8 +452,8 @@ pub fn DofManager(comptime N: usize, comptime M: usize) type {
         }
 
         /// Given a global node vector with correct boundary nodes on the lower level, prolong the data from all underlying dofs.
-        pub fn prolong(
-            self: Self,
+        pub fn prolongBlock(
+            self: *const Self,
             grid: *const Mesh,
             block_id: usize,
             field: []f64,
@@ -474,9 +496,20 @@ pub fn DofManager(comptime N: usize, comptime M: usize) type {
             }
         }
 
-        /// Given a cell vector restrict the data to all underlying cells using linear interpolation.
         pub fn restrictCells(
-            self: Self,
+            self: *const Self,
+            grid: *const Mesh,
+            field: []f64,
+        ) void {
+            for (0..grid.blocks.len) |rev_block_id| {
+                const block_id = grid.blocks.len - 1 - rev_block_id;
+                self.restrictBlockCells(grid, block_id, field);
+            }
+        }
+
+        /// Given a cell vector restrict the data to all underlying cells using linear interpolation.
+        pub fn restrictBlockCells(
+            self: *const Self,
             grid: *const Mesh,
             block_id: usize,
             field: []f64,
@@ -524,8 +557,20 @@ pub fn DofManager(comptime N: usize, comptime M: usize) type {
         // Operator *********************
         // ******************************
 
-        pub fn applyCells(
-            self: @This(),
+        pub fn apply(
+            self: *const Self,
+            grid: *const Mesh,
+            operator: anytype,
+            dest: []f64,
+            src: []const f64,
+        ) void {
+            for (0..grid.blocks.len) |block_id| {
+                self.applyBlock(grid, block_id, operator, dest, src);
+            }
+        }
+
+        pub fn applyBlock(
+            self: *const Self,
             grid: *const Mesh,
             block_id: usize,
             operator: anytype,
@@ -567,13 +612,80 @@ pub fn DofManager(comptime N: usize, comptime M: usize) type {
             }
         }
 
+        pub fn smooth(
+            self: *const Self,
+            grid: *const Mesh,
+            operator: anytype,
+            dest: []f64,
+            src: []const f64,
+            rhs: []const f64,
+        ) void {
+            for (0..grid.blocks.len) |block_id| {
+                self.smoothBlock(grid, block_id, operator, dest, src, rhs);
+            }
+        }
+
+        pub fn smoothBlock(
+            self: *const Self,
+            grid: *const Mesh,
+            block_id: usize,
+            operator: anytype,
+            dest: []f64,
+            src: []const f64,
+            rhs: []const f64,
+        ) void {
+            assert(dest.len == self.numCells());
+            assert(src.len == self.numNodes());
+            assert(rhs.len == self.numCells());
+
+            const block_dest: []const f64 = self.cell_map.slice(block_id, dest);
+            const block_src: []const f64 = self.node_map.slice(block_id, src);
+            const block_rhs: []const f64 = self.cell_map.slice(block_id, rhs);
+
+            const node_space = NodeSpace.fromCellSize(grid.blockCellSize(block_id));
+
+            const offset = self.node_map.offset(block_id);
+            const total = self.node_map.total(block_id);
+
+            const bounds = grid.blocks[block_id].bounds;
+
+            var cells = node_space.cellSpace().cartesianIndices();
+            var linear: usize = 0;
+
+            while (cells.next()) |cell| : (linear += 1) {
+                const engine: Engine = .{
+                    .bounds = bounds,
+                    .space = node_space,
+                    .offset = offset,
+                    .total = total,
+                    .cell = cell,
+                };
+
+                const val = node_space.value(cell, block_src);
+                const app = operator.apply(engine, block_src);
+
+                const engine_diag: Engine = .{
+                    .bounds = bounds,
+                    .space = node_space,
+                    .offset = offset,
+                    .total = total,
+                    .cell = cell,
+                    .diag = true,
+                };
+
+                const diag = operator.apply(engine_diag, block_src);
+
+                block_dest[linear] = val + (block_rhs[linear] - app) / diag;
+            }
+        }
+
         // ******************************
         // Helpers **********************
         // ******************************
 
         /// Finds the coarse block underlying the given tile in the given refined block. Returns `maxInt(usize)` if
         /// no such coarse block exists.
-        pub fn underlyingBlock(self: Self, grid: *const Mesh, block_id: usize, tile: [N]usize) usize {
+        pub fn underlyingBlock(self: *const Self, grid: *const Mesh, block_id: usize, tile: [N]usize) usize {
             const block = grid.blocks[block_id];
             const patch = grid.patches[block.patch];
             const coarse_patch = mesh.grid[
@@ -593,15 +705,15 @@ pub fn DofManager(comptime N: usize, comptime M: usize) type {
         // Aliases ***********************
         // *******************************
 
-        pub fn numCells(self: Self) usize {
+        pub fn numCells(self: *const Self) usize {
             return self.cell_map.numCells();
         }
 
-        pub fn numNodes(self: Self) usize {
+        pub fn numNodes(self: *const Self) usize {
             return self.node_map.numNodes();
         }
 
-        pub fn numTiles(self: Self) usize {
+        pub fn numTiles(self: *const Self) usize {
             return self.tile_map.numTiles();
         }
     };

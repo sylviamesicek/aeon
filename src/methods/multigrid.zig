@@ -3,16 +3,15 @@ const Allocator = std.mem.Allocator;
 const ArenaAllocator = std.heap.ArenaAllocator;
 
 const basis = @import("../basis/basis.zig");
-const dofs = @import("../dofs/dofs.zig");
-const lac = @import("../lac/lac.zig");
-const io = @import("../io/io.zig");
-const system = @import("../system.zig");
-const meshes = @import("../mesh/mesh.zig");
+const bsamr = @import("../bsamr/bsamr.zig");
 const geometry = @import("../geometry/geometry.zig");
+const lac = @import("../lac/lac.zig");
+const mesh = @import("../mesh/mesh.zig");
+const nodes = @import("../nodes/nodes.zig");
 
 /// A multigrid based elliptic solver which uses the given base solver to approximate the solution
 /// on the lowest level of the mesh.
-pub fn MultigridMethod(comptime N: usize, comptime O: usize, comptime BaseSolver: type) type {
+pub fn MultigridMethod(comptime N: usize, comptime M: usize, comptime BaseSolver: type) type {
     if (comptime !lac.isLinearSolver(BaseSolver)) {
         @compileError("Base solver must satisfy the a linear solver requirement.");
     }
@@ -23,16 +22,10 @@ pub fn MultigridMethod(comptime N: usize, comptime O: usize, comptime BaseSolver
         tolerance: f64,
 
         const Self = @This();
-        const Mesh = meshes.Mesh(N);
-        const DataOut = io.DataOut(N);
-        const DofMap = dofs.DofMap(N, O);
-        const DofUtils = dofs.DofUtils(N, O);
-        const BoundaryUtils = dofs.BoundaryUtils(N, O);
+        const Mesh = bsamr.Mesh(N);
+        const DofManager = bsamr.DofManager(N, M);
         const IndexSpace = geometry.IndexSpace(N);
-        const Index = geometry.Index(N);
-        const StencilSpace = basis.StencilSpace(N, O);
-        const SystemSlice = system.SystemSlice;
-        const SystemSliceConst = system.SystemSliceConst;
+        const IndexMixin = geometry.IndexMixin(N);
 
         pub fn new(max_iters: usize, tolerance: f64, base_solver: BaseSolver) Self {
             return .{
@@ -43,25 +36,25 @@ pub fn MultigridMethod(comptime N: usize, comptime O: usize, comptime BaseSolver
         }
 
         pub fn solve(
-            self: *Self,
+            self: Self,
             allocator: Allocator,
-            mesh: *const Mesh,
-            dof_map: DofMap,
-            oper: anytype,
-            x: SystemSlice(@TypeOf(oper).System),
-            context: SystemSliceConst(@TypeOf(oper).Context),
-            b: SystemSliceConst(@TypeOf(oper).System),
+            grid: *const Mesh,
+            dofs: *const DofManager,
+            operator: anytype,
+            boundary: anytype,
+            x: []f64,
+            rhs: []const f64,
         ) !void {
-            // Alias
-            const T = @TypeOf(oper);
+            // Trait bounds
+            const Op = @TypeOf(operator);
+            const Bound = @TypeOf(boundary);
 
-            // Check trait constraints
-            if (comptime !(dofs.isSystemOperator(N, O)(T))) {
-                @compileError("Oper must satisfy isMeshOperator traits.");
+            if (comptime !(mesh.isOperator(N, M)(Op))) {
+                @compileError("operator must satisfy isOperator trait.");
             }
 
-            if (comptime std.meta.fields(T.System).len != 1) {
-                @compileError("The multigrid solver only supports systems with 1 field currently.");
+            if (comptime !(nodes.isBoundary(N)(Bound))) {
+                @compileError("boundary must satisfy isBoundary trait.");
             }
 
             std.debug.print("Running Multigrid Solver\n", .{});
