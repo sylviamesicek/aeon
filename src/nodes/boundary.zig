@@ -46,11 +46,11 @@ pub fn isBoundary(comptime N: usize) fn (comptime T: type) bool {
 
     const Closure = struct {
         fn trait(comptime T: type) bool {
-            if (!(hasFn("kind") and @TypeOf(T.kind) == fn (usize) BoundaryKind)) {
+            if (!(hasFn("kind")(T) and @TypeOf(T.kind) == fn (FaceIndex) BoundaryKind)) {
                 return false;
             }
 
-            if (!(hasFn("robin") and @TypeOf(T.robin) == fn (T, [N]f64, FaceIndex) Robin)) {
+            if (!(hasFn("robin")(T) and @TypeOf(T.robin) == fn (T, [N]f64, FaceIndex) Robin)) {
                 return false;
             }
 

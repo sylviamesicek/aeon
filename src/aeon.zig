@@ -8,7 +8,10 @@ pub const mesh = @import("mesh/mesh.zig");
 pub const methods = @import("methods/methods.zig");
 pub const nodes = @import("nodes/nodes.zig");
 
-// Global exports.
+// Global exports
+const io = @import("io/io.zig");
+
+pub const DataOut = io.DataOut;
 
 // Propogate testing
 
@@ -16,6 +19,7 @@ test {
     _ = basis;
     _ = bsamr;
     _ = geometry;
+    _ = io;
     _ = mesh;
     _ = nodes;
     _ = lac;

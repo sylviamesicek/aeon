@@ -79,12 +79,12 @@ pub fn DofManager(comptime N: usize, comptime M: usize) type {
             self.tile_to_block.deinit(self.gpa);
         }
 
-        pub fn build(self: *Self, grid: Mesh) !void {
+        pub fn build(self: *Self, grid: *const Mesh) !void {
             try grid.buildCellMap(&self.cell_map);
             try grid.buildTileMap(&self.tile_map);
             try grid.buildNodeMap(M, &self.node_map);
 
-            try self.tile_to_block.resize(self.tile_map.numTiles());
+            try self.tile_to_block.resize(self.gpa, self.tile_map.numTiles());
 
             @memset(self.tile_to_block.items, maxInt(usize));
 
@@ -93,7 +93,7 @@ pub fn DofManager(comptime N: usize, comptime M: usize) type {
                 const patch = grid.patches[patch_id];
 
                 for (patch.block_offset..patch.block_total + patch.block_offset) |block_id| {
-                    const block = self.blocks[block_id];
+                    const block = grid.blocks[block_id];
                     IndexSpace.fromBox(patch.bounds).fillWindow(block.bounds.relativeTo(patch.bounds), usize, tile_to_block, block_id);
                 }
             }
@@ -127,7 +127,7 @@ pub fn DofManager(comptime N: usize, comptime M: usize) type {
             assert(src.len == self.numCells());
 
             for (0..grid.blocks.len) |block_id| {
-                self.copyNodesFromCells(grid, block_id, dest, src);
+                self.copyBlockNodesFromCells(grid, block_id, dest, src);
             }
 
             for (0..grid.blocks.len) |block_id| {
@@ -147,8 +147,8 @@ pub fn DofManager(comptime N: usize, comptime M: usize) type {
                 inner: T,
                 bounds: RealBox,
 
-                pub fn kind(axis: usize) BoundaryKind {
-                    return T.kind(axis);
+                pub fn kind(face: FaceIndex) BoundaryKind {
+                    return T.kind(face);
                 }
 
                 pub fn robin(self: @This(), pos: [N]f64, face: FaceIndex) Robin {
@@ -172,7 +172,7 @@ pub fn DofManager(comptime N: usize, comptime M: usize) type {
 
             const level = grid.blockLevel(block);
             const bounds = grid.blocks[block].bounds;
-            const tile_size = grid.levels[level].tile_size;
+            const tile_size: [N]usize = grid.levels[level].tile_size;
 
             const regions = comptime Region.orderedRegions();
 
@@ -193,7 +193,7 @@ pub fn DofManager(comptime N: usize, comptime M: usize) type {
                         .bounds = grid.blockPhysicalBounds(block),
                     };
 
-                    const node_space = NodeSpace.fromCellSize(bounds.size);
+                    const node_space = NodeSpace.fromCellSize(grid.blockCellSize(block));
                     node_space.fillBoundaryRegion(region, wrapped, self.node_map.slice(block, field));
                 } else {
                     self.fillBlockIntBoundary(region, grid, block, field);
@@ -208,11 +208,11 @@ pub fn DofManager(comptime N: usize, comptime M: usize) type {
             block_id: usize,
             field: []f64,
         ) void {
-            const extent_dir: [N]isize = region.extentDir();
+            const extent_dir: [N]isize = comptime region.extentDir();
 
             const block = grid.blocks[block_id];
             const block_node_space = NodeSpace.fromCellSize(grid.blockCellSize(block_id));
-            const block_field: []usize = self.node_map.slice(block_id, field);
+            const block_field: []f64 = self.node_map.slice(block_id, field);
 
             const patch = grid.patches[block.patch];
             const patch_space = IndexSpace.fromBox(patch.bounds);
@@ -262,7 +262,7 @@ pub fn DofManager(comptime N: usize, comptime M: usize) type {
 
                     const coarse_block_id = coarse_patch_block_map[coarse_patch_space.linearFromCartesian(coarsened(coarse_tile))];
                     const coarse_block_node_space = NodeSpace.fromCellSize(grid.blockCellSize(coarse_block_id));
-                    const coarse_block_field: []const usize = self.node_map.slice(coarse_block_id, field);
+                    const coarse_block_field: []const f64 = self.node_map.slice(coarse_block_id, field);
 
                     // Cell origin in coarse subcell patch space
                     const coarse_neighbor_origin: [N]usize = scaled(coarse_tile, grid.tile_width);
@@ -283,7 +283,7 @@ pub fn DofManager(comptime N: usize, comptime M: usize) type {
                     const neighbor_t = neighbor_relative_bounds.localFromGlobal(tile);
                     const neighbor_node_space = NodeSpace.fromCellSize(grid.blockCellSize(neighbor_id));
                     const neighbor_origin = scaled(neighbor_t, grid.tile_width);
-                    const neighbor_field: []const usize = self.node_map.slice(neighbor_id, field);
+                    const neighbor_field: []const f64 = self.node_map.slice(neighbor_id, field);
 
                     var indices = region.nodes(M, splat(grid.tile_width));
 
@@ -335,8 +335,8 @@ pub fn DofManager(comptime N: usize, comptime M: usize) type {
             assert(dest.len == self.numNodes());
             assert(src.len == self.numCells());
 
-            const block_dest: []const f64 = self.node_map.slice(block_id, dest);
-            const block_src: []f64 = self.cell_map.slice(block_id, dest);
+            const block_dest: []f64 = self.node_map.slice(block_id, dest);
+            const block_src: []const f64 = self.cell_map.slice(block_id, src);
 
             const node_space = NodeSpace.fromCellSize(grid.blockCellSize(block_id));
 
@@ -358,8 +358,8 @@ pub fn DofManager(comptime N: usize, comptime M: usize) type {
             assert(dest.len == self.numCells());
             assert(src.len == self.numNodes());
 
-            const block_dest: []const f64 = self.cell_map.slice(block_id, dest);
-            const block_src: []f64 = self.node_map.slice(block_id, dest);
+            const block_dest: []f64 = self.cell_map.slice(block_id, dest);
+            const block_src: []const f64 = self.node_map.slice(block_id, src);
 
             const node_space = NodeSpace.fromCellSize(grid.blockCellSize(block_id));
 
@@ -380,8 +380,8 @@ pub fn DofManager(comptime N: usize, comptime M: usize) type {
             assert(dest.len == self.numCells());
             assert(src.len == self.numCells());
 
-            const block_dest: []const f64 = self.cell_map.slice(block_id, dest);
-            const block_src: []f64 = self.cell_map.slice(block_id, dest);
+            const block_dest: []f64 = self.cell_map.slice(block_id, dest);
+            const block_src: []const f64 = self.cell_map.slice(block_id, src);
 
             @memcpy(block_dest, block_src);
         }
@@ -395,10 +395,29 @@ pub fn DofManager(comptime N: usize, comptime M: usize) type {
             assert(dest.len == self.numNodes());
             assert(src.len == self.numNodes());
 
-            const block_dest: []const f64 = self.node_map.slice(block_id, dest);
-            const block_src: []f64 = self.node_map.slice(block_id, dest);
+            const block_dest: []f64 = self.node_map.slice(block_id, dest);
+            const block_src: []const f64 = self.node_map.slice(block_id, src);
 
             @memcpy(block_dest, block_src);
+        }
+
+        pub fn swapBlockNodes(
+            self: *const Self,
+            block_id: usize,
+            a: []f64,
+            b: []f64,
+        ) void {
+            assert(a.len == self.numNodes());
+            assert(b.len == self.numNodes());
+
+            const block_a: []f64 = self.node_map.slice(block_id, a);
+            const block_b: []f64 = self.node_map.slice(block_id, b);
+
+            for (0..block_a.len) |idx| {
+                const tmp = block_a[idx];
+                block_a[idx] = block_b[idx];
+                block_b[idx] = tmp;
+            }
         }
 
         // *************************
@@ -414,7 +433,7 @@ pub fn DofManager(comptime N: usize, comptime M: usize) type {
         ) void {
             assert(self.node_map.numNodes() == field.len);
 
-            const block_field: []usize = self.node_map.slice(block_id, field);
+            const block_field: []f64 = self.node_map.slice(block_id, field);
 
             const block = grid.blocks[block_id];
             const patch = grid.patches[block.patch];
@@ -460,7 +479,7 @@ pub fn DofManager(comptime N: usize, comptime M: usize) type {
         ) void {
             assert(self.node_map.numNodes() == field.len);
 
-            const block_field: []usize = self.node_map.slice(block_id, field);
+            const block_field: []f64 = self.node_map.slice(block_id, field);
 
             const block = grid.blocks[block_id];
             const patch = grid.patches[block.patch];
@@ -516,7 +535,7 @@ pub fn DofManager(comptime N: usize, comptime M: usize) type {
         ) void {
             assert(self.cell_map.numCells() == field.len);
 
-            const block_field: []usize = self.cell_map.slice(block_id, field);
+            const block_field: []f64 = self.cell_map.slice(block_id, field);
 
             const block = grid.blocks[block_id];
             const patch = grid.patches[block.patch];
@@ -557,6 +576,57 @@ pub fn DofManager(comptime N: usize, comptime M: usize) type {
         // Operator *********************
         // ******************************
 
+        pub fn project(
+            self: *const Self,
+            grid: *const Mesh,
+            projection: anytype,
+            dest: []f64,
+        ) void {
+            for (0..grid.blocks.len) |block_id| {
+                self.projectBlock(grid, block_id, projection, dest);
+            }
+        }
+
+        pub fn projectBlock(
+            self: *const Self,
+            grid: *const Mesh,
+            block_id: usize,
+            projection: anytype,
+            dest: []f64,
+        ) void {
+            const Proj = @TypeOf(projection);
+
+            if (comptime !mesh.isProjection(N, M)(Proj)) {
+                @compileError("Projection must satisfy isProjection trait.");
+            }
+
+            assert(dest.len == self.numCells());
+
+            const block_dest: []f64 = self.cell_map.slice(block_id, dest);
+
+            const node_space = NodeSpace.fromCellSize(grid.blockCellSize(block_id));
+
+            const offset = self.node_map.offset(block_id);
+            const total = self.node_map.total(block_id);
+
+            const bounds: RealBox = grid.blockPhysicalBounds(block_id);
+
+            var cells = node_space.cellSpace().cartesianIndices();
+            var linear: usize = 0;
+
+            while (cells.next()) |cell| : (linear += 1) {
+                const engine: Engine = .{
+                    .bounds = bounds,
+                    .space = node_space,
+                    .offset = offset,
+                    .total = total,
+                    .cell = cell,
+                };
+
+                block_dest[linear] = projection.project(engine);
+            }
+        }
+
         pub fn apply(
             self: *const Self,
             grid: *const Mesh,
@@ -586,15 +656,14 @@ pub fn DofManager(comptime N: usize, comptime M: usize) type {
             assert(dest.len == self.numCells());
             assert(src.len == self.numNodes());
 
-            const block_dest: []const f64 = self.cell_map.slice(block_id, dest);
-            const block_src: []const f64 = self.node_map.slice(block_id, src);
+            const block_dest: []f64 = self.cell_map.slice(block_id, dest);
 
             const node_space = NodeSpace.fromCellSize(grid.blockCellSize(block_id));
 
             const offset = self.node_map.offset(block_id);
             const total = self.node_map.total(block_id);
 
-            const bounds = grid.blocks[block_id].bounds;
+            const bounds: RealBox = grid.blockPhysicalBounds(block_id);
 
             var cells = node_space.cellSpace().cartesianIndices();
             var linear: usize = 0;
@@ -608,7 +677,7 @@ pub fn DofManager(comptime N: usize, comptime M: usize) type {
                     .cell = cell,
                 };
 
-                block_dest[linear] = operator.apply(engine, block_src);
+                block_dest[linear] = operator.apply(engine, src);
             }
         }
 
@@ -644,8 +713,7 @@ pub fn DofManager(comptime N: usize, comptime M: usize) type {
             assert(src.len == self.numNodes());
             assert(rhs.len == self.numCells());
 
-            const block_dest: []const f64 = self.cell_map.slice(block_id, dest);
-            const block_src: []const f64 = self.node_map.slice(block_id, src);
+            const block_dest: []f64 = self.cell_map.slice(block_id, dest);
             const block_rhs: []const f64 = self.cell_map.slice(block_id, rhs);
 
             const node_space = NodeSpace.fromCellSize(grid.blockCellSize(block_id));
@@ -653,7 +721,7 @@ pub fn DofManager(comptime N: usize, comptime M: usize) type {
             const offset = self.node_map.offset(block_id);
             const total = self.node_map.total(block_id);
 
-            const bounds = grid.blocks[block_id].bounds;
+            const bounds: RealBox = grid.blockPhysicalBounds(block_id);
 
             var cells = node_space.cellSpace().cartesianIndices();
             var linear: usize = 0;
@@ -667,7 +735,7 @@ pub fn DofManager(comptime N: usize, comptime M: usize) type {
                     .cell = cell,
                 };
 
-                block_dest[linear] = block_rhs[linear] - operator.apply(engine, block_src);
+                block_dest[linear] = block_rhs[linear] - operator.apply(engine, src);
             }
         }
 
@@ -697,7 +765,7 @@ pub fn DofManager(comptime N: usize, comptime M: usize) type {
             assert(src.len == self.numNodes());
             assert(rhs.len == self.numCells());
 
-            const block_dest: []const f64 = self.cell_map.slice(block_id, dest);
+            const block_dest: []f64 = self.cell_map.slice(block_id, dest);
             const block_src: []const f64 = self.node_map.slice(block_id, src);
             const block_rhs: []const f64 = self.cell_map.slice(block_id, rhs);
 
@@ -706,7 +774,7 @@ pub fn DofManager(comptime N: usize, comptime M: usize) type {
             const offset = self.node_map.offset(block_id);
             const total = self.node_map.total(block_id);
 
-            const bounds = grid.blocks[block_id].bounds;
+            const bounds: RealBox = grid.blockPhysicalBounds(block_id);
 
             var cells = node_space.cellSpace().cartesianIndices();
             var linear: usize = 0;
@@ -721,7 +789,7 @@ pub fn DofManager(comptime N: usize, comptime M: usize) type {
                 };
 
                 const val = node_space.value(cell, block_src);
-                const app = operator.apply(engine, block_src);
+                const app = operator.apply(engine, src);
 
                 const engine_diag: Engine = .{
                     .bounds = bounds,
@@ -732,7 +800,7 @@ pub fn DofManager(comptime N: usize, comptime M: usize) type {
                     .diag = true,
                 };
 
-                const diag = operator.apply(engine_diag, block_src);
+                const diag = operator.apply(engine_diag, src);
 
                 block_dest[linear] = val + (block_rhs[linear] - app) / diag;
             }
@@ -747,17 +815,17 @@ pub fn DofManager(comptime N: usize, comptime M: usize) type {
         pub fn underlyingBlock(self: *const Self, grid: *const Mesh, block_id: usize, tile: [N]usize) usize {
             const block = grid.blocks[block_id];
             const patch = grid.patches[block.patch];
-            const coarse_patch = mesh.grid[
-                patch.parent orelse {
-                    return std.math.maxInt(usize);
-                }
-            ];
+            const coarse_patch_id = patch.parent orelse {
+                return std.math.maxInt(usize);
+            };
+            const coarse_patch = grid.patches[coarse_patch_id];
 
             const coarse_tile_space = IndexSpace.fromBox(coarse_patch.bounds);
             const coarse_tile = coarsened(coarse_patch.bounds.refined().localFromGlobal(block.bounds.globalFromLocal(tile)));
 
             const linear = coarse_tile_space.linearFromCartesian(coarse_tile);
-            return self.block_map[coarse_patch.tile_offset + linear];
+            const tile_offset = self.tile_map.offset(coarse_patch_id);
+            return self.tile_to_block.items[tile_offset + linear];
         }
 
         // *******************************

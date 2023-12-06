@@ -81,10 +81,12 @@ pub fn MultigridMethod(comptime N: usize, comptime M: usize, comptime BaseSolver
             defer allocator.free(err);
 
             // Use initial right hand side to set tolerance.
-            const irhs = norm(rhs);
+            const irhs = norm(b);
             const tol: f64 = self.tolerance * @fabs(irhs);
 
             if (irhs <= 1e-60) {
+                std.debug.print("Trivial Linear Problem\n", .{});
+
                 @memset(x, 0.0);
                 return;
             }
@@ -101,6 +103,7 @@ pub fn MultigridMethod(comptime N: usize, comptime M: usize, comptime BaseSolver
             var iteration: usize = 0;
 
             const worker: Worker(Op, Bound) = .{
+                .base_solver = self.base_solver,
                 .grid = grid,
                 .dofs = dofs,
                 .operator = operator,
@@ -128,7 +131,7 @@ pub fn MultigridMethod(comptime N: usize, comptime M: usize, comptime BaseSolver
 
                 // We are not at sufficient accuracy, so run another iteration of multigrid.
 
-                worker.iterate(scratch, grid.levels.len - 1);
+                try worker.iterate(scratch, grid.levels.len - 1);
 
                 // const res_norm = norm(res.field(sys_field));
 
@@ -166,12 +169,12 @@ pub fn MultigridMethod(comptime N: usize, comptime M: usize, comptime BaseSolver
 
         fn Worker(comptime Op: type, comptime Bound: type) type {
             return struct {
+                base_solver: BaseSolver,
                 grid: *const Mesh,
                 dofs: *const DofManager,
                 operator: Op,
                 boundary: Bound,
                 x: []f64,
-                rhs: []f64,
                 res: []f64,
                 rhs: []f64,
                 sys: []f64,
@@ -180,7 +183,7 @@ pub fn MultigridMethod(comptime N: usize, comptime M: usize, comptime BaseSolver
 
                 // Runs a multigrid iteration on the level. This approximates the solution to
                 // A(sys) = rhs on the given level. This leaves sys
-                fn iterate(self: @This(), allocator: Allocator, level_id: usize) void {
+                fn iterate(self: @This(), allocator: Allocator, level_id: usize) !void {
                     // Aliases
                     const grid = self.grid;
                     const dofs = self.dofs;
@@ -204,7 +207,7 @@ pub fn MultigridMethod(comptime N: usize, comptime M: usize, comptime BaseSolver
 
                         // Solve system using the base solver
                         const base_linear_map: BaseLinearMap(Op, Bound) = .{
-                            .mesh = grid,
+                            .grid = grid,
                             .dofs = dofs,
                             .operator = operator,
                             .boundary = boundary,
@@ -223,7 +226,9 @@ pub fn MultigridMethod(comptime N: usize, comptime M: usize, comptime BaseSolver
                     const level = grid.levels[level_id];
                     const coarse = grid.levels[level_id - 1];
 
-                    // Perform presmoothing
+                    // *****************************
+                    // Presmoothing
+
                     for (level.block_offset..level.block_offset + level.block_total) |block_id| {
                         dofs.fillBlockBoundary(grid, block_id, boundary, sys);
                     }
@@ -237,47 +242,48 @@ pub fn MultigridMethod(comptime N: usize, comptime M: usize, comptime BaseSolver
                         dofs.fillBlockBoundary(grid, block_id, boundary, sys);
                     }
 
-                    // TODO restriction like this might be unnessasary.
+                    // *****************************
+                    // Copy old (v^2h)
 
-                    // Restrict data down a level now that we have smoothed everything
+                    for (coarse.block_offset..coarse.block_offset + coarse.block_total) |block_id| {
+                        dofs.copyBlockNodes(block_id, old, sys);
+                    }
+
                     for (level.block_offset..level.block_offset + level.block_total) |block_id| {
-                        dofs.restrictBlock(grid, block_id, sys);
+                        dofs.swapBlockNodes(block_id, old, sys);
+                        dofs.restrictBlock(grid, block_id, old);
+                        dofs.swapBlockNodes(block_id, old, sys);
                     }
 
-                    // Fill sys boundary on coarse level
+                    // *******************************
+                    // Residual computation
+
                     for (coarse.block_offset..coarse.block_offset + coarse.block_total) |block_id| {
-                        dofs.fillBlockBoundary(grid, block_id, boundary, sys);
+                        dofs.residualBlock(grid, block_id, operator, res, old, rhs);
                     }
 
-                    // Compute residual on coarse level
-                    for (coarse.block_offset..coarse.block_offset + coarse.block_total) |block_id| {
-                        dofs.residualBlock(grid, block_id, operator, res, sys, rhs);
-                    }
-
-                    // Restrict residual from current level
                     for (level.block_offset..level.block_offset + level.block_total) |block_id| {
                         dofs.residualBlock(grid, block_id, operator, res, sys, rhs);
                         dofs.restrictBlockCells(grid, block_id, res);
                     }
 
-                    // Fill right hand side on coarse level
+                    // ********************************
+                    // Rhs correction
+
                     for (coarse.block_offset..coarse.block_offset + coarse.block_total) |block_id| {
-                        dofs.applyBlock(grid, block_id, operator, rhs, sys);
+                        dofs.applyBlock(grid, block_id, operator, rhs, old);
 
                         for (dofs.cell_map.offset(block_id)..dofs.cell_map.offset(block_id + 1)) |idx| {
                             rhs[idx] += res[idx];
                         }
                     }
 
-                    // Cache current coarse solution
-                    for (coarse.block_offset..coarse.block_offset + coarse.block_total) |block_id| {
-                        dofs.copyBlockNodes(block_id, old, sys);
-                    }
-
                     // Recurse
-                    self.iterate(allocator, level_id - 1);
+                    try self.iterate(allocator, level_id - 1);
 
-                    // Compute and prolong err
+                    // ********************************
+                    // Error Correction
+
                     for (coarse.block_offset..coarse.block_offset + coarse.block_total) |block_id| {
                         for (dofs.node_map.offset(block_id)..dofs.node_map.offset(block_id + 1)) |idx| {
                             err[idx] = sys[idx] - old[idx];
@@ -288,25 +294,24 @@ pub fn MultigridMethod(comptime N: usize, comptime M: usize, comptime BaseSolver
                         dofs.prolongBlock(grid, block_id, err);
                     }
 
-                    // Correct system
                     for (level.block_offset..level.block_offset + level.block_total) |block_id| {
                         for (dofs.node_map.offset(block_id)..dofs.node_map.offset(block_id + 1)) |idx| {
                             sys[idx] += err[idx];
                         }
                     }
 
-                    // Fill new boundaries
+                    // **************************************
+                    // Post smoothing
+
                     for (level.block_offset..level.block_offset + level.block_total) |block_id| {
                         dofs.fillBlockBoundary(grid, block_id, boundary, sys);
                     }
 
-                    // Perform post smoothing
                     for (level.block_offset..level.block_offset + level.block_total) |block_id| {
                         dofs.smoothBlock(grid, block_id, operator, x, sys, rhs);
                         dofs.copyBlockNodesFromCells(grid, block_id, sys, x);
                     }
 
-                    // Fill boundaries in post
                     for (level.block_offset..level.block_offset + level.block_total) |block_id| {
                         dofs.fillBlockBoundary(grid, block_id, boundary, sys);
                     }
@@ -324,7 +329,7 @@ pub fn MultigridMethod(comptime N: usize, comptime M: usize, comptime BaseSolver
 
                 pub fn apply(self: *const @This(), out: []f64, in: []const f64) void {
                     var aout: []f64 = out;
-                    var ain: []f64 = in;
+                    var ain: []const f64 = in;
 
                     aout.len = self.dofs.numCells();
                     ain.len = self.dofs.numCells();

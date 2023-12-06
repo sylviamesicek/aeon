@@ -10,7 +10,9 @@ const maxInt = std.math.maxInt;
 
 const basis = @import("../basis/basis.zig");
 const geometry = @import("../geometry/geometry.zig");
-const mesh = @import("mesh.zig");
+const mesh = @import("../mesh/mesh.zig");
+
+const mesh_ = @import("mesh.zig");
 
 pub fn RegridManager(comptime N: usize) type {
     return struct {
@@ -27,12 +29,20 @@ pub fn RegridManager(comptime N: usize) type {
         const IndexMixin = geometry.IndexMixin(N);
         const splat = IndexMixin.splat;
 
-        const Block = mesh.Block(N);
-        const Level = mesh.Level(N);
-        const Mesh = mesh.Mesh(N);
-        const Patch = mesh.Patch(N);
+        const Block = mesh_.Block(N);
+        const Level = mesh_.Level(N);
+        const Mesh = mesh_.Mesh(N);
+        const Patch = mesh_.Patch(N);
 
-        pub fn regrid(self: @This(), allocator: Allocator, tags: []const bool, grid: *Mesh) !void {
+        const TileMap = mesh.TileMap;
+
+        pub fn regrid(
+            self: @This(),
+            allocator: Allocator,
+            tags: []const bool,
+            grid: *Mesh,
+            tile_map: TileMap,
+        ) !void {
 
             // The total levels must be >= 1, but may not be greater than self.levels.len + 1.
             const total_levels = @max(1, @min(self.max_levels, grid.levels.len + 1));
@@ -46,7 +56,7 @@ pub fn RegridManager(comptime N: usize) type {
             const IdxSlice = struct { offset: usize, total: usize };
 
             // A map from old patches on l to new patches on l+1.
-            var patch_map: []IdxSlice = try allocator.alloc(IdxSlice, self.patches.len);
+            var patch_map: []IdxSlice = try allocator.alloc(IdxSlice, grid.patches.len);
             defer allocator.free(patch_map);
 
             // ************************************
@@ -75,7 +85,7 @@ pub fn RegridManager(comptime N: usize) type {
                     // Reset arena for new "frame"
                     defer _ = arena.reset(.retain_capacity);
 
-                    const patch = self.patches[patch_id];
+                    const patch = grid.patches[patch_id];
                     const patch_space: IndexSpace = IndexSpace.fromBox(patch.bounds);
 
                     // *****************************************************
@@ -118,11 +128,11 @@ pub fn RegridManager(comptime N: usize) type {
                     // ********************************
                     // Preprocess tags ****************
 
-                    const source_tags = tags[patch.tile_offset .. patch.tile_offset + patch.tile_total];
+                    const source_tags: []const bool = tile_map.slice(patch_id, tags);
 
                     // Using new patches on l + 2
 
-                    const patch_tags = try scratch.alloc(bool, patch.tile_total);
+                    const patch_tags = try scratch.alloc(bool, tile_map.total(patch_id));
                     defer scratch.free(patch_tags);
 
                     @memcpy(patch_tags, source_tags);
@@ -141,7 +151,7 @@ pub fn RegridManager(comptime N: usize) type {
                             }
                         }
 
-                        patch_space.fillWindow(cluster, bool, tags, true);
+                        patch_space.fillWindow(cluster, bool, patch_tags, true);
                     }
 
                     // *************************************************************
@@ -154,7 +164,7 @@ pub fn RegridManager(comptime N: usize) type {
                     };
 
                     // New blocks on l+1 (in old l space).
-                    const blocks = try cluster_space.points(scratch, tags);
+                    const blocks = try cluster_space.points(scratch, patch_tags);
                     defer scratch.free(blocks);
 
                     // *************************************************************
@@ -201,7 +211,6 @@ pub fn RegridManager(comptime N: usize) type {
                         for (patches.children[idx]) |child| {
                             if (child >= blocks.len) {
                                 // This is a child patch
-
                                 data.children[target_id].appendAssumeCapacity(grandchild_to_patch[child - blocks.len]);
 
                                 children_total += 1;
@@ -221,7 +230,7 @@ pub fn RegridManager(comptime N: usize) type {
                             }
                         }
 
-                        try data.patches[target_id].appendAssumeCapacity(.{
+                        data.patches[target_id].appendAssumeCapacity(.{
                             .bounds = bounds.refined(),
                             .level = target_id,
                             .parent = null,
@@ -240,23 +249,23 @@ pub fn RegridManager(comptime N: usize) type {
             const base_child_offset: usize = if (total_levels > 1) 1 else 0;
             const base_child_total = if (total_levels > 1) data.patches[1].items.len else 0;
 
-            const base_block: Block(N) = .{
+            const base_block: Block = .{
                 .bounds = .{ .origin = splat(0), .size = grid.index_size },
                 .patch = 0,
             };
 
-            var base_patch: Patch(N) = .{
+            var base_patch: Patch = .{
                 .bounds = .{ .origin = splat(0), .size = grid.index_size },
                 .level = 0,
                 .parent = null,
-                .children_offset = base_child_offset,
+                .children_offset = 0,
                 .children_total = base_child_total,
                 .block_offset = 0,
                 .block_total = 1,
             };
 
-            const base_level: Level(N) = .{
-                .index_size = grid.index_size,
+            const base_level: Level = .{
+                .tile_size = grid.index_size,
                 .patch_offset = 0,
                 .patch_total = 1,
                 .block_offset = 0,
@@ -269,6 +278,8 @@ pub fn RegridManager(comptime N: usize) type {
             for (0..base_child_total) |id| {
                 data.children[0].appendAssumeCapacity(id);
             }
+
+            base_patch.children_offset = base_child_offset;
 
             // **************************
             // Flatten
@@ -333,7 +344,7 @@ pub fn RegridManager(comptime N: usize) type {
                 }
 
                 levels.appendAssumeCapacity(.{
-                    .index_size = IndexMixin.scaled(levels.items[level_id].index_size, 2),
+                    .tile_size = IndexMixin.scaled(levels.items[level_id].tile_size, 2),
                     .patch_offset = global_patch_offset,
                     .patch_total = data.patches[target_id].items.len,
                     .block_offset = global_block_offset,
@@ -347,22 +358,6 @@ pub fn RegridManager(comptime N: usize) type {
             grid.blocks = blocks.items;
             grid.patches = patches.items;
             grid.levels = levels.items;
-
-            grid.computeCellOffsets();
-            grid.computeTileOffsets();
-
-            var block_map: ArrayListUnmanaged(usize) = .{
-                .capacity = grid.block_map_capacity,
-                .items = grid.block_map,
-            };
-
-            try block_map.clearRetainingCapacity();
-            try block_map.resize(grid.gpa, grid.tile_total);
-
-            grid.block_map_capacity = block_map.capacity;
-            grid.block_map = block_map.items;
-
-            grid.computeBlockMap();
         }
 
         /// An unflattened representation of a block structured mesh.

@@ -215,7 +215,7 @@ pub fn RealBox(comptime N: usize) type {
 
             for (0..N) |i| {
                 for (0..ranks[i]) |_| {
-                    res /= self.physical_bounds.size[i];
+                    res /= self.size[i];
                 }
             }
 

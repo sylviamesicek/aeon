@@ -157,7 +157,7 @@ pub fn Mesh(comptime N: usize) type {
             });
 
             try levels.append(allocator, .{
-                .index_size = config.index_size,
+                .tile_size = config.index_size,
                 .patch_offset = 0,
                 .patch_total = 1,
                 .block_offset = 0,
@@ -329,7 +329,7 @@ pub fn Mesh(comptime N: usize) type {
         }
 
         /// Finds the level a block resides on.
-        pub fn blockLevel(self: *const Self, block: usize) [N]usize {
+        pub fn blockLevel(self: *const Self, block: usize) usize {
             return self.patches[self.blocks[block].patch].level;
         }
 
@@ -345,15 +345,15 @@ pub fn Mesh(comptime N: usize) type {
             var cur: usize = 0;
 
             for (0..self.blocks.len) |block| {
-                const total = NodeSpace(N, M).fromSize(self.blockCellSize(block)).total();
+                const total = NodeSpace(N, M).fromCellSize(self.blockCellSize(block)).numNodes();
 
-                node_map.offsets[cur] = off;
+                node_map.offsets.items[cur] = off;
 
                 off += total;
                 cur += 1;
             }
 
-            node_map.offsets[cur] = off;
+            node_map.offsets.items[cur] = off;
         }
 
         /// Caches cell offsets for each block.

@@ -10,6 +10,7 @@ const engine = @import("engine.zig");
 
 pub const Engine = engine.Engine;
 pub const isOperator = engine.isOperator;
+pub const isProjection = engine.isProjection;
 
 // ***************************
 // Offset Maps ***************
@@ -17,7 +18,7 @@ pub const isOperator = engine.isOperator;
 
 /// A map from blocks (defined in a mesh agnostic way) into `CellVector`s. This is filled by the appropriate mesh routine.
 pub const CellMap = struct {
-    offsets: ArrayList(usize) = .{},
+    offsets: ArrayList(usize),
 
     pub fn init(allocator: Allocator) CellMap {
         const offsets = ArrayList(usize).init(allocator);
@@ -46,14 +47,14 @@ pub const CellMap = struct {
 
     /// Returns the number of cells in the total map.
     pub fn numCells(self: CellMap) usize {
-        return self.offsets.items[self.offsets.len - 1];
+        return self.offsets.items[self.offsets.items.len - 1];
     }
 };
 
 /// A map from patches (defined in a mesh agnostic way) into tile vectors. For example, tags for mesh refinement
 /// are most often stored in tile vectors. This is filled by the appropriate mesh routine.
 pub const TileMap = struct {
-    offsets: ArrayList(usize) = .{},
+    offsets: ArrayList(usize),
 
     pub fn init(allocator: Allocator) TileMap {
         const offsets = ArrayList(usize).init(allocator);
@@ -82,6 +83,6 @@ pub const TileMap = struct {
 
     /// Returns the number of tiles in the total map.
     pub fn numTiles(self: TileMap) usize {
-        return self.offsets.items[self.offsets.len - 1];
+        return self.offsets.items[self.offsets.items.len - 1];
     }
 };

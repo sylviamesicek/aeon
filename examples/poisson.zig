@@ -3,75 +3,71 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 
 const aeon = @import("aeon");
-const dofs = aeon.dofs;
-const geometry = aeon.geometry;
 
-pub fn PoissonEquation(comptime O: usize) type {
+const bsamr = aeon.bsamr;
+const geometry = aeon.geometry;
+const nodes = aeon.nodes;
+
+pub fn PoissonEquation(comptime M: usize) type {
     const N = 2;
     return struct {
-        const BoundaryCondition = dofs.BoundaryCondition;
-        const DofMap = dofs.DofMap(N, O);
-        const DofUtils = dofs.DofUtils(N, O);
-        const DofUtilsTotal = dofs.DofUtilsTotal(N, O);
-        const DataOut = aeon.DataOut(N);
-        const MultigridMethod = aeon.methods.MultigridMethod(N, O, BiCGStabSolver);
-        const LinearMapMethod = aeon.methods.LinearMapMethod(N, O, BiCGStabSolver);
-        const SystemSlice = aeon.SystemSlice;
-        const SystemSliceConst = aeon.SystemSliceConst;
-        const SystemValue = aeon.SystemValue;
-        const SystemBoundaryCondition = dofs.SystemBoundaryCondition;
+        const BoundaryKind = nodes.BoundaryKind;
+        const Robin = nodes.Robin;
 
-        const Face = geometry.Face(N);
+        const DataOut = aeon.DataOut(N, M);
+        const MultigridMethod = aeon.methods.MultigridMethod(N, M, BiCGStabSolver);
+        const LinearMapMethod = aeon.methods.LinearMapMethod(N, M, BiCGStabSolver);
+        const SystemConst = aeon.methods.SystemConst;
+
+        const Mesh = bsamr.Mesh(N);
+        const DofManager = bsamr.DofManager(N, M);
+        const RegridManager = bsamr.RegridManager(N);
+
+        const FaceIndex = geometry.FaceIndex(N);
         const IndexSpace = geometry.IndexSpace(N);
-        const Index = aeon.Index(N);
+        const IndexMixin = geometry.IndexMixin(N);
 
         const BiCGStabSolver = aeon.lac.BiCGStabSolver;
 
-        const Mesh = aeon.mesh.Mesh(N);
+        const Engine = aeon.mesh.Engine(N, M);
 
-        pub const Function = enum {
-            func,
-        };
-
-        // Seed Function
-        pub const RhsProjection = struct {
+        pub const Source = struct {
             amplitude: f64,
 
-            pub const System = Function;
-            pub const Context = aeon.EmptySystem;
-
-            pub fn project(self: RhsProjection, engine: dofs.ProjectionEngine(N, O, Context)) SystemValue(System) {
+            pub fn project(self: Source, engine: Engine) f64 {
                 const pos = engine.position();
 
-                return .{
-                    .func = self.amplitude * std.math.sin(pos[0]) * std.math.sin(pos[1]),
-                    // .func = self.amplitude,
-                };
+                var result: f64 = self.amplitude;
+
+                inline for (0..N) |i| {
+                    result *= std.math.sin(pos[i]);
+                }
+
+                return result;
+            }
+        };
+
+        pub const Boundary = struct {
+            pub fn kind(face: FaceIndex) BoundaryKind {
+                _ = face;
+                return .odd;
+            }
+
+            pub fn robin(self: Boundary, pos: [N]f64, face: FaceIndex) Robin {
+                _ = face;
+                _ = pos;
+                _ = self;
+                return Robin.diritchlet(0.0);
             }
         };
 
         pub const PoissonOperator = struct {
-            pub const System = Function;
-            pub const Context = aeon.EmptySystem;
-
             pub fn apply(
                 _: PoissonOperator,
-                comptime Setting: dofs.EngineSetting,
-                engine: dofs.Engine(N, O, Setting, System, Context),
-            ) SystemValue(System) {
-                return .{
-                    .func = -engine.laplacianSys(.func),
-                };
-            }
-
-            pub fn boundarySys(_: PoissonOperator, _: [N]f64, _: Face) dofs.SystemBoundaryCondition(System) {
-                return .{
-                    .func = BoundaryCondition.diritchlet(0.0),
-                };
-            }
-
-            pub fn boundaryCtx(_: PoissonOperator, _: [N]f64, _: Face) dofs.SystemBoundaryCondition(Context) {
-                return .{};
+                engine: Engine,
+                field: []const f64,
+            ) f64 {
+                return -engine.laplacian(field);
             }
         };
 
@@ -90,95 +86,85 @@ pub fn PoissonEquation(comptime O: usize) type {
             });
             defer mesh.deinit();
 
+            var dofs = DofManager.init(allocator);
+            defer dofs.deinit();
+
+            try dofs.build(&mesh);
+
             // Globally refine three times
 
             for (0..1) |_| {
-                var tags = try allocator.alloc(bool, mesh.tile_total);
+                const amr: RegridManager = .{
+                    .max_levels = 4,
+                    .patch_efficiency = 0.1,
+                    .block_efficiency = 0.7,
+                };
+
+                var tags = try allocator.alloc(bool, dofs.numTiles());
                 defer allocator.free(tags);
 
                 @memset(tags, true);
 
-                try mesh.regrid(allocator, tags, .{
-                    .max_levels = 4,
-                    .patch_efficiency = 0.1,
-                    .patch_max_tiles = 100,
-                    .block_efficiency = 0.7,
-                    .block_max_tiles = 100,
-                });
+                try amr.regrid(allocator, tags, &mesh, dofs.tile_map);
+                try dofs.build(&mesh);
+            }
+
+            for (mesh.patches) |patch| {
+                std.debug.print("Patch {}\n", .{patch});
             }
 
             for (mesh.blocks) |block| {
                 std.debug.print("Block {}\n", .{block});
             }
 
-            // Build maps
+            std.debug.print("NDofs: {}\n", .{dofs.numNodes()});
 
-            const dof_map: DofMap = try DofMap.init(allocator, &mesh);
-            defer dof_map.deinit(allocator);
+            // Project source values
 
-            std.debug.print("NDofs: {}\n", .{mesh.cell_total});
+            const source = try allocator.alloc(f64, dofs.numCells());
+            defer allocator.free(source);
 
-            // Build functions
+            dofs.project(&mesh, Source{ .amplitude = 2.0 }, source);
 
-            // Project right hand side function
+            const solution = try allocator.alloc(f64, dofs.numCells());
+            defer allocator.free(solution);
 
-            const rhs = try SystemSlice(Function).init(allocator, mesh.cell_total);
-            defer rhs.deinit(allocator);
+            dofs.project(&mesh, Source{ .amplitude = 1.0 }, solution);
 
-            DofUtilsTotal.project(
-                &mesh,
-                dof_map,
-                RhsProjection{ .amplitude = 2.0 },
-                rhs,
-                aeon.EmptySystem.sliceConst(),
+            // Allocate numerical cell vector
+
+            const numerical = try allocator.alloc(f64, dofs.numCells());
+            defer allocator.free(numerical);
+
+            @memset(numerical, 0.0);
+
+            const solver = MultigridMethod.new(
+                20,
+                10e-10,
+                BiCGStabSolver.new(10000, 10e-10),
             );
-
-            const sol = try SystemSlice(Function).init(allocator, mesh.cell_total);
-            defer sol.deinit(allocator);
-
-            // As well as the solution function
-
-            DofUtilsTotal.project(
-                &mesh,
-                dof_map,
-                RhsProjection{ .amplitude = 1.0 },
-                sol,
-                aeon.EmptySystem.sliceConst(),
-            );
-
-            // Allocate memory for the numerical solution, and set initial guess.
-
-            var numerical = try SystemSlice(Function).init(allocator, mesh.cell_total);
-            defer numerical.deinit(allocator);
-
-            @memset(numerical.field(.func), 0.0);
-
-            // Run multigrid method
-
-            var solver = MultigridMethod.new(20, 10e-10, BiCGStabSolver.new(10000, 10e-10));
-
-            // var solver = LinearMapMethod.new(BiCGStabSolver.new(10000, 10e-10));
+            // const solver = LinearMapMethod.new(BiCGStabSolver.new(10000, 10e-10));
 
             try solver.solve(
                 allocator,
                 &mesh,
-                dof_map,
+                &dofs,
                 PoissonOperator{},
+                Boundary{},
                 numerical,
-                aeon.EmptySystem.sliceConst(),
-                rhs.toConst(),
+                source,
             );
 
             // Compute error
 
-            var err = try SystemSlice(Function).init(allocator, mesh.cell_total);
-            defer err.deinit(allocator);
+            const err = try allocator.alloc(f64, dofs.numCells());
+            defer allocator.free(err);
 
-            for (0..mesh.cell_total) |i| {
-                err.field(.func)[i] = numerical.field(.func)[i] - sol.field(.func)[i];
+            for (0..dofs.numCells()) |i| {
+                err[i] = numerical[i] - solution[i];
             }
 
-            // Output results
+            // Output result
 
             std.debug.print("Writing Solution To File\n", .{});
 
@@ -186,20 +172,27 @@ pub fn PoissonEquation(comptime O: usize) type {
             defer file.close();
 
             const Output = enum {
-                num,
+                numerical,
                 exact,
                 err,
-                rhs,
+                source,
             };
 
-            const output = SystemSliceConst(Output).view(mesh.cell_total, .{
-                .num = numerical.field(.func),
-                .exact = sol.field(.func),
-                .err = err.field(.func),
-                .rhs = rhs.field(.func),
+            const output = SystemConst(Output).view(dofs.numCells(), .{
+                .numerical = numerical,
+                .exact = solution,
+                .err = err,
+                .source = source,
             });
 
-            try DataOut.writeVtk(Output, allocator, &mesh, output, file.writer());
+            try DataOut.writeVtk(
+                Output,
+                allocator,
+                &mesh,
+                &dofs,
+                output,
+                file.writer(),
+            );
         }
     };
 }

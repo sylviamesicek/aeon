@@ -5,6 +5,7 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const ArrayListUnmanaged = std.ArrayListUnmanaged;
+const assert = std.debug.assert;
 
 // Submodules
 
@@ -15,35 +16,40 @@ const VtkCellType = vtkio.VtkCellType;
 // Module imports
 
 const basis = @import("../basis/basis.zig");
-const NodeSpace = basis.NodeSpace;
-const StencilSpace = basis.StencilSpace;
-
-const dofs = @import("../dofs/dofs.zig");
-const DofUtils = dofs.DofUtils;
-
+const bsamr = @import("../bsamr/bsamr.zig");
 const geometry = @import("../geometry/geometry.zig");
-const meshes = @import("../mesh/mesh.zig");
+const methods = @import("../methods/methods.zig");
+const nodes = @import("../nodes/nodes.zig");
 
-const system = @import("../system.zig");
-const SystemSlice = system.SystemSlice;
-const SystemSliceConst = system.SystemSliceConst;
-const isSystem = system.isSystem;
+const System = methods.System;
+const SystemConst = methods.SystemConst;
+const isSystemTag = methods.isSystemTag;
 
 /// A namespace for outputting data defined on a mesh.
-pub fn DataOut(comptime N: usize) type {
+pub fn DataOut(comptime N: usize, comptime M: usize) type {
     return struct {
-        const Index = geometry.Index(N);
+        const Mesh = bsamr.Mesh(N);
+        const DofManager = bsamr.DofManager(N, M);
+        const IndexMixin = geometry.IndexMixin(N);
         const IndexSpace = geometry.IndexSpace(N);
-        const Mesh = meshes.Mesh(N);
+        const NodeSpace = nodes.NodeSpace(N, M);
 
-        pub fn writeVtkLevel(comptime System: type, allocator: Allocator, mesh: *const Mesh, level_id: usize, sys: SystemSliceConst(System), out_stream: anytype) !void {
-            if (comptime !isSystem(System)) {
-                @compileError("System must satisfy isSystem trait.");
+        pub fn writeVtkLevel(
+            comptime Tag: type,
+            allocator: Allocator,
+            grid: *const Mesh,
+            dofs: *const DofManager,
+            level_id: usize,
+            sys: SystemConst(Tag),
+            out_stream: anytype,
+        ) !void {
+            if (comptime !isSystemTag(Tag)) {
+                @compileError("System must satisfy isSystemTag trait.");
             }
 
-            sys.assertLen(mesh.cell_total);
+            assert(sys.len == dofs.numCells());
 
-            const field_count = comptime std.enums.values(System).len;
+            const field_count = comptime std.enums.values(Tag).len;
 
             // Global Constants
             const cell_type: VtkCellType = switch (N) {
@@ -67,17 +73,15 @@ pub fn DataOut(comptime N: usize) type {
                 }
             }
 
-            const level = mesh.levels[level_id];
+            const level = grid.levels[level_id];
 
             for (level.block_offset..level.block_offset + level.block_total) |block_id| {
-                const block = mesh.blocks[block_id];
+                const node_space = NodeSpace.fromCellSize(grid.blockCellSize(block_id));
+                const physical_bounds = grid.blockPhysicalBounds(block_id);
 
-                const stencil_space = DofUtils(N, 0).blockStencilSpace(mesh, block_id);
+                const point_size = IndexMixin.add(node_space.size, IndexMixin.splat(1));
 
-                const cell_size = stencil_space.size;
-                const point_size = Index.add(cell_size, Index.splat(1));
-
-                const cell_space = IndexSpace.fromSize(cell_size);
+                const cell_space = IndexSpace.fromSize(node_space.size);
                 const point_space = IndexSpace.fromSize(point_size);
 
                 const point_offset: usize = positions.items.len / N;
@@ -85,13 +89,13 @@ pub fn DataOut(comptime N: usize) type {
                 try positions.ensureUnusedCapacity(allocator, N * point_space.total());
                 try vertices.ensureUnusedCapacity(allocator, cell_type.nvertices() * cell_space.total());
 
-                const block_sys = sys.slice(block.cell_offset, block.cell_total);
+                const block_sys = sys.slice(dofs.cell_map.offset(block_id), dofs.cell_map.total(block_id));
 
                 // Fill positions and vertices
                 var points = point_space.cartesianIndices();
 
                 while (points.next()) |point| {
-                    const pos = stencil_space.vertexPosition(Index.toSigned(point));
+                    const pos = physical_bounds.transformPos(node_space.vertexPosition(IndexMixin.toSigned(point)));
                     for (0..N) |i| {
                         positions.appendAssumeCapacity(pos[i]);
                     }
@@ -102,7 +106,7 @@ pub fn DataOut(comptime N: usize) type {
 
                     while (cells.next()) |cell| {
                         const v1: usize = point_space.linearFromCartesian(cell);
-                        const v2: usize = point_space.linearFromCartesian(Index.add(cell, Index.splat(1)));
+                        const v2: usize = point_space.linearFromCartesian(IndexMixin.add(cell, IndexMixin.splat(1)));
 
                         vertices.appendAssumeCapacity(point_offset + v1);
                         vertices.appendAssumeCapacity(point_offset + v2);
@@ -112,9 +116,9 @@ pub fn DataOut(comptime N: usize) type {
 
                     while (cells.next()) |cell| {
                         const v1: usize = point_space.linearFromCartesian(cell);
-                        const v2: usize = point_space.linearFromCartesian(Index.add(cell, [2]usize{ 0, 1 }));
-                        const v3: usize = point_space.linearFromCartesian(Index.add(cell, [2]usize{ 1, 1 }));
-                        const v4: usize = point_space.linearFromCartesian(Index.add(cell, [2]usize{ 1, 0 }));
+                        const v2: usize = point_space.linearFromCartesian(IndexMixin.add(cell, [2]usize{ 0, 1 }));
+                        const v3: usize = point_space.linearFromCartesian(IndexMixin.add(cell, [2]usize{ 1, 1 }));
+                        const v4: usize = point_space.linearFromCartesian(IndexMixin.add(cell, [2]usize{ 1, 0 }));
 
                         vertices.appendAssumeCapacity(point_offset + v1);
                         vertices.appendAssumeCapacity(point_offset + v2);
@@ -126,13 +130,13 @@ pub fn DataOut(comptime N: usize) type {
 
                     while (cells.next()) |cell| {
                         const v1: usize = point_space.linearFromCartesian(cell);
-                        const v2: usize = point_space.linearFromCartesian(Index.add(cell, [3]usize{ 0, 1, 0 }));
-                        const v3: usize = point_space.linearFromCartesian(Index.add(cell, [3]usize{ 1, 1, 0 }));
-                        const v4: usize = point_space.linearFromCartesian(Index.add(cell, [3]usize{ 1, 0, 0 }));
-                        const v5: usize = point_space.linearFromCartesian(Index.add(cell, [3]usize{ 0, 0, 1 }));
-                        const v6: usize = point_space.linearFromCartesian(Index.add(cell, [3]usize{ 0, 1, 3 }));
-                        const v7: usize = point_space.linearFromCartesian(Index.add(cell, [3]usize{ 1, 1, 3 }));
-                        const v8: usize = point_space.linearFromCartesian(Index.add(cell, [3]usize{ 1, 0, 3 }));
+                        const v2: usize = point_space.linearFromCartesian(IndexMixin.add(cell, [3]usize{ 0, 1, 0 }));
+                        const v3: usize = point_space.linearFromCartesian(IndexMixin.add(cell, [3]usize{ 1, 1, 0 }));
+                        const v4: usize = point_space.linearFromCartesian(IndexMixin.add(cell, [3]usize{ 1, 0, 0 }));
+                        const v5: usize = point_space.linearFromCartesian(IndexMixin.add(cell, [3]usize{ 0, 0, 1 }));
+                        const v6: usize = point_space.linearFromCartesian(IndexMixin.add(cell, [3]usize{ 0, 1, 3 }));
+                        const v7: usize = point_space.linearFromCartesian(IndexMixin.add(cell, [3]usize{ 1, 1, 3 }));
+                        const v8: usize = point_space.linearFromCartesian(IndexMixin.add(cell, [3]usize{ 1, 0, 3 }));
 
                         vertices.appendAssumeCapacity(point_offset + v1);
                         vertices.appendAssumeCapacity(point_offset + v2);
@@ -145,27 +149,34 @@ pub fn DataOut(comptime N: usize) type {
                     }
                 }
 
-                inline for (comptime std.enums.values(System), 0..) |field, idx| {
+                inline for (comptime std.enums.values(Tag), 0..) |field, idx| {
                     try fields[idx].appendSlice(allocator, block_sys.field(field));
                 }
             }
 
-            var grid: VtuMeshOutput = try VtuMeshOutput.init(allocator, .{
+            var output: VtuMeshOutput = try VtuMeshOutput.init(allocator, .{
                 .points = positions.items,
                 .vertices = vertices.items,
                 .cell_type = cell_type,
             });
-            defer grid.deinit();
+            defer output.deinit();
 
-            inline for (comptime std.meta.fieldNames(System), 0..) |name, id| {
-                try grid.addCellField(name, fields[id].items, 1);
+            inline for (comptime std.meta.fieldNames(Tag), 0..) |name, id| {
+                try output.addCellField(name, fields[id].items, 1);
             }
 
-            try grid.write(out_stream);
+            try output.write(out_stream);
         }
 
-        pub fn writeVtk(comptime System: type, allocator: Allocator, mesh: *const Mesh, sys: system.SystemSliceConst(System), out_stream: anytype) !void {
-            try writeVtkLevel(System, allocator, mesh, mesh.levels.len - 1, sys, out_stream);
+        pub fn writeVtk(
+            comptime Tag: type,
+            allocator: Allocator,
+            grid: *const Mesh,
+            dofs: *const DofManager,
+            sys: SystemConst(Tag),
+            out_stream: anytype,
+        ) !void {
+            return writeVtkLevel(Tag, allocator, grid, dofs, grid.levels.len - 1, sys, out_stream);
         }
 
         // pub fn writeDofsToVtkOnLevel(

@@ -50,7 +50,7 @@ pub const NodeMap = struct {
 
     /// Returns the number of nodes in the total map.
     pub fn numNodes(self: NodeMap) usize {
-        return self.offsets.items[self.offsets.len - 1];
+        return self.offsets.items[self.offsets.items.len - 1];
     }
 };
 
@@ -263,7 +263,7 @@ pub fn NodeSpace(comptime N: usize, comptime M: usize) type {
             const O = M + 1;
 
             // Compute the stencil and space of indices over which the stencil is defined.
-            const stencil: [2 * O]f64 = Stencils(O).restrict();
+            const stencil: [2 * O]f64 = comptime Stencils(O).restrict();
             const stencil_space: IndexSpace = comptime IndexSpace.fromSize([1]usize{2 * O} ** N);
             // Accumulate the resulting value in this variable
             var result: f64 = 0.0;
@@ -319,7 +319,8 @@ pub fn NodeSpace(comptime N: usize, comptime M: usize) type {
                 var offset_node: [N]isize = undefined;
 
                 for (0..N) |i| {
-                    offset_node[i] = central_node[i] + stencil_index[i] - M;
+                    const offset: isize = @intCast(stencil_index[i]);
+                    offset_node[i] = central_node[i] + offset - M;
                 }
 
                 result += coef * self.nodeValue(offset_node, field);
@@ -423,15 +424,13 @@ pub fn NodeSpace(comptime N: usize, comptime M: usize) type {
                 var robin: [N]Robin = undefined;
 
                 inline for (0..N) |axis| {
-                    const kind: BoundaryKind = comptime @TypeOf(bound).kind(axis);
+                    const face = comptime FaceIndex{
+                        .side = region.sides[axis] == .right,
+                        .axis = axis,
+                    };
 
-                    if (comptime kind == .robin) {
-                        const face = FaceIndex{
-                            .side = region.sides[axis] == .right,
-                            .axis = axis,
-                        };
-
-                        robin[axis] = bound.condition(pos, face);
+                    if (@TypeOf(bound).kind(face) == .robin) {
+                        robin[axis] = bound.robin(pos, face);
                     }
                 }
 
@@ -458,7 +457,12 @@ pub fn NodeSpace(comptime N: usize, comptime M: usize) type {
                             continue;
                         }
 
-                        const kind: BoundaryKind = comptime @TypeOf(bound).kind(axis);
+                        const face = comptime FaceIndex{
+                            .side = region.sides[axis] == .right,
+                            .axis = axis,
+                        };
+
+                        const kind: BoundaryKind = comptime @TypeOf(bound).kind(face);
 
                         switch (kind) {
                             .odd, .even => {
@@ -525,10 +529,12 @@ pub fn NodeSpace(comptime N: usize, comptime M: usize) type {
                 var offset_node: [N]isize = undefined;
 
                 inline for (0..N) |i| {
-                    if (extents[i] > 0) {
-                        offset_node[i] = @as(isize, @intCast(self.size[i] - 1)) + stencil_index[i] - BM + 1;
-                    } else if (extents[i] < 0) {
-                        offset_node[i] = @as(isize, @intCast(BM - 1)) - stencil_index[i];
+                    const idx: isize = @intCast(stencil_index[i]);
+
+                    if (comptime extents[i] > 0) {
+                        offset_node[i] = @as(isize, @intCast(self.size[i] - 1)) + idx - BM + 1;
+                    } else if (comptime extents[i] < 0) {
+                        offset_node[i] = @as(isize, @intCast(BM - 1)) - idx;
                     } else {
                         offset_node[i] = @intCast(cell[i]);
                     }
@@ -662,8 +668,6 @@ test "node iteration" {
 
 test "node space" {
     const IndexBox = geometry.IndexBox(2);
-    const IndexSpace = geometry.IndexSpace(2);
-    _ = IndexSpace;
     const FaceIndex = geometry.FaceIndex(2);
     const RealBox = geometry.RealBox(2);
     const Nodes = NodeSpace(2, 2);
@@ -713,11 +717,11 @@ test "node space" {
     // *********************************
 
     const DiritchletBC = struct {
-        pub fn kind(_: usize) BoundaryKind {
+        pub fn kind(_: FaceIndex) BoundaryKind {
             return .robin;
         }
 
-        pub fn condition(_: @This(), _: [2]f64, _: FaceIndex) Robin {
+        pub fn robin(_: @This(), _: [2]f64, _: FaceIndex) Robin {
             return Robin.diritchlet(0.0);
         }
     };

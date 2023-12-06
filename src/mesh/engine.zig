@@ -30,9 +30,8 @@ pub fn Engine(comptime N: usize, comptime M: usize) type {
             }
         }
 
-        pub fn op(self: @This(), comptime ranks: [N]usize, field: []const usize) f64 {
+        pub fn op(self: @This(), comptime ranks: [N]usize, field: []const f64) f64 {
             const v = if (self.diag) self.space.opDiagonal(ranks) else self.space.op(ranks, self.cell, field[self.offset .. self.offset + self.total]);
-
             return self.bounds.transformOp(ranks, v);
         }
 
@@ -89,6 +88,22 @@ pub fn isOperator(comptime N: usize, comptime M: usize) fn (type) bool {
     const Closure = struct {
         fn trait(comptime T: type) bool {
             if (comptime !(hasFn("apply")(T) and @TypeOf(T.apply) == fn (T, Engine(N, M), []const f64) f64)) {
+                return false;
+            }
+
+            return true;
+        }
+    };
+
+    return Closure.trait;
+}
+
+pub fn isProjection(comptime N: usize, comptime M: usize) fn (type) bool {
+    const hasFn = std.meta.trait.hasFn;
+
+    const Closure = struct {
+        fn trait(comptime T: type) bool {
+            if (comptime !(hasFn("project")(T) and @TypeOf(T.project) == fn (T, Engine(N, M)) f64)) {
                 return false;
             }
 

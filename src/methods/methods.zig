@@ -5,10 +5,12 @@ const std = @import("std");
 // Submodules
 
 const linear = @import("linear.zig");
+const multigrid = @import("multigrid.zig");
 const rk4 = @import("rk4.zig");
 const system = @import("system.zig");
 
 pub const LinearMapMethod = linear.LinearMapMethod;
+pub const MultigridMethod = multigrid.MultigridMethod;
 
 pub const RungeKutta4Integrator = rk4.RungeKutta4Integrator;
 

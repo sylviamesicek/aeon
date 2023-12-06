@@ -46,7 +46,7 @@ pub fn ClusterSpace(comptime N: usize) type {
         }
 
         /// Berger-Rigoutso point clustering. The resulting slice is owned by the caller, and must be freed using the same allocator.
-        pub fn points(self: @This(), allocator: Allocator, tags: []bool) ![]IndexBox {
+        pub fn points(self: @This(), allocator: Allocator, tags: []const bool) ![]IndexBox {
             // **************************
             // General Setup ************
             // **************************
@@ -256,7 +256,7 @@ pub fn ClusterSpace(comptime N: usize) type {
             // General ********************
             // ****************************
 
-            const index_buffer: []const usize = try allocator.alloc(usize, blks.len);
+            const index_buffer: []usize = try allocator.alloc(usize, blks.len);
             errdefer allocator.free(index_buffer);
 
             for (0..index_buffer.len) |i| {
@@ -296,7 +296,7 @@ pub fn ClusterSpace(comptime N: usize) type {
             try stack.append(
                 allocator,
                 .{
-                    .bounds = .{
+                    .block = .{
                         .origin = [1]usize{0} ** N,
                         .size = self.size,
                     },
@@ -363,7 +363,7 @@ pub fn ClusterSpace(comptime N: usize) type {
                 // Compute efficiency (while accounting for overlaps)
                 const n_total: usize = culled_space.total();
 
-                const culled_tags: []bool = scratch.alloc(bool, n_total);
+                const culled_tags: []bool = try scratch.alloc(bool, n_total);
                 defer scratch.free(culled_tags);
 
                 const efficiency = computeClusterEfficiency(culled_cluster, blks, culled_tags);
@@ -382,11 +382,11 @@ pub fn ClusterSpace(comptime N: usize) type {
 
                 for (0..N) |axis| {
                     var run_active = false;
-                    var hole_index = 0;
-                    var hole_size = 0;
+                    var hole_index: usize = 0;
+                    var hole_size: usize = 0;
 
                     for (lower_bounds[axis]..upper_bounds[axis]) |i| {
-                        if (run_active and masks[axis[i]]) {
+                        if (run_active and masks[axis][i]) {
                             const size = i + 1 - hole_index;
 
                             if (size >= hole_size) {
@@ -423,7 +423,7 @@ pub fn ClusterSpace(comptime N: usize) type {
                         }
                     }
 
-                    const split = self.splitBoxes(culled_block, hole_axis, hole_index);
+                    const split = splitBoxes(culled_block, hole_index, hole_index);
 
                     // Sort children using heap sort
                     const ctx: SplitContext = .{
@@ -473,7 +473,7 @@ pub fn ClusterSpace(comptime N: usize) type {
 
         const BlockCluster = struct {
             block: IndexBox,
-            children: []const usize,
+            children: []usize,
         };
 
         fn splitBoxes(block: IndexBox, axis: usize, idx: usize) struct { left: IndexBox, right: IndexBox } {
