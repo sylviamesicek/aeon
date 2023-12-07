@@ -7,10 +7,12 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const ArrayList = std.ArrayList;
+const assert = std.debug.assert;
 const panic = std.debug.panic;
 
 const basis = @import("../basis/basis.zig");
 const geometry = @import("../geometry/geometry.zig");
+const lac = @import("../lac/lac.zig");
 
 // Submodules
 const boundary = @import("boundary.zig");
@@ -69,7 +71,7 @@ pub fn NodeSpace(comptime N: usize, comptime M: usize) type {
         const IndexSpace = geometry.IndexSpace(N);
         const IndexBox = geometry.IndexBox(N);
         const RealBox = geometry.RealBox(N);
-        const Region = geometry.Region(M);
+        const Region = geometry.Region(N);
 
         const Stencils = basis.Stencils;
 
@@ -213,21 +215,32 @@ pub fn NodeSpace(comptime N: usize, comptime M: usize) type {
 
         /// Finds the value of a field at a certain cell.
         pub fn value(self: Self, cell: [N]usize, field: []const f64) f64 {
+            assert(field.len == self.numNodes());
             return self.nodeValue(toSigned(cell), field);
         }
 
         /// Sets the value of a field at a certain cell.
         pub fn setValue(self: Self, cell: [N]usize, field: []f64, v: f64) void {
+            assert(field.len == self.numNodes());
             self.setNodeValue(toSigned(cell), field, v);
         }
 
-        /// Prolongs the value of the field to some subcell.
         pub fn prolong(self: Self, subcell: [N]usize, field: []const f64) f64 {
-            // Default order to M
-            const O = M;
+            return self.prolongCell(M, subcell, field);
+        }
+
+        /// Prolongs the value of the field to some subcell.
+        pub fn prolongCell(self: Self, comptime O: usize, subcell: [N]usize, field: []const f64) f64 {
+            if (comptime O > M) {
+                @compileError("Order must be less than or equal to number of ghost layers.");
+            }
+
+            assert(field.len == self.numNodes());
+
             // Build stencils for both the left and right case at comptime.
             const lstencil: [2 * O + 1]f64 = comptime Stencils(O).prolongCell(false);
             const rstencil: [2 * O + 1]f64 = comptime Stencils(O).prolongCell(true);
+
             // Accumulate result to this variable.
             var result: f64 = 0.0;
             // Find central node for applying stencil.
@@ -258,9 +271,79 @@ pub fn NodeSpace(comptime N: usize, comptime M: usize) type {
             return result;
         }
 
+        /// Prolongs the value of the field to some subcell.
+        pub fn prolongVertex(self: Self, comptime O: usize, subcell: [N]usize, field: []const f64) f64 {
+            if (comptime O > M) {
+                @compileError("Order must be less than or equal to number of ghost layers.");
+            }
+
+            assert(field.len == self.numNodes());
+
+            // Build stencils for both the left and right case at comptime.
+            // const lstencil: [2 * O + 1]f64 = comptime Stencils(O).prolongCell(false);
+            // const rstencil: [2 * O + 1]f64 = comptime Stencils(O).prolongCell(true);
+
+            // Vertex centered
+            const lstencil: [2 * O]f64 = comptime Stencils(O).prolongVertex(false);
+            const rstencil: [2 * O]f64 = comptime Stencils(O).prolongVertex(true);
+
+            // Accumulate result to this variable.
+            var result: f64 = 0.0;
+            // Find central node for applying stencil.
+            const central_node = toSigned(coarsened(subcell));
+            // Loop over stencil space.
+            // comptime var stencil_indices = IndexSpace.fromSize([1]usize{2 * O + 1} ** N).cartesianIndices();
+
+            comptime var stencil_indices = IndexSpace.fromSize([1]usize{2 * O} ** N).cartesianIndices();
+
+            inline while (comptime stencil_indices.next()) |stencil_index| {
+                // var coef: f64 = 1.0;
+
+                // inline for (0..N) |i| {
+                //     if (@mod(subcell[i], 2) == 1) {
+                //         coef *= rstencil[stencil_index[i]];
+                //     } else {
+                //         coef *= lstencil[stencil_index[i]];
+                //     }
+                // }
+
+                // var offset_node: [N]isize = undefined;
+
+                // inline for (0..N) |i| {
+                //     offset_node[i] = central_node[i] + stencil_index[i] - O;
+                // }
+
+                var coef: f64 = 1.0;
+
+                var offset_node: [N]isize = undefined;
+
+                inline for (0..N) |i| {
+                    if (@mod(subcell[i], 2) == 0) {
+                        coef *= rstencil[stencil_index[i]];
+                        offset_node[i] = central_node[i] + stencil_index[i] - O;
+                    } else {
+                        coef *= lstencil[stencil_index[i]];
+                        offset_node[i] = central_node[i] + stencil_index[i] - O + 1;
+                    }
+                }
+
+                result += coef * self.nodeValue(offset_node, field);
+            }
+
+            return result;
+        }
+
         /// Restricts the value of a field to a supercell.
         pub fn restrict(self: Self, supercell: [N]usize, field: []const f64) f64 {
-            const O = M + 1;
+            return self.restrictOrder(M + 1, supercell, field);
+        }
+
+        pub fn restrictOrder(self: Self, comptime O: usize, supercell: [N]usize, field: []const f64) f64 {
+            if (comptime O > M + 1) {
+                @compileError("Order must be less than ghost extent plus one.");
+            }
+
+            assert(field.len == self.numNodes());
 
             // Compute the stencil and space of indices over which the stencil is defined.
             const stencil: [2 * O]f64 = comptime Stencils(O).restrict();
@@ -295,6 +378,8 @@ pub fn NodeSpace(comptime N: usize, comptime M: usize) type {
         /// Computes the result of an operation (specified by the `ranks` argument) at the given
         /// cell, acting on the field defined over the whole nodespace.
         pub fn op(self: Self, comptime ranks: [N]usize, cell: [N]usize, field: []const f64) f64 {
+            assert(field.len == self.numNodes());
+
             const stencils = comptime opStencils(ranks);
             const stencil_space = comptime IndexSpace.fromSize([_]usize{2 * M + 1} ** N);
 
@@ -406,6 +491,8 @@ pub fn NodeSpace(comptime N: usize, comptime M: usize) type {
         }
 
         pub fn fillBoundaryRegion(self: Self, comptime region: Region, bound: anytype, field: []f64) void {
+            assert(field.len == self.numNodes());
+
             // Short circuit if the region does not actually have any boundary nodes
             if (comptime region.adjacency() == 0) {
                 return;
@@ -507,6 +594,8 @@ pub fn NodeSpace(comptime N: usize, comptime M: usize) type {
 
         pub fn boundaryOp(self: Self, comptime extents: [N]isize, comptime flux: ?usize, cell: [N]usize, field: []const f64) f64 {
             @setEvalBranchQuota(10000);
+
+            assert(field.len == self.numNodes());
 
             const stencils = comptime boundaryStencils(extents, flux);
             const stencil_lens = comptime boundaryStencilLens(extents);
@@ -618,6 +707,10 @@ pub fn NodeSpace(comptime N: usize, comptime M: usize) type {
             return result;
         }
     };
+}
+
+test {
+    _ = boundary;
 }
 
 test "node iteration" {
@@ -752,6 +845,418 @@ test "node space" {
     }
 }
 
-test {
-    _ = boundary;
+test "node space op" {
+    const Nodes = NodeSpace(1, 1);
+
+    const nodes = Nodes.fromCellSize(.{1});
+
+    std.debug.print("Op Diagonal {}\n", .{nodes.opDiagonal([1]usize{2})});
 }
+
+test "node space smoothing" {
+    const expect = std.testing.expect;
+    const allocator = std.testing.allocator;
+
+    const FaceIndex = geometry.FaceIndex(2);
+    const RealBox = geometry.RealBox(2);
+    const Nodes = NodeSpace(2, 2);
+
+    const Boundary = struct {
+        pub fn kind(_: FaceIndex) BoundaryKind {
+            return .robin;
+        }
+
+        pub fn robin(_: @This(), _: [2]f64, _: FaceIndex) Robin {
+            return Robin.diritchlet(0.0);
+        }
+    };
+
+    const Poisson = struct {
+        fn op(domain: RealBox, nodes: Nodes, cell: [2]usize, field: []const f64) f64 {
+            var result: f64 = 0.0;
+
+            inline for (0..2) |i| {
+                comptime var ranks: [2]usize = [1]usize{0} ** 2;
+                ranks[i] = 2;
+
+                result += domain.transformOp(ranks, nodes.op(ranks, cell, field));
+            }
+
+            return -result;
+        }
+
+        fn opDiag(domain: RealBox, nodes: Nodes) f64 {
+            var result: f64 = 0.0;
+
+            inline for (0..2) |i| {
+                comptime var ranks: [2]usize = [1]usize{0} ** 2;
+                ranks[i] = 2;
+
+                result += domain.transformOp(ranks, nodes.opDiagonal(ranks));
+            }
+
+            return -result;
+        }
+    };
+
+    // **************************
+    // Mesh
+
+    const domain: RealBox = .{ .origin = .{ 0.0, 0.0 }, .size = .{ 1.0, 1.0 } };
+
+    const space = Nodes.fromCellSize([2]usize{ 8, 8 });
+
+    // ***************************
+    // Variables
+
+    const sol: []f64 = try allocator.alloc(f64, space.numNodes());
+    defer allocator.free(sol);
+
+    const scratch: []f64 = try allocator.alloc(f64, space.numNodes());
+    defer allocator.free(scratch);
+
+    const rhs: []f64 = try allocator.alloc(f64, space.numNodes());
+    defer allocator.free(rhs);
+
+    @memset(sol, 0.0);
+    @memset(rhs, 1.0);
+
+    // ***************************
+    // Perform smoothing
+
+    var residual: f64 = 0.0;
+
+    for (0..1000) |iter| {
+        space.fillBoundary(Boundary{}, sol);
+
+        // Compute residual
+        {
+            residual = 0.0;
+
+            var cells = space.cellSpace().cartesianIndices();
+
+            while (cells.next()) |cell| {
+                const vrhs = space.value(cell, rhs);
+                const lap = Poisson.op(domain, space, cell, sol);
+
+                residual += (vrhs - lap) * (vrhs - lap);
+            }
+
+            residual = @sqrt(residual);
+
+            std.debug.print("Iteration {}, Residual {}\n", .{ iter, residual });
+        }
+
+        // Smooth
+        {
+            var cells = space.cellSpace().cartesianIndices();
+
+            while (cells.next()) |cell| {
+                const vsol = space.value(cell, sol);
+                const vrhs = space.value(cell, rhs);
+                const lap = Poisson.op(domain, space, cell, sol);
+                const diag = Poisson.opDiag(domain, space);
+
+                const v = vsol + 2.0 / 3.0 * (vrhs - lap) / diag;
+                space.setValue(cell, scratch, v);
+            }
+
+            @memcpy(sol, scratch);
+        }
+    }
+
+    try expect(residual <= 10e-5);
+}
+
+// test "node space two grid" {
+//     const ArenaAllocator = std.heap.ArenaAllocator;
+//     const expect = std.testing.expect;
+//     _ = expect;
+//     const allocator = std.testing.allocator;
+//     const pi = std.math.pi;
+//     _ = pi;
+
+//     const IndexBox = geometry.IndexBox(2);
+//     _ = IndexBox;
+//     const FaceIndex = geometry.FaceIndex(2);
+//     const RealBox = geometry.RealBox(2);
+//     const BiCGStabSolver = lac.BiCGStabSolver;
+//     const Nodes = NodeSpace(2, 1);
+
+//     const Boundary = struct {
+//         pub fn kind(_: FaceIndex) BoundaryKind {
+//             return .odd;
+//         }
+
+//         pub fn robin(_: @This(), _: [2]f64, _: FaceIndex) Robin {
+//             return Robin.diritchlet(0.0);
+//         }
+//     };
+
+//     const Poisson = struct {
+//         domain: RealBox,
+//         base: Nodes,
+//         scratch: []f64,
+
+//         pub fn apply(self: *const @This(), out: []f64, in: []const f64) void {
+//             // Copy to scratch
+//             {
+//                 var cells = self.base.cellSpace().cartesianIndices();
+//                 var linear: usize = 0;
+
+//                 while (cells.next()) |cell| : (linear += 1) {
+//                     self.base.setValue(cell, self.scratch, in[linear]);
+//                 }
+//             }
+
+//             self.base.fillBoundary(Boundary{}, self.scratch);
+
+//             // Apply
+//             {
+//                 var cells = self.base.cellSpace().cartesianIndices();
+//                 var linear: usize = 0;
+
+//                 while (cells.next()) |cell| : (linear += 1) {
+//                     out[linear] = op(self.domain, self.base, cell, self.scratch);
+//                 }
+//             }
+//         }
+
+//         fn op(domain: RealBox, nodes: Nodes, cell: [2]usize, field: []const f64) f64 {
+//             var result: f64 = 0.0;
+
+//             inline for (0..2) |i| {
+//                 comptime var ranks: [2]usize = [1]usize{0} ** 2;
+//                 ranks[i] = 2;
+
+//                 result += domain.transformOp(ranks, nodes.op(ranks, cell, field));
+//             }
+
+//             return -result;
+//         }
+
+//         fn opDiag(domain: RealBox, nodes: Nodes) f64 {
+//             var result: f64 = 0.0;
+
+//             inline for (0..2) |i| {
+//                 comptime var ranks: [2]usize = [1]usize{0} ** 2;
+//                 ranks[i] = 2;
+
+//                 result += domain.transformOp(ranks, nodes.opDiagonal(ranks));
+//             }
+
+//             return -result;
+//         }
+//     };
+
+//     // **************************
+//     // Mesh
+
+//     const domain: RealBox = .{ .origin = .{ 0.0, 0.0 }, .size = .{ 1.0, 1.0 } };
+
+//     const base = Nodes.fromCellSize([2]usize{ 8, 8 });
+//     const fine = Nodes.fromCellSize([2]usize{ 16, 16 });
+
+//     std.debug.print("Op Diagonal {}\n", .{Poisson.opDiag(.{ .origin = .{ 0.0, 0.0 }, .size = .{ 16.0, 16.0 } }, fine)});
+
+//     std.debug.print("Op Diagonal {}\n", .{Poisson.opDiag(domain, fine)});
+
+//     // **************************
+//     // Variables
+
+//     const base_solution: []f64 = try allocator.alloc(f64, base.numNodes());
+//     defer allocator.free(base_solution);
+
+//     const base_old: []f64 = try allocator.alloc(f64, base.numNodes());
+//     defer allocator.free(base_old);
+
+//     const base_rhs: []f64 = try allocator.alloc(f64, base.numNodes());
+//     defer allocator.free(base_rhs);
+
+//     const base_err: []f64 = try allocator.alloc(f64, base.numNodes());
+//     defer allocator.free(base_err);
+
+//     const base_scratch: []f64 = try allocator.alloc(f64, base.numNodes());
+//     defer allocator.free(base_scratch);
+
+//     const fine_solution: []f64 = try allocator.alloc(f64, fine.numNodes());
+//     defer allocator.free(fine_solution);
+
+//     const fine_res: []f64 = try allocator.alloc(f64, fine.numNodes());
+//     defer allocator.free(fine_res);
+
+//     const fine_scratch: []f64 = try allocator.alloc(f64, fine.numNodes());
+//     defer allocator.free(fine_scratch);
+
+//     const fine_rhs: []f64 = try allocator.alloc(f64, fine.numNodes());
+//     defer allocator.free(fine_rhs);
+
+//     // ****************************
+//     // Setup problem
+
+//     @memset(base_solution, 0.0);
+//     @memset(fine_solution, 0.0);
+//     @memset(fine_rhs, 1.0);
+
+//     // ****************************
+//     // Multigrid iteration
+
+//     // Build scratch allocator
+//     var arena: ArenaAllocator = ArenaAllocator.init(allocator);
+//     defer arena.deinit();
+
+//     const scratch: Allocator = arena.allocator();
+
+//     for (0..40) |iter| {
+//         defer _ = arena.reset(.retain_capacity);
+
+//         // Compute current error
+//         {
+//             var residual: f64 = 0.0;
+
+//             fine.fillBoundary(Boundary{}, fine_solution);
+
+//             var cells = fine.cellSpace().cartesianIndices();
+
+//             while (cells.next()) |cell| {
+//                 const rhs = fine.value(cell, fine_rhs);
+//                 const lap = Poisson.op(domain, fine, cell, fine_solution);
+
+//                 residual += (rhs - lap) * (rhs - lap);
+//             }
+
+//             if (residual <= 10e-10) {
+//                 std.debug.print("Converged in {} Iterations\n", .{iter});
+//                 break;
+//             }
+
+//             std.debug.print("Iteration {}, Residual {}\n", .{ iter, residual });
+//         }
+
+//         // Perform presmoothing
+//         {
+//             fine.fillBoundary(Boundary{}, fine_solution);
+
+//             var cells = fine.cellSpace().cartesianIndices();
+
+//             while (cells.next()) |cell| {
+//                 const val = fine.value(cell, fine_solution);
+//                 const rhs = fine.value(cell, fine_rhs);
+//                 const lap = Poisson.op(domain, fine, cell, fine_solution);
+//                 const diag = Poisson.opDiag(domain, fine);
+
+//                 const v = val + (rhs - lap) / diag;
+//                 fine.setValue(cell, fine_scratch, v);
+//             }
+
+//             @memcpy(fine_solution, fine_scratch);
+//         }
+
+//         // Residual calculation
+//         {
+//             fine.fillBoundary(Boundary{}, fine_solution);
+
+//             var cells = fine.cellSpace().cartesianIndices();
+
+//             while (cells.next()) |cell| {
+//                 const rhs = fine.value(cell, fine_rhs);
+//                 const lap = Poisson.op(domain, fine, cell, fine_solution);
+
+//                 fine.setValue(cell, fine_res, rhs - lap);
+//             }
+//         }
+
+//         // Right Hand Side computation
+//         {
+//             fine.fillBoundary(Boundary{}, fine_solution);
+
+//             var cells = base.cellSpace().cartesianIndices();
+
+//             while (cells.next()) |cell| {
+//                 const sol = fine.restrict(cell, fine_solution);
+//                 const res = fine.restrictOrder(1, cell, fine_res);
+
+//                 base.setValue(cell, base_rhs, res + sol);
+//                 base.setValue(cell, base_old, sol);
+//             }
+//         }
+
+//         // ****************************
+//         // Base solving
+
+//         const x = try scratch.alloc(f64, base.cellSpace().total());
+//         defer scratch.free(x);
+
+//         const b = try scratch.alloc(f64, base.cellSpace().total());
+//         defer scratch.free(b);
+
+//         // Transfer from base solution to x and base rhs to b
+//         {
+//             var cells = base.cellSpace().cartesianIndices();
+//             var linear: usize = 0;
+
+//             while (cells.next()) |cell| : (linear += 1) {
+//                 x[linear] = base.value(cell, base_solution);
+//                 b[linear] = base.value(cell, base_rhs);
+//             }
+//         }
+
+//         // Solve
+//         try BiCGStabSolver.new(1000, 10e-12).solve(scratch, Poisson{
+//             .domain = domain,
+//             .base = base,
+//             .scratch = base_scratch,
+//         }, x, b);
+
+//         // Transfer from x to base solution
+//         {
+//             var cells = base.cellSpace().cartesianIndices();
+//             var linear: usize = 0;
+
+//             while (cells.next()) |cell| : (linear += 1) {
+//                 base.setValue(cell, base_solution, x[linear]);
+//             }
+//         }
+
+//         // Compute Error
+//         {
+//             base.fillBoundary(Boundary{}, base_solution);
+//             base.fillBoundary(Boundary{}, base_old);
+
+//             for (0..base.numNodes()) |idx| {
+//                 base_err[idx] = base_solution[idx] - base_old[idx];
+//             }
+//         }
+
+//         // Correct fine solution
+//         // {
+//         //     var cells = fine.cellSpace().cartesianIndices();
+
+//         //     while (cells.next()) |cell| {
+//         //         const sol = fine.value(cell, fine_solution);
+//         //         const err = base.prolong(cell, base_err);
+
+//         //         fine.setValue(cell, fine_solution, sol + err);
+//         //     }
+//         // }
+
+//         // Post smoothing
+//         {
+//             fine.fillBoundary(Boundary{}, fine_solution);
+
+//             var cells = fine.cellSpace().cartesianIndices();
+
+//             while (cells.next()) |cell| {
+//                 const val = fine.value(cell, fine_solution);
+//                 const rhs = fine.value(cell, fine_rhs);
+//                 const lap = Poisson.op(domain, fine, cell, fine_solution);
+//                 const diag = Poisson.opDiag(domain, fine);
+
+//                 const v = val + (rhs - lap) / diag;
+//                 fine.setValue(cell, fine_scratch, v);
+//             }
+
+//             @memcpy(fine_solution, fine_scratch);
+//         }
+//     }
+// }

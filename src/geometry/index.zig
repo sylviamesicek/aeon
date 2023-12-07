@@ -314,4 +314,11 @@ test "index space" {
     try expect(eql(usize, &iterator_slice.next().?, &[_]usize{ 1, 0, 1 }));
     try expect(eql(usize, &iterator_slice.next().?, &[_]usize{ 1, 0, 2 }));
     try expect(iterator_slice.next() == null);
+
+    var indices = space.cartesianIndices();
+    var linear: usize = 0;
+
+    while (indices.next()) |index| : (linear += 1) {
+        try expect(linear == space.linearFromCartesian(index));
+    }
 }

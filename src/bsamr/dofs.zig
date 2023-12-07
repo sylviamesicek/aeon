@@ -38,7 +38,7 @@ pub fn DofManager(comptime N: usize, comptime M: usize) type {
 
         const Self = @This();
 
-        const FaceIndex = geometry.FaceIndex(M);
+        const FaceIndex = geometry.FaceIndex(N);
         const IndexBox = geometry.IndexBox(N);
         const IndexMixin = geometry.IndexMixin(N);
         const IndexSpace = geometry.IndexSpace(N);
@@ -121,7 +121,7 @@ pub fn DofManager(comptime N: usize, comptime M: usize) type {
             grid: *const Mesh,
             boundary: anytype,
             dest: []f64,
-            src: []f64,
+            src: []const f64,
         ) void {
             assert(dest.len == self.numNodes());
             assert(src.len == self.numCells());

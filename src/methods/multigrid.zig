@@ -5,9 +5,12 @@ const ArenaAllocator = std.heap.ArenaAllocator;
 const basis = @import("../basis/basis.zig");
 const bsamr = @import("../bsamr/bsamr.zig");
 const geometry = @import("../geometry/geometry.zig");
+const io = @import("../io/io.zig");
 const lac = @import("../lac/lac.zig");
 const mesh = @import("../mesh/mesh.zig");
 const nodes = @import("../nodes/nodes.zig");
+
+const system = @import("system.zig");
 
 /// A multigrid based elliptic solver which uses the given base solver to approximate the solution
 /// on the lowest level of the mesh.
@@ -20,20 +23,15 @@ pub fn MultigridMethod(comptime N: usize, comptime M: usize, comptime BaseSolver
         base_solver: BaseSolver,
         max_iters: usize,
         tolerance: f64,
+        presmooth: usize,
+        postsmooth: usize,
 
         const Self = @This();
         const Mesh = bsamr.Mesh(N);
         const DofManager = bsamr.DofManager(N, M);
+        const DataOut = io.DataOut(N, M);
         const IndexSpace = geometry.IndexSpace(N);
         const IndexMixin = geometry.IndexMixin(N);
-
-        pub fn new(max_iters: usize, tolerance: f64, base_solver: BaseSolver) Self {
-            return .{
-                .base_solver = base_solver,
-                .max_iters = max_iters,
-                .tolerance = tolerance,
-            };
-        }
 
         pub fn solve(
             self: Self,
@@ -104,6 +102,8 @@ pub fn MultigridMethod(comptime N: usize, comptime M: usize, comptime BaseSolver
 
             const worker: Worker(Op, Bound) = .{
                 .base_solver = self.base_solver,
+                .presmooth = self.presmooth,
+                .postsmooth = self.postsmooth,
                 .grid = grid,
                 .dofs = dofs,
                 .operator = operator,
@@ -125,6 +125,32 @@ pub fn MultigridMethod(comptime N: usize, comptime M: usize, comptime BaseSolver
 
                 const nres = norm(res);
 
+                std.debug.print("Iteration {}, Residual: {}\n", .{ iteration, nres });
+
+                {
+                    dofs.copyCellsFromNodes(grid, x, sys);
+
+                    const DebugOutput = enum {
+                        sys,
+                        rhs,
+                        res,
+                    };
+
+                    const file_name = try std.fmt.allocPrint(allocator, "output/multigrid_iteration_{}.vtu", .{iteration});
+                    defer allocator.free(file_name);
+
+                    const file = try std.fs.cwd().createFile(file_name, .{});
+                    defer file.close();
+
+                    const debug_output = system.SystemConst(DebugOutput).view(dofs.numCells(), .{
+                        .sys = x,
+                        .rhs = rhs,
+                        .res = res,
+                    });
+
+                    try DataOut.writeVtk(DebugOutput, allocator, grid, dofs, debug_output, file.writer());
+                }
+
                 if (nres <= tol) {
                     break;
                 }
@@ -132,32 +158,6 @@ pub fn MultigridMethod(comptime N: usize, comptime M: usize, comptime BaseSolver
                 // We are not at sufficient accuracy, so run another iteration of multigrid.
 
                 try worker.iterate(scratch, grid.levels.len - 1);
-
-                // const res_norm = norm(res.field(sys_field));
-
-                // std.debug.print("Multigrid Iteration: {}, Residual: {}\n", .{ iteration, res_norm });
-
-                // {
-                //     const DebugOutput = enum {
-                //         sys,
-                //         rhs,
-                //         res,
-                //     };
-
-                //     const file_name = try std.fmt.allocPrint(allocator, "output/multigrid_iteration_{}.vtu", .{iteration});
-                //     defer allocator.free(file_name);
-
-                //     const file = try std.fs.cwd().createFile(file_name, .{});
-                //     defer file.close();
-
-                //     const debug_output = SystemSliceConst(DebugOutput).view(mesh.cell_total, .{
-                //         .sys = x.field(sys_field),
-                //         .rhs = rhs.field(sys_field),
-                //         .res = res.field(sys_field),
-                //     });
-
-                //     try DataOut.writeVtk(DebugOutput, allocator, mesh, debug_output, file.writer());
-                // }
 
                 // if (res_norm <= tol) {
                 //     break;
@@ -170,6 +170,8 @@ pub fn MultigridMethod(comptime N: usize, comptime M: usize, comptime BaseSolver
         fn Worker(comptime Op: type, comptime Bound: type) type {
             return struct {
                 base_solver: BaseSolver,
+                presmooth: usize,
+                postsmooth: usize,
                 grid: *const Mesh,
                 dofs: *const DofManager,
                 operator: Op,
@@ -233,13 +235,22 @@ pub fn MultigridMethod(comptime N: usize, comptime M: usize, comptime BaseSolver
                         dofs.fillBlockBoundary(grid, block_id, boundary, sys);
                     }
 
-                    for (level.block_offset..level.block_offset + level.block_total) |block_id| {
-                        dofs.smoothBlock(grid, block_id, operator, x, sys, rhs);
-                        dofs.copyBlockNodesFromCells(grid, block_id, sys, x);
+                    for (coarse.block_offset..coarse.block_offset + coarse.block_total) |block_id| {
+                        dofs.fillBlockBoundary(grid, block_id, boundary, sys);
                     }
 
-                    for (level.block_offset..level.block_offset + level.block_total) |block_id| {
-                        dofs.fillBlockBoundary(grid, block_id, boundary, sys);
+                    for (0..self.presmooth) |_| {
+                        for (level.block_offset..level.block_offset + level.block_total) |block_id| {
+                            dofs.smoothBlock(grid, block_id, operator, x, sys, rhs);
+                        }
+
+                        for (level.block_offset..level.block_offset + level.block_total) |block_id| {
+                            dofs.copyBlockNodesFromCells(grid, block_id, sys, x);
+                        }
+
+                        for (level.block_offset..level.block_offset + level.block_total) |block_id| {
+                            dofs.fillBlockBoundary(grid, block_id, boundary, sys);
+                        }
                     }
 
                     // *****************************
@@ -253,6 +264,11 @@ pub fn MultigridMethod(comptime N: usize, comptime M: usize, comptime BaseSolver
                         dofs.swapBlockNodes(block_id, old, sys);
                         dofs.restrictBlock(grid, block_id, old);
                         dofs.swapBlockNodes(block_id, old, sys);
+                    }
+
+                    for (coarse.block_offset..coarse.block_offset + coarse.block_total) |block_id| {
+                        dofs.fillBlockBoundary(grid, block_id, boundary, old);
+                        dofs.fillBlockBoundary(grid, block_id, boundary, sys);
                     }
 
                     // *******************************
@@ -285,6 +301,11 @@ pub fn MultigridMethod(comptime N: usize, comptime M: usize, comptime BaseSolver
                     // Error Correction
 
                     for (coarse.block_offset..coarse.block_offset + coarse.block_total) |block_id| {
+                        dofs.fillBlockBoundary(grid, block_id, boundary, old);
+                        dofs.fillBlockBoundary(grid, block_id, boundary, sys);
+                    }
+
+                    for (coarse.block_offset..coarse.block_offset + coarse.block_total) |block_id| {
                         for (dofs.node_map.offset(block_id)..dofs.node_map.offset(block_id + 1)) |idx| {
                             err[idx] = sys[idx] - old[idx];
                         }
@@ -307,12 +328,21 @@ pub fn MultigridMethod(comptime N: usize, comptime M: usize, comptime BaseSolver
                         dofs.fillBlockBoundary(grid, block_id, boundary, sys);
                     }
 
-                    for (level.block_offset..level.block_offset + level.block_total) |block_id| {
-                        dofs.smoothBlock(grid, block_id, operator, x, sys, rhs);
-                        dofs.copyBlockNodesFromCells(grid, block_id, sys, x);
+                    for (0..self.postsmooth) |_| {
+                        for (level.block_offset..level.block_offset + level.block_total) |block_id| {
+                            dofs.smoothBlock(grid, block_id, operator, x, sys, rhs);
+                        }
+
+                        for (level.block_offset..level.block_offset + level.block_total) |block_id| {
+                            dofs.copyBlockNodesFromCells(grid, block_id, sys, x);
+                        }
+
+                        for (level.block_offset..level.block_offset + level.block_total) |block_id| {
+                            dofs.fillBlockBoundary(grid, block_id, boundary, sys);
+                        }
                     }
 
-                    for (level.block_offset..level.block_offset + level.block_total) |block_id| {
+                    for (coarse.block_offset..coarse.block_offset + coarse.block_total) |block_id| {
                         dofs.fillBlockBoundary(grid, block_id, boundary, sys);
                     }
                 }
@@ -344,7 +374,9 @@ pub fn MultigridMethod(comptime N: usize, comptime M: usize, comptime BaseSolver
                 // var iterations: usize = 0;
 
                 pub fn callback(_: *const @This(), iteration: usize, residual: f64, _: []const f64) void {
-                    std.debug.print("Iteration: {}, Residual: {}\n", .{ iteration, residual });
+                    _ = residual;
+                    _ = iteration;
+                    // std.debug.print("Iteration: {}, Residual: {}\n", .{ iteration, residual });
 
                     // const file_name = std.fmt.allocPrint(solver.self.mesh.gpa, "output/elliptic_iteration{}.vtu", .{iterations}) catch {
                     //     unreachable;

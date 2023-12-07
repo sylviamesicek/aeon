@@ -141,9 +141,15 @@ test "stencil grids" {
 }
 
 test "stencils" {
+    const S1 = Stencils(1);
     const S2 = Stencils(2);
 
     const expectEqualDeep = std.testing.expectEqualDeep;
+
+    try expectEqualDeep([_]f64{ 0.0, 1.0, 0.0 }, S1.value());
+    try expectEqualDeep([_]f64{ -1.0 / 2.0, 0.0, 1.0 / 2.0 }, S1.derivative());
+    try expectEqualDeep([_]f64{ 1.0, -2.0, 1.0 }, S1.secondDerivative());
+    try expectEqualDeep([_]f64{ 1.0 / 2.0, 1.0 / 2.0 }, S1.restrict());
 
     try expectEqualDeep([_]f64{ 0.0, -0.0, 1.0, 0.0, -0.0 }, S2.value());
     try expectEqualDeep([_]f64{ 1.0 / 12.0, -2.0 / 3.0, 0.0, 2.0 / 3.0, -1.0 / 12.0 }, S2.derivative());

@@ -67,7 +67,7 @@ pub fn PoissonEquation(comptime M: usize) type {
                 engine: Engine,
                 field: []const f64,
             ) f64 {
-                return -engine.laplacian(field);
+                return -engine.laplacian(field) + engine.value(field);
             }
         };
 
@@ -81,7 +81,7 @@ pub fn PoissonEquation(comptime M: usize) type {
                     .origin = [2]f64{ 0.0, 0.0 },
                     .size = [2]f64{ 2.0 * std.math.pi, 2.0 * std.math.pi },
                 },
-                .tile_width = 32,
+                .tile_width = 8,
                 .index_size = [2]usize{ 1, 1 },
             });
             defer mesh.deinit();
@@ -93,7 +93,7 @@ pub fn PoissonEquation(comptime M: usize) type {
 
             // Globally refine three times
 
-            for (0..1) |_| {
+            for (0..3) |_| {
                 const amr: RegridManager = .{
                     .max_levels = 4,
                     .patch_efficiency = 0.1,
@@ -124,12 +124,12 @@ pub fn PoissonEquation(comptime M: usize) type {
             const source = try allocator.alloc(f64, dofs.numCells());
             defer allocator.free(source);
 
-            dofs.project(&mesh, Source{ .amplitude = 2.0 }, source);
+            dofs.project(&mesh, Source{ .amplitude = 1.0 }, source);
 
             const solution = try allocator.alloc(f64, dofs.numCells());
             defer allocator.free(solution);
 
-            dofs.project(&mesh, Source{ .amplitude = 1.0 }, solution);
+            dofs.project(&mesh, Source{ .amplitude = 3.0 }, solution);
 
             // Allocate numerical cell vector
 
@@ -138,11 +138,14 @@ pub fn PoissonEquation(comptime M: usize) type {
 
             @memset(numerical, 0.0);
 
-            const solver = MultigridMethod.new(
-                20,
-                10e-10,
-                BiCGStabSolver.new(10000, 10e-10),
-            );
+            const solver: MultigridMethod = .{
+                .base_solver = BiCGStabSolver.new(10000, 10e-10),
+                .max_iters = 20,
+                .tolerance = 10e-10,
+                .presmooth = 2,
+                .postsmooth = 2,
+            };
+
             // const solver = LinearMapMethod.new(BiCGStabSolver.new(10000, 10e-10));
 
             try solver.solve(

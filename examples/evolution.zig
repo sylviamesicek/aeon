@@ -3,52 +3,77 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 
 const aeon = @import("aeon");
-const dofs = aeon.dofs;
-const geometry = aeon.geometry;
-const index = aeon.index;
-const lac = aeon.lac;
-const methods = aeon.methods;
 
-pub fn BrillEvolution(comptime O: usize) type {
+const bsamr = aeon.bsamr;
+const geometry = aeon.geometry;
+const nodes = aeon.nodes;
+
+pub fn BrillEvolution(comptime M: usize) type {
     const N = 2;
     return struct {
-        const BoundaryCondition = dofs.BoundaryCondition;
-        const DataOut = aeon.DataOut(N);
-        const DofMap = dofs.DofMap(N, O);
-        const DofUtils = dofs.DofUtils(N, O);
-        const DofUtilsTotal = dofs.DofUtilsTotal(N, O);
-        const LinearMapMethod = methods.LinearMapMethod(N, O, BiCGStabSolver);
-        const Rk4 = methods.RungeKutta4Integrator(Hyperbolic);
-        const SystemSlice = aeon.SystemSlice;
-        const SystemSliceConst = aeon.SystemSliceConst;
-        const SystemValue = aeon.SystemValue;
-        const SystemBoundaryCondition = dofs.SystemBoundaryCondition;
+        const BoundaryKind = nodes.BoundaryKind;
+        const Robin = nodes.Robin;
 
-        const Face = geometry.Face(N);
+        const DataOut = aeon.DataOut(N, M);
+        const MultigridMethod = aeon.methods.MultigridMethod(N, M, BiCGStabSolver);
+        const LinearMapMethod = aeon.methods.LinearMapMethod(N, M, BiCGStabSolver);
+        const SystemConst = aeon.methods.SystemConst;
+
+        const Mesh = bsamr.Mesh(N);
+        const DofManager = bsamr.DofManager(N, M);
+        const RegridManager = bsamr.RegridManager(N);
+
+        const FaceIndex = geometry.FaceIndex(N);
         const IndexSpace = geometry.IndexSpace(N);
-        const Index = index.Index(N);
+        const IndexMixin = geometry.IndexMixin(N);
 
-        const BiCGStabSolver = lac.BiCGStabSolver;
+        const BiCGStabSolver = aeon.lac.BiCGStabSolver;
 
-        const Mesh = aeon.mesh.Mesh(N);
+        const Engine = aeon.mesh.Engine(N, M);
 
-        fn evenBoundaryCondition(pos: [N]f64, face: Face) BoundaryCondition {
-            if (face.side == false and face.axis == 0) {
-                return BoundaryCondition.nuemann(0.0);
-            } else {
-                const r: f64 = @sqrt(pos[0] * pos[0] + pos[1] * pos[1]);
-                return BoundaryCondition.robin(1.0 / r, 1.0, 0.0);
+        pub const EvenBoundary = struct {
+            pub fn kind(face: FaceIndex) BoundaryKind {
+                if (face.side == false and face.axis == 0) {
+                    return .even;
+                } else {
+                    return .robin;
+                }
             }
-        }
 
-        fn oddBoundaryCondition(pos: [N]f64, face: Face) BoundaryCondition {
-            if (face.side == false and face.axis == 0) {
-                return BoundaryCondition.diritchlet(0.0);
-            } else {
+            pub fn robin(self: EvenBoundary, pos: [N]f64, face: FaceIndex) Robin {
+                _ = face;
+                _ = self;
                 const r: f64 = @sqrt(pos[0] * pos[0] + pos[1] * pos[1]);
-                return BoundaryCondition.robin(1.0 / r, 1.0, 0.0);
+
+                return .{
+                    .value = 1.0 / r,
+                    .flux = 1.0,
+                    .rhs = 0.0,
+                };
             }
-        }
+        };
+
+        pub const OddBoundary = struct {
+            pub fn kind(face: FaceIndex) BoundaryKind {
+                if (face.side == false and face.axis == 0) {
+                    return .odd;
+                } else {
+                    return .robin;
+                }
+            }
+
+            pub fn robin(self: OddBoundary, pos: [N]f64, face: FaceIndex) Robin {
+                _ = face;
+                _ = self;
+                const r: f64 = @sqrt(pos[0] * pos[0] + pos[1] * pos[1]);
+
+                return .{
+                    .value = 1.0 / r,
+                    .flux = 1.0,
+                    .rhs = 0.0,
+                };
+            }
+        };
 
         pub const Hyperbolic = enum {
             psi,
@@ -64,16 +89,11 @@ pub fn BrillEvolution(comptime O: usize) type {
             shift_z,
         };
 
-        pub const SProjection = struct {
+        pub const Seed = struct {
             amplitude: f64,
             sigma: f64,
 
-            pub const System = enum {
-                s,
-            };
-            pub const Context = aeon.EmptySystem;
-
-            pub fn project(self: SProjection, engine: dofs.ProjectionEngine(N, O, Context)) SystemValue(System) {
+            pub fn project(self: Seed, engine: Engine) f64 {
                 const pos = engine.position();
 
                 const rho = pos[0];
@@ -83,19 +103,15 @@ pub fn BrillEvolution(comptime O: usize) type {
                 const z2 = z * z;
                 const sigma2 = self.sigma * self.sigma;
 
-                return .{
-                    .s = self.amplitude * rho * @exp(-(rho2 + z2) / sigma2),
-                };
-            }
-
-            pub fn boundaryCtx(_: SProjection, _: [N]f64, _: Face) SystemBoundaryCondition(Context) {
-                return .{};
+                return self.amplitude * rho * @exp(-(rho2 + z2) / sigma2);
             }
         };
 
         pub const InitialDataRhs = struct {
             pub const System = InitialDataOperator.System;
             pub const Context = InitialDataOperator.Context;
+
+            seed: []f64,
 
             pub fn project(_: InitialDataRhs, engine: dofs.ProjectionEngine(N, O, Context)) SystemValue(System) {
                 const pos = engine.position();

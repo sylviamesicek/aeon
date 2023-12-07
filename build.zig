@@ -29,7 +29,7 @@ pub fn build(b: *std.Build) void {
         // "brillfem",
         // "brill",
         "poisson",
-        // "prolong",
+        "prolong",
         // "evolution",
     };
 
