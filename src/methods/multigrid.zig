@@ -140,29 +140,29 @@ pub fn MultigridMethod(comptime N: usize, comptime M: usize, comptime BaseSolver
                 //     std.debug.print("BLOCK {} MAX {}\n", .{ i, max });
                 // }
 
-                {
-                    dofs.copyCellsFromNodes(grid, x, sys);
+                // {
+                //     dofs.copyCellsFromNodes(grid, x, sys);
 
-                    const DebugOutput = enum {
-                        sys,
-                        rhs,
-                        res,
-                    };
+                //     const DebugOutput = enum {
+                //         sys,
+                //         rhs,
+                //         res,
+                //     };
 
-                    const file_name = try std.fmt.allocPrint(allocator, "output/multigrid_iteration_{}.vtu", .{iteration});
-                    defer allocator.free(file_name);
+                //     const file_name = try std.fmt.allocPrint(allocator, "output/multigrid_iteration_{}.vtu", .{iteration});
+                //     defer allocator.free(file_name);
 
-                    const file = try std.fs.cwd().createFile(file_name, .{});
-                    defer file.close();
+                //     const file = try std.fs.cwd().createFile(file_name, .{});
+                //     defer file.close();
 
-                    const debug_output = system.SystemConst(DebugOutput).view(dofs.numCells(), .{
-                        .sys = x,
-                        .rhs = rhs,
-                        .res = res,
-                    });
+                //     const debug_output = system.SystemConst(DebugOutput).view(dofs.numCells(), .{
+                //         .sys = x,
+                //         .rhs = rhs,
+                //         .res = res,
+                //     });
 
-                    try DataOut.writeVtk(DebugOutput, allocator, grid, dofs, debug_output, file.writer());
-                }
+                //     try DataOut.writeVtk(DebugOutput, allocator, grid, dofs, debug_output, file.writer());
+                // }
 
                 if (nres <= tol) {
                     break;

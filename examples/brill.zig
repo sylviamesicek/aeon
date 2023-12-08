@@ -3,55 +3,39 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 
 const aeon = @import("aeon");
-const dofs = aeon.dofs;
+
+const bsamr = aeon.bsamr;
 const geometry = aeon.geometry;
-const index = aeon.index;
-const lac = aeon.lac;
-const mesh = aeon.mesh;
-const methods = aeon.methods;
+const nodes = aeon.nodes;
 
-// ***********************
-// Temp Main Code ********
-// ***********************
-
-pub fn BrillInitialData(comptime O: usize) type {
+pub fn PoissonEquation(comptime M: usize) type {
     const N = 2;
     return struct {
-        const BoundaryCondition = dofs.BoundaryCondition;
-        const DataOut = aeon.DataOut(N);
-        const DofMap = dofs.DofMap(N, O);
-        const DofUtils = dofs.DofUtils(N, O);
-        const DofUtilsTotal = dofs.DofUtilsTotal(N, O);
-        const LinearMapMethod = methods.LinearMapMethod(N, O, BiCGStabSolver);
-        const SystemSlice = aeon.SystemSlice;
-        const SystemSliceConst = aeon.SystemSliceConst;
-        const SystemValue = aeon.SystemValue;
-        const SystemBoundaryCondition = dofs.SystemBoundaryCondition;
+        const BoundaryKind = nodes.BoundaryKind;
+        const Robin = nodes.Robin;
 
-        const Face = geometry.Face(N);
+        const DataOut = aeon.DataOut(N, M);
+        const MultigridMethod = aeon.methods.MultigridMethod(N, M, BiCGStabSolver);
+        const LinearMapMethod = aeon.methods.LinearMapMethod(N, M, BiCGStabSolver);
+        const SystemConst = aeon.methods.SystemConst;
+
+        const Mesh = bsamr.Mesh(N);
+        const DofManager = bsamr.DofManager(N, M);
+        const RegridManager = bsamr.RegridManager(N);
+
+        const FaceIndex = geometry.FaceIndex(N);
         const IndexSpace = geometry.IndexSpace(N);
-        const Index = index.Index(N);
+        const IndexMixin = geometry.IndexMixin(N);
 
-        const BiCGStabSolver = lac.BiCGStabSolver;
+        const BiCGStabSolver = aeon.lac.BiCGStabSolver;
 
-        const Mesh = mesh.Mesh(N);
+        const Engine = aeon.mesh.Engine(N, M);
 
-        pub const Seed = enum {
-            seed,
-        };
-
-        pub const Metric = enum {
-            factor,
-        };
-
-        pub const SeedProjection = struct {
+        pub const Seed = struct {
             amplitude: f64,
             sigma: f64,
 
-            pub const System = Seed;
-            pub const Context = aeon.EmptySystem;
-
-            pub fn project(self: SeedProjection, engine: dofs.ProjectionEngine(N, O, Context)) SystemValue(System) {
+            pub fn project(self: Seed, engine: Engine) f64 {
                 const pos = engine.position();
 
                 const rho = pos[0];
@@ -61,133 +45,180 @@ pub fn BrillInitialData(comptime O: usize) type {
                 const z2 = z * z;
                 const sigma2 = self.sigma * self.sigma;
 
-                const term1: f64 = 2.0 * self.amplitude;
-                _ = term1;
-                const term2 = 2 * rho2 * rho2 - 6 * rho2 * sigma2 + sigma2 * sigma2 + 2 * rho2 * z2;
-                _ = term2;
+                const term1: f64 = 2.0 * self.amplitude / 4.0;
+                const term2 = 2.0 * rho2 * rho2 - 6.0 * rho2 * sigma2 + sigma2 * sigma2 + 2.0 * rho2 * z2;
                 const term3 = @exp(-(rho2 + z2) / sigma2) / (sigma2 * sigma2 * sigma2);
-                _ = term3;
 
-                // return .{
-                //     .seed = term1 * term2 * term3,
-                // };
+                return term1 * term2 * term3;
+            }
+        };
 
-                const e = @sqrt(rho2 / 0.5 + z2) - 1.0;
+        pub const Boundary = struct {
+            pub fn kind(face: FaceIndex) BoundaryKind {
+                if (face.side == false) {
+                    return .even;
+                } else {
+                    return .robin;
+                }
+            }
 
-                return .{
-                    .seed = z * @exp(-(e * e)),
-                };
+            pub fn robin(_: Boundary, pos: [N]f64, face: FaceIndex) Robin {
+                if (face.side == false) {
+                    return Robin.nuemann(0.0);
+                } else {
+                    const r: f64 = @sqrt(pos[0] * pos[0] + pos[1] * pos[1]);
+
+                    return .{
+                        .value = 1.0 / r,
+                        .flux = 1.0,
+                        .rhs = 0.0,
+                    };
+                }
             }
         };
 
         pub const MetricOperator = struct {
-            pub const System = Metric;
-            pub const Context = Seed;
+            seed: []const f64,
 
-            pub fn apply(_: MetricOperator, comptime Setting: dofs.EngineSetting, engine: dofs.Engine(N, O, Setting, System, Context)) SystemValue(System) {
+            pub fn apply(
+                self: MetricOperator,
+                engine: Engine,
+                metric: []const f64,
+            ) f64 {
                 const position: [N]f64 = engine.position();
 
-                const hessian: [N][N]f64 = engine.hessianSys(.factor);
-                const gradient: [N]f64 = engine.gradientSys(.factor);
-                const value: f64 = engine.valueSys(.factor);
+                const hessian: [N][N]f64 = engine.hessian(metric);
+                const gradient: [N]f64 = engine.gradient(metric);
+                const value: f64 = engine.value(metric);
 
-                const seed: f64 = engine.valueCtx(.seed);
+                const seed: f64 = engine.value(self.seed);
 
                 const lap = hessian[0][0] + hessian[1][1] + gradient[0] / position[0];
 
-                return .{
-                    .factor = -lap - 0.25 * seed * value,
-                };
+                return -lap - seed * value;
             }
 
-            pub fn boundarySys(_: MetricOperator, pos: [N]f64, face: Face) SystemBoundaryCondition(System) {
-                if (face.side == false) {
-                    return .{ .factor = BoundaryCondition.nuemann(0.0) };
-                } else {
-                    const r: f64 = @sqrt(pos[0] * pos[0] + pos[1] * pos[1]);
-                    return .{ .factor = BoundaryCondition.robin(1.0 / r, 1.0, 0.0) };
-                }
-            }
+            pub fn applyDiag(
+                self: MetricOperator,
+                engine: Engine,
+            ) f64 {
+                const position: [N]f64 = engine.position();
 
-            pub fn boundaryCtx(_: MetricOperator, pos: [N]f64, face: Face) SystemBoundaryCondition(Context) {
-                if (face.side == false) {
-                    return .{ .seed = BoundaryCondition.nuemann(0.0) };
-                } else {
-                    const r: f64 = @sqrt(pos[0] * pos[0] + pos[1] * pos[1]);
-                    return .{ .seed = BoundaryCondition.robin(1.0 / r, 1.0, 0.0) };
-                }
+                const hessian: [N][N]f64 = engine.hessianDiag();
+                const gradient: [N]f64 = engine.gradientDiag();
+                const value: f64 = engine.valueDiag();
+
+                const seed: f64 = engine.value(self.seed);
+
+                const lap = hessian[0][0] + hessian[1][1] + gradient[0] / position[0];
+
+                return -lap - seed * value;
             }
         };
 
         // Run
 
         fn run(allocator: Allocator) !void {
-            std.debug.print("Running Brill Initial Data Solver\n", .{});
+            std.debug.print("Running Poisson Elliptic Solver\n", .{});
 
-            var grid = try Mesh.init(allocator, .{
+            var mesh = try Mesh.init(allocator, .{
                 .physical_bounds = .{
                     .origin = [2]f64{ 0.0, 0.0 },
-                    .size = [2]f64{ 10.0, 10.0 },
+                    .size = [2]f64{ 2.0 * std.math.pi, 2.0 * std.math.pi },
                 },
-                .tile_width = 512,
+                .tile_width = 8,
                 .index_size = [2]usize{ 1, 1 },
             });
-            defer grid.deinit();
+            defer mesh.deinit();
 
-            // Build maps
+            var dofs = DofManager.init(allocator);
+            defer dofs.deinit();
 
-            const dof_map: DofMap = try DofMap.init(allocator, &grid);
-            defer dof_map.deinit(allocator);
+            try dofs.build(&mesh);
 
-            std.debug.print("NDofs: {}\n", .{grid.cell_total});
+            // Globally refine three times
 
-            // Build functions
+            for (0..10) |_| {
+                const amr: RegridManager = .{
+                    .max_levels = 16,
+                    .patch_efficiency = 0.1,
+                    .block_efficiency = 0.7,
+                };
 
-            var seed = try SystemSlice(Seed).init(allocator, grid.cell_total);
-            defer seed.deinit(allocator);
+                var tags = try allocator.alloc(bool, dofs.numTiles());
+                defer allocator.free(tags);
 
-            const seed_proj: SeedProjection = .{
-                .amplitude = 1.0,
-                .sigma = 1.0,
+                @memset(tags, true);
+
+                try amr.regrid(allocator, tags, &mesh, dofs.tile_map);
+                try dofs.build(&mesh);
+            }
+
+            std.debug.print("NDofs: {}\n", .{dofs.numNodes()});
+
+            // Project seed values
+            const seed = try allocator.alloc(f64, dofs.numCells());
+            defer allocator.free(seed);
+
+            dofs.project(&mesh, Seed{ .amplitude = 1.0, .sigma = 1.0 }, seed);
+
+            const nseed = try allocator.alloc(f64, dofs.numNodes());
+            defer allocator.free(nseed);
+
+            dofs.transfer(&mesh, Boundary{}, nseed, seed);
+
+            // Allocate metric vector
+
+            const metric = try allocator.alloc(f64, dofs.numCells());
+            defer allocator.free(metric);
+
+            @memset(metric, 0.0);
+
+            // Solve using multigrid method
+
+            const solver: MultigridMethod = .{
+                .base_solver = BiCGStabSolver.new(20000, 10e-14),
+                .max_iters = 100,
+                .tolerance = 10e-10,
+                .presmooth = 5,
+                .postsmooth = 5,
             };
-
-            DofUtilsTotal.project(&grid, dof_map, seed_proj, seed, aeon.EmptySystem.sliceConst());
-
-            var metric = try SystemSlice(Metric).init(allocator, grid.cell_total);
-            defer metric.deinit(allocator);
-
-            const rhs = SystemSlice(Metric).view(grid.cell_total, .{ .factor = seed.field(.seed) });
-
-            const oper = MetricOperator{};
-
-            var solver = LinearMapMethod.new(BiCGStabSolver.new(1000000, 10e-12));
 
             try solver.solve(
                 allocator,
-                &grid,
-                dof_map,
-                oper,
+                &mesh,
+                &dofs,
+                MetricOperator{ .seed = nseed },
+                Boundary{},
                 metric,
-                seed.toConst(),
-                rhs.toConst(),
+                seed,
             );
+
+            // Output result
 
             std.debug.print("Writing Solution To File\n", .{});
 
-            const file = try std.fs.cwd().createFile("output/brillinitial.vtu", .{});
+            const file = try std.fs.cwd().createFile("output/brill.vtu", .{});
             defer file.close();
 
             const Output = enum {
-                seed,
                 metric,
+                seed,
             };
 
-            const output = SystemSliceConst(Output).view(grid.cell_total, .{
-                .seed = seed.field(.seed),
-                .metric = metric.field(.factor),
+            const output = SystemConst(Output).view(dofs.numCells(), .{
+                .metric = metric,
+                .seed = seed,
             });
 
-            try DataOut.writeVtk(Output, allocator, &grid, output, file.writer());
+            try DataOut.writeVtk(
+                Output,
+                allocator,
+                &mesh,
+                &dofs,
+                output,
+                file.writer(),
+            );
         }
     };
 }
@@ -205,5 +236,5 @@ pub fn main() !void {
     }
 
     // Run main
-    try BrillInitialData(2).run(gpa.allocator());
+    try PoissonEquation(2).run(gpa.allocator());
 }

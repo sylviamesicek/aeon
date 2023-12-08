@@ -40,7 +40,7 @@ pub fn Engine(comptime N: usize, comptime M: usize) type {
             return 1.0;
         }
 
-        pub fn gradient(self: @This(), field: []const usize) [N]f64 {
+        pub fn gradient(self: @This(), field: []const f64) [N]f64 {
             var result: [N]f64 = undefined;
 
             inline for (0..N) |i| {

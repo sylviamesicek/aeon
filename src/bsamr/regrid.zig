@@ -292,8 +292,8 @@ pub fn RegridManager(comptime N: usize) type {
             patches.clearRetainingCapacity();
             levels.clearRetainingCapacity();
 
-            try blocks.ensureUnusedCapacity(grid.gpa, data.blockTotal());
-            try patches.ensureUnusedCapacity(grid.gpa, data.patchTotal());
+            try blocks.ensureUnusedCapacity(grid.gpa, data.blockTotal() + 2);
+            try patches.ensureUnusedCapacity(grid.gpa, data.patchTotal() + 2);
             try levels.ensureUnusedCapacity(grid.gpa, total_levels);
 
             // *****************************
