@@ -18,6 +18,7 @@ const lac = @import("../lac/lac.zig");
 const boundary = @import("boundary.zig");
 
 pub const BoundaryKind = boundary.BoundaryKind;
+pub const BoundaryUtils = boundary.BoundaryUtils;
 pub const Robin = boundary.Robin;
 pub const isBoundary = boundary.isBoundary;
 
@@ -264,15 +265,9 @@ pub fn NodeSpace(comptime N: usize, comptime M: usize) type {
                     offset[i] = idx - O;
                 }
 
-                var offset_node: [N]isize = undefined;
-
-                inline for (0..N) |i| {
-                    offset_node[i] = central_node[i] + offset[i];
-                }
-
                 // std.debug.print("Coef {}, Offset ({}, {}), Value {}\n", .{ coef, offset[0], offset[1], self.nodeValue(offset_node, field) });
-
-                result += coef * self.nodeValue(offset_node, field);
+                const node = IndexMixin.addSigned(central_node, offset);
+                result += coef * self.nodeValue(node, field);
             }
 
             return result;
@@ -353,13 +348,8 @@ pub fn NodeSpace(comptime N: usize, comptime M: usize) type {
                     offset[i] = idx - O + 1;
                 }
 
-                var offset_node: [N]isize = undefined;
-
-                inline for (0..N) |i| {
-                    offset_node[i] = central_node[i] + offset[i];
-                }
-
-                result += coef * self.nodeValue(offset_node, field);
+                const node = IndexMixin.addSigned(central_node, offset);
+                result += coef * self.nodeValue(node, field);
 
                 // std.debug.print("Coef {}, Offset ({}, {}), Value {}\n", .{ coef, offset[0], offset[1], self.nodeValue(offset_node, field) });
             }
@@ -388,23 +378,21 @@ pub fn NodeSpace(comptime N: usize, comptime M: usize) type {
             inline while (comptime stencil_indices.next()) |stencil_index| {
                 // Compute coefficient for this position in the stencil space.
                 comptime var coef: f64 = 1.0;
+                comptime var offset: [N]isize = undefined;
 
                 inline for (0..N) |i| {
+                    const idx: isize = @intCast(stencil_index[i]);
+
                     coef *= stencils[i][stencil_index[i]];
+                    offset[i] = idx - M;
                 }
 
                 if (comptime (@fabs(coef) == 0.0)) {
                     continue;
                 }
 
-                var offset_node: [N]isize = undefined;
-
-                for (0..N) |i| {
-                    const offset: isize = @intCast(stencil_index[i]);
-                    offset_node[i] = central_node[i] + offset - M;
-                }
-
-                result += coef * self.nodeValue(offset_node, field);
+                const node = IndexMixin.addSigned(central_node, offset);
+                result += coef * self.nodeValue(node, field);
             }
 
             // Covariantly transform result
@@ -476,114 +464,6 @@ pub fn NodeSpace(comptime N: usize, comptime M: usize) type {
             }
 
             return result;
-        }
-
-        pub fn fillBoundary(self: Self, bound: anytype, field: []f64) void {
-            const regions = comptime Region.orderedRegions();
-
-            inline for (comptime regions[1..]) |region| {
-                self.fillBoundaryRegion(region, bound, field);
-            }
-        }
-
-        pub fn fillBoundaryRegion(self: Self, comptime region: Region, bound: anytype, field: []f64) void {
-            assert(field.len == self.numNodes());
-
-            // Short circuit if the region does not actually have any boundary nodes
-            if (comptime region.adjacency() == 0) {
-                return;
-            }
-
-            // Loop over the cells touching this face.
-            var inner_face_cells = region.innerFaceCells(self.size);
-
-            while (inner_face_cells.next()) |cell| {
-                // Cast to signed node index.
-                const node = toSigned(cell);
-                // Find position of boundary
-                const pos: [N]f64 = self.boundaryPosition(region, cell);
-
-                // Cache robin boundary conditions (if any)
-                var robin: [N]Robin = undefined;
-
-                inline for (0..N) |axis| {
-                    const face = comptime FaceIndex{
-                        .side = region.sides[axis] == .right,
-                        .axis = axis,
-                    };
-
-                    if (@TypeOf(bound).kind(face) == .robin) {
-                        robin[axis] = bound.robin(pos, face);
-                    }
-                }
-
-                // Loop over extends
-                comptime var extent_indices = region.extentOffsets(M);
-
-                inline while (comptime extent_indices.next()) |extents| {
-                    // Compute target node
-                    var target: [N]isize = undefined;
-
-                    inline for (0..N) |i| {
-                        target[i] = node[i] + extents[i];
-                    }
-
-                    // Set target to zero
-                    self.setNodeValue(target, field, 0.0);
-
-                    var result: f64 = 0.0;
-
-                    // Accumulate result value
-                    inline for (0..N) |axis| {
-                        if (comptime region.sides[axis] == .middle) {
-                            // We need not do anything
-                            continue;
-                        }
-
-                        const face = comptime FaceIndex{
-                            .side = region.sides[axis] == .right,
-                            .axis = axis,
-                        };
-
-                        const kind: BoundaryKind = comptime @TypeOf(bound).kind(face);
-
-                        switch (kind) {
-                            .odd, .even => {
-                                var source: [N]isize = target;
-
-                                if (comptime extents[axis] > 0) {
-                                    source[axis] = node[axis] + 1 - extents[axis];
-                                } else {
-                                    source[axis] = node[axis] - extents[axis] - 1;
-                                }
-
-                                const source_value: f64 = self.nodeValue(source, field);
-                                const fsign: f64 = comptime if (kind == .odd) -1.0 else 1.0;
-
-                                result += fsign * source_value;
-                            },
-                            .robin => {
-                                const vres: f64 = robin[axis].value * self.boundaryOp(extents, null, cell, field);
-                                const fres: f64 = robin[axis].flux * self.boundaryOp(extents, axis, cell, field);
-
-                                const vcoef: f64 = robin[axis].value * self.boundaryOpCoef(extents, null);
-                                const fcoef: f64 = robin[axis].flux * self.boundaryOpCoef(extents, axis);
-
-                                const rhs: f64 = robin[axis].rhs;
-
-                                result += (rhs - vres - fres) / (vcoef + fcoef);
-                            },
-                        }
-                    }
-
-                    // Take the average
-                    const adj: f64 = @floatFromInt(region.adjacency());
-                    result /= adj;
-
-                    // Set target to result.
-                    self.setNodeValue(target, field, result);
-                }
-            }
         }
 
         const BM = 2 * M + 1;
@@ -712,7 +592,7 @@ test {
 test "node space iteration" {
     const expectEqualSlices = std.testing.expectEqualSlices;
 
-    const node_space = NodeSpace(2, 4).fromCellSize([_]usize{ 1, 2 });
+    const space = NodeSpace(2, 4).fromCellSize([_]usize{ 1, 2 });
 
     const expected = [_][2]isize{
         [2]isize{ -2, -2 },
@@ -747,97 +627,11 @@ test "node space iteration" {
         [2]isize{ 2, 3 },
     };
 
-    var nodes = node_space.nodes(2);
+    var nodes = space.nodes(2);
     var index: usize = 0;
 
     while (nodes.next()) |node| : (index += 1) {
         try expectEqualSlices(isize, &node, &expected[index]);
-    }
-}
-
-test "node space boundaries" {
-    const IndexBox = geometry.IndexBox(2);
-    const FaceIndex = geometry.FaceIndex(2);
-    const RealBox = geometry.RealBox(2);
-    const Nodes = NodeSpace(2, 2);
-
-    const expect = std.testing.expect;
-    const allocator = std.testing.allocator;
-    const pi = std.math.pi;
-
-    const domain: RealBox = .{ .origin = .{ 0.0, 0.0 }, .size = .{ pi, pi } };
-
-    const node_space = Nodes.fromCellSize([2]usize{ 100, 100 });
-    const cell_space = node_space.cellSpace();
-
-    // *********************************
-    // Set field values ****************
-
-    const field: []f64 = try allocator.alloc(f64, node_space.numNodes());
-    defer allocator.free(field);
-
-    var cells = cell_space.cartesianIndices();
-
-    while (cells.next()) |cell| {
-        const pos = domain.transformPos(node_space.cellPosition(cell));
-
-        node_space.setValue(cell, field, @sin(pos[0]) * @sin(pos[1]));
-    }
-
-    // ********************************
-    // Set exact values ***************
-
-    const exact: []f64 = try allocator.alloc(f64, node_space.numNodes());
-    defer allocator.free(exact);
-
-    var nodes = node_space.nodes(2);
-
-    while (nodes.next()) |node| {
-        const pos = domain.transformPos(node_space.nodePosition(node));
-
-        node_space.setNodeValue(node, exact, @sin(pos[0]) * @sin(pos[1]));
-    }
-
-    try expect(@fabs(node_space.boundaryOp([2]isize{ -1, 0 }, null, [2]usize{ 0, 50 }, exact)) < 1e-10);
-    try expect(@fabs(node_space.boundaryOp([2]isize{ -2, 0 }, null, [2]usize{ 0, 50 }, exact)) < 1e-10);
-    try expect(@fabs(node_space.boundaryOp([2]isize{ -1, -1 }, null, [2]usize{ 0, 0 }, exact)) < 1e-10);
-    try expect(@fabs(node_space.boundaryOp([2]isize{ -2, -2 }, null, [2]usize{ 0, 0 }, exact)) < 1e-10);
-
-    // *********************************
-
-    const DiritchletBC = struct {
-        pub fn kind(_: FaceIndex) BoundaryKind {
-            return .robin;
-        }
-
-        pub fn robin(_: @This(), _: [2]f64, _: FaceIndex) Robin {
-            return Robin.diritchlet(0.0);
-        }
-    };
-
-    node_space.fillBoundary(DiritchletBC{}, field);
-
-    // **********************************
-
-    const window = IndexBox{
-        .origin = .{ 0, 0 },
-        .size = .{ 4, 4 },
-    };
-
-    const field_window: []f64 = try allocator.alloc(f64, 16);
-    defer allocator.free(field_window);
-
-    node_space.indexSpace().copyWindow(window, f64, field_window, field);
-
-    const exact_window: []f64 = try allocator.alloc(f64, 16);
-    defer allocator.free(exact_window);
-
-    node_space.indexSpace().copyWindow(window, f64, exact_window, exact);
-
-    for (0..16) |i| {
-        const diff = field_window[i] - exact_window[i];
-        // std.debug.print("diff {}\n", .{diff});
-        try expect(@fabs(diff) < 1e-10);
     }
 }
 
@@ -955,7 +749,7 @@ test "node space smoothing" {
 
     for (0..1000) |iter| {
         _ = iter;
-        space.fillBoundary(Boundary{}, sol);
+        BoundaryUtils(2, 2).fillBoundary(space, Boundary{}, sol);
 
         // Compute residual
         {
@@ -999,17 +793,20 @@ test "node space multigrid" {
     const expect = std.testing.expect;
     const allocator = std.testing.allocator;
 
-    const FaceIndex = geometry.FaceIndex(2);
-    const RealBox = geometry.RealBox(2);
+    const N = 2;
+    const M = 2;
+
+    const FaceIndex = geometry.FaceIndex(N);
+    const RealBox = geometry.RealBox(N);
     const BiCGStabSolver = lac.BiCGStabSolver;
-    const Nodes = NodeSpace(2, 1);
+    const Nodes = NodeSpace(N, M);
 
     const Boundary = struct {
         pub fn kind(_: FaceIndex) BoundaryKind {
             return .robin;
         }
 
-        pub fn robin(_: @This(), _: [2]f64, _: FaceIndex) Robin {
+        pub fn robin(_: @This(), _: [N]f64, _: FaceIndex) Robin {
             return Robin.diritchlet(0.0);
         }
     };
@@ -1030,7 +827,7 @@ test "node space multigrid" {
                 }
             }
 
-            self.base.fillBoundary(Boundary{}, self.scratch);
+            BoundaryUtils(N, M).fillBoundary(self.base, Boundary{}, self.scratch);
 
             // Apply
             {
@@ -1046,7 +843,7 @@ test "node space multigrid" {
         fn op(domain: RealBox, nodes: Nodes, cell: [2]usize, field: []const f64) f64 {
             var result: f64 = 0.0;
 
-            inline for (0..2) |i| {
+            inline for (0..N) |i| {
                 comptime var ranks: [2]usize = [1]usize{0} ** 2;
                 ranks[i] = 2;
 
@@ -1059,7 +856,7 @@ test "node space multigrid" {
         fn opDiag(domain: RealBox, nodes: Nodes) f64 {
             var result: f64 = 0.0;
 
-            inline for (0..2) |i| {
+            inline for (0..N) |i| {
                 comptime var ranks: [2]usize = [1]usize{0} ** 2;
                 ranks[i] = 2;
 
@@ -1126,15 +923,14 @@ test "node space multigrid" {
 
     var residual: f64 = 0.0;
 
-    for (0..10) |iter| {
-        _ = iter;
+    for (0..20) |iter| {
         defer _ = arena.reset(.retain_capacity);
 
         // Compute current error
         {
             residual = 0.0;
 
-            fine.fillBoundary(Boundary{}, fine_solution);
+            BoundaryUtils(N, M).fillBoundary(fine, Boundary{}, fine_solution);
 
             var cells = fine.cellSpace().cartesianIndices();
 
@@ -1147,12 +943,12 @@ test "node space multigrid" {
 
             residual = @sqrt(residual);
 
-            // std.debug.print("Iteration {}, Residual {}\n", .{ iter, residual });
+            std.debug.print("Iteration {}, Residual {}\n", .{ iter, residual });
         }
 
         // Perform presmoothing
         for (0..10) |_| {
-            fine.fillBoundary(Boundary{}, fine_solution);
+            BoundaryUtils(N, M).fillBoundary(fine, Boundary{}, fine_solution);
 
             var cells = fine.cellSpace().cartesianIndices();
 
@@ -1171,7 +967,7 @@ test "node space multigrid" {
 
         // Residual calculation
         {
-            fine.fillBoundary(Boundary{}, fine_solution);
+            BoundaryUtils(N, M).fillBoundary(fine, Boundary{}, fine_solution);
 
             var cells = fine.cellSpace().cartesianIndices();
 
@@ -1183,9 +979,9 @@ test "node space multigrid" {
             }
         }
 
-        // Restrict Solution to old
+        // Restrict Solution
         {
-            fine.fillBoundary(Boundary{}, fine_solution);
+            BoundaryUtils(N, M).fillBoundary(fine, Boundary{}, fine_solution);
 
             var cells = base.cellSpace().cartesianIndices();
 
@@ -1197,7 +993,7 @@ test "node space multigrid" {
 
         // Right Hand Side computation
         {
-            base.fillBoundary(Boundary{}, base_solution);
+            BoundaryUtils(N, M).fillBoundary(base, Boundary{}, base_solution);
 
             var cells = base.cellSpace().cartesianIndices();
 
@@ -1250,8 +1046,8 @@ test "node space multigrid" {
 
         // Compute Error
         {
-            base.fillBoundary(Boundary{}, base_solution);
-            base.fillBoundary(Boundary{}, base_old);
+            BoundaryUtils(N, M).fillBoundary(base, Boundary{}, base_solution);
+            BoundaryUtils(N, M).fillBoundary(base, Boundary{}, base_old);
 
             for (0..base.numNodes()) |idx| {
                 base_err[idx] = base_solution[idx] - base_old[idx];
@@ -1271,8 +1067,8 @@ test "node space multigrid" {
         }
 
         // Post smoothing
-        for (0..100) |_| {
-            fine.fillBoundary(Boundary{}, fine_solution);
+        for (0..10) |_| {
+            BoundaryUtils(N, M).fillBoundary(fine, Boundary{}, fine_solution);
 
             var cells = fine.cellSpace().cartesianIndices();
 

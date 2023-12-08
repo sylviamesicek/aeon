@@ -11,7 +11,17 @@ pub fn IndexMixin(comptime N: usize) type {
         pub fn add(v: [N]usize, u: [N]usize) [N]usize {
             var res: [N]usize = undefined;
 
-            for (0..N) |i| {
+            inline for (0..N) |i| {
+                res[i] = v[i] + u[i];
+            }
+
+            return res;
+        }
+
+        pub fn addSigned(v: [N]isize, u: [N]isize) [N]isize {
+            var res: [N]isize = undefined;
+
+            inline for (0..N) |i| {
                 res[i] = v[i] + u[i];
             }
 
@@ -21,7 +31,7 @@ pub fn IndexMixin(comptime N: usize) type {
         pub fn sub(v: [N]usize, u: [N]usize) [N]usize {
             var res: [N]usize = v;
 
-            for (0..N) |i| {
+            inline for (0..N) |i| {
                 res[i] -= u[i];
             }
 
@@ -31,7 +41,7 @@ pub fn IndexMixin(comptime N: usize) type {
         pub fn scaled(v: [N]usize, u: usize) [N]usize {
             var res: [N]usize = v;
 
-            for (0..N) |i| {
+            inline for (0..N) |i| {
                 res[i] *= u;
             }
 
@@ -62,7 +72,7 @@ pub fn IndexMixin(comptime N: usize) type {
 
         pub fn refined(self: [N]usize) [N]usize {
             var result: [N]usize = undefined;
-            for (0..N) |i| {
+            inline for (0..N) |i| {
                 result[i] = self[i] * 2;
             }
             return result;
@@ -70,7 +80,7 @@ pub fn IndexMixin(comptime N: usize) type {
 
         pub fn coarsened(self: [N]usize) [N]usize {
             var result: [N]usize = undefined;
-            for (0..N) |i| {
+            inline for (0..N) |i| {
                 result[i] = self[i] / 2;
             }
             return result;

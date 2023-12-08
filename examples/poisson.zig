@@ -67,7 +67,14 @@ pub fn PoissonEquation(comptime M: usize) type {
                 engine: Engine,
                 field: []const f64,
             ) f64 {
-                return -engine.laplacian(field) + engine.value(field);
+                return -engine.laplacian(field);
+            }
+
+            pub fn applyDiag(
+                _: PoissonOperator,
+                engine: Engine,
+            ) f64 {
+                return -engine.laplacianDiag();
             }
         };
 
@@ -139,11 +146,11 @@ pub fn PoissonEquation(comptime M: usize) type {
             @memset(numerical, 0.0);
 
             const solver: MultigridMethod = .{
-                .base_solver = BiCGStabSolver.new(10000, 10e-10),
+                .base_solver = BiCGStabSolver.new(10000, 10e-12),
                 .max_iters = 20,
                 .tolerance = 10e-10,
-                .presmooth = 2,
-                .postsmooth = 2,
+                .presmooth = 5,
+                .postsmooth = 5,
             };
 
             // const solver = LinearMapMethod.new(BiCGStabSolver.new(10000, 10e-10));

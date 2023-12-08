@@ -27,7 +27,7 @@ const Robin = nodes.Robin;
 const mesh_ = @import("mesh.zig");
 
 /// A convience structure that caches a number of offset maps, cell vectors and tile vectors,
-/// with functions for filling boundary conditions, restricting, and prolonging.
+/// with functions for filling boundary conditions, interpolating values, and applying operators.
 pub fn DofManager(comptime N: usize, comptime M: usize) type {
     return struct {
         gpa: Allocator,
@@ -58,6 +58,7 @@ pub fn DofManager(comptime N: usize, comptime M: usize) type {
 
         const Mesh = mesh_.Mesh(N);
 
+        const BoundaryUtils = nodes.BoundaryUtils(N, M);
         const NodeSpace = nodes.NodeSpace(N, M);
         const NodeSpaceZeroth = nodes.NodeSpace(N, 0);
         const isBoundary = nodes.isBoundary(N);
@@ -126,13 +127,8 @@ pub fn DofManager(comptime N: usize, comptime M: usize) type {
             assert(dest.len == self.numNodes());
             assert(src.len == self.numCells());
 
-            for (0..grid.blocks.len) |block_id| {
-                self.copyBlockNodesFromCells(grid, block_id, dest, src);
-            }
-
-            for (0..grid.blocks.len) |block_id| {
-                self.fillBlockBoundary(grid, block_id, boundary, dest);
-            }
+            self.copyNodesFromCells(grid, dest, src);
+            self.fillBoundary(grid, boundary, dest);
         }
 
         // *******************************
@@ -160,18 +156,43 @@ pub fn DofManager(comptime N: usize, comptime M: usize) type {
             };
         }
 
+        pub fn fillBoundary(
+            self: *const Self,
+            grid: *const Mesh,
+            boundary: anytype,
+            dest: []f64,
+        ) void {
+            for (0..grid.blocks.len) |block_id| {
+                self.fillBlockBoundary(grid, block_id, boundary, dest);
+            }
+        }
+
+        pub fn fillLevelBoundary(
+            self: *const Self,
+            grid: *const Mesh,
+            level_id: usize,
+            boundary: anytype,
+            dest: []f64,
+        ) void {
+            const level = grid.levels[level_id];
+
+            for (level.block_offset..level.block_offset + level.block_total) |block_id| {
+                self.fillBlockBoundary(grid, block_id, boundary, dest);
+            }
+        }
+
         /// Fills the boundary values of a node vector.
         pub fn fillBlockBoundary(
             self: *const Self,
             grid: *const Mesh,
-            block: usize,
+            block_id: usize,
             boundary: anytype,
-            field: []f64,
+            dest: []f64,
         ) void {
-            assert(self.numNodes() == field.len);
+            assert(self.numNodes() == dest.len);
 
-            const level = grid.blockLevel(block);
-            const bounds = grid.blocks[block].bounds;
+            const level = grid.blockLevel(block_id);
+            const bounds = grid.blocks[block_id].bounds;
             const tile_size: [N]usize = grid.levels[level].tile_size;
 
             const regions = comptime Region.orderedRegions();
@@ -190,13 +211,13 @@ pub fn DofManager(comptime N: usize, comptime M: usize) type {
                 if (exterior) {
                     const wrapped = BoundaryWrapper(@TypeOf(boundary)){
                         .inner = boundary,
-                        .bounds = grid.blockPhysicalBounds(block),
+                        .bounds = grid.blockPhysicalBounds(block_id),
                     };
 
-                    const node_space = NodeSpace.fromCellSize(grid.blockCellSize(block));
-                    node_space.fillBoundaryRegion(region, wrapped, self.node_map.slice(block, field));
+                    const space = NodeSpace.fromCellSize(grid.blockCellSize(block_id));
+                    BoundaryUtils.fillBoundaryRegion(region, space, wrapped, self.node_map.slice(block_id, dest));
                 } else {
-                    self.fillBlockIntBoundary(region, grid, block, field);
+                    self.fillBlockIntBoundary(region, grid, block_id, dest);
                 }
             }
         }
@@ -313,14 +334,17 @@ pub fn DofManager(comptime N: usize, comptime M: usize) type {
             }
         }
 
-        pub fn copyCellsFromNodes(
+        pub fn copyLevelNodesFromCells(
             self: *const Self,
             grid: *const Mesh,
+            level_id: usize,
             dest: []f64,
             src: []const f64,
         ) void {
-            for (0..grid.blocks.len) |block_id| {
-                self.copyBlockCellsFromNodes(grid, block_id, dest, src);
+            const level = grid.levels[level_id];
+
+            for (level.block_offset..level.block_offset + level.block_total) |block_id| {
+                self.copyBlockNodesFromCells(grid, block_id, dest, src);
             }
         }
 
@@ -348,6 +372,31 @@ pub fn DofManager(comptime N: usize, comptime M: usize) type {
             }
         }
 
+        pub fn copyCellsFromNodes(
+            self: *const Self,
+            grid: *const Mesh,
+            dest: []f64,
+            src: []const f64,
+        ) void {
+            for (0..grid.blocks.len) |block_id| {
+                self.copyBlockCellsFromNodes(grid, block_id, dest, src);
+            }
+        }
+
+        pub fn copyLevelCellsFromNodes(
+            self: *const Self,
+            grid: *const Mesh,
+            level_id: usize,
+            dest: []f64,
+            src: []const f64,
+        ) void {
+            const level = grid.levels[level_id];
+
+            for (level.block_offset..level.block_offset + level.block_total) |block_id| {
+                self.copyBlockCellsFromNodes(grid, block_id, dest, src);
+            }
+        }
+
         pub fn copyBlockCellsFromNodes(
             self: *const Self,
             grid: *const Mesh,
@@ -371,6 +420,20 @@ pub fn DofManager(comptime N: usize, comptime M: usize) type {
             }
         }
 
+        pub fn copyLevelCells(
+            self: *const Self,
+            grid: *const Mesh,
+            level_id: usize,
+            dest: []f64,
+            src: []const f64,
+        ) void {
+            const level = grid.levels[level_id];
+
+            for (level.block_offset..level.block_offset + level.block_total) |block_id| {
+                self.copyBlockCells(block_id, dest, src);
+            }
+        }
+
         pub fn copyBlockCells(
             self: *const Self,
             block_id: usize,
@@ -384,6 +447,20 @@ pub fn DofManager(comptime N: usize, comptime M: usize) type {
             const block_src: []const f64 = self.cell_map.slice(block_id, src);
 
             @memcpy(block_dest, block_src);
+        }
+
+        pub fn copyLevelNodes(
+            self: *const Self,
+            grid: *const Mesh,
+            level_id: usize,
+            dest: []f64,
+            src: []const f64,
+        ) void {
+            const level = grid.levels[level_id];
+
+            for (level.block_offset..level.block_offset + level.block_total) |block_id| {
+                self.copyBlockNodes(block_id, dest, src);
+            }
         }
 
         pub fn copyBlockNodes(
@@ -401,28 +478,41 @@ pub fn DofManager(comptime N: usize, comptime M: usize) type {
             @memcpy(block_dest, block_src);
         }
 
-        pub fn swapBlockNodes(
-            self: *const Self,
-            block_id: usize,
-            a: []f64,
-            b: []f64,
-        ) void {
-            assert(a.len == self.numNodes());
-            assert(b.len == self.numNodes());
+        // pub fn swapBlockNodes(
+        //     self: *const Self,
+        //     block_id: usize,
+        //     a: []f64,
+        //     b: []f64,
+        // ) void {
+        //     assert(a.len == self.numNodes());
+        //     assert(b.len == self.numNodes());
 
-            const block_a: []f64 = self.node_map.slice(block_id, a);
-            const block_b: []f64 = self.node_map.slice(block_id, b);
+        //     const block_a: []f64 = self.node_map.slice(block_id, a);
+        //     const block_b: []f64 = self.node_map.slice(block_id, b);
 
-            for (0..block_a.len) |idx| {
-                const tmp = block_a[idx];
-                block_a[idx] = block_b[idx];
-                block_b[idx] = tmp;
-            }
-        }
+        //     for (0..block_a.len) |idx| {
+        //         const tmp = block_a[idx];
+        //         block_a[idx] = block_b[idx];
+        //         block_b[idx] = tmp;
+        //     }
+        // }
 
         // *************************
         // Restrict / Prolong ******
         // *************************
+
+        pub fn restrictLevel(
+            self: *const Self,
+            grid: *const Mesh,
+            level_id: usize,
+            dest: []f64,
+        ) void {
+            const level = grid.levels[level_id];
+
+            for (level.block_offset..level.block_offset + level.block_total) |block_id| {
+                self.restrictBlock(grid, block_id, dest);
+            }
+        }
 
         /// Given a node vector with correct boundary node at the given block, restrict the data to all underlying dofs.
         pub fn restrictBlock(
@@ -467,6 +557,19 @@ pub fn DofManager(comptime N: usize, comptime M: usize) type {
                     const v = node_space.restrict(super_cell, block_field);
                     coarse_node_space.setValue(coarse_cell, coarse_block_field, v);
                 }
+            }
+        }
+
+        pub fn prolongLevel(
+            self: *const Self,
+            grid: *const Mesh,
+            level_id: usize,
+            dest: []f64,
+        ) void {
+            const level = grid.levels[level_id];
+
+            for (level.block_offset..level.block_offset + level.block_total) |block_id| {
+                self.prolongBlock(grid, block_id, dest);
             }
         }
 
@@ -523,6 +626,19 @@ pub fn DofManager(comptime N: usize, comptime M: usize) type {
             for (0..grid.blocks.len) |rev_block_id| {
                 const block_id = grid.blocks.len - 1 - rev_block_id;
                 self.restrictBlockCells(grid, block_id, field);
+            }
+        }
+
+        pub fn restrictLevelCells(
+            self: *const Self,
+            grid: *const Mesh,
+            level_id: usize,
+            dest: []f64,
+        ) void {
+            const level = grid.levels[level_id];
+
+            for (level.block_offset..level.block_offset + level.block_total) |block_id| {
+                self.restrictBlockCells(grid, block_id, dest);
             }
         }
 
@@ -587,6 +703,20 @@ pub fn DofManager(comptime N: usize, comptime M: usize) type {
             }
         }
 
+        pub fn projectLevel(
+            self: *const Self,
+            grid: *const Mesh,
+            level_id: usize,
+            projection: anytype,
+            dest: []f64,
+        ) void {
+            const level = grid.levels[level_id];
+
+            for (level.block_offset..level.block_offset + level.block_total) |block_id| {
+                self.projectBlock(grid, block_id, projection, dest);
+            }
+        }
+
         pub fn projectBlock(
             self: *const Self,
             grid: *const Mesh,
@@ -604,23 +734,23 @@ pub fn DofManager(comptime N: usize, comptime M: usize) type {
 
             const block_dest: []f64 = self.cell_map.slice(block_id, dest);
 
-            const node_space = NodeSpace.fromCellSize(grid.blockCellSize(block_id));
+            const start = self.node_map.offset(block_id);
+            const end = self.node_map.offset(block_id + 1);
 
-            const offset = self.node_map.offset(block_id);
-            const total = self.node_map.total(block_id);
+            const space = NodeSpace.fromCellSize(grid.blockCellSize(block_id));
 
             const bounds: RealBox = grid.blockPhysicalBounds(block_id);
 
-            var cells = node_space.cellSpace().cartesianIndices();
+            var cells = space.cellSpace().cartesianIndices();
             var linear: usize = 0;
 
             while (cells.next()) |cell| : (linear += 1) {
                 const engine: Engine = .{
+                    .space = space,
                     .bounds = bounds,
-                    .space = node_space,
-                    .offset = offset,
-                    .total = total,
                     .cell = cell,
+                    .start = start,
+                    .end = end,
                 };
 
                 block_dest[linear] = projection.project(engine);
@@ -635,6 +765,21 @@ pub fn DofManager(comptime N: usize, comptime M: usize) type {
             src: []const f64,
         ) void {
             for (0..grid.blocks.len) |block_id| {
+                self.applyBlock(grid, block_id, operator, dest, src);
+            }
+        }
+
+        pub fn applyLevel(
+            self: *const Self,
+            grid: *const Mesh,
+            level_id: usize,
+            operator: anytype,
+            dest: []f64,
+            src: []const f64,
+        ) void {
+            const level = grid.levels[level_id];
+
+            for (level.block_offset..level.block_offset + level.block_total) |block_id| {
                 self.applyBlock(grid, block_id, operator, dest, src);
             }
         }
@@ -658,23 +803,23 @@ pub fn DofManager(comptime N: usize, comptime M: usize) type {
 
             const block_dest: []f64 = self.cell_map.slice(block_id, dest);
 
-            const node_space = NodeSpace.fromCellSize(grid.blockCellSize(block_id));
+            const start = self.node_map.offset(block_id);
+            const end = self.node_map.offset(block_id + 1);
 
-            const offset = self.node_map.offset(block_id);
-            const total = self.node_map.total(block_id);
+            const space = NodeSpace.fromCellSize(grid.blockCellSize(block_id));
 
             const bounds: RealBox = grid.blockPhysicalBounds(block_id);
 
-            var cells = node_space.cellSpace().cartesianIndices();
+            var cells = space.cellSpace().cartesianIndices();
             var linear: usize = 0;
 
             while (cells.next()) |cell| : (linear += 1) {
                 const engine: Engine = .{
+                    .space = space,
                     .bounds = bounds,
-                    .space = node_space,
-                    .offset = offset,
-                    .total = total,
                     .cell = cell,
+                    .start = start,
+                    .end = end,
                 };
 
                 block_dest[linear] = operator.apply(engine, src);
@@ -690,6 +835,22 @@ pub fn DofManager(comptime N: usize, comptime M: usize) type {
             rhs: []const f64,
         ) void {
             for (0..grid.blocks.len) |block_id| {
+                self.residualBlock(grid, block_id, operator, dest, src, rhs);
+            }
+        }
+
+        pub fn residualLevel(
+            self: *const Self,
+            grid: *const Mesh,
+            level_id: usize,
+            operator: anytype,
+            dest: []f64,
+            src: []const f64,
+            rhs: []const f64,
+        ) void {
+            const level = grid.levels[level_id];
+
+            for (level.block_offset..level.block_offset + level.block_total) |block_id| {
                 self.residualBlock(grid, block_id, operator, dest, src, rhs);
             }
         }
@@ -716,23 +877,23 @@ pub fn DofManager(comptime N: usize, comptime M: usize) type {
             const block_dest: []f64 = self.cell_map.slice(block_id, dest);
             const block_rhs: []const f64 = self.cell_map.slice(block_id, rhs);
 
-            const node_space = NodeSpace.fromCellSize(grid.blockCellSize(block_id));
+            const space = NodeSpace.fromCellSize(grid.blockCellSize(block_id));
 
-            const offset = self.node_map.offset(block_id);
-            const total = self.node_map.total(block_id);
+            const start = self.node_map.offset(block_id);
+            const end = self.node_map.offset(block_id + 1);
 
             const bounds: RealBox = grid.blockPhysicalBounds(block_id);
 
-            var cells = node_space.cellSpace().cartesianIndices();
+            var cells = space.cellSpace().cartesianIndices();
             var linear: usize = 0;
 
             while (cells.next()) |cell| : (linear += 1) {
                 const engine: Engine = .{
+                    .space = space,
                     .bounds = bounds,
-                    .space = node_space,
-                    .offset = offset,
-                    .total = total,
                     .cell = cell,
+                    .start = start,
+                    .end = end,
                 };
 
                 block_dest[linear] = block_rhs[linear] - operator.apply(engine, src);
@@ -748,6 +909,22 @@ pub fn DofManager(comptime N: usize, comptime M: usize) type {
             rhs: []const f64,
         ) void {
             for (0..grid.blocks.len) |block_id| {
+                self.smoothBlock(grid, block_id, operator, dest, src, rhs);
+            }
+        }
+
+        pub fn smoothLevel(
+            self: *const Self,
+            grid: *const Mesh,
+            level_id: usize,
+            operator: anytype,
+            dest: []f64,
+            src: []const f64,
+            rhs: []const f64,
+        ) void {
+            const level = grid.levels[level_id];
+
+            for (level.block_offset..level.block_offset + level.block_total) |block_id| {
                 self.smoothBlock(grid, block_id, operator, dest, src, rhs);
             }
         }
@@ -769,40 +946,30 @@ pub fn DofManager(comptime N: usize, comptime M: usize) type {
             const block_src: []const f64 = self.node_map.slice(block_id, src);
             const block_rhs: []const f64 = self.cell_map.slice(block_id, rhs);
 
-            const node_space = NodeSpace.fromCellSize(grid.blockCellSize(block_id));
+            const space = NodeSpace.fromCellSize(grid.blockCellSize(block_id));
 
-            const offset = self.node_map.offset(block_id);
-            const total = self.node_map.total(block_id);
+            const start = self.node_map.offset(block_id);
+            const end = self.node_map.offset(block_id + 1);
 
             const bounds: RealBox = grid.blockPhysicalBounds(block_id);
 
-            var cells = node_space.cellSpace().cartesianIndices();
+            var cells = space.cellSpace().cartesianIndices();
             var linear: usize = 0;
 
             while (cells.next()) |cell| : (linear += 1) {
                 const engine: Engine = .{
+                    .space = space,
                     .bounds = bounds,
-                    .space = node_space,
-                    .offset = offset,
-                    .total = total,
                     .cell = cell,
+                    .start = start,
+                    .end = end,
                 };
 
-                const val = node_space.value(cell, block_src);
+                const val = space.value(cell, block_src);
                 const app = operator.apply(engine, src);
+                const appDiag = operator.applyDiag(engine);
 
-                const engine_diag: Engine = .{
-                    .bounds = bounds,
-                    .space = node_space,
-                    .offset = offset,
-                    .total = total,
-                    .cell = cell,
-                    .diag = true,
-                };
-
-                const diag = operator.apply(engine_diag, src);
-
-                block_dest[linear] = val + (block_rhs[linear] - app) / diag;
+                block_dest[linear] = val + 2.0 / 3.0 * (block_rhs[linear] - app) / appDiag;
             }
         }
 

@@ -121,11 +121,24 @@ pub fn MultigridMethod(comptime N: usize, comptime M: usize, comptime BaseSolver
 
                 @memcpy(rhs, b);
 
+                dofs.fillBoundary(grid, boundary, sys);
                 dofs.residual(grid, operator, res, sys, rhs);
 
-                const nres = norm(res);
+                const finest = grid.blocks.len - 1;
+
+                const nres = norm(res[dofs.cell_map.offset(finest)..dofs.cell_map.offset(finest + 1)]);
 
                 std.debug.print("Iteration {}, Residual: {}\n", .{ iteration, nres });
+
+                // for (0..grid.blocks.len) |i| {
+                //     var max: f64 = 0.0;
+
+                //     for (dofs.cell_map.offset(i)..dofs.cell_map.offset(i + 1)) |j| {
+                //         max = @max(max, res[j]);
+                //     }
+
+                //     std.debug.print("BLOCK {} MAX {}\n", .{ i, max });
+                // }
 
                 {
                     dofs.copyCellsFromNodes(grid, x, sys);
@@ -156,12 +169,7 @@ pub fn MultigridMethod(comptime N: usize, comptime M: usize, comptime BaseSolver
                 }
 
                 // We are not at sufficient accuracy, so run another iteration of multigrid.
-
                 try worker.iterate(scratch, grid.levels.len - 1);
-
-                // if (res_norm <= tol) {
-                //     break;
-                // }
             }
 
             dofs.copyCellsFromNodes(grid, x, sys);
@@ -231,79 +239,48 @@ pub fn MultigridMethod(comptime N: usize, comptime M: usize, comptime BaseSolver
                     // *****************************
                     // Presmoothing
 
-                    for (level.block_offset..level.block_offset + level.block_total) |block_id| {
-                        dofs.fillBlockBoundary(grid, block_id, boundary, sys);
-                    }
-
-                    for (coarse.block_offset..coarse.block_offset + coarse.block_total) |block_id| {
-                        dofs.fillBlockBoundary(grid, block_id, boundary, sys);
-                    }
-
                     for (0..self.presmooth) |_| {
-                        for (level.block_offset..level.block_offset + level.block_total) |block_id| {
-                            dofs.smoothBlock(grid, block_id, operator, x, sys, rhs);
-                        }
-
-                        for (level.block_offset..level.block_offset + level.block_total) |block_id| {
-                            dofs.copyBlockNodesFromCells(grid, block_id, sys, x);
-                        }
-
-                        for (level.block_offset..level.block_offset + level.block_total) |block_id| {
-                            dofs.fillBlockBoundary(grid, block_id, boundary, sys);
-                        }
+                        dofs.fillLevelBoundary(grid, level_id, boundary, sys);
+                        dofs.smoothLevel(grid, level_id, operator, x, sys, rhs);
+                        dofs.copyLevelNodesFromCells(grid, level_id, sys, x);
                     }
 
                     // *****************************
-                    // Copy old (v^2h)
+                    // Restrict Solution
+
+                    dofs.fillLevelBoundary(grid, level_id, boundary, sys);
+                    dofs.restrictLevel(grid, level_id, sys);
+
+                    dofs.fillLevelBoundary(grid, level_id - 1, boundary, sys);
+                    dofs.copyLevelNodes(grid, level_id - 1, old, sys);
+
+                    // *****************************
+                    // Compute Residual
+
+                    dofs.residualLevel(grid, level_id, operator, res, sys, rhs);
+                    dofs.restrictLevelCells(grid, level_id, res);
+
+                    // *****************************
+                    // RHS computation
+
+                    dofs.applyLevel(grid, level_id - 1, operator, rhs, sys);
 
                     for (coarse.block_offset..coarse.block_offset + coarse.block_total) |block_id| {
-                        dofs.copyBlockNodes(block_id, old, sys);
-                    }
-
-                    for (level.block_offset..level.block_offset + level.block_total) |block_id| {
-                        dofs.swapBlockNodes(block_id, old, sys);
-                        dofs.restrictBlock(grid, block_id, old);
-                        dofs.swapBlockNodes(block_id, old, sys);
-                    }
-
-                    for (coarse.block_offset..coarse.block_offset + coarse.block_total) |block_id| {
-                        dofs.fillBlockBoundary(grid, block_id, boundary, old);
-                        dofs.fillBlockBoundary(grid, block_id, boundary, sys);
-                    }
-
-                    // *******************************
-                    // Residual computation
-
-                    for (coarse.block_offset..coarse.block_offset + coarse.block_total) |block_id| {
-                        dofs.residualBlock(grid, block_id, operator, res, old, rhs);
-                    }
-
-                    for (level.block_offset..level.block_offset + level.block_total) |block_id| {
-                        dofs.residualBlock(grid, block_id, operator, res, sys, rhs);
-                        dofs.restrictBlockCells(grid, block_id, res);
-                    }
-
-                    // ********************************
-                    // Rhs correction
-
-                    for (coarse.block_offset..coarse.block_offset + coarse.block_total) |block_id| {
-                        dofs.applyBlock(grid, block_id, operator, rhs, old);
-
                         for (dofs.cell_map.offset(block_id)..dofs.cell_map.offset(block_id + 1)) |idx| {
                             rhs[idx] += res[idx];
                         }
                     }
 
+                    // *****************************
                     // Recurse
+
                     try self.iterate(allocator, level_id - 1);
 
                     // ********************************
                     // Error Correction
 
-                    for (coarse.block_offset..coarse.block_offset + coarse.block_total) |block_id| {
-                        dofs.fillBlockBoundary(grid, block_id, boundary, old);
-                        dofs.fillBlockBoundary(grid, block_id, boundary, sys);
-                    }
+                    dofs.fillLevelBoundary(grid, level_id - 1, boundary, sys);
+                    dofs.fillLevelBoundary(grid, level_id - 1, boundary, old);
 
                     for (coarse.block_offset..coarse.block_offset + coarse.block_total) |block_id| {
                         for (dofs.node_map.offset(block_id)..dofs.node_map.offset(block_id + 1)) |idx| {
@@ -311,9 +288,7 @@ pub fn MultigridMethod(comptime N: usize, comptime M: usize, comptime BaseSolver
                         }
                     }
 
-                    for (level.block_offset..level.block_offset + level.block_total) |block_id| {
-                        dofs.prolongBlock(grid, block_id, err);
-                    }
+                    dofs.prolongLevel(grid, level_id, err);
 
                     for (level.block_offset..level.block_offset + level.block_total) |block_id| {
                         for (dofs.node_map.offset(block_id)..dofs.node_map.offset(block_id + 1)) |idx| {
@@ -324,27 +299,13 @@ pub fn MultigridMethod(comptime N: usize, comptime M: usize, comptime BaseSolver
                     // **************************************
                     // Post smoothing
 
-                    for (level.block_offset..level.block_offset + level.block_total) |block_id| {
-                        dofs.fillBlockBoundary(grid, block_id, boundary, sys);
-                    }
-
                     for (0..self.postsmooth) |_| {
-                        for (level.block_offset..level.block_offset + level.block_total) |block_id| {
-                            dofs.smoothBlock(grid, block_id, operator, x, sys, rhs);
-                        }
-
-                        for (level.block_offset..level.block_offset + level.block_total) |block_id| {
-                            dofs.copyBlockNodesFromCells(grid, block_id, sys, x);
-                        }
-
-                        for (level.block_offset..level.block_offset + level.block_total) |block_id| {
-                            dofs.fillBlockBoundary(grid, block_id, boundary, sys);
-                        }
+                        dofs.fillLevelBoundary(grid, level_id, boundary, sys);
+                        dofs.smoothLevel(grid, level_id, operator, x, sys, rhs);
+                        dofs.copyLevelNodesFromCells(grid, level_id, sys, x);
                     }
 
-                    for (coarse.block_offset..coarse.block_offset + coarse.block_total) |block_id| {
-                        dofs.fillBlockBoundary(grid, block_id, boundary, sys);
-                    }
+                    dofs.fillLevelBoundary(grid, level_id, boundary, sys);
                 }
             };
         }
@@ -369,29 +330,6 @@ pub fn MultigridMethod(comptime N: usize, comptime M: usize, comptime BaseSolver
                     self.dofs.fillBlockBoundary(self.grid, 0, self.boundary, self.sys);
                     // (Apply) Nodes => Cells
                     self.dofs.applyBlock(self.grid, 0, self.operator, aout, self.sys);
-                }
-
-                // var iterations: usize = 0;
-
-                pub fn callback(_: *const @This(), iteration: usize, residual: f64, _: []const f64) void {
-                    _ = residual;
-                    _ = iteration;
-                    // std.debug.print("Iteration: {}, Residual: {}\n", .{ iteration, residual });
-
-                    // const file_name = std.fmt.allocPrint(solver.self.mesh.gpa, "output/elliptic_iteration{}.vtu", .{iterations}) catch {
-                    //     unreachable;
-                    // };
-
-                    // const file = std.fs.cwd().createFile(file_name, .{}) catch {
-                    //     unreachable;
-                    // };
-                    // defer file.close();
-
-                    // DofUtils.writeVtk(solver.self.mesh.gpa, solver.self.mesh, .{ .metric = x }, file.writer()) catch {
-                    //     unreachable;
-                    // };
-
-                    // iterations += 1;
                 }
             };
         }
