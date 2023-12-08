@@ -971,8 +971,6 @@ test "node space smoothing" {
             }
 
             residual = @sqrt(residual);
-
-            // std.debug.print("Iteration {}, Residual {}\n", .{ iter, residual });
         }
 
         // Smooth
@@ -996,10 +994,9 @@ test "node space smoothing" {
     try expect(residual <= 10e-12);
 }
 
-test "node space two grid" {
+test "node space multigrid" {
     const ArenaAllocator = std.heap.ArenaAllocator;
     const expect = std.testing.expect;
-    _ = expect;
     const allocator = std.testing.allocator;
 
     const FaceIndex = geometry.FaceIndex(2);
@@ -1009,7 +1006,7 @@ test "node space two grid" {
 
     const Boundary = struct {
         pub fn kind(_: FaceIndex) BoundaryKind {
-            return .odd;
+            return .robin;
         }
 
         pub fn robin(_: @This(), _: [2]f64, _: FaceIndex) Robin {
@@ -1081,10 +1078,6 @@ test "node space two grid" {
     const base = Nodes.fromCellSize([2]usize{ 8, 8 });
     const fine = Nodes.fromCellSize([2]usize{ 16, 16 });
 
-    std.debug.print("Op Diagonal {}\n", .{Poisson.opDiag(.{ .origin = .{ 0.0, 0.0 }, .size = .{ 16.0, 16.0 } }, fine)});
-
-    std.debug.print("Op Diagonal {}\n", .{Poisson.opDiag(domain, fine)});
-
     // **************************
     // Variables
 
@@ -1131,12 +1124,15 @@ test "node space two grid" {
 
     const scratch: Allocator = arena.allocator();
 
-    for (0..100) |iter| {
+    var residual: f64 = 0.0;
+
+    for (0..10) |iter| {
+        _ = iter;
         defer _ = arena.reset(.retain_capacity);
 
         // Compute current error
         {
-            var residual: f64 = 0.0;
+            residual = 0.0;
 
             fine.fillBoundary(Boundary{}, fine_solution);
 
@@ -1149,12 +1145,9 @@ test "node space two grid" {
                 residual += (rhs - lap) * (rhs - lap);
             }
 
-            if (residual <= 10e-10) {
-                std.debug.print("Converged in {} Iterations\n", .{iter});
-                break;
-            }
+            residual = @sqrt(residual);
 
-            std.debug.print("Iteration {}, Residual {}\n", .{ iter, residual });
+            // std.debug.print("Iteration {}, Residual {}\n", .{ iter, residual });
         }
 
         // Perform presmoothing
@@ -1198,22 +1191,24 @@ test "node space two grid" {
 
             while (cells.next()) |cell| {
                 const sol = fine.restrict(cell, fine_solution);
-                base.setValue(cell, base_old, sol);
+                base.setValue(cell, base_solution, sol);
             }
         }
 
         // Right Hand Side computation
         {
-            base.fillBoundary(Boundary{}, base_old);
+            base.fillBoundary(Boundary{}, base_solution);
 
             var cells = base.cellSpace().cartesianIndices();
 
             while (cells.next()) |cell| {
                 const res = fine.restrictOrder(1, cell, fine_res);
-                const val = Poisson.op(domain, base, cell, base_old);
+                const val = Poisson.op(domain, base, cell, base_solution);
 
                 base.setValue(cell, base_rhs, res + val);
             }
+
+            @memcpy(base_old, base_solution);
         }
 
         // ****************************
@@ -1237,7 +1232,7 @@ test "node space two grid" {
         }
 
         // Solve
-        try BiCGStabSolver.new(1000, 10e-12).solve(scratch, Poisson{
+        try BiCGStabSolver.new(1000, 10e-15).solve(scratch, Poisson{
             .domain = domain,
             .base = base,
             .scratch = base_scratch,
@@ -1294,4 +1289,6 @@ test "node space two grid" {
             @memcpy(fine_solution, fine_scratch);
         }
     }
+
+    try expect(residual <= 10e-12);
 }
