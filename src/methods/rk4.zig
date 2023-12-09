@@ -50,6 +50,7 @@ pub fn RungeKutta4Integrator(comptime Tag: type) type {
         }
 
         pub fn deinit(self: *@This()) void {
+            self.sys.deinit(self.allocator);
             self.scratch.deinit(self.allocator);
             self.k1.deinit(self.allocator);
             self.k2.deinit(self.allocator);
@@ -63,34 +64,34 @@ pub fn RungeKutta4Integrator(comptime Tag: type) type {
             }
 
             // Calculate k1
-            deriv.derivative(self.k1, self.sys.toConst(), self.time);
+            deriv.derivative(self.k1, self.sys, self.time);
             // Calculate k2
-            inline for (comptime std.enums.values(System)) |field| {
+            inline for (comptime std.enums.values(Tag)) |field| {
                 for (0..self.sys.len) |idx| {
                     self.scratch.field(field)[idx] = self.sys.field(field)[idx] + h / 2.0 * self.k1.field(field)[idx];
                 }
             }
 
-            deriv.derivative(self.k2, self.scratch.toConst(), self.time + h / 2.0);
+            deriv.derivative(self.k2, self.scratch, self.time + h / 2.0);
             // Calculate k3
-            inline for (comptime std.enums.values(System)) |field| {
+            inline for (comptime std.enums.values(Tag)) |field| {
                 for (0..self.sys.len) |idx| {
                     self.scratch.field(field)[idx] = self.sys.field(field)[idx] + h / 2.0 * self.k2.field(field)[idx];
                 }
             }
 
-            deriv.derivative(self.k3, self.scratch.toConst(), self.time + h / 2.0);
+            deriv.derivative(self.k3, self.scratch, self.time + h / 2.0);
             // Calculate k4
-            inline for (comptime std.enums.values(System)) |field| {
+            inline for (comptime std.enums.values(Tag)) |field| {
                 for (0..self.sys.len) |idx| {
                     self.scratch.field(field)[idx] = self.sys.field(field)[idx] + h * self.k3.field(field)[idx];
                 }
             }
 
-            deriv.derivative(self.k4, self.scratch.toConst(), self.time + h);
+            deriv.derivative(self.k4, self.scratch, self.time + h);
 
             // Update sys
-            inline for (comptime std.enums.values(System)) |field| {
+            inline for (comptime std.enums.values(Tag)) |field| {
                 for (0..self.sys.len) |idx| {
                     self.sys.field(field)[idx] += h / 6.0 * (self.k1.field(field)[idx] + 2.0 * self.k2.field(field)[idx] + 2.0 * self.k3.field(field)[idx] + self.k4.field(field)[idx]);
                 }

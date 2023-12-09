@@ -5,6 +5,7 @@ const std = @import("std");
 // Submodules
 
 const linear = @import("linear.zig");
+const euler = @import("euler.zig");
 const multigrid = @import("multigrid.zig");
 const rk4 = @import("rk4.zig");
 const system = @import("system.zig");
@@ -12,6 +13,7 @@ const system = @import("system.zig");
 pub const LinearMapMethod = linear.LinearMapMethod;
 pub const MultigridMethod = multigrid.MultigridMethod;
 
+pub const ForwardEulerIntegrator = euler.ForwardEulerIntegrator;
 pub const RungeKutta4Integrator = rk4.RungeKutta4Integrator;
 
 pub const System = system.System;
@@ -25,11 +27,11 @@ pub const isSystemTag = system.isSystemTag;
 pub fn isTemporalDerivative(comptime T: type) bool {
     const hasFn = std.meta.trait.hasFn;
 
-    if (comptime !(@hasDecl(T, "Tag") and @TypeOf(T.Tag) == type and system.isSystem(T.Tag))) {
+    if (comptime !(@hasDecl(T, "Tag") and @TypeOf(T.Tag) == type and system.isSystemTag(T.Tag))) {
         return false;
     }
 
-    if (comptime !(hasFn("derivative")(T) and @TypeOf(T.derivative) == fn (T, System(T.Tag), SystemConst(T.Tag), f64) void)) {
+    if (comptime !(hasFn("derivative")(T) and @TypeOf(T.derivative) == fn (T, System(T.Tag), System(T.Tag), f64) void)) {
         return false;
     }
 

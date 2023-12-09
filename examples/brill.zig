@@ -8,7 +8,7 @@ const bsamr = aeon.bsamr;
 const geometry = aeon.geometry;
 const nodes = aeon.nodes;
 
-pub fn PoissonEquation(comptime M: usize) type {
+pub fn BrillInitialData(comptime M: usize) type {
     const N = 2;
     return struct {
         const BoundaryKind = nodes.BoundaryKind;
@@ -138,7 +138,7 @@ pub fn PoissonEquation(comptime M: usize) type {
 
             // Globally refine three times
 
-            for (0..10) |_| {
+            for (0..8) |_| {
                 const amr: RegridManager = .{
                     .max_levels = 16,
                     .patch_efficiency = 0.1,
@@ -211,14 +211,18 @@ pub fn PoissonEquation(comptime M: usize) type {
                 .seed = seed,
             });
 
+            var buffer = std.io.bufferedWriter(file.writer());
+
             try DataOut.writeVtk(
                 Output,
                 allocator,
                 &mesh,
                 &dofs,
                 output,
-                file.writer(),
+                buffer.writer(),
             );
+
+            try buffer.flush();
         }
     };
 }
@@ -236,5 +240,5 @@ pub fn main() !void {
     }
 
     // Run main
-    try PoissonEquation(2).run(gpa.allocator());
+    try BrillInitialData(2).run(gpa.allocator());
 }
