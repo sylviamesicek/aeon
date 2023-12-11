@@ -265,7 +265,7 @@ pub fn BrillEvolution(comptime M: usize) type {
                 const u = engine.value(self.u);
                 const ugrad = engine.gradient(self.u);
 
-                const term1 = x * lgrad[1] + lapse * xgrad[1];
+                const term1 = 2.0 * (x * lgrad[1] + lapse * xgrad[1]);
                 const term2 = -u * lgrad[0] - lapse * ugrad[0];
 
                 return term1 + term2;
@@ -878,7 +878,7 @@ pub fn BrillEvolution(comptime M: usize) type {
 
             // Runge Kutta 4 context
 
-            var rk4 = try Rk4Integrator(Dynamic).init(allocator, dofs.numNodes());
+            var rk4 = try FEIntegrator(Dynamic).init(allocator, dofs.numNodes());
             defer rk4.deinit();
 
             // *****************************
@@ -917,6 +917,8 @@ pub fn BrillEvolution(comptime M: usize) type {
                 .presmooth = 5,
                 .postsmooth = 5,
             };
+
+            @memset(sol, 0.0);
 
             try solver.solve(
                 allocator,

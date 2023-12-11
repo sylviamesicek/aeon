@@ -31,6 +31,7 @@ pub fn build(b: *std.Build) void {
         "poisson",
         "prolong",
         "evolution",
+        "evolution2",
     };
 
     inline for (examples) |example| {
