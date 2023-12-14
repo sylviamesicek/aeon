@@ -829,7 +829,7 @@ pub fn BrillEvolution(comptime M: usize) type {
 
             // Globally refine
 
-            for (0..6) |_| {
+            for (0..5) |_| {
                 const amr: RegridManager = .{
                     .max_levels = 16,
                     .patch_efficiency = 0.1,
@@ -965,7 +965,7 @@ pub fn BrillEvolution(comptime M: usize) type {
 
             // Output
             {
-                const file = try std.fs.cwd().createFile("output/evolution_new0.vtu", .{});
+                const file = try std.fs.cwd().createFile("output/evolution_newer0.vtu", .{});
                 defer file.close();
 
                 const output = SystemConst(Output).view(dofs.numNodes(), .{
@@ -1000,7 +1000,7 @@ pub fn BrillEvolution(comptime M: usize) type {
 
             const scratch: Allocator = arena.allocator();
 
-            const steps: usize = 2;
+            const steps: usize = 100;
             const h: f64 = 0.01;
 
             for (0..steps) |step| {
@@ -1050,7 +1050,7 @@ pub fn BrillEvolution(comptime M: usize) type {
                 // *******************************
                 // Output
 
-                const file_name = try std.fmt.allocPrint(allocator, "output/evolution_new{}.vtu", .{step + 1});
+                const file_name = try std.fmt.allocPrint(allocator, "output/evolution_newer{}.vtu", .{step + 1});
                 defer allocator.free(file_name);
 
                 const file = try std.fs.cwd().createFile(file_name, .{});
