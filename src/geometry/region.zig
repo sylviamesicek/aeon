@@ -32,6 +32,19 @@ pub fn Region(comptime N: usize) type {
         const IndexBox = @import("box.zig").IndexBox(N);
         const IndexSpace = @import("index.zig").IndexSpace(N);
 
+        /// Converts a region into a linear index into an array.
+        pub fn linear(self: @This()) usize {
+            const rspace = IndexSpace.fromSize([1]usize{3} ** N);
+
+            var cart: [N]usize = undefined;
+
+            for (0..N) |axis| {
+                cart[axis] = @intFromEnum(self.sides[axis]);
+            }
+
+            return rspace.linearFromCartesian(cart);
+        }
+
         /// How many steps of adjacency to reach the middle region.
         pub fn adjacency(self: Self) usize {
             var res: usize = 0;
@@ -197,6 +210,12 @@ pub fn Region(comptime N: usize) type {
         // ************************
         // Constructors ***********
         // ************************
+
+        pub fn central() @This() {
+            return .{
+                .sides = [1]Side{.center} ** N,
+            };
+        }
 
         /// Assembles an array of all valid regions.
         pub fn regions() [numRegions(N)]Region(N) {

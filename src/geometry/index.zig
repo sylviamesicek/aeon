@@ -230,7 +230,7 @@ pub fn IndexSpace(comptime N: usize) type {
                 }
 
                 // Store current cursor value (this is what we will return).
-                var result = self.cursor;
+                const result = self.cursor;
 
                 // Set an increment array. In 3d this looks like [false, false, true].
                 var increment = [1]bool{false} ** N;

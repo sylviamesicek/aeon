@@ -7,6 +7,7 @@ pub const lac = @import("lac/lac.zig");
 pub const mesh = @import("mesh/mesh.zig");
 pub const methods = @import("methods/methods.zig");
 pub const nodes = @import("nodes/nodes.zig");
+pub const tree = @import("tree/tree.zig");
 
 // Global exports
 const io = @import("io/io.zig");

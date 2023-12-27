@@ -12,6 +12,7 @@ pub const FaceIndex = box.FaceIndex;
 pub const IndexBox = box.IndexBox;
 pub const RealBox = box.RealBox;
 pub const SplitIndex = box.SplitIndex;
+pub const numSplitIndices = box.numSplitIndices;
 pub const numFaces = box.numFaces;
 
 pub const BlockClusters = clusters.BlockClusters;
@@ -21,6 +22,7 @@ pub const IndexMixin = index.IndexMixin;
 pub const IndexSpace = index.IndexSpace;
 
 pub const Region = region.Region;
+pub const numRegions = region.numRegions;
 
 test {
     _ = box;

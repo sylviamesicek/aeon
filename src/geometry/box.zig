@@ -23,6 +23,16 @@ pub fn FaceIndex(comptime N: usize) type {
             else
                 .{ .side = false, .axis = index };
         }
+
+        pub fn faces() [numFaces(N)]@This() {
+            var result: [numFaces(N)]@This() = undefined;
+
+            for (0..numFaces(N)) |i| {
+                result[i] = fromLinear(i);
+            }
+
+            return result;
+        }
     };
 }
 
@@ -71,6 +81,12 @@ pub fn SplitIndex(comptime N: usize) type {
             return .{ .linear = linear };
         }
 
+        pub fn fromLinear(linear: u16) Self {
+            return .{
+                .linear = linear,
+            };
+        }
+
         /// Converts a linear `SplitIndex` to a cartesian implementation.
         pub fn toCartesian(self: Self) [N]bool {
             var cart: [N]bool = undefined;
@@ -90,7 +106,29 @@ pub fn SplitIndex(comptime N: usize) type {
                 .linear = self.linear ^ (@as(u16, 1) << @as(u4, @intCast(axis))),
             };
         }
+
+        pub fn splitIndices() [numSplitIndices(N)]@This() {
+            var result: [numSplitIndices(N)]@This() = undefined;
+
+            for (0..numSplitIndices(N)) |linear| {
+                result[linear].linear = linear;
+            }
+
+            return result;
+        }
     };
+}
+
+pub fn numSplitIndices(n: usize) usize {
+    var result: usize = 1;
+
+    for (0..n) |i| {
+        _ = i; // autofix
+
+        result *= 2;
+    }
+
+    return result;
 }
 
 test "split index" {
@@ -195,6 +233,23 @@ pub fn RealBox(comptime N: usize) type {
 
             for (0..N) |i| {
                 result = result and self.origin[i] <= x[i] and x[i] <= self.origin[i] + self.size[i];
+            }
+
+            return result;
+        }
+
+        pub fn split(self: @This(), index: SplitIndex(N)) RealBox(N) {
+            const cart = index.toCartesian();
+
+            var result: RealBox(N) = undefined;
+
+            for (0..N) |axis| {
+                result.origin[axis] = self.origin[axis];
+                result.size[axis] = self.size[axis] / 2.0;
+
+                if (cart[axis]) {
+                    result.origin[axis] += self.size[axis] / 2.0;
+                }
             }
 
             return result;
