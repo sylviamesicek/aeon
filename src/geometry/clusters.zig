@@ -214,6 +214,7 @@ pub fn ClusterSpace(comptime N: usize) type {
 
                         if (amount >= inflection_amounts[axis]) {
                             inflection_indices[axis] = i;
+                            inflection_amounts[axis] = amount;
                         }
                     }
                 }
@@ -391,6 +392,7 @@ pub fn ClusterSpace(comptime N: usize) type {
 
                             if (size >= hole_size) {
                                 hole_indices[axis] = hole_index;
+                                hole_size = size;
                                 found_hole = true;
                             }
 
@@ -406,6 +408,7 @@ pub fn ClusterSpace(comptime N: usize) type {
 
                         if (size >= hole_size) {
                             hole_indices[axis] = hole_index;
+                            hole_size = size;
                             found_hole = true;
                         }
                     }

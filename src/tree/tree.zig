@@ -41,8 +41,8 @@ pub fn TreeMesh(comptime N: usize) type {
         nodes: MultiArrayList(Node(N)),
         /// A set of offsets for each level of the mesh.
         offsets: ArrayListUnmanaged(usize),
-
-        width: usize,
+        /// The number of cells along each edge of a node.
+        node_width: usize,
 
         const Self = @This();
         const FaceIndex = geometry.FaceIndex(N);
@@ -51,11 +51,12 @@ pub fn TreeMesh(comptime N: usize) type {
         const Region = geometry.Region(N);
         const SplitIndex = geometry.SplitIndex(N);
 
-        pub fn init(allocator: Allocator, bounds: RealBox, width: usize) !Self {
+        pub fn init(allocator: Allocator, bounds: RealBox, node_width: usize) !Self {
             var nodes: MultiArrayList(Node(N)) = .{};
             errdefer nodes.deinit(allocator);
 
             try nodes.append(allocator, .{
+                .level = 0,
                 .bounds = bounds,
                 .parent = null_index,
                 .children = null_index,
@@ -65,20 +66,24 @@ pub fn TreeMesh(comptime N: usize) type {
             var offsets: ArrayListUnmanaged(usize) = .{};
             errdefer offsets.deinit(allocator);
 
-            try offsets.append(Allocator, 0);
-            try offsets.append(Allocator, 1);
+            try offsets.append(allocator, 0);
+            try offsets.append(allocator, 1);
 
             return .{
                 .gpa = allocator,
                 .nodes = nodes,
                 .offsets = offsets,
-                .width = width,
+                .node_width = node_width,
             };
         }
 
         pub fn deinit(self: *Self) void {
             self.offsets.deinit(self.gpa);
             self.nodes.deinit(self.gpa);
+        }
+
+        pub fn numLevels(self: *const Self) usize {
+            return self.offsets.items.len - 1;
         }
 
         // Smooths refinement flags to ensure proper 2:1 interfaces.
@@ -113,10 +118,10 @@ pub fn TreeMesh(comptime N: usize) type {
                     const split = SplitIndex.fromLinear(@intCast(sidx));
                     const split_sides = split.toCartesian();
                     // Iterate over a "split space".
-                    for (SplitIndex.splitIndices(N)[1..]) |split_index| {
+                    for (SplitIndex.splitIndices()[1..]) |split_index| {
                         const cart = split_index.toCartesian();
                         // Neighboring node
-                        var neighbor_node: usize = node;
+                        var neighbor: usize = node;
                         // Is the nieghbor coarser than this node
                         var neighbor_coarse: bool = false;
                         // Loop over axes
@@ -131,25 +136,25 @@ pub fn TreeMesh(comptime N: usize) type {
                                 .axis = axis,
                             };
                             // Get neighbor, searching parent neighbors if necessary
-                            var neighbor = nodes.items(.neighbors)[node][face.toLinear()];
+                            var traverse = nodes.items(.neighbors)[node][face.toLinear()];
 
-                            if (neighbor == null_index) {
-                                const neighbor_parent = nodes.items(.parent)[neighbor_node];
+                            if (traverse == null_index) {
+                                const neighbor_parent = nodes.items(.parent)[neighbor];
                                 // We had to traverse a fine-coarse boundary
                                 neighbor_coarse = true;
-                                neighbor = nodes.items(.neighbors)[neighbor_parent][face.toLinear()];
-                            } else if (neighbor == boundary_index) {
+                                traverse = nodes.items(.neighbors)[neighbor_parent][face.toLinear()];
+                            } else if (traverse == boundary_index) {
                                 // No update needed if face is on boundary
                                 neighbor_coarse = false;
                                 continue;
                             }
 
                             // Update node
-                            neighbor_node = neighbor;
+                            neighbor = traverse;
                         }
                         // If neighbor is more coarse, tag for refinement
-                        if (neighbor_coarse and nodes.items(.children)[neighbor_node] == null_index) {
-                            nodes.items(.flag)[neighbor_node] = true;
+                        if (neighbor_coarse and nodes.items(.children)[neighbor] == null_index) {
+                            nodes.items(.flag)[neighbor] = true;
                             is_smooth = false;
                         }
                     }
@@ -157,7 +162,7 @@ pub fn TreeMesh(comptime N: usize) type {
             }
         }
 
-        pub fn refine(self: *Self, allocator: Allocator) void {
+        pub fn refine(self: *Self, allocator: Allocator) !void {
             // Perfom Smoothing
             self.smoothRefineFlags();
             // Transfer all mesh data to a scratch buffer
@@ -195,9 +200,12 @@ pub fn TreeMesh(comptime N: usize) type {
 
             var target: usize = 1;
 
+            // Add offset of level 1
+            try self.offsets.append(self.gpa, self.nodes.len);
+
             while (map.items.len > 0) : (target += 1) {
                 // Add level offsets
-                self.offsets.append(self.gpa, self.nodes.len);
+
                 // Reset temporary map
                 map_tmp.shrinkRetainingCapacity(0);
                 // Loop over current level
@@ -218,19 +226,19 @@ pub fn TreeMesh(comptime N: usize) type {
                     // Starting index of new children
                     const new_children = self.nodes.len;
                     // Update current node's children index
-                    self.nodes.items(.children)[map.new] = new_children;
+                    self.nodes.items(.children)[m.new] = new_children;
 
                     // Add children to self.nodes
                     for (SplitIndex.splitIndices()) |child| {
                         var flag = false;
                         // If this node already had children, they need to be iterated, add to tmp map
-                        if (coarse_children != 0) {
+                        if (coarse_children != null_index) {
                             const old_child_index = coarse_children + child.linear;
                             const new_child_index = new_children + child.linear;
 
                             try map_tmp.append(allocator, .{
                                 .old = old_child_index,
-                                .ned = new_child_index,
+                                .new = new_child_index,
                             });
 
                             flag = old_nodes.items(.flag)[old_child_index];
@@ -270,18 +278,17 @@ pub fn TreeMesh(comptime N: usize) type {
 
                 // Swap map_tmp with map for next level
                 std.mem.swap(ArrayListUnmanaged(IndexMap), &map, &map_tmp);
+                // Update level offsets
+                try self.offsets.append(self.gpa, self.nodes.len);
             }
-
-            // Finalise offsets
-            self.offsets.append(self.gpa, self.nodes.len);
 
             const new_nodes = self.nodes.slice();
 
             // Correct neighbors
             for (1..new_nodes.len) |node| {
                 const children = new_nodes.items(.children)[node];
-                const parent = new_nodes.items(.parents)[node];
-                const neighbors = new_nodes.items(.neighbors)[node];
+                const parent = new_nodes.items(.parent)[node];
+                var neighbors = &new_nodes.items(.neighbors)[node];
                 const flag = new_nodes.items(.flag)[node];
 
                 // If this was not flagged for refinement
@@ -337,4 +344,25 @@ pub fn TreeMesh(comptime N: usize) type {
             }
         }
     };
+}
+
+test "tree mesh global refinement" {
+    const expect = std.testing.expect;
+    const allocator = std.testing.allocator;
+
+    var mesh = try TreeMesh(2).init(allocator, .{
+        .origin = .{ 0.0, 0.0 },
+        .size = .{ 1.0, 1.0 },
+    }, 16);
+    defer mesh.deinit();
+
+    // Global refine
+    for (0..1) |_| {
+        @memset(mesh.nodes.items(.flag), true);
+        try mesh.refine(allocator);
+    }
+
+    try expect(mesh.nodes.len == 5);
+
+    // std.debug.print("{}\n", .{mesh});
 }

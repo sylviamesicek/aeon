@@ -80,7 +80,7 @@ pub fn MultigridMethod(comptime N: usize, comptime M: usize, comptime BaseSolver
 
             // Use initial right hand side to set tolerance.
             const irhs = norm(b);
-            const tol: f64 = self.tolerance * @fabs(irhs);
+            const tol: f64 = self.tolerance * @abs(irhs);
 
             if (irhs <= 1e-60) {
                 std.debug.print("Trivial Linear Problem\n", .{});

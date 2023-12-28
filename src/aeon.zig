@@ -24,4 +24,5 @@ test {
     _ = mesh;
     _ = nodes;
     _ = lac;
+    _ = tree;
 }

@@ -11,7 +11,7 @@ pub fn FaceIndex(comptime N: usize) type {
 
         /// Returns a linear index corresponding to this face.
         pub fn toLinear(self: @This()) usize {
-            return if (self.side) .{ .index = self.axis + N } else .{ .index = self.axis };
+            return if (self.side) self.axis + N else self.axis;
         }
 
         /// Builds a face index from a linear index.
@@ -81,9 +81,9 @@ pub fn SplitIndex(comptime N: usize) type {
             return .{ .linear = linear };
         }
 
-        pub fn fromLinear(linear: u16) Self {
+        pub fn fromLinear(linear: usize) Self {
             return .{
-                .linear = linear,
+                .linear = @as(u16, @intCast(linear)),
             };
         }
 
@@ -111,7 +111,7 @@ pub fn SplitIndex(comptime N: usize) type {
             var result: [numSplitIndices(N)]@This() = undefined;
 
             for (0..numSplitIndices(N)) |linear| {
-                result[linear].linear = linear;
+                result[linear].linear = @as(u16, @intCast(linear));
             }
 
             return result;
@@ -173,6 +173,23 @@ pub fn IndexBox(comptime N: usize) type {
 
             inline for (0..N) |i| {
                 result = result and self.origin[i] <= index[i] and index[i] <= self.origin[i] + self.size[i];
+            }
+
+            return result;
+        }
+
+        pub fn split(self: @This(), index: SplitIndex(N)) RealBox(N) {
+            const cart = index.toCartesian();
+
+            var result: RealBox(N) = undefined;
+
+            for (0..N) |axis| {
+                result.origin[axis] = self.origin[axis];
+                result.size[axis] = self.size[axis] / 2;
+
+                if (cart[axis]) {
+                    result.origin[axis] += self.size[axis] / 2;
+                }
             }
 
             return result;

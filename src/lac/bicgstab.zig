@@ -32,7 +32,7 @@ pub const BiCGStabSolver = struct {
         assert(x.len == b.len);
 
         // Compute tolerance
-        const tol = @fabs(self.tolerance) * norm(b);
+        const tol = @abs(self.tolerance) * norm(b);
 
         if (norm(b) <= 1e-60) {
             @memset(x, 0.0);

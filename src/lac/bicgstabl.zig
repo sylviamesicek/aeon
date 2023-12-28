@@ -97,7 +97,7 @@ pub fn BiCGStablSolver(comptime L: usize) type {
             assert(x.len == self.ndofs);
             assert(b.len == self.ndofs);
 
-            const tol: f64 = @fabs(self.tolerance) * norm(b);
+            const tol: f64 = @abs(self.tolerance) * norm(b);
 
             if (norm(b) <= 1e-60) {
                 @memset(x, 0.0);
@@ -155,7 +155,7 @@ pub fn BiCGStablSolver(comptime L: usize) type {
                         rho1 = dot(self.rtld, self.r[j]);
 
                         // Test for breakdown
-                        if (@fabs(rho1) == 0.0) {
+                        if (@abs(rho1) == 0.0) {
                             // Precondition (Not implemented yet)
                             // @memcpy(self.t, self.x);
                             // @memset(self.t, 0.0);
@@ -190,7 +190,7 @@ pub fn BiCGStablSolver(comptime L: usize) type {
                         const nu = dot(self.rtld, self.u[j + 1]);
 
                         // Test for breakdown
-                        if (@fabs(nu) == 0.0) {
+                        if (@abs(nu) == 0.0) {
                             for (x, self.xp) |*xval, xpval| {
                                 xval.* += xpval;
                             }

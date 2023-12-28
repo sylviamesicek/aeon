@@ -387,7 +387,7 @@ pub fn NodeSpace(comptime N: usize, comptime M: usize) type {
                     offset[i] = idx - M;
                 }
 
-                if (comptime (@fabs(coef) == 0.0)) {
+                if (comptime (@abs(coef) == 0.0)) {
                     continue;
                 }
 
@@ -544,19 +544,17 @@ pub fn NodeSpace(comptime N: usize, comptime M: usize) type {
         }
 
         fn boundaryStencils(comptime extents: [N]isize, comptime flux: ?usize) [N][2 * BM]f64 {
-            const absCast = std.math.absCast;
-
             var result: [N][2 * BM]f64 = undefined;
 
             for (0..N) |axis| {
                 if (flux == axis) {
-                    const stencil = comptime Stencils(BM).boundaryFlux(absCast(extents[axis]));
+                    const stencil = comptime Stencils(BM).boundaryFlux(@abs(extents[axis]));
 
                     inline for (0..stencil.len) |j| {
                         result[axis][j] = stencil[j];
                     }
                 } else {
-                    const stencil = comptime Stencils(BM).boundaryValue(absCast(extents[axis]));
+                    const stencil = comptime Stencils(BM).boundaryValue(@abs(extents[axis]));
 
                     inline for (0..stencil.len) |j| {
                         result[axis][j] = stencil[j];
@@ -568,13 +566,11 @@ pub fn NodeSpace(comptime N: usize, comptime M: usize) type {
         }
 
         fn boundaryStencilLens(extents: [N]isize) [N]usize {
-            const absCast = std.math.absCast;
-
             var result: [N]usize = undefined;
 
             for (0..N) |axis| {
                 if (extents[axis] != 0) {
-                    result[axis] = BM + absCast(extents[axis]);
+                    result[axis] = BM + @abs(extents[axis]);
                 } else {
                     result[axis] = 1;
                 }

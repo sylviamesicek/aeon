@@ -169,15 +169,15 @@ pub fn BoundaryUtils(comptime N: usize, comptime M: usize) type {
 /// A trait for defining boundaries.
 pub fn isBoundary(comptime N: usize) fn (comptime T: type) bool {
     const FaceIndex = geometry.FaceIndex(N);
-    const hasFn = std.meta.trait.hasFn;
+    const hasFn = std.meta.hasFn;
 
     const Closure = struct {
         fn trait(comptime T: type) bool {
-            if (!(hasFn("kind")(T) and @TypeOf(T.kind) == fn (FaceIndex) BoundaryKind)) {
+            if (!(hasFn(T, "kind") and @TypeOf(T.kind) == fn (FaceIndex) BoundaryKind)) {
                 return false;
             }
 
-            if (!(hasFn("robin")(T) and @TypeOf(T.robin) == fn (T, [N]f64, FaceIndex) Robin)) {
+            if (!(hasFn(T, "robin") and @TypeOf(T.robin) == fn (T, [N]f64, FaceIndex) Robin)) {
                 return false;
             }
 
@@ -234,10 +234,10 @@ test "boundary filling" {
         }
     }
 
-    try expect(@fabs(node_space.boundaryOp([2]isize{ -1, 0 }, null, [2]usize{ 0, 50 }, exact)) < 1e-10);
-    try expect(@fabs(node_space.boundaryOp([2]isize{ -2, 0 }, null, [2]usize{ 0, 50 }, exact)) < 1e-10);
-    try expect(@fabs(node_space.boundaryOp([2]isize{ -1, -1 }, null, [2]usize{ 0, 0 }, exact)) < 1e-10);
-    try expect(@fabs(node_space.boundaryOp([2]isize{ -2, -2 }, null, [2]usize{ 0, 0 }, exact)) < 1e-10);
+    try expect(@abs(node_space.boundaryOp([2]isize{ -1, 0 }, null, [2]usize{ 0, 50 }, exact)) < 1e-10);
+    try expect(@abs(node_space.boundaryOp([2]isize{ -2, 0 }, null, [2]usize{ 0, 50 }, exact)) < 1e-10);
+    try expect(@abs(node_space.boundaryOp([2]isize{ -1, -1 }, null, [2]usize{ 0, 0 }, exact)) < 1e-10);
+    try expect(@abs(node_space.boundaryOp([2]isize{ -2, -2 }, null, [2]usize{ 0, 0 }, exact)) < 1e-10);
 
     // *********************************
 
@@ -257,6 +257,6 @@ test "boundary filling" {
     // Test that boundary values are within a certain bound of the exact value
 
     for (0..node_space.numNodes()) |i| {
-        try expect(@fabs(field[i] - exact[i]) < 1e-10);
+        try expect(@abs(field[i] - exact[i]) < 1e-10);
     }
 }

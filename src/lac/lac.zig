@@ -27,9 +27,9 @@ pub const BiCGStablSolver = bicgstabl.BiCGStablSolver;
 /// };
 /// ```
 pub fn isLinearMap(comptime T: type) bool {
-    const hasFn = std.meta.trait.hasFn;
+    const hasFn = std.meta.hasFn;
 
-    if (!(hasFn("apply")(T) and @TypeOf(T.apply) == fn (*const T, []f64, []const f64) void)) {
+    if (!(hasFn(T, "apply") and @TypeOf(T.apply) == fn (*const T, []f64, []const f64) void)) {
         return false;
     }
 
@@ -43,9 +43,9 @@ pub fn hasLinearMapCallback(comptime T: type) bool {
         return false;
     }
 
-    const hasFn = std.meta.trait.hasFn;
+    const hasFn = std.meta.hasFn;
 
-    if (!(hasFn("callback")(T) and @TypeOf(T.callback) == fn (*const T, usize, f64, []const f64) void)) {
+    if (!(hasFn(T, "callback") and @TypeOf(T.callback) == fn (*const T, usize, f64, []const f64) void)) {
         return false;
     }
 
@@ -62,13 +62,13 @@ pub fn hasLinearMapCallback(comptime T: type) bool {
 /// }
 /// ```
 pub fn isLinearSolver(comptime T: type) bool {
-    const hasFn = std.meta.trait.hasFn;
+    const hasFn = std.meta.hasFn;
 
     if (!(@hasDecl(T, "Error") and @TypeOf(T.Error) == type)) {
         return false;
     }
 
-    if (!(hasFn("solve")(T) and @TypeOf(T.solve) == fn (*const T, Allocator, anytype, []f64, []const f64) T.Error!void)) {
+    if (!(hasFn(T, "solve") and @TypeOf(T.solve) == fn (*const T, Allocator, anytype, []f64, []const f64) T.Error!void)) {
         return false;
     }
 

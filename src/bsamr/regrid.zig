@@ -202,10 +202,10 @@ pub fn RegridManager(comptime N: usize) type {
                         bounds.origin = patch.bounds.globalFromLocal(patches.clusters[idx].origin);
                         bounds.size = patches.clusters[idx].size;
 
-                        var children_offset: usize = data.children[target_id].items.len;
+                        const children_offset: usize = data.children[target_id].items.len;
                         var children_total: usize = 0;
 
-                        var block_offset: usize = data.blocks[target_id].items.len;
+                        const block_offset: usize = data.blocks[target_id].items.len;
                         var block_total: usize = 0;
 
                         for (patches.children[idx]) |child| {
