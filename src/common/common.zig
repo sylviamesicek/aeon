@@ -18,7 +18,7 @@ const boundary = @import("boundary.zig");
 const engine = @import("engine.zig");
 
 pub const BoundaryKind = boundary.BoundaryKind;
-pub const BoundaryUtils = boundary.BoundaryUtils;
+pub const BoundaryEngine = boundary.BoundaryEngine;
 pub const Robin = boundary.Robin;
 pub const isBoundary = boundary.isBoundary;
 
@@ -742,7 +742,7 @@ test "node space smoothing" {
 
     for (0..1000) |iter| {
         _ = iter;
-        BoundaryUtils(2, 2).fillBoundary(space, Boundary{}, sol);
+        BoundaryEngine(2, 2).new(space).fill(Boundary{}, sol);
 
         // Compute residual
         {
@@ -793,6 +793,7 @@ test "node space multigrid" {
     const RealBox = geometry.RealBox(N);
     const BiCGStabSolver = lac.BiCGStabSolver;
     const Nodes = NodeSpace(N, M);
+    const BoundaryEngine_ = BoundaryEngine(N, M);
 
     const Boundary = struct {
         pub fn kind(_: FaceIndex) BoundaryKind {
@@ -819,7 +820,7 @@ test "node space multigrid" {
                 }
             }
 
-            BoundaryUtils(N, M).fillBoundary(self.base, Boundary{}, self.scratch);
+            BoundaryEngine_.new(self.base).fill(Boundary{}, self.scratch);
 
             // Apply
             {
@@ -927,7 +928,7 @@ test "node space multigrid" {
         {
             residual = 0.0;
 
-            BoundaryUtils(N, M).fillBoundary(fine, Boundary{}, fine_solution);
+            BoundaryEngine_.new(fine).fill(Boundary{}, fine_solution);
 
             var cells = fine.cellSpace().cartesianIndices();
 
@@ -945,7 +946,7 @@ test "node space multigrid" {
 
         // Perform presmoothing
         for (0..10) |_| {
-            BoundaryUtils(N, M).fillBoundary(fine, Boundary{}, fine_solution);
+            BoundaryEngine_.new(fine).fill(Boundary{}, fine_solution);
 
             var cells = fine.cellSpace().cartesianIndices();
 
@@ -964,7 +965,7 @@ test "node space multigrid" {
 
         // Residual calculation
         {
-            BoundaryUtils(N, M).fillBoundary(fine, Boundary{}, fine_solution);
+            BoundaryEngine_.new(fine).fill(Boundary{}, fine_solution);
 
             var cells = fine.cellSpace().cartesianIndices();
 
@@ -978,7 +979,7 @@ test "node space multigrid" {
 
         // Restrict Solution
         {
-            BoundaryUtils(N, M).fillBoundary(fine, Boundary{}, fine_solution);
+            BoundaryEngine_.new(fine).fill(Boundary{}, fine_solution);
 
             var cells = base.cellSpace().cartesianIndices();
 
@@ -990,7 +991,7 @@ test "node space multigrid" {
 
         // Right Hand Side computation
         {
-            BoundaryUtils(N, M).fillBoundary(base, Boundary{}, base_solution);
+            BoundaryEngine_.new(base).fill(Boundary{}, base_solution);
 
             var cells = base.cellSpace().cartesianIndices();
 
@@ -1042,8 +1043,8 @@ test "node space multigrid" {
 
         // Compute Error
         {
-            BoundaryUtils(N, M).fillBoundary(base, Boundary{}, base_solution);
-            BoundaryUtils(N, M).fillBoundary(base, Boundary{}, base_old);
+            BoundaryEngine_.new(base).fill(Boundary{}, base_solution);
+            BoundaryEngine_.new(base).fill(Boundary{}, base_old);
 
             for (0..base.numNodes()) |idx| {
                 base_err[idx] = base_solution[idx] - base_old[idx];
@@ -1064,7 +1065,7 @@ test "node space multigrid" {
 
         // Post smoothing
         for (0..10) |_| {
-            BoundaryUtils(N, M).fillBoundary(fine, Boundary{}, fine_solution);
+            BoundaryEngine_.new(fine).fill(Boundary{}, fine_solution);
 
             var cells = fine.cellSpace().cartesianIndices();
 

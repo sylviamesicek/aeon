@@ -46,7 +46,6 @@ pub const Robin = struct {
 pub fn BoundaryEngine(comptime N: usize, comptime M: usize) type {
     return struct {
         space: NodeSpace,
-        field: []f64,
 
         const AxisMask = geometry.AxisMask(N);
         const FaceIndex = geometry.FaceIndex(N);
@@ -54,24 +53,21 @@ pub fn BoundaryEngine(comptime N: usize, comptime M: usize) type {
         const Region = geometry.Region(N);
         const NodeSpace = common.NodeSpace(N, M);
 
-        pub fn new(space: NodeSpace, field: []f64) @This() {
-            assert(space.numNodes() == field.len);
-
+        pub fn new(space: NodeSpace) @This() {
             return .{
                 .space = space,
-                .field = field,
             };
         }
 
-        pub fn fill(self: *@This(), bound: anytype) void {
+        pub fn fill(self: @This(), bound: anytype, field: []f64) void {
             const regions = comptime Region.enumerateOrdered();
 
             inline for (comptime regions[1..]) |region| {
-                self.fillRegion(region, AxisMask.initFull(), bound);
+                self.fillRegion(region, AxisMask.initFull(), bound, field);
             }
         }
 
-        pub fn fillRegion(self: *@This(), comptime region: Region, comptime mask: AxisMask, bound: anytype) void {
+        pub fn fillRegion(self: @This(), comptime region: Region, comptime mask: AxisMask, bound: anytype, field: []f64) void {
             const Bound = @TypeOf(bound);
 
             if (comptime !isBoundary(N)(Bound)) {
@@ -121,7 +117,7 @@ pub fn BoundaryEngine(comptime N: usize, comptime M: usize) type {
                         const target = IndexMixin.addSigned(node, extent);
 
                         // Set target to zero
-                        self.space.setNodeValue(target, self.field, 0.0);
+                        self.space.setNodeValue(target, field, 0.0);
 
                         var result: f64 = 0.0;
 
@@ -149,14 +145,14 @@ pub fn BoundaryEngine(comptime N: usize, comptime M: usize) type {
                                         source[axis] = node[axis] - extent[axis] - 1;
                                     }
 
-                                    const source_value: f64 = self.space.nodeValue(source, self.field);
+                                    const source_value: f64 = self.space.nodeValue(source, field);
                                     const fsign: f64 = comptime if (kind == .odd) -1.0 else 1.0;
 
                                     result += fsign * source_value;
                                 },
                                 .robin => {
-                                    const vres: f64 = robin[axis].value * self.space.boundaryOp(extent, null, cell, self.field);
-                                    const fres: f64 = robin[axis].flux * self.space.boundaryOp(extent, axis, cell, self.field);
+                                    const vres: f64 = robin[axis].value * self.space.boundaryOp(extent, null, cell, field);
+                                    const fres: f64 = robin[axis].flux * self.space.boundaryOp(extent, axis, cell, field);
 
                                     const vcoef: f64 = robin[axis].value * self.space.boundaryOpCoef(extent, null);
                                     const fcoef: f64 = robin[axis].flux * self.space.boundaryOpCoef(extent, axis);
@@ -173,132 +169,8 @@ pub fn BoundaryEngine(comptime N: usize, comptime M: usize) type {
                         result /= adj;
 
                         // Set target to result.
-                        self.space.setNodeValue(target, self.field, result);
+                        self.space.setNodeValue(target, field, result);
                     }
-                }
-            }
-        }
-    };
-}
-
-/// Provides utility functions for filling boundary regions.
-pub fn BoundaryUtils(comptime N: usize, comptime M: usize) type {
-    return struct {
-        const FaceIndex = geometry.FaceIndex(N);
-        const IndexMixin = geometry.IndexMixin(N);
-        const Region = geometry.Region(N);
-        const NodeSpace = common.NodeSpace(N, M);
-
-        pub fn fillBoundary(space: NodeSpace, bound: anytype, field: []f64) void {
-            const regions = comptime Region.enumerateOrdered();
-
-            inline for (comptime regions[1..]) |region| {
-                fillBoundaryRegion(region, space, bound, field);
-            }
-        }
-
-        pub fn fillBoundaryRegion(comptime region: Region, space: NodeSpace, bound: anytype, field: []f64) void {
-            const Bound = @TypeOf(bound);
-
-            if (comptime !isBoundary(N)(Bound)) {
-                @compileError("Boundary must satisfy isBoundary trait.");
-            }
-
-            assert(field.len == space.numNodes());
-
-            // Short circuit if the region does not actually have any boundary nodes
-            if (comptime region.adjacency() == 0) {
-                return;
-            }
-
-            // Loop over the cells touching this face.
-            var inner_face_cells = region.innerFaceCells(space.size);
-
-            while (inner_face_cells.next()) |cell| {
-                // Cast to signed node index.
-                const node = IndexMixin.toSigned(cell);
-                // Find position of boundary
-                const pos: [N]f64 = space.boundaryPosition(region, cell);
-
-                // Cache robin boundary conditions (if any)
-                var robin: [N]Robin = undefined;
-
-                inline for (0..N) |axis| {
-                    const face = comptime FaceIndex{
-                        .side = region.sides[axis] == .right,
-                        .axis = axis,
-                    };
-
-                    if (@TypeOf(bound).kind(face) == .robin) {
-                        robin[axis] = bound.robin(pos, face);
-                    }
-                }
-
-                // Loop over extends
-                comptime var extent_indices = region.extentOffsets(M);
-
-                inline while (comptime extent_indices.next()) |extents| {
-                    // Compute target node
-                    var target: [N]isize = undefined;
-
-                    inline for (0..N) |i| {
-                        target[i] = node[i] + extents[i];
-                    }
-
-                    // Set target to zero
-                    space.setNodeValue(target, field, 0.0);
-
-                    var result: f64 = 0.0;
-
-                    // Accumulate result value
-                    inline for (0..N) |axis| {
-                        if (comptime region.sides[axis] == .middle) {
-                            // We need not do anything
-                            continue;
-                        }
-
-                        const face = comptime FaceIndex{
-                            .side = region.sides[axis] == .right,
-                            .axis = axis,
-                        };
-
-                        const kind: BoundaryKind = comptime @TypeOf(bound).kind(face);
-
-                        switch (kind) {
-                            .odd, .even => {
-                                var source: [N]isize = target;
-
-                                if (comptime extents[axis] > 0) {
-                                    source[axis] = node[axis] + 1 - extents[axis];
-                                } else {
-                                    source[axis] = node[axis] - extents[axis] - 1;
-                                }
-
-                                const source_value: f64 = space.nodeValue(source, field);
-                                const fsign: f64 = comptime if (kind == .odd) -1.0 else 1.0;
-
-                                result += fsign * source_value;
-                            },
-                            .robin => {
-                                const vres: f64 = robin[axis].value * space.boundaryOp(extents, null, cell, field);
-                                const fres: f64 = robin[axis].flux * space.boundaryOp(extents, axis, cell, field);
-
-                                const vcoef: f64 = robin[axis].value * space.boundaryOpCoef(extents, null);
-                                const fcoef: f64 = robin[axis].flux * space.boundaryOpCoef(extents, axis);
-
-                                const rhs: f64 = robin[axis].rhs;
-
-                                result += (rhs - vres - fres) / (vcoef + fcoef);
-                            },
-                        }
-                    }
-
-                    // Take the average
-                    const adj: f64 = @floatFromInt(region.adjacency());
-                    result /= adj;
-
-                    // Set target to result.
-                    space.setNodeValue(target, field, result);
                 }
             }
         }
@@ -392,8 +264,7 @@ test "boundary filling" {
         }
     };
 
-    var boundary_engine: Engine = .{ .space = node_space, .field = field };
-    boundary_engine.fill(DiritchletBC{});
+    Engine.new(node_space).fill(DiritchletBC{}, field);
 
     // **********************************
     // Test that boundary values are within a certain bound of the exact value
