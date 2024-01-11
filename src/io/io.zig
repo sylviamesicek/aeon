@@ -17,9 +17,9 @@ const VtkCellType = vtkio.VtkCellType;
 
 const basis = @import("../basis/basis.zig");
 const bsamr = @import("../bsamr/bsamr.zig");
+const common = @import("../common/common.zig");
 const geometry = @import("../geometry/geometry.zig");
 const methods = @import("../methods/methods.zig");
-const nodes = @import("../nodes/nodes.zig");
 
 const System = methods.System;
 const SystemConst = methods.SystemConst;
@@ -32,7 +32,7 @@ pub fn DataOut(comptime N: usize, comptime M: usize) type {
         const DofManager = bsamr.DofManager(N, M);
         const IndexMixin = geometry.IndexMixin(N);
         const IndexSpace = geometry.IndexSpace(N);
-        const NodeSpace = nodes.NodeSpace(N, M);
+        const NodeSpace = common.NodeSpace(N, M);
 
         pub fn writeVtkLevel(
             comptime Tag: type,

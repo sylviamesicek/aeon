@@ -4,10 +4,10 @@ const ArenaAllocator = std.heap.ArenaAllocator;
 
 const basis = @import("../basis/basis.zig");
 const bsamr = @import("../bsamr/bsamr.zig");
+const common = @import("../common/common.zig");
 const geometry = @import("../geometry/geometry.zig");
 const lac = @import("../lac/lac.zig");
 const mesh = @import("../mesh/mesh.zig");
-const nodes = @import("../nodes/nodes.zig");
 
 /// An elliptic method which simply wraps an underlying linear solver.
 pub fn LinearMapMethod(comptime N: usize, comptime M: usize, comptime InnerSolver: type) type {
@@ -47,7 +47,7 @@ pub fn LinearMapMethod(comptime N: usize, comptime M: usize, comptime InnerSolve
                 @compileError("operator must satisfy isOperator trait.");
             }
 
-            if (comptime !(nodes.isBoundary(N)(Bound))) {
+            if (comptime !(common.isBoundary(N)(Bound))) {
                 @compileError("boundary must satisfy isBoundary trait.");
             }
 

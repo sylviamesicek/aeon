@@ -4,10 +4,12 @@ const assert = std.debug.assert;
 /// A mixin for common manipulation indices (`[N]usize`).
 pub fn IndexMixin(comptime N: usize) type {
     return struct {
+        /// Creates an array of length N by repeating the given element.
         pub fn splat(v: usize) [N]usize {
             return [1]usize{v} ** N;
         }
 
+        /// Adds two indices together.
         pub fn add(v: [N]usize, u: [N]usize) [N]usize {
             var res: [N]usize = undefined;
 
@@ -18,6 +20,7 @@ pub fn IndexMixin(comptime N: usize) type {
             return res;
         }
 
+        /// Adds two signed indices together.
         pub fn addSigned(v: [N]isize, u: [N]isize) [N]isize {
             var res: [N]isize = undefined;
 
@@ -28,6 +31,7 @@ pub fn IndexMixin(comptime N: usize) type {
             return res;
         }
 
+        /// Subtracts two indices from one another.
         pub fn sub(v: [N]usize, u: [N]usize) [N]usize {
             var res: [N]usize = v;
 
@@ -38,6 +42,7 @@ pub fn IndexMixin(comptime N: usize) type {
             return res;
         }
 
+        /// Scales all elements of an index by another value.
         pub fn scaled(v: [N]usize, u: usize) [N]usize {
             var res: [N]usize = v;
 
@@ -86,6 +91,7 @@ pub fn IndexMixin(comptime N: usize) type {
             return result;
         }
 
+        /// Casts an unsigned index to a signed one.
         pub fn toSigned(self: [N]usize) [N]isize {
             var result: [N]isize = undefined;
             for (0..N) |i| {
@@ -94,6 +100,7 @@ pub fn IndexMixin(comptime N: usize) type {
             return result;
         }
 
+        /// Casts a signed index to an unsigned one.
         pub fn toUnsigned(self: [N]isize) [N]usize {
             var result: [N]usize = undefined;
             for (0..N) |i| {

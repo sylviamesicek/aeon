@@ -8,7 +8,7 @@ const geometry = @import("../geometry/geometry.zig");
 const io = @import("../io/io.zig");
 const lac = @import("../lac/lac.zig");
 const mesh = @import("../mesh/mesh.zig");
-const nodes = @import("../nodes/nodes.zig");
+const common = @import("../common/common.zig");
 
 const system = @import("system.zig");
 
@@ -51,7 +51,7 @@ pub fn MultigridMethod(comptime N: usize, comptime M: usize, comptime BaseSolver
                 @compileError("operator must satisfy isOperator trait.");
             }
 
-            if (comptime !(nodes.isBoundary(N)(Bound))) {
+            if (comptime !(common.isBoundary(N)(Bound))) {
                 @compileError("boundary must satisfy isBoundary trait.");
             }
 

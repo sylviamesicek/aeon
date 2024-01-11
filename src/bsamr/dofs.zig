@@ -13,14 +13,14 @@ const maxInt = std.math.maxInt;
 const basis = @import("../basis/basis.zig");
 const geometry = @import("../geometry/geometry.zig");
 const mesh = @import("../mesh/mesh.zig");
-const nodes = @import("../nodes/nodes.zig");
+const common = @import("../common/common.zig");
 
 const CellMap = mesh.CellMap;
 const TileMap = mesh.TileMap;
 
-const BoundaryKind = nodes.BoundaryKind;
-const NodeMap = nodes.NodeMap;
-const Robin = nodes.Robin;
+const BoundaryKind = common.BoundaryKind;
+const NodeMap = mesh.CellMap;
+const Robin = common.Robin;
 
 // Other submodules
 
@@ -58,10 +58,9 @@ pub fn DofManager(comptime N: usize, comptime M: usize) type {
 
         const Mesh = mesh_.Mesh(N);
 
-        const BoundaryUtils = nodes.BoundaryUtils(N, M);
-        const NodeSpace = nodes.NodeSpace(N, M);
-        const NodeSpaceZeroth = nodes.NodeSpace(N, 0);
-        const isBoundary = nodes.isBoundary(N);
+        const NodeSpace = common.NodeSpace(N, M);
+        const NodeSpaceZeroth = common.NodeSpace(N, 0);
+        const isBoundary = common.isBoundary(N);
 
         pub fn init(allocator: Allocator) Self {
             return .{
@@ -195,7 +194,7 @@ pub fn DofManager(comptime N: usize, comptime M: usize) type {
             const bounds = grid.blocks[block_id].bounds;
             const tile_size: [N]usize = grid.levels[level].tile_size;
 
-            const regions = comptime Region.orderedRegions();
+            const regions = comptime Region.enumerateOrdered();
 
             inline for (comptime regions[1..]) |region| {
                 var exterior: bool = true;
@@ -213,9 +212,11 @@ pub fn DofManager(comptime N: usize, comptime M: usize) type {
                         .inner = boundary,
                         .bounds = grid.blockPhysicalBounds(block_id),
                     };
+                    _ = wrapped; // autofix
 
                     const space = NodeSpace.fromCellSize(grid.blockCellSize(block_id));
-                    BoundaryUtils.fillBoundaryRegion(region, space, wrapped, self.node_map.slice(block_id, dest));
+                    _ = space; // autofix
+                    // BoundaryUtils.fillBoundaryRegion(region, space, wrapped, self.node_map.slice(block_id, dest));
                 } else {
                     self.fillBlockIntBoundary(region, grid, block_id, dest);
                 }

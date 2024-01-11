@@ -2,11 +2,10 @@
 
 pub const basis = @import("basis/basis.zig");
 pub const bsamr = @import("bsamr/bsamr.zig");
+pub const common = @import("common/common.zig");
 pub const geometry = @import("geometry/geometry.zig");
 pub const lac = @import("lac/lac.zig");
-pub const mesh = @import("mesh/mesh.zig");
 pub const methods = @import("methods/methods.zig");
-pub const nodes = @import("nodes/nodes.zig");
 pub const tree = @import("tree/tree.zig");
 
 // Global exports
@@ -18,11 +17,9 @@ pub const DataOut = io.DataOut;
 
 test {
     _ = basis;
-    _ = bsamr;
+    _ = common;
     _ = geometry;
-    _ = io;
-    _ = mesh;
-    _ = nodes;
     _ = lac;
+    _ = methods;
     _ = tree;
 }

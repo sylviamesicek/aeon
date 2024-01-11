@@ -3,11 +3,64 @@ const IndexSpace = @import("index.zig").IndexSpace;
 
 const assert = std.debug.assert;
 
+fn IntegerBitSet(comptime size: usize) type {
+    const n: u16 = @intCast(size);
+    return std.bit_set.IntegerBitSet(n);
+}
+
+pub fn AxisMask(comptime N: usize) type {
+    return struct {
+        bits: IntegerBitSet(N),
+
+        pub fn initEmpty() @This() {
+            return .{
+                .bits = IntegerBitSet(N).initEmpty(),
+            };
+        }
+
+        pub fn initFull() @This() {
+            return .{
+                .bits = IntegerBitSet(N).initFull(),
+            };
+        }
+
+        /// Returns the total number of set bits in this bit set.
+        pub fn count(self: @This()) usize {
+            return self.bits.count();
+        }
+
+        pub fn complement(self: @This()) @This() {
+            return .{
+                .bits = self.bits.complement(),
+            };
+        }
+
+        pub fn isSet(self: @This(), axis: usize) bool {
+            return self.bits.isSet(axis);
+        }
+
+        pub fn set(self: *@This(), axis: usize) void {
+            self.bits.set(axis);
+        }
+
+        pub fn setValue(self: *@This(), axis: usize, val: bool) void {
+            self.bits.setValue(axis, val);
+        }
+
+        pub fn unset(self: *@This(), axis: usize) void {
+            self.bits.unset(axis);
+        }
+    };
+}
+
 /// Identifies a face by axis and side (false is left, true is right).
 pub fn FaceIndex(comptime N: usize) type {
     return struct {
         side: bool,
         axis: usize,
+
+        /// Total number of face indices.
+        pub const count = 2 * N;
 
         /// Returns a linear index corresponding to this face.
         pub fn toLinear(self: @This()) usize {
@@ -16,7 +69,7 @@ pub fn FaceIndex(comptime N: usize) type {
 
         /// Builds a face index from a linear index.
         pub fn fromLinear(index: usize) @This() {
-            assert(index < comptime numFaces(N));
+            assert(index < count);
 
             return if (index >= N)
                 .{ .side = true, .axis = index - N }
@@ -24,10 +77,10 @@ pub fn FaceIndex(comptime N: usize) type {
                 .{ .side = false, .axis = index };
         }
 
-        pub fn faces() [numFaces(N)]@This() {
-            var result: [numFaces(N)]@This() = undefined;
+        pub fn enumerate() [count]@This() {
+            var result: [count]@This() = undefined;
 
-            for (0..numFaces(N)) |i| {
+            for (0..count) |i| {
                 result[i] = fromLinear(i);
             }
 
@@ -36,20 +89,74 @@ pub fn FaceIndex(comptime N: usize) type {
     };
 }
 
-/// Returns the total number of faces for a given dimension..=
-pub fn numFaces(n: usize) usize {
-    return 2 * n;
+pub fn FaceMask(comptime N: usize) type {
+    return struct {
+        bits: IntegerBitSet(2 * N),
+
+        const Index = FaceIndex(N);
+
+        pub fn initEmpty() @This() {
+            return .{
+                .bits = IntegerBitSet(2 * N).initEmpty(),
+            };
+        }
+
+        pub fn initFull() @This() {
+            return .{
+                .bits = IntegerBitSet(2 * N).initFull(),
+            };
+        }
+
+        pub fn count(self: @This()) usize {
+            return self.bits.count();
+        }
+
+        pub fn complement(self: @This()) @This() {
+            return .{
+                .bits = self.bits.complement(),
+            };
+        }
+
+        pub fn isSet(self: @This(), face: Index) bool {
+            return self.bits.isSet(face.toLinear());
+        }
+
+        pub fn set(self: *@This(), face: Index) void {
+            self.bits.set(face.toLinear());
+        }
+
+        pub fn setValue(self: *@This(), face: Index, val: bool) void {
+            self.bits.setValue(face.toLinear(), val);
+        }
+
+        pub fn unset(self: *@This(), face: Index) void {
+            self.bits.unset(face.toLinear());
+        }
+    };
 }
 
 test "face index" {
     const expectEqual = std.testing.expectEqual;
 
-    try expectEqual(numFaces(2), 4);
+    const Index = FaceIndex(2);
+    const Mask = FaceMask(2);
 
-    const face = FaceIndex(2).fromLinear(2);
+    try expectEqual(Index.count, 4);
+
+    const face = Index.fromLinear(2);
 
     try expectEqual(face.side, true);
     try expectEqual(face.axis, 0);
+
+    var mask = Mask.initEmpty();
+    mask.set(.{ .axis = 1, .side = false });
+
+    try expectEqual(mask.isSet(.{ .axis = 0, .side = false }), false);
+    try expectEqual(mask.isSet(.{ .axis = 1, .side = false }), true);
+
+    mask.unset(.{ .axis = 1, .side = false });
+
+    try expectEqual(mask.isSet(.{ .axis = 1, .side = false }), false);
 }
 
 /// Represents an index into the 2^N subcells formed
@@ -60,30 +167,38 @@ test "face index" {
 /// right. The split index can also be converted to and from a linear index,
 /// to allow for storing subcell linearly (e.g. in an octree).
 pub fn SplitIndex(comptime N: usize) type {
-    if (N > 16) {
-        @compileError("Split index is only defined for values of N <= 16");
-    }
-
     return struct {
-        linear: u16,
+        bits: IntegerBitSet(N),
 
         const Self = @This();
+
+        /// Number of possible split indices in this dimension.
+        pub const count = blk: {
+            var result: usize = 1;
+
+            for (0..N) |_| {
+                result *= 2;
+            }
+
+            break :blk result;
+        };
 
         /// Builds a `SplitIndex` for a cartesian index, ie an array
         /// of bools indicating left/right split on each axis.
         pub fn fromCartesian(cart: [N]bool) Self {
-            var linear: u16 = 0x0;
+            var bits = IntegerBitSet(N).initEmpty();
 
-            inline for (0..N) |i| {
-                linear |= @as(u16, @intFromBool(cart[i])) << i;
+            inline for (0..N) |axis| {
+                bits.setValue(axis, cart[axis]);
             }
 
-            return .{ .linear = linear };
+            return .{ .bits = bits };
         }
 
+        /// Builds a split index from a linear index.
         pub fn fromLinear(linear: usize) Self {
             return .{
-                .linear = @as(u16, @intCast(linear)),
+                .bits = .{ .mask = @intCast(linear) },
             };
         }
 
@@ -92,43 +207,34 @@ pub fn SplitIndex(comptime N: usize) type {
             var cart: [N]bool = undefined;
 
             inline for (0..N) |i| {
-                cart[i] = self.linear & (@as(u16, 1) << i) > 0;
+                cart[i] = self.bits.isSet(i);
             }
 
             return cart;
         }
 
-        /// Finds the mirrored index along this axis.
-        pub fn reverseAxis(self: Self, axis: usize) Self {
-            assert(axis < N);
-
-            return .{
-                .linear = self.linear ^ (@as(u16, 1) << @as(u4, @intCast(axis))),
-            };
+        pub fn toLinear(self: @This()) usize {
+            return @as(usize, self.bits.mask);
         }
 
-        pub fn splitIndices() [numSplitIndices(N)]@This() {
-            var result: [numSplitIndices(N)]@This() = undefined;
+        /// Finds the mirrored index along this axis.
+        pub fn reverseAxis(self: Self, axis: usize) Self {
+            var result = self;
+            result.bits.toggle(axis);
+            return result;
+        }
 
-            for (0..numSplitIndices(N)) |linear| {
-                result[linear].linear = @as(u16, @intCast(linear));
+        /// Enumerates all possible split indices.
+        pub fn enumerate() [count]@This() {
+            var result: [count]@This() = undefined;
+
+            for (0..count) |linear| {
+                result[linear] = fromLinear(linear);
             }
 
             return result;
         }
     };
-}
-
-pub fn numSplitIndices(n: usize) usize {
-    var result: usize = 1;
-
-    for (0..n) |i| {
-        _ = i; // autofix
-
-        result *= 2;
-    }
-
-    return result;
 }
 
 test "split index" {
@@ -140,7 +246,7 @@ test "split index" {
     // Test reverse axis
     try expectEqualDeep(split.reverseAxis(0).toCartesian(), [_]bool{ true, true });
     // Check linear representation
-    try expectEqualDeep(split.linear, 2);
+    try expectEqualDeep(split.toLinear(), 2);
 }
 
 /// An N-dimensional subregion of some larger index space.
@@ -233,6 +339,11 @@ pub fn RealBox(comptime N: usize) type {
         origin: [N]f64,
         size: [N]f64,
 
+        pub const unit: @This() = .{
+            .origin = [1]f64{0.0} ** N,
+            .size = [1]f64{1.0} ** N,
+        };
+
         /// Returns the position of the center of the box.
         pub fn center(self: @This()) [N]f64 {
             var result: [N]f64 = undefined;
@@ -282,17 +393,17 @@ pub fn RealBox(comptime N: usize) type {
             return result;
         }
 
-        pub fn transformOp(self: @This(), ranks: [N]usize, v: f64) f64 {
-            var res: f64 = v;
+        // pub fn transformOp(self: @This(), ranks: [N]usize, v: f64) f64 {
+        //     var res: f64 = v;
 
-            for (0..N) |i| {
-                for (0..ranks[i]) |_| {
-                    res /= self.size[i];
-                }
-            }
+        //     for (0..N) |i| {
+        //         for (0..ranks[i]) |_| {
+        //             res /= self.size[i];
+        //         }
+        //     }
 
-            return res;
-        }
+        //     return res;
+        // }
     };
 }
 

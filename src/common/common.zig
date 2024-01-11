@@ -1,8 +1,7 @@
-//! This module handles nodes, a kind of "unpacked" representation of a function in FD codes.
-//! This module is mesh agnostic, and provides routines to apply physical boundary conditions to
-//! nodes, applying tensor products of stencils to node vectors (through the `NodeSpace` type), and
-//! an API for applying operators to node vectors. Individual meshes must provide functions for
-//! transfering between cell vectors and node vectors.
+//! This modules handles common aspects of all mesh routines and representations in FD codes. This provides functions
+//! to apply physical boundary conditions to nodes, applying tensor products of stencils to node vectors
+//! (through the `NodeSpace` type), and an API for applying operators to node vectors. Individual meshes
+//! must provide functions for transfering between various node vectors.
 
 const std = @import("std");
 const Allocator = std.mem.Allocator;
@@ -16,58 +15,30 @@ const lac = @import("../lac/lac.zig");
 
 // Submodules
 const boundary = @import("boundary.zig");
+const engine = @import("engine.zig");
 
 pub const BoundaryKind = boundary.BoundaryKind;
 pub const BoundaryUtils = boundary.BoundaryUtils;
 pub const Robin = boundary.Robin;
 pub const isBoundary = boundary.isBoundary;
 
-/// A map from blocks (defined in a mesh agnostic way) into `NodeVector`s. This is filled by the appropriate mesh routine.
-pub const NodeMap = struct {
-    offsets: ArrayList(usize),
-
-    pub fn init(allocator: Allocator) NodeMap {
-        const offsets = ArrayList(usize).init(allocator);
-        return .{ .offsets = offsets };
-    }
-
-    /// Frees a `NodeMap`.
-    pub fn deinit(self: *NodeMap) void {
-        self.offsets.deinit();
-    }
-
-    /// Returns the node offset for a given block.
-    pub fn offset(self: NodeMap, block: usize) usize {
-        return self.offsets.items[block];
-    }
-
-    /// Returns the total number of nodes in a given block.
-    pub fn total(self: NodeMap, block: usize) usize {
-        return self.offsets.items[block + 1] - self.offsets.items[block];
-    }
-
-    /// Returns of slice of nodes for a given block.
-    pub fn slice(self: NodeMap, block: usize, nodes: anytype) @TypeOf(nodes) {
-        return nodes[self.offsets.items[block]..self.offsets.items[block + 1]];
-    }
-
-    /// Returns the number of nodes in the total map.
-    pub fn numNodes(self: NodeMap) usize {
-        return self.offsets.items[self.offsets.items.len - 1];
-    }
-};
+pub const Engine = engine.Engine;
+pub const isOperator = engine.isOperator;
+pub const isProjection = engine.isProjection;
 
 /// Represents a single uniform block of nodes, along with ghost nodes along
 /// each boundary. Provides routines for applying centered stencils of order `2M + 1` to
 /// each node in the block. Nodes are indexed by a `[N]isize` where the isize on each axis
-/// may range from (-M, size + M). The node space is map to a simple unit cube coordinate system
-/// when calculating and transforming derivatives and positions.
+/// may range from (-M, size + M).
 pub fn NodeSpace(comptime N: usize, comptime M: usize) type {
     return struct {
-        /// The number of cells along each axis.
+        /// The number of nodes along each axis.
         size: [N]usize,
+        /// The physical bounds of the node space.
+        bounds: RealBox,
 
         const Self = @This();
+        const AxisMask = geometry.AxisMask(N);
         const FaceIndex = geometry.FaceIndex(N);
         const IndexSpace = geometry.IndexSpace(N);
         const IndexBox = geometry.IndexBox(N);
@@ -81,11 +52,6 @@ pub fn NodeSpace(comptime N: usize, comptime M: usize) type {
         const refined = IndexMixin.refined;
         const toSigned = IndexMixin.toSigned;
         const toUnsigned = IndexMixin.toUnsigned;
-
-        /// Constructs the node space from a given cell size.
-        pub fn fromCellSize(size: [N]usize) Self {
-            return .{ .size = size };
-        }
 
         /// Returns the number of cells along each axis for this node space.
         pub fn cellSize(self: Self) [N]usize {
@@ -119,11 +85,26 @@ pub fn NodeSpace(comptime N: usize, comptime M: usize) type {
         pub fn nodePosition(self: Self, node: [N]isize) [N]f64 {
             var result: [N]f64 = undefined;
 
-            for (0..N) |i| {
-                result[i] = (@as(f64, @floatFromInt(node[i])) + 0.5) / @as(f64, @floatFromInt(self.size[i]));
+            inline for (0..N) |i| {
+                result[i] = @as(f64, @floatFromInt(node[i])) + 0.5;
+                result[i] /= @as(f64, @floatFromInt(self.size[i]));
             }
 
-            return result;
+            return self.bounds.transformPos(result);
+        }
+
+        pub fn nodeOffsetPosition(self: Self, region: Region, node: [N]isize) [N]f64 {
+            var result: [N]f64 = undefined;
+
+            inline for (0..N) |i| {
+                result[i] = switch (region.sides[i]) {
+                    .left => 0.0,
+                    .right => @floatFromInt(self.size[i]),
+                    .middle => (@as(f64, @floatFromInt(node[i])) + 0.5) / @as(f64, @floatFromInt(self.size[i])),
+                };
+            }
+
+            return self.bounds.transformPos(result);
         }
 
         /// Returns an index space over the node space.
@@ -204,10 +185,11 @@ pub fn NodeSpace(comptime N: usize, comptime M: usize) type {
             var result: [N]f64 = undefined;
 
             for (0..N) |i| {
-                result[i] = @as(f64, @floatFromInt(vertex[i])) / @as(f64, @floatFromInt(self.size[i]));
+                result[i] = @floatFromInt(vertex[i]);
+                result[i] /= @as(f64, @floatFromInt(self.size[i]));
             }
 
-            return result;
+            return self.bounds.transformPos(result);
         }
 
         // *************************************
@@ -397,7 +379,8 @@ pub fn NodeSpace(comptime N: usize, comptime M: usize) type {
 
             // Covariantly transform result
             inline for (0..N) |i| {
-                const scale: f64 = @floatFromInt(self.size[i]);
+                var scale: f64 = @floatFromInt(self.size[i]);
+                scale /= self.bounds.size[i];
 
                 inline for (0..ranks[i]) |_| {
                     result *= scale;
@@ -422,7 +405,8 @@ pub fn NodeSpace(comptime N: usize, comptime M: usize) type {
 
             // Covariantly transform result
             inline for (0..N) |i| {
-                const scale: f64 = @floatFromInt(self.size[i]);
+                var scale: f64 = @floatFromInt(self.size[i]);
+                scale /= self.bounds.size[i];
 
                 inline for (0..ranks[i]) |_| {
                     result *= scale;
@@ -511,7 +495,8 @@ pub fn NodeSpace(comptime N: usize, comptime M: usize) type {
             // Covariantly transform result
 
             if (flux) |axis| {
-                const scale: f64 = @floatFromInt(self.size[axis]);
+                var scale: f64 = @floatFromInt(self.size[axis]);
+                scale /= self.bounds.size[axis];
                 result *= scale;
             }
 
@@ -536,7 +521,8 @@ pub fn NodeSpace(comptime N: usize, comptime M: usize) type {
             var result = coef;
 
             if (flux) |axis| {
-                const scale: f64 = @floatFromInt(self.size[axis]);
+                var scale: f64 = @floatFromInt(self.size[axis]);
+                scale /= self.bounds.size[axis];
                 result *= scale;
             }
 
@@ -588,7 +574,16 @@ test {
 test "node space iteration" {
     const expectEqualSlices = std.testing.expectEqualSlices;
 
-    const space = NodeSpace(2, 4).fromCellSize([_]usize{ 1, 2 });
+    const N = 2;
+    const M = 4;
+
+    const Nodes = NodeSpace(N, M);
+    const RealBox = geometry.RealBox(N);
+
+    const space: Nodes = .{
+        .size = .{ 1, 2 },
+        .bounds = RealBox.unit,
+    };
 
     const expected = [_][2]isize{
         [2]isize{ -2, -2 },
@@ -638,8 +633,9 @@ test "node space restriction and prolongation" {
     const N = 2;
     const M = 1;
     const Nodes = NodeSpace(N, M);
+    const RealBox = geometry.RealBox(N);
 
-    const space = Nodes.fromCellSize(.{ 20, 20 });
+    const space: Nodes = .{ .size = .{ 20, 20 }, .bounds = RealBox.unit };
 
     const function = try allocator.alloc(f64, space.numNodes());
     defer allocator.free(function);
@@ -689,27 +685,27 @@ test "node space smoothing" {
     };
 
     const Poisson = struct {
-        fn op(domain: RealBox, nodes: Nodes, cell: [2]usize, field: []const f64) f64 {
+        fn op(nodes: Nodes, cell: [2]usize, field: []const f64) f64 {
             var result: f64 = 0.0;
 
             inline for (0..2) |i| {
                 comptime var ranks: [2]usize = [1]usize{0} ** 2;
                 ranks[i] = 2;
 
-                result += domain.transformOp(ranks, nodes.op(ranks, cell, field));
+                result += nodes.op(ranks, cell, field);
             }
 
             return -result;
         }
 
-        fn opDiag(domain: RealBox, nodes: Nodes) f64 {
+        fn opDiag(nodes: Nodes) f64 {
             var result: f64 = 0.0;
 
             inline for (0..2) |i| {
                 comptime var ranks: [2]usize = [1]usize{0} ** 2;
                 ranks[i] = 2;
 
-                result += domain.transformOp(ranks, nodes.opDiagonal(ranks));
+                result += nodes.opDiagonal(ranks);
             }
 
             return -result;
@@ -719,9 +715,10 @@ test "node space smoothing" {
     // **************************
     // Mesh
 
-    const domain: RealBox = .{ .origin = .{ 0.0, 0.0 }, .size = .{ 1.0, 1.0 } };
-
-    const space = Nodes.fromCellSize([2]usize{ 8, 8 });
+    const space: Nodes = .{
+        .size = [2]usize{ 8, 8 },
+        .bounds = RealBox.unit,
+    };
 
     // ***************************
     // Variables
@@ -755,7 +752,7 @@ test "node space smoothing" {
 
             while (cells.next()) |cell| {
                 const vrhs = space.value(cell, rhs);
-                const lap = Poisson.op(domain, space, cell, sol);
+                const lap = Poisson.op(space, cell, sol);
 
                 residual += (vrhs - lap) * (vrhs - lap);
             }
@@ -770,8 +767,8 @@ test "node space smoothing" {
             while (cells.next()) |cell| {
                 const vsol = space.value(cell, sol);
                 const vrhs = space.value(cell, rhs);
-                const lap = Poisson.op(domain, space, cell, sol);
-                const diag = Poisson.opDiag(domain, space);
+                const lap = Poisson.op(space, cell, sol);
+                const diag = Poisson.opDiag(space);
 
                 const v = vsol + 2.0 / 3.0 * (vrhs - lap) / diag;
                 space.setValue(cell, scratch, v);
@@ -808,7 +805,6 @@ test "node space multigrid" {
     };
 
     const Poisson = struct {
-        domain: RealBox,
         base: Nodes,
         scratch: []f64,
 
@@ -831,32 +827,32 @@ test "node space multigrid" {
                 var linear: usize = 0;
 
                 while (cells.next()) |cell| : (linear += 1) {
-                    out[linear] = op(self.domain, self.base, cell, self.scratch);
+                    out[linear] = op(self.base, cell, self.scratch);
                 }
             }
         }
 
-        fn op(domain: RealBox, nodes: Nodes, cell: [2]usize, field: []const f64) f64 {
+        fn op(nodes: Nodes, cell: [2]usize, field: []const f64) f64 {
             var result: f64 = 0.0;
 
             inline for (0..N) |i| {
                 comptime var ranks: [2]usize = [1]usize{0} ** 2;
                 ranks[i] = 2;
 
-                result += domain.transformOp(ranks, nodes.op(ranks, cell, field));
+                result += nodes.op(ranks, cell, field);
             }
 
             return -result;
         }
 
-        fn opDiag(domain: RealBox, nodes: Nodes) f64 {
+        fn opDiag(nodes: Nodes) f64 {
             var result: f64 = 0.0;
 
             inline for (0..N) |i| {
                 comptime var ranks: [2]usize = [1]usize{0} ** 2;
                 ranks[i] = 2;
 
-                result += domain.transformOp(ranks, nodes.opDiagonal(ranks));
+                result += nodes.opDiagonal(ranks);
             }
 
             return -result;
@@ -866,10 +862,15 @@ test "node space multigrid" {
     // **************************
     // Mesh
 
-    const domain: RealBox = .{ .origin = .{ 0.0, 0.0 }, .size = .{ 1.0, 1.0 } };
+    const base: Nodes = .{
+        .size = [2]usize{ 8, 8 },
+        .bounds = RealBox.unit,
+    };
 
-    const base = Nodes.fromCellSize([2]usize{ 8, 8 });
-    const fine = Nodes.fromCellSize([2]usize{ 16, 16 });
+    const fine: Nodes = .{
+        .size = [2]usize{ 16, 16 },
+        .bounds = RealBox.unit,
+    };
 
     // **************************
     // Variables
@@ -932,7 +933,7 @@ test "node space multigrid" {
 
             while (cells.next()) |cell| {
                 const rhs = fine.value(cell, fine_rhs);
-                const lap = Poisson.op(domain, fine, cell, fine_solution);
+                const lap = Poisson.op(fine, cell, fine_solution);
 
                 residual += (rhs - lap) * (rhs - lap);
             }
@@ -951,8 +952,8 @@ test "node space multigrid" {
             while (cells.next()) |cell| {
                 const val = fine.value(cell, fine_solution);
                 const rhs = fine.value(cell, fine_rhs);
-                const lap = Poisson.op(domain, fine, cell, fine_solution);
-                const diag = Poisson.opDiag(domain, fine);
+                const lap = Poisson.op(fine, cell, fine_solution);
+                const diag = Poisson.opDiag(fine);
 
                 const v = val + 2.0 / 3.0 * (rhs - lap) / diag;
                 fine.setValue(cell, fine_scratch, v);
@@ -969,7 +970,7 @@ test "node space multigrid" {
 
             while (cells.next()) |cell| {
                 const rhs = fine.value(cell, fine_rhs);
-                const lap = Poisson.op(domain, fine, cell, fine_solution);
+                const lap = Poisson.op(fine, cell, fine_solution);
 
                 fine.setValue(cell, fine_res, rhs - lap);
             }
@@ -995,7 +996,7 @@ test "node space multigrid" {
 
             while (cells.next()) |cell| {
                 const res = fine.restrictOrder(1, cell, fine_res);
-                const val = Poisson.op(domain, base, cell, base_solution);
+                const val = Poisson.op(base, cell, base_solution);
 
                 base.setValue(cell, base_rhs, res + val);
             }
@@ -1025,7 +1026,6 @@ test "node space multigrid" {
 
         // Solve
         try BiCGStabSolver.new(1000, 10e-15).solve(scratch, Poisson{
-            .domain = domain,
             .base = base,
             .scratch = base_scratch,
         }, x, b);
@@ -1071,8 +1071,8 @@ test "node space multigrid" {
             while (cells.next()) |cell| {
                 const val = fine.value(cell, fine_solution);
                 const rhs = fine.value(cell, fine_rhs);
-                const lap = Poisson.op(domain, fine, cell, fine_solution);
-                const diag = Poisson.opDiag(domain, fine);
+                const lap = Poisson.op(fine, cell, fine_solution);
+                const diag = Poisson.opDiag(fine);
 
                 const v = val + 2.0 / 3.0 * (rhs - lap) / diag;
                 fine.setValue(cell, fine_scratch, v);

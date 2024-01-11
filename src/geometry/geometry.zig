@@ -8,12 +8,12 @@ const index = @import("index.zig");
 const region = @import("region.zig");
 
 // Public Exports
+pub const AxisMask = box.AxisMask;
 pub const FaceIndex = box.FaceIndex;
+pub const FaceMask = box.FaceMask;
 pub const IndexBox = box.IndexBox;
 pub const RealBox = box.RealBox;
 pub const SplitIndex = box.SplitIndex;
-pub const numSplitIndices = box.numSplitIndices;
-pub const numFaces = box.numFaces;
 
 pub const BlockClusters = clusters.BlockClusters;
 pub const ClusterSpace = clusters.ClusterSpace;
@@ -22,7 +22,6 @@ pub const IndexMixin = index.IndexMixin;
 pub const IndexSpace = index.IndexSpace;
 
 pub const Region = region.Region;
-pub const numRegions = region.numRegions;
 
 test {
     _ = box;

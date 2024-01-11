@@ -21,16 +21,27 @@ pub fn Region(comptime N: usize) type {
     return struct {
         sides: [N]Side,
 
+        const Self = @This();
+        const AxisMask = @import("box.zig").AxisMask(N);
+        const IndexBox = @import("box.zig").IndexBox(N);
+        const IndexSpace = @import("index.zig").IndexSpace(N);
+
+        pub const count = blk: {
+            var result: usize = 1;
+
+            for (0..N) |_| {
+                result *= 3;
+            }
+
+            break :blk result;
+        };
+
         // Which side the region is on for each axis.
         pub const Side = enum(u2) {
             left = 0,
             middle = 1,
             right = 2,
         };
-
-        const Self = @This();
-        const IndexBox = @import("box.zig").IndexBox(N);
-        const IndexSpace = @import("index.zig").IndexSpace(N);
 
         /// Converts a region into a linear index into an array.
         pub fn linear(self: @This()) usize {
@@ -176,7 +187,8 @@ pub fn Region(comptime N: usize) type {
 
         /// Iterates outwards from the inner face. Provides offsets that can be added to the inner face
         /// index to find the global index.
-        pub fn extentOffsets(self: Self, comptime E: usize) ExtentIterator {
+        pub fn extentOffsets(self: Self, E: usize) ExtentIterator {
+            // Determine size along each direction
             var size: [N]usize = undefined;
 
             for (0..N) |i| {
@@ -207,6 +219,20 @@ pub fn Region(comptime N: usize) type {
             return dir;
         }
 
+        pub fn masked(self: Self, mask: AxisMask) @This() {
+            var sides: [N]Side = self.sides;
+
+            for (0..N) |i| {
+                if (!mask.isSet(i)) {
+                    sides[i] = .middle;
+                }
+            }
+
+            return .{
+                .sides = sides,
+            };
+        }
+
         // ************************
         // Constructors ***********
         // ************************
@@ -218,8 +244,8 @@ pub fn Region(comptime N: usize) type {
         }
 
         /// Assembles an array of all valid regions.
-        pub fn regions() [numRegions(N)]Region(N) {
-            var regs: [numRegions(N)]Region(N) = undefined;
+        pub fn enumerate() [count]Region(N) {
+            var regs: [count]Region(N) = undefined;
 
             const rspace = IndexSpace.fromSize([1]usize{3} ** N);
 
@@ -242,8 +268,8 @@ pub fn Region(comptime N: usize) type {
         }
 
         /// Constructs an array of regions ordered by adjacency.
-        pub fn orderedRegions() [numRegions(N)]Region(N) {
-            var regs: [numRegions(N)]Region(N) = regions();
+        pub fn enumerateOrdered() [count]Region(N) {
+            var regs: [count]Region(N) = enumerate();
             insertion(Region(N), &regs, {}, lessThanFn);
             return regs;
         }
@@ -254,22 +280,12 @@ pub fn Region(comptime N: usize) type {
     };
 }
 
-pub fn numRegions(n: usize) usize {
-    var result: usize = 1;
-
-    for (0..n) |_| {
-        result *= 3;
-    }
-
-    return result;
-}
-
 test "region adjacency" {
     const expectEqualSlices = std.testing.expectEqualSlices;
 
     const Side = Region(2).Side;
 
-    const regions = Region(2).orderedRegions();
+    const regions = Region(2).enumerateOrdered();
 
     try expectEqualSlices(Side, &regions[0].sides, &[_]Side{ .middle, .middle });
     try expectEqualSlices(Side, &regions[1].sides, &[_]Side{ .left, .middle });
@@ -286,6 +302,8 @@ test "region indices" {
     const expect = std.testing.expect;
     const expectEqualSlices = std.testing.expectEqualSlices;
 
+    const AxisMask = Region(2).AxisMask;
+    _ = AxisMask; // autofix
     const Side = Region(2).Side;
 
     const block: [2]usize = [_]usize{ 2, 2 };

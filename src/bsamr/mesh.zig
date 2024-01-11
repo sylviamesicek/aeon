@@ -11,15 +11,15 @@ const maxInt = std.math.maxInt;
 // Root imports
 
 const basis = @import("../basis/basis.zig");
+const common = @import("../common/common.zig");
 const geometry = @import("../geometry/geometry.zig");
 const mesh = @import("../mesh/mesh.zig");
-const nodes = @import("../nodes/nodes.zig");
+
+const NodeMap = mesh.CellMap;
+const NodeSpace = common.NodeSpace;
 
 const CellMap = mesh.CellMap;
 const TileMap = mesh.TileMap;
-
-const NodeMap = nodes.NodeMap;
-const NodeSpace = nodes.NodeSpace;
 
 // ************************
 // Mesh *******************

@@ -1,7 +1,8 @@
 const std = @import("std");
 
 const geometry = @import("../geometry/geometry.zig");
-const common = @import("../common/common.zig");
+
+const common = @import("common.zig");
 
 /// An interface extending a `NodeSpace` that allows one to take properly transformed
 /// gradients, hessians, and laplacians of some larger node vector.
@@ -130,7 +131,7 @@ pub fn Engine(comptime N: usize, comptime M: usize) type {
 
 /// A trait for defining operators.
 pub fn isOperator(comptime N: usize, comptime M: usize) fn (type) bool {
-    const hasFn = std.meta.trait.hasFn;
+    const hasFn = std.meta.hasFn;
 
     const Closure = struct {
         fn trait(comptime T: type) bool {
@@ -150,7 +151,7 @@ pub fn isOperator(comptime N: usize, comptime M: usize) fn (type) bool {
 }
 
 pub fn isProjection(comptime N: usize, comptime M: usize) fn (type) bool {
-    const hasFn = std.meta.trait.hasFn;
+    const hasFn = std.meta.hasFn;
 
     const Closure = struct {
         fn trait(comptime T: type) bool {
