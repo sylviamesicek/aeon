@@ -16,13 +16,13 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 const assert = std.debug.assert;
 
-// pub fn System(comptime Tag: type, comptime Payload: type) type {
-//     if (comptime !isSystemTag(Tag)) {
-//         @compileError("Tag must satisfy isSystemTag trait.");
-//     }
+pub fn System(comptime Tag: type) type {
+    return SystemImpl(Tag, false);
+}
 
-//     return std.enums.EnumFieldStruct(Tag, Payload, null);
-// }
+pub fn SystemConst(comptime Tag: type) type {
+    return SystemImpl(Tag, true);
+}
 
 pub fn isSystemTag(comptime T: type) bool {
     switch (@typeInfo(T)) {
@@ -132,15 +132,7 @@ fn SystemImpl(comptime Tag: type, comptime is_const: bool) type {
     };
 }
 
-pub fn System(comptime Tag: type) type {
-    return SystemImpl(Tag, false);
-}
-
-pub fn SystemConst(comptime Tag: type) type {
-    return SystemImpl(Tag, true);
-}
-
-test "system trait" {
+test "system tags" {
     const expect = std.testing.expect;
 
     const Sys1 = struct {

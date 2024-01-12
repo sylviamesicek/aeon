@@ -3,7 +3,7 @@ const assert = std.debug.assert;
 
 const geometry = @import("../geometry/geometry.zig");
 
-const common = @import("common.zig");
+const nodes_ = @import("nodes.zig");
 
 /// Describes a the type of boundary condition
 /// to be used to fill ghost cells on a given axis.
@@ -51,7 +51,7 @@ pub fn BoundaryEngine(comptime N: usize, comptime M: usize) type {
         const FaceIndex = geometry.FaceIndex(N);
         const IndexMixin = geometry.IndexMixin(N);
         const Region = geometry.Region(N);
-        const NodeSpace = common.NodeSpace(N, M);
+        const NodeSpace = nodes_.NodeSpace(N, M);
 
         pub fn new(space: NodeSpace) @This() {
             return .{
@@ -205,7 +205,7 @@ test "boundary filling" {
     const pi = std.math.pi;
 
     const FaceIndex = geometry.FaceIndex(2);
-    const NodeSpace = common.NodeSpace(2, 2);
+    const NodeSpace = nodes_.NodeSpace(2, 2);
     const Engine = BoundaryEngine(2, 2);
 
     const node_space: NodeSpace = .{

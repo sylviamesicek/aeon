@@ -2,7 +2,7 @@ const std = @import("std");
 
 const geometry = @import("../geometry/geometry.zig");
 
-const common = @import("common.zig");
+const nodes = @import("nodes.zig");
 
 /// An interface extending a `NodeSpace` that allows one to take properly transformed
 /// gradients, hessians, and laplacians of some larger node vector.
@@ -14,7 +14,7 @@ pub fn Engine(comptime N: usize, comptime M: usize) type {
         start: usize,
         end: usize,
 
-        const NodeSpace = common.NodeSpace(N, M);
+        const NodeSpace = nodes.NodeSpace(N, M);
         const RealBox = geometry.RealBox(N);
 
         pub fn position(self: @This()) [N]f64 {

@@ -1,17 +1,15 @@
 // Submodules
 
 pub const basis = @import("basis/basis.zig");
-pub const bsamr = @import("bsamr/bsamr.zig");
 pub const common = @import("common/common.zig");
 pub const geometry = @import("geometry/geometry.zig");
 pub const lac = @import("lac/lac.zig");
-pub const methods = @import("methods/methods.zig");
 pub const tree = @import("tree/tree.zig");
 
-// Global exports
-const io = @import("io/io.zig");
+// // Global exports
+// const io = @import("io/io.zig");
 
-pub const DataOut = io.DataOut;
+// pub const DataOut = io.DataOut;
 
 // Propogate testing
 
@@ -20,6 +18,5 @@ test {
     _ = common;
     _ = geometry;
     _ = lac;
-    _ = methods;
     _ = tree;
 }
