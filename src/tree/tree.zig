@@ -7,6 +7,7 @@ const assert = std.debug.assert;
 const geometry = @import("../geometry/geometry.zig");
 
 const nodes = @import("nodes.zig");
+const permute = @import("permute.zig");
 
 pub const Block = nodes.Block;
 pub const NodeManager = nodes.NodeManager;
@@ -342,6 +343,11 @@ pub fn TreeMesh(comptime N: usize) type {
             }
         }
     };
+}
+
+test {
+    _ = nodes;
+    _ = permute;
 }
 
 test "tree mesh global refinement" {

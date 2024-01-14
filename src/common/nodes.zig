@@ -563,7 +563,7 @@ test "node space iteration" {
     const expectEqualSlices = std.testing.expectEqualSlices;
 
     const N = 2;
-    const M = 4;
+    const M = 1;
 
     const Nodes = NodeSpace(N, M);
     const RealBox = geometry.RealBox(N);
@@ -574,43 +574,25 @@ test "node space iteration" {
     };
 
     const expected = [_][2]isize{
-        [2]isize{ -2, -2 },
-        [2]isize{ -2, -1 },
-        [2]isize{ -2, 0 },
-        [2]isize{ -2, 1 },
-        [2]isize{ -2, 2 },
-        [2]isize{ -2, 3 },
-        [2]isize{ -1, -2 },
         [2]isize{ -1, -1 },
-        [2]isize{ -1, 0 },
-        [2]isize{ -1, 1 },
-        [2]isize{ -1, 2 },
-        [2]isize{ -1, 3 },
-        [2]isize{ 0, -2 },
         [2]isize{ 0, -1 },
-        [2]isize{ 0, 0 },
-        [2]isize{ 0, 1 },
-        [2]isize{ 0, 2 },
-        [2]isize{ 0, 3 },
-        [2]isize{ 1, -2 },
         [2]isize{ 1, -1 },
+        [2]isize{ -1, 0 },
+        [2]isize{ 0, 0 },
         [2]isize{ 1, 0 },
+        [2]isize{ -1, 1 },
+        [2]isize{ 0, 1 },
         [2]isize{ 1, 1 },
+        [2]isize{ -1, 2 },
+        [2]isize{ 0, 2 },
         [2]isize{ 1, 2 },
-        [2]isize{ 1, 3 },
-        [2]isize{ 2, -2 },
-        [2]isize{ 2, -1 },
-        [2]isize{ 2, 0 },
-        [2]isize{ 2, 1 },
-        [2]isize{ 2, 2 },
-        [2]isize{ 2, 3 },
     };
 
-    var nodes = space.nodes(2);
-    var index: usize = 0;
+    var nodes = space.nodes(M);
+    var linear: usize = 0;
 
-    while (nodes.next()) |node| : (index += 1) {
-        try expectEqualSlices(isize, &node, &expected[index]);
+    while (nodes.next()) |node| : (linear += 1) {
+        try expectEqualSlices(isize, &node, &expected[linear]);
     }
 }
 

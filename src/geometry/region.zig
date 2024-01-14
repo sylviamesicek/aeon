@@ -288,13 +288,13 @@ test "region adjacency" {
     const regions = Region(2).enumerateOrdered();
 
     try expectEqualSlices(Side, &regions[0].sides, &[_]Side{ .middle, .middle });
-    try expectEqualSlices(Side, &regions[1].sides, &[_]Side{ .left, .middle });
-    try expectEqualSlices(Side, &regions[2].sides, &[_]Side{ .middle, .left });
-    try expectEqualSlices(Side, &regions[3].sides, &[_]Side{ .middle, .right });
-    try expectEqualSlices(Side, &regions[4].sides, &[_]Side{ .right, .middle });
+    try expectEqualSlices(Side, &regions[1].sides, &[_]Side{ .middle, .left });
+    try expectEqualSlices(Side, &regions[2].sides, &[_]Side{ .left, .middle });
+    try expectEqualSlices(Side, &regions[3].sides, &[_]Side{ .right, .middle });
+    try expectEqualSlices(Side, &regions[4].sides, &[_]Side{ .middle, .right });
     try expectEqualSlices(Side, &regions[5].sides, &[_]Side{ .left, .left });
-    try expectEqualSlices(Side, &regions[6].sides, &[_]Side{ .left, .right });
-    try expectEqualSlices(Side, &regions[7].sides, &[_]Side{ .right, .left });
+    try expectEqualSlices(Side, &regions[6].sides, &[_]Side{ .right, .left });
+    try expectEqualSlices(Side, &regions[7].sides, &[_]Side{ .left, .right });
     try expectEqualSlices(Side, &regions[8].sides, &[_]Side{ .right, .right });
 }
 
@@ -317,8 +317,8 @@ test "region indices" {
     var indices = region.nodes(2, block);
 
     try expectEqualSlices(isize, &[_]isize{ 2, -1 }, &indices.next().?);
-    try expectEqualSlices(isize, &[_]isize{ 2, -2 }, &indices.next().?);
     try expectEqualSlices(isize, &[_]isize{ 3, -1 }, &indices.next().?);
+    try expectEqualSlices(isize, &[_]isize{ 2, -2 }, &indices.next().?);
     try expectEqualSlices(isize, &[_]isize{ 3, -2 }, &indices.next().?);
     try expect(indices.next() == null);
 
@@ -330,8 +330,8 @@ test "region indices" {
     var offsets = region.extentOffsets(2);
 
     try expectEqualSlices(isize, &[_]isize{ 1, -1 }, &offsets.next().?);
-    try expectEqualSlices(isize, &[_]isize{ 1, -2 }, &offsets.next().?);
     try expectEqualSlices(isize, &[_]isize{ 2, -1 }, &offsets.next().?);
+    try expectEqualSlices(isize, &[_]isize{ 1, -2 }, &offsets.next().?);
     try expectEqualSlices(isize, &[_]isize{ 2, -2 }, &offsets.next().?);
     try expect(offsets.next() == null);
 
@@ -342,8 +342,8 @@ test "region indices" {
     var other_offsets = other_region.extentOffsets(2);
 
     try expectEqualSlices(isize, &[_]isize{ 1, 1 }, &other_offsets.next().?);
-    try expectEqualSlices(isize, &[_]isize{ 1, 2 }, &other_offsets.next().?);
     try expectEqualSlices(isize, &[_]isize{ 2, 1 }, &other_offsets.next().?);
+    try expectEqualSlices(isize, &[_]isize{ 1, 2 }, &other_offsets.next().?);
     try expectEqualSlices(isize, &[_]isize{ 2, 2 }, &other_offsets.next().?);
     try expect(offsets.next() == null);
 }

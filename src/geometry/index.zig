@@ -138,10 +138,8 @@ pub fn IndexSpace(comptime N: usize) type {
             var stride: usize = 1;
             var linear: usize = 0;
 
-            for (0..N) |i| {
-                // Iterate in reverse order (as last index is least significant).
-                const axis = N - 1 - i;
-
+            // First axis is least significant
+            for (0..N) |axis| {
                 linear += stride * cartesian[axis];
                 stride *= self.size[axis];
             }
@@ -155,9 +153,7 @@ pub fn IndexSpace(comptime N: usize) type {
             var cartesian: [N]usize = undefined;
             var index = linear;
 
-            for (0..N) |i| {
-                const axis = N - 1 - i;
-
+            for (0..N) |axis| {
                 cartesian[axis] = index % self.size[axis];
                 index /= self.size[axis];
             }
@@ -232,21 +228,18 @@ pub fn IndexSpace(comptime N: usize) type {
 
             pub fn next(self: *CartesianIterator) ?[N]usize {
                 // Last index was incremented, iteration is complete.
-                if (self.cursor[0] == self.size[0]) {
+                if (self.cursor[N - 1] == self.size[N - 1]) {
                     return null;
                 }
 
                 // Store current cursor value (this is what we will return).
                 const result = self.cursor;
 
-                // Set an increment array. In 3d this looks like [false, false, true].
+                // Set an increment array. In 3d this looks like [true, false, false].
                 var increment = [1]bool{false} ** N;
-                increment[N - 1] = true;
+                increment[0] = true;
 
-                // Loop over axes in reverse order.
-                for (0..N) |i| {
-                    const axis = N - 1 - i;
-
+                for (0..N) |axis| {
                     if (increment[axis]) {
                         // If we need to increment this axis, we add to the cursor value.
                         self.cursor[axis] += 1;
@@ -255,9 +248,9 @@ pub fn IndexSpace(comptime N: usize) type {
                         // are at the end of iteration, and will return null on the next
                         // call to next.
                         if (self.cursor[axis] == self.size[axis]) {
-                            if (axis != 0) {
+                            if (axis < N - 1) {
                                 self.cursor[axis] = 0;
-                                increment[axis - 1] = true;
+                                increment[axis + 1] = true;
                             }
                         }
                     }
@@ -319,10 +312,10 @@ test "index space" {
 
     var iterator = space.cartesianIndices();
     try expect(eql(usize, &iterator.next().?, &[_]usize{ 0, 0, 0 }));
-    try expect(eql(usize, &iterator.next().?, &[_]usize{ 0, 0, 1 }));
-    try expect(eql(usize, &iterator.next().?, &[_]usize{ 0, 0, 2 }));
     try expect(eql(usize, &iterator.next().?, &[_]usize{ 1, 0, 0 }));
+    try expect(eql(usize, &iterator.next().?, &[_]usize{ 0, 0, 1 }));
     try expect(eql(usize, &iterator.next().?, &[_]usize{ 1, 0, 1 }));
+    try expect(eql(usize, &iterator.next().?, &[_]usize{ 0, 0, 2 }));
     try expect(eql(usize, &iterator.next().?, &[_]usize{ 1, 0, 2 }));
     try expect(iterator.next() == null);
 
