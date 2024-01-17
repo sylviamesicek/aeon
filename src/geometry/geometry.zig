@@ -2,18 +2,20 @@
 //! iterating over index spaces, point clustering, regions of extended blocks, etc.
 
 // Submodules
+const axis = @import("axis.zig");
 const box = @import("box.zig");
 const clusters = @import("clusters.zig");
 const index = @import("index.zig");
 const region = @import("region.zig");
 
 // Public Exports
-pub const AxisMask = box.AxisMask;
-pub const FaceIndex = box.FaceIndex;
-pub const FaceMask = box.FaceMask;
+pub const AxisMask = axis.AxisMask;
+pub const FaceIndex = axis.FaceIndex;
+pub const FaceMask = axis.FaceMask;
+pub const SplitIndex = axis.SplitIndex;
+
 pub const IndexBox = box.IndexBox;
 pub const RealBox = box.RealBox;
-pub const SplitIndex = box.SplitIndex;
 
 pub const BlockClusters = clusters.BlockClusters;
 pub const ClusterSpace = clusters.ClusterSpace;
@@ -24,6 +26,7 @@ pub const IndexSpace = index.IndexSpace;
 pub const Region = region.Region;
 
 test {
+    _ = axis;
     _ = box;
     _ = clusters;
     _ = index;

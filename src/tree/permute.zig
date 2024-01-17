@@ -7,6 +7,7 @@ const panic = std.debug.panic;
 
 const geometry = @import("../geometry/geometry.zig");
 
+/// A class for handling permutations between uniform squares in index space and tree space.
 pub fn CellPermutation(comptime N: usize) type {
     return struct {
         buffer: []const usize,
@@ -86,18 +87,28 @@ pub fn CellPermutation(comptime N: usize) type {
         pub fn permutation(self: @This(), refinement: usize) []const usize {
             return self.buffer[self.offsets[refinement]..self.offsets[refinement + 1]];
         }
+
+        pub fn maxRefinement(self: @This()) usize {
+            return self.offsets.len - 1;
+        }
     };
 }
 
 test "cell permutation" {
+    const expect = std.testing.expect;
     const expectEqualSlices = std.testing.expectEqualSlices;
     const allocator = std.testing.allocator;
 
     const permute = try CellPermutation(2).init(allocator, 3);
     defer permute.deinit(allocator);
 
+    try expect(permute.maxRefinement() == 3);
+
     try expectEqualSlices(usize, permute.permutation(0), &.{0});
-    try expectEqualSlices(usize, permute.permutation(1), &.{ 0, 1, 2, 3 });
+    try expectEqualSlices(usize, permute.permutation(1), &.{
+        0, 1,
+        2, 3,
+    });
     try expectEqualSlices(usize, permute.permutation(2), &.{
         0,  1,  4,  5,
         2,  3,  6,  7,

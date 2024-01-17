@@ -9,7 +9,6 @@ const nodes = @import("nodes.zig");
 pub fn Engine(comptime N: usize, comptime M: usize) type {
     return struct {
         space: NodeSpace,
-        bounds: RealBox,
         cell: [N]usize,
         start: usize,
         end: usize,
@@ -18,18 +17,15 @@ pub fn Engine(comptime N: usize, comptime M: usize) type {
         const RealBox = geometry.RealBox(N);
 
         pub fn position(self: @This()) [N]f64 {
-            const pos = self.space.cellPosition(self.cell);
-            return self.bounds.transformPos(pos);
+            return self.space.cellPosition(self.cell);
         }
 
         pub fn op(self: @This(), comptime ranks: [N]usize, field: []const f64) f64 {
-            const v = self.space.op(ranks, self.cell, field[self.start..self.end]);
-            return self.bounds.transformOp(ranks, v);
+            return self.space.op(ranks, self.cell, field[self.start..self.end]);
         }
 
         pub fn opDiag(self: @This(), comptime ranks: [N]usize) f64 {
-            const v = self.space.opDiagonal(ranks);
-            return self.bounds.transformOp(ranks, v);
+            return self.space.opDiagonal(ranks);
         }
 
         pub fn value(self: @This(), field: []const f64) f64 {

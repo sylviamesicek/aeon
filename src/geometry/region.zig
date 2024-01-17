@@ -22,7 +22,7 @@ pub fn Region(comptime N: usize) type {
         sides: [N]Side,
 
         const Self = @This();
-        const AxisMask = @import("box.zig").AxisMask(N);
+        const AxisMask = @import("axis.zig").AxisMask(N);
         const IndexBox = @import("box.zig").IndexBox(N);
         const IndexSpace = @import("index.zig").IndexSpace(N);
 
@@ -217,6 +217,16 @@ pub fn Region(comptime N: usize) type {
             }
 
             return dir;
+        }
+
+        pub fn toMask(self: Self) AxisMask {
+            var result = AxisMask.initEmpty();
+
+            for (0..N) |axis| {
+                result.setValue(axis, self.sides != .center);
+            }
+
+            return result;
         }
 
         pub fn masked(self: Self, mask: AxisMask) @This() {

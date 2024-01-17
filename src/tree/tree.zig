@@ -15,7 +15,7 @@ pub const NodeManager = nodes.NodeManager;
 /// A null index.
 pub const null_index: usize = std.math.maxInt(usize);
 /// This relies on the fact that the root node can never be a neighbor.
-pub const boundary_index: usize = std.math.maxInt(usize) - 1;
+pub const boundary_index: usize = 0;
 
 /// A cell in a quadtree.
 pub fn Cell(comptime N: usize) type {
