@@ -223,7 +223,7 @@ pub fn Region(comptime N: usize) type {
             var result = AxisMask.initEmpty();
 
             for (0..N) |axis| {
-                result.setValue(axis, self.sides != .center);
+                result.setValue(axis, self.sides != .middle);
             }
 
             return result;
@@ -243,13 +243,27 @@ pub fn Region(comptime N: usize) type {
             };
         }
 
+        pub fn maskedBySplit(self: Self, mask: AxisMask) @This() {
+            var sides: [N]Side = self.sides;
+
+            for (0..N) |i| {
+                if (!mask.isSet(i) == (sides[i] == .right)) {
+                    sides[i] = .middle;
+                }
+            }
+
+            return .{
+                .sides = sides,
+            };
+        }
+
         // ************************
         // Constructors ***********
         // ************************
 
         pub fn central() @This() {
             return .{
-                .sides = [1]Side{.center} ** N,
+                .sides = [1]Side{.middle} ** N,
             };
         }
 

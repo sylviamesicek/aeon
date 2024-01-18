@@ -96,6 +96,7 @@ pub fn NodeManager(comptime N: usize) type {
 
         // Sub types
 
+        /// Represents blocks of uniform and contiguous cells which all share a common anscestor.
         pub const Block = struct {
             /// Physical bounds of block.
             bounds: RealBox = RealBox.unit,
@@ -103,13 +104,17 @@ pub fn NodeManager(comptime N: usize) type {
             size: [N]usize = [1]usize{1} ** N,
             /// Boolean array indicating whether or not a given face is on the physical boundary.
             boundary: [FaceIndex.count]bool,
-            /// Refinement level of block
+            /// Refinement level of block.
             refinement: usize,
         };
 
+        /// Additional information stored for each cell of the mesh.
         pub const Cell = struct {
+            /// Block that this cell belongs to.
             block: usize = 0,
+            /// Position within block of this cell.
             index: [N]usize = [1]usize{0} ** N,
+            /// Cache of neighboring cells.
             neighbors: [Region.count]usize,
         };
 
@@ -304,6 +309,7 @@ pub fn NodeManager(comptime N: usize) type {
             }
         }
 
+        /// Builds extra cell information like neighbors.
         fn buildCells(self: *@This(), mesh: *const TreeMesh) void {
             // Cache pointers
             const cells = mesh.cells.slice();
@@ -332,15 +338,22 @@ pub fn NodeManager(comptime N: usize) type {
                         continue;
                     }
 
+                    // Start with current cell
                     var neighbor: usize = cell;
-                    var neighbor_coarse: bool = false;
+                    // Did we cross a coarse fine interface
+                    var interface: bool = false;
 
                     for (0..N) |axis| {
-                        if (neighbor == null_index or neighbor == boundary_index or region.sides[axis] == .middle) {
+                        assert(neighbor != boundary_index);
+
+                        // If current neighbor is null continue.
+                        if (neighbor == null_index or region.sides[axis] == .middle) {
                             continue;
                         }
 
-                        if (neighbor_coarse and (region.sides[axis] == .right) != split.isSet(axis)) {
+                        // If we have crossed an interface, do not traverse this axis unless we are truly
+                        // searching for a new node.
+                        if (interface and (region.sides[axis] == .right) != split.isSet(axis)) {
                             continue;
                         }
 
@@ -351,22 +364,22 @@ pub fn NodeManager(comptime N: usize) type {
                         };
 
                         // Get neighbor, searching parent neighbors if necessary
-                        var traverse = cells.items(.neighbors)[neighbor][face.toLinear()];
+                        const traverse = cells.items(.neighbors)[neighbor][face.toLinear()];
 
                         if (traverse == null_index) {
                             // We had to traverse a fine-coarse boundary
                             const neighbor_parent = cells.items(.parent)[neighbor];
-                            neighbor_coarse = true;
-                            // Update traverse
-                            traverse = cells.items(.neighbors)[neighbor_parent][face.toLinear()];
-                        } else if (neighbor == boundary_index) {
-                            // No update needed if face is on boundary
-                            neighbor_coarse = false;
-                            continue;
+                            interface = true;
+                            // Update neighbor
+                            neighbor = cells.items(.neighbors)[neighbor_parent][face.toLinear()];
+                        } else if (traverse == boundary_index) {
+                            interface = false;
+                            // On boundary, ignore.
+                            neighbor = null_index;
+                        } else {
+                            // Update neighbor
+                            neighbor = traverse;
                         }
-
-                        // Update neighbor
-                        neighbor = traverse;
                     }
 
                     neighbors[region.linear()] = neighbor;
@@ -501,7 +514,7 @@ pub fn NodeWorker(comptime N: usize, comptime M: usize) type {
             self.map.deinit();
         }
 
-        /// Fills the boundary of given level.
+        /// Fills the ghost nodes of given level.
         pub fn fillGhostNodes(self: @This(), level: usize, boundary: anytype, field: []usize) void {
             assert(field.len == self.map.total());
 
@@ -576,15 +589,84 @@ pub fn NodeWorker(comptime N: usize, comptime M: usize) type {
             }
         }
 
-        fn fillBlockIntGhostNodes(self: @This(), comptime region: Region, block_id: usize, field: []usize) void {
+        fn fillBlockIntGhostNodes(self: @This(), region: Region, block_id: usize, field: []usize) void {
             assert(block_id != 0);
 
-            _ = region; // autofix
-            _ = self; // autofix
-            _ = field; // autofix
+            const block = self.manager.blockFromId(block_id);
+            const block_node_space = self.nodeSpaceFromBlock(block);
+            const block_field: []f64 = self.map.slice(block_id, field);
+
+            // Cache pointers
+            const cells = self.mesh.cells.slice();
+            const cell_meta = self.manager.cells.slice();
+            const cell_size = self.manager.cell_size;
+
+            var cell_indices = region.innerFaceCells(block.size);
+
+            while (cell_indices.next()) |index| {
+                // Uses permutation to find actual cell
+                const cell = self.manager.cellFromBlock(block_id, index);
+                // Origin in node space
+                const origin: [N]usize = mul(index, cell_size);
+                // Get neighbor in this direction
+                var neighbor = cell_meta.items(.neighbors)[cell][region.linear()];
+
+                if (neighbor == null_index) {
+                    // Prolong from coarser level.
+                    const parent = cells.items(.parent)[cell];
+                    // Get split mask.
+                    const split_lin = cell - cells.items(.children)[parent];
+                    const split = AxisMask.fromLinear(split_lin);
+
+                    var mask = AxisMask.initEmpty();
+
+                    for (0..N) |axis| {
+                        const side = region.sides[axis];
+                        switch (side) {
+                            .middle => mask.unset(axis),
+                            .left => mask.setValue(axis, !split.isSet(axis)),
+                            .right => mask.setValue(axis, split.isSet(axis)),
+                        }
+                    }
+
+                    const mregion = region.masked(mask);
+                    neighbor = cell_meta.items(.neighbors)[parent][mregion.linear()];
+
+                    const neighbor_block_id = cell_meta.items(.block)[neighbor];
+                    const neighbor_block = self.manager.blockFromId(neighbor_block_id);
+                    const neighbor_index = cell_meta.items(.index)[neighbor];
+                    const neighbor_origin = mul(neighbor_index, cell_size);
+                    _ = neighbor_origin; // autofix
+                    const neighbor_field = self.map.slice(neighbor_block_id, field);
+                    _ = neighbor_field; // autofix
+                    const neighbor_node_space = self.nodeSpaceFromBlock(neighbor_block);
+                    _ = neighbor_node_space; // autofix
+
+                } else {
+                    // Neighbor is on same level.
+                    const neighbor_block_id = cell_meta.items(.block)[neighbor];
+                    const neighbor_block = self.manager.blockFromId(neighbor_block_id);
+                    const neighbor_index = cell_meta.items(.index)[neighbor];
+                    const neighbor_origin = mul(neighbor_index, cell_size);
+                    const neighbor_field = self.map.slice(neighbor_block_id, field);
+                    const neighbor_node_space = self.nodeSpaceFromBlock(neighbor_block);
+
+                    var offsets = region.nodes(M, cell_size);
+
+                    while (offsets.next()) |offset| {
+                        const node = IndexMixin.offsetFromOrigin(origin, offset);
+                        const neighbor_node = IndexMixin.offsetFromOrigin(neighbor_origin, offset);
+
+                        const v = neighbor_node_space.nodeValue(neighbor_node, neighbor_field);
+                        block_node_space.setNodeValue(node, block_field, v);
+                    }
+                }
+            }
         }
 
         pub fn prolong(self: @This(), level: usize, field: []usize) void {
+            assert(field.len == self.map.total());
+
             if (level == 0) {
                 return;
             }
@@ -610,11 +692,11 @@ pub fn NodeWorker(comptime N: usize, comptime M: usize) type {
 
             while (cell_indices.next()) |index| {
                 // Uses permutation to find actual cell
-                const cell_id = self.manager.cellFromBlock(block_id, index);
+                const cell = self.manager.cellFromBlock(block_id, index);
                 // Get parent of current cell
-                const parent = cells.items(.parent)[cell_id];
+                const parent = cells.items(.parent)[cell];
                 // Get split mask.
-                const split_lin = cell_id - cells.items(.children)[parent];
+                const split_lin = cell - cells.items(.children)[parent];
                 const split = AxisMask.fromLinear(split_lin);
                 // Get super block
                 const parent_block_id: usize = self.manager.cells.items(.block)[parent];
@@ -644,6 +726,8 @@ pub fn NodeWorker(comptime N: usize, comptime M: usize) type {
         }
 
         pub fn restrict(self: @This(), level: usize, field: []usize) void {
+            assert(field.len == self.map.total());
+
             if (level == 0) {
                 return;
             }
