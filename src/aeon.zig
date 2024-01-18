@@ -5,6 +5,7 @@ pub const common = @import("common/common.zig");
 pub const geometry = @import("geometry/geometry.zig");
 pub const lac = @import("lac/lac.zig");
 pub const tree = @import("tree/tree.zig");
+pub const utils = @import("utils.zig");
 
 // // Global exports
 // const io = @import("io/io.zig");
@@ -19,4 +20,5 @@ test {
     _ = geometry;
     _ = lac;
     _ = tree;
+    _ = utils;
 }

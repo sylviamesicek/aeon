@@ -108,6 +108,12 @@ pub fn AxisMask(comptime N: usize) type {
             self.bits.toggle(axis);
         }
 
+        pub fn toggled(self: @This(), axis: usize) @This() {
+            var result = self;
+            result.toggle(axis);
+            return result;
+        }
+
         /// Sets the value of the axis to `val`.
         pub fn setValue(self: *@This(), axis: usize, val: bool) void {
             self.bits.setValue(axis, val);
@@ -195,6 +201,7 @@ pub fn FaceIndex(comptime N: usize) type {
     };
 }
 
+/// A set of faces, used for various boundary routines.
 pub fn FaceMask(comptime N: usize) type {
     return struct {
         bits: IntegerBitSet(2 * N),
@@ -265,118 +272,118 @@ test "face index" {
     try expectEqual(mask.isSet(.{ .axis = 1, .side = false }), false);
 }
 
-/// Represents an index into the 2^N subcells formed
-/// when dividing a hyper box along each axis. It is essentially
-/// a bitvector which can be packed and unpacked from a `[N]bool`,
-/// `array[i] == false` indicates that the subcell is on the left of
-/// the `i`th axis, and `array[i] == true` indicates the subcell is on the
-/// right. The split index can also be converted to and from a linear index,
-/// to allow for storing subcell linearly (e.g. in an octree).
-pub fn SplitIndex(comptime N: usize) type {
-    return struct {
-        bits: IntegerBitSet(N),
+// /// Represents an index into the 2^N subcells formed
+// /// when dividing a hyper box along each axis. It is essentially
+// /// a bitvector which can be packed and unpacked from a `[N]bool`,
+// /// `array[i] == false` indicates that the subcell is on the left of
+// /// the `i`th axis, and `array[i] == true` indicates the subcell is on the
+// /// right. The split index can also be converted to and from a linear index,
+// /// to allow for storing subcell linearly (e.g. in an octree).
+// pub fn SplitIndex(comptime N: usize) type {
+//     return struct {
+//         bits: IntegerBitSet(N),
 
-        const Self = @This();
+//         const Self = @This();
 
-        /// Number of possible split indices in this dimension.
-        pub const count = blk: {
-            var result: usize = 1;
+//         /// Number of possible split indices in this dimension.
+//         pub const count = blk: {
+//             var result: usize = 1;
 
-            for (0..N) |_| {
-                result *= 2;
-            }
+//             for (0..N) |_| {
+//                 result *= 2;
+//             }
 
-            break :blk result;
-        };
+//             break :blk result;
+//         };
 
-        /// Builds a `SplitIndex` for a cartesian index, ie an array
-        /// of bools indicating left/right split on each axis.
-        pub fn fromCartesian(cart: [N]bool) Self {
-            var bits = IntegerBitSet(N).initEmpty();
+//         /// Builds a `SplitIndex` for a cartesian index, ie an array
+//         /// of bools indicating left/right split on each axis.
+//         pub fn fromCartesian(cart: [N]bool) Self {
+//             var bits = IntegerBitSet(N).initEmpty();
 
-            inline for (0..N) |axis| {
-                bits.setValue(axis, cart[axis]);
-            }
+//             inline for (0..N) |axis| {
+//                 bits.setValue(axis, cart[axis]);
+//             }
 
-            return .{ .bits = bits };
-        }
+//             return .{ .bits = bits };
+//         }
 
-        /// Builds a split index from a linear index.
-        pub fn fromLinear(linear: usize) Self {
-            return .{
-                .bits = .{ .mask = @intCast(linear) },
-            };
-        }
+//         /// Builds a split index from a linear index.
+//         pub fn fromLinear(linear: usize) Self {
+//             return .{
+//                 .bits = .{ .mask = @intCast(linear) },
+//             };
+//         }
 
-        /// Converts a linear `SplitIndex` to a cartesian implementation.
-        pub fn toCartesian(self: Self) [N]bool {
-            var cart: [N]bool = undefined;
+//         /// Converts a linear `SplitIndex` to a cartesian implementation.
+//         pub fn toCartesian(self: Self) [N]bool {
+//             var cart: [N]bool = undefined;
 
-            inline for (0..N) |i| {
-                cart[i] = self.bits.isSet(i);
-            }
+//             inline for (0..N) |i| {
+//                 cart[i] = self.bits.isSet(i);
+//             }
 
-            return cart;
-        }
+//             return cart;
+//         }
 
-        pub fn toLinear(self: @This()) usize {
-            return @as(usize, self.bits.mask);
-        }
+//         pub fn toLinear(self: @This()) usize {
+//             return @as(usize, self.bits.mask);
+//         }
 
-        /// Finds the mirrored index along this axis.
-        pub fn reverseAxis(self: Self, axis: usize) Self {
-            var result = self;
-            result.bits.toggle(axis);
-            return result;
-        }
+//         /// Finds the mirrored index along this axis.
+//         pub fn reverseAxis(self: Self, axis: usize) Self {
+//             var result = self;
+//             result.bits.toggle(axis);
+//             return result;
+//         }
 
-        pub fn innerFaces(self: Self) [N]FaceIndex(N) {
-            var result: [N]FaceIndex(N) = undefined;
+//         pub fn innerFaces(self: Self) [N]FaceIndex(N) {
+//             var result: [N]FaceIndex(N) = undefined;
 
-            for (0..N) |axis| {
-                result[axis] = .{
-                    .axis = axis,
-                    .side = !self.bits.isSet(axis),
-                };
-            }
+//             for (0..N) |axis| {
+//                 result[axis] = .{
+//                     .axis = axis,
+//                     .side = !self.bits.isSet(axis),
+//                 };
+//             }
 
-            return result;
-        }
+//             return result;
+//         }
 
-        pub fn outerFaces(self: Self) [N]FaceIndex(N) {
-            var result: [N]FaceIndex(N) = undefined;
+//         pub fn outerFaces(self: Self) [N]FaceIndex(N) {
+//             var result: [N]FaceIndex(N) = undefined;
 
-            for (0..N) |axis| {
-                result[axis] = .{
-                    .axis = axis,
-                    .side = self.bits.isSet(axis),
-                };
-            }
+//             for (0..N) |axis| {
+//                 result[axis] = .{
+//                     .axis = axis,
+//                     .side = self.bits.isSet(axis),
+//                 };
+//             }
 
-            return result;
-        }
+//             return result;
+//         }
 
-        /// Enumerates all possible split indices.
-        pub fn enumerate() [count]@This() {
-            var result: [count]@This() = undefined;
+//         /// Enumerates all possible split indices.
+//         pub fn enumerate() [count]@This() {
+//             var result: [count]@This() = undefined;
 
-            for (0..count) |linear| {
-                result[linear] = fromLinear(linear);
-            }
+//             for (0..count) |linear| {
+//                 result[linear] = fromLinear(linear);
+//             }
 
-            return result;
-        }
-    };
-}
+//             return result;
+//         }
+//     };
+// }
 
-test "split index" {
-    const expectEqualDeep = std.testing.expectEqualDeep;
+// test "split index" {
+//     const expectEqualDeep = std.testing.expectEqualDeep;
 
-    const split = SplitIndex(2).fromCartesian([_]bool{ false, true });
-    // Make sure that from/toCartesian are inverses
-    try expectEqualDeep(split.toCartesian(), [_]bool{ false, true });
-    // Test reverse axis
-    try expectEqualDeep(split.reverseAxis(0).toCartesian(), [_]bool{ true, true });
-    // Check linear representation
-    try expectEqualDeep(split.toLinear(), 2);
-}
+//     const split = SplitIndex(2).fromCartesian([_]bool{ false, true });
+//     // Make sure that from/toCartesian are inverses
+//     try expectEqualDeep(split.toCartesian(), [_]bool{ false, true });
+//     // Test reverse axis
+//     try expectEqualDeep(split.reverseAxis(0).toCartesian(), [_]bool{ true, true });
+//     // Check linear representation
+//     try expectEqualDeep(split.toLinear(), 2);
+// }

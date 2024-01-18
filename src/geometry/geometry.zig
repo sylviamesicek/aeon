@@ -12,7 +12,6 @@ const region = @import("region.zig");
 pub const AxisMask = axis.AxisMask;
 pub const FaceIndex = axis.FaceIndex;
 pub const FaceMask = axis.FaceMask;
-pub const SplitIndex = axis.SplitIndex;
 
 pub const IndexBox = box.IndexBox;
 pub const RealBox = box.RealBox;

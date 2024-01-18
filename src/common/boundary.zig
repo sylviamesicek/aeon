@@ -75,7 +75,7 @@ pub fn BoundaryEngine(comptime N: usize, comptime M: usize) type {
             }
 
             // Short circuit if the region does not actually have any boundary nodes
-            if (comptime region.adjacency() == 0) {
+            if (comptime region.adjacency() == 0 or mask.isEmpty()) {
                 return;
             }
 

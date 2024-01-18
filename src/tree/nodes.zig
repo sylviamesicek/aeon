@@ -2,6 +2,7 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 const ArrayList = std.ArrayList;
 const ArrayListUmanaged = std.ArrayListUnmanaged;
+const MultiArrayList = std.MultiArrayList;
 const assert = std.debug.assert;
 const panic = std.debug.panic;
 
@@ -13,73 +14,71 @@ const permute = @import("permute.zig");
 
 const common = @import("../common/common.zig");
 const geometry = @import("../geometry/geometry.zig");
+const utils = @import("../utils.zig");
 
-pub fn Block(comptime N: usize) type {
-    return struct {
-        /// Physical bounds of block.
-        bounds: RealBox = RealBox.unit,
-        /// Number of cells along each axis of block.
-        size: [N]usize = [1]usize{1} ** N,
-        /// Boolean array indicating whether or not a given face is on the physical boundary.
-        boundary: [FaceIndex.count]bool,
-        /// Refinement level of block
-        refinement: usize,
-        const FaceIndex = geometry.FaceIndex(N);
-        const RealBox = geometry.RealBox(N);
-    };
-}
+const Range = utils.Range;
+const RangeMap = utils.RangeMap;
 
 /// A map from blocks (defined in a mesh agnostic way) into a buffered node vector.
 /// This is filled by the appropriate mesh routine.
 pub const NodeMap = struct {
-    offsets: ArrayList(usize),
+    allocator: Allocator,
+    ranges: RangeMap = .{},
 
     pub fn init(allocator: Allocator) NodeMap {
-        const offsets = ArrayList(usize).init(allocator);
-        return .{ .offsets = offsets };
+        return .{
+            .allocator = allocator,
+        };
     }
 
     /// Frees a `CellMap`.
     pub fn deinit(self: *NodeMap) void {
-        self.offsets.deinit();
+        self.ranges.deinit(self.allocator);
     }
 
     /// Returns the cells offset for a given block.
     pub fn offset(self: NodeMap, block: usize) usize {
-        return self.offsets.items[block];
+        return self.ranges.offset(block);
     }
 
-    /// Returns the total number of cells in a given block.
-    pub fn total(self: NodeMap, block: usize) usize {
-        return self.offsets.items[block + 1] - self.offsets.items[block];
+    /// Returns the number of cells in a given block.
+    pub fn size(self: NodeMap, block: usize) usize {
+        return self.ranges.size(block);
     }
 
     /// Returns of slice of cells for a given block.
     pub fn slice(self: NodeMap, block: usize, data: anytype) @TypeOf(data) {
-        return data[self.offsets.items[block]..self.offsets.items[block + 1]];
+        const range = self.ranges.range(block);
+        return data[range.start..range.end];
     }
 
-    /// Returns the number of nodes in the total map.
-    pub fn numNodes(self: NodeMap) usize {
-        return self.offsets.items[self.offsets.items.len - 1];
+    /// Returns the number of nodes in the map.
+    pub fn total(self: NodeMap) usize {
+        return self.ranges.total();
     }
 };
 
 /// Stores the additional structured needed to associate nodes with a mesh. Uniform children with common parents
-/// are grouped into blocks to prevent unnessary ghost node duplication.
+/// are grouped into blocks to prevent unnessary ghost node duplication. Similar to a mesh, this node manager
+/// describes the structure of a discretization.
+/// All routines for transfering between node vectors, prolongation, smoothing, and filling ghost nodes are handled
+/// by seperate `NodeWorker` classes which handle parallelism and dispatching work to other devices
+/// (like the GPU or other processes).
 pub fn NodeManager(comptime N: usize) type {
     return struct {
         gpa: Allocator,
         /// The set of blocks that make up the mesh.
-        blocks: ArrayListUmanaged(Block(N)),
-        /// Map from blocks to cell offsets.
-        block_to_cells: ArrayListUmanaged(usize),
-        /// Map from blocks to node offsets
-        block_to_nodes: ArrayListUmanaged(usize),
-        /// Map from levels to block offsets.
-        level_to_blocks: ArrayListUmanaged(usize),
-        /// Full map of neighbors of cells including corners.
-        cell_neighbors: ArrayListUmanaged([numRegions]usize),
+        blocks: ArrayListUmanaged(Block),
+        /// Additional info stored per mesh cell.
+        cells: MultiArrayList(Cell),
+
+        /// Map from blocks to cell ranges.
+        block_to_cells: RangeMap,
+        /// Map from blocks to node ranges
+        block_to_nodes: RangeMap,
+        /// Map from levels to block ranges.
+        level_to_blocks: RangeMap,
+
         /// Number of nodes per axis of each cell.
         cell_size: [N]usize,
         /// A cell permutation structure,
@@ -88,25 +87,50 @@ pub fn NodeManager(comptime N: usize) type {
         const TreeMesh = tree.TreeMesh(N);
         const CellPermutation = permute.CellPermutation(N);
 
+        const AxisMask = geometry.AxisMask(N);
         const FaceIndex = geometry.FaceIndex(N);
         const IndexSpace = geometry.IndexSpace(N);
+        const RealBox = geometry.RealBox(N);
         const Region = geometry.Region(N);
-        const SplitIndex = geometry.SplitIndex(N);
-        const numRegions = Region.count;
-        const numSplitIndices = SplitIndex.count;
+        const numSplits = AxisMask.count;
+
+        // Sub types
+
+        pub const Block = struct {
+            /// Physical bounds of block.
+            bounds: RealBox = RealBox.unit,
+            /// Number of cells along each axis of block.
+            size: [N]usize = [1]usize{1} ** N,
+            /// Boolean array indicating whether or not a given face is on the physical boundary.
+            boundary: [FaceIndex.count]bool,
+            /// Refinement level of block
+            refinement: usize,
+        };
+
+        pub const Cell = struct {
+            block: usize = 0,
+            index: [N]usize = [1]usize{0} ** N,
+            neighbors: [Region.count]usize,
+        };
 
         /// Creates a new `NodeManager`, precaching information like cell_size and max_refinement.
         pub fn init(allocator: Allocator, cell_size: [N]usize, max_refinement: usize) !@This() {
             const cell_permute = try CellPermutation.init(allocator, max_refinement);
             errdefer cell_permute.deinit(allocator);
 
+            for (0..N) |axis| {
+                assert(cell_size[axis] % 2 == 0);
+            }
+
             return .{
                 .gpa = allocator,
                 .blocks = .{},
+                .cells = .{},
+
                 .block_to_cells = .{},
                 .block_to_nodes = .{},
                 .level_to_blocks = .{},
-                .cell_neighbors = .{},
+
                 .cell_size = cell_size,
                 .cell_permute = cell_permute,
             };
@@ -115,10 +139,12 @@ pub fn NodeManager(comptime N: usize) type {
         /// Frees a `NodeManager`.
         pub fn deinit(self: *@This()) void {
             self.blocks.deinit(self.gpa);
+            self.cells.deinit(self.gpa);
+
             self.block_to_cells.deinit(self.gpa);
             self.block_to_nodes.deinit(self.gpa);
             self.level_to_blocks.deinit(self.gpa);
-            self.cell_neighbors.deinit(self.gpa);
+
             self.cell_permute.deinit(self.gpa);
         }
 
@@ -126,37 +152,36 @@ pub fn NodeManager(comptime N: usize) type {
         pub fn build(self: *@This(), allocator: Allocator, mesh: *const TreeMesh) !void {
             // ****************************
             // Computes Blocks + Offsets
-            self.computeBlocks(allocator, mesh);
+            self.buildBlocks(allocator, mesh);
 
             // *****************************
             // Compute neighbors
-            self.computeCellNeighbors(mesh);
+            self.buildCells(mesh);
 
             // ********************************
             // Compute block to nodes map
-            self.computeBlockToNodes();
+            self.buildBlockToNodes();
         }
 
         /// Runs a recursive algorithm that traverses the tree from root to leaves, computing valid blocks while doing so.
         /// This algorithm works level by level (queueing up blocks for use on the next level). And thus preserves the invariant
         /// that all blocks on the same level are contiguous in the block array.
-        fn computeBlocks(self: *@This(), allocator: Allocator, mesh: *const TreeMesh) void {
+        fn buildBlocks(self: *@This(), allocator: Allocator, mesh: *const TreeMesh) void {
             // Cache
             const cells = mesh.cells.slice();
             const levels = mesh.numLevels();
 
             // Reset level offsets
-            self.level_to_blocks.shrinkRetainingCapacity(0);
-            try self.level_to_blocks.ensureTotalCapacity(self.gpa, levels + 1);
 
-            self.level_to_blocks.appendAssumeCapacity(0);
-            self.level_to_blocks.appendAssumeCapacity(1);
+            try self.level_to_blocks.resize(allocator, levels + 1);
+            self.level_to_blocks.set(0, 0);
+            self.level_to_blocks.set(1, 1);
 
             // Reset blocks
-            self.blocks.shrinkRetainingCapacity(0);
-            self.block_to_cells.shrinkRetainingCapacity(0);
-
+            self.blocks.clearRetainingCapacity();
             try self.blocks.append(self.gpa, .{ .refinement = 0 });
+
+            self.block_to_cells.clear();
             try self.block_to_cells.append(self.gpa, 0);
 
             // Iterate levels
@@ -172,11 +197,12 @@ pub fn NodeManager(comptime N: usize) type {
             defer stack.deinit(allocator);
 
             for (1..levels) |level| {
+                const coarse = self.level_to_blocks.range(level - 1);
                 // Transfer all blocks on l - 1 to stack (in reverse)
-                for (self.level_to_blocks.items[level - 1]..self.level_to_blocks.items[level]) |rev_idx| {
-                    const idx = self.level_to_blocks.items[level] - 1 - rev_idx;
+                for (0..coarse.end - coarse.start) |rev_idx| {
+                    const idx = coarse.end - 1 - rev_idx;
                     const block = self.blocks.items[idx];
-                    const offset = self.block_to_cells.items[idx];
+                    const offset = self.block_to_cells.offset(idx);
                     const total = cellTotalFromRefinement(block.refinement);
 
                     try stack.append(allocator, .{
@@ -221,7 +247,7 @@ pub fn NodeManager(comptime N: usize) type {
 
                     var offset_sub = block.offset;
 
-                    for (SplitIndex.enumerate()) |split| {
+                    for (AxisMask.enumerate()) |split| {
                         var boundary = block.boundary;
 
                         for (split.innerFaces()) |face| {
@@ -239,15 +265,15 @@ pub fn NodeManager(comptime N: usize) type {
                     }
                 }
 
-                try self.level_to_blocks.append(self.gpa, self.blocks.len);
+                self.level_to_blocks.set(level + 1, self.blocks.items.len);
             }
 
             // Append total number of cells
             try self.block_to_cells.append(self.gpa, cells.len);
 
             // Compute bounds and size
-            for (self.blocks.items, self.block_to_cells.items) |*block, cell| {
-                var base: usize = cell;
+            for (self.blocks.items, 0..) |*block, block_id| {
+                var base: usize = self.block_to_cells.offset(block_id);
 
                 for (0..block.refinement) |_| {
                     base = cells.items(.parent)[base];
@@ -258,28 +284,46 @@ pub fn NodeManager(comptime N: usize) type {
             }
         }
 
-        fn computeCellNeighbors(self: *@This(), mesh: *const TreeMesh) void {
+        /// Computes the block to node offset map.
+        fn buildBlockToNodes(self: *@This()) void {
+            try self.block_to_nodes.resize(self.gpa, self.blocks.items.len + 1);
+
+            var offset: usize = 0;
+            self.block_to_nodes.set(0, offset);
+
+            for (self.blocks.items, 0..) |block, block_id| {
+                var total: usize = 1;
+
+                for (0..N) |axis| {
+                    total *= self.cell_size[axis] * block.size[axis];
+                }
+
+                offset += total;
+
+                self.block_to_nodes.set(block_id + 1, offset);
+            }
+        }
+
+        fn buildCells(self: *@This(), mesh: *const TreeMesh) void {
             // Cache pointers
             const cells = mesh.cells.slice();
 
             // Reset and reserve
-            self.cell_neighbors.shrinkRetainingCapacity(0);
-            try self.cell_neighbors.ensureTotalCapacity(self.gpa, cells.len);
-            // Add root
-            self.cell_neighbors.appendAssumeCapacity([1]usize{boundary_index} ** numRegions);
+            try self.cells.resize(self.gpa, cells.len);
+            // Set root
+            self.cells.items[0].neighbors = [1]usize{boundary_index} ** Region.count;
 
-            // Loop through every non root node
-            for (1..cells.len) |node| {
+            // Loop through every non root cell
+            for (1..cells.len) |cell| {
                 // Parent
-                const parent = cells.items(.parent)[node];
+                const parent = cells.items(.parent)[cell];
 
                 // Find split index
-                const sidx = node - cells.items(.children)[parent];
-                const split = SplitIndex.fromLinear(@intCast(sidx));
-                const split_sides = split.toCartesian();
+                const split_lin = cell - cells.items(.children)[parent];
+                const split = AxisMask.fromLinear(@intCast(split_lin));
 
                 // Store all neighbors of this cell
-                var neighbors: [numRegions]usize = undefined;
+                var neighbors: [Region.count]usize = undefined;
 
                 for (Region.enumerate()) |region| {
                     // Central region is simply null
@@ -288,7 +332,7 @@ pub fn NodeManager(comptime N: usize) type {
                         continue;
                     }
 
-                    var neighbor: usize = node;
+                    var neighbor: usize = cell;
                     var neighbor_coarse: bool = false;
 
                     for (0..N) |axis| {
@@ -296,7 +340,7 @@ pub fn NodeManager(comptime N: usize) type {
                             continue;
                         }
 
-                        if (neighbor_coarse and (region.sides[axis] == .right) != split_sides[axis]) {
+                        if (neighbor_coarse and (region.sides[axis] == .right) != split.isSet(axis)) {
                             continue;
                         }
 
@@ -328,28 +372,20 @@ pub fn NodeManager(comptime N: usize) type {
                     neighbors[region.linear()] = neighbor;
                 }
 
-                self.cell_neighbors.appendAssumeCapacity(neighbors);
+                // Set neighbors
+                self.cells.items[cell].neighbors = neighbors;
             }
-        }
 
-        /// Computes the block to node offset map.
-        fn computeBlockToNodes(self: *@This()) void {
-            self.block_to_nodes.shrinkRetainingCapacity(0);
-            try self.block_to_nodes.ensureTotalCapacity(self.gpa, self.blocks.items.len + 1);
+            // Set block and index of cells
+            for (0..self.numBlocks()) |block_id| {
+                const block = self.blockFromId(block_id);
 
-            var offset: usize = 0;
-            self.block_to_nodes.appendAssumeCapacity(offset);
-
-            for (self.blocks.items) |block| {
-                var total: usize = 1;
-
-                for (0..N) |axis| {
-                    total *= self.cell_size[axis] * block.size[axis];
+                var cell_indices = IndexSpace.fromSize(block.size).cartesianIndices();
+                while (cell_indices.next()) |index| {
+                    const cell = self.cellFromBlock(block_id, index);
+                    self.cells.items[cell].block = block_id;
+                    self.cells.items[cell].index = index;
                 }
-
-                offset += total;
-
-                self.block_to_nodes.appendAssumeCapacity(offset);
             }
         }
 
@@ -358,7 +394,7 @@ pub fn NodeManager(comptime N: usize) type {
             var result: usize = 1;
 
             for (0..refinement) |_| {
-                result *= numSplitIndices;
+                result *= numSplits;
             }
 
             return result;
@@ -376,13 +412,12 @@ pub fn NodeManager(comptime N: usize) type {
         }
 
         pub fn buildNodeMap(self: *const @This(), comptime M: usize, map: *NodeMap) !void {
-            map.offsets.shrinkRetainingCapacity(0);
-            try map.offsets.ensureTotalCapacity(self.blocks.items.len + 1);
+            try map.ranges.resize(map.allocator, self.blocks.items.len + 1);
 
             var offset: usize = 0;
-            map.offsets.appendAssumeCapacity(offset);
+            map.ranges.set(0, 0);
 
-            for (self.blocks.items) |block| {
+            for (self.blocks.items, 0..) |block, block_id| {
                 var total: usize = 1;
 
                 for (0..N) |axis| {
@@ -391,7 +426,7 @@ pub fn NodeManager(comptime N: usize) type {
 
                 offset += total;
 
-                map.offsets.appendAssumeCapacity(offset);
+                map.ranges.set(block_id + 1, offset);
             }
         }
 
@@ -400,26 +435,20 @@ pub fn NodeManager(comptime N: usize) type {
             return self.block_to_nodes.items[self.block_to_nodes.items.len - 1];
         }
 
+        /// Number of blocks in the mesh.
         pub fn numBlocks(self: *const @This()) usize {
             return self.blocks.items.len;
         }
 
+        /// Retrieves a block descriptor from a `block_id`.
         pub fn blockFromId(self: *const @This(), block_id: usize) Block(N) {
             return self.blocks.items[block_id];
         }
 
-        pub fn levelBlockOffset(self: *const @This(), level: usize) usize {
-            return self.level_to_blocks.items[level];
-        }
-
-        pub fn levelBlockTotal(self: *const @This(), level: usize) usize {
-            return self.level_to_blocks.items[level + 1] - self.level_to_blocks.items[level];
-        }
-
-        pub fn cellFromBlock(self: *const @This(), block_id: usize, cell: []usize) usize {
+        pub fn cellFromBlock(self: *const @This(), block_id: usize, index: []usize) usize {
             const block = self.blocks.items[block_id];
             const offset = self.block_to_cells[block_id];
-            const linear = IndexSpace.fromSize(block.size).linearFromCartesian(cell);
+            const linear = IndexSpace.fromSize(block.size).linearFromCartesian(index);
             return offset + self.cell_permute.permutation(block.refinement)[linear];
         }
     };
@@ -431,6 +460,9 @@ pub fn NodeWorker(comptime N: usize, comptime M: usize) type {
         manager: *const NodeManager(N),
         map: NodeMap,
 
+        const Block = NodeManager(N).Block;
+        const Cell = NodeManager(N).Cell;
+
         const TreeMesh = tree.TreeMesh(N);
         const CellPermutation = permute.CellPermutation(N);
 
@@ -439,9 +471,15 @@ pub fn NodeWorker(comptime N: usize, comptime M: usize) type {
         const IndexMixin = geometry.IndexMixin(N);
         const IndexSpace = geometry.IndexSpace(N);
         const Region = geometry.Region(N);
-        const SplitIndex = geometry.SplitIndex(N);
+        const numSplits = AxisMask.count;
         const numRegions = Region.count;
-        const numSplitIndices = SplitIndex.count;
+        const add = IndexMixin.add;
+        const coarsened = IndexMixin.coarsened;
+        const mul = IndexMixin.mul;
+        const refined = IndexMixin.refined;
+        const scaled = IndexMixin.scaled;
+        const toSigned = IndexMixin.toSigned;
+        const toUnsigned = IndexMixin.toUnsigned;
 
         const BoundaryEngine = common.BoundaryEngine(N, M);
         const NodeSpace = common.NodeSpace(N, M);
@@ -463,78 +501,210 @@ pub fn NodeWorker(comptime N: usize, comptime M: usize) type {
             self.map.deinit();
         }
 
-        pub fn fillBoundary(self: @This(), level: usize, boundary: anytype, field: []usize) void {
-            assert(field.len == self.map.numNodes());
+        /// Fills the boundary of given level.
+        pub fn fillGhostNodes(self: @This(), level: usize, boundary: anytype, field: []usize) void {
+            assert(field.len == self.map.total());
 
             // Short circuit in the case of level = 0
             if (level == 0) {
-                const block = self.manager.blockFromId(0);
-                const block_field = field[self.map.offset(0)..self.map.offset(1)];
-                const node_space = self.nodeSpaceFromBlock(block);
-                const boundary_engine = BoundaryEngine{ .space = node_space };
-
-                boundary_engine.fill(boundary, block_field);
-
-                return;
+                self.fillBaseGhostNodes(boundary, field);
+            } else {
+                // Otherwise check each block on the level
+                const blocks = self.manager.level_to_blocks.range(level);
+                for (blocks.start..blocks.end) |block_id| {
+                    self.fillBlockGhostNodes(block_id, boundary, field);
+                }
             }
+        }
 
-            // Otherwise check each block on the level
-            for (self.manager.levelBlockOffset(level)..self.manager.levelBlockOffset(level + 1)) |block_id| {
-                const block = self.manager.blockFromId(block_id);
-                const block_field = field[self.map.offset(block_id)..self.map.offset(block_id + 1)];
-                const node_space = self.nodeSpaceFromBlock(block);
-                const boundary_engine = BoundaryEngine{ .space = node_space };
+        fn fillBaseGhostNodes(self: @This(), boundary: anytype, field: []usize) void {
+            const block = self.manager.blockFromId(0);
+            const block_field = field[self.map.offset(0)..self.map.offset(1)];
+            const node_space = self.nodeSpaceFromBlock(block);
+            const boundary_engine = BoundaryEngine{ .space = node_space };
 
-                const regions = comptime Region.enumerateOrdered();
+            boundary_engine.fill(boundary, block_field);
+        }
 
-                // Loop over the regions
-                inline for (comptime regions[1..]) |region| {
-                    const smask = comptime region.toMask();
+        /// Fills the boundary of a given block, whether by exptrapolation or prolongation.
+        fn fillBlockGhostNodes(self: @This(), block_id: usize, boundary: anytype, field: []usize) void {
+            assert(block_id != 0);
 
-                    var bmask = AxisMask.initEmpty();
+            const block = self.manager.blockFromId(block_id);
+            const block_field = field[self.map.offset(block_id)..self.map.offset(block_id + 1)];
+            const node_space = self.nodeSpaceFromBlock(block);
+            const boundary_engine = BoundaryEngine{ .space = node_space };
 
-                    for (0..N) |axis| {
-                        if (region.sides[axis] == .center) {
-                            continue;
-                        }
+            const regions = comptime Region.enumerateOrdered();
 
-                        const face: FaceIndex = .{
-                            .axis = axis,
-                            .side = region.sides[axis] == .right,
-                        };
+            // Loop over the regions
+            inline for (comptime regions[1..]) |region| {
+                const smask = comptime region.toMask();
 
-                        bmask.setValue(axis, block.boundary[face.toLinear()]);
+                var bmask = AxisMask.initEmpty();
+
+                for (0..N) |axis| {
+                    if (region.sides[axis] == .center) {
+                        continue;
                     }
 
-                    // If no axes lie on a physical boundary, prolong
-                    if (bmask.isEmpty()) {
-                        // Prolong
-                        self.prolongBoundary(level, region, block_id, field);
-                    }
+                    const face: FaceIndex = .{
+                        .axis = axis,
+                        .side = region.sides[axis] == .right,
+                    };
 
-                    // Otherwise enumerate the possible axis combinations
-                    inline for (AxisMask.enumerate()[1..]) |mask| {
-                        // Eliminate axes which
-                        if (comptime mask.intersectWith(smask).isEmpty()) {
-                            continue;
-                        }
+                    bmask.setValue(axis, block.boundary[face.toLinear()]);
+                }
 
-                        if (bmask == mask) {
-                            boundary_engine.fillRegion(region, mask, boundary, block_field);
-                        }
+                // If no axes lie on a physical boundary, prolong
+                if (bmask.isEmpty()) {
+                    // Prolong boundary
+                    self.fillBlockIntGhostNodes(region, block_id, field);
+                    // Skip following checks
+                    continue;
+                }
+
+                // Otherwise enumerate the possible axis combinations
+                inline for (AxisMask.enumerate()[1..]) |mask| {
+                    // Intersect with mask to make sure we aren't generating unnessary code.
+                    const imask = comptime mask.intersectWith(smask);
+
+                    if (bmask == imask) {
+                        boundary_engine.fillRegion(region, imask, boundary, block_field);
                     }
                 }
             }
         }
 
-        fn prolongBoundary(self: @This(), comptime region: Region, block_id: usize, field: []usize) void {
-            _ = block_id; // autofix
+        fn fillBlockIntGhostNodes(self: @This(), comptime region: Region, block_id: usize, field: []usize) void {
+            assert(block_id != 0);
+
             _ = region; // autofix
             _ = self; // autofix
             _ = field; // autofix
         }
 
-        fn nodeSpaceFromBlock(self: @This(), block: Block(N)) NodeSpace {
+        pub fn prolong(self: @This(), level: usize, field: []usize) void {
+            if (level == 0) {
+                return;
+            }
+
+            const blocks = self.manager.level_to_blocks.range(level);
+            for (blocks.start..blocks.end) |block_id| {
+                self.prolongBlock(block_id, field);
+            }
+        }
+
+        fn prolongBlock(self: @This(), block_id: usize, field: []usize) void {
+            assert(block_id != 0);
+
+            const block = self.manager.blockFromId(block_id);
+            const block_field = self.map.slice(block_id, field);
+            const block_node_space = self.nodeSpaceFromBlock(block);
+
+            // Cache pointers
+            const cells = self.mesh.cells.slice();
+            const cell_size = self.manager.cell_size;
+
+            var cell_indices = IndexSpace.fromSize(block.size).cartesianIndices();
+
+            while (cell_indices.next()) |index| {
+                // Uses permutation to find actual cell
+                const cell_id = self.manager.cellFromBlock(block_id, index);
+                // Get parent of current cell
+                const parent = cells.items(.parent)[cell_id];
+                // Get split mask.
+                const split_lin = cell_id - cells.items(.children)[parent];
+                const split = AxisMask.fromLinear(split_lin);
+                // Get super block
+                const parent_block_id: usize = self.manager.cells.items(.block)[parent];
+                const parent_index: [N]usize = self.manager.cells.items(.index)[parent];
+                const parent_block = self.manager.blockFromId(parent_block_id);
+                const parent_block_field: []const usize = self.map.slice(parent_block_id, field);
+                const parent_block_node_space = self.nodeSpaceFromBlock(parent_block);
+                var parent_origin = refined(mul(parent_index, cell_size));
+                // Offset origin to take into account split
+                for (0..N) |axis| {
+                    if (split.isSet(axis)) {
+                        parent_origin[axis] += cell_size[axis];
+                    }
+                }
+                // Get origin
+                const origin = mul(index, cell_size);
+
+                var offsets = IndexSpace.fromSize(cell_size).cartesianIndices();
+                while (offsets.next()) |offset| {
+                    const node = add(origin, offset);
+                    const subnode = add(parent_origin, offset);
+
+                    const val = parent_block_node_space.prolong(subnode, parent_block_field);
+                    block_node_space.setValue(node, block_field, val);
+                }
+            }
+        }
+
+        pub fn restrict(self: @This(), level: usize, field: []usize) void {
+            if (level == 0) {
+                return;
+            }
+
+            const blocks = self.manager.level_to_blocks.range(level);
+            for (blocks.start..blocks.end) |block_id| {
+                self.restrictBlock(block_id, field);
+            }
+        }
+
+        fn restrictBlock(self: @This(), block_id: usize, field: []usize) void {
+            assert(block_id != 0);
+
+            const block = self.manager.blockFromId(block_id);
+            const block_field = self.map.slice(block_id, field);
+            const block_node_space = self.nodeSpaceFromBlock(block);
+
+            // Cache pointers
+            const cells = self.mesh.cells.slice();
+            const cell_size = self.manager.cell_size;
+
+            var cell_indices = IndexSpace.fromSize(block.size).cartesianIndices();
+
+            while (cell_indices.next()) |index| {
+                // Uses permutation to find actual cell
+                const cell = self.manager.cellFromBlock(block_id, index);
+                // Get parent of current cell
+                const parent = cells.items(.parent)[cell];
+                // Get split mask.
+                const split_lin = cell - cells.items(.children)[parent];
+                const split = AxisMask.fromLinear(split_lin);
+                // Get super block
+                const parent_block_id: usize = self.manager.cells.items(.block)[parent];
+                const parent_index: [N]usize = self.manager.cells.items(.index)[parent];
+                const parent_block = self.manager.blockFromId(parent_block_id);
+                const parent_block_field: []const usize = self.map.slice(parent_block_id, field);
+                const parent_block_node_space = self.nodeSpaceFromBlock(parent_block);
+
+                var parent_origin = mul(parent_index, cell_size);
+                // Offset origin to take into account split
+                for (0..N) |axis| {
+                    if (split.isSet(axis)) {
+                        parent_origin[axis] += cell_size[axis] / 2;
+                    }
+                }
+                // Get origin
+                const origin = coarsened(mul(index, cell_size));
+
+                var offsets = IndexSpace.fromSize(cell_size).cartesianIndices();
+                while (offsets.next()) |offset| {
+                    const node = add(parent_origin, offset);
+                    const supernode = add(origin, offset);
+
+                    const val = block_node_space.restrict(supernode, block_field);
+                    parent_block_node_space.setValue(node, parent_block_field, val);
+                }
+            }
+        }
+
+        /// Helper function for determining the node space of a block
+        fn nodeSpaceFromBlock(self: @This(), block: Block) NodeSpace {
             var size: [N]usize = undefined;
 
             for (0..N) |axis| {

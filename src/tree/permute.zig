@@ -13,9 +13,9 @@ pub fn CellPermutation(comptime N: usize) type {
         buffer: []const usize,
         offsets: []const usize,
 
+        const AxisMask = geometry.AxisMask(N);
         const IndexMixin = geometry.IndexMixin(N);
         const IndexSpace = geometry.IndexSpace(N);
-        const SplitIndex = geometry.SplitIndex(N);
 
         pub fn init(allocator: Allocator, max_refinement: usize) !@This() {
             // Compute offsets
@@ -30,7 +30,7 @@ pub fn CellPermutation(comptime N: usize) type {
             for (1..max_refinement + 1) |i| {
                 offset += total;
                 offsets[i] = offset;
-                total *= SplitIndex.count;
+                total *= AxisMask.count;
             }
 
             // Compute buffer
@@ -52,7 +52,7 @@ pub fn CellPermutation(comptime N: usize) type {
                 var linear: usize = 0;
 
                 while (indices.next()) |sindex| : (linear += 1) {
-                    for (SplitIndex.enumerate()) |split| {
+                    for (AxisMask.enumerate()) |split| {
                         const cart = split.toCartesian();
 
                         var dindex: [N]usize = undefined;
@@ -66,7 +66,7 @@ pub fn CellPermutation(comptime N: usize) type {
                         }
 
                         const dlinear = dspace.linearFromCartesian(dindex);
-                        dest[dlinear] = SplitIndex.count * src[linear] + split.toLinear();
+                        dest[dlinear] = AxisMask.count * src[linear] + split.toLinear();
                     }
                 }
 

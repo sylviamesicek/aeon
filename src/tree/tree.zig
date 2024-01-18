@@ -49,11 +49,12 @@ pub fn TreeMesh(comptime N: usize) type {
         level_to_cells: ArrayListUnmanaged(usize),
 
         const Self = @This();
+        const AxisMask = geometry.AxisMask(N);
         const FaceIndex = geometry.FaceIndex(N);
         const IndexSpace = geometry.IndexSpace(N);
         const RealBox = geometry.RealBox(N);
         const Region = geometry.Region(N);
-        const SplitIndex = geometry.SplitIndex(N);
+        // const SplitIndex = geometry.SplitIndex(N);
 
         pub fn init(allocator: Allocator, bounds: RealBox) !Self {
             var cells: MultiArrayList(Cell(N)) = .{};
@@ -117,11 +118,11 @@ pub fn TreeMesh(comptime N: usize) type {
                     const parent = cells.items(.parent)[cell];
 
                     // Get split index
-                    const split = SplitIndex.fromLinear(@intCast(cell - cells.items(.children)[parent]));
-                    const split_sides = split.toCartesian();
+                    const split = AxisMask.fromLinear(cell - cells.items(.children)[parent]);
+                    const split_unpacked = split.unpack();
                     // Iterate over a "split space".
-                    for (SplitIndex.enumerate()[1..]) |split_index| {
-                        const cart = split_index.toCartesian();
+                    for (AxisMask.enumerate()[1..]) |osplit| {
+                        const osplit_unpacked = osplit.unpack();
                         // Neighboring node
                         var neighbor: usize = cell;
                         // Is the nieghbor coarser than this node
@@ -129,12 +130,12 @@ pub fn TreeMesh(comptime N: usize) type {
                         // Loop over axes
                         for (0..N) |axis| {
                             // Skip traversing this axis if cart[axis] == 0
-                            if (!cart[axis]) {
+                            if (!osplit_unpacked[axis]) {
                                 continue;
                             }
                             // Find face to traverse
                             const face = FaceIndex{
-                                .side = split_sides[axis],
+                                .side = split_unpacked[axis],
                                 .axis = axis,
                             };
                             // Get neighbor, searching parent neighbors if necessary
@@ -228,7 +229,7 @@ pub fn TreeMesh(comptime N: usize) type {
                     self.cells.items(.children)[m.new] = new_children;
 
                     // Add children to self.nodes
-                    for (SplitIndex.enumerate()) |child| {
+                    for (AxisMask.enumerate()) |child| {
                         var flag = false;
                         // If this node already had children, they need to be iterated, add to tmp map
                         if (coarse_children != null_index) {
@@ -249,12 +250,12 @@ pub fn TreeMesh(comptime N: usize) type {
                         // Compute new neighbors
                         var neighbors: [FaceIndex.count]usize = undefined;
 
-                        const sides = child.toCartesian();
+                        const sides = child.unpack();
 
                         for (FaceIndex.enumerate()) |face| {
                             neighbors[face.toLinear()] = if (sides[face.axis] != face.side)
                                 // Inner face
-                                new_children + child.reverseAxis(face.axis).toLinear()
+                                new_children + child.toggled(face.axis).toLinear()
                             else if (coarse_neighbors[face.toLinear()] == boundary_index)
                                 // Propogate boundary
                                 boundary_index
@@ -296,7 +297,7 @@ pub fn TreeMesh(comptime N: usize) type {
                 }
 
                 const sidx = cell - new_cells.items(.children)[parent];
-                const split = SplitIndex.fromLinear(sidx);
+                const split = AxisMask.fromLinear(sidx);
 
                 for (FaceIndex.enumerate()) |face| {
                     // If this nodes is a leaf and neighbor is coarser check if it has children
@@ -306,10 +307,8 @@ pub fn TreeMesh(comptime N: usize) type {
                         const coarse_neighbor_children = new_cells.items(.children)[coarse_neighbor];
                         // We assume flags were properly smoothed
                         assert(coarse_neighbor_children != null_index);
-                        // Find child on on opposite side of face
-                        const other = split.reverseAxis(face.axis);
                         // Update neighbors
-                        neighbors[face.toLinear()] = coarse_neighbor_children + other.toLinear();
+                        neighbors[face.toLinear()] = coarse_neighbor_children + split.toggled(face.axis).toLinear();
                     }
 
                     // Neighbor had better not be 0
@@ -323,7 +322,7 @@ pub fn TreeMesh(comptime N: usize) type {
 
                     if (neighbor_children == null_index) {
                         // Neighbor is a leaf, so this node's children must have faces set to null
-                        for (SplitIndex.enumerate()) |child| {
+                        for (AxisMask.enumerate()) |child| {
                             if (child.toCartesian()[face.axis] == face.side) {
                                 const child_node = children + child.toLinear();
                                 new_cells.items(.neighbors)[child_node][face.axis] = null_index;
@@ -331,8 +330,8 @@ pub fn TreeMesh(comptime N: usize) type {
                         }
                     } else {
                         // Neighbor has children so we update this node's children accordingly
-                        for (SplitIndex.enumerate()) |child| {
-                            if (child.toCartesian()[face.axis] == face.side) {
+                        for (AxisMask.enumerate()) |child| {
+                            if (child.isSet(face.axis) == face.side) {
                                 const child_node = children + child.toLinear();
                                 const other_node = neighbor_children + child.reverseAxis(face.axis).toLinear();
                                 new_cells.items(.neighbors)[child_node][face.axis] = other_node;

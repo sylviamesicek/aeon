@@ -20,6 +20,16 @@ pub fn IndexMixin(comptime N: usize) type {
             return res;
         }
 
+        pub fn mul(v: [N]usize, u: [N]usize) [N]usize {
+            var res: [N]usize = undefined;
+
+            inline for (0..N) |i| {
+                res[i] = v[i] * u[i];
+            }
+
+            return res;
+        }
+
         /// Adds two signed indices together.
         pub fn addSigned(v: [N]isize, u: [N]isize) [N]isize {
             var res: [N]isize = undefined;
