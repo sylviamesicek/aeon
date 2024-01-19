@@ -43,7 +43,11 @@ pub const Robin = struct {
 };
 
 /// An engine wrapping a node space and a field, providing routines for filling the ghost nodes of the field.
-pub fn BoundaryEngine(comptime N: usize, comptime M: usize) type {
+pub fn BoundaryEngine(comptime N: usize, comptime M: usize, comptime O: usize) type {
+    if (comptime O > M) {
+        @compileError("O must be <= M.");
+    }
+
     return struct {
         space: NodeSpace,
 
@@ -89,7 +93,7 @@ pub fn BoundaryEngine(comptime N: usize, comptime M: usize) type {
 
             while (inner_face_cells.next()) |cell| {
                 // Some functional patterns perhaps?
-                comptime var offsets = oregion.extentOffsets(M);
+                comptime var offsets = oregion.extentOffsets(O);
 
                 inline while (comptime offsets.next()) |off| {
                     const node = IndexMixin.addSigned(off, IndexMixin.toSigned(cell));
@@ -151,11 +155,11 @@ pub fn BoundaryEngine(comptime N: usize, comptime M: usize) type {
                                     result += fsign * source_value;
                                 },
                                 .robin => {
-                                    const vres: f64 = robin[axis].value * self.space.boundaryOp(extent, null, cell, field);
-                                    const fres: f64 = robin[axis].flux * self.space.boundaryOp(extent, axis, cell, field);
+                                    const vres: f64 = robin[axis].value * self.space.order(O).boundaryOp(extent, null, cell, field);
+                                    const fres: f64 = robin[axis].flux * self.space.order(O).boundaryOp(extent, axis, cell, field);
 
-                                    const vcoef: f64 = robin[axis].value * self.space.boundaryOpCoef(extent, null);
-                                    const fcoef: f64 = robin[axis].flux * self.space.boundaryOpCoef(extent, axis);
+                                    const vcoef: f64 = robin[axis].value * self.space.order(O).boundaryOpCoef(extent, null);
+                                    const fcoef: f64 = robin[axis].flux * self.space.order(O).boundaryOpCoef(extent, axis);
 
                                     const rhs: f64 = robin[axis].rhs;
 

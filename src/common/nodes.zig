@@ -180,6 +180,24 @@ pub fn NodeSpace(comptime N: usize, comptime M: usize) type {
             return self.bounds.transformPos(result);
         }
 
+        // **************************************
+        // Boundary *****************************
+        // **************************************
+
+        pub fn boundaryPosition(self: Self, comptime region: Region, cell: [N]usize) [N]f64 {
+            var result: [N]f64 = undefined;
+
+            inline for (0..N) |i| {
+                result[i] = switch (comptime region.sides[i]) {
+                    .left => 0.0,
+                    .right => 1.0,
+                    .middle => (@as(f64, @floatFromInt(cell[i])) + 0.5) / @as(f64, @floatFromInt(self.size[i])),
+                };
+            }
+
+            return result;
+        }
+
         // *************************************
         // Stencils ****************************
         // *************************************
@@ -196,361 +214,343 @@ pub fn NodeSpace(comptime N: usize, comptime M: usize) type {
             self.setNodeValue(toSigned(cell), field, v);
         }
 
-        pub fn prolong(self: Self, subcell: [N]usize, field: []const f64) f64 {
-            return self.prolongCell(M, subcell, field);
+        pub fn order(self: Self, comptime O: usize) Order(O) {
+            return .{
+                .space = self,
+            };
         }
 
-        /// Prolongs the value of the field to some subcell.
-        pub fn prolongCell(self: Self, comptime O: usize, subcell: [N]usize, field: []const f64) f64 {
-            if (comptime O > M) {
-                @compileError("Order must be less than or equal to number of ghost layers.");
-            }
+        pub fn Order(comptime O: usize) type {
+            return struct {
+                space: Self,
 
-            assert(field.len == self.numNodes());
+                /// Prolongs the value of the field to some subcell.
+                pub fn prolongCell(self: @This(), subcell: [N]usize, field: []const f64) f64 {
+                    assert(field.len == self.space.numNodes());
 
-            // Build stencils for both the left and right case at comptime.
-            const lstencil: [2 * O + 1]f64 = comptime Stencils(O).prolongCell(false);
-            const rstencil: [2 * O + 1]f64 = comptime Stencils(O).prolongCell(true);
+                    // Build stencils for both the left and right case at comptime.
+                    const lstencil: [2 * O + 1]f64 = comptime Stencils(O).prolongCell(false);
+                    const rstencil: [2 * O + 1]f64 = comptime Stencils(O).prolongCell(true);
 
-            // Accumulate result to this variable.
-            var result: f64 = 0.0;
-            // Find central node for applying stencil.
-            const central_node = toSigned(coarsened(subcell));
-            // Loop over stencil space.
-            comptime var stencil_indices = IndexSpace.fromSize([1]usize{2 * O + 1} ** N).cartesianIndices();
+                    // Accumulate result to this variable.
+                    var result: f64 = 0.0;
+                    // Find central node for applying stencil.
+                    const central_node = toSigned(coarsened(subcell));
+                    // Loop over stencil space.
+                    comptime var stencil_indices = IndexSpace.fromSize([1]usize{2 * O + 1} ** N).cartesianIndices();
 
-            inline while (comptime stencil_indices.next()) |stencil_index| {
-                comptime var offset: [N]isize = undefined;
-                var coef: f64 = 1.0;
+                    inline while (comptime stencil_indices.next()) |stencil_index| {
+                        comptime var offset: [N]isize = undefined;
+                        var coef: f64 = 1.0;
 
-                inline for (0..N) |i| {
-                    const idx: isize = @intCast(stencil_index[i]);
+                        inline for (0..N) |i| {
+                            const idx: isize = @intCast(stencil_index[i]);
 
-                    if (@mod(subcell[i], 2) == 1) {
-                        coef *= rstencil[stencil_index[i]];
-                    } else {
-                        coef *= lstencil[stencil_index[i]];
+                            if (@mod(subcell[i], 2) == 1) {
+                                coef *= rstencil[stencil_index[i]];
+                            } else {
+                                coef *= lstencil[stencil_index[i]];
+                            }
+
+                            offset[i] = idx - O;
+                        }
+
+                        // std.debug.print("Coef {}, Offset ({}, {}), Value {}\n", .{ coef, offset[0], offset[1], self.nodeValue(offset_node, field) });
+                        const node = IndexMixin.addSigned(central_node, offset);
+                        result += coef * self.space.nodeValue(node, field);
                     }
 
-                    offset[i] = idx - O;
+                    return result;
                 }
 
-                // std.debug.print("Coef {}, Offset ({}, {}), Value {}\n", .{ coef, offset[0], offset[1], self.nodeValue(offset_node, field) });
-                const node = IndexMixin.addSigned(central_node, offset);
-                result += coef * self.nodeValue(node, field);
-            }
-
-            return result;
-        }
-
-        /// Prolongs the value of the field to some subcell.
-        pub fn prolongVertex(self: Self, comptime O: usize, subcell: [N]usize, field: []const f64) f64 {
-            if (comptime O > M) {
-                @compileError("Order must be less than or equal to number of ghost layers.");
-            }
-
-            assert(field.len == self.numNodes());
-
-            // Build stencils for both the left and right case at comptime.
-            // Vertex centered
-            const lstencil: [2 * O]f64 = comptime Stencils(O).prolongVertex(false);
-            const rstencil: [2 * O]f64 = comptime Stencils(O).prolongVertex(true);
-
-            // Accumulate result to this variable.
-            var result: f64 = 0.0;
-            // Find central node for applying stencil.
-            const central_node = toSigned(coarsened(subcell));
-            // Loop over stencil space.
-            comptime var stencil_indices = IndexSpace.fromSize([1]usize{2 * O} ** N).cartesianIndices();
-
-            inline while (comptime stencil_indices.next()) |stencil_index| {
-                var coef: f64 = 1.0;
-
-                var offset_node: [N]isize = undefined;
-
-                inline for (0..N) |i| {
-                    if (@mod(subcell[i], 2) == 0) {
-                        coef *= rstencil[stencil_index[i]];
-                        offset_node[i] = central_node[i] + stencil_index[i] - O;
-                    } else {
-                        coef *= lstencil[stencil_index[i]];
-                        offset_node[i] = central_node[i] + stencil_index[i] - O + 1;
+                /// Prolongs the value of the field to some subcell.
+                pub fn prolongVertex(self: @This(), subcell: [N]usize, field: []const f64) f64 {
+                    if (comptime O == 0) {
+                        return self.prolongCell(subcell, field);
                     }
-                }
 
-                result += coef * self.nodeValue(offset_node, field);
-            }
+                    assert(field.len == self.space.numNodes());
 
-            return result;
-        }
+                    // Build stencils for both the left and right case at comptime.
+                    // Vertex centered
+                    const lstencil: [2 * O]f64 = comptime Stencils(O).prolongVertex(false);
+                    const rstencil: [2 * O]f64 = comptime Stencils(O).prolongVertex(true);
 
-        /// Restricts the value of a field to a supercell.
-        pub fn restrict(self: Self, supercell: [N]usize, field: []const f64) f64 {
-            return self.restrictOrder(M + 1, supercell, field);
-        }
+                    // Accumulate result to this variable.
+                    var result: f64 = 0.0;
+                    // Find central node for applying stencil.
+                    const central_node = toSigned(coarsened(subcell));
+                    // Loop over stencil space.
+                    comptime var stencil_indices = IndexSpace.fromSize([1]usize{2 * O} ** N).cartesianIndices();
 
-        pub fn restrictOrder(self: Self, comptime O: usize, supercell: [N]usize, field: []const f64) f64 {
-            if (comptime O > M + 1) {
-                @compileError("Order must be less than (extent + 1).");
-            }
+                    inline while (comptime stencil_indices.next()) |stencil_index| {
+                        var coef: f64 = 1.0;
 
-            assert(field.len == self.numNodes());
+                        var offset_node: [N]isize = undefined;
 
-            // Compute the stencil and space of indices over which the stencil is defined.
-            const stencil: [2 * O]f64 = comptime Stencils(O).restrict();
-            const stencil_space: IndexSpace = comptime IndexSpace.fromSize([1]usize{2 * O} ** N);
-            // Accumulate the resulting value in this variable
-            var result: f64 = 0.0;
-            // Compute the central node for applying the stencil
-            const central_node = toSigned(refined(supercell));
-            // Loop over each stencil index at comptime
-            comptime var stencil_indices = stencil_space.cartesianIndices();
+                        inline for (0..N) |i| {
+                            if (@mod(subcell[i], 2) == 0) {
+                                coef *= rstencil[stencil_index[i]];
+                                offset_node[i] = central_node[i] + stencil_index[i] - O;
+                            } else {
+                                coef *= lstencil[stencil_index[i]];
+                                offset_node[i] = central_node[i] + stencil_index[i] - O + 1;
+                            }
+                        }
 
-            inline while (comptime stencil_indices.next()) |stencil_index| {
-                // Compute a coefficient for this index at comptime.
-                comptime var coef: f64 = 1.0;
-                comptime var offset: [N]isize = undefined;
-
-                inline for (0..N) |i| {
-                    const idx: isize = @intCast(stencil_index[i]);
-
-                    coef *= stencil[stencil_index[i]];
-                    offset[i] = idx - O + 1;
-                }
-
-                const node = IndexMixin.addSigned(central_node, offset);
-                result += coef * self.nodeValue(node, field);
-
-                // std.debug.print("Coef {}, Offset ({}, {}), Value {}\n", .{ coef, offset[0], offset[1], self.nodeValue(offset_node, field) });
-            }
-
-            return result;
-        }
-
-        // *********************************
-        // Operators ***********************
-        // *********************************
-
-        /// Computes the result of an operation (specified by the `ranks` argument) at the given
-        /// cell, acting on the field defined over the whole nodespace.
-        pub fn op(self: Self, comptime ranks: [N]usize, cell: [N]usize, field: []const f64) f64 {
-            assert(field.len == self.numNodes());
-
-            const stencils = comptime opStencils(ranks);
-            const stencil_space = comptime IndexSpace.fromSize([_]usize{2 * M + 1} ** N);
-
-            var result: f64 = 0.0;
-
-            const central_node = toSigned(cell);
-
-            comptime var stencil_indices = stencil_space.cartesianIndices();
-
-            inline while (comptime stencil_indices.next()) |stencil_index| {
-                // Compute coefficient for this position in the stencil space.
-                comptime var coef: f64 = 1.0;
-                comptime var offset: [N]isize = undefined;
-
-                inline for (0..N) |i| {
-                    const idx: isize = @intCast(stencil_index[i]);
-
-                    coef *= stencils[i][stencil_index[i]];
-                    offset[i] = idx - M;
-                }
-
-                if (comptime (@abs(coef) == 0.0)) {
-                    continue;
-                }
-
-                const node = IndexMixin.addSigned(central_node, offset);
-                result += coef * self.nodeValue(node, field);
-            }
-
-            // Covariantly transform result
-            inline for (0..N) |i| {
-                var scale: f64 = @floatFromInt(self.size[i]);
-                scale /= self.bounds.size[i];
-
-                inline for (0..ranks[i]) |_| {
-                    result *= scale;
-                }
-            }
-
-            return result;
-        }
-
-        /// Computes the diagonal of the stencil product corresponding to
-        /// the operator set by `ranks`.
-        pub fn opDiagonal(self: Self, comptime ranks: [N]usize) f64 {
-            const stencils = comptime opStencils(ranks);
-
-            comptime var coef: f64 = 1.0;
-
-            inline for (0..N) |i| {
-                coef *= stencils[i][M];
-            }
-
-            var result: f64 = coef;
-
-            // Covariantly transform result
-            inline for (0..N) |i| {
-                var scale: f64 = @floatFromInt(self.size[i]);
-                scale /= self.bounds.size[i];
-
-                inline for (0..ranks[i]) |_| {
-                    result *= scale;
-                }
-            }
-
-            return result;
-        }
-
-        /// Builds an set of stencils for each axis for a given operator.
-        fn opStencils(ranks: [N]usize) [N][2 * M + 1]f64 {
-            var result: [N][2 * M + 1]f64 = undefined;
-
-            for (0..N) |i| {
-                switch (ranks[i]) {
-                    0 => result[i] = Stencils(M).value(),
-                    1 => result[i] = Stencils(M).derivative(),
-                    2 => result[i] = Stencils(M).secondDerivative(),
-                    else => panic("operators only defined for ranks <=2", .{}),
-                }
-            }
-
-            return result;
-        }
-
-        // *********************************
-        // Boundary ************************
-        // *********************************
-
-        pub fn boundaryPosition(self: Self, comptime region: Region, cell: [N]usize) [N]f64 {
-            var result: [N]f64 = undefined;
-
-            inline for (0..N) |i| {
-                result[i] = switch (comptime region.sides[i]) {
-                    .left => 0.0,
-                    .right => 1.0,
-                    .middle => (@as(f64, @floatFromInt(cell[i])) + 0.5) / @as(f64, @floatFromInt(self.size[i])),
-                };
-            }
-
-            return result;
-        }
-
-        const BM = 2 * M + 1;
-
-        pub fn boundaryOp(self: Self, comptime extents: [N]isize, comptime flux: ?usize, cell: [N]usize, field: []const f64) f64 {
-            @setEvalBranchQuota(10000);
-
-            assert(field.len == self.numNodes());
-
-            const stencils = comptime boundaryStencils(extents, flux);
-            const stencil_lens = comptime boundaryStencilLens(extents);
-
-            const stencil_space: IndexSpace = comptime IndexSpace.fromSize(stencil_lens);
-
-            var result: f64 = 0.0;
-
-            comptime var stencil_indices = stencil_space.cartesianIndices();
-
-            inline while (comptime stencil_indices.next()) |stencil_index| {
-                comptime var coef: f64 = 1.0;
-
-                inline for (0..N) |i| {
-                    if (extents[i] != 0) {
-                        coef *= stencils[i][stencil_index[i]];
+                        result += coef * self.space.nodeValue(offset_node, field);
                     }
+
+                    return result;
                 }
 
-                var offset_node: [N]isize = undefined;
+                /// Restricts the value of a field to a supercell.
+                pub fn restrict(self: @This(), supercell: [N]usize, field: []const f64) f64 {
+                    assert(field.len == self.space.numNodes());
 
-                inline for (0..N) |i| {
-                    const idx: isize = @intCast(stencil_index[i]);
+                    // Compute the stencil and space of indices over which the stencil is defined.
+                    const stencil: [2 * O + 2]f64 = comptime Stencils(O + 1).restrict();
+                    const stencil_space: IndexSpace = comptime IndexSpace.fromSize([1]usize{2 * O + 2} ** N);
+                    // Accumulate the resulting value in this variable
+                    var result: f64 = 0.0;
+                    // Compute the central node for applying the stencil
+                    const central_node = toSigned(refined(supercell));
+                    // Loop over each stencil index at comptime
+                    comptime var stencil_indices = stencil_space.cartesianIndices();
 
-                    if (comptime extents[i] > 0) {
-                        offset_node[i] = @as(isize, @intCast(self.size[i] - 1)) + idx - BM + 1;
-                    } else if (comptime extents[i] < 0) {
-                        offset_node[i] = @as(isize, @intCast(BM - 1)) - idx;
-                    } else {
-                        offset_node[i] = @intCast(cell[i]);
+                    inline while (comptime stencil_indices.next()) |stencil_index| {
+                        // Compute a coefficient for this index at comptime.
+                        comptime var coef: f64 = 1.0;
+                        comptime var offset: [N]isize = undefined;
+
+                        inline for (0..N) |i| {
+                            const idx: isize = @intCast(stencil_index[i]);
+
+                            coef *= stencil[stencil_index[i]];
+                            offset[i] = idx - (O + 1) + 1;
+                        }
+
+                        const node = IndexMixin.addSigned(central_node, offset);
+                        result += coef * self.space.nodeValue(node, field);
+
+                        // std.debug.print("Coef {}, Offset ({}, {}), Value {}\n", .{ coef, offset[0], offset[1], self.nodeValue(offset_node, field) });
                     }
+
+                    return result;
                 }
 
-                result += coef * self.nodeValue(offset_node, field);
-            }
+                // *********************************
+                // Operators ***********************
+                // *********************************
 
-            // Covariantly transform result
+                /// Computes the result of an operation (specified by the `ranks` argument) at the given
+                /// cell, acting on the field defined over the whole nodespace.
+                pub fn op(self: @This(), comptime ranks: [N]usize, cell: [N]usize, field: []const f64) f64 {
+                    assert(field.len == self.space.numNodes());
 
-            if (flux) |axis| {
-                var scale: f64 = @floatFromInt(self.size[axis]);
-                scale /= self.bounds.size[axis];
-                result *= scale;
-            }
+                    const stencils = comptime opStencils(ranks);
+                    const stencil_space = comptime IndexSpace.fromSize([_]usize{2 * O + 1} ** N);
 
-            return result;
-        }
+                    var result: f64 = 0.0;
 
-        pub fn boundaryOpCoef(self: Self, comptime extents: [N]isize, comptime flux: ?usize) f64 {
-            @setEvalBranchQuota(10000);
+                    const central_node = toSigned(cell);
 
-            const stencils = comptime boundaryStencils(extents, flux);
-            const stencil_lens = comptime boundaryStencilLens(extents);
+                    comptime var stencil_indices = stencil_space.cartesianIndices();
 
-            comptime var coef: f64 = 1.0;
+                    inline while (comptime stencil_indices.next()) |stencil_index| {
+                        // Compute coefficient for this position in the stencil space.
+                        comptime var coef: f64 = 1.0;
+                        comptime var offset: [N]isize = undefined;
 
-            inline for (0..N) |i| {
-                if (extents[i] != 0) {
-                    coef *= stencils[i][stencil_lens[i] - 1];
-                }
-            }
+                        inline for (0..N) |i| {
+                            const idx: isize = @intCast(stencil_index[i]);
 
-            // Covariantly transform result
-            var result = coef;
+                            coef *= stencils[i][stencil_index[i]];
+                            offset[i] = idx - O;
+                        }
 
-            if (flux) |axis| {
-                var scale: f64 = @floatFromInt(self.size[axis]);
-                scale /= self.bounds.size[axis];
-                result *= scale;
-            }
+                        if (comptime (@abs(coef) == 0.0)) {
+                            continue;
+                        }
 
-            return result;
-        }
-
-        fn boundaryStencils(comptime extents: [N]isize, comptime flux: ?usize) [N][2 * BM]f64 {
-            var result: [N][2 * BM]f64 = undefined;
-
-            for (0..N) |axis| {
-                if (flux == axis) {
-                    const stencil = comptime Stencils(BM).boundaryFlux(@abs(extents[axis]));
-
-                    inline for (0..stencil.len) |j| {
-                        result[axis][j] = stencil[j];
+                        const node = IndexMixin.addSigned(central_node, offset);
+                        result += coef * self.space.nodeValue(node, field);
                     }
-                } else {
-                    const stencil = comptime Stencils(BM).boundaryValue(@abs(extents[axis]));
 
-                    inline for (0..stencil.len) |j| {
-                        result[axis][j] = stencil[j];
+                    // Covariantly transform result
+                    inline for (0..N) |i| {
+                        var scale: f64 = @floatFromInt(self.space.size[i]);
+                        scale /= self.space.bounds.size[i];
+
+                        inline for (0..ranks[i]) |_| {
+                            result *= scale;
+                        }
                     }
+
+                    return result;
                 }
-            }
 
-            return result;
-        }
+                /// Computes the diagonal of the stencil product corresponding to
+                /// the operator set by `ranks`.
+                pub fn opDiagonal(self: @This(), comptime ranks: [N]usize) f64 {
+                    const stencils = comptime opStencils(ranks);
 
-        fn boundaryStencilLens(extents: [N]isize) [N]usize {
-            var result: [N]usize = undefined;
+                    comptime var coef: f64 = 1.0;
 
-            for (0..N) |axis| {
-                if (extents[axis] != 0) {
-                    result[axis] = BM + @abs(extents[axis]);
-                } else {
-                    result[axis] = 1;
+                    inline for (0..N) |i| {
+                        coef *= stencils[i][M];
+                    }
+
+                    var result: f64 = coef;
+
+                    // Covariantly transform result
+                    inline for (0..N) |i| {
+                        var scale: f64 = @floatFromInt(self.space.size[i]);
+                        scale /= self.space.bounds.size[i];
+
+                        inline for (0..ranks[i]) |_| {
+                            result *= scale;
+                        }
+                    }
+
+                    return result;
                 }
-            }
 
-            return result;
+                /// Builds an set of stencils for each axis for a given operator.
+                fn opStencils(ranks: [N]usize) [N][2 * O + 1]f64 {
+                    var result: [N][2 * O + 1]f64 = undefined;
+
+                    for (0..N) |i| {
+                        switch (ranks[i]) {
+                            0 => result[i] = Stencils(O).value(),
+                            1 => result[i] = Stencils(O).derivative(),
+                            2 => result[i] = Stencils(O).secondDerivative(),
+                            else => panic("operators only defined for ranks <=2", .{}),
+                        }
+                    }
+
+                    return result;
+                }
+
+                // *********************************
+                // Boundary ************************
+                // *********************************
+
+                const BO = 2 * O + 1;
+
+                pub fn boundaryOp(self: @This(), comptime extents: [N]isize, comptime flux: ?usize, cell: [N]usize, field: []const f64) f64 {
+                    @setEvalBranchQuota(10000);
+
+                    assert(field.len == self.space.numNodes());
+
+                    const stencils = comptime boundaryStencils(extents, flux);
+                    const stencil_lens = comptime boundaryStencilLens(extents);
+
+                    const stencil_space: IndexSpace = comptime IndexSpace.fromSize(stencil_lens);
+
+                    var result: f64 = 0.0;
+
+                    comptime var stencil_indices = stencil_space.cartesianIndices();
+
+                    inline while (comptime stencil_indices.next()) |stencil_index| {
+                        comptime var coef: f64 = 1.0;
+
+                        inline for (0..N) |i| {
+                            if (extents[i] != 0) {
+                                coef *= stencils[i][stencil_index[i]];
+                            }
+                        }
+
+                        var offset_node: [N]isize = undefined;
+
+                        inline for (0..N) |i| {
+                            const idx: isize = @intCast(stencil_index[i]);
+
+                            if (comptime extents[i] > 0) {
+                                offset_node[i] = @as(isize, @intCast(self.size[i] - 1)) + idx - BO + 1;
+                            } else if (comptime extents[i] < 0) {
+                                offset_node[i] = @as(isize, @intCast(BO - 1)) - idx;
+                            } else {
+                                offset_node[i] = @intCast(cell[i]);
+                            }
+                        }
+
+                        result += coef * self.space.nodeValue(offset_node, field);
+                    }
+
+                    // Covariantly transform result
+
+                    if (flux) |axis| {
+                        var scale: f64 = @floatFromInt(self.space.size[axis]);
+                        scale /= self.space.bounds.size[axis];
+                        result *= scale;
+                    }
+
+                    return result;
+                }
+
+                pub fn boundaryOpCoef(self: @This(), comptime extents: [N]isize, comptime flux: ?usize) f64 {
+                    @setEvalBranchQuota(10000);
+
+                    const stencils = comptime boundaryStencils(extents, flux);
+                    const stencil_lens = comptime boundaryStencilLens(extents);
+
+                    comptime var coef: f64 = 1.0;
+
+                    inline for (0..N) |i| {
+                        if (extents[i] != 0) {
+                            coef *= stencils[i][stencil_lens[i] - 1];
+                        }
+                    }
+
+                    // Covariantly transform result
+                    var result = coef;
+
+                    if (flux) |axis| {
+                        var scale: f64 = @floatFromInt(self.spaceself.size[axis]);
+                        scale /= self.space.bounds.size[axis];
+                        result *= scale;
+                    }
+
+                    return result;
+                }
+
+                fn boundaryStencils(comptime extents: [N]isize, comptime flux: ?usize) [N][2 * BO]f64 {
+                    var result: [N][2 * BO]f64 = undefined;
+
+                    for (0..N) |axis| {
+                        if (flux == axis) {
+                            const stencil = comptime Stencils(BO).boundaryFlux(@abs(extents[axis]));
+
+                            inline for (0..stencil.len) |j| {
+                                result[axis][j] = stencil[j];
+                            }
+                        } else {
+                            const stencil = comptime Stencils(BO).boundaryValue(@abs(extents[axis]));
+
+                            inline for (0..stencil.len) |j| {
+                                result[axis][j] = stencil[j];
+                            }
+                        }
+                    }
+
+                    return result;
+                }
+
+                fn boundaryStencilLens(extents: [N]isize) [N]usize {
+                    var result: [N]usize = undefined;
+
+                    for (0..N) |axis| {
+                        if (extents[axis] != 0) {
+                            result[axis] = BO + @abs(extents[axis]);
+                        } else {
+                            result[axis] = 1;
+                        }
+                    }
+
+                    return result;
+                }
+            };
         }
     };
 }
@@ -624,25 +624,30 @@ test "node space restriction and prolongation" {
     // **************************
     // Test restriction
 
-    try expect(space.restrict(.{ 0, 0 }, function) == 1.0);
-    try expect(space.restrict(.{ 1, 1 }, function) == 5.0);
-    try expect(space.restrict(.{ 2, 2 }, function) == 9.0);
+    const order = space.order(M);
+
+    try expect(order.restrict(.{ 0, 0 }, function) == 1.0);
+    try expect(order.restrict(.{ 1, 1 }, function) == 5.0);
+    try expect(order.restrict(.{ 2, 2 }, function) == 9.0);
 
     // **************************
     // Test prolongation
 
-    try expect(space.prolong(.{ 0, 0 }, function) == -0.5);
-    try expect(space.prolong(.{ 1, 1 }, function) == 0.5);
-    try expect(space.prolong(.{ 2, 2 }, function) == 1.5);
+    try expect(order.prolongCell(.{ 0, 0 }, function) == -0.5);
+    try expect(order.prolongCell(.{ 1, 1 }, function) == 0.5);
+    try expect(order.prolongCell(.{ 2, 2 }, function) == 1.5);
 }
 
 test "node space smoothing" {
     const expect = std.testing.expect;
     const allocator = std.testing.allocator;
 
-    const FaceIndex = geometry.FaceIndex(2);
-    const RealBox = geometry.RealBox(2);
-    const Nodes = NodeSpace(2, 2);
+    const N = 2;
+    const M = 2;
+
+    const FaceIndex = geometry.FaceIndex(N);
+    const RealBox = geometry.RealBox(N);
+    const Nodes = NodeSpace(N, M);
 
     const Boundary = struct {
         pub fn kind(_: FaceIndex) BoundaryKind {
@@ -662,7 +667,7 @@ test "node space smoothing" {
                 comptime var ranks: [2]usize = [1]usize{0} ** 2;
                 ranks[i] = 2;
 
-                result += nodes.op(ranks, cell, field);
+                result += nodes.order(M).op(ranks, cell, field);
             }
 
             return -result;
@@ -675,7 +680,7 @@ test "node space smoothing" {
                 comptime var ranks: [2]usize = [1]usize{0} ** 2;
                 ranks[i] = 2;
 
-                result += nodes.opDiagonal(ranks);
+                result += nodes.order(M).opDiagonal(ranks);
             }
 
             return -result;

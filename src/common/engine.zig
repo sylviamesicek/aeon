@@ -6,7 +6,7 @@ const nodes = @import("nodes.zig");
 
 /// An interface extending a `NodeSpace` that allows one to take properly transformed
 /// gradients, hessians, and laplacians of some larger node vector.
-pub fn Engine(comptime N: usize, comptime M: usize) type {
+pub fn Engine(comptime N: usize, comptime M: usize, comptime O: usize) type {
     return struct {
         space: NodeSpace,
         cell: [N]usize,
@@ -21,11 +21,11 @@ pub fn Engine(comptime N: usize, comptime M: usize) type {
         }
 
         pub fn op(self: @This(), comptime ranks: [N]usize, field: []const f64) f64 {
-            return self.space.op(ranks, self.cell, field[self.start..self.end]);
+            return self.space.order(O).op(ranks, self.cell, field[self.start..self.end]);
         }
 
         pub fn opDiag(self: @This(), comptime ranks: [N]usize) f64 {
-            return self.space.opDiagonal(ranks);
+            return self.space.order(O).opDiagonal(ranks);
         }
 
         pub fn value(self: @This(), field: []const f64) f64 {
@@ -126,16 +126,16 @@ pub fn Engine(comptime N: usize, comptime M: usize) type {
 }
 
 /// A trait for defining operators.
-pub fn isOperator(comptime N: usize, comptime M: usize) fn (type) bool {
+pub fn isOperator(comptime N: usize, comptime M: usize, comptime O: usize) fn (type) bool {
     const hasFn = std.meta.hasFn;
 
     const Closure = struct {
         fn trait(comptime T: type) bool {
-            if (comptime !(hasFn("apply")(T) and @TypeOf(T.apply) == fn (T, Engine(N, M), []const f64) f64)) {
+            if (comptime !(hasFn("apply")(T) and @TypeOf(T.apply) == fn (T, Engine(N, M, O), []const f64) f64)) {
                 return false;
             }
 
-            if (comptime !(hasFn("applyDiag")(T) and @TypeOf(T.applyDiag) == fn (T, Engine(N, M)) f64)) {
+            if (comptime !(hasFn("applyDiag")(T) and @TypeOf(T.applyDiag) == fn (T, Engine(N, M, O)) f64)) {
                 return false;
             }
 
@@ -146,12 +146,12 @@ pub fn isOperator(comptime N: usize, comptime M: usize) fn (type) bool {
     return Closure.trait;
 }
 
-pub fn isProjection(comptime N: usize, comptime M: usize) fn (type) bool {
+pub fn isProjection(comptime N: usize, comptime M: usize, comptime O: usize) fn (type) bool {
     const hasFn = std.meta.hasFn;
 
     const Closure = struct {
         fn trait(comptime T: type) bool {
-            if (comptime !(hasFn("project")(T) and @TypeOf(T.project) == fn (T, Engine(N, M)) f64)) {
+            if (comptime !(hasFn("project")(T) and @TypeOf(T.project) == fn (T, Engine(N, M, O)) f64)) {
                 return false;
             }
 
