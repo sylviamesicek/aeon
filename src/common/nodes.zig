@@ -291,7 +291,7 @@ pub fn NodeSpace(comptime N: usize, comptime M: usize) type {
 
         pub fn restrictOrder(self: Self, comptime O: usize, supercell: [N]usize, field: []const f64) f64 {
             if (comptime O > M + 1) {
-                @compileError("Order must be less than ghost extent plus one.");
+                @compileError("Order must be less than (extent + 1).");
             }
 
             assert(field.len == self.numNodes());

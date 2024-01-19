@@ -243,18 +243,19 @@ pub fn Region(comptime N: usize) type {
             };
         }
 
-        pub fn maskedBySplit(self: Self, mask: AxisMask) @This() {
-            var sides: [N]Side = self.sides;
+        pub fn maskedBySplit(self: Self, split: AxisMask) @This() {
+            var mask = AxisMask.initEmpty();
 
-            for (0..N) |i| {
-                if (!mask.isSet(i) == (sides[i] == .right)) {
-                    sides[i] = .middle;
+            for (0..N) |axis| {
+                const side = self.sides[axis];
+                switch (side) {
+                    .middle => mask.unset(axis),
+                    .left => mask.setValue(axis, !split.isSet(axis)),
+                    .right => mask.setValue(axis, split.isSet(axis)),
                 }
             }
 
-            return .{
-                .sides = sides,
-            };
+            return self.masked(mask);
         }
 
         // ************************

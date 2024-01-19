@@ -19,45 +19,6 @@ const utils = @import("../utils.zig");
 const Range = utils.Range;
 const RangeMap = utils.RangeMap;
 
-/// A map from blocks (defined in a mesh agnostic way) into a buffered node vector.
-/// This is filled by the appropriate mesh routine.
-pub const NodeMap = struct {
-    allocator: Allocator,
-    ranges: RangeMap = .{},
-
-    pub fn init(allocator: Allocator) NodeMap {
-        return .{
-            .allocator = allocator,
-        };
-    }
-
-    /// Frees a `CellMap`.
-    pub fn deinit(self: *NodeMap) void {
-        self.ranges.deinit(self.allocator);
-    }
-
-    /// Returns the cells offset for a given block.
-    pub fn offset(self: NodeMap, block: usize) usize {
-        return self.ranges.offset(block);
-    }
-
-    /// Returns the number of cells in a given block.
-    pub fn size(self: NodeMap, block: usize) usize {
-        return self.ranges.size(block);
-    }
-
-    /// Returns of slice of cells for a given block.
-    pub fn slice(self: NodeMap, block: usize, data: anytype) @TypeOf(data) {
-        const range = self.ranges.range(block);
-        return data[range.start..range.end];
-    }
-
-    /// Returns the number of nodes in the map.
-    pub fn total(self: NodeMap) usize {
-        return self.ranges.total();
-    }
-};
-
 /// Stores the additional structured needed to associate nodes with a mesh. Uniform children with common parents
 /// are grouped into blocks to prevent unnessary ghost node duplication. Similar to a mesh, this node manager
 /// describes the structure of a discretization.
@@ -424,11 +385,11 @@ pub fn NodeManager(comptime N: usize) type {
             return [1]usize{result} ** N;
         }
 
-        pub fn buildNodeMap(self: *const @This(), comptime M: usize, map: *NodeMap) !void {
-            try map.ranges.resize(map.allocator, self.blocks.items.len + 1);
+        pub fn buildNodeMap(self: *const @This(), comptime M: usize, map: *RangeMap) !void {
+            try map.resize(map.allocator, self.blocks.items.len + 1);
 
             var offset: usize = 0;
-            map.ranges.set(0, 0);
+            map.set(0, 0);
 
             for (self.blocks.items, 0..) |block, block_id| {
                 var total: usize = 1;
@@ -439,7 +400,7 @@ pub fn NodeManager(comptime N: usize) type {
 
                 offset += total;
 
-                map.ranges.set(block_id + 1, offset);
+                map.set(block_id + 1, offset);
             }
         }
 
@@ -469,9 +430,11 @@ pub fn NodeManager(comptime N: usize) type {
 
 pub fn NodeWorker(comptime N: usize, comptime M: usize) type {
     return struct {
+        gpa: Allocator,
+        map: RangeMap,
+
         mesh: *const TreeMesh,
         manager: *const NodeManager(N),
-        map: NodeMap,
 
         const Block = NodeManager(N).Block;
         const Cell = NodeManager(N).Cell;
@@ -484,9 +447,8 @@ pub fn NodeWorker(comptime N: usize, comptime M: usize) type {
         const IndexMixin = geometry.IndexMixin(N);
         const IndexSpace = geometry.IndexSpace(N);
         const Region = geometry.Region(N);
-        const numSplits = AxisMask.count;
-        const numRegions = Region.count;
         const add = IndexMixin.add;
+        const addSigned = IndexMixin.addSigned;
         const coarsened = IndexMixin.coarsened;
         const mul = IndexMixin.mul;
         const refined = IndexMixin.refined;
@@ -495,27 +457,38 @@ pub fn NodeWorker(comptime N: usize, comptime M: usize) type {
         const toUnsigned = IndexMixin.toUnsigned;
 
         const BoundaryEngine = common.BoundaryEngine(N, M);
+        const Engine = common.Engine(N, M);
         const NodeSpace = common.NodeSpace(N, M);
 
         pub fn init(allocator: Allocator, mesh: *const TreeMesh, manager: *const NodeManager(N)) !@This() {
-            var map = NodeMap.init(allocator);
+            var map = RangeMap.init(allocator);
             errdefer map.deinit();
 
             try manager.buildNodeMap(M, &map);
 
             return .{
+                .gpa = allocator,
+                .map = map,
+
                 .mesh = mesh,
                 .manager = manager,
-                .map = map,
             };
         }
 
         pub fn deinit(self: *@This()) void {
-            self.map.deinit();
+            self.map.deinit(self.gpa);
         }
 
+        pub fn numNodes(self: @This()) usize {
+            return self.map.total();
+        }
+
+        // **************************
+        // Ghost Nodes **************
+        // **************************
+
         /// Fills the ghost nodes of given level.
-        pub fn fillGhostNodes(self: @This(), level: usize, boundary: anytype, field: []usize) void {
+        pub fn fillGhostNodes(self: @This(), level: usize, boundary: anytype, field: []f64) void {
             assert(field.len == self.map.total());
 
             // Short circuit in the case of level = 0
@@ -572,7 +545,7 @@ pub fn NodeWorker(comptime N: usize, comptime M: usize) type {
                 // If no axes lie on a physical boundary, prolong
                 if (bmask.isEmpty()) {
                     // Prolong boundary
-                    self.fillBlockIntGhostNodes(region, block_id, field);
+                    self.fillBlockGhostNodesInterior(region, block_id, field);
                     // Skip following checks
                     continue;
                 }
@@ -589,7 +562,8 @@ pub fn NodeWorker(comptime N: usize, comptime M: usize) type {
             }
         }
 
-        fn fillBlockIntGhostNodes(self: @This(), region: Region, block_id: usize, field: []usize) void {
+        /// Fills ghost nodes on the interior of the numerical domain.
+        fn fillBlockGhostNodesInterior(self: @This(), region: Region, block_id: usize, field: []f64) void {
             assert(block_id != 0);
 
             const block = self.manager.blockFromId(block_id);
@@ -618,44 +592,63 @@ pub fn NodeWorker(comptime N: usize, comptime M: usize) type {
                     const split_lin = cell - cells.items(.children)[parent];
                     const split = AxisMask.fromLinear(split_lin);
 
-                    var mask = AxisMask.initEmpty();
+                    const neighbor_region = region.maskedBySplit(split);
+
+                    neighbor = cell_meta.items(.neighbors)[parent][neighbor_region.linear()];
+
+                    const neighbor_block_id = cell_meta.items(.block)[neighbor];
+                    const neighbor_block = self.manager.blockFromId(neighbor_block_id);
+                    const neighbor_index = cell_meta.items(.index)[neighbor];
+                    const neighbor_field = self.map.slice(neighbor_block_id, field);
+                    const neighbor_node_space = self.nodeSpaceFromBlock(neighbor_block);
+
+                    var neighbor_origin = toSigned(refined(mul(neighbor_index, cell_size)));
 
                     for (0..N) |axis| {
-                        const side = region.sides[axis];
-                        switch (side) {
-                            .middle => mask.unset(axis),
-                            .left => mask.setValue(axis, !split.isSet(axis)),
-                            .right => mask.setValue(axis, split.isSet(axis)),
+                        if (split.isSet(axis)) {
+                            neighbor_origin[axis] += cell_size[axis];
+                        }
+
+                        switch (neighbor_region.sides[axis]) {
+                            .left => neighbor_origin[axis] += 2 * cell_size[axis],
+                            .right => neighbor_origin[axis] -= 2 * cell_size[axis],
+                            else => {},
                         }
                     }
 
-                    const mregion = region.masked(mask);
-                    neighbor = cell_meta.items(.neighbors)[parent][mregion.linear()];
+                    // Iterate over node offsets
+                    var offsets = region.nodes(M, cell_size);
 
-                    const neighbor_block_id = cell_meta.items(.block)[neighbor];
-                    const neighbor_block = self.manager.blockFromId(neighbor_block_id);
-                    const neighbor_index = cell_meta.items(.index)[neighbor];
-                    const neighbor_origin = mul(neighbor_index, cell_size);
-                    _ = neighbor_origin; // autofix
-                    const neighbor_field = self.map.slice(neighbor_block_id, field);
-                    _ = neighbor_field; // autofix
-                    const neighbor_node_space = self.nodeSpaceFromBlock(neighbor_block);
-                    _ = neighbor_node_space; // autofix
+                    while (offsets.next()) |offset| {
+                        const node: [N]isize = addSigned(origin, offset);
+                        const neighbor_node: [N]isize = addSigned(neighbor_origin, offset);
 
+                        const v = neighbor_node_space.prolong(toUnsigned(neighbor_node), neighbor_field);
+                        block_node_space.setNodeValue(node, block_field, v);
+                    }
                 } else {
                     // Neighbor is on same level.
                     const neighbor_block_id = cell_meta.items(.block)[neighbor];
-                    const neighbor_block = self.manager.blockFromId(neighbor_block_id);
                     const neighbor_index = cell_meta.items(.index)[neighbor];
-                    const neighbor_origin = mul(neighbor_index, cell_size);
+                    const neighbor_block = self.manager.blockFromId(neighbor_block_id);
                     const neighbor_field = self.map.slice(neighbor_block_id, field);
                     const neighbor_node_space = self.nodeSpaceFromBlock(neighbor_block);
+
+                    var neighbor_origin = toSigned(mul(neighbor_index, cell_size));
+
+                    for (0..N) |axis| {
+                        switch (region.sides[axis]) {
+                            .left => neighbor_origin[axis] += cell_size[axis],
+                            .right => neighbor_origin[axis] -= cell_size[axis],
+                            else => {},
+                        }
+                    }
 
                     var offsets = region.nodes(M, cell_size);
 
                     while (offsets.next()) |offset| {
-                        const node = IndexMixin.offsetFromOrigin(origin, offset);
-                        const neighbor_node = IndexMixin.offsetFromOrigin(neighbor_origin, offset);
+                        const node = addSigned(origin, offset);
+                        const neighbor_node = addSigned(neighbor_origin, offset);
 
                         const v = neighbor_node_space.nodeValue(neighbor_node, neighbor_field);
                         block_node_space.setNodeValue(node, block_field, v);
@@ -664,7 +657,11 @@ pub fn NodeWorker(comptime N: usize, comptime M: usize) type {
             }
         }
 
-        pub fn prolong(self: @This(), level: usize, field: []usize) void {
+        // *******************************
+        // Prolongation/Restriction ******
+        // *******************************
+
+        pub fn prolong(self: @This(), level: usize, field: []f64) void {
             assert(field.len == self.map.total());
 
             if (level == 0) {
@@ -677,7 +674,7 @@ pub fn NodeWorker(comptime N: usize, comptime M: usize) type {
             }
         }
 
-        fn prolongBlock(self: @This(), block_id: usize, field: []usize) void {
+        fn prolongBlock(self: @This(), block_id: usize, field: []f64) void {
             assert(block_id != 0);
 
             const block = self.manager.blockFromId(block_id);
@@ -686,6 +683,7 @@ pub fn NodeWorker(comptime N: usize, comptime M: usize) type {
 
             // Cache pointers
             const cells = self.mesh.cells.slice();
+            const cell_meta = self.manager.cells.slice();
             const cell_size = self.manager.cell_size;
 
             var cell_indices = IndexSpace.fromSize(block.size).cartesianIndices();
@@ -699,8 +697,8 @@ pub fn NodeWorker(comptime N: usize, comptime M: usize) type {
                 const split_lin = cell - cells.items(.children)[parent];
                 const split = AxisMask.fromLinear(split_lin);
                 // Get super block
-                const parent_block_id: usize = self.manager.cells.items(.block)[parent];
-                const parent_index: [N]usize = self.manager.cells.items(.index)[parent];
+                const parent_block_id: usize = cell_meta.items(.block)[parent];
+                const parent_index: [N]usize = cell_meta.items(.index)[parent];
                 const parent_block = self.manager.blockFromId(parent_block_id);
                 const parent_block_field: []const usize = self.map.slice(parent_block_id, field);
                 const parent_block_node_space = self.nodeSpaceFromBlock(parent_block);
@@ -725,7 +723,7 @@ pub fn NodeWorker(comptime N: usize, comptime M: usize) type {
             }
         }
 
-        pub fn restrict(self: @This(), level: usize, field: []usize) void {
+        pub fn restrict(self: @This(), level: usize, field: []f64) void {
             assert(field.len == self.map.total());
 
             if (level == 0) {
@@ -738,7 +736,7 @@ pub fn NodeWorker(comptime N: usize, comptime M: usize) type {
             }
         }
 
-        fn restrictBlock(self: @This(), block_id: usize, field: []usize) void {
+        fn restrictBlock(self: @This(), block_id: usize, field: []f64) void {
             assert(block_id != 0);
 
             const block = self.manager.blockFromId(block_id);
@@ -747,6 +745,7 @@ pub fn NodeWorker(comptime N: usize, comptime M: usize) type {
 
             // Cache pointers
             const cells = self.mesh.cells.slice();
+            const cell_meta = self.manager.cells.slice();
             const cell_size = self.manager.cell_size;
 
             var cell_indices = IndexSpace.fromSize(block.size).cartesianIndices();
@@ -760,8 +759,8 @@ pub fn NodeWorker(comptime N: usize, comptime M: usize) type {
                 const split_lin = cell - cells.items(.children)[parent];
                 const split = AxisMask.fromLinear(split_lin);
                 // Get super block
-                const parent_block_id: usize = self.manager.cells.items(.block)[parent];
-                const parent_index: [N]usize = self.manager.cells.items(.index)[parent];
+                const parent_block_id: usize = cell_meta.items(.block)[parent];
+                const parent_index: [N]usize = cell_meta.items(.index)[parent];
                 const parent_block = self.manager.blockFromId(parent_block_id);
                 const parent_block_field: []const usize = self.map.slice(parent_block_id, field);
                 const parent_block_node_space = self.nodeSpaceFromBlock(parent_block);
@@ -784,6 +783,134 @@ pub fn NodeWorker(comptime N: usize, comptime M: usize) type {
                     const val = block_node_space.restrict(supernode, block_field);
                     parent_block_node_space.setValue(node, parent_block_field, val);
                 }
+            }
+        }
+
+        // ********************************
+        // Projection/Application *********
+        // ********************************
+
+        /// Using the given projection to set the values of the field on this level.
+        pub fn project(self: @This(), level: usize, projection: anytype, field: []f64) void {
+            const Proj = @TypeOf(projection);
+
+            if (comptime !common.isProjection(N, M)(Proj)) {
+                @compileError("Projection must satisfy isProjection trait");
+            }
+
+            assert(field == self.map.total());
+
+            const blocks = self.manager.level_to_blocks.range(level);
+            for (blocks.start..blocks.end) |block_id| {
+                self.projectBlock(block_id, projection, field);
+            }
+        }
+
+        /// Set values of the field on the given block using the projection.
+        fn projectBlock(self: @This(), block_id: usize, projection: anytype, field: []f64) void {
+            const block_field: []f64 = self.map.slice(block_id, field);
+            const block_range = self.map.range(block_id);
+
+            const node_space = self.nodeSpaceFromBlock(self.manager.blockFromId(block_id));
+
+            var cells = node_space.cellSpace().cartesianIndices();
+
+            while (cells.next()) |cell| {
+                const engine = Engine{
+                    .space = node_space,
+                    .cell = cell,
+                    .start = block_range.start,
+                    .end = block_range.end,
+                };
+
+                node_space.setValue(cell, block_field, projection.project(engine));
+            }
+        }
+
+        /// Applies the operator to the source function on this level, storing the result on field.
+        pub fn apply(self: @This(), level: usize, operator: anytype, src: []const f64, field: []f64) void {
+            const Oper = @TypeOf(operator);
+
+            if (comptime !common.isOperator(N, M)(Oper)) {
+                @compileError("Operator must satisfy isOperator trait");
+            }
+
+            assert(field == self.map.total());
+            assert(src == self.map.total());
+
+            const blocks = self.manager.level_to_blocks.range(level);
+            for (blocks.start..blocks.end) |block_id| {
+                self.applyBlock(block_id, operator, src, field);
+            }
+        }
+
+        /// Applies the operator to the source function on this block, storing the result on field.
+        fn applyBlock(self: @This(), block_id: usize, operator: anytype, src: []const f64, field: []f64) void {
+            const block_field: []f64 = self.map.slice(block_id, field);
+            const block_range = self.map.range(block_id);
+
+            const node_space = self.nodeSpaceFromBlock(self.manager.blockFromId(block_id));
+
+            var cells = node_space.cellSpace().cartesianIndices();
+
+            while (cells.next()) |cell| {
+                const engine = Engine{
+                    .space = node_space,
+                    .cell = cell,
+                    .start = block_range.start,
+                    .end = block_range.end,
+                };
+
+                node_space.setValue(cell, block_field, operator.apply(engine, src));
+            }
+        }
+
+        // ***************************************
+        // Smoothing *****************************
+        // ***************************************
+
+        /// Performs jacobi smoothing on this level.
+        pub fn smooth(self: @This(), level: usize, operator: anytype, src: []const f64, rhs: []const f64, field: []f64) void {
+            const Oper = @TypeOf(operator);
+
+            if (comptime !common.isOperator(N, M)(Oper)) {
+                @compileError("Operator must satisfy isOperator trait");
+            }
+
+            assert(field == self.map.total());
+            assert(src == self.map.total());
+
+            const blocks = self.manager.level_to_blocks.range(level);
+            for (blocks.start..blocks.end) |block_id| {
+                self.smoothBlock(block_id, operator, src, rhs, field);
+            }
+        }
+
+        /// Performs jacobi smoothing on this block.
+        fn smoothBlock(self: @This(), block_id: usize, operator: anytype, src: []const f64, rhs: []const f64, field: []f64) void {
+            const block_field: []f64 = self.map.slice(block_id, field);
+            const block_rhs: []const f64 = self.map.slice(block_id, rhs);
+            const block_src: []const f64 = self.map.slice(block_id, src);
+            const block_range = self.map.range(block_id);
+
+            const node_space = self.nodeSpaceFromBlock(self.manager.blockFromId(block_id));
+
+            var cells = node_space.cellSpace().cartesianIndices();
+
+            while (cells.next()) |cell| {
+                const engine = Engine{
+                    .space = node_space,
+                    .cell = cell,
+                    .start = block_range.start,
+                    .end = block_range.end,
+                };
+
+                const sval = node_space.value(cell, block_src);
+                const rval = node_space.value(cell, block_rhs);
+                const app = operator.apply(engine, src);
+                const appDiag = operator.applyDiag(engine);
+
+                node_space.setValue(cell, block_field, sval + 2.0 / 3.0 * (rval - app) / appDiag);
             }
         }
 
