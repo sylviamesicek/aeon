@@ -483,6 +483,45 @@ pub fn NodeWorker(comptime N: usize, comptime M: usize) type {
             return self.map.total();
         }
 
+        pub fn pack(self: @This(), src: []const f64, dest: []f64) void {
+            assert(src.len == self.map.total());
+            assert(dest.len == self.manager.numNodes());
+
+            for (0..self.manager.numBlocks()) |block_id| {
+                const block = self.manager.blockFromId(block_id);
+                const block_src = self.slice(block_id, src);
+                const block_dest = self.manager.block_to_nodes.slice(block_id, dest);
+                const node_space = self.nodeSpaceFromBlock(block);
+
+                var cells = node_space.cellSpace().cartesianIndices();
+                var linear: usize = 0;
+
+                while (cells.next()) |cell| : (linear += 1) {
+                    const v = node_space.value(cell, block_src);
+                    block_dest[linear] = v;
+                }
+            }
+        }
+
+        pub fn unpack(self: @This(), src: []const f64, dest: []f64) void {
+            assert(dest.len == self.map.total());
+            assert(src.len == self.manager.numNodes());
+
+            for (0..self.manager.numBlocks()) |block_id| {
+                const block = self.manager.blockFromId(block_id);
+                const block_dest = self.map.slice(block_id, dest);
+                const block_src = self.manager.block_to_nodes.slice(block_id, src);
+                const node_space = self.nodeSpaceFromBlock(block);
+
+                var cells = node_space.cellSpace().cartesianIndices();
+                var linear: usize = 0;
+
+                while (cells.next()) |cell| : (linear += 1) {
+                    node_space.setValue(cell, block_dest, block_src[linear]);
+                }
+            }
+        }
+
         // **************************
         // Ghost Nodes **************
         // **************************

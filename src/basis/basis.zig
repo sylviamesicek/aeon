@@ -13,9 +13,6 @@ const stencils = @import("stencils.zig");
 pub const Lagrange = lagrange.Lagrange;
 pub const Stencils = stencils.Stencils;
 
-pub const NodeSpace = nodes.NodeSpace;
-pub const StencilSpace = stencils.StencilSpace;
-
 test {
     _ = lagrange;
     _ = stencils;
