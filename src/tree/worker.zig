@@ -23,10 +23,10 @@ pub fn NodeWorker(comptime N: usize, comptime M: usize) type {
         map: RangeMap,
 
         mesh: *const TreeMesh,
-        manager: *const NodeManager(N),
+        manager: *const NodeManager,
 
-        const Block = NodeManager(N).Block;
-        const Cell = NodeManager(N).Cell;
+        const Block = NodeManager.Block;
+        const Cell = NodeManager.Cell;
 
         const NodeManager = manager_.NodeManager(N);
         const TreeMesh = tree.TreeMesh(N);
@@ -36,7 +36,6 @@ pub fn NodeWorker(comptime N: usize, comptime M: usize) type {
         const IndexMixin = geometry.IndexMixin(N);
         const IndexSpace = geometry.IndexSpace(N);
         const Region = geometry.Region(N);
-        const add = IndexMixin.add;
         const addSigned = IndexMixin.addSigned;
         const coarsened = IndexMixin.coarsened;
         const mul = IndexMixin.mul;
@@ -72,7 +71,7 @@ pub fn NodeWorker(comptime N: usize, comptime M: usize) type {
             return self.map.total();
         }
 
-        pub fn pack(self: @This(), src: []const f64, dest: []f64) void {
+        pub fn packAll(self: @This(), src: []const f64, dest: []f64) void {
             assert(src.len == self.map.total());
             assert(dest.len == self.manager.numNodes());
 
@@ -92,7 +91,7 @@ pub fn NodeWorker(comptime N: usize, comptime M: usize) type {
             }
         }
 
-        pub fn unpack(self: @This(), src: []const f64, dest: []f64) void {
+        pub fn unpackAll(self: @This(), src: []const f64, dest: []f64) void {
             assert(dest.len == self.map.total());
             assert(src.len == self.manager.numNodes());
 
@@ -109,6 +108,87 @@ pub fn NodeWorker(comptime N: usize, comptime M: usize) type {
                     node_space.setValue(cell, block_dest, block_src[linear]);
                 }
             }
+        }
+
+        pub fn normSqAll(self: @This(), field: []const f64) f64 {
+            assert(field.len == self.map.total());
+
+            var result: f64 = 0.0;
+
+            for (0..self.manager.numBlocks()) |block_id| {
+                const block = self.manager.blockFromId(block_id);
+                const block_field = self.map.slice(block_id, field);
+                const node_space = self.nodeSpaceFromBlock(block);
+
+                const cells = node_space.cellSpace().cartesianIndices();
+
+                while (cells.next()) |cell| {
+                    const v = node_space.value(cell, block_field);
+                    result += v * v;
+                }
+            }
+
+            return result;
+        }
+
+        pub fn normAll(self: @This(), field: []const f64) f64 {
+            return @sqrt(self.normSq(field));
+        }
+
+        // **********************************
+        // Basic Operations *****************
+        // **********************************
+
+        pub fn copy(self: @This(), level: usize, dest: []f64, src: []const f64) f64 {
+            assert(src == self.numNodes());
+            assert(dest.len == self.numNodes());
+
+            const blocks = self.manager.level_to_blocks.range(level);
+
+            for (blocks.start..blocks.end) |block_id| {
+                const block_src = self.map.slice(block_id, src);
+                const block_dest = self.map.slice(block_id, dest);
+
+                @memcpy(block_dest, block_src);
+            }
+        }
+
+        pub fn add(self: @This(), level: usize, dest: []f64, a: []const f64) f64 {
+            assert(a.len == self.numNodes());
+            assert(dest.len == self.numNodes());
+
+            const blocks = self.manager.level_to_blocks.range(level);
+
+            for (blocks.start..blocks.end) |block_id| {
+                const block_a = self.map.slice(block_id, a);
+                const block_dest = self.map.slice(block_id, dest);
+
+                for (block_a, block_dest) |aval, *d| {
+                    d += aval;
+                }
+            }
+        }
+
+        pub fn subtract(self: @This(), level: usize, dest: []f64, a: []const f64) f64 {
+            assert(a.len == self.numNodes());
+            assert(dest.len == self.numNodes());
+
+            const blocks = self.manager.level_to_blocks.range(level);
+
+            for (blocks.start..blocks.end) |block_id| {
+                const block_a = self.map.slice(block_id, a);
+                const block_dest = self.map.slice(block_id, dest);
+
+                for (block_a, block_dest) |aval, *d| {
+                    d -= aval;
+                }
+            }
+        }
+
+        pub fn order(self: @This(), comptime O: usize) Order(O) {
+            return .{
+                .worker = self,
+            };
         }
 
         pub fn Order(comptime O: usize) type {
@@ -371,8 +451,8 @@ pub fn NodeWorker(comptime N: usize, comptime M: usize) type {
 
                         var offsets = IndexSpace.fromSize(cell_size).cartesianIndices();
                         while (offsets.next()) |offset| {
-                            const node = add(origin, offset);
-                            const subnode = add(parent_origin, offset);
+                            const node = IndexMixin.add(origin, offset);
+                            const subnode = IndexMixin.add(parent_origin, offset);
 
                             const val = parent_block_node_space.order(O).prolongCell(subnode, parent_block_field);
                             block_node_space.setValue(node, block_field, val);
@@ -438,8 +518,8 @@ pub fn NodeWorker(comptime N: usize, comptime M: usize) type {
 
                         var offsets = IndexSpace.fromSize(cell_size).cartesianIndices();
                         while (offsets.next()) |offset| {
-                            const node = add(parent_origin, offset);
-                            const supernode = add(origin, offset);
+                            const node = IndexMixin.add(parent_origin, offset);
+                            const supernode = IndexMixin.add(origin, offset);
 
                             const val = block_node_space.order(O).restrict(supernode, block_field);
                             parent_block_node_space.setValue(node, parent_block_field, val);
@@ -462,7 +542,7 @@ pub fn NodeWorker(comptime N: usize, comptime M: usize) type {
                     const map = self.worker.map;
                     const manager = self.worker.manager;
 
-                    assert(field == map.total());
+                    assert(field.len == map.total());
 
                     const blocks = manager.level_to_blocks.range(level);
                     for (blocks.start..blocks.end) |block_id| {
@@ -495,7 +575,7 @@ pub fn NodeWorker(comptime N: usize, comptime M: usize) type {
                 }
 
                 /// Applies the operator to the source function on this level, storing the result on field.
-                pub fn apply(self: @This(), level: usize, operator: anytype, src: []const f64, field: []f64) void {
+                pub fn apply(self: @This(), level: usize, field: []f64, operator: anytype, src: []const f64) void {
                     const Oper = @TypeOf(operator);
 
                     if (comptime !isOperator(Oper)) {
@@ -505,17 +585,17 @@ pub fn NodeWorker(comptime N: usize, comptime M: usize) type {
                     const map = self.worker.map;
                     const manager = self.worker.manager;
 
-                    assert(field == map.total());
-                    assert(src == map.total());
+                    assert(field.len == map.total());
+                    assert(src.len == map.total());
 
                     const blocks = manager.level_to_blocks.range(level);
                     for (blocks.start..blocks.end) |block_id| {
-                        self.applyBlock(block_id, operator, src, field);
+                        self.applyBlock(block_id, field, operator, src);
                     }
                 }
 
                 /// Applies the operator to the source function on this block, storing the result on field.
-                fn applyBlock(self: @This(), block_id: usize, operator: anytype, src: []const f64, field: []f64) void {
+                fn applyBlock(self: @This(), block_id: usize, field: []f64, operator: anytype, src: []const f64) void {
                     const map = self.worker.map;
                     const manager = self.worker.manager;
 
@@ -538,12 +618,126 @@ pub fn NodeWorker(comptime N: usize, comptime M: usize) type {
                     }
                 }
 
+                /// Applies the operator to the source function on this level, storing the result on field.
+                pub fn residual(self: @This(), level: usize, field: []f64, rhs: []const f64, operator: anytype, src: []const f64) void {
+                    const Oper = @TypeOf(operator);
+
+                    if (comptime !isOperator(Oper)) {
+                        @compileError("Operator must satisfy isOperator trait");
+                    }
+
+                    const map = self.worker.map;
+                    const manager = self.worker.manager;
+
+                    assert(field.len == map.total());
+                    assert(src.len == map.total());
+                    assert(rhs.len == map.total());
+
+                    const blocks = manager.level_to_blocks.range(level);
+                    for (blocks.start..blocks.end) |block_id| {
+                        self.residualBlock(block_id, field, rhs, operator, src);
+                    }
+                }
+
+                /// Applies the operator to the source function on this block, storing the result on field.
+                fn residualBlock(self: @This(), block_id: usize, field: []f64, rhs: []const f64, operator: anytype, src: []const f64) void {
+                    const map = self.worker.map;
+                    const manager = self.worker.manager;
+
+                    const block_field: []f64 = map.slice(block_id, field);
+                    const block_rhs: []f64 = map.slice(block_id, rhs);
+                    const block_range = map.range(block_id);
+
+                    const node_space = self.nodeSpaceFromBlock(manager.blockFromId(block_id));
+
+                    var cells = node_space.cellSpace().cartesianIndices();
+
+                    while (cells.next()) |cell| {
+                        const engine = Engine{
+                            .space = node_space,
+                            .cell = cell,
+                            .start = block_range.start,
+                            .end = block_range.end,
+                        };
+
+                        const rval = node_space.value(cell, block_rhs);
+
+                        node_space.setValue(cell, block_field, rval - operator.apply(engine, src));
+                    }
+                }
+
+                /// Applies the operator to the source function on this level, storing the result on field.
+                pub fn tauCorrect(self: @This(), level: usize, field: []f64, res: []const f64, operator: anytype, src: []const f64) void {
+                    const Oper = @TypeOf(operator);
+
+                    if (comptime !isOperator(Oper)) {
+                        @compileError("Operator must satisfy isOperator trait");
+                    }
+
+                    const map = self.worker.map;
+                    const manager = self.worker.manager;
+
+                    assert(field.len == map.total());
+                    assert(src.len == map.total());
+                    assert(res.len == map.total());
+
+                    const blocks = manager.level_to_blocks.range(level);
+                    for (blocks.start..blocks.end) |block_id| {
+                        self.tauCorrectBlock(block_id, field, res, operator, src);
+                    }
+                }
+
+                /// Applies the operator to the source function on this block, storing the result on field.
+                fn tauCorrectBlock(self: @This(), block_id: usize, field: []f64, res: []const f64, operator: anytype, src: []const f64) void {
+                    const map = self.worker.map;
+                    const manager = self.worker.manager;
+
+                    const block_field: []f64 = map.slice(block_id, field);
+                    const block_res: []f64 = map.slice(block_id, res);
+                    const block_range = map.range(block_id);
+                    const block = manager.blockFromId(block_id);
+
+                    const node_space = self.nodeSpaceFromBlock(block);
+
+                    const cells = self.worker.mesh.cells.slice();
+
+                    var indices = IndexSpace.fromSize(block.size).cartesianIndices();
+
+                    while (indices.next()) |index| {
+                        const cell = manager.cellFromBlock(block_id, index);
+
+                        if (cells.items(.children)[cell] == null_index) {
+                            continue;
+                        }
+
+                        const origin = IndexMixin.mul(index, manager.cell_size);
+
+                        var offsets = IndexSpace.fromSize(manager.cell_size).cartesianIndices();
+
+                        while (offsets.next()) |offset| {
+                            const node = IndexMixin.add(origin, offset);
+
+                            const engine = Engine{
+                                .space = node_space,
+                                .cell = node,
+                                .start = block_range.start,
+                                .end = block_range.end,
+                            };
+
+                            const aval = operator.apply(engine, src);
+                            const rval = node_space.value(cell, block_res);
+
+                            node_space.setValue(cell, block_field, rval + aval);
+                        }
+                    }
+                }
+
                 // ***************************************
                 // Smoothing *****************************
                 // ***************************************
 
                 /// Performs jacobi smoothing on this level.
-                pub fn smooth(self: @This(), level: usize, operator: anytype, src: []const f64, rhs: []const f64, field: []f64) void {
+                pub fn smooth(self: @This(), level: usize, field: []f64, operator: anytype, src: []const f64, rhs: []const f64) void {
                     const Oper = @TypeOf(operator);
 
                     if (comptime !common.isOperator(N, M)(Oper)) {
@@ -553,17 +747,17 @@ pub fn NodeWorker(comptime N: usize, comptime M: usize) type {
                     const map = self.worker.map;
                     const manager = self.worker.manager;
 
-                    assert(field == map.total());
-                    assert(src == map.total());
+                    assert(field.len == map.total());
+                    assert(src.len == map.total());
 
                     const blocks = manager.level_to_blocks.range(level);
                     for (blocks.start..blocks.end) |block_id| {
-                        self.smoothBlock(block_id, operator, src, rhs, field);
+                        self.smoothBlock(block_id, field, operator, src, rhs);
                     }
                 }
 
                 /// Performs jacobi smoothing on this block.
-                fn smoothBlock(self: @This(), block_id: usize, operator: anytype, src: []const f64, rhs: []const f64, field: []f64) void {
+                fn smoothBlock(self: @This(), block_id: usize, field: []f64, operator: anytype, src: []const f64, rhs: []const f64) void {
                     const map = self.worker.map;
                     const manager = self.worker.manager;
 
@@ -606,6 +800,20 @@ pub fn NodeWorker(comptime N: usize, comptime M: usize) type {
                         .size = size,
                     };
                 }
+            };
+        }
+
+        /// Helper function for determining the node space of a block
+        fn nodeSpaceFromBlock(self: @This(), block: Block) NodeSpace {
+            var size: [N]usize = undefined;
+
+            for (0..N) |axis| {
+                size[axis] = block.size[axis] * self.manager.cell_size[axis];
+            }
+
+            return .{
+                .bounds = block.bounds,
+                .size = size,
             };
         }
     };

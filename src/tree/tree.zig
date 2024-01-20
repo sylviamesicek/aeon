@@ -7,6 +7,7 @@ const assert = std.debug.assert;
 const geometry = @import("../geometry/geometry.zig");
 
 const manager = @import("manager.zig");
+const multigrid = @import("multigrid.zig");
 const permute = @import("permute.zig");
 const worker = @import("worker.zig");
 
@@ -347,6 +348,7 @@ pub fn TreeMesh(comptime N: usize) type {
 
 test {
     _ = manager;
+    _ = multigrid;
     _ = permute;
     _ = worker;
 }

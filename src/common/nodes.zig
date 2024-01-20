@@ -214,6 +214,10 @@ pub fn NodeSpace(comptime N: usize, comptime M: usize) type {
             self.setNodeValue(toSigned(cell), field, v);
         }
 
+        // *********************************
+        // Order ***************************
+        // *********************************
+
         pub fn order(self: Self, comptime O: usize) Order(O) {
             return .{
                 .space = self,
