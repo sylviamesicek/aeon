@@ -5,13 +5,13 @@ const assert = std.debug.assert;
 
 const axis_ = @import("axis.zig");
 
-const SplitIndex = axis_.SplitIndex;
-
 /// An N-dimensional subregion of some larger index space.
 pub fn IndexBox(comptime N: usize) type {
     return struct {
         origin: [N]usize,
         size: [N]usize,
+
+        const AxisMask = axis_.AxisMask(N);
 
         /// Transforms a local index into a global one.
         pub fn globalFromLocal(self: @This(), local: [N]usize) [N]usize {
@@ -42,8 +42,8 @@ pub fn IndexBox(comptime N: usize) type {
             return result;
         }
 
-        pub fn split(self: @This(), index: SplitIndex(N)) RealBox(N) {
-            const cart = index.toCartesian();
+        pub fn split(self: @This(), mask: AxisMask) RealBox(N) {
+            const cart = mask.unpack();
 
             var result: RealBox(N) = undefined;
 
@@ -97,6 +97,8 @@ pub fn RealBox(comptime N: usize) type {
         origin: [N]f64,
         size: [N]f64,
 
+        const AxisMask = axis_.AxisMask(N);
+
         pub const unit: @This() = .{
             .origin = [1]f64{0.0} ** N,
             .size = [1]f64{1.0} ** N,
@@ -124,8 +126,8 @@ pub fn RealBox(comptime N: usize) type {
             return result;
         }
 
-        pub fn split(self: @This(), index: SplitIndex(N)) RealBox(N) {
-            const cart = index.toCartesian();
+        pub fn split(self: @This(), mask: AxisMask) RealBox(N) {
+            const cart = mask.unpack();
 
             var result: RealBox(N) = undefined;
 

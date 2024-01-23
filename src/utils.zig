@@ -44,7 +44,7 @@ pub const RangeMap = struct {
         return self.offsets.items.len;
     }
 
-    pub fn set(self: @This(), idx: usize, val: usize) usize {
+    pub fn set(self: @This(), idx: usize, val: usize) void {
         self.offsets.items[idx] = val;
     }
 

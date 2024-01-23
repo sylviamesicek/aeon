@@ -157,7 +157,7 @@ pub fn AxisMask(comptime N: usize) type {
             var result: [count]@This() = undefined;
 
             for (0..count) |i| {
-                result[i].bits.mask = @intCast(count);
+                result[i].bits.mask = @intCast(i);
             }
 
             return result;

@@ -48,11 +48,11 @@ pub fn NodeWorker(comptime N: usize, comptime M: usize) type {
 
         const Self = @This();
 
-        pub fn init(allocator: Allocator, mesh: *const TreeMesh, manager: *const NodeManager(N)) !@This() {
-            var map = RangeMap.init(allocator);
-            errdefer map.deinit();
+        pub fn init(allocator: Allocator, mesh: *const TreeMesh, manager: *const NodeManager) !@This() {
+            var map: RangeMap = .{};
+            errdefer map.deinit(allocator);
 
-            try manager.buildNodeMap(M, &map);
+            try manager.buildNodeMap(M, allocator, &map);
 
             return .{
                 .gpa = allocator,
@@ -146,7 +146,7 @@ pub fn NodeWorker(comptime N: usize, comptime M: usize) type {
                 const block_field = self.map.slice(block_id, field);
                 const node_space = self.nodeSpaceFromBlock(block);
 
-                const cells = node_space.cellSpace().cartesianIndices();
+                var cells = node_space.cellSpace().cartesianIndices();
 
                 while (cells.next()) |cell| {
                     const v = node_space.value(cell, block_field);
@@ -158,7 +158,7 @@ pub fn NodeWorker(comptime N: usize, comptime M: usize) type {
         }
 
         pub fn normAll(self: @This(), field: []const f64) f64 {
-            return @sqrt(self.normSq(field));
+            return @sqrt(self.normSqAll(field));
         }
 
         // **********************************

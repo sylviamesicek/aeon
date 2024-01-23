@@ -14,7 +14,7 @@ pub fn PoissonEquation(comptime M: usize) type {
         const BoundaryKind = common.BoundaryKind;
         const Robin = common.Robin;
 
-        const DataOut = aeon.DataOut(N);
+        const DataOut = aeon.DataOut(N, M);
 
         const SystemConst = common.SystemConst;
 
@@ -92,13 +92,13 @@ pub fn PoissonEquation(comptime M: usize) type {
             // Globally refine three times
             for (0..3) |_| {
                 @memset(mesh.cells.items(.flag), true);
-                mesh.refine(allocator);
+                try mesh.refine(allocator);
             }
 
             var manager = try NodeManager.init(allocator, [1]usize{16} ** N, 8);
             defer manager.deinit();
 
-            manager.build(allocator, &mesh);
+            try manager.build(allocator, &mesh);
 
             for (manager.blocks.items) |block| {
                 std.debug.print("Block {}\n", .{block});

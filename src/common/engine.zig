@@ -131,11 +131,11 @@ pub fn isOperator(comptime N: usize, comptime M: usize, comptime O: usize) fn (t
 
     const Closure = struct {
         fn trait(comptime T: type) bool {
-            if (comptime !(hasFn("apply")(T) and @TypeOf(T.apply) == fn (T, Engine(N, M, O), []const f64) f64)) {
+            if (comptime !(hasFn(T, "apply") and @TypeOf(T.apply) == fn (T, Engine(N, M, O), []const f64) f64)) {
                 return false;
             }
 
-            if (comptime !(hasFn("applyDiag")(T) and @TypeOf(T.applyDiag) == fn (T, Engine(N, M, O)) f64)) {
+            if (comptime !(hasFn(T, "applyDiag") and @TypeOf(T.applyDiag) == fn (T, Engine(N, M, O)) f64)) {
                 return false;
             }
 
@@ -151,7 +151,7 @@ pub fn isProjection(comptime N: usize, comptime M: usize, comptime O: usize) fn 
 
     const Closure = struct {
         fn trait(comptime T: type) bool {
-            if (comptime !(hasFn("project")(T) and @TypeOf(T.project) == fn (T, Engine(N, M, O)) f64)) {
+            if (comptime !(hasFn(T, "project") and @TypeOf(T.project) == fn (T, Engine(N, M, O)) f64)) {
                 return false;
             }
 

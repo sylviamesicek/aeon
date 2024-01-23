@@ -2,7 +2,6 @@ const std = @import("std");
 const geometry = @import("../geometry/geometry.zig");
 
 const lagrange = @import("lagrange.zig");
-const nodes = @import("nodes.zig");
 
 /// This namespace provides several functions for computing cell centered interpolation, differentiation,
 /// prolongation, restriction, and boundary stencils. Here `M` corresponds to the number of support points

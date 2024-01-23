@@ -3,7 +3,6 @@
 //! and extrapolating from boundary conditions.
 
 const lagrange = @import("lagrange.zig");
-const nodes = @import("nodes.zig");
 const stencils = @import("stencils.zig");
 
 // ***************************

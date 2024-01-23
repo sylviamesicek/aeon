@@ -118,21 +118,21 @@ pub fn NodeManager(comptime N: usize) type {
         pub fn build(self: *@This(), allocator: Allocator, mesh: *const TreeMesh) !void {
             // ****************************
             // Computes Blocks + Offsets
-            self.buildBlocks(allocator, mesh);
+            try self.buildBlocks(allocator, mesh);
 
             // *****************************
             // Compute neighbors
-            self.buildCells(mesh);
+            try self.buildCells(mesh);
 
             // ********************************
             // Compute block to nodes map
-            self.buildBlockToNodes();
+            try self.buildBlockToNodes();
         }
 
         /// Runs a recursive algorithm that traverses the tree from root to leaves, computing valid blocks while doing so.
         /// This algorithm works level by level (queueing up blocks for use on the next level). And thus preserves the invariant
         /// that all blocks on the same level are contiguous in the block array.
-        fn buildBlocks(self: *@This(), allocator: Allocator, mesh: *const TreeMesh) void {
+        fn buildBlocks(self: *@This(), allocator: Allocator, mesh: *const TreeMesh) !void {
             // Cache
             const cells = mesh.cells.slice();
             const levels = mesh.numLevels();
@@ -145,7 +145,10 @@ pub fn NodeManager(comptime N: usize) type {
 
             // Reset blocks
             self.blocks.clearRetainingCapacity();
-            try self.blocks.append(self.gpa, .{ .refinement = 0 });
+            try self.blocks.append(self.gpa, .{
+                .refinement = 0,
+                .boundary = [1]bool{true} ** FaceIndex.count,
+            });
 
             self.block_to_cells.clear();
             try self.block_to_cells.append(self.gpa, 0);
@@ -223,8 +226,8 @@ pub fn NodeManager(comptime N: usize) type {
                         try stack.append(allocator, .{
                             .boundary = boundary,
                             .refinement = refinement_sub,
-                            .node_offset = offset_sub,
-                            .node_total = total_sub,
+                            .offset = offset_sub,
+                            .total = total_sub,
                         });
 
                         offset_sub += total_sub;
@@ -251,7 +254,7 @@ pub fn NodeManager(comptime N: usize) type {
         }
 
         /// Computes the block to node offset map.
-        fn buildBlockToNodes(self: *@This()) void {
+        fn buildBlockToNodes(self: *@This()) !void {
             try self.block_to_nodes.resize(self.gpa, self.blocks.items.len + 1);
 
             var offset: usize = 0;
@@ -271,14 +274,14 @@ pub fn NodeManager(comptime N: usize) type {
         }
 
         /// Builds extra cell information like neighbors.
-        fn buildCells(self: *@This(), mesh: *const TreeMesh) void {
+        fn buildCells(self: *@This(), mesh: *const TreeMesh) !void {
             // Cache pointers
             const cells = mesh.cells.slice();
 
             // Reset and reserve
             try self.cells.resize(self.gpa, cells.len);
             // Set root
-            self.cells.items[0].neighbors = [1]usize{boundary_index} ** Region.count;
+            self.cells.items(.neighbors)[0] = [1]usize{boundary_index} ** Region.count;
 
             // Loop through every non root cell
             for (1..cells.len) |cell| {
@@ -294,7 +297,7 @@ pub fn NodeManager(comptime N: usize) type {
 
                 for (Region.enumerate()) |region| {
                     // Central region is simply null
-                    if (region == Region.central()) {
+                    if (std.meta.eql(region, Region.central())) {
                         neighbors[region.linear()] = null_index;
                         continue;
                     }
@@ -347,7 +350,7 @@ pub fn NodeManager(comptime N: usize) type {
                 }
 
                 // Set neighbors
-                self.cells.items[cell].neighbors = neighbors;
+                self.cells.items(.neighbors)[cell] = neighbors;
             }
 
             // Set block and index of cells
@@ -357,8 +360,8 @@ pub fn NodeManager(comptime N: usize) type {
                 var cell_indices = IndexSpace.fromSize(block.size).cartesianIndices();
                 while (cell_indices.next()) |index| {
                     const cell = self.cellFromBlock(block_id, index);
-                    self.cells.items[cell].block = block_id;
-                    self.cells.items[cell].index = index;
+                    self.cells.items(.block)[cell] = block_id;
+                    self.cells.items(.index)[cell] = index;
                 }
             }
         }
@@ -385,8 +388,8 @@ pub fn NodeManager(comptime N: usize) type {
             return [1]usize{result} ** N;
         }
 
-        pub fn buildNodeMap(self: *const @This(), comptime M: usize, map: *RangeMap) !void {
-            try map.resize(map.allocator, self.blocks.items.len + 1);
+        pub fn buildNodeMap(self: *const @This(), comptime M: usize, allocator: Allocator, map: *RangeMap) !void {
+            try map.resize(allocator, self.blocks.items.len + 1);
 
             var offset: usize = 0;
             map.set(0, 0);
@@ -423,9 +426,9 @@ pub fn NodeManager(comptime N: usize) type {
             return self.blocks.items[block_id];
         }
 
-        pub fn cellFromBlock(self: *const @This(), block_id: usize, index: []usize) usize {
+        pub fn cellFromBlock(self: *const @This(), block_id: usize, index: [N]usize) usize {
             const block = self.blocks.items[block_id];
-            const offset = self.block_to_cells[block_id];
+            const offset = self.block_to_cells.offset(block_id);
             const linear = IndexSpace.fromSize(block.size).linearFromCartesian(index);
             return offset + self.cell_permute.permutation(block.refinement)[linear];
         }

@@ -326,7 +326,7 @@ pub fn TreeMesh(comptime N: usize) type {
                     if (neighbor_children == null_index) {
                         // Neighbor is a leaf, so this node's children must have faces set to null
                         for (AxisMask.enumerate()) |child| {
-                            if (child.toCartesian()[face.axis] == face.side) {
+                            if (child.isSet(face.axis) == face.side) {
                                 const child_node = children + child.toLinear();
                                 new_cells.items(.neighbors)[child_node][face.axis] = null_index;
                             }
@@ -336,7 +336,7 @@ pub fn TreeMesh(comptime N: usize) type {
                         for (AxisMask.enumerate()) |child| {
                             if (child.isSet(face.axis) == face.side) {
                                 const child_node = children + child.toLinear();
-                                const other_node = neighbor_children + child.reverseAxis(face.axis).toLinear();
+                                const other_node = neighbor_children + child.toggled(face.axis).toLinear();
                                 new_cells.items(.neighbors)[child_node][face.axis] = other_node;
                             }
                         }

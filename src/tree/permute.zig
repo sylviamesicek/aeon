@@ -53,12 +53,10 @@ pub fn CellPermutation(comptime N: usize) type {
 
                 while (indices.next()) |sindex| : (linear += 1) {
                     for (AxisMask.enumerate()) |split| {
-                        const cart = split.toCartesian();
-
                         var dindex: [N]usize = undefined;
 
                         for (0..N) |axis| {
-                            if (cart[axis]) {
+                            if (split.isSet(axis)) {
                                 dindex[axis] = 2 * sindex[axis] + 1;
                             } else {
                                 dindex[axis] = 2 * sindex[axis];
