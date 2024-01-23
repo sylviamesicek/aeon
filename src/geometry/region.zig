@@ -250,7 +250,7 @@ pub fn Region(comptime N: usize) type {
                 const side = self.sides[axis];
                 switch (side) {
                     .middle => mask.unset(axis),
-                    .left => mask.setValue(axis, !split.isSet(axis)),
+                    .left => mask.setValue(axis, split.isSet(axis) == false),
                     .right => mask.setValue(axis, split.isSet(axis)),
                 }
             }

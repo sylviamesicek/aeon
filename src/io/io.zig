@@ -90,7 +90,7 @@ pub fn DataOut(comptime N: usize, comptime M: usize) type {
                     // Get Cell ID
                     const cell_id = manager.cellFromBlock(block_id, mcell);
 
-                    if (mesh.cells.items(.children)[cell_id] == null_index) {
+                    if (mesh.cells.items(.children)[cell_id] != null_index) {
                         continue;
                     }
 

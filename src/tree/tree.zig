@@ -104,8 +104,6 @@ pub fn TreeMesh(comptime N: usize) type {
                 }
             }
 
-            std.debug.print("Began Smoothing\n", .{});
-
             // Smooth flags
             var is_smooth = false;
 
@@ -168,15 +166,11 @@ pub fn TreeMesh(comptime N: usize) type {
                     }
                 }
             }
-
-            std.debug.print("End Smoothing\n", .{});
         }
 
         pub fn refine(self: *Self, allocator: Allocator) !void {
             // Perfom Smoothing
             self.smoothRefineFlags();
-
-            std.debug.print("Cell Flags {any}\n", .{self.cells.items(.flag)});
 
             // Transfer all mesh data to a scratch buffer
             var scratch = try self.cells.clone(allocator);
@@ -216,7 +210,6 @@ pub fn TreeMesh(comptime N: usize) type {
             try self.level_to_cells.append(self.gpa, self.cells.len);
 
             while (map.items.len > 0) : (target += 1) {
-                std.debug.print("Target {}, Map {any}\n", .{ target, map.items });
                 // Reset temporary map
                 map_tmp.shrinkRetainingCapacity(0);
                 // Loop over current level

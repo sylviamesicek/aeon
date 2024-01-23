@@ -6,9 +6,7 @@
 
 To reach the state of minimum viable product (MVP) the following features must be completed.
 
-- [x] Single level cell clustering using the Berger-Rigoutsos alogorithm.
-- [x] Patch compatible clustering algorithm extension.
-- [x] Multilevel regridding based on GRChombo.
+- [x] Adaptive Quadtree based meshes.
 - [x] Stencil application.
 - [ ] Transfer between regridding runs.
 - [x] Interior ghost node filling.
@@ -17,9 +15,9 @@ To reach the state of minimum viable product (MVP) the following features must b
 - [x] Prolongation operator.
 - [x] BiCGStab(l) Solver.
 - [x] Jacobi's Method.
-- [ ] Multigrid elliptic solver.
-- [ ] Runge Kutta 4th order method.
-- [ ] Hyperbolic solver.
+- [x] Multigrid elliptic solver.
+- [x] Runge Kutta 4th order method.
+- [x] Hyperbolic solver.
 - [x] VTK Output.
 
 

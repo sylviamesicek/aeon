@@ -353,7 +353,7 @@ pub fn NodeWorker(comptime N: usize, comptime M: usize) type {
                             const neighbor_block_id = cell_meta.items(.block)[neighbor];
                             const neighbor_block = manager.blockFromId(neighbor_block_id);
                             const neighbor_index = cell_meta.items(.index)[neighbor];
-                            const neighbor_field = map.slice(neighbor_block_id, field);
+                            const neighbor_field: []const f64 = map.slice(neighbor_block_id, field);
                             const neighbor_node_space = self.nodeSpaceFromBlock(neighbor_block);
 
                             var neighbor_origin = toSigned(refined(mul(neighbor_index, cell_size)));

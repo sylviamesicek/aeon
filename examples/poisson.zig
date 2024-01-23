@@ -23,6 +23,7 @@ pub fn PoissonEquation(comptime M: usize) type {
         const NodeWorker = tree.NodeWorker(N, M);
         const TreeMesh = tree.TreeMesh(N);
 
+        const RealBox = geometry.RealBox(N);
         const FaceIndex = geometry.FaceIndex(N);
         const IndexSpace = geometry.IndexSpace(N);
         const IndexMixin = geometry.IndexMixin(N);
@@ -89,14 +90,23 @@ pub fn PoissonEquation(comptime M: usize) type {
             });
             defer mesh.deinit();
 
-            // Globally refine three times
-            for (0..3) |r| {
+            // Globally refine two times
+            for (0..5) |r| {
                 std.debug.print("Running Refinement {}\n", .{r});
-                std.debug.print("Mesh Neighbors {any}\n", .{mesh.cells.items(.neighbors)});
-                std.debug.print("Mesh Parent {any}\n", .{mesh.cells.items(.parent)});
-                std.debug.print("Mesh Children {any}\n", .{mesh.cells.items(.children)});
+                // std.debug.print("Mesh Neighbors {any}\n", .{mesh.cells.items(.neighbors)});
+                // std.debug.print("Mesh Parent {any}\n", .{mesh.cells.items(.parent)});
+                // std.debug.print("Mesh Children {any}\n", .{mesh.cells.items(.children)});
 
                 @memset(mesh.cells.items(.flag), true);
+                try mesh.refine(allocator);
+            }
+
+            for (0..mesh.cells.len) |cell_id| {
+                const bounds: RealBox = mesh.cells.items(.bounds)[cell_id];
+                if (bounds.origin[0] < 0.1 and bounds.origin[1] < 0.1) {
+                    mesh.cells.items(.flag)[cell_id] = true;
+                }
+
                 try mesh.refine(allocator);
             }
 
@@ -107,6 +117,12 @@ pub fn PoissonEquation(comptime M: usize) type {
 
             // for (manager.blocks.items) |block| {
             //     std.debug.print("Block {}\n", .{block});
+            // }
+
+            // for (0..mesh.cells.len) |cell_id| {
+            //     std.debug.print("Cell {}\n", .{cell_id});
+            //     std.debug.print("Cell Face: {any}\n", .{mesh.cells.items(.neighbors)[cell_id]});
+            //     std.debug.print("Cell Neighbors: {any}\n", .{manager.cells.items(.neighbors)[cell_id]});
             // }
 
             std.debug.print("Num packed nodes: {}\n", .{manager.numPackedNodes()});
@@ -181,13 +197,17 @@ pub fn PoissonEquation(comptime M: usize) type {
                 .source = source,
             });
 
+            var buf = std.io.bufferedWriter(file.writer());
+
             try DataOut.writeVtk(
                 Output,
                 allocator,
                 &worker,
                 output,
-                file.writer(),
+                buf.writer(),
             );
+
+            try buf.flush();
         }
     };
 }

@@ -296,6 +296,7 @@ pub fn NodeManager(comptime N: usize) type {
                 // Find split index
                 const split_lin = cell - cells.items(.children)[parent];
                 const split = AxisMask.fromLinear(@intCast(split_lin));
+                _ = split; // autofix
 
                 // Store all neighbors of this cell
                 var neighbors: [Region.count]usize = undefined;
@@ -310,21 +311,21 @@ pub fn NodeManager(comptime N: usize) type {
                     // Start with current cell
                     var neighbor: usize = cell;
                     // Did we cross a coarse fine interface
-                    var interface: bool = false;
+                    // var interface: bool = false;
 
                     for (0..N) |axis| {
                         assert(neighbor != boundary_index);
 
-                        // If current neighbor is null continue.
-                        if (neighbor == null_index or region.sides[axis] == .middle) {
+                        // If side is middle skip axis.
+                        if (region.sides[axis] == .middle) {
                             continue;
                         }
 
-                        // If we have crossed an interface, do not traverse this axis unless we are truly
-                        // searching for a new node.
-                        if (interface and (region.sides[axis] == .right) != split.isSet(axis)) {
-                            continue;
-                        }
+                        // // If we have crossed an interface, do not traverse this axis unless we are truly
+                        // // searching for a new node.
+                        // if (interface and (region.sides[axis] == .right) != split.isSet(axis)) {
+                        //     continue;
+                        // }
 
                         // Find face to traverse
                         const face = FaceIndex{
@@ -333,21 +334,10 @@ pub fn NodeManager(comptime N: usize) type {
                         };
 
                         // Get neighbor, searching parent neighbors if necessary
-                        const traverse = cells.items(.neighbors)[neighbor][face.toLinear()];
-
-                        if (traverse == null_index) {
-                            // We had to traverse a fine-coarse boundary
-                            const neighbor_parent = cells.items(.parent)[neighbor];
-                            interface = true;
-                            // Update neighbor
-                            neighbor = cells.items(.neighbors)[neighbor_parent][face.toLinear()];
-                        } else if (traverse == boundary_index) {
-                            interface = false;
-                            // On boundary, ignore.
-                            neighbor = null_index;
-                        } else {
-                            // Update neighbor
-                            neighbor = traverse;
+                        neighbor = cells.items(.neighbors)[neighbor][face.toLinear()];
+                        // Traverse no more if boundary or null
+                        if (neighbor == boundary_index or neighbor == null_index) {
+                            break;
                         }
                     }
 
