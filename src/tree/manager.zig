@@ -405,8 +405,12 @@ pub fn NodeManager(comptime N: usize) type {
         }
 
         /// Returns the number of nodes required to store compact node vectors on the mesh.
-        pub fn numNodes(self: *const @This()) usize {
-            return self.block_to_nodes.items[self.block_to_nodes.items.len - 1];
+        pub fn numPackedNodes(self: *const @This()) usize {
+            return self.block_to_nodes.total();
+        }
+
+        pub fn numPackedBaseNodes(self: *const @This()) usize {
+            return self.block_to_nodes.size(0);
         }
 
         /// Number of blocks in the mesh.
@@ -415,7 +419,7 @@ pub fn NodeManager(comptime N: usize) type {
         }
 
         /// Retrieves a block descriptor from a `block_id`.
-        pub fn blockFromId(self: *const @This(), block_id: usize) Block(N) {
+        pub fn blockFromId(self: *const @This(), block_id: usize) Block {
             return self.blocks.items[block_id];
         }
 

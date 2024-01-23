@@ -11,6 +11,7 @@ const multigrid = @import("multigrid.zig");
 const permute = @import("permute.zig");
 const worker = @import("worker.zig");
 
+pub const MultigridMethod = multigrid.MultigridMethod;
 pub const NodeManager = manager.NodeManager;
 pub const NodeWorker = worker.NodeWorker;
 

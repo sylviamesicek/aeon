@@ -85,11 +85,38 @@ pub fn MultigridMethod(comptime N: usize, comptime M: usize, comptime O: usize, 
                 scr: []f64,
                 rhs: []f64,
 
-                fn iterate(self: @This(), allocator: Allocator, level: usize) !void {
-                    if (level == 0) {}
+                fn apply(self: *const @This(), out: []f64, in: []const f64) void {
+                    self.worker.unpackBase(self.sys, in);
+                    self.worker.order(M).fillGhostNodes(0, self.bound, self.sys);
+                    self.worker.order(M).apply(0, self.scr, self.oper, self.sys);
+                    self.worker.packBase(out, self.scr);
+                }
 
+                fn iterate(self: @This(), allocator: Allocator, level: usize) !void {
                     const worker = self.worker.order(M);
                     const worker0 = self.worker.order(0);
+
+                    if (level == 0) {
+                        const ndofs = self.worker.manager.numPackedBaseNodes();
+
+                        const sys_base = try allocator.alloc(f64, ndofs);
+                        defer allocator.free(sys_base);
+
+                        const rhs_base = try allocator.alloc(f64, ndofs);
+                        defer allocator.free(rhs_base);
+
+                        self.worker.packBase(sys_base, self.sys);
+                        self.worker.packBase(rhs_base, self.rhs);
+
+                        try self.method.base_solver.solve(allocator, self, sys_base, rhs_base);
+
+                        self.worker.unpackBase(self.sys, sys_base);
+                        self.worker.unpackBase(self.rhs, rhs_base);
+
+                        self.worker.order(M).fillGhostNodes(0, self.bound, self.sys);
+
+                        return;
+                    }
 
                     // ********************************
                     // Presmoothing

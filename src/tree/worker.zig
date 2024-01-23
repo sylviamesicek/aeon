@@ -71,42 +71,68 @@ pub fn NodeWorker(comptime N: usize, comptime M: usize) type {
             return self.map.total();
         }
 
-        pub fn packAll(self: @This(), src: []const f64, dest: []f64) void {
+        pub fn packBase(self: @This(), dest: []f64, src: []const f64) void {
+            assert(dest.len == self.manager.numPackedBaseNodes());
+            assert(src.len == self.numNodes());
+
+            self.packBlock(0, dest, src);
+        }
+
+        pub fn unpackBase(self: @This(), dest: []f64, src: []const f64) void {
+            assert(src.len == self.manager.numPackedBaseNodes());
+            assert(dest.len == self.numNodes());
+
+            self.unpackBlock(0, dest, src);
+        }
+
+        pub fn packAll(
+            self: @This(),
+            dest: []f64,
+            src: []const f64,
+        ) void {
             assert(src.len == self.map.total());
-            assert(dest.len == self.manager.numNodes());
+            assert(dest.len == self.manager.numPackedNodes());
 
             for (0..self.manager.numBlocks()) |block_id| {
-                const block = self.manager.blockFromId(block_id);
-                const block_src = self.slice(block_id, src);
-                const block_dest = self.manager.block_to_nodes.slice(block_id, dest);
-                const node_space = self.nodeSpaceFromBlock(block);
-
-                var cells = node_space.cellSpace().cartesianIndices();
-                var linear: usize = 0;
-
-                while (cells.next()) |cell| : (linear += 1) {
-                    const v = node_space.value(cell, block_src);
-                    block_dest[linear] = v;
-                }
+                self.packBlock(block_id, dest, src);
             }
         }
 
-        pub fn unpackAll(self: @This(), src: []const f64, dest: []f64) void {
+        pub fn unpackAll(self: @This(), dest: []f64, src: []const f64) void {
             assert(dest.len == self.map.total());
-            assert(src.len == self.manager.numNodes());
+            assert(src.len == self.manager.numPackedNodes());
 
             for (0..self.manager.numBlocks()) |block_id| {
-                const block = self.manager.blockFromId(block_id);
-                const block_dest = self.map.slice(block_id, dest);
-                const block_src = self.manager.block_to_nodes.slice(block_id, src);
-                const node_space = self.nodeSpaceFromBlock(block);
+                self.unpackBlock(block_id, dest, src);
+            }
+        }
 
-                var cells = node_space.cellSpace().cartesianIndices();
-                var linear: usize = 0;
+        fn packBlock(self: @This(), block_id: usize, dest: []f64, src: []const f64) void {
+            const block = self.manager.blockFromId(block_id);
+            const block_src = self.slice(block_id, src);
+            const block_dest = self.manager.block_to_nodes.slice(block_id, dest);
+            const node_space = self.nodeSpaceFromBlock(block);
 
-                while (cells.next()) |cell| : (linear += 1) {
-                    node_space.setValue(cell, block_dest, block_src[linear]);
-                }
+            var cells = node_space.cellSpace().cartesianIndices();
+            var linear: usize = 0;
+
+            while (cells.next()) |cell| : (linear += 1) {
+                const v = node_space.value(cell, block_src);
+                block_dest[linear] = v;
+            }
+        }
+
+        fn unpackBlock(self: @This(), block_id: usize, dest: []f64, src: []const f64) void {
+            const block = self.manager.blockFromId(block_id);
+            const block_dest = self.map.slice(block_id, dest);
+            const block_src = self.manager.block_to_nodes.slice(block_id, src);
+            const node_space = self.nodeSpaceFromBlock(block);
+
+            var cells = node_space.cellSpace().cartesianIndices();
+            var linear: usize = 0;
+
+            while (cells.next()) |cell| : (linear += 1) {
+                node_space.setValue(cell, block_dest, block_src[linear]);
             }
         }
 
@@ -530,6 +556,13 @@ pub fn NodeWorker(comptime N: usize, comptime M: usize) type {
                 // ********************************
                 // Projection/Application *********
                 // ********************************
+
+                /// Using the given projection to set the values of the field on this level.
+                pub fn projectAll(self: @This(), projection: anytype, field: []f64) void {
+                    for (0..self.worker.mesh.numLevels()) |level_id| {
+                        self.project(level_id, projection, field);
+                    }
+                }
 
                 /// Using the given projection to set the values of the field on this level.
                 pub fn project(self: @This(), level: usize, projection: anytype, field: []f64) void {

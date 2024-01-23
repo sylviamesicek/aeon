@@ -7,10 +7,10 @@ pub const lac = @import("lac/lac.zig");
 pub const tree = @import("tree/tree.zig");
 pub const utils = @import("utils.zig");
 
-// // Global exports
-// const io = @import("io/io.zig");
+// Global exports
+const io = @import("io/io.zig");
 
-// pub const DataOut = io.DataOut;
+pub const DataOut = io.DataOut;
 
 // Propogate testing
 

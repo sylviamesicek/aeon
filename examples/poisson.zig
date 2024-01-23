@@ -4,24 +4,24 @@ const Allocator = std.mem.Allocator;
 
 const aeon = @import("aeon");
 
-const bsamr = aeon.bsamr;
+const common = aeon.common;
 const geometry = aeon.geometry;
-const nodes = aeon.nodes;
+const tree = aeon.tree;
 
 pub fn PoissonEquation(comptime M: usize) type {
     const N = 2;
     return struct {
-        const BoundaryKind = nodes.BoundaryKind;
-        const Robin = nodes.Robin;
+        const BoundaryKind = common.BoundaryKind;
+        const Robin = common.Robin;
 
-        const DataOut = aeon.DataOut(N, M);
-        const MultigridMethod = aeon.methods.MultigridMethod(N, M, BiCGStabSolver);
-        const LinearMapMethod = aeon.methods.LinearMapMethod(N, M, BiCGStabSolver);
-        const SystemConst = aeon.methods.SystemConst;
+        const DataOut = aeon.DataOut(N);
 
-        const Mesh = bsamr.Mesh(N);
-        const DofManager = bsamr.DofManager(N, M);
-        const RegridManager = bsamr.RegridManager(N);
+        const SystemConst = common.SystemConst;
+
+        const MultigridMethod = tree.MultigridMethod(N, M, M, BiCGStabSolver);
+        const NodeManager = tree.NodeManager(N);
+        const NodeWorker = tree.NodeWorker(N, M);
+        const TreeMesh = tree.TreeMesh(N);
 
         const FaceIndex = geometry.FaceIndex(N);
         const IndexSpace = geometry.IndexSpace(N);
@@ -29,7 +29,7 @@ pub fn PoissonEquation(comptime M: usize) type {
 
         const BiCGStabSolver = aeon.lac.BiCGStabSolver;
 
-        const Engine = aeon.mesh.Engine(N, M);
+        const Engine = common.Engine(N, M, M);
 
         pub const Source = struct {
             amplitude: f64,
@@ -83,64 +83,48 @@ pub fn PoissonEquation(comptime M: usize) type {
         fn run(allocator: Allocator) !void {
             std.debug.print("Running Poisson Elliptic Solver\n", .{});
 
-            var mesh = try Mesh.init(allocator, .{
-                .physical_bounds = .{
-                    .origin = [2]f64{ 0.0, 0.0 },
-                    .size = [2]f64{ 2.0 * std.math.pi, 2.0 * std.math.pi },
-                },
-                .tile_width = 8,
-                .index_size = [2]usize{ 1, 1 },
+            var mesh = try TreeMesh.init(allocator, .{
+                .origin = [2]f64{ 0.0, 0.0 },
+                .size = [2]f64{ 2.0 * std.math.pi, 2.0 * std.math.pi },
             });
             defer mesh.deinit();
 
-            var dofs = DofManager.init(allocator);
-            defer dofs.deinit();
-
-            try dofs.build(&mesh);
-
             // Globally refine three times
-
             for (0..3) |_| {
-                const amr: RegridManager = .{
-                    .max_levels = 4,
-                    .patch_efficiency = 0.1,
-                    .block_efficiency = 0.7,
-                };
-
-                var tags = try allocator.alloc(bool, dofs.numTiles());
-                defer allocator.free(tags);
-
-                @memset(tags, true);
-
-                try amr.regrid(allocator, tags, &mesh, dofs.tile_map);
-                try dofs.build(&mesh);
+                @memset(mesh.cells.items(.flag), true);
+                mesh.refine(allocator);
             }
 
-            for (mesh.patches) |patch| {
-                std.debug.print("Patch {}\n", .{patch});
-            }
+            var manager = try NodeManager.init(allocator, [1]usize{16} ** N, 8);
+            defer manager.deinit();
 
-            for (mesh.blocks) |block| {
+            manager.build(allocator, &mesh);
+
+            for (manager.blocks.items) |block| {
                 std.debug.print("Block {}\n", .{block});
             }
 
-            std.debug.print("NDofs: {}\n", .{dofs.numNodes()});
+            std.debug.print("Num packed nodes: {}\n", .{manager.numPackedNodes()});
+
+            // Create worker
+            var worker = try NodeWorker.init(allocator, &mesh, &manager);
+            defer worker.deinit();
 
             // Project source values
-
-            const source = try allocator.alloc(f64, dofs.numCells());
+            const source = try allocator.alloc(f64, worker.numNodes());
             defer allocator.free(source);
 
-            dofs.project(&mesh, Source{ .amplitude = 1.0 }, source);
+            worker.order(M).projectAll(Source{ .amplitude = 1.0 }, source);
 
-            const solution = try allocator.alloc(f64, dofs.numCells());
+            // Project solution
+            const solution = try allocator.alloc(f64, worker.numNodes());
             defer allocator.free(solution);
 
-            dofs.project(&mesh, Source{ .amplitude = 3.0 }, solution);
+            worker.order(M).projectAll(Source{ .amplitude = 2.0 }, solution);
 
             // Allocate numerical cell vector
 
-            const numerical = try allocator.alloc(f64, dofs.numCells());
+            const numerical = try allocator.alloc(f64, worker.numNodes());
             defer allocator.free(numerical);
 
             @memset(numerical, 0.0);
@@ -153,12 +137,9 @@ pub fn PoissonEquation(comptime M: usize) type {
                 .postsmooth = 5,
             };
 
-            // const solver = LinearMapMethod.new(BiCGStabSolver.new(10000, 10e-10));
-
             try solver.solve(
                 allocator,
-                &mesh,
-                &dofs,
+                &worker,
                 PoissonOperator{},
                 Boundary{},
                 numerical,
@@ -167,10 +148,10 @@ pub fn PoissonEquation(comptime M: usize) type {
 
             // Compute error
 
-            const err = try allocator.alloc(f64, dofs.numCells());
+            const err = try allocator.alloc(f64, worker.numNodes());
             defer allocator.free(err);
 
-            for (0..dofs.numCells()) |i| {
+            for (0..worker.numNodes()) |i| {
                 err[i] = numerical[i] - solution[i];
             }
 
@@ -188,7 +169,7 @@ pub fn PoissonEquation(comptime M: usize) type {
                 source,
             };
 
-            const output = SystemConst(Output).view(dofs.numCells(), .{
+            const output = SystemConst(Output).view(worker.numNodes(), .{
                 .numerical = numerical,
                 .exact = solution,
                 .err = err,
@@ -198,8 +179,7 @@ pub fn PoissonEquation(comptime M: usize) type {
             try DataOut.writeVtk(
                 Output,
                 allocator,
-                &mesh,
-                &dofs,
+                &worker,
                 output,
                 file.writer(),
             );
