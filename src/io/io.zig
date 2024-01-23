@@ -95,7 +95,7 @@ pub fn DataOut(comptime N: usize, comptime M: usize) type {
                     }
 
                     // This is a leaf
-                    const origin = IndexMixin.mul(block.size, manager.cell_size);
+                    const origin = IndexMixin.mul(mcell, manager.cell_size);
 
                     // Append Point Data
 
@@ -169,10 +169,10 @@ pub fn DataOut(comptime N: usize, comptime M: usize) type {
 
                     while (cells.next()) |cell| {
                         const node = IndexMixin.add(origin, cell);
-                        const linear = node_space.cellSpace().linearFromCartesian(node);
 
                         inline for (comptime std.enums.values(Tag), 0..) |field, idx| {
-                            try fields[idx].append(allocator, block_sys.field(field)[linear]);
+                            const value = node_space.value(node, block_sys.field(field));
+                            try fields[idx].append(allocator, value);
                         }
                     }
                 }

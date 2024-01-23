@@ -104,17 +104,19 @@ pub fn TreeMesh(comptime N: usize) type {
                 }
             }
 
+            std.debug.print("Began Smoothing\n", .{});
+
             // Smooth flags
             var is_smooth = false;
 
-            while (!is_smooth) {
+            while (is_smooth == false) {
                 is_smooth = true;
 
                 for (1..cells.len) |cell| {
                     // Is the current node flagged for refinement
                     const flag = cells.items(.flag)[cell];
 
-                    if (!flag) {
+                    if (flag == false) {
                         continue;
                     }
 
@@ -166,11 +168,16 @@ pub fn TreeMesh(comptime N: usize) type {
                     }
                 }
             }
+
+            std.debug.print("End Smoothing\n", .{});
         }
 
         pub fn refine(self: *Self, allocator: Allocator) !void {
             // Perfom Smoothing
             self.smoothRefineFlags();
+
+            std.debug.print("Cell Flags {any}\n", .{self.cells.items(.flag)});
+
             // Transfer all mesh data to a scratch buffer
             var scratch = try self.cells.clone(allocator);
             defer scratch.deinit(allocator);
@@ -180,7 +187,7 @@ pub fn TreeMesh(comptime N: usize) type {
             var new_node_count: usize = 0;
             for (0..old_cells.len) |idx| {
                 if (old_cells.items(.flag)[idx]) {
-                    new_node_count += 1;
+                    new_node_count += AxisMask.count;
                 }
             }
             // And erase current mesh data (other than root)
@@ -209,6 +216,7 @@ pub fn TreeMesh(comptime N: usize) type {
             try self.level_to_cells.append(self.gpa, self.cells.len);
 
             while (map.items.len > 0) : (target += 1) {
+                std.debug.print("Target {}, Map {any}\n", .{ target, map.items });
                 // Reset temporary map
                 map_tmp.shrinkRetainingCapacity(0);
                 // Loop over current level
@@ -221,8 +229,8 @@ pub fn TreeMesh(comptime N: usize) type {
                     const coarse_flag = old_cells.items(.flag)[m.old];
                     const coarse_neighbors = old_cells.items(.neighbors)[m.old];
 
-                    // Only continue if this node has pre-existing children or is tagged for refinement
-                    if (coarse_children != null_index and !coarse_flag) {
+                    // Only continue processing if this node has pre-existing children or is tagged for refinement
+                    if (coarse_children == null_index and coarse_flag == false) {
                         continue;
                     }
 
@@ -249,7 +257,6 @@ pub fn TreeMesh(comptime N: usize) type {
 
                         // Compute new bounds
                         const bounds = coarse_bounds.split(child);
-
                         // Compute new neighbors
                         var neighbors: [FaceIndex.count]usize = undefined;
 
@@ -289,56 +296,23 @@ pub fn TreeMesh(comptime N: usize) type {
 
             // Correct neighbors
             for (1..new_cells.len) |cell| {
-                const children = new_cells.items(.children)[cell];
                 const parent = new_cells.items(.parent)[cell];
                 var neighbors = &new_cells.items(.neighbors)[cell];
-                const flag = new_cells.items(.flag)[cell];
-
-                // If this was not flagged for refinement
-                if (!flag) {
-                    continue;
-                }
 
                 const sidx = cell - new_cells.items(.children)[parent];
                 const split = AxisMask.fromLinear(sidx);
 
                 for (FaceIndex.enumerate()) |face| {
-                    // If this nodes is a leaf and neighbor is coarser check if it has children
+                    // If neighbor is coarser check if it has children (so we can update self)
                     if (neighbors[face.toLinear()] == null_index) {
                         // Neighbor on coarser level
                         const coarse_neighbor = new_cells.items(.neighbors)[parent][face.toLinear()];
                         const coarse_neighbor_children = new_cells.items(.children)[coarse_neighbor];
-                        // We assume flags were properly smoothed
-                        assert(coarse_neighbor_children != null_index);
-                        // Update neighbors
-                        neighbors[face.toLinear()] = coarse_neighbor_children + split.toggled(face.axis).toLinear();
-                    }
 
-                    // Neighbor had better not be 0
-                    const neighbor = neighbors[face.axis];
-
-                    if (neighbor == boundary_index) {
-                        continue;
-                    }
-
-                    const neighbor_children = new_cells.items(.children)[neighbor];
-
-                    if (neighbor_children == null_index) {
-                        // Neighbor is a leaf, so this node's children must have faces set to null
-                        for (AxisMask.enumerate()) |child| {
-                            if (child.isSet(face.axis) == face.side) {
-                                const child_node = children + child.toLinear();
-                                new_cells.items(.neighbors)[child_node][face.axis] = null_index;
-                            }
-                        }
-                    } else {
-                        // Neighbor has children so we update this node's children accordingly
-                        for (AxisMask.enumerate()) |child| {
-                            if (child.isSet(face.axis) == face.side) {
-                                const child_node = children + child.toLinear();
-                                const other_node = neighbor_children + child.toggled(face.axis).toLinear();
-                                new_cells.items(.neighbors)[child_node][face.axis] = other_node;
-                            }
+                        if (coarse_neighbor_children != null_index) {
+                            // Update neighbors
+                            neighbors[face.toLinear()] = coarse_neighbor_children + split.toggled(face.axis).toLinear();
+                            continue;
                         }
                     }
                 }

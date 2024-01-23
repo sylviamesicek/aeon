@@ -1,5 +1,6 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
+const ArenaAllocator = std.heap.ArenaAllocator;
 const assert = std.debug.assert;
 
 const tree = @import("tree.zig");
@@ -51,25 +52,68 @@ pub fn MultigridMethod(comptime N: usize, comptime M: usize, comptime O: usize, 
             assert(x.len == worker.numNodes());
             assert(b.len == worker.numNodes());
 
-            const res = try allocator.alloc(f64, worker.numNodes());
-            defer allocator.free(res);
+            const levels = worker.mesh.numLevels();
 
             const old = try allocator.alloc(f64, worker.numNodes());
             defer allocator.free(old);
 
-            const err = try allocator.alloc(f64, worker.numNodes());
-            defer allocator.free(err);
+            const scr = try allocator.alloc(f64, worker.numNodes());
+            defer allocator.free(scr);
+
+            @memset(scr, 0.0);
+
+            const rhs = try allocator.alloc(f64, worker.numNodes());
+            defer allocator.free(rhs);
 
             // Use initial right hand side to set tolerance.
             const irhs = worker.normAll(b);
             const tol: f64 = self.tolerance * @abs(irhs);
-            _ = tol; // autofix
 
             if (irhs <= 1e-60) {
                 std.debug.print("Trivial Linear Problem\n", .{});
 
                 @memset(x, 0.0);
                 return;
+            }
+
+            // Build scratch allocator
+            var arena: ArenaAllocator = ArenaAllocator.init(allocator);
+            defer arena.deinit();
+
+            const scratch: Allocator = arena.allocator();
+
+            // Run iterations
+            var iteration: usize = 0;
+
+            const recursive: Recursive(Oper, Bound) = .{
+                .method = self,
+                .worker = worker,
+                .oper = operator,
+                .bound = boundary,
+
+                .sys = x,
+                .old = old,
+                .scr = scr,
+                .rhs = rhs,
+            };
+
+            while (iteration < self.max_iters) : (iteration += 1) {
+                defer _ = arena.reset(.retain_capacity);
+                @memcpy(rhs, b);
+                // Iterate
+                try recursive.iterate(scratch, levels - 1);
+
+                for (0..levels) |level| {
+                    worker.order(O).residual(level, scr, rhs, operator, x);
+                }
+
+                const nres = worker.normAll(scr);
+
+                std.debug.print("Iteration {}, Residual {}\n", .{ iteration, nres });
+
+                if (nres <= tol) {
+                    break;
+                }
             }
         }
 
@@ -85,14 +129,14 @@ pub fn MultigridMethod(comptime N: usize, comptime M: usize, comptime O: usize, 
                 scr: []f64,
                 rhs: []f64,
 
-                fn apply(self: *const @This(), out: []f64, in: []const f64) void {
+                pub fn apply(self: *const @This(), out: []f64, in: []const f64) void {
                     self.worker.unpackBase(self.sys, in);
                     self.worker.order(M).fillGhostNodes(0, self.bound, self.sys);
                     self.worker.order(M).apply(0, self.scr, self.oper, self.sys);
                     self.worker.packBase(out, self.scr);
                 }
 
-                fn iterate(self: @This(), allocator: Allocator, level: usize) !void {
+                pub fn iterate(self: @This(), allocator: Allocator, level: usize) !void {
                     const worker = self.worker.order(M);
                     const worker0 = self.worker.order(0);
 
@@ -123,7 +167,7 @@ pub fn MultigridMethod(comptime N: usize, comptime M: usize, comptime O: usize, 
 
                     for (0..self.method.presmooth) |_| {
                         worker.fillGhostNodes(level, self.bound, self.sys);
-                        worker.smooth(level, self.oper, self.sys, self.rhs, self.scr);
+                        worker.smooth(level, self.scr, self.oper, self.sys, self.rhs);
                         self.worker.copy(level, self.sys, self.scr);
                     }
 
@@ -139,7 +183,7 @@ pub fn MultigridMethod(comptime N: usize, comptime M: usize, comptime O: usize, 
                     // ********************************
                     // Right Hand Side (Tau Correction)
 
-                    worker.residual(level, self.rhs, self.oper, self.sys, self.scr);
+                    worker.residual(level, self.scr, self.rhs, self.oper, self.sys);
                     worker0.restrict(level, self.scr);
                     worker.tauCorrect(level - 1, self.rhs, self.scr, self.oper, self.sys);
 
@@ -165,7 +209,7 @@ pub fn MultigridMethod(comptime N: usize, comptime M: usize, comptime O: usize, 
 
                     for (0..self.method.postsmooth) |_| {
                         worker.fillGhostNodes(level, self.bound, self.sys);
-                        worker.smooth(level, self.oper, self.sys, self.rhs, self.scr);
+                        worker.smooth(level, self.scr, self.oper, self.sys, self.rhs);
                         self.worker.copy(level, self.sys, self.scr);
                     }
 

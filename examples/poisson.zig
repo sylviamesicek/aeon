@@ -90,7 +90,12 @@ pub fn PoissonEquation(comptime M: usize) type {
             defer mesh.deinit();
 
             // Globally refine three times
-            for (0..3) |_| {
+            for (0..3) |r| {
+                std.debug.print("Running Refinement {}\n", .{r});
+                std.debug.print("Mesh Neighbors {any}\n", .{mesh.cells.items(.neighbors)});
+                std.debug.print("Mesh Parent {any}\n", .{mesh.cells.items(.parent)});
+                std.debug.print("Mesh Children {any}\n", .{mesh.cells.items(.children)});
+
                 @memset(mesh.cells.items(.flag), true);
                 try mesh.refine(allocator);
             }
@@ -100,9 +105,9 @@ pub fn PoissonEquation(comptime M: usize) type {
 
             try manager.build(allocator, &mesh);
 
-            for (manager.blocks.items) |block| {
-                std.debug.print("Block {}\n", .{block});
-            }
+            // for (manager.blocks.items) |block| {
+            //     std.debug.print("Block {}\n", .{block});
+            // }
 
             std.debug.print("Num packed nodes: {}\n", .{manager.numPackedNodes()});
 
@@ -114,13 +119,13 @@ pub fn PoissonEquation(comptime M: usize) type {
             const source = try allocator.alloc(f64, worker.numNodes());
             defer allocator.free(source);
 
-            worker.order(M).projectAll(Source{ .amplitude = 1.0 }, source);
+            worker.order(M).projectAll(Source{ .amplitude = 2.0 }, source);
 
             // Project solution
             const solution = try allocator.alloc(f64, worker.numNodes());
             defer allocator.free(solution);
 
-            worker.order(M).projectAll(Source{ .amplitude = 2.0 }, solution);
+            worker.order(M).projectAll(Source{ .amplitude = 1.0 }, solution);
 
             // Allocate numerical cell vector
 

@@ -223,7 +223,7 @@ pub fn Region(comptime N: usize) type {
             var result = AxisMask.initEmpty();
 
             for (0..N) |axis| {
-                result.setValue(axis, self.sides != .middle);
+                result.setValue(axis, self.sides[axis] != .middle);
             }
 
             return result;

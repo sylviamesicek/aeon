@@ -88,6 +88,8 @@ pub fn NodeManager(comptime N: usize) type {
                 assert(cell_size[axis] % 2 == 0);
             }
 
+            assert(max_refinement > 1);
+
             return .{
                 .gpa = allocator,
                 .blocks = .{},
@@ -138,19 +140,18 @@ pub fn NodeManager(comptime N: usize) type {
             const levels = mesh.numLevels();
 
             // Reset level offsets
-
             try self.level_to_blocks.resize(allocator, levels + 1);
             self.level_to_blocks.set(0, 0);
             self.level_to_blocks.set(1, 1);
 
             // Reset blocks
             self.blocks.clearRetainingCapacity();
+            self.block_to_cells.clear();
+
             try self.blocks.append(self.gpa, .{
                 .refinement = 0,
                 .boundary = [1]bool{true} ** FaceIndex.count,
             });
-
-            self.block_to_cells.clear();
             try self.block_to_cells.append(self.gpa, 0);
 
             // Iterate levels
@@ -195,7 +196,7 @@ pub fn NodeManager(comptime N: usize) type {
                     if (leaf_count == block.total) {
                         // Skip block if it is a leaf
                         continue;
-                    } else if (leaf_count == 0 and block.refinement >= self.cell_permute.maxRefinement()) {
+                    } else if (leaf_count == 0 and block.refinement < self.cell_permute.maxRefinement()) {
                         // Accept
 
                         // Kind of hacky, this depends on the fact that all grandchildren are stored contigiously.
@@ -208,7 +209,11 @@ pub fn NodeManager(comptime N: usize) type {
                             .refinement = block.refinement + 1,
                         });
                         try self.block_to_cells.append(self.gpa, grandchildren);
+
+                        continue;
                     }
+
+                    assert(block.refinement > 0);
 
                     // Some are leaves, some are not. Perform subdivision.
                     const refinement_sub = block.refinement - 1;

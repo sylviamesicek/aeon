@@ -109,7 +109,7 @@ pub fn NodeWorker(comptime N: usize, comptime M: usize) type {
 
         fn packBlock(self: @This(), block_id: usize, dest: []f64, src: []const f64) void {
             const block = self.manager.blockFromId(block_id);
-            const block_src = self.slice(block_id, src);
+            const block_src = self.map.slice(block_id, src);
             const block_dest = self.manager.block_to_nodes.slice(block_id, dest);
             const node_space = self.nodeSpaceFromBlock(block);
 
@@ -165,8 +165,8 @@ pub fn NodeWorker(comptime N: usize, comptime M: usize) type {
         // Basic Operations *****************
         // **********************************
 
-        pub fn copy(self: @This(), level: usize, dest: []f64, src: []const f64) f64 {
-            assert(src == self.numNodes());
+        pub fn copy(self: @This(), level: usize, dest: []f64, src: []const f64) void {
+            assert(src.len == self.numNodes());
             assert(dest.len == self.numNodes());
 
             const blocks = self.manager.level_to_blocks.range(level);
@@ -179,7 +179,7 @@ pub fn NodeWorker(comptime N: usize, comptime M: usize) type {
             }
         }
 
-        pub fn add(self: @This(), level: usize, dest: []f64, a: []const f64) f64 {
+        pub fn add(self: @This(), level: usize, dest: []f64, a: []const f64) void {
             assert(a.len == self.numNodes());
             assert(dest.len == self.numNodes());
 
@@ -190,12 +190,12 @@ pub fn NodeWorker(comptime N: usize, comptime M: usize) type {
                 const block_dest = self.map.slice(block_id, dest);
 
                 for (block_a, block_dest) |aval, *d| {
-                    d += aval;
+                    d.* += aval;
                 }
             }
         }
 
-        pub fn subtract(self: @This(), level: usize, dest: []f64, a: []const f64) f64 {
+        pub fn subtract(self: @This(), level: usize, dest: []f64, a: []const f64) void {
             assert(a.len == self.numNodes());
             assert(dest.len == self.numNodes());
 
@@ -206,7 +206,7 @@ pub fn NodeWorker(comptime N: usize, comptime M: usize) type {
                 const block_dest = self.map.slice(block_id, dest);
 
                 for (block_a, block_dest) |aval, *d| {
-                    d -= aval;
+                    d.* -= aval;
                 }
             }
         }
@@ -249,7 +249,7 @@ pub fn NodeWorker(comptime N: usize, comptime M: usize) type {
                     }
                 }
 
-                fn fillBaseGhostNodes(self: @This(), boundary: anytype, field: []usize) void {
+                fn fillBaseGhostNodes(self: @This(), boundary: anytype, field: []f64) void {
                     const map = self.worker.map;
                     const manager = self.worker.manager;
 
@@ -262,7 +262,7 @@ pub fn NodeWorker(comptime N: usize, comptime M: usize) type {
                 }
 
                 /// Fills the boundary of a given block, whether by exptrapolation or prolongation.
-                fn fillBlockGhostNodes(self: @This(), block_id: usize, boundary: anytype, field: []usize) void {
+                fn fillBlockGhostNodes(self: @This(), block_id: usize, boundary: anytype, field: []f64) void {
                     const map = self.worker.map;
                     const manager = self.worker.manager;
 
@@ -282,7 +282,7 @@ pub fn NodeWorker(comptime N: usize, comptime M: usize) type {
                         var bmask = AxisMask.initEmpty();
 
                         for (0..N) |axis| {
-                            if (region.sides[axis] == .center) {
+                            if (region.sides[axis] == .middle) {
                                 continue;
                             }
 
@@ -298,16 +298,14 @@ pub fn NodeWorker(comptime N: usize, comptime M: usize) type {
                         if (bmask.isEmpty()) {
                             // Prolong boundary
                             self.fillBlockGhostNodesInterior(region, block_id, field);
-                            // Skip following checks
-                            continue;
                         }
 
                         // Otherwise enumerate the possible axis combinations
-                        inline for (AxisMask.enumerate()[1..]) |mask| {
+                        inline for (comptime AxisMask.enumerate()[1..]) |mask| {
                             // Intersect with mask to make sure we aren't generating unnessary code.
                             const imask = comptime mask.intersectWith(smask);
 
-                            if (bmask == imask) {
+                            if (bmask.toLinear() == imask.toLinear()) {
                                 boundary_engine.fillRegion(region, imask, boundary, block_field);
                             }
                         }
@@ -337,7 +335,7 @@ pub fn NodeWorker(comptime N: usize, comptime M: usize) type {
                         // Uses permutation to find actual cell
                         const cell = manager.cellFromBlock(block_id, index);
                         // Origin in node space
-                        const origin: [N]usize = mul(index, cell_size);
+                        const origin = toSigned(mul(index, cell_size));
                         // Get neighbor in this direction
                         var neighbor = cell_meta.items(.neighbors)[cell][region.linear()];
 
@@ -362,12 +360,12 @@ pub fn NodeWorker(comptime N: usize, comptime M: usize) type {
 
                             for (0..N) |axis| {
                                 if (split.isSet(axis)) {
-                                    neighbor_origin[axis] += cell_size[axis];
+                                    neighbor_origin[axis] += @intCast(cell_size[axis]);
                                 }
 
                                 switch (neighbor_region.sides[axis]) {
-                                    .left => neighbor_origin[axis] += 2 * cell_size[axis],
-                                    .right => neighbor_origin[axis] -= 2 * cell_size[axis],
+                                    .left => neighbor_origin[axis] += @intCast(2 * cell_size[axis]),
+                                    .right => neighbor_origin[axis] -= @intCast(2 * cell_size[axis]),
                                     else => {},
                                 }
                             }
@@ -394,8 +392,8 @@ pub fn NodeWorker(comptime N: usize, comptime M: usize) type {
 
                             for (0..N) |axis| {
                                 switch (region.sides[axis]) {
-                                    .left => neighbor_origin[axis] += cell_size[axis],
-                                    .right => neighbor_origin[axis] -= cell_size[axis],
+                                    .left => neighbor_origin[axis] += @intCast(cell_size[axis]),
+                                    .right => neighbor_origin[axis] -= @intCast(cell_size[axis]),
                                     else => {},
                                 }
                             }
@@ -463,7 +461,7 @@ pub fn NodeWorker(comptime N: usize, comptime M: usize) type {
                         const parent_block_id: usize = cell_meta.items(.block)[parent];
                         const parent_index: [N]usize = cell_meta.items(.index)[parent];
                         const parent_block = manager.blockFromId(parent_block_id);
-                        const parent_block_field: []const usize = map.slice(parent_block_id, field);
+                        const parent_block_field: []const f64 = map.slice(parent_block_id, field);
                         const parent_block_node_space = self.nodeSpaceFromBlock(parent_block);
                         var parent_origin = refined(mul(parent_index, cell_size));
                         // Offset origin to take into account split
@@ -487,13 +485,13 @@ pub fn NodeWorker(comptime N: usize, comptime M: usize) type {
                 }
 
                 pub fn restrict(self: @This(), level: usize, field: []f64) void {
-                    assert(field.len == self.map.total());
+                    assert(field.len == self.worker.map.total());
 
                     if (level == 0) {
                         return;
                     }
 
-                    const blocks = self.manager.level_to_blocks.range(level);
+                    const blocks = self.worker.manager.level_to_blocks.range(level);
                     for (blocks.start..blocks.end) |block_id| {
                         self.restrictBlock(block_id, field);
                     }
@@ -507,7 +505,7 @@ pub fn NodeWorker(comptime N: usize, comptime M: usize) type {
                     assert(block_id != 0);
 
                     const block = manager.blockFromId(block_id);
-                    const block_field = map.slice(block_id, field);
+                    const block_field: []const f64 = map.slice(block_id, field);
                     const block_node_space = self.nodeSpaceFromBlock(block);
 
                     // Cache pointers
@@ -529,7 +527,7 @@ pub fn NodeWorker(comptime N: usize, comptime M: usize) type {
                         const parent_block_id: usize = cell_meta.items(.block)[parent];
                         const parent_index: [N]usize = cell_meta.items(.index)[parent];
                         const parent_block = manager.blockFromId(parent_block_id);
-                        const parent_block_field: []const usize = map.slice(parent_block_id, field);
+                        const parent_block_field: []f64 = map.slice(parent_block_id, field);
                         const parent_block_node_space = self.nodeSpaceFromBlock(parent_block);
 
                         var parent_origin = mul(parent_index, cell_size);
@@ -542,7 +540,7 @@ pub fn NodeWorker(comptime N: usize, comptime M: usize) type {
                         // Get origin
                         const origin = coarsened(mul(index, cell_size));
 
-                        var offsets = IndexSpace.fromSize(cell_size).cartesianIndices();
+                        var offsets = IndexSpace.fromSize(coarsened(cell_size)).cartesianIndices();
                         while (offsets.next()) |offset| {
                             const node = IndexMixin.add(parent_origin, offset);
                             const supernode = IndexMixin.add(origin, offset);
@@ -678,7 +676,7 @@ pub fn NodeWorker(comptime N: usize, comptime M: usize) type {
                     const manager = self.worker.manager;
 
                     const block_field: []f64 = map.slice(block_id, field);
-                    const block_rhs: []f64 = map.slice(block_id, rhs);
+                    const block_rhs: []const f64 = map.slice(block_id, rhs);
                     const block_range = map.range(block_id);
 
                     const node_space = self.nodeSpaceFromBlock(manager.blockFromId(block_id));
@@ -726,7 +724,7 @@ pub fn NodeWorker(comptime N: usize, comptime M: usize) type {
                     const manager = self.worker.manager;
 
                     const block_field: []f64 = map.slice(block_id, field);
-                    const block_res: []f64 = map.slice(block_id, res);
+                    const block_res: []const f64 = map.slice(block_id, res);
                     const block_range = map.range(block_id);
                     const block = manager.blockFromId(block_id);
 
@@ -758,9 +756,9 @@ pub fn NodeWorker(comptime N: usize, comptime M: usize) type {
                             };
 
                             const aval = operator.apply(engine, src);
-                            const rval = node_space.value(cell, block_res);
+                            const rval = node_space.value(node, block_res);
 
-                            node_space.setValue(cell, block_field, rval + aval);
+                            node_space.setValue(node, block_field, rval + aval);
                         }
                     }
                 }
@@ -773,7 +771,7 @@ pub fn NodeWorker(comptime N: usize, comptime M: usize) type {
                 pub fn smooth(self: @This(), level: usize, field: []f64, operator: anytype, src: []const f64, rhs: []const f64) void {
                     const Oper = @TypeOf(operator);
 
-                    if (comptime !common.isOperator(N, M)(Oper)) {
+                    if (comptime !common.isOperator(N, M, O)(Oper)) {
                         @compileError("Operator must satisfy isOperator trait");
                     }
 
