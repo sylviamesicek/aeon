@@ -208,7 +208,7 @@ pub fn isBoundary(comptime N: usize) fn (comptime T: type) bool {
     return Closure.trait;
 }
 
-test "boundary filling" {
+test "2d boundary filling" {
     const expect = std.testing.expect;
     const allocator = std.testing.allocator;
     const pi = std.math.pi;
@@ -283,12 +283,9 @@ test "boundary filling" {
     }
 }
 
-test "nuemann boundary filling" {
+test "mixed boundary filling" {
     const expect = std.testing.expect;
-    _ = expect; // autofix
     const allocator = std.testing.allocator;
-    const pi = std.math.pi;
-    _ = pi; // autofix
 
     const FaceIndex = geometry.FaceIndex(1);
     const NodeSpace = nodes_.NodeSpace(1, 2);
@@ -335,15 +332,13 @@ test "nuemann boundary filling" {
         }
     }
 
-    const RobinBC = struct {
+    const MixedBC = struct {
         pub fn kind(_: FaceIndex) BoundaryKind {
             return .robin;
         }
 
         pub fn robin(_: @This(), pos: [1]f64, face: FaceIndex) Robin {
             const x = pos[0];
-
-            std.debug.print("Position {}\n", .{x});
 
             if (face.side == false) {
                 return Robin.diritchlet(0.0);
@@ -353,15 +348,12 @@ test "nuemann boundary filling" {
         }
     };
 
-    Engine.new(node_space).fill(RobinBC{}, field);
-    // try expect(@abs(2.0 - node_space.order(2).boundaryOp(.{2}, 0, .{99}, exact)) < 1e-10);
+    Engine.new(node_space).fill(MixedBC{}, field);
 
     // **********************************
     // Test that boundary values are within a certain bound of the exact value
 
-    for (node_space.numNodes() - 3..node_space.numNodes()) |i| {
-        std.debug.print("{}, {}\n", .{ field[i], exact[i] });
-        std.debug.print("{}\n", .{field[i] - exact[i]});
-        // try expect(@abs(field[i] - exact[i]) < 1e-10);
+    for (0..node_space.numNodes()) |i| {
+        try expect(@abs(field[i] - exact[i]) < 1e-10);
     }
 }

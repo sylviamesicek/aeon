@@ -15,11 +15,11 @@ pub fn isOrdinaryDiffEq(comptime T: type) bool {
         return false;
     }
 
-    if (comptime !(hasFn("preprocess")(T) and @TypeOf(T.preprocess) == fn (T, system.System(T.Tag)) T.Error!void)) {
+    if (comptime !(hasFn(T, "preprocess") and @TypeOf(T.preprocess) == fn (T, system.System(T.Tag)) T.Error!void)) {
         return false;
     }
 
-    if (comptime !(hasFn("derivative")(T) and @TypeOf(T.derivative) == fn (T, system.System(T.Tag), system.SystemConst(T.Tag), f64) T.Error!void)) {
+    if (comptime !(hasFn(T, "derivative") and @TypeOf(T.derivative) == fn (T, system.System(T.Tag), system.SystemConst(T.Tag), f64) T.Error!void)) {
         return false;
     }
 
@@ -140,7 +140,7 @@ pub fn RungeKutta4Integrator(comptime Tag: type) type {
             }
 
             try deriv.preprocess(scratch);
-            try deriv.derivative(k3, scratch, self.time + h / 2.0);
+            try deriv.derivative(k3, scratch.toConst(), self.time + h / 2.0);
 
             // Calculate k4
             inline for (comptime std.enums.values(Tag)) |field| {
@@ -150,7 +150,7 @@ pub fn RungeKutta4Integrator(comptime Tag: type) type {
             }
 
             try deriv.preprocess(scratch);
-            try deriv.derivative(k4, scratch, self.time + h);
+            try deriv.derivative(k4, scratch.toConst(), self.time + h);
 
             // Update sys
             inline for (comptime std.enums.values(Tag)) |field| {

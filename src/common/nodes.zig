@@ -760,7 +760,7 @@ test "node space smoothing" {
     try expect(residual <= 10e-12);
 }
 
-test "node space multigrid" {
+test "node space two grid" {
     const ArenaAllocator = std.heap.ArenaAllocator;
     const expect = std.testing.expect;
     const allocator = std.testing.allocator;
@@ -900,7 +900,7 @@ test "node space multigrid" {
 
     var residual: f64 = 0.0;
 
-    for (0..20) |iter| {
+    for (0..20) |_| {
         defer _ = arena.reset(.retain_capacity);
 
         // Compute current error
@@ -920,7 +920,7 @@ test "node space multigrid" {
 
             residual = @sqrt(residual);
 
-            std.debug.print("Iteration {}, Residual {}\n", .{ iter, residual });
+            // std.debug.print("Iteration {}, Residual {}\n", .{ iter, residual });
         }
 
         // Perform presmoothing

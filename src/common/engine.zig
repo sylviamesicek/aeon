@@ -32,8 +32,7 @@ pub fn Engine(comptime N: usize, comptime M: usize, comptime O: usize) type {
             return self.space.value(self.cell, field[self.start..self.end]);
         }
 
-        pub fn valueDiag(self: @This()) f64 {
-            _ = self;
+        pub fn valueDiag(_: @This()) f64 {
             return 1.0;
         }
 

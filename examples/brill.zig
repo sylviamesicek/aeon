@@ -4,32 +4,33 @@ const Allocator = std.mem.Allocator;
 
 const aeon = @import("aeon");
 
-const bsamr = aeon.bsamr;
+const common = aeon.common;
 const geometry = aeon.geometry;
-const nodes = aeon.nodes;
+const tree = aeon.tree;
 
 pub fn BrillInitialData(comptime M: usize) type {
     const N = 2;
     return struct {
-        const BoundaryKind = nodes.BoundaryKind;
-        const Robin = nodes.Robin;
+        const BoundaryKind = common.BoundaryKind;
+        const Robin = common.Robin;
 
         const DataOut = aeon.DataOut(N, M);
-        const MultigridMethod = aeon.methods.MultigridMethod(N, M, BiCGStabSolver);
-        const LinearMapMethod = aeon.methods.LinearMapMethod(N, M, BiCGStabSolver);
-        const SystemConst = aeon.methods.SystemConst;
 
-        const Mesh = bsamr.Mesh(N);
-        const DofManager = bsamr.DofManager(N, M);
-        const RegridManager = bsamr.RegridManager(N);
+        const SystemConst = common.SystemConst;
 
+        const MultigridMethod = tree.MultigridMethod(N, M, M, BiCGStabSolver);
+        const NodeManager = tree.NodeManager(N);
+        const NodeWorker = tree.NodeWorker(N, M);
+        const TreeMesh = tree.TreeMesh(N);
+
+        const RealBox = geometry.RealBox(N);
         const FaceIndex = geometry.FaceIndex(N);
         const IndexSpace = geometry.IndexSpace(N);
         const IndexMixin = geometry.IndexMixin(N);
 
         const BiCGStabSolver = aeon.lac.BiCGStabSolver;
 
-        const Engine = aeon.mesh.Engine(N, M);
+        const Engine = common.Engine(N, M, M);
 
         pub const Seed = struct {
             amplitude: f64,
@@ -68,7 +69,9 @@ pub fn BrillInitialData(comptime M: usize) type {
                 } else {
                     const r: f64 = @sqrt(pos[0] * pos[0] + pos[1] * pos[1]);
 
-                    return .{
+                    // return Robin.nuemann(0.0);
+
+                    return Robin{
                         .value = 1.0 / r,
                         .flux = 1.0,
                         .rhs = 0.0,
@@ -119,66 +122,62 @@ pub fn BrillInitialData(comptime M: usize) type {
         // Run
 
         fn run(allocator: Allocator) !void {
-            std.debug.print("Running Poisson Elliptic Solver\n", .{});
+            std.debug.print("Running Brill Elliptic Solver\n", .{});
 
-            var mesh = try Mesh.init(allocator, .{
-                .physical_bounds = .{
-                    .origin = [2]f64{ 0.0, 0.0 },
-                    .size = [2]f64{ 2.0 * std.math.pi, 2.0 * std.math.pi },
-                },
-                .tile_width = 8,
-                .index_size = [2]usize{ 1, 1 },
+            var mesh = try TreeMesh.init(allocator, .{
+                .origin = [2]f64{ 0.0, 0.0 },
+                .size = [2]f64{ 10.0, 10.0 },
             });
             defer mesh.deinit();
 
-            var dofs = DofManager.init(allocator);
-            defer dofs.deinit();
+            // Globally refine two times
+            for (0..3) |r| {
+                std.debug.print("Running Refinement {}\n", .{r});
 
-            try dofs.build(&mesh);
+                @memset(mesh.cells.items(.flag), false);
 
-            // Globally refine three times
+                for (0..mesh.cells.len) |cell_id| {
+                    const bounds: RealBox = mesh.cells.items(.bounds)[cell_id];
+                    if (bounds.origin[0] < 0.1 and bounds.origin[1] < 0.1) {
+                        mesh.cells.items(.flag)[cell_id] = true;
+                    }
 
-            for (0..8) |_| {
-                const amr: RegridManager = .{
-                    .max_levels = 16,
-                    .patch_efficiency = 0.1,
-                    .block_efficiency = 0.7,
-                };
+                    try mesh.refine(allocator);
+                }
 
-                var tags = try allocator.alloc(bool, dofs.numTiles());
-                defer allocator.free(tags);
-
-                @memset(tags, true);
-
-                try amr.regrid(allocator, tags, &mesh, dofs.tile_map);
-                try dofs.build(&mesh);
+                try mesh.refine(allocator);
             }
 
-            std.debug.print("NDofs: {}\n", .{dofs.numNodes()});
+            var manager = try NodeManager.init(allocator, [1]usize{16} ** N, 8);
+            defer manager.deinit();
+
+            try manager.build(allocator, &mesh);
+
+            std.debug.print("Num packed nodes: {}\n", .{manager.numPackedNodes()});
+
+            // Create worker
+            var worker = try NodeWorker.init(allocator, &mesh, &manager);
+            defer worker.deinit();
 
             // Project seed values
-            const seed = try allocator.alloc(f64, dofs.numCells());
+            const seed = try allocator.alloc(f64, worker.numNodes());
             defer allocator.free(seed);
 
-            dofs.project(&mesh, Seed{ .amplitude = 1.0, .sigma = 1.0 }, seed);
+            worker.order(M).projectAll(Seed{ .amplitude = 1.0, .sigma = 1.0 }, seed);
+            worker.order(M).fillGhostNodesAll(Boundary{}, seed);
 
-            const nseed = try allocator.alloc(f64, dofs.numNodes());
-            defer allocator.free(nseed);
+            // Allocate psi
+            const psi = try allocator.alloc(f64, worker.numNodes());
+            defer allocator.free(psi);
 
-            dofs.transfer(&mesh, Boundary{}, nseed, seed);
+            @memset(psi, 0.0);
 
-            // Allocate metric vector
-
-            const metric = try allocator.alloc(f64, dofs.numCells());
-            defer allocator.free(metric);
-
-            @memset(metric, 0.0);
-
-            // Solve using multigrid method
+            // Solve with multigrid
+            std.debug.print("Running Multigrid Solver\n", .{});
 
             const solver: MultigridMethod = .{
-                .base_solver = BiCGStabSolver.new(20000, 10e-14),
-                .max_iters = 100,
+                .base_solver = BiCGStabSolver.new(10000, 10e-12),
+                .max_iters = 30,
                 .tolerance = 10e-10,
                 .presmooth = 5,
                 .postsmooth = 5,
@@ -186,11 +185,12 @@ pub fn BrillInitialData(comptime M: usize) type {
 
             try solver.solve(
                 allocator,
-                &mesh,
-                &dofs,
-                MetricOperator{ .seed = nseed },
+                &worker,
+                MetricOperator{
+                    .seed = seed,
+                },
                 Boundary{},
-                metric,
+                psi,
                 seed,
             );
 
@@ -202,27 +202,26 @@ pub fn BrillInitialData(comptime M: usize) type {
             defer file.close();
 
             const Output = enum {
-                metric,
+                psi,
                 seed,
             };
 
-            const output = SystemConst(Output).view(dofs.numCells(), .{
-                .metric = metric,
+            const output = SystemConst(Output).view(worker.numNodes(), .{
+                .psi = psi,
                 .seed = seed,
             });
 
-            var buffer = std.io.bufferedWriter(file.writer());
+            var buf = std.io.bufferedWriter(file.writer());
 
             try DataOut.writeVtk(
                 Output,
                 allocator,
-                &mesh,
-                &dofs,
+                &worker,
                 output,
-                buffer.writer(),
+                buf.writer(),
             );
 
-            try buffer.flush();
+            try buf.flush();
         }
     };
 }

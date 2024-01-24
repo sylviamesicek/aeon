@@ -165,6 +165,13 @@ pub fn NodeWorker(comptime N: usize, comptime M: usize) type {
         // Basic Operations *****************
         // **********************************
 
+        pub fn copyAll(self: @This(), dest: []f64, src: []const f64) void {
+            assert(src.len == self.numNodes());
+            assert(dest.len == self.numNodes());
+
+            @memcpy(dest, src);
+        }
+
         pub fn copy(self: @This(), level: usize, dest: []f64, src: []const f64) void {
             assert(src.len == self.numNodes());
             assert(dest.len == self.numNodes());

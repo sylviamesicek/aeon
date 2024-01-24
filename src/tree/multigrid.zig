@@ -113,32 +113,6 @@ pub fn MultigridMethod(comptime N: usize, comptime M: usize, comptime O: usize, 
 
                 const nres = worker.normAll(scr);
 
-                const DataOut = @import("../aeon.zig").DataOut(N, M);
-
-                const file_name = try std.fmt.allocPrint(allocator, "output/multigrid{}.vtu", .{iteration});
-                defer allocator.free(file_name);
-
-                const file = try std.fs.cwd().createFile(file_name, .{});
-                defer file.close();
-
-                const Output = enum { residual };
-
-                const output = common.SystemConst(Output).view(worker.numNodes(), .{
-                    .residual = scr,
-                });
-
-                var buf = std.io.bufferedWriter(file.writer());
-
-                try DataOut.writeVtk(
-                    Output,
-                    allocator,
-                    worker,
-                    output,
-                    buf.writer(),
-                );
-
-                try buf.flush();
-
                 std.debug.print("Iteration {}, Residual {}\n", .{ iteration, nres });
 
                 if (nres <= tol) {
@@ -161,13 +135,13 @@ pub fn MultigridMethod(comptime N: usize, comptime M: usize, comptime O: usize, 
 
                 pub fn apply(self: *const @This(), out: []f64, in: []const f64) void {
                     self.worker.unpackBase(self.sys, in);
-                    self.worker.order(M).fillGhostNodes(0, self.bound, self.sys);
-                    self.worker.order(M).apply(0, self.scr, self.oper, self.sys);
+                    self.worker.order(O).fillGhostNodes(0, self.bound, self.sys);
+                    self.worker.order(O).apply(0, self.scr, self.oper, self.sys);
                     self.worker.packBase(out, self.scr);
                 }
 
                 pub fn iterate(self: @This(), allocator: Allocator, level: usize) !void {
-                    const worker = self.worker.order(M);
+                    const worker = self.worker.order(O);
                     const worker0 = self.worker.order(0);
 
                     if (level == 0) {
