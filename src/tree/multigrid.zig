@@ -65,8 +65,10 @@ pub fn MultigridMethod(comptime N: usize, comptime M: usize, comptime O: usize, 
             const rhs = try allocator.alloc(f64, worker.numNodes());
             defer allocator.free(rhs);
 
+            @memcpy(rhs, b);
+
             // Use initial right hand side to set tolerance.
-            const irhs = worker.normAll(b);
+            const irhs = worker.normAll(rhs);
             const tol: f64 = self.tolerance * @abs(irhs);
 
             if (irhs <= 1e-60) {
@@ -99,15 +101,43 @@ pub fn MultigridMethod(comptime N: usize, comptime M: usize, comptime O: usize, 
 
             while (iteration < self.max_iters) : (iteration += 1) {
                 defer _ = arena.reset(.retain_capacity);
-                @memcpy(rhs, b);
+                // @memcpy(rhs, b);
+
                 // Iterate
                 try recursive.iterate(scratch, levels - 1);
 
+                // Check residual
                 for (0..levels) |level| {
                     worker.order(O).residual(level, scr, rhs, operator, x);
                 }
 
                 const nres = worker.normAll(scr);
+
+                const DataOut = @import("../aeon.zig").DataOut(N, M);
+
+                const file_name = try std.fmt.allocPrint(allocator, "output/multigrid{}.vtu", .{iteration});
+                defer allocator.free(file_name);
+
+                const file = try std.fs.cwd().createFile(file_name, .{});
+                defer file.close();
+
+                const Output = enum { residual };
+
+                const output = common.SystemConst(Output).view(worker.numNodes(), .{
+                    .residual = scr,
+                });
+
+                var buf = std.io.bufferedWriter(file.writer());
+
+                try DataOut.writeVtk(
+                    Output,
+                    allocator,
+                    worker,
+                    output,
+                    buf.writer(),
+                );
+
+                try buf.flush();
 
                 std.debug.print("Iteration {}, Residual {}\n", .{ iteration, nres });
 
@@ -196,7 +226,6 @@ pub fn MultigridMethod(comptime N: usize, comptime M: usize, comptime O: usize, 
                     // Error Correction
 
                     // Sys and Old should both have boundaries filled
-
                     self.worker.copy(level - 1, self.scr, self.sys);
                     self.worker.subtract(level - 1, self.scr, self.old);
 

@@ -104,8 +104,13 @@ pub fn BoundaryEngine(comptime N: usize, comptime M: usize, comptime O: usize) t
                     var robin: [N]Robin = undefined;
 
                     inline for (0..N) |axis| {
+                        if (comptime mregion.sides[axis] == .middle) {
+                            // We need not do anything
+                            continue;
+                        }
+
                         const face = comptime FaceIndex{
-                            .side = region.sides[axis] == .right,
+                            .side = mregion.sides[axis] == .right,
                             .axis = axis,
                         };
 
@@ -210,7 +215,7 @@ test "boundary filling" {
 
     const FaceIndex = geometry.FaceIndex(2);
     const NodeSpace = nodes_.NodeSpace(2, 2);
-    const Engine = BoundaryEngine(2, 2);
+    const Engine = BoundaryEngine(2, 2, 2);
 
     const node_space: NodeSpace = .{
         .size = [2]usize{ 100, 100 },
@@ -251,10 +256,10 @@ test "boundary filling" {
         }
     }
 
-    try expect(@abs(node_space.boundaryOp([2]isize{ -1, 0 }, null, [2]usize{ 0, 50 }, exact)) < 1e-10);
-    try expect(@abs(node_space.boundaryOp([2]isize{ -2, 0 }, null, [2]usize{ 0, 50 }, exact)) < 1e-10);
-    try expect(@abs(node_space.boundaryOp([2]isize{ -1, -1 }, null, [2]usize{ 0, 0 }, exact)) < 1e-10);
-    try expect(@abs(node_space.boundaryOp([2]isize{ -2, -2 }, null, [2]usize{ 0, 0 }, exact)) < 1e-10);
+    try expect(@abs(node_space.order(2).boundaryOp([2]isize{ -1, 0 }, null, [2]usize{ 0, 50 }, exact)) < 1e-10);
+    try expect(@abs(node_space.order(2).boundaryOp([2]isize{ -2, 0 }, null, [2]usize{ 0, 50 }, exact)) < 1e-10);
+    try expect(@abs(node_space.order(2).boundaryOp([2]isize{ -1, -1 }, null, [2]usize{ 0, 0 }, exact)) < 1e-10);
+    try expect(@abs(node_space.order(2).boundaryOp([2]isize{ -2, -2 }, null, [2]usize{ 0, 0 }, exact)) < 1e-10);
 
     // *********************************
 
@@ -275,5 +280,88 @@ test "boundary filling" {
 
     for (0..node_space.numNodes()) |i| {
         try expect(@abs(field[i] - exact[i]) < 1e-10);
+    }
+}
+
+test "nuemann boundary filling" {
+    const expect = std.testing.expect;
+    _ = expect; // autofix
+    const allocator = std.testing.allocator;
+    const pi = std.math.pi;
+    _ = pi; // autofix
+
+    const FaceIndex = geometry.FaceIndex(1);
+    const NodeSpace = nodes_.NodeSpace(1, 2);
+    const Engine = BoundaryEngine(1, 2, 2);
+
+    const node_space: NodeSpace = .{
+        .size = [1]usize{100},
+        .bounds = .{
+            .origin = .{0.0},
+            .size = .{1.0},
+        },
+    };
+    const cell_space = node_space.cellSpace();
+
+    // *********************************
+    // Set field values ****************
+
+    const field: []f64 = try allocator.alloc(f64, node_space.numNodes());
+    defer allocator.free(field);
+
+    @memset(field, 0.0);
+
+    {
+        var cells = cell_space.cartesianIndices();
+
+        while (cells.next()) |cell| {
+            const pos = node_space.cellPosition(cell);
+            node_space.setValue(cell, field, pos[0] * pos[0]);
+        }
+    }
+
+    // ********************************
+    // Set exact values ***************
+
+    const exact: []f64 = try allocator.alloc(f64, node_space.numNodes());
+    defer allocator.free(exact);
+
+    {
+        var nodes = node_space.nodes(2);
+
+        while (nodes.next()) |node| {
+            const pos = node_space.nodePosition(node);
+            node_space.setNodeValue(node, exact, pos[0] * pos[0]);
+        }
+    }
+
+    const RobinBC = struct {
+        pub fn kind(_: FaceIndex) BoundaryKind {
+            return .robin;
+        }
+
+        pub fn robin(_: @This(), pos: [1]f64, face: FaceIndex) Robin {
+            const x = pos[0];
+
+            std.debug.print("Position {}\n", .{x});
+
+            if (face.side == false) {
+                return Robin.diritchlet(0.0);
+            } else {
+                return Robin.nuemann(2.0 * x);
+            }
+        }
+    };
+
+    Engine.new(node_space).fill(RobinBC{}, field);
+    // try expect(@abs(2.0 - node_space.order(2).boundaryOp(.{2}, 0, .{99}, exact)) < 1e-10);
+
+    // **********************************
+    // Test that boundary values are within a certain bound of the exact value
+
+    for (node_space.numNodes() - 3..node_space.numNodes()) |i| {
+        std.debug.print("{}, {}\n", .{ field[i], exact[i] });
+        std.debug.print("{}\n", .{field[i] - exact[i]});
+        // try expect(@abs(field[i] - exact[i]) < 1e-10);
     }
 }

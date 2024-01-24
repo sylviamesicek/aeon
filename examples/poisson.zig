@@ -32,26 +32,51 @@ pub fn PoissonEquation(comptime M: usize) type {
 
         const Engine = common.Engine(N, M, M);
 
+        const pi = std.math.pi;
+
         pub const Source = struct {
             amplitude: f64,
 
             pub fn project(self: Source, engine: Engine) f64 {
                 const pos = engine.position();
+                const x = pos[0];
+                const y = pos[1];
 
-                var result: f64 = self.amplitude;
+                const term1 = (y * @sin(pi * y)) * (x * x * pi * pi * @sin(pi * x) - 2 * pi * @cos(pi * x));
+                const term2 = (x * @sin(pi * x)) * (y * y * pi * pi * @sin(pi * y) - 2 * pi * @cos(pi * y));
 
-                inline for (0..N) |i| {
-                    result *= std.math.sin(pos[i]);
-                }
+                // var result: f64 = self.amplitude;
 
-                return result;
+                // inline for (0..N) |i| {
+                //     result *= std.math.sin(pos[i]);
+                // }
+
+                return self.amplitude * (term1 + term2);
+            }
+        };
+
+        pub const Solution = struct {
+            amplitude: f64,
+
+            pub fn project(self: Solution, engine: Engine) f64 {
+                const pos = engine.position();
+                const x = pos[0];
+                const y = pos[1];
+
+                // var result: f64 = self.amplitude;
+
+                // inline for (0..N) |i| {
+                //     result *= std.math.sin(pos[i]);
+                // }
+
+                return self.amplitude * x * y * @sin(pi * x) * @sin(pi * y);
             }
         };
 
         pub const Boundary = struct {
             pub fn kind(face: FaceIndex) BoundaryKind {
                 _ = face;
-                return .odd;
+                return .robin;
             }
 
             pub fn robin(self: Boundary, pos: [N]f64, face: FaceIndex) Robin {
@@ -86,7 +111,7 @@ pub fn PoissonEquation(comptime M: usize) type {
 
             var mesh = try TreeMesh.init(allocator, .{
                 .origin = [2]f64{ 0.0, 0.0 },
-                .size = [2]f64{ 2.0 * std.math.pi, 2.0 * std.math.pi },
+                .size = [2]f64{ 1.0, 1.0 },
             });
             defer mesh.deinit();
 
@@ -101,14 +126,14 @@ pub fn PoissonEquation(comptime M: usize) type {
                 try mesh.refine(allocator);
             }
 
-            for (0..mesh.cells.len) |cell_id| {
-                const bounds: RealBox = mesh.cells.items(.bounds)[cell_id];
-                if (bounds.origin[0] < 0.1 and bounds.origin[1] < 0.1) {
-                    mesh.cells.items(.flag)[cell_id] = true;
-                }
+            // for (0..mesh.cells.len) |cell_id| {
+            //     const bounds: RealBox = mesh.cells.items(.bounds)[cell_id];
+            //     if (bounds.origin[0] < 0.1 and bounds.origin[1] < 0.1) {
+            //         mesh.cells.items(.flag)[cell_id] = true;
+            //     }
 
-                try mesh.refine(allocator);
-            }
+            //     try mesh.refine(allocator);
+            // }
 
             var manager = try NodeManager.init(allocator, [1]usize{16} ** N, 8);
             defer manager.deinit();
@@ -135,13 +160,13 @@ pub fn PoissonEquation(comptime M: usize) type {
             const source = try allocator.alloc(f64, worker.numNodes());
             defer allocator.free(source);
 
-            worker.order(M).projectAll(Source{ .amplitude = 2.0 }, source);
+            worker.order(M).projectAll(Source{ .amplitude = 1.0 }, source);
 
             // Project solution
             const solution = try allocator.alloc(f64, worker.numNodes());
             defer allocator.free(solution);
 
-            worker.order(M).projectAll(Source{ .amplitude = 1.0 }, solution);
+            worker.order(M).projectAll(Solution{ .amplitude = 1.0 }, solution);
 
             // Allocate numerical cell vector
 

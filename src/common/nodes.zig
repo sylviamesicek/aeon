@@ -87,7 +87,7 @@ pub fn NodeSpace(comptime N: usize, comptime M: usize) type {
             inline for (0..N) |i| {
                 result[i] = switch (region.sides[i]) {
                     .left => 0.0,
-                    .right => @floatFromInt(self.size[i]),
+                    .right => 1.0,
                     .middle => (@as(f64, @floatFromInt(node[i])) + 0.5) / @as(f64, @floatFromInt(self.size[i])),
                 };
             }
@@ -195,7 +195,7 @@ pub fn NodeSpace(comptime N: usize, comptime M: usize) type {
                 };
             }
 
-            return result;
+            return self.bounds.transformPos(result);
         }
 
         // *************************************
@@ -471,7 +471,7 @@ pub fn NodeSpace(comptime N: usize, comptime M: usize) type {
                             const idx: isize = @intCast(stencil_index[i]);
 
                             if (comptime extents[i] > 0) {
-                                offset_node[i] = @as(isize, @intCast(self.size[i] - 1)) + idx - BO + 1;
+                                offset_node[i] = @as(isize, @intCast(self.space.size[i] - 1)) + idx - BO + 1;
                             } else if (comptime extents[i] < 0) {
                                 offset_node[i] = @as(isize, @intCast(BO - 1)) - idx;
                             } else {
@@ -511,7 +511,7 @@ pub fn NodeSpace(comptime N: usize, comptime M: usize) type {
                     var result = coef;
 
                     if (flux) |axis| {
-                        var scale: f64 = @floatFromInt(self.spaceself.size[axis]);
+                        var scale: f64 = @floatFromInt(self.space.size[axis]);
                         scale /= self.space.bounds.size[axis];
                         result *= scale;
                     }
@@ -721,7 +721,7 @@ test "node space smoothing" {
 
     for (0..1000) |iter| {
         _ = iter;
-        BoundaryEngine(2, 2).new(space).fill(Boundary{}, sol);
+        BoundaryEngine(2, 2, 2).new(space).fill(Boundary{}, sol);
 
         // Compute residual
         {
@@ -772,7 +772,7 @@ test "node space multigrid" {
     const RealBox = geometry.RealBox(N);
     const BiCGStabSolver = lac.BiCGStabSolver;
     const Nodes = NodeSpace(N, M);
-    const BoundaryEngine_ = BoundaryEngine(N, M);
+    const BoundaryEngine_ = BoundaryEngine(N, M, M);
 
     const Boundary = struct {
         pub fn kind(_: FaceIndex) BoundaryKind {
@@ -819,7 +819,7 @@ test "node space multigrid" {
                 comptime var ranks: [2]usize = [1]usize{0} ** 2;
                 ranks[i] = 2;
 
-                result += nodes.op(ranks, cell, field);
+                result += nodes.order(M).op(ranks, cell, field);
             }
 
             return -result;
@@ -832,7 +832,7 @@ test "node space multigrid" {
                 comptime var ranks: [2]usize = [1]usize{0} ** 2;
                 ranks[i] = 2;
 
-                result += nodes.opDiagonal(ranks);
+                result += nodes.order(M).opDiagonal(ranks);
             }
 
             return -result;
@@ -963,7 +963,7 @@ test "node space multigrid" {
             var cells = base.cellSpace().cartesianIndices();
 
             while (cells.next()) |cell| {
-                const sol = fine.restrict(cell, fine_solution);
+                const sol = fine.order(M).restrict(cell, fine_solution);
                 base.setValue(cell, base_solution, sol);
             }
         }
@@ -975,7 +975,7 @@ test "node space multigrid" {
             var cells = base.cellSpace().cartesianIndices();
 
             while (cells.next()) |cell| {
-                const res = fine.restrictOrder(1, cell, fine_res);
+                const res = fine.order(0).restrict(cell, fine_res);
                 const val = Poisson.op(base, cell, base_solution);
 
                 base.setValue(cell, base_rhs, res + val);
@@ -1036,7 +1036,7 @@ test "node space multigrid" {
 
             while (cells.next()) |cell| {
                 const sol = fine.value(cell, fine_solution);
-                const err = base.prolong(cell, base_err);
+                const err = base.order(M).prolongCell(cell, base_err);
 
                 fine.setValue(cell, fine_solution, sol + err);
             }

@@ -189,8 +189,8 @@ pub fn NodeWorker(comptime N: usize, comptime M: usize) type {
                 const block_a = self.map.slice(block_id, a);
                 const block_dest = self.map.slice(block_id, dest);
 
-                for (block_a, block_dest) |aval, *d| {
-                    d.* += aval;
+                for (0..block_dest.len) |i| {
+                    block_dest[i] += block_a[i];
                 }
             }
         }
@@ -205,8 +205,8 @@ pub fn NodeWorker(comptime N: usize, comptime M: usize) type {
                 const block_a = self.map.slice(block_id, a);
                 const block_dest = self.map.slice(block_id, dest);
 
-                for (block_a, block_dest) |aval, *d| {
-                    d.* -= aval;
+                for (0..block_dest.len) |i| {
+                    block_dest[i] -= block_a[i];
                 }
             }
         }
@@ -246,6 +246,20 @@ pub fn NodeWorker(comptime N: usize, comptime M: usize) type {
                         for (blocks.start..blocks.end) |block_id| {
                             self.fillBlockGhostNodes(block_id, boundary, field);
                         }
+                    }
+                }
+
+                /// Fills all ghost nodes.
+                pub fn fillGhostNodesAll(self: @This(), boundary: anytype, field: []f64) void {
+                    const map = self.worker.map;
+                    const manager = self.worker.manager;
+
+                    assert(field.len == map.total());
+
+                    self.fillBaseGhostNodes(boundary, field);
+
+                    for (1..manager.numBlocks()) |block_id| {
+                        self.fillBlockGhostNodes(block_id, boundary, field);
                     }
                 }
 
