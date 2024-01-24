@@ -155,7 +155,7 @@ pub const BrillEvolution = struct {
             const sgrad: [N]f64 = engine.gradient(self.seed);
 
             const term1 = hessian[0][0] + grad[0] / r + hessian[1][1];
-            const term2 = 1.0 / 4.0 * val * (r * shessian[0][0] + 2.0 * sgrad[0] + r * shessian[1][1]);
+            const term2 = val / 4.0 * (r * shessian[0][0] + 2.0 * sgrad[0] + r * shessian[1][1]);
 
             return term1 + term2;
         }
@@ -586,10 +586,11 @@ pub const BrillEvolution = struct {
             const y = dynamic.field(.y);
             const w = dynamic.field(.w);
 
-            const worker = self.worker.order(O + 1);
+            const worker = self.worker.order(M);
             const worker0 = self.worker.order(0);
 
-            for (1..self.worker.mesh.numLevels()) |level| {
+            for (0..self.worker.mesh.numLevels()) |rev_level| {
+                const level = self.worker.mesh.numLevels() - 1 - rev_level;
                 worker0.restrict(level, psi);
                 worker0.restrict(level, seed);
                 worker0.restrict(level, u);
@@ -612,7 +613,6 @@ pub const BrillEvolution = struct {
             const lapse = self.lapse;
             const shiftr = self.shiftr;
             const shiftz = self.shiftz;
-
             const rhs = self.rhs;
 
             const psi = dynamic.field(.psi);
@@ -801,7 +801,7 @@ pub const BrillEvolution = struct {
         defer mesh.deinit();
 
         // Globally refine two times
-        for (0..3) |r| {
+        for (0..2) |r| {
             std.debug.print("Running Refinement {}\n", .{r});
 
             @memset(mesh.cells.items(.flag), true);
@@ -846,40 +846,36 @@ pub const BrillEvolution = struct {
         const constraint = try allocator.alloc(f64, worker.numNodes());
         defer allocator.free(constraint);
 
-        @memset(lapse, 0.0);
-        @memset(shiftr, 0.0);
-        @memset(shiftz, 0.0);
-
         const eta = try allocator.alloc(f64, worker.numNodes());
         defer allocator.free(eta);
 
         // Runge Kutta 4 context
-
         var rk4 = try Rk4Integrator(Dynamic).init(allocator, worker.numNodes());
         defer rk4.deinit();
+
+        @memset(rk4.sys.field(.u), 0.0);
+        @memset(rk4.sys.field(.y), 0.0);
+        @memset(rk4.sys.field(.w), 0.0);
 
         // *****************************
         // Initial Data
 
         std.debug.print("Solving Initial Data\n", .{});
 
-        @memset(rk4.sys.field(.u), 0.0);
-        @memset(rk4.sys.field(.y), 0.0);
-        @memset(rk4.sys.field(.w), 0.0);
-
         // Seed
         worker.order(O).projectAll(Seed{ .amplitude = 1.0, .sigma = 1.0 }, rk4.sys.field(.seed));
+        worker.order(O).fillGhostNodesAll(seed_boundary, rk4.sys.field(.seed));
 
-        // Psi
+        // Conformal factor
         const initial_rhs: InitialEtaRhs = .{
             .seed = rk4.sys.field(.seed),
         };
 
-        worker.order(O).projectAll(initial_rhs, rhs);
-
         const initial_op: InitialEtaOp = .{
             .seed = rk4.sys.field(.seed),
         };
+
+        worker.order(O).projectAll(initial_rhs, rhs);
 
         const solver: MultigridMethod = .{
             .base_solver = BiCGStabSolver.new(20000, 10e-14),
@@ -911,6 +907,8 @@ pub const BrillEvolution = struct {
                 psi[i] = 2.0 * @log(eta[i]);
             }
         }
+
+        std.debug.print("Running Evolution\n", .{});
 
         // ******************************
         // Step 0
@@ -1012,7 +1010,7 @@ pub const BrillEvolution = struct {
             // *******************************
             // Output
 
-            const file_name = try std.fmt.allocPrint(allocator, "output/evolution_newer{}.vtu", .{step + 1});
+            const file_name = try std.fmt.allocPrint(allocator, "output/evolution{}.vtu", .{step + 1});
             defer allocator.free(file_name);
 
             const file = try std.fs.cwd().createFile(file_name, .{});

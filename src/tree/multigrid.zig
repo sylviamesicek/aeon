@@ -101,7 +101,7 @@ pub fn MultigridMethod(comptime N: usize, comptime M: usize, comptime O: usize, 
 
             while (iteration < self.max_iters) : (iteration += 1) {
                 defer _ = arena.reset(.retain_capacity);
-                // @memcpy(rhs, b);
+                @memcpy(rhs, b);
 
                 // Iterate
                 try recursive.iterate(scratch, levels - 1);
@@ -113,7 +113,36 @@ pub fn MultigridMethod(comptime N: usize, comptime M: usize, comptime O: usize, 
 
                 const nres = worker.normAll(scr);
 
-                std.debug.print("Iteration {}, Residual {}\n", .{ iteration, nres });
+                // // Debugging code
+
+                // const DataOut = @import("../aeon.zig").DataOut(N, M);
+
+                // const file_name = try std.fmt.allocPrint(allocator, "output/multigrid{}.vtu", .{iteration});
+                // defer allocator.free(file_name);
+
+                // const file = try std.fs.cwd().createFile(file_name, .{});
+                // defer file.close();
+
+                // const Output = enum { residual, sys };
+
+                // const output = common.SystemConst(Output).view(worker.numNodes(), .{
+                //     .residual = scr,
+                //     .sys = x,
+                // });
+
+                // var buf = std.io.bufferedWriter(file.writer());
+
+                // try DataOut.writeVtk(
+                //     Output,
+                //     allocator,
+                //     worker,
+                //     output,
+                //     buf.writer(),
+                // );
+
+                // try buf.flush();
+
+                // std.debug.print("Iteration {}, Residual {}\n", .{ iteration, nres });
 
                 if (nres <= tol) {
                     break;
@@ -161,7 +190,7 @@ pub fn MultigridMethod(comptime N: usize, comptime M: usize, comptime O: usize, 
                         self.worker.unpackBase(self.sys, sys_base);
                         self.worker.unpackBase(self.rhs, rhs_base);
 
-                        self.worker.order(M).fillGhostNodes(0, self.bound, self.sys);
+                        self.worker.order(O).fillGhostNodes(0, self.bound, self.sys);
 
                         return;
                     }

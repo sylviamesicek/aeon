@@ -875,12 +875,10 @@ pub fn BrillEvolution(comptime M: usize) type {
             @memset(shiftz, 0.0);
 
             // Eta scratch vector
-
             const eta = try allocator.alloc(f64, dofs.numNodes());
             defer allocator.free(eta);
 
             // Runge Kutta 4 context
-
             var rk4 = try Rk4Integrator(Dynamic).init(allocator, dofs.numNodes());
             defer rk4.deinit();
 

@@ -402,7 +402,7 @@ pub fn NodeSpace(comptime N: usize, comptime M: usize) type {
                     comptime var coef: f64 = 1.0;
 
                     inline for (0..N) |i| {
-                        coef *= stencils[i][M];
+                        coef *= stencils[i][O];
                     }
 
                     var result: f64 = coef;

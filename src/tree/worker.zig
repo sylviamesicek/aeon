@@ -392,7 +392,7 @@ pub fn NodeWorker(comptime N: usize, comptime M: usize) type {
                             }
 
                             // Iterate over node offsets
-                            var offsets = region.nodes(M, cell_size);
+                            var offsets = region.nodes(O, cell_size);
 
                             while (offsets.next()) |offset| {
                                 const node: [N]isize = addSigned(origin, offset);
@@ -419,7 +419,7 @@ pub fn NodeWorker(comptime N: usize, comptime M: usize) type {
                                 }
                             }
 
-                            var offsets = region.nodes(M, cell_size);
+                            var offsets = region.nodes(O, cell_size);
 
                             while (offsets.next()) |offset| {
                                 const node = addSigned(origin, offset);
