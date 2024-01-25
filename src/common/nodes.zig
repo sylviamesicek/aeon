@@ -437,6 +437,27 @@ pub fn NodeSpace(comptime N: usize, comptime M: usize) type {
                 }
 
                 // *********************************
+                // Dissispation ********************
+                // *********************************
+
+                pub fn dissipation(self: @This(), comptime axis: usize, cell: [N]usize, field: []const f64) f64 {
+                    const stencil = Stencils(O).dissipation();
+
+                    var result: f64 = 0.0;
+
+                    inline for (0..2 * O + 1) |i| {
+                        const offset: isize = @as(isize, @intCast(i)) - O;
+
+                        var node = IndexMixin.toSigned(cell);
+                        node[axis] += offset;
+
+                        result += stencil[i] * self.space.nodeValue(node, field);
+                    }
+
+                    return result;
+                }
+
+                // *********************************
                 // Boundary ************************
                 // *********************************
 

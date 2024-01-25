@@ -839,6 +839,61 @@ pub fn NodeWorker(comptime N: usize, comptime M: usize) type {
                     }
                 }
 
+                // **********************************
+                // Dissipation
+
+                pub fn dissipationAll(self: @This(), eps: f64, deriv: []f64, src: []const f64) void {
+                    const map = self.worker.map;
+                    const manager = self.worker.manager;
+
+                    assert(deriv.len == map.total());
+                    assert(src.len == map.total());
+
+                    for (0..manager.numBlocks()) |block_id| {
+                        self.dissipationBlock(block_id, eps, deriv, src);
+                    }
+                }
+
+                pub fn dissipation(self: @This(), level: usize, eps: f64, deriv: []f64, src: []const f64) void {
+                    const map = self.worker.map;
+                    const manager = self.worker.manager;
+
+                    assert(deriv.len == map.total());
+                    assert(src.len == map.total());
+
+                    const blocks = manager.level_to_blocks.range(level);
+                    for (blocks.start..blocks.end) |block_id| {
+                        self.dissipationBlock(block_id, eps, deriv, src);
+                    }
+                }
+
+                fn dissipationBlock(self: @This(), block_id: usize, eps: f64, deriv: []f64, src: []const f64) void {
+                    const map = self.worker.map;
+                    const manager = self.worker.manager;
+
+                    const block_deriv: []f64 = map.slice(block_id, deriv);
+                    const block_src: []const f64 = map.slice(block_id, src);
+                    const block = manager.blockFromId(block_id);
+
+                    const node_space = self.nodeSpaceFromBlock(block);
+
+                    const spacing = manager.minSpacing();
+
+                    var cells = node_space.cellSpace().cartesianIndices();
+
+                    while (cells.next()) |cell| {
+                        const v = node_space.value(cell, block_deriv);
+
+                        var d: f64 = 0.0;
+
+                        inline for (0..N) |axis| {
+                            d += eps / spacing[axis] * node_space.order(O).dissipation(axis, cell, block_src);
+                        }
+
+                        node_space.setValue(cell, block_deriv, v - d);
+                    }
+                }
+
                 /// Helper function for determining the node space of a block
                 fn nodeSpaceFromBlock(self: @This(), block: Block) NodeSpace {
                     var size: [N]usize = undefined;

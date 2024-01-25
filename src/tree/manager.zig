@@ -290,14 +290,6 @@ pub fn NodeManager(comptime N: usize) type {
 
             // Loop through every non root cell
             for (1..cells.len) |cell| {
-                // Parent
-                const parent = cells.items(.parent)[cell];
-
-                // Find split index
-                const split_lin = cell - cells.items(.children)[parent];
-                const split = AxisMask.fromLinear(@intCast(split_lin));
-                _ = split; // autofix
-
                 // Store all neighbors of this cell
                 var neighbors: [Region.count]usize = undefined;
 
@@ -320,12 +312,6 @@ pub fn NodeManager(comptime N: usize) type {
                         if (region.sides[axis] == .middle) {
                             continue;
                         }
-
-                        // // If we have crossed an interface, do not traverse this axis unless we are truly
-                        // // searching for a new node.
-                        // if (interface and (region.sides[axis] == .right) != split.isSet(axis)) {
-                        //     continue;
-                        // }
 
                         // Find face to traverse
                         const face = FaceIndex{
@@ -426,6 +412,27 @@ pub fn NodeManager(comptime N: usize) type {
             const offset = self.block_to_cells.offset(block_id);
             const linear = IndexSpace.fromSize(block.size).linearFromCartesian(index);
             return offset + self.cell_permute.permutation(block.refinement)[linear];
+        }
+
+        /// Retrieves the spatial spacing of a given level
+        pub fn spacing(self: *const @This(), level: usize) [N]f64 {
+            var result: [N]f64 = self.blocks.items[0].bounds.size;
+
+            for (0..N) |axis| {
+                result[axis] /= @floatFromInt(self.cell_size[axis]);
+            }
+
+            for (0..level) |_| {
+                for (0..N) |axis| {
+                    result[axis] /= 2.0;
+                }
+            }
+
+            return result;
+        }
+
+        pub fn minSpacing(self: *const @This()) [N]f64 {
+            return self.spacing(self.level_to_blocks.len() - 2);
         }
     };
 }

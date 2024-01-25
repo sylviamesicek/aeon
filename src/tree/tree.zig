@@ -89,8 +89,16 @@ pub fn TreeMesh(comptime N: usize) type {
             self.cells.deinit(self.gpa);
         }
 
+        pub fn numCells(self: *const Self) usize {
+            return self.cells.len;
+        }
+
         pub fn numLevels(self: *const Self) usize {
             return self.level_to_cells.items.len - 1;
+        }
+
+        pub fn physicalBounds(self: *const Self) RealBox {
+            return self.cells.items(.bounds)[0];
         }
 
         // Smooths refinement flags to ensure proper 2:1 interfaces.
@@ -283,6 +291,17 @@ pub fn TreeMesh(comptime N: usize) type {
                 std.mem.swap(ArrayListUnmanaged(IndexMap), &map, &map_tmp);
                 // Update level offsets
                 try self.level_to_cells.append(self.gpa, self.cells.len);
+            }
+
+            // Remove last levels if it contains no cells
+            while (true) {
+                const last = self.level_to_cells.items.len - 1;
+
+                if (self.level_to_cells.items[last] == self.level_to_cells.items[last - 1]) {
+                    _ = self.level_to_cells.pop();
+                } else {
+                    break;
+                }
             }
 
             const new_cells = self.cells.slice();

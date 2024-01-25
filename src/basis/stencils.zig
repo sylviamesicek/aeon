@@ -33,6 +33,28 @@ pub fn Stencils(comptime M: usize) type {
             return floatCastSlice(2 * M + 1, result);
         }
 
+        pub fn dissipation() [2 * M + 1]f64 {
+            var scale: f64 = if (M % 2 == 0) 1.0 else -1.0;
+
+            for (0..2 * M) |_| {
+                scale /= 2.0;
+            }
+
+            var result: [2 * M + 1]f64 = switch (M) {
+                0 => .{1.0},
+                1 => .{ 1.0, -2.0, 1.0 },
+                2 => .{ 1.0, -4.0, 6.0, -4.0, 1.0 },
+                3 => .{ 1.0, -6.0, 15.0, -20.0, 15.0, -6.0, 1.0 },
+                else => @compileError("Dissipation only supported for M < 4."),
+            };
+
+            for (0..result.len) |i| {
+                result[i] *= scale;
+            }
+
+            return result;
+        }
+
         /// Computes an interpolation stencil of order `M + E - 1` for the boundary
         /// of a cell. `E` denotes the number of exterior support points.
         pub fn boundaryValue(comptime E: usize) [M + E]f64 {
