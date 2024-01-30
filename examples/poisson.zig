@@ -15,7 +15,7 @@ const PoissonEquation = struct {
     const BoundaryKind = common.BoundaryKind;
     const Robin = common.Robin;
 
-    const DataOut = aeon.DataOut(N, M);
+    const DataOut = aeon.DataOut(N);
 
     const SystemConst = common.SystemConst;
 
@@ -43,8 +43,10 @@ const PoissonEquation = struct {
             const x = pos[0];
             const y = pos[1];
 
-            const term1 = (y * @sin(pi * y)) * (x * x * pi * pi * @sin(pi * x) - 2 * pi * @cos(pi * x));
-            const term2 = (x * @sin(pi * x)) * (y * y * pi * pi * @sin(pi * y) - 2 * pi * @cos(pi * y));
+            // return self.amplitude * 2 * pi * pi * @sin(pi * x) * @sin(pi * y);
+
+            const term1 = (y * @sin(pi * y)) * (x * pi * pi * @sin(pi * x) - 2 * pi * @cos(pi * x));
+            const term2 = (x * @sin(pi * x)) * (y * pi * pi * @sin(pi * y) - 2 * pi * @cos(pi * y));
 
             return self.amplitude * (term1 + term2);
         }
@@ -59,6 +61,8 @@ const PoissonEquation = struct {
             const y = pos[1];
 
             return self.amplitude * x * y * @sin(pi * x) * @sin(pi * y);
+
+            // return self.amplitude * @sin(pi * x) * @sin(pi * y);
         }
     };
 
@@ -105,31 +109,53 @@ const PoissonEquation = struct {
         defer mesh.deinit();
 
         // Globally refine two times
-        for (0..5) |r| {
-            std.debug.print("Running Refinement {}\n", .{r});
-            // std.debug.print("Mesh Neighbors {any}\n", .{mesh.cells.items(.neighbors)});
-            // std.debug.print("Mesh Parent {any}\n", .{mesh.cells.items(.parent)});
-            // std.debug.print("Mesh Children {any}\n", .{mesh.cells.items(.children)});
+        for (0..2) |r| {
+            std.debug.print("Running Global Refinement {}\n", .{r});
 
             @memset(mesh.cells.items(.flag), true);
+
             try mesh.refine(allocator);
         }
 
-        // for (0..mesh.cells.len) |cell_id| {
-        //     const bounds: RealBox = mesh.cells.items(.bounds)[cell_id];
-        //     if (bounds.origin[0] < 0.1 and bounds.origin[1] < 0.1) {
-        //         mesh.cells.items(.flag)[cell_id] = true;
-        //     }
+        // Locally refine once
+        for (0..1) |r| {
+            std.debug.print("Running Refinement {}\n", .{r});
 
-        //     try mesh.refine(allocator);
-        // }
+            @memset(mesh.cells.items(.flag), false);
+
+            for (0..mesh.cells.len) |cell_id| {
+                const bounds: RealBox = mesh.cells.items(.bounds)[cell_id];
+                const center = bounds.center();
+
+                const radius = @sqrt((center[0] - 0.5) * (center[0] - 0.5) + (center[1] - 0.5) * (center[1] - 0.5));
+
+                if (radius < 0.33) {
+                    mesh.cells.items(.flag)[cell_id] = true;
+                }
+            }
+
+            try mesh.refine(allocator);
+        }
 
         var manager = try NodeManager.init(allocator, [1]usize{16} ** N, 8);
         defer manager.deinit();
 
         try manager.build(allocator, &mesh);
 
-        std.debug.print("Num packed nodes: {}\n", .{manager.numPackedNodes()});
+        std.debug.print("Num Cells: {}\n", .{mesh.numCells()});
+        std.debug.print("Num Packed Nodes: {}\n", .{manager.numPackedNodes()});
+        std.debug.print("Writing Mesh To File\n", .{});
+
+        {
+            const file = try std.fs.cwd().createFile("output/poisson-mesh.txt", .{});
+            defer file.close();
+
+            var buf = std.io.bufferedWriter(file.writer());
+
+            try DataOut.writeMesh(&mesh, &manager, buf.writer());
+
+            try buf.flush();
+        }
 
         // Create worker
         var worker = try NodeWorker.init(allocator, &mesh, &manager);
@@ -146,6 +172,7 @@ const PoissonEquation = struct {
         defer allocator.free(solution);
 
         worker.order(M).projectAll(Solution{ .amplitude = 1.0 }, solution);
+        worker.order(M).fillGhostNodesAll(Boundary{}, solution);
 
         // Allocate numerical cell vector
 
@@ -180,6 +207,13 @@ const PoissonEquation = struct {
             err[i] = numerical[i] - solution[i];
         }
 
+        const apply = try allocator.alloc(f64, worker.numNodes());
+        defer allocator.free(apply);
+
+        for (0..mesh.numLevels()) |level_id| {
+            worker.order(M).apply(level_id, apply, PoissonOperator{}, solution);
+        }
+
         // Output result
 
         std.debug.print("Writing Solution To File\n", .{});
@@ -191,6 +225,7 @@ const PoissonEquation = struct {
             numerical,
             exact,
             err,
+            apply,
             source,
         };
 
@@ -198,12 +233,13 @@ const PoissonEquation = struct {
             .numerical = numerical,
             .exact = solution,
             .source = source,
+            .apply = apply,
             .err = err,
         });
 
         var buf = std.io.bufferedWriter(file.writer());
 
-        try DataOut.writeVtk(
+        try DataOut.Ghost(M).writeVtk(
             Output,
             allocator,
             &worker,

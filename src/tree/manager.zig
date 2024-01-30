@@ -33,8 +33,6 @@ pub fn NodeManager(comptime N: usize) type {
         /// Additional info stored per mesh cell.
         cells: MultiArrayList(Cell),
 
-        /// Map from blocks to cell ranges.
-        block_to_cells: RangeMap,
         /// Map from blocks to node ranges
         block_to_nodes: RangeMap,
         /// Map from levels to block ranges.
@@ -67,6 +65,8 @@ pub fn NodeManager(comptime N: usize) type {
             boundary: [FaceIndex.count]bool,
             /// Refinement level of block.
             refinement: usize,
+            /// Cell offset
+            cells: usize,
         };
 
         /// Additional information stored for each cell of the mesh.
@@ -95,7 +95,6 @@ pub fn NodeManager(comptime N: usize) type {
                 .blocks = .{},
                 .cells = .{},
 
-                .block_to_cells = .{},
                 .block_to_nodes = .{},
                 .level_to_blocks = .{},
 
@@ -109,7 +108,6 @@ pub fn NodeManager(comptime N: usize) type {
             self.blocks.deinit(self.gpa);
             self.cells.deinit(self.gpa);
 
-            self.block_to_cells.deinit(self.gpa);
             self.block_to_nodes.deinit(self.gpa);
             self.level_to_blocks.deinit(self.gpa);
 
@@ -146,13 +144,12 @@ pub fn NodeManager(comptime N: usize) type {
 
             // Reset blocks
             self.blocks.clearRetainingCapacity();
-            self.block_to_cells.clear();
 
             try self.blocks.append(self.gpa, .{
                 .refinement = 0,
                 .boundary = [1]bool{true} ** FaceIndex.count,
+                .cells = 0,
             });
-            try self.block_to_cells.append(self.gpa, 0);
 
             // Iterate levels
             const BlockInfo = struct {
@@ -172,7 +169,7 @@ pub fn NodeManager(comptime N: usize) type {
                 for (0..coarse.end - coarse.start) |rev_idx| {
                     const idx = coarse.end - 1 - rev_idx;
                     const block = self.blocks.items[idx];
-                    const offset = self.block_to_cells.offset(idx);
+                    const offset = block.cells;
                     const total = cellTotalFromRefinement(block.refinement);
 
                     try stack.append(allocator, .{
@@ -207,8 +204,8 @@ pub fn NodeManager(comptime N: usize) type {
                         try self.blocks.append(self.gpa, .{
                             .boundary = block.boundary,
                             .refinement = block.refinement + 1,
+                            .cells = grandchildren,
                         });
-                        try self.block_to_cells.append(self.gpa, grandchildren);
 
                         continue;
                     }
@@ -242,12 +239,9 @@ pub fn NodeManager(comptime N: usize) type {
                 self.level_to_blocks.set(level + 1, self.blocks.items.len);
             }
 
-            // Append total number of cells
-            try self.block_to_cells.append(self.gpa, cells.len);
-
             // Compute bounds and size
-            for (self.blocks.items, 0..) |*block, block_id| {
-                var base: usize = self.block_to_cells.offset(block_id);
+            for (self.blocks.items) |*block| {
+                var base: usize = block.cells;
 
                 for (0..block.refinement) |_| {
                     base = cells.items(.parent)[base];
@@ -409,9 +403,8 @@ pub fn NodeManager(comptime N: usize) type {
 
         pub fn cellFromBlock(self: *const @This(), block_id: usize, index: [N]usize) usize {
             const block = self.blocks.items[block_id];
-            const offset = self.block_to_cells.offset(block_id);
             const linear = IndexSpace.fromSize(block.size).linearFromCartesian(index);
-            return offset + self.cell_permute.permutation(block.refinement)[linear];
+            return block.cells + self.cell_permute.permutation(block.refinement)[linear];
         }
 
         /// Retrieves the spatial spacing of a given level
@@ -431,8 +424,16 @@ pub fn NodeManager(comptime N: usize) type {
             return result;
         }
 
-        pub fn minSpacing(self: *const @This()) [N]f64 {
-            return self.spacing(self.level_to_blocks.len() - 2);
+        pub fn minSpacing(self: *const @This()) f64 {
+            const sp = self.spacing(self.level_to_blocks.len() - 2);
+
+            var result = sp[0];
+
+            for (1..N) |axis| {
+                result = @max(result, sp[axis]);
+            }
+
+            return result;
         }
     };
 }

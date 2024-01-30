@@ -16,7 +16,7 @@ pub const BrillInitialData = struct {
     const BoundaryKind = common.BoundaryKind;
     const Robin = common.Robin;
 
-    const DataOut = aeon.DataOut(N, M);
+    const DataOut = aeon.DataOut(N);
 
     const SystemConst = common.SystemConst;
 
@@ -215,7 +215,7 @@ pub const BrillInitialData = struct {
 
         var buf = std.io.bufferedWriter(file.writer());
 
-        try DataOut.writeVtk(
+        try DataOut.Ghost(M).writeVtk(
             Output,
             allocator,
             &worker,

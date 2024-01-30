@@ -14,8 +14,10 @@ pub const N = 2;
 pub const M = 3;
 pub const O = 2;
 
+const cfl: f64 = 0.1;
+
 pub const BrillEvolution = struct {
-    const DataOut = aeon.DataOut(N, M);
+    const DataOut = aeon.DataOut(N);
 
     const BoundaryKind = common.BoundaryKind;
     const Engine = common.Engine(N, M, O);
@@ -45,11 +47,11 @@ pub const BrillEvolution = struct {
             }
         }
 
-        pub fn robin(_: EvenBoundary, pos: [N]f64, _: FaceIndex) Robin {
+        pub fn robin(_: EvenBoundary, pos: [N]f64, face: FaceIndex) Robin {
             const r: f64 = @sqrt(pos[0] * pos[0] + pos[1] * pos[1]);
 
             return .{
-                .value = 1.0 / r,
+                .value = @abs(pos[face.axis]) / (r * r),
                 .flux = 1.0,
                 .rhs = 0.0,
             };
@@ -65,11 +67,11 @@ pub const BrillEvolution = struct {
             }
         }
 
-        pub fn robin(_: OddBoundary, pos: [N]f64, _: FaceIndex) Robin {
+        pub fn robin(_: OddBoundary, pos: [N]f64, face: FaceIndex) Robin {
             const r: f64 = @sqrt(pos[0] * pos[0] + pos[1] * pos[1]);
 
             return .{
-                .value = 1.0 / r,
+                .value = @abs(pos[face.axis]) / (r * r),
                 .flux = 1.0,
                 .rhs = 0.0,
             };
@@ -822,7 +824,7 @@ pub const BrillEvolution = struct {
 
             worker.projectAll(w_evolve, deriv.field(.w));
 
-            const eps = 20;
+            const eps = 10.0;
 
             const workerm = self.worker.order(M);
 
@@ -846,7 +848,7 @@ pub const BrillEvolution = struct {
 
         // Globally refine two times
         for (0..3) |r| {
-            std.debug.print("Running Refinement {}\n", .{r});
+            std.debug.print("Running Global Refinement {}\n", .{r});
 
             @memset(mesh.cells.items(.flag), true);
 
@@ -862,12 +864,32 @@ pub const BrillEvolution = struct {
             try mesh.refine(allocator);
         }
 
+        for (0..1) |r| {
+            std.debug.print("Running Refinement {}\n", .{r});
+
+            @memset(mesh.cells.items(.flag), false);
+
+            for (0..mesh.cells.len) |cell_id| {
+                const bounds: RealBox = mesh.cells.items(.bounds)[cell_id];
+                const center = bounds.center();
+
+                const radius = @sqrt((center[0]) * (center[0]) + (center[1]) * (center[1]));
+
+                if (radius < 2) {
+                    mesh.cells.items(.flag)[cell_id] = true;
+                }
+            }
+
+            try mesh.refine(allocator);
+        }
+
         var manager = try NodeManager.init(allocator, [1]usize{16} ** N, 8);
         defer manager.deinit();
 
         try manager.build(allocator, &mesh);
 
         std.debug.print("Num packed nodes: {}\n", .{manager.numPackedNodes()});
+        std.debug.print("Min spacing {}\n", .{manager.minSpacing()});
 
         // Create worker
         var worker = try NodeWorker.init(allocator, &mesh, &manager);
@@ -993,7 +1015,7 @@ pub const BrillEvolution = struct {
 
         // Output
         {
-            const file = try std.fs.cwd().createFile("output/evolution0.vtu", .{});
+            const file = try std.fs.cwd().createFile("output/enew0.vtu", .{});
             defer file.close();
 
             const output = SystemConst(Output).view(worker.numNodes(), .{
@@ -1010,7 +1032,7 @@ pub const BrillEvolution = struct {
 
             var buffer = std.io.bufferedWriter(file.writer());
 
-            try DataOut.writeVtk(
+            try DataOut.Ghost(M).writeVtk(
                 Output,
                 allocator,
                 &worker,
@@ -1031,13 +1053,11 @@ pub const BrillEvolution = struct {
         const scratch: Allocator = arena.allocator();
 
         const steps: usize = 100;
-        const h: f64 = 0.01;
+        const h: f64 = cfl * manager.minSpacing();
 
         for (0..steps) |step| {
-            // Reset allocations
-            defer _ = arena.reset(.retain_capacity);
-
-            std.debug.print("Step {}/{}\n", .{ step + 1, steps });
+            const con = worker.normAll(constraint);
+            std.debug.print("Step {}/{}, Time: {}, Constraint: {}\n", .{ step + 1, steps, rk4.time, con });
 
             // ********************************
             // Step
@@ -1054,6 +1074,8 @@ pub const BrillEvolution = struct {
             try rk4.step(scratch, evolution, h);
             try evolution.preprocess(rk4.sys);
 
+            _ = arena.reset(.retain_capacity);
+
             // ******************************
             // Gauge
 
@@ -1067,6 +1089,8 @@ pub const BrillEvolution = struct {
             };
 
             try gauge.solve(rk4.sys.toConst());
+
+            _ = arena.reset(.retain_capacity);
 
             // *******************************
             // Constraint
@@ -1094,7 +1118,7 @@ pub const BrillEvolution = struct {
             // *******************************
             // Output
 
-            const file_name = try std.fmt.allocPrint(allocator, "output/evolution{}.vtu", .{step + 1});
+            const file_name = try std.fmt.allocPrint(allocator, "output/enew{}.vtu", .{step + 1});
             defer allocator.free(file_name);
 
             const file = try std.fs.cwd().createFile(file_name, .{});
@@ -1114,7 +1138,7 @@ pub const BrillEvolution = struct {
 
             var buffer = std.io.bufferedWriter(file.writer());
 
-            try DataOut.writeVtk(
+            try DataOut.Ghost(M).writeVtk(
                 Output,
                 allocator,
                 &worker,
@@ -1123,6 +1147,8 @@ pub const BrillEvolution = struct {
             );
 
             try buffer.flush();
+
+            _ = arena.reset(.retain_capacity);
         }
     }
 };

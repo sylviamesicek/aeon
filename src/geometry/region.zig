@@ -23,6 +23,7 @@ pub fn Region(comptime N: usize) type {
 
         const Self = @This();
         const AxisMask = @import("axis.zig").AxisMask(N);
+        const FaceIndex = @import("axis.zig").FaceIndex(N);
         const IndexBox = @import("box.zig").IndexBox(N);
         const IndexSpace = @import("index.zig").IndexSpace(N);
 
@@ -82,6 +83,22 @@ pub fn Region(comptime N: usize) type {
             }
 
             return IndexSpace.fromSize(size);
+        }
+
+        const naxis = "0";
+
+        pub fn toString(self: Self) [N][]const u8 {
+            var result: [N][]const u8 = undefined;
+
+            for (0..N) |axis| {
+                result[axis] = switch (self.sides[axis]) {
+                    .left => (FaceIndex{ .axis = axis, .side = false }).toString(),
+                    .right => (FaceIndex{ .axis = axis, .side = true }).toString(),
+                    .middle => naxis,
+                };
+            }
+
+            return result;
         }
 
         pub const NodeIterator = struct {
@@ -327,8 +344,6 @@ test "region indices" {
     const expect = std.testing.expect;
     const expectEqualSlices = std.testing.expectEqualSlices;
 
-    const AxisMask = Region(2).AxisMask;
-    _ = AxisMask; // autofix
     const Side = Region(2).Side;
 
     const block: [2]usize = [_]usize{ 2, 2 };

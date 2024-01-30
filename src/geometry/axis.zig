@@ -165,6 +165,11 @@ pub fn AxisMask(comptime N: usize) type {
     };
 }
 
+const xaxis: [2][]const u8 = .{ "-x", "+x" };
+const yaxis: [2][]const u8 = .{ "-y", "+y" };
+const zaxis: [2][]const u8 = .{ "-z", "+z" };
+const waxis: [2][]const u8 = .{ "-w", "+w" };
+
 /// Identifies a face by axis and side (false is left, true is right).
 pub fn FaceIndex(comptime N: usize) type {
     return struct {
@@ -197,6 +202,22 @@ pub fn FaceIndex(comptime N: usize) type {
             }
 
             return result;
+        }
+
+        pub fn toString(self: @This()) []const u8 {
+            if (comptime N > 4) {
+                @compileError("Face to string only supported for N less that 5.");
+            }
+
+            const idx: usize = if (self.side) 1 else 0;
+
+            return switch (self.axis) {
+                0 => xaxis[idx],
+                1 => yaxis[idx],
+                2 => zaxis[idx],
+                3 => waxis[idx],
+                else => std.debug.panic("Axis must be less than 4\n", .{}),
+            };
         }
     };
 }

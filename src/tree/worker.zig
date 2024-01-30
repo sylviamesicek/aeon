@@ -875,22 +875,27 @@ pub fn NodeWorker(comptime N: usize, comptime M: usize) type {
                     const block_src: []const f64 = map.slice(block_id, src);
                     const block = manager.blockFromId(block_id);
 
-                    const node_space = self.nodeSpaceFromBlock(block);
+                    var spacing: [N]f64 = undefined;
 
-                    const spacing = manager.minSpacing();
+                    for (0..N) |axis| {
+                        spacing[axis] = block.bounds.size[axis];
+                        spacing[axis] /= @floatFromInt(block.size[axis] * manager.cell_size[axis]);
+                    }
+
+                    const node_space = self.nodeSpaceFromBlock(block);
 
                     var cells = node_space.cellSpace().cartesianIndices();
 
                     while (cells.next()) |cell| {
                         const v = node_space.value(cell, block_deriv);
 
-                        var d: f64 = 0.0;
+                        var result: f64 = 0.0;
 
                         inline for (0..N) |axis| {
-                            d += eps / spacing[axis] * node_space.order(O).dissipation(axis, cell, block_src);
+                            result += eps / spacing[axis] * node_space.order(O).dissipation(axis, cell, block_src);
                         }
 
-                        node_space.setValue(cell, block_deriv, v - d);
+                        node_space.setValue(cell, block_deriv, v - result);
                     }
                 }
 

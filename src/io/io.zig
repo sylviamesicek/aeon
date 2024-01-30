@@ -20,176 +20,261 @@ const common = @import("../common/common.zig");
 const geometry = @import("../geometry/geometry.zig");
 const tree = @import("../tree/tree.zig");
 
+const NodeSpace = common.NodeSpace;
 const System = common.System;
 const SystemConst = common.SystemConst;
 const isSystemTag = common.isSystemTag;
+
+const NodeWorker = tree.NodeWorker;
+const boundary_index = tree.boundary_index;
 const null_index = tree.null_index;
 
 /// A namespace for outputting data defined on a mesh.
-pub fn DataOut(comptime N: usize, comptime M: usize) type {
+pub fn DataOut(comptime N: usize) type {
     return struct {
         const Mesh = tree.TreeMesh(N);
-        const NodeWorker = tree.NodeWorker(N, M);
+        const NodeManager = tree.NodeManager(N);
 
         const IndexMixin = geometry.IndexMixin(N);
         const IndexSpace = geometry.IndexSpace(N);
-        const NodeSpace = common.NodeSpace(N, M);
+        const Region = geometry.Region(N);
 
-        pub fn writeVtk(
-            comptime Tag: type,
-            allocator: Allocator,
-            worker: *const NodeWorker,
-            sys: SystemConst(Tag),
+        pub fn writeMesh(
+            mesh: *const Mesh,
+            manager: *const NodeManager,
             out_stream: anytype,
         ) !void {
-            if (comptime !isSystemTag(Tag)) {
-                @compileError("System must satisfy isSystemTag trait.");
-            }
+            for (0..mesh.cells.len) |cell_id| {
+                const parent = mesh.cells.items(.parent)[cell_id];
+                const children = mesh.cells.items(.children)[cell_id];
+                const bounds = mesh.cells.items(.bounds)[cell_id];
 
-            const mesh = worker.mesh;
-            const manager = worker.manager;
+                const block = manager.cells.items(.block)[cell_id];
+                const index = manager.cells.items(.index)[cell_id];
+                const neighbors = manager.cells.items(.neighbors)[cell_id];
 
-            assert(sys.len == worker.numNodes());
+                try out_stream.print("Cell {}:\n", .{cell_id});
+                try out_stream.print("    Origin: {any}\n", .{bounds.origin});
+                try out_stream.print("    Size: {any}\n", .{bounds.size});
 
-            const field_count = comptime std.enums.values(Tag).len;
+                if (parent != null_index) {
+                    try out_stream.print("    Parent: {}\n", .{parent});
+                } else {
+                    try out_stream.print("    Parent: null\n", .{});
+                }
 
-            // Global Constants
-            const cell_type: VtkCellType = switch (N) {
-                1 => .line,
-                2 => .quad,
-                3 => .hexa,
-                else => @compileError("Vtk Output not supported for N > 3"),
-            };
+                if (children != null_index) {
+                    try out_stream.print("    Children: {}\n", .{children});
+                } else {
+                    try out_stream.print("    Children: null\n", .{});
+                }
 
-            var positions: ArrayListUnmanaged(f64) = .{};
-            defer positions.deinit(allocator);
+                try out_stream.print("    Block: {}, {any}\n", .{ block, index });
+                try out_stream.print("    Neighbors:\n", .{});
 
-            var vertices: ArrayListUnmanaged(usize) = .{};
-            defer vertices.deinit(allocator);
+                for (Region.enumerate()) |region| {
+                    if (region.linear() == Region.central().linear()) {
+                        continue;
+                    }
 
-            var fields = [1]ArrayListUnmanaged(f64){.{}} ** field_count;
+                    const coords = region.toString();
+                    const neighbor = neighbors[region.linear()];
 
-            defer {
-                for (&fields) |*field| {
-                    field.deinit(allocator);
+                    try out_stream.writeAll("        { ");
+
+                    for (0..N - 1) |axis| {
+                        try out_stream.print("{s}, ", .{coords[axis]});
+                    }
+
+                    try out_stream.print("{s}", .{coords[N - 1]});
+
+                    try out_stream.writeAll("}: ");
+
+                    if (neighbor == null_index) {
+                        try out_stream.print("Coarse\n", .{});
+                    } else if (neighbor == boundary_index) {
+                        try out_stream.print("Physical Boundary\n", .{});
+                    } else {
+                        try out_stream.print("{}\n", .{neighbor});
+                    }
                 }
             }
 
             for (0..manager.numBlocks()) |block_id| {
                 const block = manager.blockFromId(block_id);
-                const node_space = NodeSpace{
-                    .bounds = block.bounds,
-                    .size = IndexMixin.mul(block.size, manager.cell_size),
-                };
 
-                const block_sys = sys.slice(worker.map.offset(block_id), worker.map.size(block_id));
+                var size: usize = 1;
 
-                var mcells = IndexSpace.fromSize(block.size).cartesianIndices();
-
-                while (mcells.next()) |mcell| {
-                    // Get Cell ID
-                    const cell_id = manager.cellFromBlock(block_id, mcell);
-
-                    if (mesh.cells.items(.children)[cell_id] != null_index) {
-                        continue;
-                    }
-
-                    // This is a leaf
-                    const origin = IndexMixin.mul(mcell, manager.cell_size);
-
-                    // Append Point Data
-
-                    const point_offset: usize = positions.items.len / N;
-
-                    const point_size = IndexMixin.add(manager.cell_size, IndexMixin.splat(1));
-                    const point_space = IndexSpace.fromSize(point_size);
-                    const cell_space = IndexSpace.fromSize(manager.cell_size);
-
-                    var points = point_space.cartesianIndices();
-
-                    while (points.next()) |point| {
-                        const position = node_space.vertexPosition(IndexMixin.toSigned(IndexMixin.add(origin, point)));
-                        for (0..N) |i| {
-                            try positions.append(allocator, position[i]);
-                        }
-                    }
-
-                    // Append Vertex data
-
-                    if (N == 1) {
-                        var cells = cell_space.cartesianIndices();
-
-                        while (cells.next()) |cell| {
-                            const v1: usize = point_space.linearFromCartesian(cell);
-                            const v2: usize = point_space.linearFromCartesian(IndexMixin.add(cell, IndexMixin.splat(1)));
-
-                            try vertices.append(allocator, point_offset + v1);
-                            try vertices.append(allocator, point_offset + v2);
-                        }
-                    } else if (N == 2) {
-                        var cells = cell_space.cartesianIndices();
-
-                        while (cells.next()) |cell| {
-                            const v1: usize = point_space.linearFromCartesian(cell);
-                            const v2: usize = point_space.linearFromCartesian(IndexMixin.add(cell, [2]usize{ 0, 1 }));
-                            const v3: usize = point_space.linearFromCartesian(IndexMixin.add(cell, [2]usize{ 1, 1 }));
-                            const v4: usize = point_space.linearFromCartesian(IndexMixin.add(cell, [2]usize{ 1, 0 }));
-
-                            try vertices.append(allocator, point_offset + v1);
-                            try vertices.append(allocator, point_offset + v2);
-                            try vertices.append(allocator, point_offset + v3);
-                            try vertices.append(allocator, point_offset + v4);
-                        }
-                    } else if (N == 3) {
-                        var cells = cell_space.cartesianIndices();
-
-                        while (cells.next()) |cell| {
-                            const v1: usize = point_space.linearFromCartesian(cell);
-                            const v2: usize = point_space.linearFromCartesian(IndexMixin.add(cell, [3]usize{ 0, 1, 0 }));
-                            const v3: usize = point_space.linearFromCartesian(IndexMixin.add(cell, [3]usize{ 1, 1, 0 }));
-                            const v4: usize = point_space.linearFromCartesian(IndexMixin.add(cell, [3]usize{ 1, 0, 0 }));
-                            const v5: usize = point_space.linearFromCartesian(IndexMixin.add(cell, [3]usize{ 0, 0, 1 }));
-                            const v6: usize = point_space.linearFromCartesian(IndexMixin.add(cell, [3]usize{ 0, 1, 3 }));
-                            const v7: usize = point_space.linearFromCartesian(IndexMixin.add(cell, [3]usize{ 1, 1, 3 }));
-                            const v8: usize = point_space.linearFromCartesian(IndexMixin.add(cell, [3]usize{ 1, 0, 3 }));
-
-                            try vertices.append(allocator, point_offset + v1);
-                            try vertices.append(allocator, point_offset + v2);
-                            try vertices.append(allocator, point_offset + v3);
-                            try vertices.append(allocator, point_offset + v4);
-                            try vertices.append(allocator, point_offset + v5);
-                            try vertices.append(allocator, point_offset + v6);
-                            try vertices.append(allocator, point_offset + v7);
-                            try vertices.append(allocator, point_offset + v8);
-                        }
-                    }
-
-                    // Append Field data
-                    var cells = cell_space.cartesianIndices();
-
-                    while (cells.next()) |cell| {
-                        const node = IndexMixin.add(origin, cell);
-
-                        inline for (comptime std.enums.values(Tag), 0..) |field, idx| {
-                            const value = node_space.value(node, block_sys.field(field));
-                            try fields[idx].append(allocator, value);
-                        }
-                    }
+                for (0..N) |i| {
+                    size *= block.size[i];
                 }
+
+                try out_stream.print("Block {}:\n", .{block_id});
+                try out_stream.print("    Cells: {}..{}\n", .{ block.cells, block.cells + size });
+                try out_stream.print("    Size: {any}\n", .{block.size});
+                try out_stream.print("    Refinement: {}\n", .{block.refinement});
             }
+        }
 
-            var output: VtuMeshOutput = try VtuMeshOutput.init(allocator, .{
-                .points = positions.items,
-                .vertices = vertices.items,
-                .cell_type = cell_type,
-            });
-            defer output.deinit();
+        pub fn Ghost(comptime M: usize) type {
+            return struct {
+                pub fn writeVtk(
+                    comptime Tag: type,
+                    allocator: Allocator,
+                    worker: *const NodeWorker(N, M),
+                    sys: SystemConst(Tag),
+                    out_stream: anytype,
+                ) !void {
+                    if (comptime !isSystemTag(Tag)) {
+                        @compileError("System must satisfy isSystemTag trait.");
+                    }
 
-            inline for (comptime std.meta.fieldNames(Tag), 0..) |name, id| {
-                try output.addCellField(name, fields[id].items, 1);
-            }
+                    const mesh = worker.mesh;
+                    const manager = worker.manager;
 
-            try output.write(out_stream);
+                    assert(sys.len == worker.numNodes());
+
+                    const field_count = comptime std.enums.values(Tag).len;
+
+                    // Global Constants
+                    const cell_type: VtkCellType = switch (N) {
+                        1 => .line,
+                        2 => .quad,
+                        3 => .hexa,
+                        else => @compileError("Vtk Output not supported for N > 3"),
+                    };
+
+                    var positions: ArrayListUnmanaged(f64) = .{};
+                    defer positions.deinit(allocator);
+
+                    var vertices: ArrayListUnmanaged(usize) = .{};
+                    defer vertices.deinit(allocator);
+
+                    var fields = [1]ArrayListUnmanaged(f64){.{}} ** field_count;
+
+                    defer {
+                        for (&fields) |*field| {
+                            field.deinit(allocator);
+                        }
+                    }
+
+                    for (0..manager.numBlocks()) |block_id| {
+                        const block = manager.blockFromId(block_id);
+                        const node_space = NodeSpace(N, M){
+                            .bounds = block.bounds,
+                            .size = IndexMixin.mul(block.size, manager.cell_size),
+                        };
+
+                        const block_sys = sys.slice(worker.map.offset(block_id), worker.map.size(block_id));
+
+                        var mcells = IndexSpace.fromSize(block.size).cartesianIndices();
+
+                        while (mcells.next()) |mcell| {
+                            // Get Cell ID
+                            const cell_id = manager.cellFromBlock(block_id, mcell);
+
+                            if (mesh.cells.items(.children)[cell_id] != null_index) {
+                                continue;
+                            }
+
+                            // This is a leaf
+                            const origin = IndexMixin.mul(mcell, manager.cell_size);
+
+                            // Append Point Data
+
+                            const point_offset: usize = positions.items.len / N;
+
+                            const point_size = IndexMixin.add(manager.cell_size, IndexMixin.splat(1));
+                            const point_space = IndexSpace.fromSize(point_size);
+                            const cell_space = IndexSpace.fromSize(manager.cell_size);
+
+                            var points = point_space.cartesianIndices();
+
+                            while (points.next()) |point| {
+                                const position = node_space.vertexPosition(IndexMixin.toSigned(IndexMixin.add(origin, point)));
+                                for (0..N) |i| {
+                                    try positions.append(allocator, position[i]);
+                                }
+                            }
+
+                            // Append Vertex data
+
+                            if (N == 1) {
+                                var cells = cell_space.cartesianIndices();
+
+                                while (cells.next()) |cell| {
+                                    const v1: usize = point_space.linearFromCartesian(cell);
+                                    const v2: usize = point_space.linearFromCartesian(IndexMixin.add(cell, IndexMixin.splat(1)));
+
+                                    try vertices.append(allocator, point_offset + v1);
+                                    try vertices.append(allocator, point_offset + v2);
+                                }
+                            } else if (N == 2) {
+                                var cells = cell_space.cartesianIndices();
+
+                                while (cells.next()) |cell| {
+                                    const v1: usize = point_space.linearFromCartesian(cell);
+                                    const v2: usize = point_space.linearFromCartesian(IndexMixin.add(cell, [2]usize{ 0, 1 }));
+                                    const v3: usize = point_space.linearFromCartesian(IndexMixin.add(cell, [2]usize{ 1, 1 }));
+                                    const v4: usize = point_space.linearFromCartesian(IndexMixin.add(cell, [2]usize{ 1, 0 }));
+
+                                    try vertices.append(allocator, point_offset + v1);
+                                    try vertices.append(allocator, point_offset + v2);
+                                    try vertices.append(allocator, point_offset + v3);
+                                    try vertices.append(allocator, point_offset + v4);
+                                }
+                            } else if (N == 3) {
+                                var cells = cell_space.cartesianIndices();
+
+                                while (cells.next()) |cell| {
+                                    const v1: usize = point_space.linearFromCartesian(cell);
+                                    const v2: usize = point_space.linearFromCartesian(IndexMixin.add(cell, [3]usize{ 0, 1, 0 }));
+                                    const v3: usize = point_space.linearFromCartesian(IndexMixin.add(cell, [3]usize{ 1, 1, 0 }));
+                                    const v4: usize = point_space.linearFromCartesian(IndexMixin.add(cell, [3]usize{ 1, 0, 0 }));
+                                    const v5: usize = point_space.linearFromCartesian(IndexMixin.add(cell, [3]usize{ 0, 0, 1 }));
+                                    const v6: usize = point_space.linearFromCartesian(IndexMixin.add(cell, [3]usize{ 0, 1, 3 }));
+                                    const v7: usize = point_space.linearFromCartesian(IndexMixin.add(cell, [3]usize{ 1, 1, 3 }));
+                                    const v8: usize = point_space.linearFromCartesian(IndexMixin.add(cell, [3]usize{ 1, 0, 3 }));
+
+                                    try vertices.append(allocator, point_offset + v1);
+                                    try vertices.append(allocator, point_offset + v2);
+                                    try vertices.append(allocator, point_offset + v3);
+                                    try vertices.append(allocator, point_offset + v4);
+                                    try vertices.append(allocator, point_offset + v5);
+                                    try vertices.append(allocator, point_offset + v6);
+                                    try vertices.append(allocator, point_offset + v7);
+                                    try vertices.append(allocator, point_offset + v8);
+                                }
+                            }
+
+                            // Append Field data
+                            var cells = cell_space.cartesianIndices();
+
+                            while (cells.next()) |cell| {
+                                const node = IndexMixin.add(origin, cell);
+
+                                inline for (comptime std.enums.values(Tag), 0..) |field, idx| {
+                                    const value = node_space.value(node, block_sys.field(field));
+                                    try fields[idx].append(allocator, value);
+                                }
+                            }
+                        }
+                    }
+
+                    var output: VtuMeshOutput = try VtuMeshOutput.init(allocator, .{
+                        .points = positions.items,
+                        .vertices = vertices.items,
+                        .cell_type = cell_type,
+                    });
+                    defer output.deinit();
+
+                    inline for (comptime std.meta.fieldNames(Tag), 0..) |name, id| {
+                        try output.addCellField(name, fields[id].items, 1);
+                    }
+
+                    try output.write(out_stream);
+                }
+            };
         }
     };
 }

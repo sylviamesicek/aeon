@@ -113,10 +113,8 @@ pub fn TreeMesh(comptime N: usize) type {
             }
 
             // Smooth flags
-            var is_smooth = false;
-
-            while (is_smooth == false) {
-                is_smooth = true;
+            while (true) {
+                var is_smooth = true;
 
                 for (1..cells.len) |cell| {
                     // Is the current node flagged for refinement
@@ -130,10 +128,8 @@ pub fn TreeMesh(comptime N: usize) type {
 
                     // Get split index
                     const split = AxisMask.fromLinear(cell - cells.items(.children)[parent]);
-                    const split_unpacked = split.unpack();
                     // Iterate over a "split space".
-                    for (AxisMask.enumerate()[1..]) |osplit| {
-                        const osplit_unpacked = osplit.unpack();
+                    for (AxisMask.enumerate()[1..]) |direction| {
                         // Neighboring node
                         var neighbor: usize = cell;
                         // Is the nieghbor coarser than this node
@@ -141,16 +137,16 @@ pub fn TreeMesh(comptime N: usize) type {
                         // Loop over axes
                         for (0..N) |axis| {
                             // Skip traversing this axis if cart[axis] == 0
-                            if (!osplit_unpacked[axis]) {
+                            if (direction.isSet(axis) == false) {
                                 continue;
                             }
                             // Find face to traverse
                             const face = FaceIndex{
-                                .side = split_unpacked[axis],
+                                .side = split.isSet(axis),
                                 .axis = axis,
                             };
                             // Get neighbor, searching parent neighbors if necessary
-                            var traverse = cells.items(.neighbors)[cell][face.toLinear()];
+                            var traverse = cells.items(.neighbors)[neighbor][face.toLinear()];
 
                             if (traverse == null_index) {
                                 const neighbor_parent = cells.items(.parent)[neighbor];
@@ -167,11 +163,16 @@ pub fn TreeMesh(comptime N: usize) type {
                             neighbor = traverse;
                         }
                         // If neighbor is more coarse, tag for refinement
-                        if (neighbor_coarse and cells.items(.children)[neighbor] == null_index) {
+                        const neighbor_leaf = cells.items(.children)[neighbor] == null_index;
+                        if (neighbor_coarse and neighbor_leaf and !cells.items(.flag)[neighbor]) {
                             cells.items(.flag)[neighbor] = true;
                             is_smooth = false;
                         }
                     }
+                }
+
+                if (is_smooth) {
+                    break;
                 }
             }
         }
