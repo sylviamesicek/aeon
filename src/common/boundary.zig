@@ -160,8 +160,8 @@ pub fn BoundaryEngine(comptime N: usize, comptime M: usize, comptime O: usize) t
                                     result += fsign * source_value;
                                 },
                                 .robin => {
-                                    const vres: f64 = robin[axis].value * self.space.order(O).boundaryOp(extent, null, cell, field);
-                                    const fres: f64 = robin[axis].flux * self.space.order(O).boundaryOp(extent, axis, cell, field);
+                                    const vres: f64 = robin[axis].value * self.space.order(O).boundaryOp(extent, null, node, field);
+                                    const fres: f64 = robin[axis].flux * self.space.order(O).boundaryOp(extent, axis, node, field);
 
                                     const vcoef: f64 = robin[axis].value * self.space.order(O).boundaryOpCoef(extent, null);
                                     const fcoef: f64 = robin[axis].flux * self.space.order(O).boundaryOpCoef(extent, axis);
@@ -256,10 +256,10 @@ test "2d boundary filling" {
         }
     }
 
-    try expect(@abs(node_space.order(2).boundaryOp([2]isize{ -1, 0 }, null, [2]usize{ 0, 50 }, exact)) < 1e-10);
-    try expect(@abs(node_space.order(2).boundaryOp([2]isize{ -2, 0 }, null, [2]usize{ 0, 50 }, exact)) < 1e-10);
-    try expect(@abs(node_space.order(2).boundaryOp([2]isize{ -1, -1 }, null, [2]usize{ 0, 0 }, exact)) < 1e-10);
-    try expect(@abs(node_space.order(2).boundaryOp([2]isize{ -2, -2 }, null, [2]usize{ 0, 0 }, exact)) < 1e-10);
+    try expect(@abs(node_space.order(2).boundaryOp([2]isize{ -1, 0 }, null, [2]isize{ 0, 50 }, exact)) < 1e-10);
+    try expect(@abs(node_space.order(2).boundaryOp([2]isize{ -2, 0 }, null, [2]isize{ 0, 50 }, exact)) < 1e-10);
+    try expect(@abs(node_space.order(2).boundaryOp([2]isize{ -1, -1 }, null, [2]isize{ 0, 0 }, exact)) < 1e-10);
+    try expect(@abs(node_space.order(2).boundaryOp([2]isize{ -2, -2 }, null, [2]isize{ 0, 0 }, exact)) < 1e-10);
 
     // *********************************
 
@@ -355,5 +355,89 @@ test "mixed boundary filling" {
 
     for (0..node_space.numNodes()) |i| {
         try expect(@abs(field[i] - exact[i]) < 1e-10);
+    }
+}
+
+test "masked boundary filling" {
+    const expect = std.testing.expect;
+    const allocator = std.testing.allocator;
+    const pi = std.math.pi;
+
+    const AxisMask = geometry.AxisMask(2);
+    const FaceIndex = geometry.FaceIndex(2);
+    const Region = geometry.Region(2);
+    const NodeSpace = nodes_.NodeSpace(2, 2);
+    const Engine = BoundaryEngine(2, 2, 2);
+
+    const node_space: NodeSpace = .{
+        .size = [2]usize{ 100, 100 },
+        .bounds = .{
+            .origin = .{ 0.0, 0.0 },
+            .size = .{ 1.0, 1.0 },
+        },
+    };
+
+    const engine = Engine.new(node_space);
+
+    // ********************************
+    // Set field values ***************
+
+    const exact: []f64 = try allocator.alloc(f64, node_space.numNodes());
+    defer allocator.free(exact);
+
+    {
+        var nodes = node_space.nodes(2);
+
+        while (nodes.next()) |node| {
+            const pos = node_space.nodePosition(node);
+            const v = @sin(pi * pos[0]) * pos[1];
+            node_space.setNodeValue(node, exact, v);
+        }
+    }
+
+    const field: []f64 = try allocator.alloc(f64, node_space.numNodes());
+    defer allocator.free(field);
+
+    @memcpy(field, exact);
+
+    // *********************************
+
+    const DiritchletBC = struct {
+        pub fn kind(_: FaceIndex) BoundaryKind {
+            return .robin;
+        }
+
+        pub fn robin(_: @This(), _: [2]f64, _: FaceIndex) Robin {
+            return Robin.diritchlet(0.0);
+        }
+    };
+
+    const region: Region = .{
+        .sides = .{ .right, .left },
+    };
+
+    const mask = comptime blk: {
+        var result = AxisMask.initEmpty();
+        result.set(0);
+        break :blk result;
+    };
+
+    engine.fillRegion(region, mask, DiritchletBC{}, field);
+
+    // **********************************
+    // Test that boundary values are within a certain bound of the exact value
+
+    const index_space = node_space.indexSpace();
+
+    var nodes = node_space.nodes(2);
+
+    while (nodes.next()) |node| {
+        const lin = index_space.linearFromCartesian(NodeSpace.indexFromNode(node));
+        const err = @abs(field[lin] - exact[lin]);
+
+        // if (err > 1e-10) {
+        //     std.debug.print("Error at {any} is {}\n", .{ node, err });
+        // }
+        try expect(err < 1e-10);
     }
 }

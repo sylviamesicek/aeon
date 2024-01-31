@@ -463,7 +463,7 @@ pub fn NodeSpace(comptime N: usize, comptime M: usize) type {
 
                 const BO = 2 * O + 1;
 
-                pub fn boundaryOp(self: @This(), comptime extents: [N]isize, comptime flux: ?usize, cell: [N]usize, field: []const f64) f64 {
+                pub fn boundaryOp(self: @This(), comptime extents: [N]isize, comptime flux: ?usize, node: [N]isize, field: []const f64) f64 {
                     @setEvalBranchQuota(10000);
 
                     assert(field.len == self.space.numNodes());
@@ -496,7 +496,7 @@ pub fn NodeSpace(comptime N: usize, comptime M: usize) type {
                             } else if (comptime extents[i] < 0) {
                                 offset_node[i] = @as(isize, @intCast(BO - 1)) - idx;
                             } else {
-                                offset_node[i] = @intCast(cell[i]);
+                                offset_node[i] = node[i];
                             }
                         }
 
