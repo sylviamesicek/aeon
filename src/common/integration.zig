@@ -30,6 +30,7 @@ pub fn ForwardEulerIntegrator(comptime Tag: type) type {
     return struct {
         allocator: Allocator,
         sys: System,
+        scr: System,
         time: f64,
 
         const System = system.System(Tag);
@@ -39,32 +40,34 @@ pub fn ForwardEulerIntegrator(comptime Tag: type) type {
             var sys = try System.init(allocator, nnodes);
             errdefer sys.deinit(allocator);
 
+            var scr = try System.init(allocator, nnodes);
+            errdefer scr.deinit(allocator);
+
             return .{
                 .allocator = allocator,
                 .sys = sys,
+                .scr = scr,
                 .time = 0.0,
             };
         }
 
         pub fn deinit(self: *@This()) void {
             self.sys.deinit(self.allocator);
+            self.scr.deinit(self.allocator);
         }
 
-        pub fn step(self: *@This(), allocator: Allocator, deriv: anytype, h: f64) !void {
+        pub fn step(self: *@This(), deriv: anytype, h: f64) !void {
             if (comptime !(isOrdinaryDiffEq(@TypeOf(deriv))) and @TypeOf(deriv).Tag == Tag) {
                 @compileError("Derivative type must satisfy isOrdinaryDiffEq trait.");
             }
 
-            const scratch = try System.init(allocator, self.sys.len);
-            defer scratch.deinit(allocator);
-
             // Calculate derivative
             try deriv.preprocess(self.sys);
-            try deriv.derivative(scratch, self.sys.toConst(), self.time);
+            try deriv.derivative(self.scr, self.sys.toConst(), self.time);
             // Step
             inline for (comptime std.enums.values(Tag)) |field| {
                 for (0..self.sys.len) |idx| {
-                    self.sys.field(field)[idx] += h * scratch.field(field)[idx];
+                    self.sys.field(field)[idx] += h * self.scr.field(field)[idx];
                 }
             }
 
@@ -77,6 +80,11 @@ pub fn RungeKutta4Integrator(comptime Tag: type) type {
     return struct {
         allocator: Allocator,
         sys: System,
+        scr: System,
+        k1: System,
+        k2: System,
+        k3: System,
+        k4: System,
         time: f64,
 
         const System = system.System(Tag);
@@ -86,76 +94,85 @@ pub fn RungeKutta4Integrator(comptime Tag: type) type {
             const sys = try System.init(allocator, nnodes);
             errdefer sys.deinit(allocator);
 
+            const scr = try System.init(allocator, nnodes);
+            errdefer scr.deinit(allocator);
+
+            const k1 = try System.init(allocator, nnodes);
+            errdefer k1.deinit(allocator);
+
+            const k2 = try System.init(allocator, nnodes);
+            errdefer k2.deinit(allocator);
+
+            const k3 = try System.init(allocator, nnodes);
+            errdefer k3.deinit(allocator);
+
+            const k4 = try System.init(allocator, nnodes);
+            errdefer k4.deinit(allocator);
+
             return .{
                 .allocator = allocator,
                 .sys = sys,
+                .scr = scr,
+                .k1 = k1,
+                .k2 = k2,
+                .k3 = k3,
+                .k4 = k4,
                 .time = 0.0,
             };
         }
 
         pub fn deinit(self: *@This()) void {
             self.sys.deinit(self.allocator);
+            self.scr.deinit(self.allocator);
+            self.k1.deinit(self.allocator);
+            self.k2.deinit(self.allocator);
+            self.k3.deinit(self.allocator);
+            self.k4.deinit(self.allocator);
         }
 
-        pub fn step(self: *@This(), allocator: Allocator, deriv: anytype, h: f64) !void {
+        pub fn step(self: *@This(), deriv: anytype, h: f64) !void {
             if (comptime !(isOrdinaryDiffEq(@TypeOf(deriv))) and @TypeOf(deriv).Tag == Tag) {
                 @compileError("Derivative type must satisfy isOrdinaryDiffEq trait.");
             }
 
-            // Allocate scratch vectors
-
-            const scratch = try System.init(allocator, self.sys.len);
-            defer scratch.deinit(allocator);
-
-            const k1 = try System.init(allocator, self.sys.len);
-            defer k1.deinit(allocator);
-
-            const k2 = try System.init(allocator, self.sys.len);
-            defer k2.deinit(allocator);
-
-            const k3 = try System.init(allocator, self.sys.len);
-            defer k3.deinit(allocator);
-
-            const k4 = try System.init(allocator, self.sys.len);
-            defer k4.deinit(allocator);
-
             // Calculate k1
             try deriv.preprocess(self.sys);
-            try deriv.derivative(k1, self.sys.toConst(), self.time);
+            try deriv.derivative(self.k1, self.sys.toConst(), self.time);
+
             // Calculate k2
             inline for (comptime std.enums.values(Tag)) |field| {
                 for (0..self.sys.len) |idx| {
-                    scratch.field(field)[idx] = self.sys.field(field)[idx] + h / 2.0 * k1.field(field)[idx];
+                    self.scr.field(field)[idx] = self.sys.field(field)[idx] + h / 2.0 * self.k1.field(field)[idx];
                 }
             }
 
-            try deriv.preprocess(scratch);
-            try deriv.derivative(k2, scratch.toConst(), self.time + h / 2.0);
+            try deriv.preprocess(self.scr);
+            try deriv.derivative(self.k2, self.scr.toConst(), self.time + h / 2.0);
 
             // Calculate k3
             inline for (comptime std.enums.values(Tag)) |field| {
                 for (0..self.sys.len) |idx| {
-                    scratch.field(field)[idx] = self.sys.field(field)[idx] + h / 2.0 * k2.field(field)[idx];
+                    self.scr.field(field)[idx] = self.sys.field(field)[idx] + h / 2.0 * self.k2.field(field)[idx];
                 }
             }
 
-            try deriv.preprocess(scratch);
-            try deriv.derivative(k3, scratch.toConst(), self.time + h / 2.0);
+            try deriv.preprocess(self.scr);
+            try deriv.derivative(self.k3, self.scr.toConst(), self.time + h / 2.0);
 
             // Calculate k4
             inline for (comptime std.enums.values(Tag)) |field| {
                 for (0..self.sys.len) |idx| {
-                    scratch.field(field)[idx] = self.sys.field(field)[idx] + h * k3.field(field)[idx];
+                    self.scr.field(field)[idx] = self.sys.field(field)[idx] + h * self.k3.field(field)[idx];
                 }
             }
 
-            try deriv.preprocess(scratch);
-            try deriv.derivative(k4, scratch.toConst(), self.time + h);
+            try deriv.preprocess(self.scr);
+            try deriv.derivative(self.k4, self.scr.toConst(), self.time + h);
 
             // Update sys
             inline for (comptime std.enums.values(Tag)) |field| {
                 for (0..self.sys.len) |idx| {
-                    self.sys.field(field)[idx] += h / 6.0 * (k1.field(field)[idx] + 2.0 * k2.field(field)[idx] + 2.0 * k3.field(field)[idx] + k4.field(field)[idx]);
+                    self.sys.field(field)[idx] += h / 6.0 * (self.k1.field(field)[idx] + 2.0 * self.k2.field(field)[idx] + 2.0 * self.k3.field(field)[idx] + self.k4.field(field)[idx]);
                 }
             }
 

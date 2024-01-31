@@ -16,22 +16,62 @@ pub fn MultigridMethod(comptime N: usize, comptime M: usize, comptime O: usize, 
     }
 
     return struct {
+        gpa: Allocator,
+
+        config: Config,
         base_solver: BaseSolver,
-        max_iters: usize,
-        tolerance: f64,
-        presmooth: usize,
-        postsmooth: usize,
+        base_buffer: ArenaAllocator,
+
+        scr: []f64,
+        old: []f64,
+        rhs: []f64,
 
         const Self = @This();
         const Mesh = tree.TreeMesh(N);
-        const NodeManager = tree.NodeManager(N);
+        const NodeManager = tree.NodeManager(N, M);
         const NodeWorker = tree.NodeWorker(N, M);
         const isOperator = common.isOperator(N, M, O);
         const isBoundary = common.isBoundary(N);
 
+        pub const Config = struct {
+            max_iters: usize,
+            tolerance: f64,
+            presmooth: usize,
+            postsmooth: usize,
+        };
+
+        pub fn init(allocator: Allocator, num_nodes: usize, base_solver: BaseSolver, config: Config) !Self {
+            const scr = try allocator.alloc(f64, num_nodes);
+            errdefer allocator.free(scr);
+
+            const old = try allocator.alloc(f64, num_nodes);
+            errdefer allocator.free(old);
+
+            const rhs = try allocator.alloc(f64, num_nodes);
+            errdefer allocator.free(rhs);
+
+            return .{
+                .gpa = allocator,
+
+                .config = config,
+                .base_solver = base_solver,
+                .base_buffer = ArenaAllocator.init(allocator),
+
+                .scr = scr,
+                .old = old,
+                .rhs = rhs,
+            };
+        }
+
+        pub fn deinit(self: *Self) void {
+            self.base_buffer.deinit();
+            self.gpa.free(self.scr);
+            self.gpa.free(self.old);
+            self.gpa.free(self.rhs);
+        }
+
         pub fn solve(
-            self: Self,
-            allocator: Allocator,
+            self: *Self,
             worker: *const NodeWorker,
             operator: anytype,
             boundary: anytype,
@@ -49,27 +89,18 @@ pub fn MultigridMethod(comptime N: usize, comptime M: usize, comptime O: usize, 
                 @compileError("boundary must satisfy isBoundary trait.");
             }
 
-            assert(x.len == worker.numNodes());
-            assert(b.len == worker.numNodes());
+            assert(x.len == worker.manager.numNodes());
+            assert(b.len == worker.manager.numNodes());
+            assert(self.scr.len == worker.manager.numNodes());
 
             const levels = worker.mesh.numLevels();
 
-            const old = try allocator.alloc(f64, worker.numNodes());
-            defer allocator.free(old);
-
-            const scr = try allocator.alloc(f64, worker.numNodes());
-            defer allocator.free(scr);
-
-            @memset(scr, 0.0);
-
-            const rhs = try allocator.alloc(f64, worker.numNodes());
-            defer allocator.free(rhs);
-
-            @memcpy(rhs, b);
+            @memset(self.scr, 0.0);
+            @memcpy(self.rhs, b);
 
             // Use initial right hand side to set tolerance.
-            const irhs = worker.normAll(rhs);
-            const tol: f64 = self.tolerance * @abs(irhs);
+            const irhs = worker.normAll(self.rhs);
+            const tol: f64 = self.config.tolerance * @abs(irhs);
 
             if (irhs <= 1e-60) {
                 std.debug.print("Trivial Linear Problem\n", .{});
@@ -77,12 +108,6 @@ pub fn MultigridMethod(comptime N: usize, comptime M: usize, comptime O: usize, 
                 @memset(x, 0.0);
                 return;
             }
-
-            // Build scratch allocator
-            var arena: ArenaAllocator = ArenaAllocator.init(allocator);
-            defer arena.deinit();
-
-            const scratch: Allocator = arena.allocator();
 
             // Run iterations
             var iteration: usize = 0;
@@ -92,26 +117,24 @@ pub fn MultigridMethod(comptime N: usize, comptime M: usize, comptime O: usize, 
                 .worker = worker,
                 .oper = operator,
                 .bound = boundary,
-
-                .sys = x,
-                .old = old,
-                .scr = scr,
-                .rhs = rhs,
             };
 
-            while (iteration < self.max_iters) : (iteration += 1) {
-                defer _ = arena.reset(.retain_capacity);
-                @memcpy(rhs, b);
+            while (iteration < self.config.max_iters) : (iteration += 1) {
+                @memcpy(self.rhs, b);
 
                 // Iterate
-                try recursive.iterate(scratch, levels - 1);
+                try recursive.iterate(levels - 1, x);
 
                 // Check residual
                 for (0..levels) |level| {
-                    worker.order(O).residual(level, scr, rhs, operator, x);
+                    worker.order(O).residual(level, self.scr, self.rhs, operator, x);
                 }
 
-                const nres = worker.normAll(scr);
+                const nres = worker.normAll(self.scr);
+
+                if (nres <= tol) {
+                    break;
+                }
 
                 // // Debugging code
 
@@ -143,54 +166,66 @@ pub fn MultigridMethod(comptime N: usize, comptime M: usize, comptime O: usize, 
                 // try buf.flush();
 
                 // std.debug.print("Iteration {}, Residual {}\n", .{ iteration, nres });
-
-                if (nres <= tol) {
-                    break;
-                }
             }
         }
 
         fn Recursive(comptime Oper: type, comptime Bound: type) type {
             return struct {
-                method: Self,
+                method: *Self,
                 worker: *const NodeWorker,
                 oper: Oper,
                 bound: Bound,
 
-                sys: []f64,
-                old: []f64,
-                scr: []f64,
-                rhs: []f64,
+                pub fn iterate(self: @This(), level: usize, sys: []f64) !void {
+                    const rhs = self.method.rhs;
+                    const old = self.method.old;
+                    const scr = self.method.scr;
 
-                pub fn apply(self: *const @This(), out: []f64, in: []const f64) void {
-                    self.worker.unpackBase(self.sys, in);
-                    self.worker.order(O).fillGhostNodes(0, self.bound, self.sys);
-                    self.worker.order(O).apply(0, self.scr, self.oper, self.sys);
-                    self.worker.packBase(out, self.scr);
-                }
-
-                pub fn iterate(self: @This(), allocator: Allocator, level: usize) !void {
                     const worker = self.worker.order(O);
                     const worker0 = self.worker.order(0);
 
                     if (level == 0) {
-                        const ndofs = self.worker.manager.numPackedBaseNodes();
+                        defer _ = self.method.base_buffer.reset(.retain_capacity);
+                        const allocator = self.method.base_buffer.allocator();
 
-                        const sys_base = try allocator.alloc(f64, ndofs);
+                        const num_base_nodes = self.worker.numBaseNodes();
+
+                        const sys_base = try allocator.alloc(f64, num_base_nodes);
                         defer allocator.free(sys_base);
 
-                        const rhs_base = try allocator.alloc(f64, ndofs);
+                        const rhs_base = try allocator.alloc(f64, num_base_nodes);
                         defer allocator.free(rhs_base);
 
-                        self.worker.packBase(sys_base, self.sys);
-                        self.worker.packBase(rhs_base, self.rhs);
+                        self.worker.packBase(sys_base, sys);
+                        self.worker.packBase(rhs_base, rhs);
 
-                        try self.method.base_solver.solve(allocator, self, sys_base, rhs_base);
+                        const BaseOperator = struct {
+                            worker: *const NodeWorker,
+                            oper: Oper,
+                            bound: Bound,
+                            scr: []f64,
+                            sys: []f64,
 
-                        self.worker.unpackBase(self.sys, sys_base);
-                        self.worker.unpackBase(self.rhs, rhs_base);
+                            pub fn apply(base: *const @This(), out: []f64, in: []const f64) void {
+                                base.worker.unpackBase(base.sys, in);
+                                base.worker.order(O).fillGhostNodes(0, base.bound, base.sys);
+                                base.worker.order(O).apply(0, base.scr, base.oper, base.sys);
+                                base.worker.packBase(out, base.scr);
+                            }
+                        };
 
-                        self.worker.order(O).fillGhostNodes(0, self.bound, self.sys);
+                        try self.method.base_solver.solve(allocator, BaseOperator{
+                            .worker = self.worker,
+                            .oper = self.oper,
+                            .bound = self.bound,
+                            .scr = scr,
+                            .sys = sys,
+                        }, sys_base, rhs_base);
+
+                        self.worker.unpackBase(sys, sys_base);
+                        self.worker.unpackBase(rhs, rhs_base);
+
+                        self.worker.order(O).fillGhostNodes(0, self.bound, sys);
 
                         return;
                     }
@@ -198,54 +233,54 @@ pub fn MultigridMethod(comptime N: usize, comptime M: usize, comptime O: usize, 
                     // ********************************
                     // Presmoothing
 
-                    for (0..self.method.presmooth) |_| {
-                        worker.fillGhostNodes(level, self.bound, self.sys);
-                        worker.smooth(level, self.scr, self.oper, self.sys, self.rhs);
-                        self.worker.copy(level, self.sys, self.scr);
+                    for (0..self.method.config.presmooth) |_| {
+                        worker.fillGhostNodes(level, self.bound, sys);
+                        worker.smooth(level, scr, self.oper, sys, rhs);
+                        self.worker.copy(level, sys, scr);
                     }
 
                     // ********************************
                     // Restrict Solution
 
-                    worker.fillGhostNodes(level, self.bound, self.sys);
-                    worker.restrict(level, self.sys);
+                    worker.fillGhostNodes(level, self.bound, sys);
+                    worker.restrict(level, sys);
 
-                    worker.fillGhostNodes(level - 1, self.bound, self.sys);
-                    self.worker.copy(level - 1, self.old, self.sys);
+                    worker.fillGhostNodes(level - 1, self.bound, sys);
+                    self.worker.copy(level - 1, old, sys);
 
                     // ********************************
                     // Right Hand Side (Tau Correction)
 
-                    worker.residual(level, self.scr, self.rhs, self.oper, self.sys);
-                    worker0.restrict(level, self.scr);
-                    worker.tauCorrect(level - 1, self.rhs, self.scr, self.oper, self.sys);
+                    worker.residual(level, scr, rhs, self.oper, sys);
+                    worker0.restrict(level, scr);
+                    worker.tauCorrect(level - 1, rhs, scr, self.oper, sys);
 
                     // ********************************
-                    // Recurese
+                    // Recurse
 
-                    try self.iterate(allocator, level - 1);
+                    try self.iterate(level - 1, sys);
 
                     // ********************************
                     // Error Correction
 
                     // Sys and Old should both have boundaries filled
-                    self.worker.copy(level - 1, self.scr, self.sys);
-                    self.worker.subtract(level - 1, self.scr, self.old);
+                    self.worker.copy(level - 1, scr, sys);
+                    self.worker.subtract(level - 1, scr, old);
 
-                    worker.prolong(level, self.scr);
+                    worker.prolong(level, scr);
 
-                    self.worker.add(level, self.sys, self.scr);
+                    self.worker.add(level, sys, scr);
 
                     // **********************************
                     // Post smooth
 
-                    for (0..self.method.postsmooth) |_| {
-                        worker.fillGhostNodes(level, self.bound, self.sys);
-                        worker.smooth(level, self.scr, self.oper, self.sys, self.rhs);
-                        self.worker.copy(level, self.sys, self.scr);
+                    for (0..self.method.config.postsmooth) |_| {
+                        worker.fillGhostNodes(level, self.bound, sys);
+                        worker.smooth(level, scr, self.oper, sys, rhs);
+                        self.worker.copy(level, sys, scr);
                     }
 
-                    worker.fillGhostNodes(level, self.bound, self.sys);
+                    worker.fillGhostNodes(level, self.bound, sys);
                 }
             };
         }

@@ -22,10 +22,11 @@ const RangeMap = utils.RangeMap;
 /// Stores the additional structured needed to associate nodes with a mesh. Uniform children with common parents
 /// are grouped into blocks to prevent unnessary ghost node duplication. Similar to a mesh, this node manager
 /// describes the structure of a discretization.
+///
 /// All routines for transfering between node vectors, prolongation, smoothing, and filling ghost nodes are handled
 /// by seperate `NodeWorker` classes which handle parallelism and dispatching work to other devices
 /// (like the GPU or other processes).
-pub fn NodeManager(comptime N: usize) type {
+pub fn NodeManager(comptime N: usize, comptime M: usize) type {
     return struct {
         gpa: Allocator,
         /// The set of blocks that make up the mesh.
@@ -263,7 +264,7 @@ pub fn NodeManager(comptime N: usize) type {
                 var total: usize = 1;
 
                 for (0..N) |axis| {
-                    total *= self.cell_size[axis] * block.size[axis];
+                    total *= self.cell_size[axis] * block.size[axis] + 2 * M;
                 }
 
                 offset += total;
@@ -363,37 +364,23 @@ pub fn NodeManager(comptime N: usize) type {
             return [1]usize{result} ** N;
         }
 
-        pub fn buildNodeMap(self: *const @This(), comptime M: usize, allocator: Allocator, map: *RangeMap) !void {
-            try map.resize(allocator, self.blocks.items.len + 1);
-
-            var offset: usize = 0;
-            map.set(0, 0);
-
-            for (self.blocks.items, 0..) |block, block_id| {
-                var total: usize = 1;
-
-                for (0..N) |axis| {
-                    total *= self.cell_size[axis] * block.size[axis] + 2 * M;
-                }
-
-                offset += total;
-
-                map.set(block_id + 1, offset);
-            }
-        }
-
-        /// Returns the number of nodes required to store compact node vectors on the mesh.
-        pub fn numPackedNodes(self: *const @This()) usize {
+        /// Returns the number of nodes required to store node vectors on the mesh.
+        pub fn numNodes(self: *const @This()) usize {
             return self.block_to_nodes.total();
         }
 
-        pub fn numPackedBaseNodes(self: *const @This()) usize {
+        /// Returns the number of nodes on the base level of the mesh.
+        pub fn numBaseNodes(self: *const @This()) usize {
             return self.block_to_nodes.size(0);
         }
 
         /// Number of blocks in the mesh.
         pub fn numBlocks(self: *const @This()) usize {
             return self.blocks.items.len;
+        }
+
+        pub fn blockNodes(self: *const @This(), lock_id: usize, data: anytype) @TypeOf(data) {
+            return self.block_to_nodes.slice(lock_id, data);
         }
 
         /// Retrieves a block descriptor from a `block_id`.

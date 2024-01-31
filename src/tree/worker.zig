@@ -19,16 +19,13 @@ const RangeMap = utils.RangeMap;
 
 pub fn NodeWorker(comptime N: usize, comptime M: usize) type {
     return struct {
-        gpa: Allocator,
-        map: RangeMap,
-
         mesh: *const TreeMesh,
         manager: *const NodeManager,
 
         const Block = NodeManager.Block;
         const Cell = NodeManager.Cell;
 
-        const NodeManager = manager_.NodeManager(N);
+        const NodeManager = manager_.NodeManager(N, M);
         const TreeMesh = tree.TreeMesh(N);
 
         const AxisMask = geometry.AxisMask(N);
@@ -48,102 +45,27 @@ pub fn NodeWorker(comptime N: usize, comptime M: usize) type {
 
         const Self = @This();
 
-        pub fn init(allocator: Allocator, mesh: *const TreeMesh, manager: *const NodeManager) !@This() {
-            var map: RangeMap = .{};
-            errdefer map.deinit(allocator);
-
-            try manager.buildNodeMap(M, allocator, &map);
-
+        pub fn init(mesh: *const TreeMesh, manager: *const NodeManager) !@This() {
             return .{
-                .gpa = allocator,
-                .map = map,
-
                 .mesh = mesh,
                 .manager = manager,
             };
         }
 
         pub fn deinit(self: *@This()) void {
-            self.map.deinit(self.gpa);
-        }
-
-        pub fn numNodes(self: @This()) usize {
-            return self.map.total();
-        }
-
-        pub fn packBase(self: @This(), dest: []f64, src: []const f64) void {
-            assert(dest.len == self.manager.numPackedBaseNodes());
-            assert(src.len == self.numNodes());
-
-            self.packBlock(0, dest, src);
-        }
-
-        pub fn unpackBase(self: @This(), dest: []f64, src: []const f64) void {
-            assert(src.len == self.manager.numPackedBaseNodes());
-            assert(dest.len == self.numNodes());
-
-            self.unpackBlock(0, dest, src);
-        }
-
-        pub fn packAll(
-            self: @This(),
-            dest: []f64,
-            src: []const f64,
-        ) void {
-            assert(src.len == self.map.total());
-            assert(dest.len == self.manager.numPackedNodes());
-
-            for (0..self.manager.numBlocks()) |block_id| {
-                self.packBlock(block_id, dest, src);
-            }
-        }
-
-        pub fn unpackAll(self: @This(), dest: []f64, src: []const f64) void {
-            assert(dest.len == self.map.total());
-            assert(src.len == self.manager.numPackedNodes());
-
-            for (0..self.manager.numBlocks()) |block_id| {
-                self.unpackBlock(block_id, dest, src);
-            }
-        }
-
-        fn packBlock(self: @This(), block_id: usize, dest: []f64, src: []const f64) void {
-            const block = self.manager.blockFromId(block_id);
-            const block_src = self.map.slice(block_id, src);
-            const block_dest = self.manager.block_to_nodes.slice(block_id, dest);
-            const node_space = self.nodeSpaceFromBlock(block);
-
-            var cells = node_space.cellSpace().cartesianIndices();
-            var linear: usize = 0;
-
-            while (cells.next()) |cell| : (linear += 1) {
-                const v = node_space.value(cell, block_src);
-                block_dest[linear] = v;
-            }
-        }
-
-        fn unpackBlock(self: @This(), block_id: usize, dest: []f64, src: []const f64) void {
-            const block = self.manager.blockFromId(block_id);
-            const block_dest = self.map.slice(block_id, dest);
-            const block_src = self.manager.block_to_nodes.slice(block_id, src);
-            const node_space = self.nodeSpaceFromBlock(block);
-
-            var cells = node_space.cellSpace().cartesianIndices();
-            var linear: usize = 0;
-
-            while (cells.next()) |cell| : (linear += 1) {
-                node_space.setValue(cell, block_dest, block_src[linear]);
-            }
+            _ = self;
         }
 
         pub fn normSqAll(self: @This(), field: []const f64) f64 {
-            assert(field.len == self.map.total());
+            const manager = self.manager;
+
+            assert(field.len == manager.numNodes());
 
             var result: f64 = 0.0;
 
-            for (0..self.manager.numBlocks()) |block_id| {
-                const block = self.manager.blockFromId(block_id);
-                const block_field = self.map.slice(block_id, field);
+            for (0..manager.numBlocks()) |block_id| {
+                const block = manager.blockFromId(block_id);
+                const block_field = manager.blockNodes(block_id, field);
                 const node_space = self.nodeSpaceFromBlock(block);
 
                 var cells = node_space.cellSpace().cartesianIndices();
@@ -166,57 +88,108 @@ pub fn NodeWorker(comptime N: usize, comptime M: usize) type {
         // **********************************
 
         pub fn copyAll(self: @This(), dest: []f64, src: []const f64) void {
-            assert(src.len == self.numNodes());
-            assert(dest.len == self.numNodes());
+            assert(src.len == self.manager.numNodes());
+            assert(dest.len == self.manager.numNodes());
 
             @memcpy(dest, src);
         }
 
         pub fn copy(self: @This(), level: usize, dest: []f64, src: []const f64) void {
-            assert(src.len == self.numNodes());
-            assert(dest.len == self.numNodes());
+            const manager = self.manager;
 
-            const blocks = self.manager.level_to_blocks.range(level);
+            assert(src.len == manager.numNodes());
+            assert(dest.len == manager.numNodes());
+
+            const blocks = manager.level_to_blocks.range(level);
 
             for (blocks.start..blocks.end) |block_id| {
-                const block_src = self.map.slice(block_id, src);
-                const block_dest = self.map.slice(block_id, dest);
+                const block_src = manager.blockNodes(block_id, src);
+                const block_dest = manager.blockNodes(block_id, dest);
 
                 @memcpy(block_dest, block_src);
             }
         }
 
-        pub fn add(self: @This(), level: usize, dest: []f64, a: []const f64) void {
-            assert(a.len == self.numNodes());
-            assert(dest.len == self.numNodes());
+        pub fn add(self: @This(), level: usize, dest: []f64, v: []const f64) void {
+            const manager = self.manager;
 
-            const blocks = self.manager.level_to_blocks.range(level);
+            assert(v.len == manager.numNodes());
+            assert(dest.len == manager.numNodes());
+
+            const blocks = manager.level_to_blocks.range(level);
 
             for (blocks.start..blocks.end) |block_id| {
-                const block_a = self.map.slice(block_id, a);
-                const block_dest = self.map.slice(block_id, dest);
+                const block_v = manager.blockNodes(block_id, v);
+                const block_dest = manager.blockNodes(block_id, dest);
 
                 for (0..block_dest.len) |i| {
-                    block_dest[i] += block_a[i];
+                    block_dest[i] += block_v[i];
                 }
             }
         }
 
-        pub fn subtract(self: @This(), level: usize, dest: []f64, a: []const f64) void {
-            assert(a.len == self.numNodes());
-            assert(dest.len == self.numNodes());
+        pub fn subtract(self: @This(), level: usize, dest: []f64, v: []const f64) void {
+            const manager = self.manager;
 
-            const blocks = self.manager.level_to_blocks.range(level);
+            assert(v.len == manager.numNodes());
+            assert(dest.len == manager.numNodes());
+
+            const blocks = manager.level_to_blocks.range(level);
 
             for (blocks.start..blocks.end) |block_id| {
-                const block_a = self.map.slice(block_id, a);
-                const block_dest = self.map.slice(block_id, dest);
+                const block_v = manager.blockNodes(block_id, v);
+                const block_dest = manager.blockNodes(block_id, dest);
 
                 for (0..block_dest.len) |i| {
-                    block_dest[i] -= block_a[i];
+                    block_dest[i] -= block_v[i];
                 }
             }
         }
+
+        // *********************************
+        // Base operations *****************
+        // *********************************
+
+        pub fn numBaseNodes(self: @This()) usize {
+            return IndexSpace.fromSize(self.manager.cell_size).total();
+        }
+
+        pub fn packBase(self: @This(), dest: []f64, src: []const f64) void {
+            assert(dest.len == self.numBaseNodes());
+            assert(src.len == self.manager.numNodes());
+
+            const block = self.manager.blockFromId(0);
+            const block_src = self.manager.blockNodes(0, src);
+            const node_space = self.nodeSpaceFromBlock(block);
+
+            var cells = node_space.cellSpace().cartesianIndices();
+            var linear: usize = 0;
+
+            while (cells.next()) |cell| : (linear += 1) {
+                const v = node_space.value(cell, block_src);
+                dest[linear] = v;
+            }
+        }
+
+        pub fn unpackBase(self: @This(), dest: []f64, src: []const f64) void {
+            assert(src.len == self.numBaseNodes());
+            assert(dest.len == self.manager.numNodes());
+
+            const block = self.manager.blockFromId(0);
+            const block_dest = self.manager.blockNodes(0, dest);
+            const node_space = self.nodeSpaceFromBlock(block);
+
+            var cells = node_space.cellSpace().cartesianIndices();
+            var linear: usize = 0;
+
+            while (cells.next()) |cell| : (linear += 1) {
+                node_space.setValue(cell, block_dest, src[linear]);
+            }
+        }
+
+        // **************************************
+        // General Order Dependent Operations ***
+        // **************************************
 
         pub fn order(self: @This(), comptime O: usize) Order(O) {
             return .{
@@ -239,10 +212,9 @@ pub fn NodeWorker(comptime N: usize, comptime M: usize) type {
 
                 /// Fills the ghost nodes of given level.
                 pub fn fillGhostNodes(self: @This(), level: usize, boundary: anytype, field: []f64) void {
-                    const map = self.worker.map;
                     const manager = self.worker.manager;
 
-                    assert(field.len == map.total());
+                    assert(field.len == manager.numNodes());
 
                     // Short circuit in the case of level = 0
                     if (level == 0) {
@@ -258,10 +230,9 @@ pub fn NodeWorker(comptime N: usize, comptime M: usize) type {
 
                 /// Fills all ghost nodes.
                 pub fn fillGhostNodesAll(self: @This(), boundary: anytype, field: []f64) void {
-                    const map = self.worker.map;
                     const manager = self.worker.manager;
 
-                    assert(field.len == map.total());
+                    assert(field.len == manager.numNodes());
 
                     self.fillBaseGhostNodes(boundary, field);
 
@@ -271,11 +242,10 @@ pub fn NodeWorker(comptime N: usize, comptime M: usize) type {
                 }
 
                 fn fillBaseGhostNodes(self: @This(), boundary: anytype, field: []f64) void {
-                    const map = self.worker.map;
                     const manager = self.worker.manager;
 
                     const block = manager.blockFromId(0);
-                    const block_field = field[map.offset(0)..map.offset(1)];
+                    const block_field = manager.blockNodes(0, field);
                     const node_space = self.nodeSpaceFromBlock(block);
                     const boundary_engine = BoundaryEngine{ .space = node_space };
 
@@ -284,13 +254,12 @@ pub fn NodeWorker(comptime N: usize, comptime M: usize) type {
 
                 /// Fills the boundary of a given block, whether by exptrapolation or prolongation.
                 fn fillBlockGhostNodes(self: @This(), block_id: usize, boundary: anytype, field: []f64) void {
-                    const map = self.worker.map;
                     const manager = self.worker.manager;
 
                     assert(block_id != 0);
 
                     const block = manager.blockFromId(block_id);
-                    const block_field = field[map.offset(block_id)..map.offset(block_id + 1)];
+                    const block_field = manager.blockNodes(block_id, field);
                     const node_space = self.nodeSpaceFromBlock(block);
                     const boundary_engine = BoundaryEngine{ .space = node_space };
 
@@ -335,7 +304,6 @@ pub fn NodeWorker(comptime N: usize, comptime M: usize) type {
 
                 /// Fills ghost nodes on the interior of the numerical domain.
                 fn fillBlockGhostNodesInterior(self: @This(), region: Region, block_id: usize, field: []f64) void {
-                    const map = self.worker.map;
                     const manager = self.worker.manager;
                     const mesh = self.worker.mesh;
 
@@ -343,7 +311,7 @@ pub fn NodeWorker(comptime N: usize, comptime M: usize) type {
 
                     const block = manager.blockFromId(block_id);
                     const block_node_space = self.nodeSpaceFromBlock(block);
-                    const block_field: []f64 = map.slice(block_id, field);
+                    const block_field: []f64 = manager.blockNodes(block_id, field);
 
                     // Cache pointers
                     const cells = mesh.cells.slice();
@@ -374,7 +342,7 @@ pub fn NodeWorker(comptime N: usize, comptime M: usize) type {
                             const neighbor_block_id = cell_meta.items(.block)[neighbor];
                             const neighbor_block = manager.blockFromId(neighbor_block_id);
                             const neighbor_index = cell_meta.items(.index)[neighbor];
-                            const neighbor_field: []const f64 = map.slice(neighbor_block_id, field);
+                            const neighbor_field: []const f64 = manager.blockNodes(neighbor_block_id, field);
                             const neighbor_node_space = self.nodeSpaceFromBlock(neighbor_block);
 
                             var neighbor_origin = toSigned(refined(mul(neighbor_index, cell_size)));
@@ -406,7 +374,7 @@ pub fn NodeWorker(comptime N: usize, comptime M: usize) type {
                             const neighbor_block_id = cell_meta.items(.block)[neighbor];
                             const neighbor_index = cell_meta.items(.index)[neighbor];
                             const neighbor_block = manager.blockFromId(neighbor_block_id);
-                            const neighbor_field = map.slice(neighbor_block_id, field);
+                            const neighbor_field = manager.blockNodes(neighbor_block_id, field);
                             const neighbor_node_space = self.nodeSpaceFromBlock(neighbor_block);
 
                             var neighbor_origin = toSigned(mul(neighbor_index, cell_size));
@@ -437,10 +405,9 @@ pub fn NodeWorker(comptime N: usize, comptime M: usize) type {
                 // *******************************
 
                 pub fn prolong(self: @This(), level: usize, field: []f64) void {
-                    const map = self.worker.map;
                     const manager = self.worker.manager;
 
-                    assert(field.len == map.total());
+                    assert(field.len == manager.numNodes());
 
                     if (level == 0) {
                         return;
@@ -453,14 +420,13 @@ pub fn NodeWorker(comptime N: usize, comptime M: usize) type {
                 }
 
                 fn prolongBlock(self: @This(), block_id: usize, field: []f64) void {
-                    const map = self.worker.map;
                     const manager = self.worker.manager;
                     const mesh = self.worker.mesh;
 
                     assert(block_id != 0);
 
                     const block = manager.blockFromId(block_id);
-                    const block_field = map.slice(block_id, field);
+                    const block_field = manager.blockNodes(block_id, field);
                     const block_node_space = self.nodeSpaceFromBlock(block);
 
                     // Cache pointers
@@ -482,7 +448,7 @@ pub fn NodeWorker(comptime N: usize, comptime M: usize) type {
                         const parent_block_id: usize = cell_meta.items(.block)[parent];
                         const parent_index: [N]usize = cell_meta.items(.index)[parent];
                         const parent_block = manager.blockFromId(parent_block_id);
-                        const parent_block_field: []const f64 = map.slice(parent_block_id, field);
+                        const parent_block_field: []const f64 = manager.blockNodes(parent_block_id, field);
                         const parent_block_node_space = self.nodeSpaceFromBlock(parent_block);
                         var parent_origin = refined(mul(parent_index, cell_size));
                         // Offset origin to take into account split
@@ -506,7 +472,7 @@ pub fn NodeWorker(comptime N: usize, comptime M: usize) type {
                 }
 
                 pub fn restrict(self: @This(), level: usize, field: []f64) void {
-                    assert(field.len == self.worker.map.total());
+                    assert(field.len == self.worker.manager.numNodes());
 
                     if (level == 0) {
                         return;
@@ -519,14 +485,13 @@ pub fn NodeWorker(comptime N: usize, comptime M: usize) type {
                 }
 
                 fn restrictBlock(self: @This(), block_id: usize, field: []f64) void {
-                    const map = self.worker.map;
                     const manager = self.worker.manager;
                     const mesh = self.worker.mesh;
 
                     assert(block_id != 0);
 
                     const block = manager.blockFromId(block_id);
-                    const block_field: []const f64 = map.slice(block_id, field);
+                    const block_field: []const f64 = manager.blockNodes(block_id, field);
                     const block_node_space = self.nodeSpaceFromBlock(block);
 
                     // Cache pointers
@@ -548,7 +513,7 @@ pub fn NodeWorker(comptime N: usize, comptime M: usize) type {
                         const parent_block_id: usize = cell_meta.items(.block)[parent];
                         const parent_index: [N]usize = cell_meta.items(.index)[parent];
                         const parent_block = manager.blockFromId(parent_block_id);
-                        const parent_block_field: []f64 = map.slice(parent_block_id, field);
+                        const parent_block_field: []f64 = manager.blockNodes(parent_block_id, field);
                         const parent_block_node_space = self.nodeSpaceFromBlock(parent_block);
 
                         var parent_origin = mul(parent_index, cell_size);
@@ -591,10 +556,9 @@ pub fn NodeWorker(comptime N: usize, comptime M: usize) type {
                         @compileError("Projection must satisfy isProjection trait");
                     }
 
-                    const map = self.worker.map;
                     const manager = self.worker.manager;
 
-                    assert(field.len == map.total());
+                    assert(field.len == manager.numNodes());
 
                     const blocks = manager.level_to_blocks.range(level);
                     for (blocks.start..blocks.end) |block_id| {
@@ -604,11 +568,10 @@ pub fn NodeWorker(comptime N: usize, comptime M: usize) type {
 
                 /// Set values of the field on the given block using the projection.
                 fn projectBlock(self: @This(), block_id: usize, projection: anytype, field: []f64) void {
-                    const map = self.worker.map;
                     const manager = self.worker.manager;
 
-                    const block_field: []f64 = map.slice(block_id, field);
-                    const block_range = map.range(block_id);
+                    const block_field: []f64 = manager.blockNodes(block_id, field);
+                    const block_range = manager.block_to_nodes.range(block_id);
 
                     const node_space = self.nodeSpaceFromBlock(manager.blockFromId(block_id));
 
@@ -634,11 +597,10 @@ pub fn NodeWorker(comptime N: usize, comptime M: usize) type {
                         @compileError("Operator must satisfy isOperator trait");
                     }
 
-                    const map = self.worker.map;
                     const manager = self.worker.manager;
 
-                    assert(field.len == map.total());
-                    assert(src.len == map.total());
+                    assert(field.len == manager.numNodes());
+                    assert(src.len == manager.numNodes());
 
                     const blocks = manager.level_to_blocks.range(level);
                     for (blocks.start..blocks.end) |block_id| {
@@ -648,11 +610,10 @@ pub fn NodeWorker(comptime N: usize, comptime M: usize) type {
 
                 /// Applies the operator to the source function on this block, storing the result on field.
                 fn applyBlock(self: @This(), block_id: usize, field: []f64, operator: anytype, src: []const f64) void {
-                    const map = self.worker.map;
                     const manager = self.worker.manager;
 
-                    const block_field: []f64 = map.slice(block_id, field);
-                    const block_range = map.range(block_id);
+                    const block_field: []f64 = manager.blockNodes(block_id, field);
+                    const block_range = manager.block_to_nodes.range(block_id);
 
                     const node_space = self.nodeSpaceFromBlock(manager.blockFromId(block_id));
 
@@ -678,12 +639,11 @@ pub fn NodeWorker(comptime N: usize, comptime M: usize) type {
                         @compileError("Operator must satisfy isOperator trait");
                     }
 
-                    const map = self.worker.map;
                     const manager = self.worker.manager;
 
-                    assert(field.len == map.total());
-                    assert(src.len == map.total());
-                    assert(rhs.len == map.total());
+                    assert(field.len == manager.numNodes());
+                    assert(src.len == manager.numNodes());
+                    assert(rhs.len == manager.numNodes());
 
                     const blocks = manager.level_to_blocks.range(level);
                     for (blocks.start..blocks.end) |block_id| {
@@ -693,12 +653,11 @@ pub fn NodeWorker(comptime N: usize, comptime M: usize) type {
 
                 /// Applies the operator to the source function on this block, storing the result on field.
                 fn residualBlock(self: @This(), block_id: usize, field: []f64, rhs: []const f64, operator: anytype, src: []const f64) void {
-                    const map = self.worker.map;
                     const manager = self.worker.manager;
 
-                    const block_field: []f64 = map.slice(block_id, field);
-                    const block_rhs: []const f64 = map.slice(block_id, rhs);
-                    const block_range = map.range(block_id);
+                    const block_field: []f64 = manager.blockNodes(block_id, field);
+                    const block_rhs: []const f64 = manager.blockNodes(block_id, rhs);
+                    const block_range = manager.block_to_nodes.range(block_id);
 
                     const node_space = self.nodeSpaceFromBlock(manager.blockFromId(block_id));
 
@@ -726,12 +685,11 @@ pub fn NodeWorker(comptime N: usize, comptime M: usize) type {
                         @compileError("Operator must satisfy isOperator trait");
                     }
 
-                    const map = self.worker.map;
                     const manager = self.worker.manager;
 
-                    assert(field.len == map.total());
-                    assert(src.len == map.total());
-                    assert(res.len == map.total());
+                    assert(field.len == manager.numNodes());
+                    assert(src.len == manager.numNodes());
+                    assert(res.len == manager.numNodes());
 
                     const blocks = manager.level_to_blocks.range(level);
                     for (blocks.start..blocks.end) |block_id| {
@@ -741,12 +699,11 @@ pub fn NodeWorker(comptime N: usize, comptime M: usize) type {
 
                 /// Applies the operator to the source function on this block, storing the result on field.
                 fn tauCorrectBlock(self: @This(), block_id: usize, field: []f64, res: []const f64, operator: anytype, src: []const f64) void {
-                    const map = self.worker.map;
                     const manager = self.worker.manager;
 
-                    const block_field: []f64 = map.slice(block_id, field);
-                    const block_res: []const f64 = map.slice(block_id, res);
-                    const block_range = map.range(block_id);
+                    const block_field: []f64 = manager.blockNodes(block_id, field);
+                    const block_res: []const f64 = manager.blockNodes(block_id, res);
+                    const block_range = manager.block_to_nodes.range(block_id);
                     const block = manager.blockFromId(block_id);
 
                     const node_space = self.nodeSpaceFromBlock(block);
@@ -796,11 +753,10 @@ pub fn NodeWorker(comptime N: usize, comptime M: usize) type {
                         @compileError("Operator must satisfy isOperator trait");
                     }
 
-                    const map = self.worker.map;
                     const manager = self.worker.manager;
 
-                    assert(field.len == map.total());
-                    assert(src.len == map.total());
+                    assert(field.len == manager.numNodes());
+                    assert(src.len == manager.numNodes());
 
                     const blocks = manager.level_to_blocks.range(level);
                     for (blocks.start..blocks.end) |block_id| {
@@ -810,13 +766,12 @@ pub fn NodeWorker(comptime N: usize, comptime M: usize) type {
 
                 /// Performs jacobi smoothing on this block.
                 fn smoothBlock(self: @This(), block_id: usize, field: []f64, operator: anytype, src: []const f64, rhs: []const f64) void {
-                    const map = self.worker.map;
                     const manager = self.worker.manager;
 
-                    const block_field: []f64 = map.slice(block_id, field);
-                    const block_rhs: []const f64 = map.slice(block_id, rhs);
-                    const block_src: []const f64 = map.slice(block_id, src);
-                    const block_range = map.range(block_id);
+                    const block_field: []f64 = manager.blockNodes(block_id, field);
+                    const block_rhs: []const f64 = manager.blockNodes(block_id, rhs);
+                    const block_src: []const f64 = manager.blockNodes(block_id, src);
+                    const block_range = manager.block_to_nodes.range(block_id);
 
                     const node_space = self.nodeSpaceFromBlock(manager.blockFromId(block_id));
 
@@ -843,11 +798,10 @@ pub fn NodeWorker(comptime N: usize, comptime M: usize) type {
                 // Dissipation
 
                 pub fn dissipationAll(self: @This(), eps: f64, deriv: []f64, src: []const f64) void {
-                    const map = self.worker.map;
                     const manager = self.worker.manager;
 
-                    assert(deriv.len == map.total());
-                    assert(src.len == map.total());
+                    assert(deriv.len == manager.numNodes());
+                    assert(src.len == manager.numNodes());
 
                     for (0..manager.numBlocks()) |block_id| {
                         self.dissipationBlock(block_id, eps, deriv, src);
@@ -855,11 +809,10 @@ pub fn NodeWorker(comptime N: usize, comptime M: usize) type {
                 }
 
                 pub fn dissipation(self: @This(), level: usize, eps: f64, deriv: []f64, src: []const f64) void {
-                    const map = self.worker.map;
                     const manager = self.worker.manager;
 
-                    assert(deriv.len == map.total());
-                    assert(src.len == map.total());
+                    assert(deriv.len == manager.numNodes());
+                    assert(src.len == manager.numNodes());
 
                     const blocks = manager.level_to_blocks.range(level);
                     for (blocks.start..blocks.end) |block_id| {
@@ -868,11 +821,10 @@ pub fn NodeWorker(comptime N: usize, comptime M: usize) type {
                 }
 
                 fn dissipationBlock(self: @This(), block_id: usize, eps: f64, deriv: []f64, src: []const f64) void {
-                    const map = self.worker.map;
                     const manager = self.worker.manager;
 
-                    const block_deriv: []f64 = map.slice(block_id, deriv);
-                    const block_src: []const f64 = map.slice(block_id, src);
+                    const block_deriv: []f64 = manager.blockNodes(block_id, deriv);
+                    const block_src: []const f64 = manager.blockNodes(block_id, src);
                     const block = manager.blockFromId(block_id);
 
                     var spacing: [N]f64 = undefined;
