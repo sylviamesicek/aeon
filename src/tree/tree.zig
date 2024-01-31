@@ -35,8 +35,6 @@ pub fn Cell(comptime N: usize) type {
         children: usize,
         /// The neighbor cell along each face (null_index if coarser, boundary_index if a physical boundary).
         neighbors: [num_faces]usize,
-        /// A flag for whether this cell if flagged for refinement or coarsening.
-        flag: bool = false,
 
         const RealBox = geometry.RealBox(N);
     };
@@ -102,13 +100,15 @@ pub fn TreeMesh(comptime N: usize) type {
         }
 
         // Smooths refinement flags to ensure proper 2:1 interfaces.
-        pub fn smoothRefineFlags(self: *Self) void {
+        pub fn smoothRefineFlags(self: *const Self, flags: []bool) void {
+            assert(flags.len == self.cells.len);
+
             const cells = self.cells.slice();
 
             // Ensure only leaf nodes are tagged for refinement
             for (0..cells.len) |idx| {
                 if (cells.items(.children)[idx] != null_index) {
-                    cells.items(.flag)[idx] = false;
+                    flags[idx] = false;
                 }
             }
 
@@ -118,7 +118,7 @@ pub fn TreeMesh(comptime N: usize) type {
 
                 for (1..cells.len) |cell| {
                     // Is the current node flagged for refinement
-                    const flag = cells.items(.flag)[cell];
+                    const flag = flags[cell];
 
                     if (flag == false) {
                         continue;
@@ -164,8 +164,8 @@ pub fn TreeMesh(comptime N: usize) type {
                         }
                         // If neighbor is more coarse, tag for refinement
                         const neighbor_leaf = cells.items(.children)[neighbor] == null_index;
-                        if (neighbor_coarse and neighbor_leaf and !cells.items(.flag)[neighbor]) {
-                            cells.items(.flag)[neighbor] = true;
+                        if (neighbor_coarse and neighbor_leaf and !flags[neighbor]) {
+                            flags[neighbor] = true;
                             is_smooth = false;
                         }
                     }
@@ -177,9 +177,9 @@ pub fn TreeMesh(comptime N: usize) type {
             }
         }
 
-        pub fn refine(self: *Self, allocator: Allocator) !void {
+        pub fn refine(self: *Self, allocator: Allocator, flags: []bool) !void {
             // Perfom Smoothing
-            self.smoothRefineFlags();
+            self.smoothRefineFlags(flags);
 
             // Transfer all mesh data to a scratch buffer
             var scratch = try self.cells.clone(allocator);
@@ -189,7 +189,7 @@ pub fn TreeMesh(comptime N: usize) type {
             // Find number of cells to be added
             var new_node_count: usize = 0;
             for (0..old_cells.len) |idx| {
-                if (old_cells.items(.flag)[idx]) {
+                if (flags[idx]) {
                     new_node_count += AxisMask.count;
                 }
             }
@@ -225,10 +225,9 @@ pub fn TreeMesh(comptime N: usize) type {
                 for (map.items) |m| {
                     // Add all children of this element to self.nodes
                     // and update map_tmp
-
                     const coarse_bounds: RealBox = old_cells.items(.bounds)[m.old];
                     const coarse_children = old_cells.items(.children)[m.old];
-                    const coarse_flag = old_cells.items(.flag)[m.old];
+                    const coarse_flag = flags[m.old];
                     const coarse_neighbors = old_cells.items(.neighbors)[m.old];
 
                     // Only continue processing if this node has pre-existing children or is tagged for refinement
@@ -243,7 +242,6 @@ pub fn TreeMesh(comptime N: usize) type {
 
                     // Add children to self.nodes
                     for (AxisMask.enumerate()) |child| {
-                        var flag = false;
                         // If this node already had children, they need to be iterated, add to tmp map
                         if (coarse_children != null_index) {
                             const old_child_index = coarse_children + child.toLinear();
@@ -253,8 +251,6 @@ pub fn TreeMesh(comptime N: usize) type {
                                 .old = old_child_index,
                                 .new = new_child_index,
                             });
-
-                            flag = old_cells.items(.flag)[old_child_index];
                         }
 
                         // Compute new bounds
@@ -283,7 +279,6 @@ pub fn TreeMesh(comptime N: usize) type {
                             .children = null_index,
                             .neighbors = neighbors,
                             .level = target,
-                            .flag = flag,
                         });
                     }
                 }
@@ -331,6 +326,16 @@ pub fn TreeMesh(comptime N: usize) type {
                 }
             }
         }
+
+        pub fn refineGlobal(self: *@This(), allocator: Allocator) !void {
+            const flags = try allocator.alloc(bool, self.numCells());
+            defer allocator.free(flags);
+
+            @memset(flags, true);
+            self.smoothRefineFlags(flags);
+
+            try self.refine(allocator, flags);
+        }
     };
 }
 
@@ -353,8 +358,7 @@ test "tree mesh global refinement" {
 
     // Global refine
     for (0..1) |_| {
-        @memset(mesh.cells.items(.flag), true);
-        try mesh.refine(allocator);
+        try mesh.refineGlobal(allocator);
     }
 
     try expect(mesh.cells.len == 5);

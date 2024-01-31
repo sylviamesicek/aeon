@@ -99,7 +99,7 @@ pub fn MultigridMethod(comptime N: usize, comptime M: usize, comptime O: usize, 
             @memcpy(self.rhs, b);
 
             // Use initial right hand side to set tolerance.
-            const irhs = worker.normAll(self.rhs);
+            const irhs = worker.norm(self.rhs);
             const tol: f64 = self.config.tolerance * @abs(irhs);
 
             if (irhs <= 1e-60) {
@@ -125,12 +125,10 @@ pub fn MultigridMethod(comptime N: usize, comptime M: usize, comptime O: usize, 
                 // Iterate
                 try recursive.iterate(levels - 1, x);
 
-                // Check residual
-                for (0..levels) |level| {
-                    worker.order(O).residual(level, self.scr, self.rhs, operator, x);
-                }
+                // Check if residual is less than tolerance.
+                worker.order(O).residual(self.scr, self.rhs, operator, x);
 
-                const nres = worker.normAll(self.scr);
+                const nres = worker.norm(self.scr);
 
                 if (nres <= tol) {
                     break;
@@ -208,8 +206,8 @@ pub fn MultigridMethod(comptime N: usize, comptime M: usize, comptime O: usize, 
 
                             pub fn apply(base: *const @This(), out: []f64, in: []const f64) void {
                                 base.worker.unpackBase(base.sys, in);
-                                base.worker.order(O).fillGhostNodes(0, base.bound, base.sys);
-                                base.worker.order(O).apply(0, base.scr, base.oper, base.sys);
+                                base.worker.order(O).fillLevelGhostNodes(0, base.bound, base.sys);
+                                base.worker.order(O).applyLevel(0, base.scr, base.oper, base.sys);
                                 base.worker.packBase(out, base.scr);
                             }
                         };
@@ -225,7 +223,7 @@ pub fn MultigridMethod(comptime N: usize, comptime M: usize, comptime O: usize, 
                         self.worker.unpackBase(sys, sys_base);
                         self.worker.unpackBase(rhs, rhs_base);
 
-                        self.worker.order(O).fillGhostNodes(0, self.bound, sys);
+                        self.worker.order(O).fillLevelGhostNodes(0, self.bound, sys);
 
                         return;
                     }
@@ -234,26 +232,26 @@ pub fn MultigridMethod(comptime N: usize, comptime M: usize, comptime O: usize, 
                     // Presmoothing
 
                     for (0..self.method.config.presmooth) |_| {
-                        worker.fillGhostNodes(level, self.bound, sys);
-                        worker.smooth(level, scr, self.oper, sys, rhs);
-                        self.worker.copy(level, sys, scr);
+                        worker.fillLevelGhostNodes(level, self.bound, sys);
+                        worker.smoothLevel(level, scr, self.oper, sys, rhs);
+                        self.worker.copyLevel(level, sys, scr);
                     }
 
                     // ********************************
                     // Restrict Solution
 
-                    worker.fillGhostNodes(level, self.bound, sys);
-                    worker.restrict(level, sys);
+                    worker.fillLevelGhostNodes(level, self.bound, sys);
+                    worker.restrictLevel(level, sys);
 
-                    worker.fillGhostNodes(level - 1, self.bound, sys);
-                    self.worker.copy(level - 1, old, sys);
+                    worker.fillLevelGhostNodes(level - 1, self.bound, sys);
+                    self.worker.copyLevel(level - 1, old, sys);
 
                     // ********************************
                     // Right Hand Side (Tau Correction)
 
-                    worker.residual(level, scr, rhs, self.oper, sys);
-                    worker0.restrict(level, scr);
-                    worker.tauCorrect(level - 1, rhs, scr, self.oper, sys);
+                    worker.residualLevel(level, scr, rhs, self.oper, sys);
+                    worker0.restrictLevel(level, scr);
+                    worker.tauCorrectLevel(level - 1, rhs, scr, self.oper, sys);
 
                     // ********************************
                     // Recurse
@@ -264,23 +262,23 @@ pub fn MultigridMethod(comptime N: usize, comptime M: usize, comptime O: usize, 
                     // Error Correction
 
                     // Sys and Old should both have boundaries filled
-                    self.worker.copy(level - 1, scr, sys);
-                    self.worker.subtract(level - 1, scr, old);
+                    self.worker.copyLevel(level - 1, scr, sys);
+                    self.worker.subAssignLevel(level - 1, scr, old);
 
-                    worker.prolong(level, scr);
+                    worker.prolongLevel(level, scr);
 
-                    self.worker.add(level, sys, scr);
+                    self.worker.addAssignLevel(level, sys, scr);
 
                     // **********************************
                     // Post smooth
 
                     for (0..self.method.config.postsmooth) |_| {
-                        worker.fillGhostNodes(level, self.bound, sys);
-                        worker.smooth(level, scr, self.oper, sys, rhs);
-                        self.worker.copy(level, sys, scr);
+                        worker.fillLevelGhostNodes(level, self.bound, sys);
+                        worker.smoothLevel(level, scr, self.oper, sys, rhs);
+                        self.worker.copyLevel(level, sys, scr);
                     }
 
-                    worker.fillGhostNodes(level, self.bound, sys);
+                    worker.fillLevelGhostNodes(level, self.bound, sys);
                 }
             };
         }

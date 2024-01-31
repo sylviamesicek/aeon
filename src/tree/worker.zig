@@ -17,6 +17,8 @@ const utils = @import("../utils.zig");
 const Range = utils.Range;
 const RangeMap = utils.RangeMap;
 
+/// Represents a generic cpu-driver node worker. This is a convience class for implementing a wide variety of routines
+/// dealing with nodes (restriction, prolongation, filling ghost nodes, etc.).
 pub fn NodeWorker(comptime N: usize, comptime M: usize) type {
     return struct {
         mesh: *const TreeMesh,
@@ -56,7 +58,8 @@ pub fn NodeWorker(comptime N: usize, comptime M: usize) type {
             _ = self;
         }
 
-        pub fn normSqAll(self: @This(), field: []const f64) f64 {
+        /// Computes the l2 norm of the the field, including nodes on non-leaf cells.
+        pub fn norm(self: @This(), field: []const f64) f64 {
             const manager = self.manager;
 
             assert(field.len == manager.numNodes());
@@ -76,25 +79,28 @@ pub fn NodeWorker(comptime N: usize, comptime M: usize) type {
                 }
             }
 
-            return result;
+            return @sqrt(result);
         }
 
-        pub fn normAll(self: @This(), field: []const f64) f64 {
-            return @sqrt(self.normSqAll(field));
+        pub fn normScaled(self: @This(), field: []const f64) f64 {
+            const dimension: f64 = @floatFromInt(field.len);
+            return self.norm(field) / @sqrt(dimension);
         }
 
         // **********************************
         // Basic Operations *****************
         // **********************************
 
-        pub fn copyAll(self: @This(), dest: []f64, src: []const f64) void {
+        /// Copies src to dest.
+        pub fn copy(self: @This(), dest: []f64, src: []const f64) void {
             assert(src.len == self.manager.numNodes());
             assert(dest.len == self.manager.numNodes());
 
             @memcpy(dest, src);
         }
 
-        pub fn copy(self: @This(), level: usize, dest: []f64, src: []const f64) void {
+        /// Copies src to dest on a particular level.
+        pub fn copyLevel(self: @This(), level: usize, dest: []f64, src: []const f64) void {
             const manager = self.manager;
 
             assert(src.len == manager.numNodes());
@@ -110,7 +116,8 @@ pub fn NodeWorker(comptime N: usize, comptime M: usize) type {
             }
         }
 
-        pub fn add(self: @This(), level: usize, dest: []f64, v: []const f64) void {
+        /// Adds v to dest on a particular level.
+        pub fn addAssignLevel(self: @This(), level: usize, dest: []f64, v: []const f64) void {
             const manager = self.manager;
 
             assert(v.len == manager.numNodes());
@@ -128,7 +135,8 @@ pub fn NodeWorker(comptime N: usize, comptime M: usize) type {
             }
         }
 
-        pub fn subtract(self: @This(), level: usize, dest: []f64, v: []const f64) void {
+        /// Subtracts v from dest on a particular level.
+        pub fn subAssignLevel(self: @This(), level: usize, dest: []f64, v: []const f64) void {
             const manager = self.manager;
 
             assert(v.len == manager.numNodes());
@@ -188,9 +196,48 @@ pub fn NodeWorker(comptime N: usize, comptime M: usize) type {
         }
 
         // **************************************
+        // Refinement Helpers *******************
+        // **************************************
+
+        /// Computse refinement flags based on local truncation error. If the absolute value of the error for any node in a cell
+        /// is greater than the given tolerance, that cell will be tagged for refinement.
+        pub fn refineByLocalTruncErr(self: @This(), err: []const f64, tol: f64, flags: []bool) void {
+            assert(flags.len == self.mesh.numCells());
+            assert(err.len == self.manager.numNodes());
+            assert(tol > 0);
+
+            for (0..self.mesh.numCells()) |cell_id| {
+                const block_id = self.manager.cells.items(.block)[cell_id];
+                const index = self.manager.cells.items(.index)[cell_id];
+
+                const block = self.manager.blockFromId(block_id);
+                const block_err = self.manager.blockNodes(block_id, err);
+                const node_space = self.nodeSpaceFromBlock(block);
+
+                const origin = IndexMixin.mul(index, self.manager.cell_size);
+
+                var max_err: f64 = 0.0;
+
+                var offsets = IndexSpace.fromSize(self.manager.cell_size).cartesianIndices();
+
+                while (offsets.next()) |offset| {
+                    const cell = IndexMixin.add(origin, offset);
+
+                    const v = node_space.value(cell, block_err);
+                    max_err = @max(max_err, @abs(v));
+                }
+
+                if (max_err > tol) {
+                    flags[cell_id] = true;
+                }
+            }
+        }
+
+        // **************************************
         // General Order Dependent Operations ***
         // **************************************
 
+        /// Returns a namespace for all routines dependent on the order of accuracy.
         pub fn order(self: @This(), comptime O: usize) Order(O) {
             return .{
                 .worker = self,
@@ -210,8 +257,21 @@ pub fn NodeWorker(comptime N: usize, comptime M: usize) type {
                 // Ghost Nodes **************
                 // **************************
 
+                /// Fills all ghost nodes.
+                pub fn fillGhostNodes(self: @This(), boundary: anytype, field: []f64) void {
+                    const manager = self.worker.manager;
+
+                    assert(field.len == manager.numNodes());
+
+                    self.fillBaseGhostNodes(boundary, field);
+
+                    for (1..manager.numBlocks()) |block_id| {
+                        self.fillBlockGhostNodes(block_id, boundary, field);
+                    }
+                }
+
                 /// Fills the ghost nodes of given level.
-                pub fn fillGhostNodes(self: @This(), level: usize, boundary: anytype, field: []f64) void {
+                pub fn fillLevelGhostNodes(self: @This(), level: usize, boundary: anytype, field: []f64) void {
                     const manager = self.worker.manager;
 
                     assert(field.len == manager.numNodes());
@@ -228,25 +288,12 @@ pub fn NodeWorker(comptime N: usize, comptime M: usize) type {
                     }
                 }
 
-                /// Fills all ghost nodes.
-                pub fn fillGhostNodesAll(self: @This(), boundary: anytype, field: []f64) void {
-                    const manager = self.worker.manager;
-
-                    assert(field.len == manager.numNodes());
-
-                    self.fillBaseGhostNodes(boundary, field);
-
-                    for (1..manager.numBlocks()) |block_id| {
-                        self.fillBlockGhostNodes(block_id, boundary, field);
-                    }
-                }
-
                 fn fillBaseGhostNodes(self: @This(), boundary: anytype, field: []f64) void {
                     const manager = self.worker.manager;
 
                     const block = manager.blockFromId(0);
                     const block_field = manager.blockNodes(0, field);
-                    const node_space = self.nodeSpaceFromBlock(block);
+                    const node_space = self.worker.nodeSpaceFromBlock(block);
                     const boundary_engine = BoundaryEngine{ .space = node_space };
 
                     boundary_engine.fill(boundary, block_field);
@@ -260,7 +307,7 @@ pub fn NodeWorker(comptime N: usize, comptime M: usize) type {
 
                     const block = manager.blockFromId(block_id);
                     const block_field = manager.blockNodes(block_id, field);
-                    const node_space = self.nodeSpaceFromBlock(block);
+                    const node_space = self.worker.nodeSpaceFromBlock(block);
                     const boundary_engine = BoundaryEngine{ .space = node_space };
 
                     const regions = comptime Region.enumerateOrdered();
@@ -310,7 +357,7 @@ pub fn NodeWorker(comptime N: usize, comptime M: usize) type {
                     assert(block_id != 0);
 
                     const block = manager.blockFromId(block_id);
-                    const block_node_space = self.nodeSpaceFromBlock(block);
+                    const block_node_space = self.worker.nodeSpaceFromBlock(block);
                     const block_field: []f64 = manager.blockNodes(block_id, field);
 
                     // Cache pointers
@@ -343,7 +390,7 @@ pub fn NodeWorker(comptime N: usize, comptime M: usize) type {
                             const neighbor_block = manager.blockFromId(neighbor_block_id);
                             const neighbor_index = cell_meta.items(.index)[neighbor];
                             const neighbor_field: []const f64 = manager.blockNodes(neighbor_block_id, field);
-                            const neighbor_node_space = self.nodeSpaceFromBlock(neighbor_block);
+                            const neighbor_node_space = self.worker.nodeSpaceFromBlock(neighbor_block);
 
                             var neighbor_origin = toSigned(refined(mul(neighbor_index, cell_size)));
 
@@ -375,7 +422,7 @@ pub fn NodeWorker(comptime N: usize, comptime M: usize) type {
                             const neighbor_index = cell_meta.items(.index)[neighbor];
                             const neighbor_block = manager.blockFromId(neighbor_block_id);
                             const neighbor_field = manager.blockNodes(neighbor_block_id, field);
-                            const neighbor_node_space = self.nodeSpaceFromBlock(neighbor_block);
+                            const neighbor_node_space = self.worker.nodeSpaceFromBlock(neighbor_block);
 
                             var neighbor_origin = toSigned(mul(neighbor_index, cell_size));
 
@@ -404,7 +451,8 @@ pub fn NodeWorker(comptime N: usize, comptime M: usize) type {
                 // Prolongation/Restriction ******
                 // *******************************
 
-                pub fn prolong(self: @This(), level: usize, field: []f64) void {
+                /// Prolongs data from `level - 1` to `level`.
+                pub fn prolongLevel(self: @This(), level: usize, field: []f64) void {
                     const manager = self.worker.manager;
 
                     assert(field.len == manager.numNodes());
@@ -427,7 +475,7 @@ pub fn NodeWorker(comptime N: usize, comptime M: usize) type {
 
                     const block = manager.blockFromId(block_id);
                     const block_field = manager.blockNodes(block_id, field);
-                    const block_node_space = self.nodeSpaceFromBlock(block);
+                    const block_node_space = self.worker.nodeSpaceFromBlock(block);
 
                     // Cache pointers
                     const cells = mesh.cells.slice();
@@ -449,7 +497,7 @@ pub fn NodeWorker(comptime N: usize, comptime M: usize) type {
                         const parent_index: [N]usize = cell_meta.items(.index)[parent];
                         const parent_block = manager.blockFromId(parent_block_id);
                         const parent_block_field: []const f64 = manager.blockNodes(parent_block_id, field);
-                        const parent_block_node_space = self.nodeSpaceFromBlock(parent_block);
+                        const parent_block_node_space = self.worker.nodeSpaceFromBlock(parent_block);
                         var parent_origin = refined(mul(parent_index, cell_size));
                         // Offset origin to take into account split
                         for (0..N) |axis| {
@@ -471,7 +519,8 @@ pub fn NodeWorker(comptime N: usize, comptime M: usize) type {
                     }
                 }
 
-                pub fn restrict(self: @This(), level: usize, field: []f64) void {
+                /// Restricts data from `level` to `level - 1`
+                pub fn restrictLevel(self: @This(), level: usize, field: []f64) void {
                     assert(field.len == self.worker.manager.numNodes());
 
                     if (level == 0) {
@@ -492,7 +541,7 @@ pub fn NodeWorker(comptime N: usize, comptime M: usize) type {
 
                     const block = manager.blockFromId(block_id);
                     const block_field: []const f64 = manager.blockNodes(block_id, field);
-                    const block_node_space = self.nodeSpaceFromBlock(block);
+                    const block_node_space = self.worker.nodeSpaceFromBlock(block);
 
                     // Cache pointers
                     const cells = mesh.cells.slice();
@@ -514,7 +563,7 @@ pub fn NodeWorker(comptime N: usize, comptime M: usize) type {
                         const parent_index: [N]usize = cell_meta.items(.index)[parent];
                         const parent_block = manager.blockFromId(parent_block_id);
                         const parent_block_field: []f64 = manager.blockNodes(parent_block_id, field);
-                        const parent_block_node_space = self.nodeSpaceFromBlock(parent_block);
+                        const parent_block_node_space = self.worker.nodeSpaceFromBlock(parent_block);
 
                         var parent_origin = mul(parent_index, cell_size);
                         // Offset origin to take into account split
@@ -541,15 +590,15 @@ pub fn NodeWorker(comptime N: usize, comptime M: usize) type {
                 // Projection/Application *********
                 // ********************************
 
-                /// Using the given projection to set the values of the field on this level.
-                pub fn projectAll(self: @This(), projection: anytype, field: []f64) void {
+                /// Using the given projection to set the values of the field.
+                pub fn project(self: @This(), projection: anytype, field: []f64) void {
                     for (0..self.worker.mesh.numLevels()) |level_id| {
-                        self.project(level_id, projection, field);
+                        self.projectLevel(level_id, projection, field);
                     }
                 }
 
                 /// Using the given projection to set the values of the field on this level.
-                pub fn project(self: @This(), level: usize, projection: anytype, field: []f64) void {
+                pub fn projectLevel(self: @This(), level: usize, projection: anytype, field: []f64) void {
                     const Proj = @TypeOf(projection);
 
                     if (comptime !common.isProjection(N, M, O)(Proj)) {
@@ -573,7 +622,7 @@ pub fn NodeWorker(comptime N: usize, comptime M: usize) type {
                     const block_field: []f64 = manager.blockNodes(block_id, field);
                     const block_range = manager.block_to_nodes.range(block_id);
 
-                    const node_space = self.nodeSpaceFromBlock(manager.blockFromId(block_id));
+                    const node_space = self.worker.nodeSpaceFromBlock(manager.blockFromId(block_id));
 
                     var cells = node_space.cellSpace().cartesianIndices();
 
@@ -589,14 +638,18 @@ pub fn NodeWorker(comptime N: usize, comptime M: usize) type {
                     }
                 }
 
-                /// Applies the operator to the source function on this level, storing the result on field.
-                pub fn apply(self: @This(), level: usize, field: []f64, operator: anytype, src: []const f64) void {
-                    const Oper = @TypeOf(operator);
+                /// Applies the operator to the source function storing the result in field.
+                pub fn apply(self: @This(), field: []f64, operator: anytype, src: []const f64) void {
+                    assert(field.len == self.worker.manager.numNodes());
+                    assert(src.len == self.worker.manager.numNodes());
 
-                    if (comptime !isOperator(Oper)) {
-                        @compileError("Operator must satisfy isOperator trait");
+                    for (0..self.worker.manager.numBlocks()) |block_id| {
+                        self.applyBlock(block_id, field, operator, src);
                     }
+                }
 
+                /// Applies the operator to the source function on this level, storing the result in field.
+                pub fn applyLevel(self: @This(), level: usize, field: []f64, operator: anytype, src: []const f64) void {
                     const manager = self.worker.manager;
 
                     assert(field.len == manager.numNodes());
@@ -610,12 +663,18 @@ pub fn NodeWorker(comptime N: usize, comptime M: usize) type {
 
                 /// Applies the operator to the source function on this block, storing the result on field.
                 fn applyBlock(self: @This(), block_id: usize, field: []f64, operator: anytype, src: []const f64) void {
+                    const Oper = @TypeOf(operator);
+
+                    if (comptime !isOperator(Oper)) {
+                        @compileError("Operator must satisfy isOperator trait");
+                    }
+
                     const manager = self.worker.manager;
 
                     const block_field: []f64 = manager.blockNodes(block_id, field);
                     const block_range = manager.block_to_nodes.range(block_id);
 
-                    const node_space = self.nodeSpaceFromBlock(manager.blockFromId(block_id));
+                    const node_space = self.worker.nodeSpaceFromBlock(manager.blockFromId(block_id));
 
                     var cells = node_space.cellSpace().cartesianIndices();
 
@@ -631,8 +690,19 @@ pub fn NodeWorker(comptime N: usize, comptime M: usize) type {
                     }
                 }
 
-                /// Applies the operator to the source function on this level, storing the result on field.
-                pub fn residual(self: @This(), level: usize, field: []f64, rhs: []const f64, operator: anytype, src: []const f64) void {
+                /// Computes the residual of a given operation, storing the result in field.
+                pub fn residual(self: @This(), field: []f64, rhs: []const f64, operator: anytype, src: []const f64) void {
+                    assert(field.len == self.worker.manager.numNodes());
+                    assert(rhs.len == self.worker.manager.numNodes());
+                    assert(src.len == self.worker.manager.numNodes());
+
+                    for (0..self.worker.manager.numBlocks()) |block_id| {
+                        self.residualBlock(block_id, field, rhs, operator, src);
+                    }
+                }
+
+                /// Computes the residual of a given operation on this level, storing the result in field.
+                pub fn residualLevel(self: @This(), level: usize, field: []f64, rhs: []const f64, operator: anytype, src: []const f64) void {
                     const Oper = @TypeOf(operator);
 
                     if (comptime !isOperator(Oper)) {
@@ -651,7 +721,6 @@ pub fn NodeWorker(comptime N: usize, comptime M: usize) type {
                     }
                 }
 
-                /// Applies the operator to the source function on this block, storing the result on field.
                 fn residualBlock(self: @This(), block_id: usize, field: []f64, rhs: []const f64, operator: anytype, src: []const f64) void {
                     const manager = self.worker.manager;
 
@@ -659,7 +728,7 @@ pub fn NodeWorker(comptime N: usize, comptime M: usize) type {
                     const block_rhs: []const f64 = manager.blockNodes(block_id, rhs);
                     const block_range = manager.block_to_nodes.range(block_id);
 
-                    const node_space = self.nodeSpaceFromBlock(manager.blockFromId(block_id));
+                    const node_space = self.worker.nodeSpaceFromBlock(manager.blockFromId(block_id));
 
                     var cells = node_space.cellSpace().cartesianIndices();
 
@@ -677,8 +746,9 @@ pub fn NodeWorker(comptime N: usize, comptime M: usize) type {
                     }
                 }
 
-                /// Applies the operator to the source function on this level, storing the result on field.
-                pub fn tauCorrect(self: @This(), level: usize, field: []f64, res: []const f64, operator: anytype, src: []const f64) void {
+                /// Computes the tau correction for this level, given a restricted residual, and a source function.
+                /// Only fills field for non-leaf cells.
+                pub fn tauCorrectLevel(self: @This(), level: usize, field: []f64, res: []const f64, operator: anytype, src: []const f64) void {
                     const Oper = @TypeOf(operator);
 
                     if (comptime !isOperator(Oper)) {
@@ -697,7 +767,6 @@ pub fn NodeWorker(comptime N: usize, comptime M: usize) type {
                     }
                 }
 
-                /// Applies the operator to the source function on this block, storing the result on field.
                 fn tauCorrectBlock(self: @This(), block_id: usize, field: []f64, res: []const f64, operator: anytype, src: []const f64) void {
                     const manager = self.worker.manager;
 
@@ -706,7 +775,7 @@ pub fn NodeWorker(comptime N: usize, comptime M: usize) type {
                     const block_range = manager.block_to_nodes.range(block_id);
                     const block = manager.blockFromId(block_id);
 
-                    const node_space = self.nodeSpaceFromBlock(block);
+                    const node_space = self.worker.nodeSpaceFromBlock(block);
 
                     const cells = self.worker.mesh.cells.slice();
 
@@ -746,7 +815,7 @@ pub fn NodeWorker(comptime N: usize, comptime M: usize) type {
                 // ***************************************
 
                 /// Performs jacobi smoothing on this level.
-                pub fn smooth(self: @This(), level: usize, field: []f64, operator: anytype, src: []const f64, rhs: []const f64) void {
+                pub fn smoothLevel(self: @This(), level: usize, field: []f64, operator: anytype, src: []const f64, rhs: []const f64) void {
                     const Oper = @TypeOf(operator);
 
                     if (comptime !common.isOperator(N, M, O)(Oper)) {
@@ -773,7 +842,7 @@ pub fn NodeWorker(comptime N: usize, comptime M: usize) type {
                     const block_src: []const f64 = manager.blockNodes(block_id, src);
                     const block_range = manager.block_to_nodes.range(block_id);
 
-                    const node_space = self.nodeSpaceFromBlock(manager.blockFromId(block_id));
+                    const node_space = self.worker.nodeSpaceFromBlock(manager.blockFromId(block_id));
 
                     var cells = node_space.cellSpace().cartesianIndices();
 
@@ -797,7 +866,11 @@ pub fn NodeWorker(comptime N: usize, comptime M: usize) type {
                 // **********************************
                 // Dissipation
 
-                pub fn dissipationAll(self: @This(), eps: f64, deriv: []f64, src: []const f64) void {
+                /// Applies dissipation to a first order hyperbolic system of equations.
+                /// Here stencils have been scaled such that, in order to perserve stability,
+                /// `eps` must be less than or equal to `min(delta_x)/(delta_t)`, which may be written
+                /// `eps <= 1/max(CFL)`.
+                pub fn dissipation(self: @This(), eps: f64, deriv: []f64, src: []const f64) void {
                     const manager = self.worker.manager;
 
                     assert(deriv.len == manager.numNodes());
@@ -808,7 +881,7 @@ pub fn NodeWorker(comptime N: usize, comptime M: usize) type {
                     }
                 }
 
-                pub fn dissipation(self: @This(), level: usize, eps: f64, deriv: []f64, src: []const f64) void {
+                pub fn dissipationLevel(self: @This(), level: usize, eps: f64, deriv: []f64, src: []const f64) void {
                     const manager = self.worker.manager;
 
                     assert(deriv.len == manager.numNodes());
@@ -834,7 +907,7 @@ pub fn NodeWorker(comptime N: usize, comptime M: usize) type {
                         spacing[axis] /= @floatFromInt(block.size[axis] * manager.cell_size[axis]);
                     }
 
-                    const node_space = self.nodeSpaceFromBlock(block);
+                    const node_space = self.worker.nodeSpaceFromBlock(block);
 
                     var cells = node_space.cellSpace().cartesianIndices();
 
@@ -849,20 +922,6 @@ pub fn NodeWorker(comptime N: usize, comptime M: usize) type {
 
                         node_space.setValue(cell, block_deriv, v - result);
                     }
-                }
-
-                /// Helper function for determining the node space of a block
-                fn nodeSpaceFromBlock(self: @This(), block: Block) NodeSpace {
-                    var size: [N]usize = undefined;
-
-                    for (0..N) |axis| {
-                        size[axis] = block.size[axis] * self.worker.manager.cell_size[axis];
-                    }
-
-                    return .{
-                        .bounds = block.bounds,
-                        .size = size,
-                    };
                 }
             };
         }

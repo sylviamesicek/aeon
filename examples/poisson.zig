@@ -122,17 +122,17 @@ const PoissonEquation = struct {
         // Globally refine two times
         for (0..2) |r| {
             std.debug.print("Running Global Refinement {}\n", .{r});
-
-            @memset(mesh.cells.items(.flag), true);
-
-            try mesh.refine(allocator);
+            try mesh.refineGlobal(allocator);
         }
 
         // Locally refine once
         for (0..1) |r| {
             std.debug.print("Running Local Refinement {}\n", .{r});
 
-            @memset(mesh.cells.items(.flag), false);
+            const flags = try allocator.alloc(bool, mesh.numCells());
+            defer allocator.free(flags);
+
+            @memset(flags, false);
 
             for (0..mesh.cells.len) |cell_id| {
                 const bounds: RealBox = mesh.cells.items(.bounds)[cell_id];
@@ -141,11 +141,13 @@ const PoissonEquation = struct {
                 const radius = @sqrt((center[0] - 0.5) * (center[0] - 0.5) + (center[1] - 0.5) * (center[1] - 0.5));
 
                 if (radius < 0.33) {
-                    mesh.cells.items(.flag)[cell_id] = true;
+                    flags[cell_id] = true;
                 }
             }
 
-            try mesh.refine(allocator);
+            mesh.smoothRefineFlags(flags);
+
+            try mesh.refine(allocator, flags);
         }
 
         try manager.build(allocator, &mesh);
@@ -174,9 +176,9 @@ const PoissonEquation = struct {
         defer worker.deinit();
 
         // Project Source
-        worker.order(M).projectAll(Source{ .amplitude = 1.0 }, sys.field(.source));
+        worker.order(M).project(Source{ .amplitude = 1.0 }, sys.field(.source));
         // Project Solution
-        worker.order(M).projectAll(Solution{ .amplitude = 1.0 }, sys.field(.exact));
+        worker.order(M).project(Solution{ .amplitude = 1.0 }, sys.field(.exact));
         // Set initial guess
         @memset(sys.field(.approx), 0.0);
 

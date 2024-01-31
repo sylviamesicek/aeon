@@ -52,9 +52,8 @@ pub fn NodeManager(comptime N: usize, comptime M: usize) type {
         const IndexSpace = geometry.IndexSpace(N);
         const RealBox = geometry.RealBox(N);
         const Region = geometry.Region(N);
-        const numSplits = AxisMask.count;
 
-        // Sub types
+        // Subtypes
 
         /// Represents blocks of uniform and contiguous cells which all share a common anscestor.
         pub const Block = struct {
@@ -347,7 +346,7 @@ pub fn NodeManager(comptime N: usize, comptime M: usize) type {
             var result: usize = 1;
 
             for (0..refinement) |_| {
-                result *= numSplits;
+                result *= AxisMask.count;
             }
 
             return result;

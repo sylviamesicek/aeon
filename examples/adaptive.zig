@@ -6,21 +6,24 @@ const aeon = @import("aeon");
 
 const common = aeon.common;
 const geometry = aeon.geometry;
+const lac = aeon.lac;
 const tree = aeon.tree;
 
-const PoissonEquation = struct {
-    const N = 2;
-    const M = 2;
+const N = 2;
+const M = 2;
 
+const AdaptivePoissonEquation = struct {
     const BoundaryKind = common.BoundaryKind;
     const Robin = common.Robin;
 
-    const DataOut = aeon.DataOut(N);
+    const DataOut = aeon.DataOut(N, M);
 
-    const SystemConst = common.SystemConst;
+    const Engine = common.Engine(N, M, M);
+    const System = common.System(Tag);
+    const SystemConst = common.SystemConst(Tag);
 
     const MultigridMethod = tree.MultigridMethod(N, M, M, BiCGStabSolver);
-    const NodeManager = tree.NodeManager(N);
+    const NodeManager = tree.NodeManager(N, M);
     const NodeWorker = tree.NodeWorker(N, M);
     const TreeMesh = tree.TreeMesh(N);
 
@@ -29,9 +32,7 @@ const PoissonEquation = struct {
     const IndexSpace = geometry.IndexSpace(N);
     const IndexMixin = geometry.IndexMixin(N);
 
-    const BiCGStabSolver = aeon.lac.BiCGStabSolver;
-
-    const Engine = common.Engine(N, M, M);
+    const BiCGStabSolver = lac.BiCGStabSolver;
 
     const pi = std.math.pi;
 
@@ -42,8 +43,6 @@ const PoissonEquation = struct {
             const pos = engine.position();
             const x = pos[0];
             const y = pos[1];
-
-            // return self.amplitude * 2 * pi * pi * @sin(pi * x) * @sin(pi * y);
 
             const term1 = (y * @sin(pi * y)) * (x * pi * pi * @sin(pi * x) - 2 * pi * @cos(pi * x));
             const term2 = (x * @sin(pi * x)) * (y * pi * pi * @sin(pi * y) - 2 * pi * @cos(pi * y));
@@ -61,21 +60,15 @@ const PoissonEquation = struct {
             const y = pos[1];
 
             return self.amplitude * x * y * @sin(pi * x) * @sin(pi * y);
-
-            // return self.amplitude * @sin(pi * x) * @sin(pi * y);
         }
     };
 
     pub const Boundary = struct {
-        pub fn kind(face: FaceIndex) BoundaryKind {
-            _ = face;
+        pub fn kind(_: FaceIndex) BoundaryKind {
             return .robin;
         }
 
-        pub fn robin(self: Boundary, pos: [N]f64, face: FaceIndex) Robin {
-            _ = face;
-            _ = pos;
-            _ = self;
+        pub fn robin(_: Boundary, _: [N]f64, _: FaceIndex) Robin {
             return Robin.diritchlet(0.0);
         }
     };
@@ -97,10 +90,17 @@ const PoissonEquation = struct {
         }
     };
 
+    pub const Tag = enum {
+        approx,
+        exact,
+        err,
+        source,
+    };
+
     // Run
 
-    fn run(allocator: Allocator) !void {
-        std.debug.print("Running Poisson Elliptic Solver\n", .{});
+    fn run(allocator: Allocator, max_adaptive: usize, tolerance: f64) !void {
+        std.debug.print("Running Adaptive Poisson Solver\n", .{});
 
         var mesh = try TreeMesh.init(allocator, .{
             .origin = [2]f64{ 0.0, 0.0 },
@@ -111,191 +111,105 @@ const PoissonEquation = struct {
         var manager = try NodeManager.init(allocator, [1]usize{16} ** N, 8);
         defer manager.deinit();
 
-        const adaptive_iterations = 7;
+        for (0..max_adaptive) |adaptive_iter| {
+            std.debug.print("Running Adaptive Solve {}\n", .{adaptive_iter});
 
-        for (0..adaptive_iterations) |iter| {
-            std.debug.print("Running Adaptive Step", .{iter});
-
+            // Build node
             try manager.build(allocator, &mesh);
 
-            // Create worker
-            var worker = try NodeWorker.init(allocator, &mesh, &manager);
+            std.debug.print("Num Cells: {}\n", .{mesh.numCells()});
+            std.debug.print("Num Nodes: {}\n", .{manager.numNodes()});
+
+            var worker = try NodeWorker.init(&mesh, &manager);
             defer worker.deinit();
 
-            // Project source values
-            const source = try allocator.alloc(f64, worker.numNodes());
-            defer allocator.free(source);
+            // Allocate system
+            const sys = try System.init(allocator, manager.numNodes());
+            defer sys.deinit(allocator);
 
-            worker.order(M).projectAll(Source{ .amplitude = 1.0 }, source);
+            // Project Source
+            worker.order(M).project(Source{ .amplitude = 1.0 }, sys.field(.source));
+            // Project Solution
+            worker.order(M).project(Solution{ .amplitude = 1.0 }, sys.field(.exact));
+            // Set initial guess
+            @memset(sys.field(.approx), 0.0);
 
-            // Project solution
-            const solution = try allocator.alloc(f64, worker.numNodes());
-            defer allocator.free(solution);
-
-            worker.order(M).projectAll(Solution{ .amplitude = 1.0 }, solution);
-
-            // Allocate numerical cell vector
-            const numerical = try allocator.alloc(f64, worker.numNodes());
-            defer allocator.free(numerical);
-
+            // *****************************
             // Solve
-            const solver: MultigridMethod = .{
-                .base_solver = BiCGStabSolver.new(10000, 10e-12),
-                .max_iters = 20,
-                .tolerance = 10e-10,
-                .presmooth = 5,
-                .postsmooth = 5,
-            };
 
-            try solver.solve(
+            var method = try MultigridMethod.init(
                 allocator,
+                manager.numNodes(),
+                BiCGStabSolver.new(10000, 10e-12),
+                .{
+                    .max_iters = 20,
+                    .tolerance = 10e-10,
+                    .presmooth = 5,
+                    .postsmooth = 5,
+                },
+            );
+            defer method.deinit();
+
+            try method.solve(
                 &worker,
                 PoissonOperator{},
                 Boundary{},
-                numerical,
-                source,
+                sys.field(.approx),
+                sys.field(.source),
             );
 
-            @memset(mesh.cells.items(.flag), false);
-        }
+            // *****************************
+            // Compute error
 
-        // Globally refine two times
-        for (0..2) |r| {
-            std.debug.print("Running Global Refinement {}\n", .{r});
-
-            @memset(mesh.cells.items(.flag), true);
-
-            try mesh.refine(allocator);
-        }
-
-        // Locally refine once
-        for (0..1) |r| {
-            std.debug.print("Running Refinement {}\n", .{r});
-
-            @memset(mesh.cells.items(.flag), false);
-
-            for (0..mesh.cells.len) |cell_id| {
-                const bounds: RealBox = mesh.cells.items(.bounds)[cell_id];
-                const center = bounds.center();
-
-                const radius = @sqrt((center[0] - 0.5) * (center[0] - 0.5) + (center[1] - 0.5) * (center[1] - 0.5));
-
-                if (radius < 0.33) {
-                    mesh.cells.items(.flag)[cell_id] = true;
-                }
+            for (0..manager.numNodes()) |i| {
+                sys.field(.err)[i] = sys.field(.approx)[i] - sys.field(.exact)[i];
             }
 
-            try mesh.refine(allocator);
-        }
+            const norm = worker.normScaled(sys.field(.err));
 
-        try manager.build(allocator, &mesh);
+            std.debug.print("Global Error {}\n", .{norm});
 
-        std.debug.print("Num Cells: {}\n", .{mesh.numCells()});
-        std.debug.print("Num Packed Nodes: {}\n", .{manager.numPackedNodes()});
-        std.debug.print("Writing Mesh To File\n", .{});
+            // *****************************
+            // Output results
 
-        {
-            const file = try std.fs.cwd().createFile("output/poisson-mesh.txt", .{});
+            const file_name = try std.fmt.allocPrint(allocator, "output/adaptive{}.vtu", .{adaptive_iter});
+            defer allocator.free(file_name);
+
+            // Output result
+            std.debug.print("Writing Solution To File\n", .{});
+
+            const file = try std.fs.cwd().createFile(file_name, .{});
             defer file.close();
 
             var buf = std.io.bufferedWriter(file.writer());
 
-            try DataOut.writeMesh(&mesh, &manager, buf.writer());
+            try DataOut.writeVtk(
+                Tag,
+                allocator,
+                &worker,
+                sys.toConst(),
+                buf.writer(),
+            );
 
             try buf.flush();
+
+            if (adaptive_iter < max_adaptive - 1) {
+                // ****************************
+                // Refine
+
+                std.debug.print("Performing Adaptive Refinement\n", .{});
+
+                const flags = try allocator.alloc(bool, mesh.numCells());
+                defer allocator.free(flags);
+
+                @memset(flags, false);
+
+                worker.refineByLocalTruncErr(sys.field(.err), tolerance, flags);
+                mesh.smoothRefineFlags(flags);
+
+                try mesh.refine(allocator, flags);
+            }
         }
-
-        // Create worker
-        var worker = try NodeWorker.init(allocator, &mesh, &manager);
-        defer worker.deinit();
-
-        // Project source values
-        const source = try allocator.alloc(f64, worker.numNodes());
-        defer allocator.free(source);
-
-        worker.order(M).projectAll(Source{ .amplitude = 1.0 }, source);
-
-        // Project solution
-        const solution = try allocator.alloc(f64, worker.numNodes());
-        defer allocator.free(solution);
-
-        worker.order(M).projectAll(Solution{ .amplitude = 1.0 }, solution);
-        worker.order(M).fillGhostNodesAll(Boundary{}, solution);
-
-        // Allocate numerical cell vector
-
-        const numerical = try allocator.alloc(f64, worker.numNodes());
-        defer allocator.free(numerical);
-
-        @memset(numerical, 0.0);
-
-        const solver: MultigridMethod = .{
-            .base_solver = BiCGStabSolver.new(10000, 10e-12),
-            .max_iters = 20,
-            .tolerance = 10e-10,
-            .presmooth = 5,
-            .postsmooth = 5,
-        };
-
-        try solver.solve(
-            allocator,
-            &worker,
-            PoissonOperator{},
-            Boundary{},
-            numerical,
-            source,
-        );
-
-        // Compute error
-
-        const err = try allocator.alloc(f64, worker.numNodes());
-        defer allocator.free(err);
-
-        for (0..worker.numNodes()) |i| {
-            err[i] = numerical[i] - solution[i];
-        }
-
-        const apply = try allocator.alloc(f64, worker.numNodes());
-        defer allocator.free(apply);
-
-        for (0..mesh.numLevels()) |level_id| {
-            worker.order(M).apply(level_id, apply, PoissonOperator{}, solution);
-        }
-
-        // Output result
-
-        std.debug.print("Writing Solution To File\n", .{});
-
-        const file = try std.fs.cwd().createFile("output/poisson.vtu", .{});
-        defer file.close();
-
-        const Output = enum {
-            numerical,
-            exact,
-            err,
-            apply,
-            source,
-        };
-
-        const output = SystemConst(Output).view(worker.numNodes(), .{
-            .numerical = numerical,
-            .exact = solution,
-            .source = source,
-            .apply = apply,
-            .err = err,
-        });
-
-        var buf = std.io.bufferedWriter(file.writer());
-
-        try DataOut.Ghost(M).writeVtk(
-            Output,
-            allocator,
-            &worker,
-            output,
-            buf.writer(),
-        );
-
-        try buf.flush();
     }
 };
 
@@ -312,5 +226,5 @@ pub fn main() !void {
     }
 
     // Run main
-    try PoissonEquation.run(gpa.allocator());
+    try AdaptivePoissonEquation.run(gpa.allocator(), 6, 10e-12);
 }
