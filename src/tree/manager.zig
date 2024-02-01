@@ -287,6 +287,10 @@ pub fn NodeManager(comptime N: usize, comptime M: usize) type {
                 // Store all neighbors of this cell
                 var neighbors: [Region.count]usize = undefined;
 
+                // Get split index
+                const parent = cells.items(.parent)[cell];
+                const split = AxisMask.fromLinear(cell - cells.items(.children)[parent]);
+
                 for (Region.enumerate()) |region| {
                     // Central region is simply null
                     if (std.meta.eql(region, Region.central())) {
@@ -296,32 +300,45 @@ pub fn NodeManager(comptime N: usize, comptime M: usize) type {
 
                     // Start with current cell
                     var neighbor: usize = cell;
-                    // Did we cross a coarse fine interface
-                    // var interface: bool = false;
+                    var coarse: bool = false;
 
                     for (0..N) |axis| {
-                        assert(neighbor != boundary_index);
+                        assert(neighbor != boundary_index and neighbor != null_index);
+
+                        const mregion = if (coarse) region.maskedBySplit(split) else region;
 
                         // If side is middle skip axis.
-                        if (region.sides[axis] == .middle) {
+                        if (mregion.sides[axis] == .middle) {
                             continue;
                         }
 
                         // Find face to traverse
                         const face = FaceIndex{
-                            .side = region.sides[axis] == .right,
+                            .side = mregion.sides[axis] == .right,
                             .axis = axis,
                         };
 
                         // Get neighbor, searching parent neighbors if necessary
                         neighbor = cells.items(.neighbors)[neighbor][face.toLinear()];
-                        // Traverse no more if boundary or null
-                        if (neighbor == boundary_index or neighbor == null_index) {
+
+                        if (neighbor == null_index) {
+                            assert(coarse == false);
+
+                            coarse = true;
+                            // Get parent of neighbor
+                            const neighbor_parent = cells.items(.parent)[neighbor];
+                            neighbor = cells.items(.neighbors)[neighbor_parent][face.toLinear()];
+                        } else if (neighbor == boundary_index) {
+                            coarse = false;
                             break;
                         }
                     }
 
-                    neighbors[region.linear()] = neighbor;
+                    if (coarse) {
+                        neighbors[region.linear()] = null_index;
+                    } else {
+                        neighbors[region.linear()] = neighbor;
+                    }
                 }
 
                 // Set neighbors

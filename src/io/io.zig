@@ -35,6 +35,7 @@ pub fn DataOut(comptime N: usize, comptime M: usize) type {
         const Mesh = tree.TreeMesh(N);
         const NodeManager = tree.NodeManager(N, M);
 
+        const FaceIndex = geometry.FaceIndex(N);
         const IndexMixin = geometry.IndexMixin(N);
         const IndexSpace = geometry.IndexSpace(N);
         const Region = geometry.Region(N);
@@ -70,6 +71,23 @@ pub fn DataOut(comptime N: usize, comptime M: usize) type {
                 }
 
                 try out_stream.print("    Block: {}, {any}\n", .{ block, index });
+
+                // try out_stream.print("    Face Neighbors:\n", .{});
+
+                // for (FaceIndex.enumerate()) |face| {
+                //     try out_stream.print("         {s}: ", .{face.toString()});
+
+                //     const neighbor = mesh.cells.items(.neighbors)[cell_id][face.toLinear()];
+
+                //     if (neighbor == null_index) {
+                //         try out_stream.print("Coarse\n", .{});
+                //     } else if (neighbor == boundary_index) {
+                //         try out_stream.print("Physical Boundary\n", .{});
+                //     } else {
+                //         try out_stream.print("{}\n", .{neighbor});
+                //     }
+                // }
+
                 try out_stream.print("    Neighbors:\n", .{});
 
                 for (Region.enumerate()) |region| {

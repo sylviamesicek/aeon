@@ -120,7 +120,7 @@ pub fn BoundaryEngine(comptime N: usize, comptime M: usize, comptime O: usize) t
                     }
 
                     // Loop over extends
-                    comptime var extents = mregion.extentOffsets(M);
+                    comptime var extents = mregion.extentOffsets(O);
 
                     inline while (comptime extents.next()) |extent| {
                         const target = IndexMixin.addSigned(node, extent);

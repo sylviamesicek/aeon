@@ -261,7 +261,7 @@ pub fn MultigridMethod(comptime N: usize, comptime M: usize, comptime O: usize, 
                     // ********************************
                     // Error Correction
 
-                    // Sys and Old should both have boundaries filled
+                    // Sys and Old should both have boundaries filled by this point
                     self.worker.copyLevel(level - 1, scr, sys);
                     self.worker.subAssignLevel(level - 1, scr, old);
 

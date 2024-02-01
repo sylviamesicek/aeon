@@ -338,9 +338,13 @@ pub fn NodeWorker(comptime N: usize, comptime M: usize) type {
                         }
 
                         // Otherwise enumerate the possible axis combinations
-                        inline for (comptime AxisMask.enumerate()[1..]) |mask| {
+                        inline for (comptime AxisMask.enumerate()) |mask| {
                             // Intersect with mask to make sure we aren't generating unnessary code.
                             const imask = comptime mask.intersectWith(smask);
+
+                            if (comptime imask.isEmpty()) {
+                                continue;
+                            }
 
                             if (bmask.toLinear() == imask.toLinear()) {
                                 boundary_engine.fillRegion(region, imask, boundary, block_field);

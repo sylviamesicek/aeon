@@ -48,6 +48,8 @@ const AdaptivePoissonEquation = struct {
             const term2 = (x * @sin(pi * x)) * (y * pi * pi * @sin(pi * y) - 2 * pi * @cos(pi * y));
 
             return self.amplitude * (term1 + term2);
+
+            // return 2.0 * pi * pi * self.amplitude * @sin(pi * x) * @sin(pi * y);
         }
     };
 
@@ -60,6 +62,8 @@ const AdaptivePoissonEquation = struct {
             const y = pos[1];
 
             return self.amplitude * x * y * @sin(pi * x) * @sin(pi * y);
+
+            // return self.amplitude * @sin(pi * x) * @sin(pi * y);
         }
     };
 
@@ -172,6 +176,17 @@ const AdaptivePoissonEquation = struct {
             // *****************************
             // Output results
 
+            {
+                const file = try std.fs.cwd().createFile("output/adapative-mesh.txt", .{});
+                defer file.close();
+
+                var buf = std.io.bufferedWriter(file.writer());
+
+                try DataOut.writeMesh(&mesh, &manager, buf.writer());
+
+                try buf.flush();
+            }
+
             const file_name = try std.fmt.allocPrint(allocator, "output/adaptive{}.vtu", .{adaptive_iter});
             defer allocator.free(file_name);
 
@@ -226,5 +241,5 @@ pub fn main() !void {
     }
 
     // Run main
-    try AdaptivePoissonEquation.run(gpa.allocator(), 6, 10e-12);
+    try AdaptivePoissonEquation.run(gpa.allocator(), 7, 10e-12);
 }
