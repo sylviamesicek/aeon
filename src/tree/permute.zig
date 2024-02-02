@@ -97,10 +97,13 @@ test "cell permutation" {
     const expectEqualSlices = std.testing.expectEqualSlices;
     const allocator = std.testing.allocator;
 
-    const permute = try CellPermutation(2).init(allocator, 3);
+    const permute = try CellPermutation(2).init(allocator, 4);
     defer permute.deinit(allocator);
 
-    try expect(permute.maxRefinement() == 3);
+    try expect(permute.maxRefinement() == 4);
+    try expect(permute.offsets[0] == 0);
+    try expect(permute.offsets[1] == 1);
+    try expect(permute.offsets[2] == 5);
 
     try expectEqualSlices(usize, permute.permutation(0), &.{0});
     try expectEqualSlices(usize, permute.permutation(1), &.{
@@ -112,5 +115,16 @@ test "cell permutation" {
         2,  3,  6,  7,
         8,  9,  12, 13,
         10, 11, 14, 15,
+    });
+
+    try expectEqualSlices(usize, permute.permutation(3), &.{
+        0,  1,  4,  5,  16, 17, 20, 21,
+        2,  3,  6,  7,  18, 19, 22, 23,
+        8,  9,  12, 13, 24, 25, 28, 29,
+        10, 11, 14, 15, 26, 27, 30, 31,
+        32, 33, 36, 37, 48, 49, 52, 53,
+        34, 35, 38, 39, 50, 51, 54, 55,
+        40, 41, 44, 45, 56, 57, 60, 61,
+        42, 43, 46, 47, 58, 59, 62, 63,
     });
 }

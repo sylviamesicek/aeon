@@ -139,72 +139,85 @@ pub fn NodeManager(comptime N: usize, comptime M: usize) type {
 
             // Reset level offsets
             try self.level_to_blocks.resize(allocator, levels + 1);
+
+            // // Reset blocks
+            // self.blocks.clearRetainingCapacity();
+
+            // try self.blocks.append(self.gpa, .{
+            //     .refinement = 0,
+            //     .boundary = [1]bool{true} ** FaceIndex.count,
+            //     .cells = 0,
+            // });
+
+            // Iterate levels
+            const BlockMeta = struct {
+                /// Base cell
+                base: usize,
+                /// Physical Boundaries
+                boundary: [FaceIndex.count]bool,
+                /// Refinement level
+                refinement: usize,
+            };
+
+            // Allocate block meta data
+            var blocks: ArrayListUmanaged(BlockMeta) = .{};
+            defer blocks.deinit(allocator);
+            // Stack for each level
+            var stack: ArrayListUmanaged(BlockMeta) = .{};
+            defer stack.deinit(allocator);
+
+            try blocks.append(allocator, .{
+                .base = 0,
+                .boundary = [1]bool{true} ** FaceIndex.count,
+                .refinement = 0,
+            });
+
+            // Set base level offset
             self.level_to_blocks.set(0, 0);
             self.level_to_blocks.set(1, 1);
 
-            // Reset blocks
-            self.blocks.clearRetainingCapacity();
-
-            try self.blocks.append(self.gpa, .{
-                .refinement = 0,
-                .boundary = [1]bool{true} ** FaceIndex.count,
-                .cells = 0,
-            });
-
-            // Iterate levels
-            const BlockInfo = struct {
-                boundary: [FaceIndex.count]bool,
-                refinement: usize,
-                offset: usize,
-                total: usize,
-            };
-
-            // Allocate scratch data
-            var stack: ArrayListUmanaged(BlockInfo) = .{};
-            defer stack.deinit(allocator);
-
             for (1..levels) |level| {
                 const coarse = self.level_to_blocks.range(level - 1);
-                // Transfer all blocks on l - 1 to stack (in reverse)
+
+                // Reset stack
+                stack.clearRetainingCapacity();
+
+                // Transfer all blocks on l - 1 to stack in reverse order
                 for (0..coarse.end - coarse.start) |rev_idx| {
                     const idx = coarse.end - 1 - rev_idx;
-                    const block = self.blocks.items[idx];
-                    const offset = block.cells;
-                    const total = cellTotalFromRefinement(block.refinement);
 
-                    try stack.append(allocator, .{
-                        .boundary = [1]bool{true} ** FaceIndex.count,
-                        .refinement = block.refinement,
-                        .offset = offset,
-                        .total = total,
-                    });
+                    try stack.append(allocator, blocks.items[idx]);
                 }
 
                 // Iterate until the stack is empty
                 while (stack.popOrNull()) |block| {
+                    // Find cell offset and cell total.
+                    var cell_offset: usize = block.base;
+
+                    for (0..block.refinement) |_| {
+                        cell_offset = cells.items(.children)[cell_offset];
+                    }
+
+                    const cell_total = cellTotalFromRefinement(block.refinement);
+
+                    // Count number of leaves
                     var leaf_count: usize = 0;
 
-                    for (block.offset..block.offset + block.total) |cell| {
+                    for (cell_offset..cell_offset + cell_total) |cell| {
                         if (cells.items(.children)[cell] == null_index) {
                             leaf_count += 1;
                         }
                     }
 
-                    if (leaf_count == block.total) {
+                    if (leaf_count == cell_total) {
                         // Skip block if it is a leaf
                         continue;
-                    } else if (leaf_count == 0 and block.refinement < self.cell_permute.maxRefinement()) {
+                    } else if (leaf_count == 0 and block.refinement + 1 < self.cell_permute.maxRefinement()) {
                         // Accept
-
-                        // Kind of hacky, this depends on the fact that all grandchildren are stored contigiously.
-                        // Document this invariant.
-
-                        const grandchildren = cells.items(.children)[block.offset];
-
-                        try self.blocks.append(self.gpa, .{
+                        try blocks.append(allocator, .{
                             .boundary = block.boundary,
+                            .base = block.base,
                             .refinement = block.refinement + 1,
-                            .cells = grandchildren,
                         });
 
                         continue;
@@ -212,11 +225,9 @@ pub fn NodeManager(comptime N: usize, comptime M: usize) type {
 
                     assert(block.refinement > 0);
 
-                    // Some are leaves, some are not. Perform subdivision.
-                    const refinement_sub = block.refinement - 1;
-                    const total_sub = cellTotalFromRefinement(refinement_sub);
+                    const children = cells.items(.children)[block.base];
 
-                    var offset_sub = block.offset;
+                    assert(children != null_index);
 
                     for (AxisMask.enumerate()) |split| {
                         var boundary = block.boundary;
@@ -227,28 +238,35 @@ pub fn NodeManager(comptime N: usize, comptime M: usize) type {
 
                         try stack.append(allocator, .{
                             .boundary = boundary,
-                            .refinement = refinement_sub,
-                            .offset = offset_sub,
-                            .total = total_sub,
+                            .refinement = block.refinement - 1,
+                            .base = children + split.toLinear(),
                         });
-
-                        offset_sub += total_sub;
                     }
                 }
 
-                self.level_to_blocks.set(level + 1, self.blocks.items.len);
+                // Update level to blocks
+                self.level_to_blocks.set(level + 1, blocks.items.len);
             }
 
-            // Compute bounds and size
-            for (self.blocks.items) |*block| {
-                var base: usize = block.cells;
+            // Transfer to blocks
 
-                for (0..block.refinement) |_| {
-                    base = cells.items(.parent)[base];
+            self.blocks.clearRetainingCapacity();
+
+            for (blocks.items) |meta| {
+                // Find cell offset and cell total.
+                var cell_offset: usize = meta.base;
+
+                for (0..meta.refinement) |_| {
+                    cell_offset = cells.items(.children)[cell_offset];
                 }
 
-                block.bounds = cells.items(.bounds)[base];
-                block.size = cellSizeFromRefinement(block.refinement);
+                try self.blocks.append(self.gpa, .{
+                    .bounds = cells.items(.bounds)[meta.base],
+                    .size = cellSizeFromRefinement(meta.refinement),
+                    .boundary = meta.boundary,
+                    .refinement = meta.refinement,
+                    .cells = cell_offset,
+                });
             }
         }
 
@@ -272,7 +290,7 @@ pub fn NodeManager(comptime N: usize, comptime M: usize) type {
             }
         }
 
-        /// Builds extra cell information like neighbors.
+        /// Builds extra per-cell information like neighbors.
         fn buildCells(self: *@This(), mesh: *const TreeMesh) !void {
             // Cache pointers
             const cells = mesh.cells.slice();
@@ -289,6 +307,7 @@ pub fn NodeManager(comptime N: usize, comptime M: usize) type {
 
                 // Get split index
                 const parent = cells.items(.parent)[cell];
+                const children = cells.items(.children)[parent];
                 const split = AxisMask.fromLinear(cell - cells.items(.children)[parent]);
 
                 for (Region.enumerate()) |region| {
@@ -298,47 +317,104 @@ pub fn NodeManager(comptime N: usize, comptime M: usize) type {
                         continue;
                     }
 
-                    // Start with current cell
-                    var neighbor: usize = cell;
-                    var coarse: bool = false;
+                    // Get neighbor split
+                    var nsplit = split;
 
                     for (0..N) |axis| {
-                        assert(neighbor != boundary_index and neighbor != null_index);
-
-                        const mregion = if (coarse) region.maskedBySplit(split) else region;
-
-                        // If side is middle skip axis.
-                        if (mregion.sides[axis] == .middle) {
-                            continue;
-                        }
-
-                        // Find face to traverse
-                        const face = FaceIndex{
-                            .side = mregion.sides[axis] == .right,
-                            .axis = axis,
-                        };
-
-                        // Get neighbor, searching parent neighbors if necessary
-                        neighbor = cells.items(.neighbors)[neighbor][face.toLinear()];
-
-                        if (neighbor == null_index) {
-                            assert(coarse == false);
-
-                            coarse = true;
-                            // Get parent of neighbor
-                            const neighbor_parent = cells.items(.parent)[neighbor];
-                            neighbor = cells.items(.neighbors)[neighbor_parent][face.toLinear()];
-                        } else if (neighbor == boundary_index) {
-                            coarse = false;
-                            break;
+                        if (region.sides[axis] != .middle) {
+                            nsplit.toggle(axis);
                         }
                     }
 
-                    if (coarse) {
-                        neighbors[region.linear()] = null_index;
+                    // Masked region
+                    const mregion = region.maskedBySplit(split);
+
+                    if (std.meta.eql(mregion, Region.central())) {
+                        // Inner face
+                        neighbors[region.linear()] = children + nsplit.toLinear();
+
+                        continue;
+                    }
+
+                    const neighbor = self.cells.items(.neighbors)[parent][mregion.linear()];
+                    assert(neighbor != null_index);
+
+                    if (neighbor == boundary_index) {
+                        neighbors[region.linear()] = boundary_index;
                     } else {
-                        neighbors[region.linear()] = neighbor;
+                        const nchildren = cells.items(.children)[neighbor];
+
+                        if (nchildren == null_index) {
+                            neighbors[region.linear()] = null_index;
+                        } else {
+                            neighbors[region.linear()] = nchildren + nsplit.toLinear();
+                        }
                     }
+
+                    // // Start with current cell
+                    // var neighbor: usize = cell;
+
+                    // for (0..N) |axis| {
+                    //     assert(neighbor != boundary_index and neighbor != null_index);
+
+                    //     // If side is middle skip axis.
+                    //     if (region.sides[axis] == .middle) {
+                    //         continue;
+                    //     }
+
+                    //     // Find face to traverse
+                    //     const face = FaceIndex{
+                    //         .side = region.sides[axis] == .right,
+                    //         .axis = axis,
+                    //     };
+
+                    //     // Get neighbor, searching parent neighbors if necessary
+                    //     neighbor = cells.items(.neighbors)[neighbor][face.toLinear()];
+
+                    //     if (neighbor == null_index or neighbor == boundary_index) {
+                    //         break;
+                    //     }
+
+                    //     // if (neighbor == null_index) {
+                    //     //     assert(coarse == false);
+
+                    //     //     coarse = true;
+                    //     //     // Get parent of neighbor
+                    //     //     const neighbor_parent = cells.items(.parent)[neighbor];
+                    //     //     neighbor = cells.items(.neighbors)[neighbor_parent][face.toLinear()];
+                    //     // } else if (neighbor == boundary_index) {
+                    //     //     coarse = false;
+                    //     //     break;
+                    //     // }
+                    // }
+
+                    // if (neighbor == null_index) {
+                    //     const mregion = region.maskedBySplit(split);
+
+                    //     const parent_neighbor = self.cells.items(.neighbors)[parent][mregion.linear()];
+
+                    //     assert(parent_neighbor != null_index);
+
+                    //     if (parent_neighbor == boundary_index) {
+                    //         neighbor = boundary_index;
+                    //     } else {
+                    //         const parent_neighbor_children = cells.items(.children)[parent_neighbor];
+
+                    //         if (parent_neighbor_children != null_index) {
+                    //             var neighbor_split = split;
+
+                    //             for (0..N) |axis| {
+                    //                 if (region.sides[axis] != .middle) {
+                    //                     neighbor_split.toggle(axis);
+                    //                 }
+                    //             }
+
+                    //             neighbor = parent_neighbor_children + neighbor_split.toLinear();
+                    //         }
+                    //     }
+                    // }
+
+                    // neighbors[region.linear()] = neighbor;
                 }
 
                 // Set neighbors
@@ -407,6 +483,9 @@ pub fn NodeManager(comptime N: usize, comptime M: usize) type {
         pub fn cellFromBlock(self: *const @This(), block_id: usize, index: [N]usize) usize {
             const block = self.blocks.items[block_id];
             const linear = IndexSpace.fromSize(block.size).linearFromCartesian(index);
+
+            assert(block.refinement <= self.cell_permute.maxRefinement());
+
             return block.cells + self.cell_permute.permutation(block.refinement)[linear];
         }
 

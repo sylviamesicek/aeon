@@ -134,20 +134,20 @@ pub fn MultigridMethod(comptime N: usize, comptime M: usize, comptime O: usize, 
                     break;
                 }
 
-                // // Debugging code
+                // Debugging code
 
                 // const DataOut = @import("../aeon.zig").DataOut(N, M);
 
-                // const file_name = try std.fmt.allocPrint(allocator, "output/multigrid{}.vtu", .{iteration});
-                // defer allocator.free(file_name);
+                // const file_name = try std.fmt.allocPrint(self.gpa, "output/multigrid{}.vtu", .{iteration});
+                // defer self.gpa.free(file_name);
 
                 // const file = try std.fs.cwd().createFile(file_name, .{});
                 // defer file.close();
 
                 // const Output = enum { residual, sys };
 
-                // const output = common.SystemConst(Output).view(worker.numNodes(), .{
-                //     .residual = scr,
+                // const output = common.SystemConst(Output).view(worker.manager.numNodes(), .{
+                //     .residual = self.scr,
                 //     .sys = x,
                 // });
 
@@ -155,7 +155,7 @@ pub fn MultigridMethod(comptime N: usize, comptime M: usize, comptime O: usize, 
 
                 // try DataOut.writeVtk(
                 //     Output,
-                //     allocator,
+                //     self.gpa,
                 //     worker,
                 //     output,
                 //     buf.writer(),

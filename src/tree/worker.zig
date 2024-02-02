@@ -9,6 +9,7 @@ const panic = std.debug.panic;
 const manager_ = @import("manager.zig");
 const tree = @import("tree.zig");
 const null_index = tree.null_index;
+const boundary_index = tree.boundary_index;
 
 const common = @import("../common/common.zig");
 const geometry = @import("../geometry/geometry.zig");
@@ -379,12 +380,13 @@ pub fn NodeWorker(comptime N: usize, comptime M: usize) type {
                         // Get neighbor in this direction
                         var neighbor = cell_meta.items(.neighbors)[cell][region.linear()];
 
+                        assert(neighbor != boundary_index);
+
                         if (neighbor == null_index) {
                             // Prolong from coarser level.
                             const parent = cells.items(.parent)[cell];
                             // Get split mask.
-                            const split_lin = cell - cells.items(.children)[parent];
-                            const split = AxisMask.fromLinear(split_lin);
+                            const split = AxisMask.fromLinear(cell - cells.items(.children)[parent]);
 
                             const neighbor_region = region.maskedBySplit(split);
 

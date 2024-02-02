@@ -12,6 +12,8 @@ const tree = aeon.tree;
 const N = 2;
 const M = 2;
 
+const symmetric = false;
+
 const AdaptivePoissonEquation = struct {
     const BoundaryKind = common.BoundaryKind;
     const Robin = common.Robin;
@@ -44,12 +46,14 @@ const AdaptivePoissonEquation = struct {
             const x = pos[0];
             const y = pos[1];
 
+            if (symmetric) {
+                return 2.0 * pi * pi * self.amplitude * @sin(pi * x) * @sin(pi * y);
+            }
+
             const term1 = (y * @sin(pi * y)) * (x * pi * pi * @sin(pi * x) - 2 * pi * @cos(pi * x));
             const term2 = (x * @sin(pi * x)) * (y * pi * pi * @sin(pi * y) - 2 * pi * @cos(pi * y));
 
             return self.amplitude * (term1 + term2);
-
-            // return 2.0 * pi * pi * self.amplitude * @sin(pi * x) * @sin(pi * y);
         }
     };
 
@@ -61,9 +65,11 @@ const AdaptivePoissonEquation = struct {
             const x = pos[0];
             const y = pos[1];
 
-            return self.amplitude * x * y * @sin(pi * x) * @sin(pi * y);
+            if (symmetric) {
+                return self.amplitude * @sin(pi * x) * @sin(pi * y);
+            }
 
-            // return self.amplitude * @sin(pi * x) * @sin(pi * y);
+            return self.amplitude * x * y * @sin(pi * x) * @sin(pi * y);
         }
     };
 

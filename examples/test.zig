@@ -41,8 +41,8 @@ const AdaptivePoissonEquation = struct {
 
         pub fn project(self: Source, engine: Engine) f64 {
             const pos = engine.position();
-            const x = pos[0];
-            const y = pos[1];
+            const x = 1.0 - pos[0];
+            const y = 1.0 - pos[1];
 
             const term1 = (y * @sin(pi * y)) * (x * pi * pi * @sin(pi * x) - 2 * pi * @cos(pi * x));
             const term2 = (x * @sin(pi * x)) * (y * pi * pi * @sin(pi * y) - 2 * pi * @cos(pi * y));
@@ -56,8 +56,8 @@ const AdaptivePoissonEquation = struct {
 
         pub fn project(self: Solution, engine: Engine) f64 {
             const pos = engine.position();
-            const x = pos[0];
-            const y = pos[1];
+            const x = 1.0 - pos[0];
+            const y = 1.0 - pos[1];
 
             return self.amplitude * x * y * @sin(pi * x) * @sin(pi * y);
         }
@@ -119,7 +119,7 @@ const AdaptivePoissonEquation = struct {
         const flags = try allocator.alloc(bool, mesh.numCells());
         defer allocator.free(flags);
 
-        flags[4] = true;
+        flags[1] = true;
 
         try mesh.refine(allocator, flags);
 
