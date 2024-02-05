@@ -4,18 +4,21 @@
 
 ## To Do
 
-To reach the state of minimum viable product (MVP) the following features must be completed.
+To reach the state of minimum viable product (MVP) the following feature(s) must be completed.
 
 - [x] Adaptive Quadtree based meshes.
 - [x] Stencil application.
 - [ ] Transfer between regridding runs.
 - [x] Interior ghost node filling.
 - [x] Exterior ghost node filling.
-- [x] Restriction operator.
-- [x] Prolongation operator.
+- [x] Restriction/Prolongation.
 - [x] BiCGStab(l) Solver.
 - [x] Jacobi's Method.
 - [x] Multigrid elliptic solver.
+    - [x] Adaptive solves.
+    - [x] V-cycles
+    - [ ] W-cycles
+    - [ ] FMG cycles
 - [x] Runge Kutta 4th order method.
 - [x] Hyperbolic solver.
 - [x] VTK Output.

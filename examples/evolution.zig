@@ -1,3 +1,5 @@
+//! Uses old inexact equations and boundary conditions.
+
 // Imports
 const std = @import("std");
 const Allocator = std.mem.Allocator;
@@ -17,7 +19,7 @@ pub const O = 2;
 const cfl: f64 = 0.1;
 
 pub const BrillEvolution = struct {
-    const DataOut = aeon.DataOut(N);
+    const DataOut = aeon.DataOut(N, M);
 
     const BoundaryKind = common.BoundaryKind;
     const Engine = common.Engine(N, M, O);
@@ -35,7 +37,7 @@ pub const BrillEvolution = struct {
 
     const TreeMesh = tree.TreeMesh(N);
     const MultigridMethod = tree.MultigridMethod(N, M, O, BiCGStabSolver);
-    const NodeManager = tree.NodeManager(N);
+    const NodeManager = tree.NodeManager(N, M);
     const NodeWorker = tree.NodeWorker(N, M);
 
     pub const EvenBoundary = struct {
@@ -592,13 +594,13 @@ pub const BrillEvolution = struct {
             // ***********************************
             // Solve Elliptic Gauges Conditions
 
-            const solver: MultigridMethod = .{
-                .base_solver = BiCGStabSolver.new(20000, 10e-14),
+            var solver = try MultigridMethod.init(self.gpa, self.worker.manager.numNodes(), BiCGStabSolver.new(20000, 10e-14), .{
                 .max_iters = 100,
                 .tolerance = 10e-10,
                 .presmooth = 5,
                 .postsmooth = 5,
-            };
+            });
+            defer solver.deinit();
 
             // ***********************************
             // Solve Lapse
@@ -620,10 +622,9 @@ pub const BrillEvolution = struct {
             };
 
             @memset(self.lapse, 0.0);
-            worker.projectAll(lapse_rhs, self.rhs);
+            worker.project(lapse_rhs, self.rhs);
 
             try solver.solve(
-                self.gpa,
                 self.worker,
                 lapse_op,
                 lapse_boundary,
@@ -631,7 +632,7 @@ pub const BrillEvolution = struct {
                 self.rhs,
             );
 
-            worker.fillGhostNodesAll(lapse_boundary, self.lapse);
+            worker.fillGhostNodes(lapse_boundary, self.lapse);
 
             for (0..self.lapse.len) |i| {
                 self.lapse[i] += 1.0;
@@ -656,10 +657,9 @@ pub const BrillEvolution = struct {
 
             // ShiftR
             @memset(self.shiftr, 0.0);
-            worker.projectAll(shiftr_rhs, self.rhs);
+            worker.project(shiftr_rhs, self.rhs);
 
             try solver.solve(
-                self.gpa,
                 self.worker,
                 shift_op,
                 shiftr_boundary,
@@ -667,14 +667,13 @@ pub const BrillEvolution = struct {
                 self.rhs,
             );
 
-            worker.fillGhostNodesAll(shiftr_boundary, self.shiftr);
+            worker.fillGhostNodes(shiftr_boundary, self.shiftr);
 
             // ShiftZ
             @memset(self.shiftz, 0.0);
-            worker.projectAll(shiftz_rhs, self.rhs);
+            worker.project(shiftz_rhs, self.rhs);
 
             try solver.solve(
-                self.gpa,
                 self.worker,
                 shift_op,
                 shiftz_boundary,
@@ -682,7 +681,7 @@ pub const BrillEvolution = struct {
                 self.rhs,
             );
 
-            worker.fillGhostNodesAll(shiftz_boundary, self.shiftz);
+            worker.fillGhostNodes(shiftz_boundary, self.shiftz);
         }
     };
 
@@ -713,18 +712,18 @@ pub const BrillEvolution = struct {
 
             for (0..self.worker.mesh.numLevels()) |rev_level| {
                 const level = self.worker.mesh.numLevels() - 1 - rev_level;
-                worker0.restrict(level, psi);
-                worker0.restrict(level, seed);
-                worker0.restrict(level, u);
-                worker0.restrict(level, y);
-                worker0.restrict(level, w);
+                worker0.restrictLevel(level, psi);
+                worker0.restrictLevel(level, seed);
+                worker0.restrictLevel(level, u);
+                worker0.restrictLevel(level, y);
+                worker0.restrictLevel(level, w);
             }
 
-            worker.fillGhostNodesAll(psi_boundary, psi);
-            worker.fillGhostNodesAll(seed_boundary, seed);
-            worker.fillGhostNodesAll(u_boundary, u);
-            worker.fillGhostNodesAll(y_boundary, y);
-            worker.fillGhostNodesAll(w_boundary, w);
+            worker.fillGhostNodes(psi_boundary, psi);
+            worker.fillGhostNodes(seed_boundary, seed);
+            worker.fillGhostNodes(u_boundary, u);
+            worker.fillGhostNodes(y_boundary, y);
+            worker.fillGhostNodes(w_boundary, w);
         }
 
         pub fn derivative(self: Evolution, deriv: System(Tag), dynamic: SystemConst(Tag), time: f64) Error!void {
@@ -764,7 +763,7 @@ pub const BrillEvolution = struct {
                 .y = y,
             };
 
-            worker.projectAll(psi_evolve, deriv.field(.psi));
+            worker.project(psi_evolve, deriv.field(.psi));
 
             // ************************************
             // Evolve seed
@@ -777,7 +776,7 @@ pub const BrillEvolution = struct {
                 .y = y,
             };
 
-            worker.projectAll(seed_evolve, deriv.field(.seed));
+            worker.project(seed_evolve, deriv.field(.seed));
 
             // ************************************
             // Evolve Y
@@ -792,7 +791,7 @@ pub const BrillEvolution = struct {
                 .w = w,
             };
 
-            worker.projectAll(y_evolve, deriv.field(.y));
+            worker.project(y_evolve, deriv.field(.y));
 
             // ***********************************
             // Evolve U
@@ -807,7 +806,7 @@ pub const BrillEvolution = struct {
                 .w = w,
             };
 
-            worker.projectAll(u_evolve, deriv.field(.u));
+            worker.project(u_evolve, deriv.field(.u));
 
             // ************************************
             // Evolve W
@@ -822,17 +821,17 @@ pub const BrillEvolution = struct {
                 .w = w,
             };
 
-            worker.projectAll(w_evolve, deriv.field(.w));
+            worker.project(w_evolve, deriv.field(.w));
 
             const eps = 10.0;
 
             const workerm = self.worker.order(M);
 
-            workerm.dissipationAll(eps, deriv.field(.psi), psi);
-            workerm.dissipationAll(eps, deriv.field(.seed), seed);
-            workerm.dissipationAll(eps, deriv.field(.u), u);
-            workerm.dissipationAll(eps, deriv.field(.w), w);
-            workerm.dissipationAll(eps, deriv.field(.y), y);
+            workerm.dissipation(eps, deriv.field(.psi), psi);
+            workerm.dissipation(eps, deriv.field(.seed), seed);
+            workerm.dissipation(eps, deriv.field(.u), u);
+            workerm.dissipation(eps, deriv.field(.w), w);
+            workerm.dissipation(eps, deriv.field(.y), y);
         }
     };
 
@@ -850,24 +849,16 @@ pub const BrillEvolution = struct {
         for (0..3) |r| {
             std.debug.print("Running Global Refinement {}\n", .{r});
 
-            @memset(mesh.cells.items(.flag), true);
-
-            // for (0..mesh.cells.len) |cell_id| {
-            //     const bounds: RealBox = mesh.cells.items(.bounds)[cell_id];
-            //     if (bounds.origin[0] < 0.1 and bounds.origin[1] < 0.1) {
-            //         mesh.cells.items(.flag)[cell_id] = true;
-            //     }
-
-            //     try mesh.refine(allocator);
-            // }
-
-            try mesh.refine(allocator);
+            try mesh.refineGlobal(allocator);
         }
 
         for (0..1) |r| {
             std.debug.print("Running Refinement {}\n", .{r});
 
-            @memset(mesh.cells.items(.flag), false);
+            const flags = try allocator.alloc(bool, mesh.numCells());
+            defer allocator.free(flags);
+
+            @memset(flags, false);
 
             for (0..mesh.cells.len) |cell_id| {
                 const bounds: RealBox = mesh.cells.items(.bounds)[cell_id];
@@ -876,11 +867,11 @@ pub const BrillEvolution = struct {
                 const radius = @sqrt((center[0]) * (center[0]) + (center[1]) * (center[1]));
 
                 if (radius < 2) {
-                    mesh.cells.items(.flag)[cell_id] = true;
+                    flags[cell_id] = true;
                 }
             }
 
-            try mesh.refine(allocator);
+            try mesh.refine(allocator, flags);
         }
 
         var manager = try NodeManager.init(allocator, [1]usize{16} ** N, 8);
@@ -888,35 +879,35 @@ pub const BrillEvolution = struct {
 
         try manager.build(allocator, &mesh);
 
-        std.debug.print("Num packed nodes: {}\n", .{manager.numPackedNodes()});
+        std.debug.print("Num nodes: {}\n", .{manager.numNodes()});
         std.debug.print("Min spacing {}\n", .{manager.minSpacing()});
 
         // Create worker
-        var worker = try NodeWorker.init(allocator, &mesh, &manager);
+        var worker = try NodeWorker.init(&mesh, &manager);
         defer worker.deinit();
 
         std.debug.print("Allocating Memory\n", .{});
 
-        const rhs = try allocator.alloc(f64, worker.numNodes());
+        const rhs = try allocator.alloc(f64, manager.numNodes());
         defer allocator.free(rhs);
 
-        const lapse = try allocator.alloc(f64, worker.numNodes());
+        const lapse = try allocator.alloc(f64, manager.numNodes());
         defer allocator.free(lapse);
 
-        const shiftr = try allocator.alloc(f64, worker.numNodes());
+        const shiftr = try allocator.alloc(f64, manager.numNodes());
         defer allocator.free(shiftr);
 
-        const shiftz = try allocator.alloc(f64, worker.numNodes());
+        const shiftz = try allocator.alloc(f64, manager.numNodes());
         defer allocator.free(shiftz);
 
-        const constraint = try allocator.alloc(f64, worker.numNodes());
+        const constraint = try allocator.alloc(f64, manager.numNodes());
         defer allocator.free(constraint);
 
-        const eta = try allocator.alloc(f64, worker.numNodes());
+        const eta = try allocator.alloc(f64, manager.numNodes());
         defer allocator.free(eta);
 
         // Runge Kutta 4 context
-        var rk4 = try Rk4Integrator(Dynamic).init(allocator, worker.numNodes());
+        var rk4 = try Rk4Integrator(Dynamic).init(allocator, manager.numNodes());
         defer rk4.deinit();
 
         @memset(rk4.sys.field(.u), 0.0);
@@ -929,8 +920,8 @@ pub const BrillEvolution = struct {
         std.debug.print("Solving Initial Data\n", .{});
 
         // Seed
-        worker.order(O).projectAll(Seed{ .amplitude = 1.0, .sigma = 1.0 }, rk4.sys.field(.seed));
-        worker.order(O).fillGhostNodesAll(seed_boundary, rk4.sys.field(.seed));
+        worker.order(O).project(Seed{ .amplitude = 1.0, .sigma = 1.0 }, rk4.sys.field(.seed));
+        worker.order(O).fillGhostNodes(seed_boundary, rk4.sys.field(.seed));
 
         // Conformal factor
         const initial_rhs: InitialEtaRhs = .{
@@ -941,20 +932,19 @@ pub const BrillEvolution = struct {
             .seed = rk4.sys.field(.seed),
         };
 
-        worker.order(O).projectAll(initial_rhs, rhs);
+        worker.order(O).project(initial_rhs, rhs);
 
-        const solver: MultigridMethod = .{
-            .base_solver = BiCGStabSolver.new(20000, 10e-14),
+        var solver = try MultigridMethod.init(allocator, manager.numNodes(), BiCGStabSolver.new(20000, 10e-14), .{
             .max_iters = 100,
             .tolerance = 10e-10,
             .presmooth = 5,
             .postsmooth = 5,
-        };
+        });
+        defer solver.deinit();
 
         @memset(eta, 0.0);
 
         try solver.solve(
-            allocator,
             &worker,
             initial_op,
             eta_boundary,
@@ -1010,15 +1000,15 @@ pub const BrillEvolution = struct {
                 .w = rk4.sys.field(.w),
             };
 
-            worker.order(O).projectAll(hamiltonain, constraint);
+            worker.order(O).project(hamiltonain, constraint);
         }
 
         // Output
         {
-            const file = try std.fs.cwd().createFile("output/enew0.vtu", .{});
+            const file = try std.fs.cwd().createFile("output/evolution0.vtu", .{});
             defer file.close();
 
-            const output = SystemConst(Output).view(worker.numNodes(), .{
+            const output = SystemConst(Output).view(manager.numNodes(), .{
                 .psi = rk4.sys.field(.psi),
                 .seed = rk4.sys.field(.seed),
                 .u = rk4.sys.field(.u),
@@ -1032,7 +1022,7 @@ pub const BrillEvolution = struct {
 
             var buffer = std.io.bufferedWriter(file.writer());
 
-            try DataOut.Ghost(M).writeVtk(
+            try DataOut.writeVtk(
                 Output,
                 allocator,
                 &worker,
@@ -1056,7 +1046,7 @@ pub const BrillEvolution = struct {
         const h: f64 = cfl * manager.minSpacing();
 
         for (0..steps) |step| {
-            const con = worker.normAll(constraint);
+            const con = worker.norm(constraint);
             std.debug.print("Step {}/{}, Time: {}, Constraint: {}\n", .{ step + 1, steps, rk4.time, con });
 
             // ********************************
@@ -1071,7 +1061,7 @@ pub const BrillEvolution = struct {
                 .rhs = rhs,
             };
 
-            try rk4.step(scratch, evolution, h);
+            try rk4.step(evolution, h);
             try evolution.preprocess(rk4.sys);
 
             _ = arena.reset(.retain_capacity);
@@ -1098,7 +1088,7 @@ pub const BrillEvolution = struct {
             {
                 const psi = rk4.sys.field(.psi);
 
-                worker.order(O).fillGhostNodesAll(psi_boundary, psi);
+                worker.order(O).fillGhostNodes(psi_boundary, psi);
 
                 for (0..eta.len) |i| {
                     eta[i] = @exp(psi[i] / 2.0);
@@ -1113,18 +1103,18 @@ pub const BrillEvolution = struct {
                 .w = rk4.sys.field(.w),
             };
 
-            worker.order(O).projectAll(hamiltonian, constraint);
+            worker.order(O).project(hamiltonian, constraint);
 
             // *******************************
             // Output
 
-            const file_name = try std.fmt.allocPrint(allocator, "output/enew{}.vtu", .{step + 1});
+            const file_name = try std.fmt.allocPrint(allocator, "output/evolution{}.vtu", .{step + 1});
             defer allocator.free(file_name);
 
             const file = try std.fs.cwd().createFile(file_name, .{});
             defer file.close();
 
-            const output = SystemConst(Output).view(worker.numNodes(), .{
+            const output = SystemConst(Output).view(manager.numNodes(), .{
                 .psi = rk4.sys.field(.psi),
                 .seed = rk4.sys.field(.seed),
                 .u = rk4.sys.field(.u),
@@ -1138,7 +1128,7 @@ pub const BrillEvolution = struct {
 
             var buffer = std.io.bufferedWriter(file.writer());
 
-            try DataOut.Ghost(M).writeVtk(
+            try DataOut.writeVtk(
                 Output,
                 allocator,
                 &worker,

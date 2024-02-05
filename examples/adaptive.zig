@@ -10,7 +10,7 @@ const lac = aeon.lac;
 const tree = aeon.tree;
 
 const N = 2;
-const M = 2;
+const M = 1;
 
 const symmetric = false;
 
@@ -247,5 +247,5 @@ pub fn main() !void {
     }
 
     // Run main
-    try AdaptivePoissonEquation.run(gpa.allocator(), 7, 10e-12);
+    try AdaptivePoissonEquation.run(gpa.allocator(), 7, 10e-7);
 }

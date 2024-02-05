@@ -26,6 +26,7 @@ pub fn build(b: *std.Build) void {
 
     const examples = [_][]const u8{
         "adaptive",
+        "evolution",
         "poisson",
         "test",
     };

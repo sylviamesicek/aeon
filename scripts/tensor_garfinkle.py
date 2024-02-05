@@ -83,26 +83,18 @@ def covariant(f, a, b):
 
     return sym.simplify(result)
 
-# print(covariant(lam, 0, 0))
-
-# exit(0)
-
-# sym.pretty_print(rtrace)
-
-# exit(0)
-
 
 # Extrinsic curvature
 
 u = sym.Function('U')(r, z)
+x = sym.Function('X')(r, z)
 w = sym.Function('W')(r, z)
-y = sym.Function('Y')(r, z)
 
 ext = np.array([
-    [(r * y - u) / sym.sympify(3), w], 
-    [w, 2 * (u + r*y/2) / sym.sympify(3) ]])
+    [(r * w - u) / sym.sympify(3), x], 
+    [x, 2 * (u + r*w/2) / sym.sympify(3) ]])
 
-exttrace = (2*r*y + u) / sym.sympify(3)
+exttrace = (2*r*w + u) / sym.sympify(3)
 
 source = np.array([
     [sym.Function('Srr')(r, z), sym.Function('Srz')(r, z)], 
@@ -123,72 +115,59 @@ def ext_normal(a, b):
 
 # Evolution
 
-w_normal = sym.simplify(ext_normal(0, 1))
-w_beta = shiftr * par(w, 0) + shiftz * par(w, 1) + (par(shiftz, 0) - par(shiftr, 1)) * u / 2
-w_evolution =  lapse * w_normal + w_beta
+x_normal = sym.simplify(ext_normal(0, 1))
+x_beta = shiftr * par(x, 0) + shiftz * par(x, 1) + (par(shiftz, 0) - par(shiftr, 1)) * u / 2
+x_evolution =  lapse * x_normal + x_beta
+
+print("X NORMAL")
+sym.pretty_print(x_normal);
+print("X Beta")
+sym.pretty_print(x_beta);
 
 u_normal = sym.simplify(ext_normal(1, 1) - ext_normal(0, 0))
-u_beta = shiftr * par(u, 0) + shiftz * par(u, 1) + 2 * w * (par(shiftr, 1) - par(shiftz, 0))
+u_beta = shiftr * par(u, 0) + shiftz * par(u, 1) + 2 * x * (par(shiftr, 1) - par(shiftz, 0))
 u_evolution = lapse * u_normal + u_beta
 
 l_normal = - (covariant(lam, 0, 0) + covariant(lam, 1, 1) ) / lam - (par(lam, 0) * par(lapse, 0) +  par(lam, 1) * par(lapse, 1)) / (A * lam * lapse) - kappa / 2 * (rhoh - strace + tau)
 
-y_normal = sym.simplify((ext_normal(0, 0) - l_normal) / r)
-y_beta = shiftr * par(r*y, 0) / r + shiftz * par(y, 1) + w/r * (par(shiftz, 0) - par(shiftr, 1))
-y_evolution = sym.simplify(lapse * y_normal) + y_beta
+w_normal = sym.simplify((ext_normal(0, 0) - l_normal) / r)
+w_beta = shiftr * par(r*w, 0) / r + shiftz * par(w, 1) + x/r * (par(shiftz, 0) - par(shiftr, 1))
+w_evolution = sym.simplify(lapse * w_normal) + w_beta
 
 ext_combination = (ext[0, 0])**2 + 2*(ext[0, 1])**2 + (ext[1, 1])**2
 
 ## Analytic
 
-y_evolution_analytic1 = sym.exp(-2*r*seed) / (psi**4) * (-par(par(lapse, 0) / r, 0) - par(seed, 1) * par(lapse, 1) + (seed / r + par(seed, 0) + 4 *  (r * psi)**-1 * par(psi, 0)) * par(lapse, 0))
-y_evolution_analytic2 = -lapse / (r**2 * psi**6) * sym.exp(-2*r*seed) * (r**2 * psi**2 * (par(par(seed, 0), 0) + par(par(seed, 1), 1) + par(seed, 0) / r) + 2 * r**2 * psi * par(seed, 1) * par(psi, 1) - seed * psi**2 - 6 * r * par(psi, 0)**2 + 2 * r * psi * par(par(psi, 0), 0) + par(psi, 0) * (-2 * r * r * psi * par(seed, 0) + (-2 * r * seed - 2) * psi))
-y_evolution_analytic3 = shiftr * par(y, 0) + shiftz * par(y, 1) + y * shiftr / r + w / r * (par(shiftz, 0) - par(shiftr, 1))
+w_evolution_analytic1 = sym.exp(-2*r*seed) / (psi**4) * (-par(par(lapse, 0) / r, 0) - par(seed, 1) * par(lapse, 1) + (seed / r + par(seed, 0) + 4 *  (r * psi)**-1 * par(psi, 0)) * par(lapse, 0))
+w_evolution_analytic2 = -lapse / (r**2 * psi**6) * sym.exp(-2*r*seed) * (r**2 * psi**2 * (par(par(seed, 0), 0) + par(par(seed, 1), 1) + par(seed, 0) / r) + 2 * r**2 * psi * par(seed, 1) * par(psi, 1) - seed * psi**2 - 6 * r * par(psi, 0)**2 + 2 * r * psi * par(par(psi, 0), 0) + par(psi, 0) * (-2 * r * r * psi * par(seed, 0) + (-2 * r * seed - 2) * psi))
+w_evolution_analytic3 = shiftr * par(w, 0) + shiftz * par(w, 1) + w * shiftr / r + x / r * (par(shiftz, 0) - par(shiftr, 1))
 
-y_evolution_analytic = y_evolution_analytic1 + y_evolution_analytic2 + y_evolution_analytic3
+w_evolution_analytic = w_evolution_analytic1 + w_evolution_analytic2 + w_evolution_analytic3
 
 ## Y EVOLUTION
-print("Y EVOLUTION")
-sym.pretty_print(y_evolution.expand() - y_evolution_analytic.expand())
+print("W EVOLUTION DIFF")
+sym.pretty_print(w_evolution.expand() - w_evolution_analytic.expand())
 
 ## U EVOLUTION
 
 u_evolution_analytic1 = psi**(-4) * sym.exp(-2 * r * seed) * ((4 * par(psi, 1) / psi + 2 * r * par(seed, 1)) * par(lapse, 1) - (2 * seed + 4 * par(psi, 0) / psi + 2 * r * par(seed, 0)) * par(lapse, 0) + par(par(lapse, 0), 0) - par(par(lapse, 1), 1))
 u_evolution_analytic2 = -lapse * psi**(-6) * sym.exp(-2 * r * seed) / r * (-4 * r**2 * psi * par(seed, 1) * par(psi, 1) + 2 * r * psi**2 * par(seed, 0) + 2 * seed * psi**2 - 6 * r * par(psi, 1)**2 + 2 * r * psi * par(par(psi, 1), 1) + 6 * r * par(psi, 0)**2 - 2 * r * psi * par(par(psi, 0), 0) + (4 * r**2 * psi * par(seed, 0) + 4 * r * seed * psi) * par(psi, 0))
-u_evolution_analytic3 = shiftr * par(u, 0) + shiftz * par(u, 1) + 2 * w * (par(shiftr, 1) - par(shiftz, 0))
+u_evolution_analytic3 = shiftr * par(u, 0) + shiftz * par(u, 1) + 2 * x * (par(shiftr, 1) - par(shiftz, 0))
 
 u_evolution_analytic = u_evolution_analytic1 + u_evolution_analytic2 + u_evolution_analytic3
 
-print("U EVOLUTION")
+print("U EVOLUTION DIFF")
 sym.pretty_print(u_evolution.expand() - u_evolution_analytic.expand())
 
-print("W EVOLUTION")
+print("X EVOLUTION DIFF")
 
-w_evolution_analytic1 = psi**(-4) * sym.exp(-2 * r * seed) * ((seed + 2 * par(psi, 0) / psi + r * par(seed, 0)) * par(lapse, 1) - par(par(lapse, 0), 1) + (2 * par(psi, 1) / psi + r * par(seed, 1)) * par(lapse, 0))
-w_evolution_analytic2 = lapse * psi**(-6) * sym.exp(-2 * r * seed) * (2 * r * psi * par(seed, 1) * par(psi, 0) + psi**2 * par(seed, 1) + (2  *r * psi * par(seed, 0) + 2 * seed * psi + 6 * par(psi, 0)) * par(psi, 1) - 2 * psi * par(par(psi, 0), 1))
-w_evolution_analytic3 = shiftr * par(w, 0) + shiftz * par(w, 1) + u / 2 * (par(shiftz, 0) - par(shiftr, 1))
+x_evolution_analytic1 = psi**(-4) * sym.exp(-2 * r * seed) * ((seed + 2 * par(psi, 0) / psi + r * par(seed, 0)) * par(lapse, 1) - par(par(lapse, 0), 1) + (2 * par(psi, 1) / psi + r * par(seed, 1)) * par(lapse, 0))
+x_evolution_analytic2 = lapse * psi**(-6) * sym.exp(-2 * r * seed) * (2 * r * psi * par(seed, 1) * par(psi, 0) + psi**2 * par(seed, 1) + (2  *r * psi * par(seed, 0) + 2 * seed * psi + 6 * par(psi, 0)) * par(psi, 1) - 2 * psi * par(par(psi, 0), 1))
+x_evolution_analytic3 = shiftr * par(x, 0) + shiftz * par(x, 1) + u / 2 * (par(shiftz, 0) - par(shiftr, 1))
 
-w_evolution_analytic = w_evolution_analytic1 + w_evolution_analytic2 + w_evolution_analytic3
+x_evolution_analytic = x_evolution_analytic1 + x_evolution_analytic2 + x_evolution_analytic3
 
-sym.pretty_print(w_evolution.expand() - w_evolution_analytic.expand())
-
-# assert((y_evolution_analytic.expand() - y_evolution.expand()) == 0)
-
-# u_evolution_analytic1 = shiftr * par(u, 0) + shiftz * par(u, 1) + 2 * w * (par(shiftr, 1) - par(shiftz, 0)) + kappa * lapse * (source[0, 0] - source[1, 1])
-# u_evolution_analytic2 = sym.exp(-2*r*seed - 2*psi) * (2 * (r * par(seed, 1) + par(psi, 1)) * par(lapse, 1) - 2*(r * par(seed, 0) + seed + par(psi, 0)) * par(lapse, 0) + par(par(lapse, 0), 0) - par(par(lapse, 1), 1))
-# u_evolution_analytic3 = lapse * sym.exp(-2*r*seed - 2*psi) * ((2 * r * par(seed, 1) + par(psi, 1)) * par(psi, 1) - (2 * r * par(seed, 0) + 2 * seed + par(psi, 0)) * par(psi, 0) + par(par(psi, 0), 0) - par(par(psi, 1), 1) - 2 * par(r * seed, 0) / r)
-
-# u_evolution_analytic = u_evolution_analytic1 + u_evolution_analytic2 + u_evolution_analytic3
-
-# assert((u_evolution.expand() - u_evolution_analytic.expand()) == 0)
-
-# w_evolution_analytic1 = shiftr * par(w, 0) + shiftz * par(w, 1) + u / 2 * (par(shiftz, 0) - par(shiftr, 1)) - kappa * lapse * source[0, 1]
-# w_evolution_analytic2 = sym.exp(-2*r*seed - 2*psi) * (par(lapse, 0) * (r * par(seed, 1) + par(psi, 1)) + par(lapse, 1) * (r * par(seed, 0) + seed + par(psi, 0)) - par(par(lapse, 0), 1))
-# w_evolution_analytic3 = lapse * sym.exp(-2*r*seed - 2*psi) * (par(psi, 0) * (r * par(seed, 1) + par(psi, 1)) + par(psi, 1) * (r * par(seed, 0) + seed) + par(seed, 1) - par(par(psi, 0), 1))
-
-# w_evolution_analytic = w_evolution_analytic1 + w_evolution_analytic2 + w_evolution_analytic3
-
-# assert((w_evolution.expand() - w_evolution_analytic.expand()) == 0)
+sym.pretty_print(x_evolution.expand() - x_evolution_analytic.expand())
 
 print("Finished")
 # sym.pretty_print(diff)
