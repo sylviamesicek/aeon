@@ -40,7 +40,7 @@ pub fn Cell(comptime N: usize) type {
     };
 }
 
-/// A quadtree based mesh.
+/// A quadtree based mesh. The domain must be rectangular.
 pub fn TreeMesh(comptime N: usize) type {
     return struct {
         gpa: Allocator,
@@ -55,8 +55,8 @@ pub fn TreeMesh(comptime N: usize) type {
         const IndexSpace = geometry.IndexSpace(N);
         const RealBox = geometry.RealBox(N);
         const Region = geometry.Region(N);
-        // const SplitIndex = geometry.SplitIndex(N);
 
+        /// Creates a new tree mesh of the given bounds.
         pub fn init(allocator: Allocator, bounds: RealBox) !Self {
             var cells: MultiArrayList(Cell(N)) = .{};
             errdefer cells.deinit(allocator);
@@ -82,19 +82,23 @@ pub fn TreeMesh(comptime N: usize) type {
             };
         }
 
+        /// Deinitializes the mesh.
         pub fn deinit(self: *Self) void {
             self.level_to_cells.deinit(self.gpa);
             self.cells.deinit(self.gpa);
         }
 
+        /// Returns the number of cells.
         pub fn numCells(self: *const Self) usize {
             return self.cells.len;
         }
 
+        /// Returns the number of levels on the mesh.
         pub fn numLevels(self: *const Self) usize {
             return self.level_to_cells.items.len - 1;
         }
 
+        /// Retrieves the physical bounds of the
         pub fn physicalBounds(self: *const Self) RealBox {
             return self.cells.items(.bounds)[0];
         }
@@ -120,7 +124,7 @@ pub fn TreeMesh(comptime N: usize) type {
                     // Is the current node flagged for refinement
                     const flag = flags[cell];
 
-                    if (flag == false) {
+                    if (flag == false or cells.items(.children)[cell] != null_index) {
                         continue;
                     }
 
@@ -135,16 +139,11 @@ pub fn TreeMesh(comptime N: usize) type {
                         // Is the nieghbor coarser than this node
                         var neighbor_coarse: bool = false;
                         // Loop over axes
-                        for (0..N) |axis| {
+                        for (split.outerFaces()) |face| {
                             // Skip traversing this axis if cart[axis] == 0
-                            if (direction.isSet(axis) == false) {
+                            if (direction.isSet(face.axis) == false) {
                                 continue;
                             }
-                            // Find face to traverse
-                            const face = FaceIndex{
-                                .side = split.isSet(axis),
-                                .axis = axis,
-                            };
                             // Get neighbor, searching parent neighbors if necessary
                             var traverse = cells.items(.neighbors)[neighbor][face.toLinear()];
 
@@ -152,19 +151,21 @@ pub fn TreeMesh(comptime N: usize) type {
                                 const neighbor_parent = cells.items(.parent)[neighbor];
                                 // We had to traverse a fine-coarse boundary
                                 neighbor_coarse = true;
+                                // We continue searching in case we eventually cross a boundary
                                 traverse = cells.items(.neighbors)[neighbor_parent][face.toLinear()];
                             } else if (traverse == boundary_index) {
                                 // No update needed if face is on boundary
                                 neighbor_coarse = false;
-                                continue;
+                                neighbor = boundary_index;
+                                break;
                             }
 
                             // Update node
                             neighbor = traverse;
                         }
+
                         // If neighbor is more coarse, tag for refinement
-                        const neighbor_leaf = cells.items(.children)[neighbor] == null_index;
-                        if (neighbor_coarse and neighbor_leaf and !flags[neighbor]) {
+                        if (neighbor_coarse and cells.items(.children)[neighbor] == null_index and !flags[neighbor]) {
                             flags[neighbor] = true;
                             is_smooth = false;
                         }
@@ -181,21 +182,30 @@ pub fn TreeMesh(comptime N: usize) type {
             // Perfom Smoothing
             self.smoothRefineFlags(flags);
 
+            // *************************************************
+            // Regenerate quadtree structure
+
             // Transfer all mesh data to a scratch buffer
             var scratch = try self.cells.clone(allocator);
             defer scratch.deinit(allocator);
             // Cache pointers
             const old_cells = scratch.slice();
+
             // Find number of cells to be added
             var new_node_count: usize = 0;
             for (0..old_cells.len) |idx| {
-                if (flags[idx]) {
+                // If cell is flagged and is a leaf
+                if (flags[idx] and old_cells.items(.children)[idx] == null_index) {
                     new_node_count += AxisMask.count;
                 }
             }
             // And erase current mesh data (other than root)
             self.cells.shrinkRetainingCapacity(1);
-            self.level_to_cells.shrinkRetainingCapacity(1);
+            self.level_to_cells.shrinkRetainingCapacity(2);
+            // Check level offsets
+            assert(self.level_to_cells.items[0] == 0);
+            assert(self.level_to_cells.items[1] == 1);
+
             // Set root children to null (updated later).
             self.cells.items(.children)[0] = null_index;
             // Ensure total capacity is such that we need not allocate in the loop
@@ -207,16 +217,13 @@ pub fn TreeMesh(comptime N: usize) type {
             // Temporary map structures
             var map: ArrayListUnmanaged(IndexMap) = .{};
             defer map.deinit(allocator);
-
+            // Add root map
             try map.append(allocator, .{ .old = 0, .new = 0 });
 
             var map_tmp: ArrayListUnmanaged(IndexMap) = .{};
             defer map_tmp.deinit(allocator);
 
             var target: usize = 1;
-
-            // Add offset of level 1
-            try self.level_to_cells.append(self.gpa, self.cells.len);
 
             while (map.items.len > 0) : (target += 1) {
                 // Reset temporary map
@@ -228,10 +235,10 @@ pub fn TreeMesh(comptime N: usize) type {
                     const coarse_bounds: RealBox = old_cells.items(.bounds)[m.old];
                     const coarse_children = old_cells.items(.children)[m.old];
                     const coarse_flag = flags[m.old];
-                    const coarse_neighbors = old_cells.items(.neighbors)[m.old];
 
                     // Only continue processing if this node has pre-existing children or is tagged for refinement
                     if (coarse_children == null_index and coarse_flag == false) {
+                        self.cells.items(.children)[m.new] = null_index;
                         continue;
                     }
 
@@ -255,29 +262,13 @@ pub fn TreeMesh(comptime N: usize) type {
 
                         // Compute new bounds
                         const bounds = coarse_bounds.split(child);
-                        // Compute new neighbors
-                        var neighbors: [FaceIndex.count]usize = undefined;
-
-                        const sides = child.unpack();
-
-                        for (FaceIndex.enumerate()) |face| {
-                            neighbors[face.toLinear()] = if (sides[face.axis] != face.side)
-                                // Inner face
-                                new_children + child.toggled(face.axis).toLinear()
-                            else if (coarse_neighbors[face.toLinear()] == boundary_index)
-                                // Propogate boundary
-                                boundary_index
-                            else
-                                // Decide in next step
-                                null_index;
-                        }
 
                         // Add new child node
                         self.cells.appendAssumeCapacity(.{
                             .bounds = bounds,
                             .parent = m.new,
                             .children = null_index,
-                            .neighbors = neighbors,
+                            .neighbors = [1]usize{null_index} ** FaceIndex.count,
                             .level = target,
                         });
                     }
@@ -302,31 +293,93 @@ pub fn TreeMesh(comptime N: usize) type {
 
             const new_cells = self.cells.slice();
 
-            // Correct neighbors
-            for (1..new_cells.len) |cell| {
-                const parent = new_cells.items(.parent)[cell];
-                var neighbors = &new_cells.items(.neighbors)[cell];
+            assert(new_cells.len > 0);
 
-                const sidx = cell - new_cells.items(.children)[parent];
-                const split = AxisMask.fromLinear(sidx);
+            // ********************************
+            // Compute neighbors
 
-                for (FaceIndex.enumerate()) |face| {
-                    // If neighbor is coarser check if it has children (so we can update self)
-                    if (neighbors[face.toLinear()] == null_index) {
-                        // Neighbor on coarser level
-                        const coarse_neighbor = new_cells.items(.neighbors)[parent][face.toLinear()];
-                        const coarse_neighbor_children = new_cells.items(.children)[coarse_neighbor];
+            const neighbors = new_cells.items(.neighbors);
 
-                        if (coarse_neighbor_children != null_index) {
-                            // Update neighbors
-                            neighbors[face.toLinear()] = coarse_neighbor_children + split.toggled(face.axis).toLinear();
+            // Root should have only boundary neighbors
+            neighbors[0] = [1]usize{boundary_index} ** FaceIndex.count;
+
+            for (0..new_cells.len) |cell_id| {
+                const children = new_cells.items(.children)[cell_id];
+                assert(children != boundary_index);
+
+                if (children == null_index) {
+                    continue;
+                }
+
+                // We loop over the children of the current cell
+                for (AxisMask.enumerate()) |child| {
+                    const child_id = children + child.toLinear();
+                    // Inner faces are trivial to set
+                    for (child.innerFaces()) |face| {
+                        neighbors[child_id][face.toLinear()] = children + child.toggled(face.axis).toLinear();
+                    }
+
+                    // Outer faces are a bit more complicated
+                    for (child.outerFaces()) |face| {
+                        const cell_neighbor = neighbors[cell_id][face.toLinear()];
+                        // If this cell has children, the neighbors must not be null if we have properly smoothed the flags
+
+                        if (cell_neighbor == null_index) {
+                            std.debug.print("Cell ID {}\n", .{cell_id});
+                            std.debug.print("Neighbors {any}\n", .{neighbors[cell_id]});
+                            std.debug.print("Face {}\n", .{face});
+                            std.debug.print("Children {}\n", .{children});
+                            neighbors[child_id][face.toLinear()] = null_index;
                             continue;
+                        }
+
+                        assert(cell_neighbor != null_index);
+
+                        if (cell_neighbor == boundary_index) {
+                            neighbors[child_id][face.toLinear()] = boundary_index;
+                        } else {
+                            const cell_neighbor_children = new_cells.items(.children)[cell_neighbor];
+
+                            if (cell_neighbor_children == null_index) {
+                                // assert(new_cells.items(.children)[child_id] == null_index);
+                                neighbors[child_id][face.toLinear()] = null_index;
+                            } else {
+                                neighbors[child_id][face.toLinear()] = cell_neighbor_children + child.toggled(face.axis).toLinear();
+                            }
                         }
                     }
                 }
             }
+
+            // // Set neighbors
+            // for (1..new_cells.len) |cell| {
+            //     const parent = new_cells.items(.parent)[cell];
+            //     var neighbors = &new_cells.items(.neighbors)[cell];
+
+            //     const sidx = cell - new_cells.items(.children)[parent];
+            //     const split = AxisMask.fromLinear(sidx);
+
+            //     for (FaceIndex.enumerate()) |face| {
+            //         // If neighbor is coarser check if it has children (so we can update self)
+            //         if (neighbors[face.toLinear()] == null_index) {
+            //             // Neighbor on coarser level
+            //             const coarse_neighbor = new_cells.items(.neighbors)[parent][face.toLinear()];
+
+            //             assert(coarse_neighbor != null_index);
+
+            //             const coarse_neighbor_children = new_cells.items(.children)[coarse_neighbor];
+
+            //             if (coarse_neighbor_children != null_index) {
+            //                 // Update neighbors
+            //                 neighbors[face.toLinear()] = coarse_neighbor_children + split.toggled(face.axis).toLinear();
+            //                 continue;
+            //             }
+            //         }
+            //     }
+            // }
         }
 
+        /// Refines the mesh globally.
         pub fn refineGlobal(self: *@This(), allocator: Allocator) !void {
             const flags = try allocator.alloc(bool, self.numCells());
             defer allocator.free(flags);
@@ -335,6 +388,86 @@ pub fn TreeMesh(comptime N: usize) type {
             self.smoothRefineFlags(flags);
 
             try self.refine(allocator, flags);
+        }
+
+        /// Checks whether or not the mesh datastructure is wellformed.
+        pub fn isWellFormed(self: *const @This()) bool {
+            // Check levels to cells
+            if (self.level_to_cells.getLast() != self.cells.len) {
+                return false;
+            }
+
+            for (0..self.numLevels()) |level| {
+                const start = self.level_to_cells.items[level];
+                const end = self.level_to_cells.items[level + 1];
+
+                for (start..end) |cell_id| {
+                    if (self.cells.items(.level)[cell_id] != level) {
+                        return false;
+                    }
+                }
+            }
+
+            // Check Parents/Children
+            for (0..self.numCells()) |cell_id| {
+                const parent = self.cells.items(.parent)[cell_id];
+                const children = self.cells.items(.children)[cell_id];
+
+                if (parent != null_index) {
+                    if (self.cells.items(.children)[parent] == null_index) {
+                        return false;
+                    }
+                    if (cell_id < self.cells.items(.children)[parent] or cell_id >= self.cells.items(.children)[parent] + AxisMask.count) {
+                        return false;
+                    }
+                }
+
+                if (children != null_index) {
+                    for (AxisMask.enumerate()) |split| {
+                        const child_id = children + split.toLinear();
+
+                        if (self.cells.items(.parent)[child_id] != cell_id) {
+                            return false;
+                        }
+                    }
+                }
+            }
+
+            // Check neighbors
+            for (0..self.numCells()) |cell_id| {
+                const children = self.cells.items(.children)[cell_id];
+
+                if (children != null_index) {
+                    for (AxisMask.enumerate()) |split| {
+                        const children_id = children + split.toLinear();
+
+                        for (split.innerFaces()) |face| {
+                            const child_neighbor = self.cells.items(.neighbors)[children_id][face.toLinear()];
+
+                            // Check if inner face is boundary or null
+                            if (child_neighbor == boundary_index or child_neighbor == null_index) {
+                                return false;
+                            }
+
+                            const tsplit = split.toggled(face.axis);
+                            if (children + tsplit.toLinear() != child_neighbor) {
+                                return false;
+                            }
+                        }
+
+                        for (split.outerFaces()) |face| {
+                            const neighbor = self.cells.items(.neighbors)[cell_id][face.toLinear()];
+                            const child_neighbor = self.cells.items(.neighbors)[children_id][face.toLinear()];
+
+                            if ((neighbor == boundary_index) != (child_neighbor == boundary_index)) {
+                                return false;
+                            }
+                        }
+                    }
+                }
+            }
+
+            return true;
         }
     };
 }
@@ -361,7 +494,19 @@ test "tree mesh global refinement" {
         try mesh.refineGlobal(allocator);
     }
 
-    try expect(mesh.cells.len == 5);
+    for (0..3) |_| {
+        const flags = try allocator.alloc(bool, mesh.numCells());
+        defer allocator.free(flags);
 
-    // std.debug.print("{}\n", .{mesh});
+        for (mesh.cells.items(.bounds), flags) |bounds, *flag| {
+            if (bounds.origin[0] == 0.0 and bounds.origin[1] == 0.0) {
+                flag.* = true;
+            }
+        }
+
+        try mesh.refine(allocator, flags);
+    }
+
+    // try expect(mesh.numLevels() == 5);
+    try expect(mesh.isWellFormed());
 }

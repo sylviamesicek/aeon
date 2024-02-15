@@ -6,9 +6,9 @@ const MultiArrayList = std.MultiArrayList;
 const assert = std.debug.assert;
 const panic = std.debug.panic;
 
-const tree = @import("tree.zig");
-const null_index = tree.null_index;
-const boundary_index = tree.boundary_index;
+const mesh_ = @import("mesh.zig");
+const null_index = mesh_.null_index;
+const boundary_index = mesh_.boundary_index;
 
 const permute = @import("permute.zig");
 
@@ -28,9 +28,10 @@ const RangeMap = utils.RangeMap;
 /// (like the GPU or other processes).
 pub fn NodeManager(comptime N: usize, comptime M: usize) type {
     return struct {
+        /// Allocator for internal data structures
         gpa: Allocator,
         /// The set of blocks that make up the mesh.
-        blocks: ArrayListUmanaged(Block),
+        blocks: MultiArrayList(Block),
         /// Additional info stored per mesh cell.
         cells: MultiArrayList(Cell),
 
@@ -44,7 +45,7 @@ pub fn NodeManager(comptime N: usize, comptime M: usize) type {
         /// A cell permutation structure,
         cell_permute: CellPermutation,
 
-        const TreeMesh = tree.TreeMesh(N);
+        const Mesh = mesh_.Mesh(N);
         const CellPermutation = permute.CellPermutation(N);
 
         const AxisMask = geometry.AxisMask(N);
@@ -84,11 +85,7 @@ pub fn NodeManager(comptime N: usize, comptime M: usize) type {
             const cell_permute = try CellPermutation.init(allocator, max_refinement);
             errdefer cell_permute.deinit(allocator);
 
-            for (0..N) |axis| {
-                assert(cell_size[axis] % 2 == 0);
-            }
-
-            assert(max_refinement > 1);
+            assert(max_refinement > 0);
 
             return .{
                 .gpa = allocator,
@@ -115,7 +112,7 @@ pub fn NodeManager(comptime N: usize, comptime M: usize) type {
         }
 
         /// Builds a new `NodeManager` from a mesh, using the given allocator for scratch allocations.
-        pub fn build(self: *@This(), allocator: Allocator, mesh: *const TreeMesh) !void {
+        pub fn build(self: *@This(), allocator: Allocator, mesh: *const Mesh) !void {
             // ****************************
             // Computes Blocks + Offsets
             try self.buildBlocks(allocator, mesh);
@@ -132,22 +129,13 @@ pub fn NodeManager(comptime N: usize, comptime M: usize) type {
         /// Runs a recursive algorithm that traverses the tree from root to leaves, computing valid blocks while doing so.
         /// This algorithm works level by level (queueing up blocks for use on the next level). And thus preserves the invariant
         /// that all blocks on the same level are contiguous in the block array.
-        fn buildBlocks(self: *@This(), allocator: Allocator, mesh: *const TreeMesh) !void {
+        fn buildBlocks(self: *@This(), allocator: Allocator, mesh: *const Mesh) !void {
             // Cache
             const cells = mesh.cells.slice();
             const levels = mesh.numLevels();
 
             // Reset level offsets
-            try self.level_to_blocks.resize(allocator, levels + 1);
-
-            // // Reset blocks
-            // self.blocks.clearRetainingCapacity();
-
-            // try self.blocks.append(self.gpa, .{
-            //     .refinement = 0,
-            //     .boundary = [1]bool{true} ** FaceIndex.count,
-            //     .cells = 0,
-            // });
+            try self.level_to_blocks.resize(allocator, levels);
 
             // Iterate levels
             const BlockMeta = struct {
@@ -250,7 +238,7 @@ pub fn NodeManager(comptime N: usize, comptime M: usize) type {
 
             // Transfer to blocks
 
-            self.blocks.clearRetainingCapacity();
+            self.blocks.shrinkRetainingCapacity(0);
 
             for (blocks.items) |meta| {
                 // Find cell offset and cell total.
@@ -272,16 +260,16 @@ pub fn NodeManager(comptime N: usize, comptime M: usize) type {
 
         /// Computes the block to node offset map.
         fn buildBlockToNodes(self: *@This()) !void {
-            try self.block_to_nodes.resize(self.gpa, self.blocks.items.len + 1);
+            try self.block_to_nodes.resize(self.gpa, self.blocks.len + 1);
 
             var offset: usize = 0;
             self.block_to_nodes.set(0, offset);
 
-            for (self.blocks.items, 0..) |block, block_id| {
+            for (self.blocks.items(.size), 0..) |size, block_id| {
                 var total: usize = 1;
 
                 for (0..N) |axis| {
-                    total *= self.cell_size[axis] * block.size[axis] + 2 * M;
+                    total *= self.cell_size[axis] * size[axis] + 2 * M;
                 }
 
                 offset += total;
@@ -291,7 +279,7 @@ pub fn NodeManager(comptime N: usize, comptime M: usize) type {
         }
 
         /// Builds extra per-cell information like neighbors.
-        fn buildCells(self: *@This(), mesh: *const TreeMesh) !void {
+        fn buildCells(self: *@This(), mesh: *const Mesh) !void {
             // Cache pointers
             const cells = mesh.cells.slice();
 
@@ -363,13 +351,11 @@ pub fn NodeManager(comptime N: usize, comptime M: usize) type {
             }
 
             // Set block and index of cells
-            for (0..self.numBlocks()) |block_id| {
-                const block = self.blockFromId(block_id);
-
-                var cell_indices = IndexSpace.fromSize(block.size).cartesianIndices();
+            for (0..self.numBlocks()) |block| {
+                var cell_indices = IndexSpace.fromSize(self.blocks.items(.size)[block]).cartesianIndices();
                 while (cell_indices.next()) |index| {
-                    const cell = self.cellFromBlock(block_id, index);
-                    self.cells.items(.block)[cell] = block_id;
+                    const cell = self.cellFromBlock(block, index);
+                    self.cells.items(.block)[cell] = block;
                     self.cells.items(.index)[cell] = index;
                 }
             }
@@ -409,25 +395,24 @@ pub fn NodeManager(comptime N: usize, comptime M: usize) type {
 
         /// Number of blocks in the mesh.
         pub fn numBlocks(self: *const @This()) usize {
-            return self.blocks.items.len;
+            return self.blocks.len;
         }
 
-        pub fn blockNodes(self: *const @This(), lock_id: usize, data: anytype) @TypeOf(data) {
-            return self.block_to_nodes.slice(lock_id, data);
-        }
-
-        /// Retrieves a block descriptor from a `block_id`.
-        pub fn blockFromId(self: *const @This(), block_id: usize) Block {
-            return self.blocks.items[block_id];
+        /// Returns a slice of nodes for the given block
+        pub fn blockNodes(self: *const @This(), block_id: usize, data: anytype) @TypeOf(data) {
+            return self.block_to_nodes.slice(block_id, data);
         }
 
         pub fn cellFromBlock(self: *const @This(), block_id: usize, index: [N]usize) usize {
-            const block = self.blocks.items[block_id];
-            const linear = IndexSpace.fromSize(block.size).linearFromCartesian(index);
+            const size = self.blocks.items(.size)[block_id];
+            const refinement = self.blocks.items(.refinement)[block_id];
+            const cells = self.blocks.items(.cells)[block_id];
 
-            assert(block.refinement <= self.cell_permute.maxRefinement());
+            const linear = IndexSpace.fromSize(size).linearFromCartesian(index);
 
-            return block.cells + self.cell_permute.permutation(block.refinement)[linear];
+            assert(refinement <= self.cell_permute.numLevels());
+
+            return cells + self.cell_permute.permutation(refinement)[linear];
         }
 
         /// Retrieves the spatial spacing of a given level
@@ -447,8 +432,9 @@ pub fn NodeManager(comptime N: usize, comptime M: usize) type {
             return result;
         }
 
+        /// Computes the minum spacing of
         pub fn minSpacing(self: *const @This()) f64 {
-            const sp = self.spacing(self.level_to_blocks.len() - 2);
+            const sp = self.spacing(self.level_to_blocks.len() - 1);
 
             var result = sp[0];
 

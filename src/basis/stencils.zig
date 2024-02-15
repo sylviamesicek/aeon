@@ -3,6 +3,71 @@ const geometry = @import("../geometry/geometry.zig");
 
 const lagrange = @import("lagrange.zig");
 
+pub const VertexStencils = struct {
+    const Lagrange = lagrange.Lagrange(f128);
+
+    pub fn value(comptime L: usize, comptime R: usize) [L + R + 1]f64 {
+        var result: [L + R + 1]f128 = undefined;
+        Lagrange.value(&grid(L, R), 0.0, &result);
+        return floatCastSlice(L + R + 1, result);
+    }
+
+    pub fn derivative(comptime L: usize, comptime R: usize) [L + R + 1]f64 {
+        var result: [L + R + 1]f128 = undefined;
+        Lagrange.derivative(&grid(L, R), 0.0, &result);
+        return floatCastSlice(L + R + 1, result);
+    }
+
+    pub fn secondDerivative(comptime L: usize, comptime R: usize) [L + R + 1]f64 {
+        var result: [L + R + 1]f128 = undefined;
+        Lagrange.secondDerivative(&grid(L, R), 0.0, &result);
+        return floatCastSlice(L + R + 1, result);
+    }
+
+    pub fn dissipation(comptime M: usize) [2 * M + 1]f64 {
+        var scale: f64 = if (M % 2 == 0) -1.0 else 1.0;
+
+        for (0..2 * M) |_| {
+            scale /= 2.0;
+        }
+
+        var result: [2 * M + 1]f64 = switch (M) {
+            0 => .{1.0},
+            1 => .{ 1.0, -2.0, 1.0 },
+            2 => .{ 1.0, -4.0, 6.0, -4.0, 1.0 },
+            3 => .{ 1.0, -6.0, 15.0, -20.0, 15.0, -6.0, 1.0 },
+            else => @compileError("Dissipation only supported for M < 4."),
+        };
+
+        for (0..result.len) |i| {
+            result[i] *= scale;
+        }
+
+        return result;
+    }
+
+    fn grid(comptime L: usize, comptime R: usize) [L + R + 1]f128 {
+        var result: [L + R + 1]f128 = undefined;
+
+        for (0..(L + R + 1)) |i| {
+            result[i] = @as(f128, @floatFromInt(i)) - @as(f128, @floatFromInt(L));
+        }
+
+        return result;
+    }
+
+    /// Casts arrays of `[Len]f128` -> `[Len]f64` using the `@floatCast` builtin.
+    fn floatCastSlice(comptime Len: usize, slice: [Len]f128) [Len]f64 {
+        var result: [Len]f64 = undefined;
+
+        for (0..Len) |i| {
+            result[i] = @floatCast(slice[i]);
+        }
+
+        return result;
+    }
+};
+
 /// This namespace provides several functions for computing cell centered interpolation, differentiation,
 /// prolongation, restriction, and boundary stencils. Here `M` corresponds to the number of support points
 /// to either side of the center of the stencil (or the number of interior support points in the case of
@@ -34,7 +99,7 @@ pub fn Stencils(comptime M: usize) type {
         }
 
         pub fn dissipation() [2 * M + 1]f64 {
-            var scale: f64 = if (M % 2 == 0) 1.0 else -1.0;
+            var scale: f64 = if (M % 2 == 0) -1.0 else 1.0;
 
             for (0..2 * M) |_| {
                 scale /= 2.0;

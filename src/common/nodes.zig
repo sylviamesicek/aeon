@@ -78,7 +78,7 @@ pub fn NodeSpace(comptime N: usize, comptime M: usize) type {
                 result[i] /= @as(f64, @floatFromInt(self.size[i]));
             }
 
-            return self.bounds.transformPos(result);
+            return self.bounds.localToGlobal(result);
         }
 
         pub fn nodeOffsetPosition(self: Self, region: Region, node: [N]isize) [N]f64 {
@@ -92,7 +92,7 @@ pub fn NodeSpace(comptime N: usize, comptime M: usize) type {
                 };
             }
 
-            return self.bounds.transformPos(result);
+            return self.bounds.localToGlobal(result);
         }
 
         /// Returns an index space over the node space.
@@ -177,7 +177,7 @@ pub fn NodeSpace(comptime N: usize, comptime M: usize) type {
                 result[i] /= @as(f64, @floatFromInt(self.size[i]));
             }
 
-            return self.bounds.transformPos(result);
+            return self.bounds.localToGlobal(result);
         }
 
         // **************************************
@@ -195,7 +195,7 @@ pub fn NodeSpace(comptime N: usize, comptime M: usize) type {
                 };
             }
 
-            return self.bounds.transformPos(result);
+            return self.bounds.localToGlobal(result);
         }
 
         // *************************************

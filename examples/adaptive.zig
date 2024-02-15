@@ -1,6 +1,7 @@
 // Imports
 const std = @import("std");
 const Allocator = std.mem.Allocator;
+const assert = std.debug.assert;
 
 const aeon = @import("aeon");
 
@@ -127,6 +128,22 @@ const AdaptivePoissonEquation = struct {
             // Build node
             try manager.build(allocator, &mesh);
 
+            assert(mesh.isWellFormed());
+            assert(manager.isWellFormed());
+
+            if (adaptive_iter == max_adaptive - 1) {
+                std.debug.print("Printing Mesh Structure\n", .{});
+
+                const file = try std.fs.cwd().createFile("output/adapative-mesh.txt", .{});
+                defer file.close();
+
+                var buf = std.io.bufferedWriter(file.writer());
+
+                try DataOut.writeMesh(&mesh, &manager, buf.writer());
+
+                try buf.flush();
+            }
+
             std.debug.print("Num Cells: {}\n", .{mesh.numCells()});
             std.debug.print("Num Nodes: {}\n", .{manager.numNodes()});
 
@@ -182,37 +199,52 @@ const AdaptivePoissonEquation = struct {
             // *****************************
             // Output results
 
-            {
-                const file = try std.fs.cwd().createFile("output/adapative-mesh.txt", .{});
-                defer file.close();
-
-                var buf = std.io.bufferedWriter(file.writer());
-
-                try DataOut.writeMesh(&mesh, &manager, buf.writer());
-
-                try buf.flush();
-            }
-
             const file_name = try std.fmt.allocPrint(allocator, "output/adaptive{}.vtu", .{adaptive_iter});
             defer allocator.free(file_name);
 
             // Output result
             std.debug.print("Writing Solution To File\n", .{});
+            {
+                const file = try std.fs.cwd().createFile(file_name, .{});
+                defer file.close();
 
-            const file = try std.fs.cwd().createFile(file_name, .{});
-            defer file.close();
+                var bufffer = std.io.bufferedWriter(file.writer());
 
-            var buf = std.io.bufferedWriter(file.writer());
+                try DataOut.writeVtk(
+                    Tag,
+                    allocator,
+                    &worker,
+                    sys.toConst(),
+                    bufffer.writer(),
+                );
 
-            try DataOut.writeVtk(
-                Tag,
-                allocator,
-                &worker,
-                sys.toConst(),
-                buf.writer(),
-            );
+                try bufffer.flush();
+            }
 
-            try buf.flush();
+            if (adaptive_iter == max_adaptive - 1) {
+                std.debug.print("Printing Adaptive Levels\n", .{});
+
+                for (0..mesh.numLevels()) |level| {
+                    const fname = try std.fmt.allocPrint(allocator, "output/adaptive-levels{}.vtu", .{level});
+                    defer allocator.free(fname);
+
+                    const f = try std.fs.cwd().createFile(fname, .{});
+                    defer f.close();
+
+                    var buffer = std.io.bufferedWriter(f.writer());
+
+                    try DataOut.writeLevelsVtk(
+                        Tag,
+                        allocator,
+                        &worker,
+                        level + 1,
+                        sys.toConst(),
+                        buffer.writer(),
+                    );
+
+                    try buffer.flush();
+                }
+            }
 
             if (adaptive_iter < max_adaptive - 1) {
                 // ****************************

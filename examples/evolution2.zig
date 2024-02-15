@@ -57,12 +57,6 @@ pub const BrillEvolution = struct {
                 .flux = 1.0,
                 .rhs = 0.0,
             };
-
-            // return .{
-            //     .value = 1.0,
-            //     .flux = @abs(pos[face.axis]),
-            //     .rhs = 0.0,
-            // };
         }
     };
 
@@ -83,12 +77,6 @@ pub const BrillEvolution = struct {
                 .flux = 1.0,
                 .rhs = 0.0,
             };
-
-            // return .{
-            //     .value = 1.0,
-            //     .flux = @abs(pos[face.axis]),
-            //     .rhs = 0.0,
-            // };
         }
     };
 
@@ -96,10 +84,11 @@ pub const BrillEvolution = struct {
     const shiftr_boundary = OddBoundary{};
     const shiftz_boundary = EvenBoundary{};
     const psi_boundary = EvenBoundary{};
+    const eta_boundary = EvenBoundary{};
     const seed_boundary = OddBoundary{};
-    const w_boundary = OddBoundary{};
+    const y_boundary = OddBoundary{};
     const u_boundary = EvenBoundary{};
-    const x_boundary = OddBoundary{};
+    const w_boundary = OddBoundary{};
     const constraint_boundary = EvenBoundary{};
 
     pub const Seed = struct {
@@ -120,10 +109,10 @@ pub const BrillEvolution = struct {
         }
     };
 
-    pub const InitialPsiRhs = struct {
+    pub const InitialEtaRhs = struct {
         seed: []const f64,
 
-        pub fn project(self: InitialPsiRhs, engine: Engine) f64 {
+        pub fn project(self: InitialEtaRhs, engine: Engine) f64 {
             const pos = engine.position();
             const r = pos[0];
 
@@ -138,16 +127,16 @@ pub const BrillEvolution = struct {
         }
     };
 
-    pub const InitialPsiOp = struct {
+    pub const InitialEtaOp = struct {
         seed: []const f64,
 
-        pub fn apply(self: InitialPsiOp, engine: Engine, psi: []const f64) f64 {
+        pub fn apply(self: InitialEtaOp, engine: Engine, eta: []const f64) f64 {
             const position: [N]f64 = engine.position();
             const r = position[0];
 
-            const hessian: [N][N]f64 = engine.hessian(psi);
-            const grad: [N]f64 = engine.gradient(psi);
-            const val: f64 = engine.value(psi);
+            const hessian: [N][N]f64 = engine.hessian(eta);
+            const grad: [N]f64 = engine.gradient(eta);
+            const val: f64 = engine.value(eta);
 
             const shessian: [N][N]f64 = engine.hessian(self.seed);
             const sgrad: [N]f64 = engine.gradient(self.seed);
@@ -158,7 +147,7 @@ pub const BrillEvolution = struct {
             return term1 + term2;
         }
 
-        pub fn applyDiag(self: InitialPsiOp, engine: Engine) f64 {
+        pub fn applyDiag(self: InitialEtaOp, engine: Engine) f64 {
             const position: [N]f64 = engine.position();
             const r = position[0];
 
@@ -180,23 +169,23 @@ pub const BrillEvolution = struct {
         psi: []const f64,
         seed: []const f64,
         u: []const f64,
+        y: []const f64,
         w: []const f64,
-        x: []const f64,
 
         pub fn project(self: LapseRhs, engine: Engine) f64 {
             const pos: [N]f64 = engine.position();
             const rho = pos[0];
 
-            const psi = engine.value(self.psi) + 1.0;
+            const psi = engine.value(self.psi);
             const seed = engine.value(self.seed);
             const u = engine.value(self.u);
+            const y = engine.value(self.y);
             const w = engine.value(self.w);
-            const x = engine.value(self.x);
 
-            const scale = @exp(2.0 * rho * seed) * psi * psi * psi * psi;
+            const scale = @exp(2.0 * rho * seed + 2.0 * psi);
 
-            const term1 = 2.0 / 3.0 * (rho * rho * w * w + rho * u * w + u * u);
-            const term2 = 2.0 * x * x;
+            const term1 = 2.0 / 3.0 * (rho * rho * y * y + rho * u * y + u * u);
+            const term2 = 2.0 * w * w;
 
             return scale * (term1 + term2);
         }
@@ -206,7 +195,7 @@ pub const BrillEvolution = struct {
         psi: []const f64,
         seed: []const f64,
         u: []const f64,
-        x: []const f64,
+        y: []const f64,
         w: []const f64,
 
         pub fn apply(self: LapseOp, engine: Engine, lapse: []const f64) f64 {
@@ -217,21 +206,21 @@ pub const BrillEvolution = struct {
             const grad: [N]f64 = engine.gradient(lapse);
             const val: f64 = engine.value(lapse);
 
-            const psi = engine.value(self.psi) + 1.0;
+            const psi = engine.value(self.psi);
             const pgrad = engine.gradient(self.psi);
 
             const seed = engine.value(self.seed);
             const u = engine.value(self.u);
-            const x = engine.value(self.x);
+            const y = engine.value(self.y);
             const w = engine.value(self.w);
 
             const term1 = hessian[0][0] + grad[0] / rho + hessian[1][1];
-            const term2 = 2.0 / psi * (pgrad[0] * grad[0] + pgrad[1] * grad[1]);
+            const term2 = (pgrad[0] * grad[0] + pgrad[1] * grad[1]);
 
-            const scale = -val * @exp(2.0 * rho * seed) * psi * psi * psi * psi;
+            const scale = -val * @exp(2.0 * rho * seed + 2.0 * psi);
 
-            const term3 = 2.0 / 3.0 * (rho * rho * w * w + rho * u * w + u * u);
-            const term4 = 2.0 * x * x;
+            const term3 = 2.0 / 3.0 * (rho * rho * y * y + rho * u * y + u * u);
+            const term4 = 2 * w * w;
 
             return term1 + term2 + scale * (term3 + term4);
         }
@@ -244,21 +233,21 @@ pub const BrillEvolution = struct {
             const grad: [N]f64 = engine.gradientDiag();
             const val: f64 = engine.valueDiag();
 
-            const psi = engine.value(self.psi) + 1.0;
+            const psi = engine.value(self.psi);
             const pgrad = engine.gradient(self.psi);
 
             const seed = engine.value(self.seed);
             const u = engine.value(self.u);
-            const x = engine.value(self.x);
+            const y = engine.value(self.y);
             const w = engine.value(self.w);
 
             const term1 = hessian[0][0] + grad[0] / rho + hessian[1][1];
-            const term2 = 2.0 / psi * (pgrad[0] * grad[0] + pgrad[1] * grad[1]);
+            const term2 = (pgrad[0] * grad[0] + pgrad[1] * grad[1]);
 
-            const scale = -val * @exp(2.0 * rho * seed) * psi * psi * psi * psi;
+            const scale = -val * @exp(2.0 * rho * seed + 2.0 * psi);
 
-            const term3 = 2.0 / 3.0 * (rho * rho * w * w + rho * u * w + u * u);
-            const term4 = 2.0 * x * x;
+            const term3 = 2.0 / 3.0 * (rho * rho * y * y + rho * u * y + u * u);
+            const term4 = 2.0 * w * w;
 
             return term1 + term2 + scale * (term3 + term4);
         }
@@ -266,20 +255,20 @@ pub const BrillEvolution = struct {
 
     pub const ShiftRRhs = struct {
         lapse: []const f64,
-        x: []const f64,
+        w: []const f64,
         u: []const f64,
 
         pub fn project(self: ShiftRRhs, engine: Engine) f64 {
-            const lapse = engine.value(self.lapse) + 1.0;
+            const lapse = engine.value(self.lapse);
             const lgrad = engine.gradient(self.lapse);
 
-            const x = engine.value(self.x);
-            const xgrad = engine.gradient(self.x);
+            const w = engine.value(self.w);
+            const wgrad = engine.gradient(self.w);
 
             const u = engine.value(self.u);
             const ugrad = engine.gradient(self.u);
 
-            const term1 = 2.0 * (x * lgrad[1] + lapse * xgrad[1]);
+            const term1 = 2.0 * (w * lgrad[1] + lapse * wgrad[1]);
             const term2 = -u * lgrad[0] - lapse * ugrad[0];
 
             return term1 + term2;
@@ -288,20 +277,20 @@ pub const BrillEvolution = struct {
 
     pub const ShiftZRhs = struct {
         lapse: []const f64,
-        x: []const f64,
+        w: []const f64,
         u: []const f64,
 
         pub fn project(self: ShiftZRhs, engine: Engine) f64 {
-            const lapse = engine.value(self.lapse) + 1.0;
+            const lapse = engine.value(self.lapse);
             const lgrad = engine.gradient(self.lapse);
 
-            const x = engine.value(self.x);
-            const xgrad = engine.gradient(self.x);
+            const w = engine.value(self.w);
+            const wgrad = engine.gradient(self.w);
 
             const u = engine.value(self.u);
             const ugrad = engine.gradient(self.u);
 
-            const term1 = 2.0 * (x * lgrad[0] + lapse * xgrad[0]);
+            const term1 = 2.0 * (w * lgrad[0] + lapse * wgrad[0]);
             const term2 = u * lgrad[1] + lapse * ugrad[1];
 
             return term1 + term2;
@@ -319,34 +308,34 @@ pub const BrillEvolution = struct {
     };
 
     pub const Hamiltonian = struct {
-        psi: []const f64,
+        eta: []const f64,
         seed: []const f64,
         u: []const f64,
-        x: []const f64,
+        y: []const f64,
         w: []const f64,
 
         pub fn project(self: Hamiltonian, engine: Engine) f64 {
             const pos: [N]f64 = engine.position();
             const rho = pos[0];
 
-            const phess: [N][N]f64 = engine.hessian(self.psi);
-            const pgrad: [N]f64 = engine.gradient(self.psi);
-            const psi: f64 = engine.value(self.psi) + 1.0;
+            const ehess: [N][N]f64 = engine.hessian(self.eta);
+            const egrad: [N]f64 = engine.gradient(self.eta);
+            const eta: f64 = engine.value(self.eta);
 
             const shess: [N][N]f64 = engine.hessian(self.seed);
             const sgrad: [N]f64 = engine.gradient(self.seed);
             const seed: f64 = engine.value(self.seed);
 
             const u = engine.value(self.u);
-            const x = engine.value(self.x);
+            const y = engine.value(self.y);
             const w = engine.value(self.w);
 
-            const term1 = phess[0][0] + pgrad[0] / rho + phess[1][1];
-            const term2 = psi / 4.0 * (rho * shess[0][0] + 2.0 * sgrad[0] + rho * shess[1][1]);
+            const term1 = ehess[0][0] + egrad[0] / rho + ehess[1][1];
+            const term2 = eta / 4.0 * (rho * shess[0][0] + 2.0 * sgrad[0] + rho * shess[1][1]);
 
-            const scale = psi * psi * psi * psi * psi * @exp(2.0 * rho * seed) / 4.0;
-            const term3 = 1.0 / 3.0 * (rho * rho * w * w + rho * u * w + u * u);
-            const term4 = x * x;
+            const scale = eta * eta * eta * eta * eta * @exp(2.0 * rho * seed) / 4.0;
+            const term3 = 1.0 / 3.0 * (rho * rho * y * y + rho * u * y + u * u);
+            const term4 = w * w;
 
             return term1 + term2 + scale * (term3 + term4);
         }
@@ -358,23 +347,22 @@ pub const BrillEvolution = struct {
         shiftz: []const f64,
         psi: []const f64,
         u: []const f64,
-        w: []const f64,
+        y: []const f64,
 
         pub fn project(self: PsiEvolution, engine: Engine) f64 {
             const pos = engine.position();
             const rho = pos[0];
 
-            const lapse = engine.value(self.lapse) + 1.0;
+            const lapse = engine.value(self.lapse);
             const shiftr = engine.value(self.shiftr);
             const shiftz = engine.value(self.shiftz);
 
-            const psi = engine.value(self.psi) + 1.0;
             const pgrad = engine.gradient(self.psi);
             const u = engine.value(self.u);
-            const w = engine.value(self.w);
+            const y = engine.value(self.y);
 
-            const term1 = shiftr * pgrad[0] + shiftz * pgrad[1];
-            const term2 = psi * (shiftr / (2.0 * rho) + lapse / 6.0 * (u + 2 * rho * w));
+            const term1 = shiftr * pgrad[0] + shiftz * pgrad[1] + shiftr / rho;
+            const term2 = lapse / 3.0 * (2.0 * rho * y + u);
 
             return term1 + term2;
         }
@@ -385,7 +373,7 @@ pub const BrillEvolution = struct {
         shiftr: []const f64,
         shiftz: []const f64,
         seed: []const f64,
-        w: []const f64,
+        y: []const f64,
 
         pub fn project(self: SeedEvolution, engine: Engine) f64 {
             const pos = engine.position();
@@ -395,37 +383,37 @@ pub const BrillEvolution = struct {
             const seed = engine.value(self.seed);
             const sgrad = engine.gradient(self.seed);
 
-            const lapse = engine.value(self.lapse) + 1.0;
+            const lapse = engine.value(self.lapse);
             const shiftr = engine.value(self.shiftr);
             const shiftz = engine.value(self.shiftz);
 
             const shiftr_grad = engine.gradient(self.shiftr);
 
-            const w = engine.value(self.w);
+            const y = engine.value(self.y);
 
             const term1 = shiftr * sgrad[0] + shiftz * sgrad[1];
-            const term2 = -lapse * w + shiftr * seed / rho;
+            const term2 = -lapse * y + shiftr * seed / rho;
             const term3 = shiftr_grad[0] / rho - shiftr / rho2;
 
             return term1 + term2 + term3;
         }
     };
 
-    pub const WEvolution = struct {
+    pub const YEvolution = struct {
         lapse: []const f64,
         shiftr: []const f64,
         shiftz: []const f64,
         psi: []const f64,
         seed: []const f64,
-        x: []const f64,
+        y: []const f64,
         w: []const f64,
 
-        pub fn project(self: WEvolution, engine: Engine) f64 {
+        pub fn project(self: YEvolution, engine: Engine) f64 {
             const pos = engine.position();
             const rho = pos[0];
             const rho2 = rho * rho;
 
-            const lapse = engine.value(self.lapse) + 1.0;
+            const lapse = engine.value(self.lapse);
             const lgrad = engine.gradient(self.lapse);
             const lhess = engine.hessian(self.lapse);
 
@@ -434,7 +422,7 @@ pub const BrillEvolution = struct {
             const shiftr_grad = engine.gradient(self.shiftr);
             const shiftz_grad = engine.gradient(self.shiftz);
 
-            const psi = engine.value(self.psi) + 1.0;
+            const psi = engine.value(self.psi);
             const pgrad = engine.gradient(self.psi);
             const phess = engine.hessian(self.psi);
 
@@ -442,21 +430,22 @@ pub const BrillEvolution = struct {
             const sgrad = engine.gradient(self.seed);
             const shess = engine.hessian(self.seed);
 
-            const x = engine.value(self.x);
             const w = engine.value(self.w);
-            const wgrad = engine.gradient(self.w);
 
-            const term1 = shiftr * wgrad[0] + shiftz * wgrad[1] + shiftr * w / rho;
-            const term2 = x / rho * (shiftz_grad[0] - shiftr_grad[1]);
+            const y = engine.value(self.y);
+            const ygrad = engine.gradient(self.y);
 
-            const scale1 = @exp(-2.0 * rho * seed) / (psi * psi * psi * psi);
-            const term3 = lgrad[0] / rho * (rho * sgrad[0] + seed + 4.0 * pgrad[0] / psi);
+            const term1 = shiftr * ygrad[0] + shiftz * ygrad[1] + shiftr * y / rho;
+            const term2 = w / rho * (shiftz_grad[0] - shiftr_grad[1]);
+
+            const scale1 = @exp(-2.0 * rho * seed - 2.0 * psi);
+            const term3 = lgrad[0] / rho * (rho * sgrad[0] + seed + 2.0 * pgrad[0]);
             const term4 = lgrad[0] / rho2 - lhess[0][0] / rho - lgrad[1] * sgrad[1];
 
             const scale2 = lapse * scale1;
-            const term5 = 2.0 * pgrad[0] / (rho * psi) * (rho * sgrad[0] + seed + 3.0 * pgrad[0] / psi) - 2.0 * pgrad[1] / psi * sgrad[1];
+            const term5 = pgrad[0] / rho * (rho * sgrad[0] + seed + pgrad[0]) - pgrad[1] * sgrad[1];
             const term6 = -shess[0][0] - sgrad[0] / rho - shess[1][1] + seed / rho2;
-            const term7 = 2.0 / psi * (pgrad[0] / rho2 - phess[0][0] / rho);
+            const term7 = pgrad[0] / rho2 - phess[0][0] / rho;
 
             return term1 + term2 + scale1 * (term3 + term4) + scale2 * (term5 + term6 + term7);
         }
@@ -469,13 +458,13 @@ pub const BrillEvolution = struct {
         psi: []const f64,
         seed: []const f64,
         u: []const f64,
-        x: []const f64,
+        w: []const f64,
 
         pub fn project(self: UEvolution, engine: Engine) f64 {
             const pos = engine.position();
             const rho = pos[0];
 
-            const lapse = engine.value(self.lapse) + 1.0;
+            const lapse = engine.value(self.lapse);
             const lgrad = engine.gradient(self.lapse);
             const lhess = engine.hessian(self.lapse);
 
@@ -484,47 +473,48 @@ pub const BrillEvolution = struct {
             const shiftr_grad = engine.gradient(self.shiftr);
             const shiftz_grad = engine.gradient(self.shiftz);
 
-            const psi = engine.value(self.psi) + 1.0;
+            const psi = engine.value(self.psi);
             const pgrad = engine.gradient(self.psi);
             const phess = engine.hessian(self.psi);
 
             const seed = engine.value(self.seed);
             const sgrad = engine.gradient(self.seed);
 
-            const x = engine.value(self.x);
+            const w = engine.value(self.w);
+
             const ugrad = engine.gradient(self.u);
 
             const term1 = shiftr * ugrad[0] + shiftz * ugrad[1];
-            const term2 = 2 * x * (shiftr_grad[1] - shiftz_grad[0]);
+            const term2 = 2 * w * (shiftr_grad[1] - shiftz_grad[0]);
 
-            const scale1 = @exp(-2 * rho * seed) / (psi * psi * psi * psi);
-            const term3 = 2 * lgrad[1] * (2 * pgrad[1] / psi + rho * sgrad[1]);
-            const term4 = -2 * lgrad[0] * (rho * sgrad[0] + seed + 2 * pgrad[0] / psi);
+            const scale1 = @exp(-2 * rho * seed - 2 * psi);
+            const term3 = 2 * lgrad[1] * (pgrad[1] + rho * sgrad[1]);
+            const term4 = -2 * lgrad[0] * (rho * sgrad[0] + seed + pgrad[0]);
             const term5 = lhess[0][0] - lhess[1][1];
 
-            const scale2 = 2 * lapse * scale1;
-            const term6 = pgrad[1] / psi * (2 * rho * sgrad[1] + 3 * pgrad[1] / psi);
-            const term7 = -pgrad[0] / psi * (2 * rho * sgrad[0] + 2 * seed + 3 * pgrad[0] / psi);
-            const term8 = phess[0][0] / psi - phess[1][1] / psi - seed / rho - sgrad[0];
+            const scale2 = lapse * scale1;
+            const term6 = pgrad[1] * (2 * rho * sgrad[1] + pgrad[1]);
+            const term7 = -pgrad[0] * (2 * rho * sgrad[0] + 2 * seed + pgrad[0]);
+            const term8 = phess[0][0] - phess[1][1] - 2 * seed / rho - 2 * sgrad[0];
 
             return term1 + term2 + scale1 * (term3 + term4 + term5) + scale2 * (term6 + term7 + term8);
         }
     };
 
-    pub const XEvolution = struct {
+    pub const WEvolution = struct {
         lapse: []const f64,
         shiftr: []const f64,
         shiftz: []const f64,
         psi: []const f64,
         seed: []const f64,
         u: []const f64,
-        x: []const f64,
+        w: []const f64,
 
-        pub fn project(self: XEvolution, engine: Engine) f64 {
+        pub fn project(self: WEvolution, engine: Engine) f64 {
             const pos = engine.position();
             const rho = pos[0];
 
-            const lapse = engine.value(self.lapse) + 1.0;
+            const lapse = engine.value(self.lapse);
             const lgrad = engine.gradient(self.lapse);
             const lhess = engine.hessian(self.lapse);
 
@@ -533,7 +523,7 @@ pub const BrillEvolution = struct {
             const shiftr_grad = engine.gradient(self.shiftr);
             const shiftz_grad = engine.gradient(self.shiftz);
 
-            const psi = engine.value(self.psi) + 1.0;
+            const psi = engine.value(self.psi);
             const pgrad = engine.gradient(self.psi);
             const phess = engine.hessian(self.psi);
 
@@ -541,20 +531,21 @@ pub const BrillEvolution = struct {
             const sgrad = engine.gradient(self.seed);
 
             const u = engine.value(self.u);
-            const xgrad = engine.gradient(self.x);
 
-            const term1 = shiftr * xgrad[0] + shiftz * xgrad[1];
+            const wgrad = engine.gradient(self.w);
+
+            const term1 = shiftr * wgrad[0] + shiftz * wgrad[1];
             const term2 = 1.0 / 2.0 * u * (shiftz_grad[0] - shiftr_grad[1]);
 
-            const scale1 = @exp(-2.0 * rho * seed) / (psi * psi * psi * psi);
-            const term3 = lgrad[0] * (rho * sgrad[1] + 2 * pgrad[1] / psi);
-            const term4 = lgrad[1] * (rho * sgrad[0] + seed + 2 * pgrad[0] / psi);
+            const scale1 = @exp(-2.0 * rho * seed - 2.0 * psi);
+            const term3 = lgrad[0] * (rho * sgrad[1] + pgrad[1]);
+            const term4 = lgrad[1] * (rho * sgrad[0] + seed + pgrad[0]);
             const term5 = -lhess[0][1];
 
             const scale2 = lapse * scale1;
-            const term6 = pgrad[0] / psi * (2 * rho * sgrad[1] + 6 * pgrad[1] / psi);
-            const term7 = pgrad[1] / psi * (2 * rho * sgrad[0] + 2 * seed);
-            const term8 = sgrad[1] - 2 * phess[0][1] / psi;
+            const term6 = pgrad[0] * (rho * sgrad[1] + pgrad[1]);
+            const term7 = pgrad[1] * (rho * sgrad[0] + seed);
+            const term8 = sgrad[1] - phess[0][1];
 
             return term1 + term2 + scale1 * (term3 + term4 + term5) + scale2 * (term6 + term7 + term8);
         }
@@ -565,14 +556,14 @@ pub const BrillEvolution = struct {
         seed,
         u,
         w,
-        x,
+        y,
     };
 
     const Output = enum {
         psi,
         seed,
         u,
-        x,
+        y,
         w,
         constraint,
         lapse,
@@ -597,7 +588,7 @@ pub const BrillEvolution = struct {
             const psi = dynamic.field(.psi);
             const seed = dynamic.field(.seed);
             const u = dynamic.field(.u);
-            const x = dynamic.field(.x);
+            const y = dynamic.field(.y);
             const w = dynamic.field(.w);
 
             // ***********************************
@@ -618,7 +609,7 @@ pub const BrillEvolution = struct {
                 .psi = psi,
                 .seed = seed,
                 .u = u,
-                .x = x,
+                .y = y,
                 .w = w,
             };
 
@@ -627,7 +618,7 @@ pub const BrillEvolution = struct {
                 .seed = seed,
                 .u = u,
                 .w = w,
-                .x = x,
+                .y = y,
             };
 
             @memset(self.lapse, 0.0);
@@ -643,6 +634,10 @@ pub const BrillEvolution = struct {
 
             worker.fillGhostNodes(lapse_boundary, self.lapse);
 
+            for (0..self.lapse.len) |i| {
+                self.lapse[i] += 1.0;
+            }
+
             // ***********************************
             // Solve Shift
 
@@ -651,13 +646,13 @@ pub const BrillEvolution = struct {
             const shiftr_rhs: ShiftRRhs = .{
                 .lapse = self.lapse,
                 .u = u,
-                .x = x,
+                .w = w,
             };
 
             const shiftz_rhs: ShiftZRhs = .{
                 .lapse = self.lapse,
                 .u = u,
-                .x = x,
+                .w = w,
             };
 
             // ShiftR
@@ -709,7 +704,7 @@ pub const BrillEvolution = struct {
             const psi = dynamic.field(.psi);
             const seed = dynamic.field(.seed);
             const u = dynamic.field(.u);
-            const x = dynamic.field(.x);
+            const y = dynamic.field(.y);
             const w = dynamic.field(.w);
 
             const worker = self.worker.order(M);
@@ -720,14 +715,14 @@ pub const BrillEvolution = struct {
                 worker0.restrictLevel(level, psi);
                 worker0.restrictLevel(level, seed);
                 worker0.restrictLevel(level, u);
-                worker0.restrictLevel(level, x);
+                worker0.restrictLevel(level, y);
                 worker0.restrictLevel(level, w);
             }
 
             worker.fillGhostNodes(psi_boundary, psi);
             worker.fillGhostNodes(seed_boundary, seed);
             worker.fillGhostNodes(u_boundary, u);
-            worker.fillGhostNodes(x_boundary, x);
+            worker.fillGhostNodes(y_boundary, y);
             worker.fillGhostNodes(w_boundary, w);
         }
 
@@ -739,7 +734,7 @@ pub const BrillEvolution = struct {
             const psi = dynamic.field(.psi);
             const seed = dynamic.field(.seed);
             const u = dynamic.field(.u);
-            const x = dynamic.field(.x);
+            const y = dynamic.field(.y);
             const w = dynamic.field(.w);
 
             // ************************************
@@ -765,7 +760,7 @@ pub const BrillEvolution = struct {
                 .shiftz = self.shiftz,
                 .psi = psi,
                 .u = u,
-                .w = w,
+                .y = y,
             };
 
             worker.project(psi_evolve, deriv.field(.psi));
@@ -778,25 +773,25 @@ pub const BrillEvolution = struct {
                 .shiftr = self.shiftr,
                 .shiftz = self.shiftz,
                 .seed = seed,
-                .w = w,
+                .y = y,
             };
 
             worker.project(seed_evolve, deriv.field(.seed));
 
             // ************************************
-            // Evolve W
+            // Evolve Y
 
-            const w_evolve: WEvolution = .{
+            const y_evolve: YEvolution = .{
                 .lapse = self.lapse,
                 .shiftr = self.shiftr,
                 .shiftz = self.shiftz,
                 .psi = psi,
                 .seed = seed,
+                .y = y,
                 .w = w,
-                .x = x,
             };
 
-            worker.project(w_evolve, deriv.field(.w));
+            worker.project(y_evolve, deriv.field(.y));
 
             // ***********************************
             // Evolve U
@@ -808,25 +803,25 @@ pub const BrillEvolution = struct {
                 .psi = psi,
                 .seed = seed,
                 .u = u,
-                .x = x,
+                .w = w,
             };
 
             worker.project(u_evolve, deriv.field(.u));
 
             // ************************************
-            // Evolve X
+            // Evolve W
 
-            const x_evolve: XEvolution = .{
+            const w_evolve: WEvolution = .{
                 .lapse = self.lapse,
                 .shiftr = self.shiftr,
                 .shiftz = self.shiftz,
                 .psi = psi,
                 .seed = seed,
                 .u = u,
-                .x = x,
+                .w = w,
             };
 
-            worker.project(x_evolve, deriv.field(.x));
+            worker.project(w_evolve, deriv.field(.w));
 
             const eps = 10.0;
 
@@ -836,7 +831,7 @@ pub const BrillEvolution = struct {
             workerm.dissipation(eps, deriv.field(.seed), seed);
             workerm.dissipation(eps, deriv.field(.u), u);
             workerm.dissipation(eps, deriv.field(.w), w);
-            workerm.dissipation(eps, deriv.field(.x), x);
+            workerm.dissipation(eps, deriv.field(.y), y);
         }
     };
 
@@ -857,27 +852,27 @@ pub const BrillEvolution = struct {
             try mesh.refineGlobal(allocator);
         }
 
-        // for (0..1) |r| {
-        //     std.debug.print("Running Refinement {}\n", .{r});
+        for (0..1) |r| {
+            std.debug.print("Running Refinement {}\n", .{r});
 
-        //     const flags = try allocator.alloc(bool, mesh.numCells());
-        //     defer allocator.free(flags);
+            const flags = try allocator.alloc(bool, mesh.numCells());
+            defer allocator.free(flags);
 
-        //     @memset(flags, false);
+            @memset(flags, false);
 
-        //     for (0..mesh.cells.len) |cell_id| {
-        //         const bounds: RealBox = mesh.cells.items(.bounds)[cell_id];
-        //         const center = bounds.center();
+            for (0..mesh.cells.len) |cell_id| {
+                const bounds: RealBox = mesh.cells.items(.bounds)[cell_id];
+                const center = bounds.center();
 
-        //         const radius = @sqrt((center[0]) * (center[0]) + (center[1]) * (center[1]));
+                const radius = @sqrt((center[0]) * (center[0]) + (center[1]) * (center[1]));
 
-        //         if (radius < 2) {
-        //             flags[cell_id] = true;
-        //         }
-        //     }
+                if (radius < 2) {
+                    flags[cell_id] = true;
+                }
+            }
 
-        //     try mesh.refine(allocator, flags);
-        // }
+            try mesh.refine(allocator, flags);
+        }
 
         var manager = try NodeManager.init(allocator, [1]usize{16} ** N, 8);
         defer manager.deinit();
@@ -908,12 +903,15 @@ pub const BrillEvolution = struct {
         const constraint = try allocator.alloc(f64, manager.numNodes());
         defer allocator.free(constraint);
 
+        const eta = try allocator.alloc(f64, manager.numNodes());
+        defer allocator.free(eta);
+
         // Runge Kutta 4 context
         var rk4 = try Rk4Integrator(Dynamic).init(allocator, manager.numNodes());
         defer rk4.deinit();
 
         @memset(rk4.sys.field(.u), 0.0);
-        @memset(rk4.sys.field(.x), 0.0);
+        @memset(rk4.sys.field(.y), 0.0);
         @memset(rk4.sys.field(.w), 0.0);
 
         // *****************************
@@ -926,11 +924,11 @@ pub const BrillEvolution = struct {
         worker.order(O).fillGhostNodes(seed_boundary, rk4.sys.field(.seed));
 
         // Conformal factor
-        const initial_rhs: InitialPsiRhs = .{
+        const initial_rhs: InitialEtaRhs = .{
             .seed = rk4.sys.field(.seed),
         };
 
-        const initial_op: InitialPsiOp = .{
+        const initial_op: InitialEtaOp = .{
             .seed = rk4.sys.field(.seed),
         };
 
@@ -944,15 +942,27 @@ pub const BrillEvolution = struct {
         });
         defer solver.deinit();
 
-        @memset(rk4.sys.field(.psi), 0.0);
+        @memset(eta, 0.0);
 
         try solver.solve(
             &worker,
             initial_op,
-            psi_boundary,
-            rk4.sys.field(.psi),
+            eta_boundary,
+            eta,
             rhs,
         );
+
+        {
+            const psi = rk4.sys.field(.psi);
+
+            for (0..eta.len) |i| {
+                eta[i] += 1.0;
+            }
+
+            for (0..eta.len) |i| {
+                psi[i] = 2.0 * @log(eta[i]);
+            }
+        }
 
         std.debug.print("Running Evolution\n", .{});
 
@@ -983,54 +993,14 @@ pub const BrillEvolution = struct {
             try gauge.solve(rk4.sys.toConst());
 
             const hamiltonain: Hamiltonian = .{
-                .psi = rk4.sys.field(.psi),
+                .eta = eta,
                 .seed = rk4.sys.field(.seed),
                 .u = rk4.sys.field(.u),
-                .x = rk4.sys.field(.x),
+                .y = rk4.sys.field(.y),
                 .w = rk4.sys.field(.w),
             };
 
-            @memset(constraint, 0.0);
-
             worker.order(O).project(hamiltonain, constraint);
-
-            std.debug.print("Initial Constraint Violation {}\n", .{worker.normScaled(constraint)});
-        }
-
-        // Output Base Data
-        {
-            for (0..mesh.numLevels()) |level| {
-                const file_name = try std.fmt.allocPrint(allocator, "output/evolution-base{}.vtu", .{level});
-                defer allocator.free(file_name);
-
-                const file = try std.fs.cwd().createFile(file_name, .{});
-                defer file.close();
-
-                const output = SystemConst(Output).view(manager.numNodes(), .{
-                    .psi = rk4.sys.field(.psi),
-                    .seed = rk4.sys.field(.seed),
-                    .u = rk4.sys.field(.u),
-                    .x = rk4.sys.field(.x),
-                    .w = rk4.sys.field(.w),
-                    .lapse = lapse,
-                    .shiftr = shiftr,
-                    .shiftz = shiftz,
-                    .constraint = constraint,
-                });
-
-                var buffer = std.io.bufferedWriter(file.writer());
-
-                try DataOut.writeLevelsVtk(
-                    Output,
-                    allocator,
-                    &worker,
-                    level + 1,
-                    output,
-                    buffer.writer(),
-                );
-
-                try buffer.flush();
-            }
         }
 
         // Output
@@ -1042,7 +1012,7 @@ pub const BrillEvolution = struct {
                 .psi = rk4.sys.field(.psi),
                 .seed = rk4.sys.field(.seed),
                 .u = rk4.sys.field(.u),
-                .x = rk4.sys.field(.x),
+                .y = rk4.sys.field(.y),
                 .w = rk4.sys.field(.w),
                 .lapse = lapse,
                 .shiftr = shiftr,
@@ -1072,11 +1042,11 @@ pub const BrillEvolution = struct {
 
         const scratch: Allocator = arena.allocator();
 
-        const steps: usize = 0;
+        const steps: usize = 100;
         const h: f64 = cfl * manager.minSpacing();
 
         for (0..steps) |step| {
-            const con = worker.normScaled(constraint);
+            const con = worker.norm(constraint);
             std.debug.print("Step {}/{}, Time: {}, Constraint: {}\n", .{ step + 1, steps, rk4.time, con });
 
             // ********************************
@@ -1115,11 +1085,21 @@ pub const BrillEvolution = struct {
             // *******************************
             // Constraint
 
+            {
+                const psi = rk4.sys.field(.psi);
+
+                worker.order(O).fillGhostNodes(psi_boundary, psi);
+
+                for (0..eta.len) |i| {
+                    eta[i] = @exp(psi[i] / 2.0);
+                }
+            }
+
             const hamiltonian: Hamiltonian = .{
-                .psi = rk4.sys.field(.psi),
+                .eta = eta,
                 .seed = rk4.sys.field(.seed),
                 .u = rk4.sys.field(.u),
-                .x = rk4.sys.field(.x),
+                .y = rk4.sys.field(.y),
                 .w = rk4.sys.field(.w),
             };
 
@@ -1138,7 +1118,7 @@ pub const BrillEvolution = struct {
                 .psi = rk4.sys.field(.psi),
                 .seed = rk4.sys.field(.seed),
                 .u = rk4.sys.field(.u),
-                .x = rk4.sys.field(.x),
+                .y = rk4.sys.field(.y),
                 .w = rk4.sys.field(.w),
                 .lapse = lapse,
                 .shiftr = shiftr,

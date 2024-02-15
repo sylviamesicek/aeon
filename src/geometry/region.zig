@@ -44,8 +44,23 @@ pub fn Region(comptime N: usize) type {
             right = 2,
         };
 
+        /// Computes the opposing region. For instance E -> W and NW -> SE.
+        pub fn reversed(self: @This()) @This() {
+            var result: Self = undefined;
+
+            for (0..N) |axis| {
+                result.sides[axis] = switch (self.sides[axis]) {
+                    .left => .right,
+                    .middle => .middle,
+                    .right => .left,
+                };
+            }
+
+            return result;
+        }
+
         /// Converts a region into a linear index into an array.
-        pub fn linear(self: @This()) usize {
+        pub fn toLinear(self: @This()) usize {
             const rspace = IndexSpace.fromSize([1]usize{3} ** N);
 
             var cart: [N]usize = undefined;
@@ -101,11 +116,13 @@ pub fn Region(comptime N: usize) type {
             return result;
         }
 
+        /// A type used for iterating nodes in a region.
         pub const NodeIterator = struct {
             inner: IndexSpace.CartesianIterator,
             block: [N]usize,
             sides: [N]Side,
 
+            /// Increments to the next node.
             pub fn next(self: *NodeIterator) ?[N]isize {
                 if (self.inner.next()) |cart| {
                     var result: [N]isize = undefined;
@@ -125,7 +142,7 @@ pub fn Region(comptime N: usize) type {
             }
         };
 
-        /// Iterates all ghost nodes in this region out to a given extent.
+        /// Iterates all ghost nodes in this region out to a given extent `E`.
         pub fn nodes(self: Self, comptime E: usize, block: [N]usize) NodeIterator {
             return .{
                 .inner = self.space(E, block).cartesianIndices(),
@@ -134,6 +151,7 @@ pub fn Region(comptime N: usize) type {
             };
         }
 
+        /// A type used for interating nodes on the inner face of a region.
         pub const InnerFaceIterator = struct {
             inner: IndexSpace.CartesianIterator,
             block: [N]usize,
@@ -236,6 +254,7 @@ pub fn Region(comptime N: usize) type {
             return dir;
         }
 
+        /// Returns a mask for which a given axis is set, if and only if `self.sides[axis] != .middle`.
         pub fn toMask(self: Self) AxisMask {
             var result = AxisMask.initEmpty();
 
@@ -246,6 +265,8 @@ pub fn Region(comptime N: usize) type {
             return result;
         }
 
+        /// Returns a new region for which any axis such that `mask.isSet(axis) == false`,
+        /// `self.sides[axis] == .middle`.
         pub fn masked(self: Self, mask: AxisMask) @This() {
             var sides: [N]Side = self.sides;
 
@@ -279,6 +300,7 @@ pub fn Region(comptime N: usize) type {
         // Constructors ***********
         // ************************
 
+        /// Returns the null region.
         pub fn central() @This() {
             return .{
                 .sides = [1]Side{.middle} ** N,
@@ -316,6 +338,7 @@ pub fn Region(comptime N: usize) type {
             return regs;
         }
 
+        /// Helper function for comparing adjacency.
         fn lessThanFn(_: void, lhs: Region(N), rhs: Region(N)) bool {
             return lhs.adjacency() < rhs.adjacency();
         }

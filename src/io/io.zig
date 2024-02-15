@@ -91,12 +91,12 @@ pub fn DataOut(comptime N: usize, comptime M: usize) type {
                 try out_stream.print("    Neighbors:\n", .{});
 
                 for (Region.enumerate()) |region| {
-                    if (region.linear() == Region.central().linear()) {
+                    if (region.toLinear() == Region.central().toLinear()) {
                         continue;
                     }
 
                     const coords = region.toString();
-                    const neighbor = neighbors[region.linear()];
+                    const neighbor = neighbors[region.toLinear()];
 
                     try out_stream.writeAll("        { ");
 
@@ -141,6 +141,17 @@ pub fn DataOut(comptime N: usize, comptime M: usize) type {
             sys: SystemConst(Tag),
             out_stream: anytype,
         ) !void {
+            try writeLevelsVtk(Tag, allocator, worker, worker.mesh.numLevels(), sys, out_stream);
+        }
+
+        pub fn writeLevelsVtk(
+            comptime Tag: type,
+            allocator: Allocator,
+            worker: *const NodeWorker(N, M),
+            levels: usize,
+            sys: SystemConst(Tag),
+            out_stream: anytype,
+        ) !void {
             if (comptime !isSystemTag(Tag)) {
                 @compileError("System must satisfy isSystemTag trait.");
             }
@@ -149,6 +160,10 @@ pub fn DataOut(comptime N: usize, comptime M: usize) type {
             const manager = worker.manager;
 
             assert(sys.len == manager.numNodes());
+
+            if (levels == 0) {
+                return;
+            }
 
             const field_count = comptime std.enums.values(Tag).len;
 
@@ -174,7 +189,9 @@ pub fn DataOut(comptime N: usize, comptime M: usize) type {
                 }
             }
 
-            for (0..manager.numBlocks()) |block_id| {
+            const level = manager.level_to_blocks.range(levels - 1);
+
+            for (0..level.end) |block_id| {
                 const block = manager.blockFromId(block_id);
                 const node_space = NodeSpace(N, M){
                     .bounds = block.bounds,
@@ -190,7 +207,9 @@ pub fn DataOut(comptime N: usize, comptime M: usize) type {
                     // Get Cell ID
                     const cell_id = manager.cellFromBlock(block_id, mcell);
 
-                    if (mesh.cells.items(.children)[cell_id] != null_index) {
+                    const cell_level = mesh.cells.items(.level)[cell_id];
+
+                    if (cell_level >= levels) {
                         continue;
                     }
 

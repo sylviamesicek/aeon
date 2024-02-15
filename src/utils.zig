@@ -41,7 +41,7 @@ pub const RangeMap = struct {
     }
 
     pub fn len(self: @This()) usize {
-        return self.offsets.items.len;
+        return self.offsets.items.len - 1;
     }
 
     pub fn set(self: @This(), idx: usize, val: usize) void {
@@ -49,7 +49,7 @@ pub const RangeMap = struct {
     }
 
     pub fn resize(self: *@This(), allocator: Allocator, l: usize) !void {
-        return self.offsets.resize(allocator, l);
+        return self.offsets.resize(allocator, l + 1);
     }
 
     pub fn clear(self: *@This()) void {
@@ -58,5 +58,17 @@ pub const RangeMap = struct {
 
     pub fn append(self: *@This(), allocator: Allocator, val: usize) !void {
         return self.offsets.append(allocator, val);
+    }
+
+    pub fn trim(self: *@This()) void {
+        while (true) {
+            const last = self.len();
+
+            if (self.offsets.items[last] == self.offsets.items[last - 1]) {
+                _ = self.offsets.pop();
+            } else {
+                break;
+            }
+        }
     }
 };

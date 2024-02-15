@@ -243,6 +243,16 @@ pub fn MultigridMethod(comptime N: usize, comptime M: usize, comptime O: usize, 
                     worker.fillLevelGhostNodes(level, self.bound, sys);
                     worker.restrictLevel(level, sys);
 
+                    // worker.fillLevelGhostNodes(level, self.bound, sys);
+
+                    // self.worker.copyLevel(level, scr, sys);
+                    // self.worker.copyLevel(level - 1, scr, sys);
+
+                    // worker.restrictLevel(level, scr);
+                    // worker.fillLevelGhostNodes(level - 1, self.bound, scr);
+
+                    // self.worker.copyLevel(level - 1, old, scr);
+
                     worker.fillLevelGhostNodes(level - 1, self.bound, sys);
                     self.worker.copyLevel(level - 1, old, sys);
 

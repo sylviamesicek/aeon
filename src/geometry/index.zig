@@ -20,6 +20,7 @@ pub fn IndexMixin(comptime N: usize) type {
             return res;
         }
 
+        /// Multiplies two indices together elementwise.
         pub fn mul(v: [N]usize, u: [N]usize) [N]usize {
             var res: [N]usize = undefined;
 
@@ -63,27 +64,27 @@ pub fn IndexMixin(comptime N: usize) type {
             return res;
         }
 
-        pub fn addWithSign(v: [N]usize, u: [N]isize) [N]usize {
-            var res: [N]usize = undefined;
+        // pub fn addWithSign(v: [N]usize, u: [N]isize) [N]usize {
+        //     var res: [N]usize = undefined;
 
-            for (0..N) |i| {
-                const vf: isize = @intCast(v[i]);
-                const uf: isize = u[i];
-                res[i] = @intCast(vf + uf);
-            }
+        //     for (0..N) |i| {
+        //         const vf: isize = @intCast(v[i]);
+        //         const uf: isize = u[i];
+        //         res[i] = @intCast(vf + uf);
+        //     }
 
-            return res;
-        }
+        //     return res;
+        // }
 
-        pub fn offsetFromOrigin(origin: [N]usize, offset: [N]isize) [N]isize {
-            var result: [N]isize = undefined;
+        // pub fn offsetFromOrigin(origin: [N]usize, offset: [N]isize) [N]isize {
+        //     var result: [N]isize = undefined;
 
-            for (0..N) |i| {
-                result[i] = @as(isize, @intCast(origin[i])) + offset[i];
-            }
+        //     for (0..N) |i| {
+        //         result[i] = @as(isize, @intCast(origin[i])) + offset[i];
+        //     }
 
-            return result;
-        }
+        //     return result;
+        // }
 
         pub fn refined(self: [N]usize) [N]usize {
             var result: [N]usize = undefined;

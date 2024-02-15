@@ -119,10 +119,7 @@ x_normal = sym.simplify(ext_normal(0, 1))
 x_beta = shiftr * par(x, 0) + shiftz * par(x, 1) + (par(shiftz, 0) - par(shiftr, 1)) * u / 2
 x_evolution =  lapse * x_normal + x_beta
 
-print("X NORMAL")
-sym.pretty_print(x_normal);
-print("X Beta")
-sym.pretty_print(x_beta);
+# TODO Check 6 vs 3
 
 u_normal = sym.simplify(ext_normal(1, 1) - ext_normal(0, 0))
 u_beta = shiftr * par(u, 0) + shiftz * par(u, 1) + 2 * x * (par(shiftr, 1) - par(shiftz, 0))
@@ -133,6 +130,11 @@ l_normal = - (covariant(lam, 0, 0) + covariant(lam, 1, 1) ) / lam - (par(lam, 0)
 w_normal = sym.simplify((ext_normal(0, 0) - l_normal) / r)
 w_beta = shiftr * par(r*w, 0) / r + shiftz * par(w, 1) + x/r * (par(shiftz, 0) - par(shiftr, 1))
 w_evolution = sym.simplify(lapse * w_normal) + w_beta
+
+print("U NORMAL")
+sym.pretty_print(u_normal);
+print("U Beta")
+sym.pretty_print(u_beta);
 
 ext_combination = (ext[0, 0])**2 + 2*(ext[0, 1])**2 + (ext[1, 1])**2
 

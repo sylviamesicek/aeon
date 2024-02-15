@@ -3,6 +3,7 @@ const IndexSpace = @import("index.zig").IndexSpace;
 
 const assert = std.debug.assert;
 
+/// Helper for creating integer bit sets of usize length.
 fn IntegerBitSet(comptime size: usize) type {
     const n: u16 = @intCast(size);
     return std.bit_set.IntegerBitSet(n);
@@ -10,6 +11,9 @@ fn IntegerBitSet(comptime size: usize) type {
 
 /// Represents a set of axes, stored as a bit set of N axes, where the nth bit is set if that axis is
 /// included in the mask.
+///
+/// An AxisMask is often used as a split index, which represents
+/// an index into the 2^N subcells formed when dividing a hyper box along each axis.
 pub fn AxisMask(comptime N: usize) type {
     return struct {
         bits: IntegerBitSet(N),
@@ -165,6 +169,19 @@ pub fn AxisMask(comptime N: usize) type {
     };
 }
 
+test "axis mask" {
+    const expectEqualDeep = std.testing.expectEqualDeep;
+
+    const mask = AxisMask(2).pack([_]bool{ false, true });
+
+    // Make sure that from/toCartesian are inverses
+    try expectEqualDeep(mask.unpack(), [_]bool{ false, true });
+    // Test reverse axis
+    try expectEqualDeep(mask.toggled(0).unpack(), [_]bool{ true, true });
+    // Check linear representation
+    try expectEqualDeep(mask.toLinear(), 0b10);
+}
+
 const xaxis: [2][]const u8 = .{ "-x", "+x" };
 const yaxis: [2][]const u8 = .{ "-y", "+y" };
 const zaxis: [2][]const u8 = .{ "-z", "+z" };
@@ -194,6 +211,7 @@ pub fn FaceIndex(comptime N: usize) type {
                 .{ .side = false, .axis = index };
         }
 
+        /// Enumerates all face indices, starting with the negative face on each axis, and then the positive face on each axis.
         pub fn enumerate() [count]@This() {
             var result: [count]@This() = undefined;
 
@@ -204,6 +222,7 @@ pub fn FaceIndex(comptime N: usize) type {
             return result;
         }
 
+        /// Converts a face index to a string representation.
         pub fn toString(self: @This()) []const u8 {
             if (comptime N > 4) {
                 @compileError("Face to string only supported for N less that 5.");
@@ -293,13 +312,7 @@ test "face index" {
     try expectEqual(mask.isSet(.{ .axis = 1, .side = false }), false);
 }
 
-// /// Represents an index into the 2^N subcells formed
-// /// when dividing a hyper box along each axis. It is essentially
-// /// a bitvector which can be packed and unpacked from a `[N]bool`,
-// /// `array[i] == false` indicates that the subcell is on the left of
-// /// the `i`th axis, and `array[i] == true` indicates the subcell is on the
-// /// right. The split index can also be converted to and from a linear index,
-// /// to allow for storing subcell linearly (e.g. in an octree).
+//
 // pub fn SplitIndex(comptime N: usize) type {
 //     return struct {
 //         bits: IntegerBitSet(N),
@@ -395,16 +408,4 @@ test "face index" {
 //             return result;
 //         }
 //     };
-// }
-
-// test "split index" {
-//     const expectEqualDeep = std.testing.expectEqualDeep;
-
-//     const split = SplitIndex(2).fromCartesian([_]bool{ false, true });
-//     // Make sure that from/toCartesian are inverses
-//     try expectEqualDeep(split.toCartesian(), [_]bool{ false, true });
-//     // Test reverse axis
-//     try expectEqualDeep(split.reverseAxis(0).toCartesian(), [_]bool{ true, true });
-//     // Check linear representation
-//     try expectEqualDeep(split.toLinear(), 2);
 // }

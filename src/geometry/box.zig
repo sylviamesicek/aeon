@@ -92,6 +92,7 @@ pub fn IndexBox(comptime N: usize) type {
     };
 }
 
+/// An n-dimension AABB in physical space, often used to denote rectangular domains.
 pub fn RealBox(comptime N: usize) type {
     return struct {
         origin: [N]f64,
@@ -126,6 +127,7 @@ pub fn RealBox(comptime N: usize) type {
             return result;
         }
 
+        /// Computes the hyperquadrant assocaited with the mask.
         pub fn split(self: @This(), mask: AxisMask) RealBox(N) {
             const cart = mask.unpack();
 
@@ -143,7 +145,8 @@ pub fn RealBox(comptime N: usize) type {
             return result;
         }
 
-        pub fn transformPos(self: @This(), x: [N]f64) [N]f64 {
+        /// Transforms a local position in the box to a global position.
+        pub fn localToGlobal(self: @This(), x: [N]f64) [N]f64 {
             var result: [N]f64 = undefined;
 
             for (0..N) |i| {
@@ -152,18 +155,6 @@ pub fn RealBox(comptime N: usize) type {
 
             return result;
         }
-
-        // pub fn transformOp(self: @This(), ranks: [N]usize, v: f64) f64 {
-        //     var res: f64 = v;
-
-        //     for (0..N) |i| {
-        //         for (0..ranks[i]) |_| {
-        //             res /= self.size[i];
-        //         }
-        //     }
-
-        //     return res;
-        // }
     };
 }
 

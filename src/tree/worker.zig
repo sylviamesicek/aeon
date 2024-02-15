@@ -378,7 +378,7 @@ pub fn NodeWorker(comptime N: usize, comptime M: usize) type {
                         // Origin in node space
                         const origin = toSigned(mul(index, cell_size));
                         // Get neighbor in this direction
-                        var neighbor = cell_meta.items(.neighbors)[cell][region.linear()];
+                        var neighbor = cell_meta.items(.neighbors)[cell][region.toLinear()];
 
                         assert(neighbor != boundary_index);
 
@@ -390,7 +390,7 @@ pub fn NodeWorker(comptime N: usize, comptime M: usize) type {
 
                             const neighbor_region = region.maskedBySplit(split);
 
-                            neighbor = cell_meta.items(.neighbors)[parent][neighbor_region.linear()];
+                            neighbor = cell_meta.items(.neighbors)[parent][neighbor_region.toLinear()];
 
                             const neighbor_block_id = cell_meta.items(.block)[neighbor];
                             const neighbor_block = manager.blockFromId(neighbor_block_id);
@@ -926,7 +926,7 @@ pub fn NodeWorker(comptime N: usize, comptime M: usize) type {
                             result += eps / spacing[axis] * node_space.order(O).dissipation(axis, cell, block_src);
                         }
 
-                        node_space.setValue(cell, block_deriv, v - result);
+                        node_space.setValue(cell, block_deriv, v + result);
                     }
                 }
             };
