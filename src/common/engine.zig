@@ -1,6 +1,8 @@
 const std = @import("std");
 
 const geometry = @import("../geometry/geometry.zig");
+const utils = @import("../utils.zig");
+const Range = utils.Range;
 
 const nodes = @import("nodes.zig");
 
@@ -9,27 +11,29 @@ const nodes = @import("nodes.zig");
 pub fn Engine(comptime N: usize, comptime M: usize, comptime O: usize) type {
     return struct {
         space: NodeSpace,
-        cell: [N]usize,
-        start: usize,
-        end: usize,
+        vertex: [N]usize,
+        range: Range,
 
         const NodeSpace = nodes.NodeSpace(N, M);
+        const Operator = nodes.Stencil(N);
+
         const RealBox = geometry.RealBox(N);
 
+        /// Retrieves the position of the current vertex.
         pub fn position(self: @This()) [N]f64 {
-            return self.space.cellPosition(self.cell);
+            return self.space.vertexPosition(self.vertex);
         }
 
-        pub fn op(self: @This(), comptime ranks: [N]usize, field: []const f64) f64 {
-            return self.space.order(O).op(ranks, self.cell, field[self.start..self.end]);
+        pub fn eval(self: @This(), comptime ranks: [N]usize, field: []const f64) f64 {
+            return self.space.eval(Operator.centered(O, ranks), self.vertex, field[self.range.start..self.range.end]);
         }
 
-        pub fn opDiag(self: @This(), comptime ranks: [N]usize) f64 {
-            return self.space.order(O).opDiagonal(ranks);
+        pub fn evalDiag(self: @This(), comptime ranks: [N]usize) f64 {
+            return self.space.evalCoef(Operator.centered(O, ranks), [1]isize{0} ** N);
         }
 
         pub fn value(self: @This(), field: []const f64) f64 {
-            return self.space.value(self.cell, field[self.start..self.end]);
+            return self.space.vertexValue(self.vertex, field[self.range.start..self.range.end]);
         }
 
         pub fn valueDiag(_: @This()) f64 {
@@ -43,7 +47,7 @@ pub fn Engine(comptime N: usize, comptime M: usize, comptime O: usize) type {
                 comptime var ranks: [N]usize = [1]usize{0} ** N;
                 ranks[i] += 1;
 
-                result[i] = self.op(ranks, field);
+                result[i] = self.eval(ranks, field);
             }
 
             return result;
@@ -56,7 +60,7 @@ pub fn Engine(comptime N: usize, comptime M: usize, comptime O: usize) type {
                 comptime var ranks: [N]usize = [1]usize{0} ** N;
                 ranks[i] += 1;
 
-                result[i] = self.opDiag(ranks);
+                result[i] = self.evalDiag(ranks);
             }
 
             return result;
@@ -72,7 +76,7 @@ pub fn Engine(comptime N: usize, comptime M: usize, comptime O: usize) type {
                     ranks[i] += 1;
                     ranks[j] += 1;
 
-                    result[i][j] = self.op(ranks, field);
+                    result[i][j] = self.eval(ranks, field);
                 }
             }
 
@@ -88,7 +92,7 @@ pub fn Engine(comptime N: usize, comptime M: usize, comptime O: usize) type {
                     ranks[i] += 1;
                     ranks[j] += 1;
 
-                    result[i][j] = self.opDiag(ranks);
+                    result[i][j] = self.evalDiag(ranks);
                 }
             }
 
@@ -103,7 +107,7 @@ pub fn Engine(comptime N: usize, comptime M: usize, comptime O: usize) type {
                 comptime var ranks: [N]usize = [1]usize{0} ** N;
                 ranks[i] = 2;
 
-                result += self.op(ranks, field);
+                result += self.eval(ranks, field);
             }
 
             return result;
@@ -116,47 +120,10 @@ pub fn Engine(comptime N: usize, comptime M: usize, comptime O: usize) type {
                 comptime var ranks: [N]usize = [1]usize{0} ** N;
                 ranks[i] = 2;
 
-                result += self.opDiag(ranks);
+                result += self.evalDiag(ranks);
             }
 
             return result;
         }
     };
-}
-
-/// A trait for defining operators.
-pub fn isOperator(comptime N: usize, comptime M: usize, comptime O: usize) fn (type) bool {
-    const hasFn = std.meta.hasFn;
-
-    const Closure = struct {
-        fn trait(comptime T: type) bool {
-            if (comptime !(hasFn(T, "apply") and @TypeOf(T.apply) == fn (T, Engine(N, M, O), []const f64) f64)) {
-                return false;
-            }
-
-            if (comptime !(hasFn(T, "applyDiag") and @TypeOf(T.applyDiag) == fn (T, Engine(N, M, O)) f64)) {
-                return false;
-            }
-
-            return true;
-        }
-    };
-
-    return Closure.trait;
-}
-
-pub fn isProjection(comptime N: usize, comptime M: usize, comptime O: usize) fn (type) bool {
-    const hasFn = std.meta.hasFn;
-
-    const Closure = struct {
-        fn trait(comptime T: type) bool {
-            if (comptime !(hasFn(T, "project") and @TypeOf(T.project) == fn (T, Engine(N, M, O)) f64)) {
-                return false;
-            }
-
-            return true;
-        }
-    };
-
-    return Closure.trait;
 }

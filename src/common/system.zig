@@ -39,8 +39,8 @@ pub fn isSystemTag(comptime T: type) bool {
 fn SystemImpl(comptime Tag: type, comptime is_const: bool) type {
     const ManyItemPtr: type = if (is_const) [*]const f64 else [*]f64;
     const Slice: type = if (is_const) []const f64 else []f64;
-    const Slices = std.enums.EnumFieldStruct(Tag, Slice, null);
-    const Ptrs = std.enums.EnumFieldStruct(Tag, ManyItemPtr, null);
+    const Slices: type = std.enums.EnumFieldStruct(Tag, Slice, null);
+    const Ptrs: type = std.enums.EnumFieldStruct(Tag, ManyItemPtr, null);
 
     const fields = std.meta.fieldNames(Tag);
 
@@ -48,6 +48,7 @@ fn SystemImpl(comptime Tag: type, comptime is_const: bool) type {
         len: usize,
         ptrs: Ptrs,
 
+        /// Allocates a new system of the given length.
         pub fn init(allocator: Allocator, len: usize) !@This() {
             var slices: Slices = undefined;
 
@@ -68,6 +69,7 @@ fn SystemImpl(comptime Tag: type, comptime is_const: bool) type {
             return view(len, slices);
         }
 
+        /// Frees a system allocated with the given allocator.
         pub fn deinit(self: @This(), allocator: Allocator) void {
             inline for (fields) |name| {
                 var slice_to_free: Slice = undefined;
@@ -78,6 +80,7 @@ fn SystemImpl(comptime Tag: type, comptime is_const: bool) type {
             }
         }
 
+        /// Produces a view, a system that is not allocated but rather backed by external arrays.
         pub fn view(len: usize, slices: Slices) @This() {
             var ptrs: Ptrs = undefined;
 
@@ -92,6 +95,7 @@ fn SystemImpl(comptime Tag: type, comptime is_const: bool) type {
             };
         }
 
+        /// Retrieves the given field from the system.
         pub fn field(self: @This(), comptime sys: Tag) Slice {
             const ptr = @field(self.ptrs, @tagName(sys));
 
@@ -102,8 +106,9 @@ fn SystemImpl(comptime Tag: type, comptime is_const: bool) type {
             return result;
         }
 
-        pub fn slice(self: @This(), offset: usize, total: usize) @This() {
-            assert(self.len >= offset + total);
+        /// Produces a slice of the system.
+        pub fn slice(self: @This(), offset: usize, size: usize) @This() {
+            assert(self.len >= offset + size);
 
             var ptrs: Ptrs = undefined;
 
@@ -114,11 +119,12 @@ fn SystemImpl(comptime Tag: type, comptime is_const: bool) type {
             }
 
             return .{
-                .len = total,
+                .len = size,
                 .ptrs = ptrs,
             };
         }
 
+        /// Converts a mutable system to a const system.
         pub fn toConst(self: @This()) SystemImpl(Tag, true) {
             var result: SystemImpl(Tag, true) = undefined;
             result.len = self.len;

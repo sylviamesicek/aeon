@@ -85,6 +85,36 @@ pub fn Region(comptime N: usize) type {
             return res;
         }
 
+        pub fn adjacentFaces(comptime self: Self) [self.adjacency()]FaceIndex {
+            comptime {
+                var result: [self.adjacency()]FaceIndex = undefined;
+                var cursor: usize = 0;
+
+                for (0..N) |axis| {
+                    if (self.sides[axis] == .middle) {
+                        // We need not do anything
+                        continue;
+                    }
+
+                    const face = FaceIndex{
+                        .side = self.sides[axis] == .right,
+                        .axis = axis,
+                    };
+
+                    result[cursor] = face;
+
+                    cursor += 1;
+                }
+            }
+        }
+
+        pub fn faceFromAxis(self: Self, axis: usize) FaceIndex {
+            return .{
+                .axis = axis,
+                .side = self.sides[axis] == .right,
+            };
+        }
+
         /// Returns a space corresponding to the size of the region.
         pub fn space(self: Self, comptime E: usize, block: [N]usize) IndexSpace {
             var size: [N]usize = undefined;
