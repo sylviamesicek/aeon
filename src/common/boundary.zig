@@ -44,8 +44,8 @@ pub fn BoundaryEngine(comptime N: usize, comptime M: usize, comptime Set: type) 
         const FaceIndex = geometry.FaceIndex(N);
         const IndexMixin = geometry.IndexMixin(N);
         const Region = geometry.Region(N);
+        const NodeOperator = nodes_.NodeOperator(N);
         const NodeSpace = nodes_.NodeSpace(N, M);
-        const Stencil = nodes_.NodeOperator(N);
 
         pub fn fill(self: @This(), comptime O: usize, field: []f64) void {
             const regions = comptime Region.enumerateOrdered();
@@ -89,11 +89,6 @@ pub fn BoundaryEngine(comptime N: usize, comptime M: usize, comptime Set: type) 
             self.fillRegionKind(O, region, nmask, kind, field);
         }
 
-        /// Here there be dragons.
-        ///
-        /// This is a chaotic and fantastic jugle of comptime, all used for generating specialized
-        /// functions for filling a specific kind of boundary condition in a given masked region,
-        /// to a given order, out to a certain extent, all in a certain dimension.
         pub fn fillRegionKind(
             self: @This(),
             comptime O: usize,
@@ -116,8 +111,6 @@ pub fn BoundaryEngine(comptime N: usize, comptime M: usize, comptime Set: type) 
                 }
             }
 
-            const bfield = field[self.range.start..self.range.end];
-
             // Masked version of the region. Used for wonderfully ergonomic ways of (ab)using the regions API
             // to properly handle node space corners which do not actually touch the domain corner.
             const mregion = comptime region.masked(mask);
@@ -133,148 +126,162 @@ pub fn BoundaryEngine(comptime N: usize, comptime M: usize, comptime Set: type) 
                 inline while (comptime offsets.next()) |off| {
                     // This is the central node, off of which we are filling ghost nodes.
                     const node = IndexMixin.addSigned(off, IndexMixin.toSigned(cell));
-                    // Get value of function at node.
-                    const f = self.space.nodeValue(node, bfield);
 
                     // Loop over extends
                     comptime var extents = mregion.extentOffsets(O);
 
                     inline while (comptime extents.next()) |extent| {
-                        // Target node
-                        const target = IndexMixin.addSigned(node, extent);
-
-                        // Set target to zero
-                        self.space.setNodeValue(target, bfield, 0.0);
-
-                        switch (kind) {
-                            .symmetric => {
-                                var source: [N]isize = target;
-                                var sign: bool = true;
-
-                                inline for (mregion.adjacentFaces()) |face| {
-                                    const boundary = traits.boundaryFromId(self.set, Set.boundaryIdFromFace(face));
-
-                                    // Flip source across axis
-                                    const axis = face.axis;
-
-                                    if (comptime extent[axis] > 0) {
-                                        source[axis] = node[axis] + 1 - extent[axis];
-                                    } else {
-                                        source[axis] = node[axis] - extent[axis] - 1;
-                                    }
-
-                                    // Flip sign if we have odd polarity
-                                    sign ^= boundary.polarity == .odd;
-                                }
-
-                                const value = self.space.nodeValue(source, bfield);
-                                self.space.setNodeValue(target, bfield, if (sign) value else -value);
-                            },
-                            .robin => {
-                                // Relavent axes
-                                comptime var axes: [N]usize = 0;
-                                // Signs of each normal derivative.
-                                comptime var signs: [N]f64 = undefined;
-                                // Sign of overall mixed derivative.
-                                comptime var sign: f64 = 1.0;
-                                // Overall mixed derivative stencil.
-                                comptime var stencil: Stencil = Stencil.value();
-
-                                comptime {
-                                    var cur: usize = 0;
-
-                                    for (0..N) |axis| {
-                                        if (extents[axis] != 0) {
-                                            axes[cur] = axis;
-                                            cur += 1;
-                                        }
-
-                                        signs[axis] = if (extents[axis] >= 0) 1.0 else -1.0;
-
-                                        if (extents[axis] < 0) {
-                                            sign *= -1.0;
-                                        }
-
-                                        stencil.setAxisBoundaryDerivative(axis, O, extents[axis]);
-                                    }
-                                }
-
-                                // Compute target value for mixed derivative.
-                                const normal = switch (comptime region.adjacency()) {
-                                    1 => blk: {
-                                        const axis = axes[0];
-                                        const face = region.faceFromAxis(axis);
-                                        const boundary = traits.boundaryFromId(self.set, Set.boundaryIdFromFace(face));
-
-                                        const alpha = fieldValue(self, node, boundary.robin_value);
-                                        const beta = fieldValue(self, node, boundary.robin_rhs);
-
-                                        break :blk alpha * f + beta;
-                                    },
-                                    2 => blk: {
-                                        comptime var s0 = Stencil.value();
-                                        comptime var s1 = Stencil.value();
-                                        s0.setAxisCentered(axes[0], O, .derivative);
-                                        s1.setAxisCentered(axes[1], O, .derivative);
-
-                                        const sign0: f64 = signs[axes[0]];
-                                        const sign1: f64 = signs[axes[1]];
-
-                                        const face0 = region.faceFromAxis(axes[0]);
-                                        const face1 = region.faceFromAxis(axes[1]);
-                                        const boundary0 = traits.boundaryFromId(self.set, Set.boundaryIdFromFace(face0));
-                                        const boundary1 = traits.boundaryFromId(self.set, Set.boundaryIdFromFace(face1));
-
-                                        const alpha0 = self.fieldValue(node, boundary0.robin_value);
-                                        const alpha1 = self.fieldValue(node, boundary1.robin_value);
-                                        const beta0 = self.fieldValue(node, boundary0.robin_rhs);
-                                        const beta1 = self.fieldValue(node, boundary1.robin_rhs);
-
-                                        const alpha0_1 = sign1 * self.fieldEval(s1, node, boundary0.robin_value);
-                                        const alpha1_0 = sign0 * self.fieldEval(s0, node, boundary1.robin_value);
-                                        const beta0_1 = sign1 * self.fieldEval(s1, node, boundary0.robin_rhs);
-                                        const beta1_0 = sign0 * self.fieldEval(s0, node, boundary1.robin_rhs);
-
-                                        break :blk (alpha0_1 + alpha1_0 + alpha0 * alpha1) * f + alpha0 * beta1 + alpha1 * beta0 + beta0_1 + beta1_0;
-                                    },
-                                    else => @compileError("Robin boundary conditions only supported for N <= 2"),
-                                };
-
-                                // Current value of mixed stencil.
-                                const value = sign * self.space.eval(stencil, node, bfield);
-                                // Coefficient for mixed stencil.
-                                const coef = sign * self.space.evalCoef(stencil, extents);
-                                // Set target value.
-                                self.space.setNodeValue(target, bfield, (normal - value) / coef);
-                            },
-                            .extrapolate => {
-                                // Extrapolation stencil.
-                                comptime var stencil: Stencil = Stencil.value();
-
-                                comptime {
-                                    for (0..N) |axis| {
-                                        if (extents[axis] > 0) {
-                                            stencil.left[axis] = 2 * O;
-                                            stencil.right[axis] = 0;
-                                            stencil.ranks[axis] = .{ .extrapolate = extent[axis] };
-                                        } else if (extents[axis] < 0) {
-                                            stencil.right[axis] = 2 * O;
-                                            stencil.left[axis] = 0;
-                                            stencil.ranks[axis] = .{ .extrapolate = extent[axis] };
-                                        }
-                                    }
-                                }
-
-                                const value = self.space.eval(stencil, node, bfield);
-                                // Set target value.
-                                self.space.setNodeValue(target, bfield, value);
-                            },
-                        }
+                        self.fillGhostNode(
+                            O,
+                            mregion,
+                            kind,
+                            extent,
+                            node,
+                            field,
+                        );
                     }
                 }
             }
         }
 
+        /// Here there be dragons.
+        ///
+        /// This is a chaotic and fantastic jugle of comptime, all used for generating specialized
+        /// functions for filling a specific kind of boundary condition in a given masked region,
+        /// to a given order, out to a certain extent, all in a certain dimension.
+        pub fn fillGhostNode(
+            self: @This(),
+            comptime O: usize,
+            comptime region: Region,
+            comptime kind: BoundaryKind,
+            comptime extent: [N]isize,
+            node: [N]usize,
+            field: []f64,
+        ) void {
+            // Get proper slice of field.
+            const bfield = field[self.range.start..self.range.end];
+            // Get value of function at node.
+            const f = self.space.nodeValue(node, bfield);
+
+            // Target node
+            const target = IndexMixin.addSigned(node, extent);
+
+            // Set target to zero
+            self.space.setNodeValue(target, bfield, 0.0);
+
+            switch (kind) {
+                .symmetric => {
+                    var source: [N]isize = target;
+                    var sign: bool = true;
+
+                    inline for (region.adjacentFaces()) |face| {
+                        const boundary = traits.boundaryFromId(self.set, Set.boundaryIdFromFace(face));
+
+                        // Flip source across axis
+                        const axis = face.axis;
+
+                        if (comptime extent[axis] > 0) {
+                            source[axis] = node[axis] + 1 - extent[axis];
+                        } else {
+                            source[axis] = node[axis] - extent[axis] - 1;
+                        }
+
+                        // Flip sign if we have odd polarity
+                        sign ^= boundary.polarity == .odd;
+                    }
+
+                    const value = self.space.nodeValue(source, bfield);
+                    self.space.setNodeValue(target, bfield, if (sign) value else -value);
+                },
+                .robin => {
+                    // Relavent axes
+                    comptime var axes: [N]usize = 0;
+                    // Signs of each normal derivative.
+                    comptime var signs: [N]f64 = undefined;
+                    // Sign of overall mixed derivative.
+                    comptime var sign: f64 = 1.0;
+                    // Overall mixed derivative stencil.
+                    comptime var stencil: NodeOperator = NodeOperator.value();
+
+                    comptime {
+                        var cur: usize = 0;
+
+                        for (0..N) |axis| {
+                            if (extent[axis] != 0) {
+                                axes[cur] = axis;
+                                cur += 1;
+                            }
+
+                            signs[axis] = if (extent[axis] >= 0) 1.0 else -1.0;
+
+                            if (extent[axis] < 0) {
+                                sign *= -1.0;
+                            }
+
+                            stencil.setAxisBoundaryDerivative(axis, O, extent[axis]);
+                        }
+                    }
+
+                    // Compute target value for mixed derivative.
+                    const normal = switch (comptime region.adjacency()) {
+                        1 => blk: {
+                            const axis = axes[0];
+                            const face = region.faceFromAxis(axis);
+                            const boundary = traits.boundaryFromId(self.set, Set.boundaryIdFromFace(face));
+
+                            const alpha = fieldValue(self, node, boundary.robin_value);
+                            const beta = fieldValue(self, node, boundary.robin_rhs);
+
+                            break :blk alpha * f + beta;
+                        },
+                        2 => blk: {
+                            comptime var s0 = NodeOperator.value();
+                            comptime var s1 = NodeOperator.value();
+                            s0.setAxisCentered(axes[0], O, .derivative);
+                            s1.setAxisCentered(axes[1], O, .derivative);
+
+                            const sign0: f64 = signs[axes[0]];
+                            const sign1: f64 = signs[axes[1]];
+
+                            const face0 = region.faceFromAxis(axes[0]);
+                            const face1 = region.faceFromAxis(axes[1]);
+                            const boundary0 = traits.boundaryFromId(self.set, Set.boundaryIdFromFace(face0));
+                            const boundary1 = traits.boundaryFromId(self.set, Set.boundaryIdFromFace(face1));
+
+                            const alpha0 = self.fieldValue(node, boundary0.robin_value);
+                            const alpha1 = self.fieldValue(node, boundary1.robin_value);
+                            const beta0 = self.fieldValue(node, boundary0.robin_rhs);
+                            const beta1 = self.fieldValue(node, boundary1.robin_rhs);
+
+                            const alpha0_1 = sign1 * self.fieldEval(s1, node, boundary0.robin_value);
+                            const alpha1_0 = sign0 * self.fieldEval(s0, node, boundary1.robin_value);
+                            const beta0_1 = sign1 * self.fieldEval(s1, node, boundary0.robin_rhs);
+                            const beta1_0 = sign0 * self.fieldEval(s0, node, boundary1.robin_rhs);
+
+                            break :blk (alpha0_1 + alpha1_0 + alpha0 * alpha1) * f + alpha0 * beta1 + alpha1 * beta0 + beta0_1 + beta1_0;
+                        },
+                        else => @compileError("Robin boundary conditions only supported for N <= 2"),
+                    };
+
+                    // Current value of mixed stencil.
+                    const value = sign * self.space.eval(stencil, node, bfield);
+                    // Coefficient for mixed stencil.
+                    const coef = sign * self.space.evalCoef(stencil, extent);
+                    // Set target value.
+                    self.space.setNodeValue(target, bfield, (normal - value) / coef);
+                },
+                .extrapolate => {
+                    // Extrapolation stencil.
+                    const stencil: NodeOperator = comptime NodeOperator.extrapolate(O, extent);
+                    // Apply stencil.
+                    const value = self.space.eval(stencil, node, bfield);
+                    // Set target value.
+                    self.space.setNodeValue(target, bfield, value);
+                },
+            }
+        }
+
+        // Retrieves the value of a field (either numerical or analytic) at the given vertex.
         fn fieldValue(self: @This(), vertex: [N]isize, field: anytype) f64 {
             const Field = @TypeOf(field);
 
@@ -288,7 +295,7 @@ pub fn BoundaryEngine(comptime N: usize, comptime M: usize, comptime Set: type) 
             }
         }
 
-        fn fieldEval(self: @This(), comptime stencil: Stencil, vertex: [N]isize, field: anytype) f64 {
+        fn fieldEval(self: @This(), comptime stencil: NodeOperator, vertex: [N]isize, field: anytype) f64 {
             const Field = @TypeOf(field);
 
             if (comptime Field == []const f64 or Field == []f64) {
@@ -299,156 +306,8 @@ pub fn BoundaryEngine(comptime N: usize, comptime M: usize, comptime Set: type) 
                 @compileError("Unexpected field type");
             }
         }
-
-        // fn stencilFromExtents(O: usize, extents: [N]isize) Stencil {
-
-        // }
     };
 }
-
-// /// An engine wrapping a node space and a field, providing routines for filling the ghost nodes of the field.
-// pub fn BoundaryEngine(comptime N: usize, comptime M: usize, comptime O: usize) type {
-//     if (comptime O > M) {
-//         @compileError("O must be <= M.");
-//     }
-
-//     return struct {
-//         space: NodeSpace,
-
-//         const AxisMask = geometry.AxisMask(N);
-//         const FaceIndex = geometry.FaceIndex(N);
-//         const IndexMixin = geometry.IndexMixin(N);
-//         const Region = geometry.Region(N);
-//         const NodeSpace = nodes_.NodeSpace(N, M);
-
-//         pub fn new(space: NodeSpace) @This() {
-//             return .{
-//                 .space = space,
-//             };
-//         }
-
-//         pub fn fill(self: @This(), bound: anytype, field: []f64) void {
-//             const regions = comptime Region.enumerateOrdered();
-
-//             inline for (comptime regions[1..]) |region| {
-//                 self.fillRegion(region, AxisMask.initFull(), bound, field);
-//             }
-//         }
-
-//         pub fn fillRegion(self: @This(), comptime region: Region, comptime mask: AxisMask, bound: anytype, field: []f64) void {
-//             const Bound = @TypeOf(bound);
-
-//             if (comptime !isBoundary(N)(Bound)) {
-//                 @compileError("Boundary must satisfy isBoundary trait.");
-//             }
-
-//             // Short circuit if the region does not actually have any boundary nodes
-//             if (comptime region.adjacency() == 0 or mask.isEmpty()) {
-//                 return;
-//             }
-
-//             // Masked version of the region. Used for wonderfully ergonomic ways of (ab)using the regions API
-//             // to properly handle node space corners which do not actually touch the domain corner.
-//             const mregion = comptime region.masked(mask);
-//             const oregion = comptime region.masked(mask.complement());
-
-//             // Loop over the cells touching this face.
-//             var inner_face_cells = region.innerFaceCells(self.space.size);
-
-//             while (inner_face_cells.next()) |cell| {
-//                 // Some functional patterns perhaps?
-//                 comptime var offsets = oregion.extentOffsets(O);
-
-//                 inline while (comptime offsets.next()) |off| {
-//                     const node = IndexMixin.addSigned(off, IndexMixin.toSigned(cell));
-//                     // Find Position
-//                     const pos: [N]f64 = self.space.nodeOffsetPosition(mregion, node);
-
-//                     // Cache robin boundary conditions (if any)
-//                     var robin: [N]Robin = undefined;
-
-//                     inline for (0..N) |axis| {
-//                         if (comptime mregion.sides[axis] == .middle) {
-//                             // We need not do anything
-//                             continue;
-//                         }
-
-//                         const face = comptime FaceIndex{
-//                             .side = mregion.sides[axis] == .right,
-//                             .axis = axis,
-//                         };
-
-//                         if (Bound.kind(face) == .robin) {
-//                             robin[axis] = bound.robin(pos, face);
-//                         }
-//                     }
-
-//                     // Loop over extends
-//                     comptime var extents = mregion.extentOffsets(O);
-
-//                     inline while (comptime extents.next()) |extent| {
-//                         const target = IndexMixin.addSigned(node, extent);
-
-//                         // Set target to zero
-//                         self.space.setNodeValue(target, field, 0.0);
-
-//                         var result: f64 = 0.0;
-
-//                         // Accumulate result value
-//                         inline for (0..N) |axis| {
-//                             if (comptime mregion.sides[axis] == .middle) {
-//                                 // We need not do anything
-//                                 continue;
-//                             }
-
-//                             const face = comptime FaceIndex{
-//                                 .side = mregion.sides[axis] == .right,
-//                                 .axis = axis,
-//                             };
-
-//                             const kind: BoundaryKind = comptime Bound.kind(face);
-
-//                             switch (comptime kind) {
-//                                 .odd, .even => {
-//                                     var source: [N]isize = target;
-
-//                                     if (comptime extent[axis] > 0) {
-//                                         source[axis] = node[axis] + 1 - extent[axis];
-//                                     } else {
-//                                         source[axis] = node[axis] - extent[axis] - 1;
-//                                     }
-
-//                                     const source_value: f64 = self.space.nodeValue(source, field);
-//                                     const fsign: f64 = comptime if (kind == .odd) -1.0 else 1.0;
-
-//                                     result += fsign * source_value;
-//                                 },
-//                                 .robin => {
-//                                     const vres: f64 = robin[axis].value * self.space.order(O).boundaryOp(extent, null, node, field);
-//                                     const fres: f64 = robin[axis].flux * self.space.order(O).boundaryOp(extent, axis, node, field);
-
-//                                     const vcoef: f64 = robin[axis].value * self.space.order(O).boundaryOpCoef(extent, null);
-//                                     const fcoef: f64 = robin[axis].flux * self.space.order(O).boundaryOpCoef(extent, axis);
-
-//                                     const rhs: f64 = robin[axis].rhs;
-
-//                                     result += (rhs - vres - fres) / (vcoef + fcoef);
-//                                 },
-//                             }
-//                         }
-
-//                         // Take the average
-//                         const adj: f64 = @floatFromInt(mregion.adjacency());
-//                         result /= adj;
-
-//                         // Set target to result.
-//                         self.space.setNodeValue(target, field, result);
-//                     }
-//                 }
-//             }
-//         }
-//     };
-// }
 
 // test "2d boundary filling" {
 //     const expect = std.testing.expect;

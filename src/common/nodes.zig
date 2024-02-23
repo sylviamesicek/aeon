@@ -50,6 +50,24 @@ pub fn NodeOperator(comptime N: usize) type {
             };
         }
 
+        pub fn extrapolate(order: usize, extent: [N]isize) @This() {
+            const result = value();
+
+            for (0..N) |axis| {
+                if (extent[axis] > 0) {
+                    result.left[axis] = 2 * order;
+                    result.right[axis] = 0;
+                    result.ranks[axis] = .{ .extrapolate = extent[axis] };
+                } else if (extent[axis] < 0) {
+                    result.right[axis] = 2 * order;
+                    result.left[axis] = 0;
+                    result.ranks[axis] = .{ .extrapolate = extent[axis] };
+                }
+            }
+
+            return result;
+        }
+
         pub fn setAxisCentered(self: *@This(), axis: usize, order: usize, rank: NodeOperatorRank) void {
             self.ranks[axis] = rank;
             self.left[axis] = order;
