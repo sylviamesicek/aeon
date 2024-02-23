@@ -33,6 +33,16 @@ pub const Stencils = struct {
         return floatCastSlice(L + R + 1, result);
     }
 
+    /// Produces an extrapolation stencil, which is always a centered delta function.
+    pub fn extrapolate(comptime L: usize, comptime R: usize, off: isize) [L + R + 1]f64 {
+        const point: f128 = @floatFromInt(off);
+
+        var result: [L + R + 1]f128 = undefined;
+        Lagrange.value(&grid(L, R), point, &result);
+        return floatCastSlice(L + R + 1, result);
+    }
+
+    /// Produces a prolongation stencil.
     pub fn prolong(comptime M: usize) [2 * M]f64 {
         return switch (M) {
             0 => .{},
@@ -42,6 +52,7 @@ pub const Stencils = struct {
         };
     }
 
+    /// Produces a full weighting restriction stencil.
     pub fn restrict(comptime M: usize) [2 * M + 1]f64 {
         return switch (M) {
             0 => .{1.0},
@@ -50,6 +61,7 @@ pub const Stencils = struct {
         };
     }
 
+    /// Computes the dissipation stencil.
     pub fn dissipation(comptime M: usize) [2 * M + 1]f64 {
         var scale: f64 = if (M % 2 == 0) -1.0 else 1.0;
 

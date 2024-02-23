@@ -18,6 +18,9 @@ pub const BoundaryKind = enum {
     /// The function satisfies some set of robin-style boundary
     /// conditions at the boundary.
     robin,
+    /// Boundary values are extrapolated from existed data. This should only be used in conjunction with
+    /// some other boundary condition (sommerfeld for instance).
+    extrapolate,
 };
 
 /// Describes the polarity of a symmetric boundary conditions.
@@ -42,7 +45,7 @@ pub fn BoundaryEngine(comptime N: usize, comptime M: usize, comptime Set: type) 
         const IndexMixin = geometry.IndexMixin(N);
         const Region = geometry.Region(N);
         const NodeSpace = nodes_.NodeSpace(N, M);
-        const Stencil = nodes_.Stencil(N);
+        const Stencil = nodes_.NodeOperator(N);
 
         pub fn fill(self: @This(), comptime O: usize, field: []f64) void {
             const regions = comptime Region.enumerateOrdered();
@@ -192,7 +195,7 @@ pub fn BoundaryEngine(comptime N: usize, comptime M: usize, comptime Set: type) 
                                             sign *= -1.0;
                                         }
 
-                                        stencil.boundaryDerivativeAxis(axis, O, extents[axis]);
+                                        stencil.setAxisBoundaryDerivative(axis, O, extents[axis]);
                                     }
                                 }
 
@@ -211,8 +214,8 @@ pub fn BoundaryEngine(comptime N: usize, comptime M: usize, comptime Set: type) 
                                     2 => blk: {
                                         comptime var s0 = Stencil.value();
                                         comptime var s1 = Stencil.value();
-                                        s0.boundaryDerivativeAxis(axes[0], O, extents[axes[0]]);
-                                        s1.boundaryDerivativeAxis(axes[1], O, extents[axes[1]]);
+                                        s0.setAxisCentered(axes[0], O, .derivative);
+                                        s1.setAxisCentered(axes[1], O, .derivative);
 
                                         const sign0: f64 = signs[axes[0]];
                                         const sign1: f64 = signs[axes[1]];
@@ -243,6 +246,28 @@ pub fn BoundaryEngine(comptime N: usize, comptime M: usize, comptime Set: type) 
                                 const coef = sign * self.space.evalCoef(stencil, extents);
                                 // Set target value.
                                 self.space.setNodeValue(target, bfield, (normal - value) / coef);
+                            },
+                            .extrapolate => {
+                                // Extrapolation stencil.
+                                comptime var stencil: Stencil = Stencil.value();
+
+                                comptime {
+                                    for (0..N) |axis| {
+                                        if (extents[axis] > 0) {
+                                            stencil.left[axis] = 2 * O;
+                                            stencil.right[axis] = 0;
+                                            stencil.ranks[axis] = .{ .extrapolate = extent[axis] };
+                                        } else if (extents[axis] < 0) {
+                                            stencil.right[axis] = 2 * O;
+                                            stencil.left[axis] = 0;
+                                            stencil.ranks[axis] = .{ .extrapolate = extent[axis] };
+                                        }
+                                    }
+                                }
+
+                                const value = self.space.eval(stencil, node, bfield);
+                                // Set target value.
+                                self.space.setNodeValue(target, bfield, value);
                             },
                         }
                     }

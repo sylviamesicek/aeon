@@ -16,25 +16,33 @@ const traits = @import("traits.zig");
 
 const checkFunction = traits.checkFunction;
 
-/// Represents an N-dimensional stencil approximating some combination of
+pub const NodeOperatorRank = union(enum) {
+    value,
+    derivative,
+    second_derivative,
+    extrapolate: isize,
+};
+
+/// Represents an N-dimensional stencil product approximating some combination of
 /// differential operators applied along each axis.
-pub fn Stencil(comptime N: usize) type {
+pub fn NodeOperator(comptime N: usize) type {
     return struct {
         left: [N]usize,
         right: [N]usize,
-        ranks: [N]usize,
+        ranks: [N]NodeOperatorRank,
 
         const Stencils = basis.Stencils;
 
+        /// Returns the operator that simply returns the value of the field at the point.
         pub fn value() @This() {
             return .{
-                .ranks = [1]usize{0} ** N,
+                .ranks = [1]NodeOperatorRank{.value} ** N,
                 .left = [1]usize{0} ** N,
                 .right = [1]usize{0} ** N,
             };
         }
 
-        pub fn centered(order: usize, ranks: [N]usize) @This() {
+        pub fn centered(order: usize, ranks: [N]NodeOperatorRank) @This() {
             return .{
                 .ranks = ranks,
                 .left = [1]usize{order} ** N,
@@ -42,19 +50,25 @@ pub fn Stencil(comptime N: usize) type {
             };
         }
 
-        pub fn boundaryDerivativeAxis(self: *@This(), axis: usize, order: usize, extent: isize) void {
+        pub fn setAxisCentered(self: *@This(), axis: usize, order: usize, rank: NodeOperatorRank) void {
+            self.ranks[axis] = rank;
+            self.left[axis] = order;
+            self.right[axis] = order;
+        }
+
+        pub fn setAxisBoundaryDerivative(self: *@This(), axis: usize, order: usize, extent: isize) void {
             if (extent == 0) {
                 self.left[axis] = 0;
                 self.right[axis] = 0;
-                self.ranks[axis] = 0;
+                self.ranks[axis] = .value;
             } else if (extent > 0) {
                 self.right[axis] = @abs(extent);
-                self.left[axis] = 2 * order + 1;
-                self.ranks[axis] = 1;
+                self.left[axis] = 2 * order;
+                self.ranks[axis] = .derivative;
             } else {
                 self.left[axis] = @abs(extent);
-                self.right[axis] = 2 * order + 1;
-                self.ranks[axis] = 1;
+                self.right[axis] = 2 * order;
+                self.ranks[axis] = .derivative;
             }
         }
 
@@ -84,10 +98,10 @@ pub fn Stencil(comptime N: usize) type {
             for (0..N) |axis| {
                 const size = self.left[axis] + self.right[axis] + 1;
                 const stencil = switch (self.ranks[axis]) {
-                    0 => Stencils.value(self.left[axis], self.right[axis]),
-                    1 => Stencils.derivative(self.left[axis], self.right[axis]),
-                    2 => Stencils.secondDerivative(self.left[axis], self.right[axis]),
-                    else => @compileError("Only ranks <= 2 are supported."),
+                    .value => Stencils.value(self.left[axis], self.right[axis]),
+                    .derivative => Stencils.derivative(self.left[axis], self.right[axis]),
+                    .second_derivative => Stencils.secondDerivative(self.left[axis], self.right[axis]),
+                    .extrapolate => |off| Stencils.extrapolate(self.left[axis], self.right[axis], off),
                 };
 
                 @memcpy(result[axis][0..size], stencil);
@@ -244,6 +258,7 @@ pub fn NodeSpace(comptime N: usize, comptime M: usize) type {
             };
         }
 
+        /// Iterates all nodes in the `NodeSpace`, including `F` layers of ghost nodes.
         pub fn nodes(self: Self, comptime F: usize) NodeIterator(F) {
             return NodeIterator(F).init(self.size);
         }
@@ -376,12 +391,12 @@ pub fn NodeSpace(comptime N: usize, comptime M: usize) type {
         // Dissispation ********************
         // *********************************
 
-        /// Apply dissipation at the given vertex.
-        pub fn dissipation(self: @This(), comptime O: usize, vertex: [N]isize, field: []const f64) f64 {
+        /// Apply dissipation at the given node.
+        pub fn dissipation(self: @This(), comptime O: usize, node: [N]isize, field: []const f64) f64 {
             var result: f64 = 0.0;
 
             for (0..N) |axis| {
-                result += self.dissipationAxis(O, axis, vertex, field);
+                result += self.dissipationAxis(O, axis, node, field);
             }
 
             return result;
@@ -412,7 +427,7 @@ pub fn NodeSpace(comptime N: usize, comptime M: usize) type {
         // ******************************
 
         /// Evaluates an operator at the given vertex.
-        pub fn eval(self: @This(), comptime op: Stencil(N), vertex: [N]isize, field: []const f64) f64 {
+        pub fn eval(self: @This(), comptime op: NodeOperator(N), vertex: [N]isize, field: []const f64) f64 {
             // Accumulate result
             var result: f64 = 0.0;
 
@@ -455,7 +470,7 @@ pub fn NodeSpace(comptime N: usize, comptime M: usize) type {
         }
 
         /// Evaluates an operator at the given vertex by lazily applying a function.
-        pub fn evalAnalytic(self: @This(), comptime op: Stencil(N), vertex: [N]isize, field: anytype) f64 {
+        pub fn evalAnalytic(self: @This(), comptime op: NodeOperator(N), vertex: [N]isize, field: anytype) f64 {
             const Field: type = @TypeOf(field);
             // Check field satisfies isAnalyticField trait.
             traits.checkAnalyticField(N, Field);
@@ -504,7 +519,7 @@ pub fn NodeSpace(comptime N: usize, comptime M: usize) type {
         }
 
         /// Computes the coefficient for a given operator at a particular index.
-        pub fn evalCoef(self: @This(), comptime op: Stencil(N), comptime index: [N]isize) f64 {
+        pub fn evalCoef(self: @This(), comptime op: NodeOperator(N), comptime index: [N]isize) f64 {
             comptime var coef: f64 = 1.0;
 
             comptime {

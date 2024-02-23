@@ -15,7 +15,7 @@ pub fn Engine(comptime N: usize, comptime M: usize, comptime O: usize) type {
         range: Range,
 
         const NodeSpace = nodes.NodeSpace(N, M);
-        const Operator = nodes.Stencil(N);
+        const Operator = nodes.NodeOperator(N);
 
         const RealBox = geometry.RealBox(N);
 

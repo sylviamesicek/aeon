@@ -33,7 +33,7 @@ pub const RungeKutta4Integrator = integration.RungeKutta4Integrator;
 pub const isOrdinaryDiffEq = integration.isOrdinaryDiffEq;
 
 pub const NodeSpace = nodes.NodeSpace;
-pub const Stencil = nodes.Stencil;
+pub const Stencil = nodes.NodeOperator;
 
 pub const System = system.System;
 pub const SystemConst = system.SystemConst;
