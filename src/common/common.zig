@@ -14,17 +14,17 @@ const geometry = @import("../geometry/geometry.zig");
 const lac = @import("../lac/lac.zig");
 
 // Submodules
-// const boundary = @import("boundary.zig");
+const boundary = @import("boundary.zig");
 const engine = @import("engine.zig");
 const integration = @import("integration.zig");
 const nodes = @import("nodes.zig");
 const system = @import("system.zig");
 const traits = @import("traits.zig");
 
-// pub const BoundaryKind = boundary.BoundaryKind;
-// pub const BoundaryEngine = boundary.BoundaryEngine;
-// pub const Robin = boundary.Robin;
-// pub const isBoundary = boundary.isBoundary;
+// Aliases
+pub const BoundaryKind = boundary.BoundaryKind;
+pub const BoundaryPolarity = boundary.BoundaryPolarity;
+pub const BoundaryEngine = boundary.BoundaryEngine;
 
 pub const Engine = engine.Engine;
 
@@ -61,6 +61,7 @@ pub const EvenBoundary = traits.EvenBoundary;
 pub const isBoundarySet = traits.isBoundarySet;
 pub const checkBoundarySet = traits.checkBoundarySet;
 
+// Propogate testing.
 test {
     _ = engine;
     _ = integration;

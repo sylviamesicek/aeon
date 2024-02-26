@@ -149,7 +149,7 @@ pub fn BoundaryEngine(comptime N: usize, comptime M: usize, comptime Set: type) 
         /// This is a chaotic and fantastic jugle of comptime, all used for generating specialized
         /// functions for filling a specific kind of boundary condition in a given masked region,
         /// to a given order, out to a certain extent, all in a certain dimension.
-        pub fn fillGhostNode(
+        fn fillGhostNode(
             self: @This(),
             comptime O: usize,
             comptime region: Region,
@@ -161,13 +161,13 @@ pub fn BoundaryEngine(comptime N: usize, comptime M: usize, comptime Set: type) 
             // Get proper slice of field.
             const bfield = field[self.range.start..self.range.end];
             // Get value of function at node.
-            const f = self.space.nodeValue(node, bfield);
+            const f = self.space.value(node, bfield);
 
             // Target node
             const target = IndexMixin.addSigned(node, extent);
 
             // Set target to zero
-            self.space.setNodeValue(target, bfield, 0.0);
+            self.space.setValue(target, bfield, 0.0);
 
             switch (kind) {
                 .symmetric => {
@@ -190,8 +190,8 @@ pub fn BoundaryEngine(comptime N: usize, comptime M: usize, comptime Set: type) 
                         sign ^= boundary.polarity == .odd;
                     }
 
-                    const value = self.space.nodeValue(source, bfield);
-                    self.space.setNodeValue(target, bfield, if (sign) value else -value);
+                    const value = self.space.value(source, bfield);
+                    self.space.setValue(target, bfield, if (sign) value else -value);
                 },
                 .robin => {
                     // Relavent axes
@@ -268,7 +268,7 @@ pub fn BoundaryEngine(comptime N: usize, comptime M: usize, comptime Set: type) 
                     // Coefficient for mixed stencil.
                     const coef = sign * self.space.evalCoef(stencil, extent);
                     // Set target value.
-                    self.space.setNodeValue(target, bfield, (normal - value) / coef);
+                    self.space.setValue(target, bfield, (normal - value) / coef);
                 },
                 .extrapolate => {
                     // Extrapolation stencil.
@@ -276,7 +276,7 @@ pub fn BoundaryEngine(comptime N: usize, comptime M: usize, comptime Set: type) 
                     // Apply stencil.
                     const value = self.space.eval(stencil, node, bfield);
                     // Set target value.
-                    self.space.setNodeValue(target, bfield, value);
+                    self.space.setValue(target, bfield, value);
                 },
             }
         }
@@ -286,7 +286,7 @@ pub fn BoundaryEngine(comptime N: usize, comptime M: usize, comptime Set: type) 
             const Field = @TypeOf(field);
 
             if (comptime Field == []const f64 or Field == []f64) {
-                return self.space.nodeValue(vertex, field[self.range.start..self.range.end]);
+                return self.space.value(vertex, field[self.range.start..self.range.end]);
             } else if (comptime traits.isAnalyticField(N, Field)) {
                 const pos = self.space.nodePosition(vertex);
                 return field.eval(pos);

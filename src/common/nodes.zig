@@ -165,26 +165,6 @@ pub fn NodeSpace(comptime N: usize, comptime M: usize) type {
             return self.size;
         }
 
-        /// Returns an index space over vertices.
-        pub fn vertexSpace(self: Self) IndexSpace {
-            return IndexSpace.fromSize(self.size);
-        }
-
-        /// Sets the value at the given vertex.
-        pub fn vertexValue(self: Self, vertex: [N]usize, field: []const f64) f64 {
-            return self.nodeValue(toSigned(vertex), field);
-        }
-
-        /// Set the value at the given vertex.
-        pub fn setVertexValue(self: Self, vertex: [N]usize, field: []f64, v: f64) void {
-            self.setNodeValue(toSigned(vertex), field, v);
-        }
-
-        /// Returns the position of the given vertex.
-        pub fn vertexPosition(self: Self, vertex: [N]isize) [N]f64 {
-            return self.nodePosition(toSigned(vertex));
-        }
-
         // *******************************
         // Nodes
 
@@ -211,7 +191,7 @@ pub fn NodeSpace(comptime N: usize, comptime M: usize) type {
             return self.bounds.localToGlobal(result);
         }
 
-        /// Returns an index space over the node space.
+        /// Returns an index space over the entire node space.
         pub fn indexSpace(self: Self) IndexSpace {
             return IndexSpace.fromSize(self.nodeSize());
         }
@@ -233,13 +213,13 @@ pub fn NodeSpace(comptime N: usize, comptime M: usize) type {
         }
 
         /// Computes the value of a field at a given node.
-        pub fn nodeValue(self: Self, node: [N]isize, field: []const f64) f64 {
+        pub fn value(self: Self, node: [N]isize, field: []const f64) f64 {
             const linear = self.indexSpace().linearFromCartesian(indexFromNode(node));
             return field[linear];
         }
 
         /// Sets the value of a field at a given node.
-        pub fn setNodeValue(self: Self, node: [N]isize, field: []f64, v: f64) void {
+        pub fn setValue(self: Self, node: [N]isize, field: []f64, v: f64) void {
             const linear = self.indexSpace().linearFromCartesian(indexFromNode(node));
             field[linear] = v;
         }
@@ -286,24 +266,24 @@ pub fn NodeSpace(comptime N: usize, comptime M: usize) type {
         // *********************************
 
         /// Prolongs values to the given supervertex.
-        pub fn prolong(self: @This(), comptime O: usize, supervertex: [N]isize, field: []const f64) f64 {
+        pub fn prolong(self: @This(), comptime O: usize, supernode: [N]isize, field: []const f64) f64 {
             assert(field.len == self.numNodes());
 
             // Compute parity of super vertex.
             var parity: AxisMask = AxisMask.initEmpty();
 
             for (0..N) |axis| {
-                parity.setValue(axis, @mod(supervertex[axis], 2) == 1);
+                parity.setValue(axis, @mod(supernode[axis], 2) == 1);
             }
 
             return switch (parity) {
-                inline else => |val| self.prolongParity(O, val, supervertex, field),
+                inline else => |val| self.prolongParity(O, val, supernode, field),
             };
         }
 
         /// Prolong values to the given supervertex assuming
         /// a known parity.
-        fn prolongParity(self: @This(), comptime O: usize, comptime parity: AxisMask, super: [N]isize, field: []const f64) f64 {
+        fn prolongParity(self: @This(), comptime O: usize, comptime parity: AxisMask, supernode: [N]isize, field: []const f64) f64 {
             // Generate Prolongation stencil
             const pstencil: [2 * O]f64 = comptime Stencils.prolong(O);
 
@@ -314,7 +294,7 @@ pub fn NodeSpace(comptime N: usize, comptime M: usize) type {
             var central: [N]isize = undefined;
 
             for (0..N) |i| {
-                central[i] = @divFloor(super[i], 2);
+                central[i] = @divFloor(supernode[i], 2);
             }
 
             // Loop over stencil space.
@@ -347,26 +327,26 @@ pub fn NodeSpace(comptime N: usize, comptime M: usize) type {
                 }
 
                 const node = IndexMixin.addSigned(central, offset);
-                result += coef * self.nodeValue(node, field);
+                result += coef * self.value(node, field);
             }
 
             return result;
         }
 
         /// Performs direct restriction (i.e. injection).
-        pub fn restrict(self: @This(), subvertex: [N]isize, field: []const f64) f64 {
+        pub fn restrict(self: @This(), subnode: [N]isize, field: []const f64) f64 {
             var node: [N]isize = undefined;
 
             for (0..N) |i| {
-                node[i] = 2 * subvertex[i];
+                node[i] = 2 * subnode[i];
             }
 
-            return self.nodeValue(node, field);
+            return self.value(node, field);
         }
 
         /// Performs restriction with full weighting (i.e. the restriction compatible with the prolongation operator
         /// of the same order).
-        pub fn restrictFull(self: @This(), comptime O: usize, subvertex: [N]isize, field: []const f64) f64 {
+        pub fn restrictFull(self: @This(), comptime O: usize, subnode: [N]isize, field: []const f64) f64 {
             const stencil: [2 * O + 1]f64 = comptime Stencils.restrict(O);
 
             // Accumulate result to this variable
@@ -375,7 +355,7 @@ pub fn NodeSpace(comptime N: usize, comptime M: usize) type {
             var central: [N]isize = undefined;
 
             for (0..N) |i| {
-                central[i] = 2 * subvertex[i];
+                central[i] = 2 * subnode[i];
             }
 
             // Iterate over stencil space
@@ -399,7 +379,7 @@ pub fn NodeSpace(comptime N: usize, comptime M: usize) type {
                 }
 
                 const node = IndexMixin.addSigned(central, offset);
-                result += coef * self.nodeValue(node, field);
+                result += coef * self.value(node, field);
             }
 
             return result;
@@ -420,7 +400,7 @@ pub fn NodeSpace(comptime N: usize, comptime M: usize) type {
             return result;
         }
 
-        fn dissipationAxis(self: @This(), comptime O: usize, comptime axis: usize, vertex: [N]isize, field: []const f64) f64 {
+        fn dissipationAxis(self: @This(), comptime O: usize, comptime axis: usize, node: [N]isize, field: []const f64) f64 {
             const stencil = Stencils.dissipation(O);
 
             var result: f64 = 0.0;
@@ -428,10 +408,10 @@ pub fn NodeSpace(comptime N: usize, comptime M: usize) type {
             inline for (0..2 * O + 1) |i| {
                 const offset: isize = @as(isize, @intCast(i)) - O;
 
-                var node = vertex;
-                node[axis] += offset;
+                var offset_node = node;
+                offset_node[axis] += offset;
 
-                result += stencil[i] * self.nodeValue(node, field);
+                result += stencil[i] * self.value(offset_node, field);
             }
 
             var scale: f64 = @floatFromInt(self.size[axis]);
@@ -471,7 +451,7 @@ pub fn NodeSpace(comptime N: usize, comptime M: usize) type {
                 }
 
                 const node = IndexMixin.addSigned(vertex, offset);
-                result += coef * self.nodeValue(node, field);
+                result += coef * self.value(node, field);
             }
 
             // Covariantly transform result

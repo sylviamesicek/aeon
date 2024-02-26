@@ -66,6 +66,10 @@ pub fn NodeManager(comptime N: usize, comptime M: usize) type {
             boundary: [FaceIndex.count]bool,
             /// Refinement level of block.
             refinement: usize,
+            /// Parent of this block
+            parent: usize = null_index,
+            /// Position within parent
+            index: [N]usize = [1]usize{0} ** N,
             /// Cell offset
             cells: usize,
         };
@@ -73,7 +77,7 @@ pub fn NodeManager(comptime N: usize, comptime M: usize) type {
         /// Additional information stored for each cell of the mesh.
         pub const Cell = struct {
             /// Block that this cell belongs to.
-            block: usize = 0,
+            block: usize = null_index,
             /// Position within block of this cell.
             index: [N]usize = [1]usize{0} ** N,
             /// Cache of neighboring cells.
@@ -86,6 +90,10 @@ pub fn NodeManager(comptime N: usize, comptime M: usize) type {
             errdefer cell_permute.deinit(allocator);
 
             assert(max_refinement > 0);
+
+            for (0..N) |axis| {
+                assert(cell_size[axis] % 2 == 0);
+            }
 
             return .{
                 .gpa = allocator,
@@ -120,6 +128,10 @@ pub fn NodeManager(comptime N: usize, comptime M: usize) type {
             // *****************************
             // Compute neighbors
             try self.buildCells(mesh);
+
+            // *****************************
+            // Compute block cell maps
+            try self.buildBlockCellMaps(mesh);
 
             // ********************************
             // Compute block to nodes map
@@ -237,7 +249,6 @@ pub fn NodeManager(comptime N: usize, comptime M: usize) type {
             }
 
             // Transfer to blocks
-
             self.blocks.shrinkRetainingCapacity(0);
 
             for (blocks.items) |meta| {
@@ -258,26 +269,6 @@ pub fn NodeManager(comptime N: usize, comptime M: usize) type {
             }
         }
 
-        /// Computes the block to node offset map.
-        fn buildBlockToNodes(self: *@This()) !void {
-            try self.block_to_nodes.resize(self.gpa, self.blocks.len + 1);
-
-            var offset: usize = 0;
-            self.block_to_nodes.set(0, offset);
-
-            for (self.blocks.items(.size), 0..) |size, block_id| {
-                var total: usize = 1;
-
-                for (0..N) |axis| {
-                    total *= self.cell_size[axis] * size[axis] + 2 * M;
-                }
-
-                offset += total;
-
-                self.block_to_nodes.set(block_id + 1, offset);
-            }
-        }
-
         /// Builds extra per-cell information like neighbors.
         fn buildCells(self: *@This(), mesh: *const Mesh) !void {
             // Cache pointers
@@ -286,7 +277,9 @@ pub fn NodeManager(comptime N: usize, comptime M: usize) type {
             // Reset and reserve
             try self.cells.resize(self.gpa, cells.len);
             // Set root
-            self.cells.items(.neighbors)[0] = [1]usize{boundary_index} ** Region.count;
+            self.cells.set(0, Cell{
+                .neighbors = [1]usize{boundary_index} ** Region.count,
+            });
 
             // Loop through every non root cell
             for (1..cells.len) |cell| {
@@ -349,7 +342,10 @@ pub fn NodeManager(comptime N: usize, comptime M: usize) type {
                 // Set neighbors
                 self.cells.items(.neighbors)[cell] = neighbors;
             }
+        }
 
+        /// Fills cell to block, and block to parent maps.
+        fn buildBlockCellMaps(self: *@This(), mesh: *const Mesh) void {
             // Set block and index of cells
             for (0..self.numBlocks()) |block| {
                 var cell_indices = IndexSpace.fromSize(self.blocks.items(.size)[block]).cartesianIndices();
@@ -358,6 +354,42 @@ pub fn NodeManager(comptime N: usize, comptime M: usize) type {
                     self.cells.items(.block)[cell] = block;
                     self.cells.items(.index)[cell] = index;
                 }
+            }
+
+            // Set block parents and indices
+            for (0..self.numBlocks()) |block| {
+                // Get cell in bottom left corner
+                const cell = self.blocks.items(.cells)[block];
+                // Get parent
+                const parent = mesh.cells.items(.parent)[cell];
+
+                if (parent == null_index) {
+                    self.blocks.items(.parent)[block] = 0;
+                    self.blocks.items(.index)[block] = [1]usize{0} ** N;
+                } else {
+                    self.blocks.items(.parent)[block] = self.cells.items(.block)[parent];
+                    self.blocks.items(.index)[block] = self.cells.items(.index)[parent];
+                }
+            }
+        }
+
+        /// Computes the block to node offset map.
+        fn buildBlockToNodes(self: *@This()) !void {
+            try self.block_to_nodes.resize(self.gpa, self.blocks.len + 1);
+
+            var offset: usize = 0;
+            self.block_to_nodes.set(0, offset);
+
+            for (self.blocks.items(.size), 0..) |size, block_id| {
+                var total: usize = 1;
+
+                for (0..N) |axis| {
+                    total *= self.cell_size[axis] * size[axis] + 1 + 2 * M;
+                }
+
+                offset += total;
+
+                self.block_to_nodes.set(block_id + 1, offset);
             }
         }
 
@@ -383,6 +415,9 @@ pub fn NodeManager(comptime N: usize, comptime M: usize) type {
             return [1]usize{result} ** N;
         }
 
+        // *******************************
+        // Helpers
+
         /// Returns the number of nodes required to store node vectors on the mesh.
         pub fn numNodes(self: *const @This()) usize {
             return self.block_to_nodes.total();
@@ -398,11 +433,67 @@ pub fn NodeManager(comptime N: usize, comptime M: usize) type {
             return self.blocks.len;
         }
 
+        /// Returns the number of vertices per cell along each axis, including vertices which overlap with other cells.
+        pub fn verticesPerCell(self: *const @This()) []usize {
+            var result = self.cell_size;
+
+            for (0..N) |i| {
+                result[i] += 1;
+            }
+
+            return result;
+        }
+
         /// Returns a slice of nodes for the given block
         pub fn blockNodes(self: *const @This(), block_id: usize, data: anytype) @TypeOf(data) {
             return self.block_to_nodes.slice(block_id, data);
         }
 
+        pub fn blockNodeSize(self: *const @This(), block_id: usize) [N]usize {
+            const size = self.blocks.items(.size)[block_id];
+
+            var result: [N]usize = undefined;
+
+            for (0..N) |axis| {
+                result[axis] = self.cell_size[axis] * size[axis] + 1;
+            }
+
+            return result;
+        }
+
+        pub fn blockNodeParentOrigin(self: *const @This(), block_id: usize) [N]usize {
+            var origin = self.blocks.items(.index)[block_id];
+
+            for (0..N) |axis| {
+                origin[axis] *= self.cell_size[axis];
+            }
+
+            return origin;
+        }
+
+        pub fn blockNodeParentSize(self: *const @This(), block_id: usize) [N]usize {
+            const size = self.blocks.items(.size)[block_id];
+
+            var result: [N]usize = undefined;
+
+            for (0..N) |axis| {
+                result[axis] = (self.cell_size[axis] * size[axis]) / 2 + 1;
+            }
+
+            return result;
+        }
+
+        pub fn cellNodeOrigin(self: *const @This(), cell_id: usize) [N]usize {
+            var origin = self.cells.items(.index)[cell_id];
+
+            for (0..N) |axis| {
+                origin[axis] *= self.cell_size[axis];
+            }
+
+            return origin;
+        }
+
+        /// Finds the index of the cell that lies at the given position in the block.
         pub fn cellFromBlock(self: *const @This(), block_id: usize, index: [N]usize) usize {
             const size = self.blocks.items(.size)[block_id];
             const refinement = self.blocks.items(.refinement)[block_id];

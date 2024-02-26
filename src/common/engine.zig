@@ -11,7 +11,7 @@ const nodes = @import("nodes.zig");
 pub fn Engine(comptime N: usize, comptime M: usize, comptime O: usize) type {
     return struct {
         space: NodeSpace,
-        vertex: [N]usize,
+        node: [N]isize,
         range: Range,
 
         const NodeSpace = nodes.NodeSpace(N, M);
@@ -21,11 +21,11 @@ pub fn Engine(comptime N: usize, comptime M: usize, comptime O: usize) type {
 
         /// Retrieves the position of the current vertex.
         pub fn position(self: @This()) [N]f64 {
-            return self.space.vertexPosition(self.vertex);
+            return self.space.nodePosition(self.node);
         }
 
         pub fn eval(self: @This(), comptime ranks: [N]usize, field: []const f64) f64 {
-            return self.space.eval(Operator.centered(O, ranks), self.vertex, field[self.range.start..self.range.end]);
+            return self.space.eval(Operator.centered(O, ranks), self.node, field[self.range.start..self.range.end]);
         }
 
         pub fn evalDiag(self: @This(), comptime ranks: [N]usize) f64 {
@@ -33,7 +33,7 @@ pub fn Engine(comptime N: usize, comptime M: usize, comptime O: usize) type {
         }
 
         pub fn value(self: @This(), field: []const f64) f64 {
-            return self.space.vertexValue(self.vertex, field[self.range.start..self.range.end]);
+            return self.space.value(self.node, field[self.range.start..self.range.end]);
         }
 
         pub fn valueDiag(_: @This()) f64 {

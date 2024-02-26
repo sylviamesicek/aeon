@@ -40,15 +40,9 @@ pub fn isOperator(comptime N: usize, comptime M: usize, comptime T: type) bool {
 
 /// Checks whether a type satisfies the isOperator at comptime, optionally asserting that
 /// it is defined for a certain dimension, number of ghost points, or order.
-pub fn checkOperator(comptime N: usize, comptime M: usize, comptime T: type, comptime order: ?usize) void {
+pub fn checkOperator(comptime N: usize, comptime M: usize, comptime T: type) void {
     if (comptime !isOperator(N, M, T)) {
         @compileError("Type must satisfy isOperator trait.");
-    }
-
-    if (order) |O| {
-        if (comptime O != T.order) {
-            @compileError("Type isOperator order mismatch.");
-        }
     }
 }
 
@@ -84,15 +78,9 @@ pub fn isFunction(comptime N: usize, comptime M: usize, comptime T: type) bool {
     return true;
 }
 
-pub fn checkFunction(comptime N: usize, comptime M: usize, comptime T: type, comptime order: ?usize) void {
+pub fn checkFunction(comptime N: usize, comptime M: usize, comptime T: type) void {
     if (comptime !isFunction(N, M, T)) {
         @compileError("Type must satisfy isFunction trait.");
-    }
-
-    if (order) |O| {
-        if (comptime O != T.order) {
-            @compileError("Type isFunction order mismatch.");
-        }
     }
 }
 
@@ -116,6 +104,14 @@ pub fn ConstantFunction(comptime N: usize, comptime M: usize) type {
             return self.value;
         }
     };
+}
+
+pub fn checkOrder(comptime T: type, comptime order: usize) void {
+    if (order) |O| {
+        if (comptime O != T.order) {
+            @compileError("Type order mismatch.");
+        }
+    }
 }
 
 // *********************************************

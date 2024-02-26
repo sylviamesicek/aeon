@@ -420,7 +420,7 @@ pub fn NodeWorker(comptime N: usize, comptime M: usize) type {
                                 const neighbor_node: [N]isize = addSigned(neighbor_origin, offset);
 
                                 const v = neighbor_node_space.order(O).prolongCell(toUnsigned(neighbor_node), neighbor_field);
-                                block_node_space.setNodeValue(node, block_field, v);
+                                block_node_space.setValue(node, block_field, v);
                             }
                         } else {
                             // Neighbor is on same level.
@@ -446,8 +446,8 @@ pub fn NodeWorker(comptime N: usize, comptime M: usize) type {
                                 const node = addSigned(origin, offset);
                                 const neighbor_node = addSigned(neighbor_origin, offset);
 
-                                const v = neighbor_node_space.nodeValue(neighbor_node, neighbor_field);
-                                block_node_space.setNodeValue(node, block_field, v);
+                                const v = neighbor_node_space.value(neighbor_node, neighbor_field);
+                                block_node_space.setValue(node, block_field, v);
                             }
                         }
                     }
