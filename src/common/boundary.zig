@@ -6,7 +6,6 @@ const utils = @import("../utils.zig");
 
 const Range = utils.Range;
 
-const engine = @import("engine.zig");
 const nodes_ = @import("nodes.zig");
 const traits = @import("traits.zig");
 
@@ -33,7 +32,7 @@ pub const BoundaryPolarity = enum {
 
 /// A utility wrapper around a node space which handles boundary conditions.
 pub fn BoundaryEngine(comptime N: usize, comptime M: usize, comptime Set: type) type {
-    traits.checkBoundarySet(N, M, Set);
+    traits.checkBoundarySet(N, Set);
 
     return struct {
         space: NodeSpace,
@@ -65,17 +64,17 @@ pub fn BoundaryEngine(comptime N: usize, comptime M: usize, comptime Set: type) 
                 var priority: usize = 0;
 
                 for (mregion.adjacentFaces()) |face| {
-                    const boundary_id = self.set.boundaryIdFromFace(face);
+                    const boundary_id = Set.boundaryIdFromFace(face);
                     const BoundaryType: type = traits.BoundaryTypeFromId(Set, boundary_id);
 
                     if (BoundaryType.priority >= priority) {
                         priority = BoundaryType.priority;
-                        kind = BoundaryKind.kind;
+                        kind = BoundaryType.kind;
                     }
                 }
 
                 for (mregion.adjacentFaces()) |face| {
-                    const boundary_id = self.set.boundaryIdFromFace(face);
+                    const boundary_id = Set.boundaryIdFromFace(face);
                     const BoundaryType: type = traits.BoundaryTypeFromId(Set, boundary_id);
 
                     if (BoundaryType.priority == priority) {
@@ -155,7 +154,7 @@ pub fn BoundaryEngine(comptime N: usize, comptime M: usize, comptime Set: type) 
             comptime region: Region,
             comptime kind: BoundaryKind,
             comptime extent: [N]isize,
-            node: [N]usize,
+            node: [N]isize,
             field: []f64,
         ) void {
             // Get proper slice of field.
@@ -195,7 +194,7 @@ pub fn BoundaryEngine(comptime N: usize, comptime M: usize, comptime Set: type) 
                 },
                 .robin => {
                     // Relavent axes
-                    comptime var axes: [N]usize = 0;
+                    comptime var axes: [N]usize = [1]usize{0} ** N;
                     // Signs of each normal derivative.
                     comptime var signs: [N]f64 = undefined;
                     // Sign of overall mixed derivative.
@@ -226,7 +225,7 @@ pub fn BoundaryEngine(comptime N: usize, comptime M: usize, comptime Set: type) 
                     const normal = switch (comptime region.adjacency()) {
                         1 => blk: {
                             const axis = axes[0];
-                            const face = region.faceFromAxis(axis);
+                            const face = comptime region.faceFromAxis(axis);
                             const boundary = traits.boundaryFromId(self.set, Set.boundaryIdFromFace(face));
 
                             const alpha = fieldValue(self, node, boundary.robin_value);
@@ -243,8 +242,8 @@ pub fn BoundaryEngine(comptime N: usize, comptime M: usize, comptime Set: type) 
                             const sign0: f64 = signs[axes[0]];
                             const sign1: f64 = signs[axes[1]];
 
-                            const face0 = region.faceFromAxis(axes[0]);
-                            const face1 = region.faceFromAxis(axes[1]);
+                            const face0 = comptime region.faceFromAxis(axes[0]);
+                            const face1 = comptime region.faceFromAxis(axes[1]);
                             const boundary0 = traits.boundaryFromId(self.set, Set.boundaryIdFromFace(face0));
                             const boundary1 = traits.boundaryFromId(self.set, Set.boundaryIdFromFace(face1));
 
@@ -288,7 +287,7 @@ pub fn BoundaryEngine(comptime N: usize, comptime M: usize, comptime Set: type) 
             if (comptime Field == []const f64 or Field == []f64) {
                 return self.space.value(vertex, field[self.range.start..self.range.end]);
             } else if (comptime traits.isAnalyticField(N, Field)) {
-                const pos = self.space.nodePosition(vertex);
+                const pos = self.space.position(vertex);
                 return field.eval(pos);
             } else {
                 @compileError("Unexpected field type");
@@ -309,80 +308,108 @@ pub fn BoundaryEngine(comptime N: usize, comptime M: usize, comptime Set: type) 
     };
 }
 
-// test "2d boundary filling" {
-//     const expect = std.testing.expect;
-//     const allocator = std.testing.allocator;
-//     const pi = std.math.pi;
+test "2d boundary filling" {
+    const expect = std.testing.expect;
+    const allocator = std.testing.allocator;
+    const pi = std.math.pi;
 
-//     const FaceIndex = geometry.FaceIndex(2);
-//     const NodeSpace = nodes_.NodeSpace(2, 2);
-//     const Engine = BoundaryEngine(2, 2, 2);
+    const FaceIndex = geometry.FaceIndex(2);
+    const NodeSpace = nodes_.NodeSpace(2, 2);
+    // const NodeOperator = nodes_.NodeOperator(2);
+    const NuemannBoundary = traits.NuemannBoundary(2);
 
-//     const node_space: NodeSpace = .{
-//         .size = [2]usize{ 100, 100 },
-//         .bounds = .{
-//             .origin = .{ 0.0, 0.0 },
-//             .size = .{ pi, pi },
-//         },
-//     };
-//     const cell_space = node_space.cellSpace();
+    const NuemannSet = struct {
+        pub const card: usize = 1;
 
-//     // *********************************
-//     // Set field values ****************
+        pub fn boundaryIdFromFace(_: FaceIndex) usize {
+            return 0;
+        }
 
-//     const field: []f64 = try allocator.alloc(f64, node_space.numNodes());
-//     defer allocator.free(field);
+        pub const BoundaryType0: type = NuemannBoundary;
 
-//     {
-//         var cells = cell_space.cartesianIndices();
+        pub fn boundary0(_: @This()) BoundaryType0 {
+            return .{};
+        }
+    };
 
-//         while (cells.next()) |cell| {
-//             const pos = node_space.cellPosition(cell);
-//             node_space.setValue(cell, field, @sin(pos[0]) * @sin(pos[1]));
-//         }
-//     }
+    const Engine = BoundaryEngine(2, 2, NuemannSet);
 
-//     // ********************************
-//     // Set exact values ***************
+    const node_space: NodeSpace = .{
+        .size = [2]usize{ 100, 100 },
+        .bounds = .{
+            .origin = .{ 0.0, 0.0 },
+            .size = .{ pi, pi },
+        },
+    };
 
-//     const exact: []f64 = try allocator.alloc(f64, node_space.numNodes());
-//     defer allocator.free(exact);
+    // *********************************
+    // Set field values ****************
 
-//     {
-//         var nodes = node_space.nodes(2);
+    const field: []f64 = try allocator.alloc(f64, node_space.numNodes());
+    defer allocator.free(field);
 
-//         while (nodes.next()) |node| {
-//             const pos = node_space.nodePosition(node);
-//             node_space.setNodeValue(node, exact, @sin(pos[0]) * @sin(pos[1]));
-//         }
-//     }
+    {
+        var nodes = node_space.nodes(0);
 
-//     try expect(@abs(node_space.order(2).boundaryOp([2]isize{ -1, 0 }, null, [2]isize{ 0, 50 }, exact)) < 1e-10);
-//     try expect(@abs(node_space.order(2).boundaryOp([2]isize{ -2, 0 }, null, [2]isize{ 0, 50 }, exact)) < 1e-10);
-//     try expect(@abs(node_space.order(2).boundaryOp([2]isize{ -1, -1 }, null, [2]isize{ 0, 0 }, exact)) < 1e-10);
-//     try expect(@abs(node_space.order(2).boundaryOp([2]isize{ -2, -2 }, null, [2]isize{ 0, 0 }, exact)) < 1e-10);
+        while (nodes.next()) |node| {
+            const pos = node_space.position(node);
+            node_space.setValue(node, field, @cos(pos[0]) * @cos(pos[1]));
+        }
+    }
 
-//     // *********************************
+    // ********************************
+    // Set exact values ***************
 
-//     const DiritchletBC = struct {
-//         pub fn kind(_: FaceIndex) BoundaryKind {
-//             return .robin;
-//         }
+    const exact: []f64 = try allocator.alloc(f64, node_space.numNodes());
+    defer allocator.free(exact);
 
-//         pub fn robin(_: @This(), _: [2]f64, _: FaceIndex) Robin {
-//             return Robin.diritchlet(0.0);
-//         }
-//     };
+    {
+        var nodes = node_space.nodes(2);
 
-//     Engine.new(node_space).fill(DiritchletBC{}, field);
+        while (nodes.next()) |node| {
+            const pos = node_space.position(node);
+            node_space.setValue(node, exact, @cos(pos[0]) * @cos(pos[1]));
+        }
+    }
 
-//     // **********************************
-//     // Test that boundary values are within a certain bound of the exact value
+    // comptime var left_operator1: NodeOperator = NodeOperator.value();
+    // comptime var left_operator2: NodeOperator = NodeOperator.value();
+    // comptime var right_operator1: NodeOperator = NodeOperator.value();
+    // comptime var right_operator2: NodeOperator = NodeOperator.value();
 
-//     for (0..node_space.numNodes()) |i| {
-//         try expect(@abs(field[i] - exact[i]) < 1e-10);
-//     }
-// }
+    // comptime {
+    //     left_operator1.setAxisBoundaryDerivative(0, 2, -1);
+    //     left_operator2.setAxisBoundaryDerivative(0, 2, -2);
+    //     right_operator1.setAxisBoundaryDerivative(0, 2, 1);
+    //     right_operator2.setAxisBoundaryDerivative(0, 2, 2);
+    // }
+
+    // try expect(@abs(node_space.order(2).boundaryOp([2]isize{ -1, 0 }, null, [2]isize{ 0, 50 }, exact)) < 1e-10);
+    // try expect(@abs(node_space.order(2).boundaryOp([2]isize{ -2, 0 }, null, [2]isize{ 0, 50 }, exact)) < 1e-10);
+    // try expect(@abs(node_space.order(2).boundaryOp([2]isize{ -1, -1 }, null, [2]isize{ 0, 0 }, exact)) < 1e-10);
+    // try expect(@abs(node_space.order(2).boundaryOp([2]isize{ -2, -2 }, null, [2]isize{ 0, 0 }, exact)) < 1e-10);
+
+    // *********************************
+
+    const engine = Engine{ .space = node_space, .set = NuemannSet{}, .range = .{
+        .start = 0,
+        .end = node_space.numNodes(),
+    } };
+
+    engine.fill(2, field);
+
+    // **********************************
+    // Test that boundary values are within a certain bound of the exact value
+
+    for (0..node_space.numNodes()) |i| {
+        const err = @abs(field[i] - exact[i]);
+        try expect(err < 1e-8);
+
+        // if (err > 1e-8) {
+        //     std.debug.print("Failed at {} with error {}\n", .{ i, err });
+        // }
+    }
+}
 
 // test "mixed boundary filling" {
 //     const expect = std.testing.expect;

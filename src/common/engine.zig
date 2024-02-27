@@ -21,7 +21,7 @@ pub fn Engine(comptime N: usize, comptime M: usize, comptime O: usize) type {
 
         /// Retrieves the position of the current vertex.
         pub fn position(self: @This()) [N]f64 {
-            return self.space.nodePosition(self.node);
+            return self.space.position(self.node);
         }
 
         pub fn eval(self: @This(), comptime ranks: [N]usize, field: []const f64) f64 {

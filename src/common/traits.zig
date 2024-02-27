@@ -42,7 +42,8 @@ pub fn isOperator(comptime N: usize, comptime M: usize, comptime T: type) bool {
 /// it is defined for a certain dimension, number of ghost points, or order.
 pub fn checkOperator(comptime N: usize, comptime M: usize, comptime T: type) void {
     if (comptime !isOperator(N, M, T)) {
-        @compileError("Type must satisfy isOperator trait.");
+        const msg = std.fmt.comptimePrint("Type {} must satisfy isOperator trait.", .{T});
+        @compileError(&(msg.*));
     }
 }
 
@@ -54,39 +55,42 @@ pub fn IdentityOperator(comptime N: usize, comptime M: usize, comptime O: usize)
             return engine.value(field);
         }
 
-        pub fn applyDiag(_: @This(), engine: Engine(N, M, O), field: []const f64) f64 {
-            return engine.valueDiag(field);
+        pub fn applyDiag(_: @This(), engine: Engine(N, M, O)) f64 {
+            return engine.valueDiag();
         }
     };
 }
 
 pub fn isFunction(comptime N: usize, comptime M: usize, comptime T: type) bool {
-    if (comptime !(@hasDecl(T, "order") and @TypeOf(T.order) == usize)) {
-        return false;
+    comptime {
+        if (!(@hasDecl(T, "order") and @TypeOf(T.order) == usize)) {
+            return false;
+        }
+
+        const O = T.order;
+
+        if (O > M) {
+            return false;
+        }
+
+        if (!(hasFn(T, "eval") and @TypeOf(T.eval) == fn (T, Engine(N, M, O)) f64)) {
+            return false;
+        }
+
+        return true;
     }
-
-    const O = T.order;
-
-    if (O > M) {
-        return false;
-    }
-
-    if (comptime !(hasFn(T, "eval") and @TypeOf(T.eval) == fn (T, Engine(N, M, O)) f64)) {
-        return false;
-    }
-
-    return true;
 }
 
 pub fn checkFunction(comptime N: usize, comptime M: usize, comptime T: type) void {
     if (comptime !isFunction(N, M, T)) {
-        @compileError("Type must satisfy isFunction trait.");
+        const msg = std.fmt.comptimePrint("Type {} must satisfy isFunction trait.", .{T});
+        @compileError(&(msg.*));
     }
 }
 
 pub fn ZeroFunction(comptime N: usize, comptime M: usize) type {
     return struct {
-        pub const order = 0;
+        pub const order: usize = 0;
 
         pub fn eval(_: @This(), _: Engine(N, M, 0)) f64 {
             return 0.0;
@@ -98,7 +102,7 @@ pub fn ConstantFunction(comptime N: usize, comptime M: usize) type {
     return struct {
         value: f64,
 
-        pub const order = 0;
+        pub const order: usize = 0;
 
         pub fn eval(self: @This(), _: Engine(N, M, 0)) f64 {
             return self.value;
@@ -107,10 +111,8 @@ pub fn ConstantFunction(comptime N: usize, comptime M: usize) type {
 }
 
 pub fn checkOrder(comptime T: type, comptime order: usize) void {
-    if (order) |O| {
-        if (comptime O != T.order) {
-            @compileError("Type order mismatch.");
-        }
+    if (comptime order != T.order) {
+        @compileError("Type order mismatch.");
     }
 }
 
@@ -121,6 +123,8 @@ pub fn isAnalyticField(comptime N: usize, comptime T: type) bool {
     if (comptime !(hasFn(T, "eval") and @TypeOf(T.eval) == fn (T, [N]f64) f64)) {
         return false;
     }
+
+    return true;
 }
 
 pub fn ZeroField(comptime N: usize) type {
@@ -141,7 +145,7 @@ pub fn ConstantField(comptime N: usize) type {
     };
 }
 
-pub fn checkAnalyticField(comptime N: usize, comptime T: type) bool {
+pub fn checkAnalyticField(comptime N: usize, comptime T: type) void {
     comptime {
         if (!isAnalyticField(N, T)) {
             @compileError("Type must satisfy isAnalyticField trait.");
@@ -194,8 +198,9 @@ pub fn isBoundary(comptime N: usize, comptime T: type) bool {
 
 pub fn checkBoundary(comptime N: usize, comptime T: type) void {
     comptime {
-        if (!isBoundarySet(N, T)) {
-            @compileError("T must satisfy isBoundary trait.");
+        if (!isBoundary(N, T)) {
+            const msg = std.fmt.comptimePrint("Type {} must satisfy isBoundary trait.", .{T});
+            @compileError(&(msg.*));
         }
     }
 }
@@ -244,20 +249,22 @@ pub fn isBoundarySet(comptime N: usize, comptime T: type) bool {
         const type_name = std.fmt.comptimePrint("BoundaryType{}", .{i});
         const func_name = std.fmt.comptimePrint("boundary{}", .{i});
 
-        if (!(@hasDecl(T, type_name.*) and @TypeOf(@field(T, type_name.*)) == type)) {
+        if (!(@hasDecl(T, &(type_name.*)) and @TypeOf(@field(T, &(type_name.*))) == type)) {
             return false;
         }
 
-        const BoundaryType = @field(T, type_name.*);
+        const BoundaryType = @field(T, &(type_name.*));
 
         if (!(@TypeOf(BoundaryType) == type and isBoundary(N, BoundaryType))) {
             return false;
         }
 
-        if (!(hasFn(T, func_name.*) and @TypeOf(@field(T, func_name.*)) == fn (T) BoundaryType)) {
+        if (!(hasFn(T, &(func_name.*)) and @TypeOf(@field(T, &(func_name.*))) == fn (T) BoundaryType)) {
             return false;
         }
     }
+
+    return true;
 }
 
 /// Asserts at comptime that the given type satisfies `isBoundarySet(N)` and has compatible boundaries.
@@ -306,7 +313,7 @@ pub fn boundaryFromId(set: anytype, comptime id: usize) BoundaryTypeFromId(@Type
 
     const func_name = std.fmt.comptimePrint("boundary{}", .{id});
 
-    return @field(set, func_name)(set);
+    return @field(Set, func_name)(set);
 }
 
 /// Finds the maximum priority of any boundary in the set.
@@ -323,10 +330,11 @@ pub fn maxBoundaryPriority(comptime Set: type) usize {
 }
 
 test "traits" {
-    checkOperator(2, 2, IdentityOperator(2, 2, 2), 2);
-    checkFunction(2, 2, ZeroFunction(2, 2), null);
-    checkFunction(2, 2, ConstantFunction(2, 2), null);
-    checkBoundary(2, 2, NuemannBoundary(2, 2));
-    checkBoundary(2, 2, OddBoundary);
-    checkBoundary(2, 2, EvenBoundary);
+    checkOperator(2, 2, IdentityOperator(2, 2, 2));
+    checkOrder(IdentityOperator(2, 2, 2), 2);
+    checkFunction(2, 2, ZeroFunction(2, 2));
+    checkFunction(2, 2, ConstantFunction(2, 2));
+    checkBoundary(2, NuemannBoundary(2));
+    checkBoundary(2, OddBoundary);
+    checkBoundary(2, EvenBoundary);
 }

@@ -4,7 +4,6 @@ pub const basis = @import("basis/basis.zig");
 pub const common = @import("common/common.zig");
 pub const geometry = @import("geometry/geometry.zig");
 pub const lac = @import("lac/lac.zig");
-pub const tree = @import("tree/tree.zig");
 pub const mesh = @import("mesh/mesh.zig");
 pub const utils = @import("utils.zig");
 
@@ -20,7 +19,6 @@ test {
     _ = common;
     _ = geometry;
     _ = lac;
-    _ = tree;
     _ = mesh;
     _ = utils;
 }

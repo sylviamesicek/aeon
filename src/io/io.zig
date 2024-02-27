@@ -18,22 +18,22 @@ const VtkCellType = vtkio.VtkCellType;
 const basis = @import("../basis/basis.zig");
 const common = @import("../common/common.zig");
 const geometry = @import("../geometry/geometry.zig");
-const tree = @import("../tree/tree.zig");
+const mesh_ = @import("../mesh/mesh.zig");
 
 const NodeSpace = common.NodeSpace;
 const System = common.System;
 const SystemConst = common.SystemConst;
 const isSystemTag = common.isSystemTag;
 
-const NodeWorker = tree.NodeWorker;
-const boundary_index = tree.boundary_index;
-const null_index = tree.null_index;
+const NodeWorker = mesh_.NodeWorker;
+const boundary_index = mesh_.boundary_index;
+const null_index = mesh_.null_index;
 
 /// A namespace for outputting data defined on a mesh.
 pub fn DataOut(comptime N: usize, comptime M: usize) type {
     return struct {
-        const Mesh = tree.TreeMesh(N);
-        const NodeManager = tree.NodeManager(N, M);
+        const Mesh = mesh_.Mesh(N);
+        const NodeManager = mesh_.NodeManager(N, M);
 
         const FaceIndex = geometry.FaceIndex(N);
         const IndexMixin = geometry.IndexMixin(N);
@@ -192,16 +192,12 @@ pub fn DataOut(comptime N: usize, comptime M: usize) type {
             const level = manager.level_to_blocks.range(levels - 1);
 
             for (0..level.end) |block_id| {
-                const block = manager.blockFromId(block_id);
-                const node_space = NodeSpace(N, M){
-                    .bounds = block.bounds,
-                    .size = IndexMixin.mul(block.size, manager.cell_size),
-                };
-
+                const node_space = worker.blockNodeSpace(block_id);
                 const block_range = manager.block_to_nodes.range(block_id);
                 const block_sys = sys.slice(block_range.start, block_range.end - block_range.start);
+                const block_size = manager.blocks.items(.size)[block_id];
 
-                var mcells = IndexSpace.fromSize(block.size).cartesianIndices();
+                var mcells = IndexSpace.fromSize(block_size).cartesianIndices();
 
                 while (mcells.next()) |mcell| {
                     // Get Cell ID
@@ -220,16 +216,18 @@ pub fn DataOut(comptime N: usize, comptime M: usize) type {
 
                     const point_offset: usize = positions.items.len / N;
 
-                    const point_size = IndexMixin.add(manager.cell_size, IndexMixin.splat(1));
+                    const point_size = manager.verticesPerCell();
                     const point_space = IndexSpace.fromSize(point_size);
                     const cell_space = IndexSpace.fromSize(manager.cell_size);
 
-                    var points = point_space.cartesianIndices();
+                    {
+                        var points = point_space.cartesianIndices();
 
-                    while (points.next()) |point| {
-                        const position = node_space.vertexPosition(IndexMixin.toSigned(IndexMixin.add(origin, point)));
-                        for (0..N) |i| {
-                            try positions.append(allocator, position[i]);
+                        while (points.next()) |point| {
+                            const position = node_space.vertexPosition(IndexMixin.toSigned(IndexMixin.add(origin, point)));
+                            for (0..N) |i| {
+                                try positions.append(allocator, position[i]);
+                            }
                         }
                     }
 
@@ -283,15 +281,17 @@ pub fn DataOut(comptime N: usize, comptime M: usize) type {
                         }
                     }
 
-                    // Append Field data
-                    var cells = cell_space.cartesianIndices();
+                    {
+                        // Append Field data
+                        var points = point_space.cartesianIndices();
 
-                    while (cells.next()) |cell| {
-                        const node = IndexMixin.add(origin, cell);
+                        while (points.next()) |point| {
+                            const node = IndexMixin.toSigned(IndexMixin.add(origin, point));
 
-                        inline for (comptime std.enums.values(Tag), 0..) |field, idx| {
-                            const value = node_space.value(node, block_sys.field(field));
-                            try fields[idx].append(allocator, value);
+                            inline for (comptime std.enums.values(Tag), 0..) |field, idx| {
+                                const value = node_space.value(node, block_sys.field(field));
+                                try fields[idx].append(allocator, value);
+                            }
                         }
                     }
                 }
@@ -305,7 +305,7 @@ pub fn DataOut(comptime N: usize, comptime M: usize) type {
             defer output.deinit();
 
             inline for (comptime std.meta.fieldNames(Tag), 0..) |name, id| {
-                try output.addCellField(name, fields[id].items, 1);
+                try output.addField(name, fields[id].items, 1);
             }
 
             try output.write(out_stream);

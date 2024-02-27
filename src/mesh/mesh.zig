@@ -7,7 +7,13 @@ const assert = std.debug.assert;
 const geometry = @import("../geometry/geometry.zig");
 const utils = @import("../utils.zig");
 
+const manager = @import("manager.zig");
+const multigrid = @import("multigrid.zig");
 const permute = @import("permute.zig");
+const worker = @import("worker.zig");
+
+pub const NodeManager = manager.NodeManager;
+pub const NodeWorker = worker.NodeWorker;
 
 /// A null index.
 pub const null_index: usize = std.math.maxInt(usize);
@@ -469,5 +475,7 @@ pub fn Mesh(comptime N: usize) type {
 }
 
 test {
+    _ = manager;
     _ = permute;
+    _ = worker;
 }

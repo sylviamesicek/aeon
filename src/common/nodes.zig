@@ -111,18 +111,20 @@ pub fn NodeOperator(comptime N: usize) type {
         }
 
         pub fn stencils(comptime self: @This()) [N][self.maxSupportSize()]f64 {
-            var result: [N][self.maxSupportSize()]f64 = undefined;
+            comptime var result: [N][self.maxSupportSize()]f64 = undefined;
 
-            for (0..N) |axis| {
-                const size = self.left[axis] + self.right[axis] + 1;
-                const stencil = switch (self.ranks[axis]) {
-                    .value => Stencils.value(self.left[axis], self.right[axis]),
-                    .derivative => Stencils.derivative(self.left[axis], self.right[axis]),
-                    .second_derivative => Stencils.secondDerivative(self.left[axis], self.right[axis]),
-                    .extrapolate => |off| Stencils.extrapolate(self.left[axis], self.right[axis], off),
-                };
+            comptime {
+                for (0..N) |axis| {
+                    const size = self.left[axis] + self.right[axis] + 1;
+                    const stencil = switch (self.ranks[axis]) {
+                        .value => Stencils.value(self.left[axis], self.right[axis]),
+                        .derivative => Stencils.derivative(self.left[axis], self.right[axis]),
+                        .second_derivative => Stencils.secondDerivative(self.left[axis], self.right[axis]),
+                        .extrapolate => |off| Stencils.extrapolate(self.left[axis], self.right[axis], off),
+                    };
 
-                @memcpy(result[axis][0..size], stencil);
+                    @memcpy(result[axis][0..size], &stencil);
+                }
             }
 
             return result;
@@ -179,18 +181,6 @@ pub fn NodeSpace(comptime N: usize, comptime M: usize) type {
             return result;
         }
 
-        /// Return the position of the given node.
-        pub fn nodePosition(self: Self, node: [N]isize) [N]f64 {
-            var result: [N]f64 = undefined;
-
-            inline for (0..N) |i| {
-                result[i] = @floatFromInt(node[i]);
-                result[i] /= @floatFromInt(self.size[i] - 1);
-            }
-
-            return self.bounds.localToGlobal(result);
-        }
-
         /// Returns an index space over the entire node space.
         pub fn indexSpace(self: Self) IndexSpace {
             return IndexSpace.fromSize(self.nodeSize());
@@ -210,6 +200,18 @@ pub fn NodeSpace(comptime N: usize, comptime M: usize) type {
         /// Computes the total number of nodes in this `NodeSpace`.
         pub fn numNodes(self: Self) usize {
             return self.indexSpace().total();
+        }
+
+        /// Return the position of the given node.
+        pub fn position(self: Self, node: [N]isize) [N]f64 {
+            var result: [N]f64 = undefined;
+
+            inline for (0..N) |i| {
+                result[i] = @floatFromInt(node[i]);
+                result[i] /= @floatFromInt(self.size[i] - 1);
+            }
+
+            return self.bounds.localToGlobal(result);
         }
 
         /// Computes the value of a field at a given node.
@@ -429,13 +431,13 @@ pub fn NodeSpace(comptime N: usize, comptime M: usize) type {
             // Accumulate result
             var result: f64 = 0.0;
 
-            const stencil_sizes = op.stencilSizes();
-            const stencils = op.stencils();
+            const stencil_sizes = comptime op.stencilSizes();
+            const stencils = comptime op.stencils();
 
             comptime var indices = IndexSpace.fromSize(stencil_sizes).cartesianIndices();
 
-            inline while (indices.next()) |index| {
-                const sindex = toSigned(index);
+            inline while (comptime indices.next()) |index| {
+                const sindex = comptime toSigned(index);
 
                 comptime var offset: [N]isize = undefined;
                 comptime var coef: f64 = 1.0;
@@ -459,8 +461,10 @@ pub fn NodeSpace(comptime N: usize, comptime M: usize) type {
                 var scale: f64 = @floatFromInt(self.size[i]);
                 scale /= self.bounds.size[i];
 
-                inline for (0..op.ranks[i]) |_| {
-                    result *= scale;
+                switch (op.ranks[i]) {
+                    .derivative => result *= scale,
+                    .second_derivative => result *= scale * scale,
+                    else => {},
                 }
             }
 
@@ -473,18 +477,16 @@ pub fn NodeSpace(comptime N: usize, comptime M: usize) type {
             // Check field satisfies isAnalyticField trait.
             traits.checkAnalyticField(N, Field);
 
-            // Central Vertex
-            const central = toSigned(vertex);
             // Accumulate result
             var result: f64 = 0.0;
 
-            const stencil_sizes = op.stencilSizes();
-            const stencils = op.stencils();
+            const stencil_sizes = comptime op.stencilSizes();
+            const stencils = comptime op.stencils();
 
             comptime var indices = IndexSpace.fromSize(stencil_sizes).cartesianIndices();
 
-            inline while (indices.next()) |index| {
-                const sindex = toSigned(index);
+            inline while (comptime indices.next()) |index| {
+                const sindex = comptime toSigned(index);
 
                 comptime var offset: [N]isize = undefined;
                 comptime var coef: f64 = 1.0;
@@ -499,8 +501,8 @@ pub fn NodeSpace(comptime N: usize, comptime M: usize) type {
                     continue;
                 }
 
-                const node = IndexMixin.addSigned(central, offset);
-                result += coef * field.eval(self.nodePosition(node));
+                const node = IndexMixin.addSigned(vertex, offset);
+                result += coef * field.eval(self.position(node));
             }
 
             // Covariantly transform result
@@ -508,8 +510,10 @@ pub fn NodeSpace(comptime N: usize, comptime M: usize) type {
                 var scale: f64 = @floatFromInt(self.size[i]);
                 scale /= self.bounds.size[i];
 
-                inline for (0..op.ranks[i]) |_| {
-                    result *= scale;
+                switch (op.ranks[i]) {
+                    .derivative => result *= scale,
+                    .second_derivative => result *= scale * scale,
+                    else => {},
                 }
             }
 
@@ -521,20 +525,15 @@ pub fn NodeSpace(comptime N: usize, comptime M: usize) type {
             comptime var coef: f64 = 1.0;
 
             comptime {
-                for (0..N) |axis| {
-                    const stencil = switch (op.ranks[axis]) {
-                        0 => Stencils.value(op.left[axis], op.right[axis]),
-                        1 => Stencils.derivative(op.left[axis], op.right[axis]),
-                        2 => Stencils.secondDerivative(op.left[axis], op.right[axis]),
-                        else => @compileError("Only ranks <= 2 are supported."),
-                    };
+                const stencils = op.stencils();
 
-                    assert(index[axis] >= -op.left[axis]);
+                for (0..N) |axis| {
+                    assert(index[axis] >= -@as(isize, @intCast(op.left[axis])));
                     assert(index[axis] <= op.right[axis]);
 
                     const i: usize = @intCast(index[axis] + op.left[axis]);
 
-                    coef *= stencil[i];
+                    coef *= stencils[axis][i];
                 }
             }
 
@@ -545,8 +544,10 @@ pub fn NodeSpace(comptime N: usize, comptime M: usize) type {
                 var scale: f64 = @floatFromInt(self.size[i]);
                 scale /= self.bounds.size[i];
 
-                inline for (0..op.ranks[i]) |_| {
-                    result *= scale;
+                switch (op.ranks[i]) {
+                    .derivative => result *= scale,
+                    .second_derivative => result *= scale * scale,
+                    else => {},
                 }
             }
 

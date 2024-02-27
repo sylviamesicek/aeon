@@ -105,6 +105,8 @@ pub fn Region(comptime N: usize) type {
 
                     cursor += 1;
                 }
+
+                return result;
             }
         }
 
