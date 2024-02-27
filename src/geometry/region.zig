@@ -86,8 +86,9 @@ pub fn Region(comptime N: usize) type {
         }
 
         pub fn adjacentFaces(comptime self: Self) [self.adjacency()]FaceIndex {
+            comptime var result: [self.adjacency()]FaceIndex = undefined;
+
             comptime {
-                var result: [self.adjacency()]FaceIndex = undefined;
                 var cursor: usize = 0;
 
                 for (0..N) |axis| {
@@ -105,9 +106,9 @@ pub fn Region(comptime N: usize) type {
 
                     cursor += 1;
                 }
-
-                return result;
             }
+
+            return result;
         }
 
         pub fn faceFromAxis(self: Self, axis: usize) FaceIndex {

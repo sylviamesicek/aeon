@@ -13,7 +13,6 @@ const io = @import("io/io.zig");
 pub const DataOut = io.DataOut;
 
 // Propogate testing
-
 test {
     _ = basis;
     _ = common;

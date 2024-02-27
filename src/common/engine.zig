@@ -15,6 +15,7 @@ pub fn Engine(comptime N: usize, comptime M: usize, comptime O: usize) type {
         range: Range,
 
         const NodeSpace = nodes.NodeSpace(N, M);
+        const NodeOperatorRank = nodes.NodeOperatorRank;
         const Operator = nodes.NodeOperator(N);
 
         const RealBox = geometry.RealBox(N);
@@ -25,11 +26,23 @@ pub fn Engine(comptime N: usize, comptime M: usize, comptime O: usize) type {
         }
 
         pub fn eval(self: @This(), comptime ranks: [N]usize, field: []const f64) f64 {
-            return self.space.eval(Operator.centered(O, ranks), self.node, field[self.range.start..self.range.end]);
+            comptime var rnks: [N]NodeOperatorRank = undefined;
+
+            inline for (0..N) |axis| {
+                rnks[axis] = comptime NodeOperatorRank.fromDerivative(ranks[axis]);
+            }
+
+            return self.space.eval(Operator.centered(O, rnks), self.node, field[self.range.start..self.range.end]);
         }
 
         pub fn evalDiag(self: @This(), comptime ranks: [N]usize) f64 {
-            return self.space.evalCoef(Operator.centered(O, ranks), [1]isize{0} ** N);
+            comptime var rnks: [N]NodeOperatorRank = undefined;
+
+            inline for (0..N) |axis| {
+                rnks[axis] = comptime NodeOperatorRank.fromDerivative(ranks[axis]);
+            }
+
+            return self.space.evalCoef(Operator.centered(O, rnks), [1]isize{0} ** N);
         }
 
         pub fn value(self: @This(), field: []const f64) f64 {

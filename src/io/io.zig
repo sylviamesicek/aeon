@@ -119,7 +119,7 @@ pub fn DataOut(comptime N: usize, comptime M: usize) type {
             }
 
             for (0..manager.numBlocks()) |block_id| {
-                const block = manager.blockFromId(block_id);
+                const block = manager.blocks.get(block_id);
 
                 var size: usize = 1;
 
@@ -224,7 +224,7 @@ pub fn DataOut(comptime N: usize, comptime M: usize) type {
                         var points = point_space.cartesianIndices();
 
                         while (points.next()) |point| {
-                            const position = node_space.vertexPosition(IndexMixin.toSigned(IndexMixin.add(origin, point)));
+                            const position = node_space.position(IndexMixin.toSigned(IndexMixin.add(origin, point)));
                             for (0..N) |i| {
                                 try positions.append(allocator, position[i]);
                             }

@@ -131,7 +131,7 @@ pub fn NodeManager(comptime N: usize, comptime M: usize) type {
 
             // *****************************
             // Compute block cell maps
-            try self.buildBlockCellMaps(mesh);
+            self.buildBlockCellMaps(mesh);
 
             // ********************************
             // Compute block to nodes map
@@ -212,7 +212,7 @@ pub fn NodeManager(comptime N: usize, comptime M: usize) type {
                     if (leaf_count == cell_total) {
                         // Skip block if it is a leaf
                         continue;
-                    } else if (leaf_count == 0 and block.refinement + 1 < self.cell_permute.maxRefinement()) {
+                    } else if (leaf_count == 0 and block.refinement + 1 < self.cell_permute.numLevels()) {
                         // Accept
                         try blocks.append(allocator, .{
                             .boundary = block.boundary,
@@ -375,7 +375,7 @@ pub fn NodeManager(comptime N: usize, comptime M: usize) type {
 
         /// Computes the block to node offset map.
         fn buildBlockToNodes(self: *@This()) !void {
-            try self.block_to_nodes.resize(self.gpa, self.blocks.len + 1);
+            try self.block_to_nodes.resize(self.gpa, self.blocks.len);
 
             var offset: usize = 0;
             self.block_to_nodes.set(0, offset);
@@ -434,7 +434,7 @@ pub fn NodeManager(comptime N: usize, comptime M: usize) type {
         }
 
         /// Returns the number of vertices per cell along each axis, including vertices which overlap with other cells.
-        pub fn verticesPerCell(self: *const @This()) []usize {
+        pub fn verticesPerCell(self: *const @This()) [N]usize {
             var result = self.cell_size;
 
             for (0..N) |i| {

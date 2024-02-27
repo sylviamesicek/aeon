@@ -17,7 +17,7 @@ const utils = @import("../utils.zig");
 
 const BoundaryEngine = common.BoundaryEngine;
 const Engine = common.Engine;
-const checkOperator = common.checkFunction;
+const checkOperator = common.checkOperator;
 const checkFunction = common.checkFunction;
 const checkBoundarySet = common.checkBoundarySet;
 
@@ -77,10 +77,10 @@ pub fn NodeWorker(comptime N: usize, comptime M: usize) type {
                 const block_field = manager.blockNodes(block_id, field);
                 const node_space = self.blockNodeSpace(block_id);
 
-                var cells = node_space.cellSpace().cartesianIndices();
+                var nodes = node_space.nodes(0);
 
-                while (cells.next()) |cell| {
-                    const v = node_space.value(cell, block_field);
+                while (nodes.next()) |node| {
+                    const v = node_space.value(node, block_field);
                     result += v * v;
                 }
             }
@@ -165,7 +165,7 @@ pub fn NodeWorker(comptime N: usize, comptime M: usize) type {
         // *********************************
 
         pub fn numBaseNodes(self: @This()) usize {
-            return IndexSpace.fromSize(self.manager.cell_size).total();
+            return IndexSpace.fromSize(self.manager.verticesPerCell()).total();
         }
 
         pub fn packBase(self: @This(), dest: []f64, src: []const f64) void {
@@ -175,11 +175,11 @@ pub fn NodeWorker(comptime N: usize, comptime M: usize) type {
             const block_src = self.manager.blockNodes(0, src);
             const node_space = self.blockNodeSpace(0);
 
-            var vertices = node_space.vertexSpace().cartesianIndices();
+            var vertices = node_space.nodes(0);
             var linear: usize = 0;
 
             while (vertices.next()) |vertex| : (linear += 1) {
-                const v = node_space.vertexValue(vertex, block_src);
+                const v = node_space.value(vertex, block_src);
                 dest[linear] = v;
             }
         }
@@ -191,11 +191,11 @@ pub fn NodeWorker(comptime N: usize, comptime M: usize) type {
             const block_dest = self.manager.blockNodes(0, dest);
             const node_space = self.blockNodeSpace(0);
 
-            var vertices = node_space.vertexSpace().cartesianIndices();
+            var vertices = node_space.nodes(0);
             var linear: usize = 0;
 
             while (vertices.next()) |vertex| : (linear += 1) {
-                node_space.setVertexValue(vertex, block_dest, src[linear]);
+                node_space.setValue(vertex, block_dest, src[linear]);
             }
         }
 
@@ -416,7 +416,7 @@ pub fn NodeWorker(comptime N: usize, comptime M: usize) type {
             const origin = self.manager.blockNodeParentOrigin(block_id);
             const size = self.manager.blockNodeParentSize(block_id);
 
-            const indices = IndexSpace.fromSize(size).cartesianIndices();
+            var indices = IndexSpace.fromSize(size).cartesianIndices();
 
             while (indices.next()) |offset| {
                 const node = toSigned(IndexMixin.add(origin, offset));
@@ -465,7 +465,7 @@ pub fn NodeWorker(comptime N: usize, comptime M: usize) type {
             var nodes = node_space.nodes(0);
 
             while (nodes.next()) |node| {
-                const engine = Engine{
+                const engine = Engine(N, M, Oper.order){
                     .space = node_space,
                     .node = node,
                     .range = block_range,
@@ -507,7 +507,7 @@ pub fn NodeWorker(comptime N: usize, comptime M: usize) type {
             const parent = self.manager.blocks.items(.parent)[block_id];
             const parent_field = self.manager.blockNodes(parent, field);
             const parent_node_space = self.blockNodeSpace(parent);
-            const origin = refined(self.manager.blockNodeParentOrigin(block_id));
+            const origin = toSigned(refined(self.manager.blockNodeParentOrigin(block_id)));
 
             var node_indices = block_node_space.nodes(0);
 
@@ -515,7 +515,7 @@ pub fn NodeWorker(comptime N: usize, comptime M: usize) type {
                 const node = addSigned(origin, offset);
 
                 const val = parent_node_space.prolong(O, node, parent_field);
-                block_node_space.setValue(node, block_field, val);
+                block_node_space.setValue(offset, block_field, val);
             }
         }
 
@@ -547,7 +547,7 @@ pub fn NodeWorker(comptime N: usize, comptime M: usize) type {
             const origin = self.manager.blockNodeParentOrigin(block_id);
             const size = self.manager.blockNodeParentSize(block_id);
 
-            const indices = IndexSpace.fromSize(size).cartesianIndices();
+            var indices = IndexSpace.fromSize(size).cartesianIndices();
 
             while (indices.next()) |offset| {
                 const node = toSigned(IndexMixin.add(origin, offset));
@@ -635,7 +635,7 @@ pub fn NodeWorker(comptime N: usize, comptime M: usize) type {
         pub fn fillLevelGhostNodes(self: @This(), comptime O: usize, level: usize, set: anytype, field: []f64) void {
             checkBoundarySet(N, @TypeOf(set));
 
-            const manager = self.worker.manager;
+            const manager = self.manager;
             assert(field.len == manager.numNodes());
 
             // Short circuit in the case of level = 0

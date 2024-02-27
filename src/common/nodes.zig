@@ -21,6 +21,15 @@ pub const NodeOperatorRank = union(enum) {
     derivative,
     second_derivative,
     extrapolate: isize,
+
+    pub fn fromDerivative(rank: usize) NodeOperatorRank {
+        return switch (rank) {
+            0 => .value,
+            1 => .derivative,
+            2 => .second_derivative,
+            else => std.debug.panic("Rank > 2 is unsupported.", .{}),
+        };
+    }
 };
 
 /// Represents an N-dimensional stencil product approximating some combination of
@@ -278,9 +287,15 @@ pub fn NodeSpace(comptime N: usize, comptime M: usize) type {
                 parity.setValue(axis, @mod(supernode[axis], 2) == 1);
             }
 
-            return switch (parity) {
-                inline else => |val| self.prolongParity(O, val, supernode, field),
-            };
+            inline for (comptime AxisMask.enumerate()) |cparity| {
+                if (parity.toLinear() == cparity.toLinear()) {
+                    return self.prolongParity(O, cparity, supernode, field);
+                }
+            }
+
+            assert(false);
+
+            return 0.0;
         }
 
         /// Prolong values to the given supervertex assuming

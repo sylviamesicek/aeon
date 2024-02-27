@@ -160,7 +160,7 @@ pub fn MultigridMethod(comptime N: usize, comptime M: usize, comptime BaseSolver
 
                 // try buf.flush();
 
-                // std.debug.print("Iteration {}, Residual {}\n", .{ iteration, nres });
+                std.debug.print("Iteration {}, Residual {}\n", .{ iteration, nres });
             }
         }
 
@@ -221,7 +221,7 @@ pub fn MultigridMethod(comptime N: usize, comptime M: usize, comptime BaseSolver
                         worker.unpackBase(sys, sys_base);
                         worker.unpackBase(rhs, rhs_base);
 
-                        worker.fillLevelGhostNodes(O, 0, self.bound, sys);
+                        worker.fillLevelGhostNodes(O, 0, self.set, sys);
 
                         return;
                     }
@@ -230,7 +230,7 @@ pub fn MultigridMethod(comptime N: usize, comptime M: usize, comptime BaseSolver
                     // Presmoothing
 
                     for (0..self.method.config.presmooth) |_| {
-                        worker.fillLevelGhostNodes(O, level, self.bound, sys);
+                        worker.fillLevelGhostNodes(O, level, self.set, sys);
                         worker.smoothLevel(level, scr, self.oper, sys, rhs);
                         self.worker.copyLevel(level, sys, scr);
                     }
@@ -238,7 +238,7 @@ pub fn MultigridMethod(comptime N: usize, comptime M: usize, comptime BaseSolver
                     // ********************************
                     // Restrict Solution
 
-                    worker.fillLevelGhostNodes(1, level, self.bound, sys);
+                    worker.fillLevelGhostNodes(O, level, self.set, sys);
                     worker.restrictLevel(1, level, sys);
 
                     // worker.fillLevelGhostNodes(level, self.bound, sys);
@@ -251,7 +251,7 @@ pub fn MultigridMethod(comptime N: usize, comptime M: usize, comptime BaseSolver
 
                     // self.worker.copyLevel(level - 1, old, scr);
 
-                    worker.fillLevelGhostNodes(O, level - 1, self.bound, sys);
+                    worker.fillLevelGhostNodes(O, level - 1, self.set, sys);
                     self.worker.copyLevel(level - 1, old, sys);
 
                     // ********************************
@@ -281,12 +281,12 @@ pub fn MultigridMethod(comptime N: usize, comptime M: usize, comptime BaseSolver
                     // Post smooth
 
                     for (0..self.method.config.postsmooth) |_| {
-                        worker.fillLevelGhostNodes(O, level, self.bound, sys);
+                        worker.fillLevelGhostNodes(O, level, self.set, sys);
                         worker.smoothLevel(level, scr, self.oper, sys, rhs);
                         self.worker.copyLevel(level, sys, scr);
                     }
 
-                    worker.fillLevelGhostNodes(O, level, self.bound, sys);
+                    worker.fillLevelGhostNodes(O, level, self.set, sys);
                 }
             };
         }

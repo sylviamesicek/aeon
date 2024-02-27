@@ -25,11 +25,11 @@ pub fn build(b: *std.Build) void {
     // *******************************
 
     const examples = [_][]const u8{
-        "adaptive",
-        "evolution",
-        "evolution2",
+        // "adaptive",
+        // "evolution",
+        // "evolution2",
         "poisson",
-        "test",
+        // "test",
     };
 
     inline for (examples) |example| {

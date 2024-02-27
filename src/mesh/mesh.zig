@@ -12,6 +12,7 @@ const multigrid = @import("multigrid.zig");
 const permute = @import("permute.zig");
 const worker = @import("worker.zig");
 
+pub const MultigridMethod = multigrid.MultigridMethod;
 pub const NodeManager = manager.NodeManager;
 pub const NodeWorker = worker.NodeWorker;
 
@@ -26,9 +27,9 @@ pub fn Mesh(comptime N: usize) type {
         /// Internal Allocator
         gpa: Allocator,
         /// Physical Bounds of the mesh.
-        bounds: RealBox(N),
+        bounds: RealBox,
         /// The cells that make up this mesh
-        cells: MultiArrayList(Cell(N)),
+        cells: MultiArrayList(Cell),
         /// A set of offsets for each level of the mesh
         /// to the corresponding cells.
         levels: RangeMap,
@@ -69,7 +70,7 @@ pub fn Mesh(comptime N: usize) type {
 
         /// Creates a new mesh on a rectangular domain.
         pub fn init(allocator: Allocator, bounds: RealBox) !Self {
-            var cells: MultiArrayList(Cell(N)) = .{};
+            var cells: MultiArrayList(Cell) = .{};
             errdefer cells.deinit(allocator);
 
             try cells.append(allocator, .{
@@ -338,7 +339,7 @@ pub fn Mesh(comptime N: usize) type {
             }
 
             // Transfer all data to a scratch buffer
-            const scratch = try self.cells.clone(allocator);
+            var scratch = try self.cells.clone(allocator);
             defer scratch.deinit(allocator);
             // Cache pointers
             const cells = scratch.slice();

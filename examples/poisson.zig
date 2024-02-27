@@ -7,14 +7,13 @@ const aeon = @import("aeon");
 const common = aeon.common;
 const geometry = aeon.geometry;
 const lac = aeon.lac;
-const tree = aeon.tree;
+const mesh_ = aeon.mesh;
 
 const PoissonEquation = struct {
     const N = 2;
     const M = 2;
 
     const BoundaryKind = common.BoundaryKind;
-    const Robin = common.Robin;
 
     const DataOut = aeon.DataOut(N, M);
 
@@ -22,10 +21,10 @@ const PoissonEquation = struct {
     const System = common.System(Tag);
     const SystemConst = common.SystemConst(Tag);
 
-    const MultigridMethod = tree.MultigridMethod(N, M, M, BiCGStabSolver);
-    const NodeManager = tree.NodeManager(N, M);
-    const NodeWorker = tree.NodeWorker(N, M);
-    const TreeMesh = tree.TreeMesh(N);
+    const MultigridMethod = mesh_.MultigridMethod(N, M, BiCGStabSolver);
+    const NodeManager = mesh_.NodeManager(N, M);
+    const NodeWorker = mesh_.NodeWorker(N, M);
+    const Mesh = mesh_.Mesh(N);
 
     const RealBox = geometry.RealBox(N);
     const FaceIndex = geometry.FaceIndex(N);
@@ -39,49 +38,55 @@ const PoissonEquation = struct {
     pub const Source = struct {
         amplitude: f64,
 
-        pub fn project(self: Source, engine: Engine) f64 {
+        pub const order: usize = M;
+
+        pub fn eval(self: Source, engine: Engine) f64 {
             const pos = engine.position();
             const x = pos[0];
             const y = pos[1];
 
-            // return self.amplitude * 2 * pi * pi * @sin(pi * x) * @sin(pi * y);
+            return self.amplitude * 2 * pi * pi * @sin(pi * x) * @sin(pi * y);
 
-            const term1 = (y * @sin(pi * y)) * (x * pi * pi * @sin(pi * x) - 2 * pi * @cos(pi * x));
-            const term2 = (x * @sin(pi * x)) * (y * pi * pi * @sin(pi * y) - 2 * pi * @cos(pi * y));
+            // const term1 = (y * @sin(pi * y)) * (x * pi * pi * @sin(pi * x) - 2 * pi * @cos(pi * x));
+            // const term2 = (x * @sin(pi * x)) * (y * pi * pi * @sin(pi * y) - 2 * pi * @cos(pi * y));
 
-            return self.amplitude * (term1 + term2);
+            // return self.amplitude * (term1 + term2);
         }
     };
 
     pub const Solution = struct {
         amplitude: f64,
 
-        pub fn project(self: Solution, engine: Engine) f64 {
+        pub const order: usize = M;
+
+        pub fn eval(self: Solution, engine: Engine) f64 {
             const pos = engine.position();
             const x = pos[0];
             const y = pos[1];
 
-            return self.amplitude * x * y * @sin(pi * x) * @sin(pi * y);
+            // return self.amplitude * x * y * @sin(pi * x) * @sin(pi * y);
 
-            // return self.amplitude * @sin(pi * x) * @sin(pi * y);
+            return self.amplitude * @sin(pi * x) * @sin(pi * y);
         }
     };
 
-    pub const Boundary = struct {
-        pub fn kind(face: FaceIndex) BoundaryKind {
-            _ = face;
-            return .robin;
+    pub const BoundarySet = struct {
+        pub const card: usize = 1;
+
+        pub fn boundaryIdFromFace(_: FaceIndex) usize {
+            return 0;
         }
 
-        pub fn robin(self: Boundary, pos: [N]f64, face: FaceIndex) Robin {
-            _ = face;
-            _ = pos;
-            _ = self;
-            return Robin.diritchlet(0.0);
+        pub const BoundaryType0: type = common.OddBoundary;
+
+        pub fn boundary0(_: @This()) BoundaryType0 {
+            return .{};
         }
     };
 
     pub const PoissonOperator = struct {
+        pub const order: usize = M;
+
         pub fn apply(
             _: PoissonOperator,
             engine: Engine,
@@ -110,7 +115,7 @@ const PoissonEquation = struct {
     fn run(allocator: Allocator) !void {
         std.debug.print("Running Poisson Elliptic Solver\n", .{});
 
-        var mesh = try TreeMesh.init(allocator, .{
+        var mesh = try Mesh.init(allocator, .{
             .origin = [2]f64{ 0.0, 0.0 },
             .size = [2]f64{ 1.0, 1.0 },
         });
@@ -125,30 +130,30 @@ const PoissonEquation = struct {
             try mesh.refineGlobal(allocator);
         }
 
-        // Locally refine once
-        for (0..1) |r| {
-            std.debug.print("Running Local Refinement {}\n", .{r});
+        // // Locally refine once
+        // for (0..1) |r| {
+        //     std.debug.print("Running Local Refinement {}\n", .{r});
 
-            const flags = try allocator.alloc(bool, mesh.numCells());
-            defer allocator.free(flags);
+        //     const flags = try allocator.alloc(bool, mesh.numCells());
+        //     defer allocator.free(flags);
 
-            @memset(flags, false);
+        //     @memset(flags, false);
 
-            for (0..mesh.cells.len) |cell_id| {
-                const bounds: RealBox = mesh.cells.items(.bounds)[cell_id];
-                const center = bounds.center();
+        //     for (0..mesh.cells.len) |cell_id| {
+        //         const bounds: RealBox = mesh.cells.items(.bounds)[cell_id];
+        //         const center = bounds.center();
 
-                const radius = @sqrt((center[0] - 0.5) * (center[0] - 0.5) + (center[1] - 0.5) * (center[1] - 0.5));
+        //         const radius = @sqrt((center[0] - 0.5) * (center[0] - 0.5) + (center[1] - 0.5) * (center[1] - 0.5));
 
-                if (radius < 0.33) {
-                    flags[cell_id] = true;
-                }
-            }
+        //         if (radius < 0.33) {
+        //             flags[cell_id] = true;
+        //         }
+        //     }
 
-            mesh.smoothRefineFlags(flags);
+        //     mesh.smoothRefineFlags(flags);
 
-            try mesh.refine(allocator, flags);
-        }
+        //     try mesh.refine(allocator, flags);
+        // }
 
         try manager.build(allocator, &mesh);
 
@@ -176,9 +181,9 @@ const PoissonEquation = struct {
         defer worker.deinit();
 
         // Project Source
-        worker.order(M).project(Source{ .amplitude = 1.0 }, sys.field(.source));
+        worker.project(Source{ .amplitude = 1.0 }, sys.field(.source));
         // Project Solution
-        worker.order(M).project(Solution{ .amplitude = 1.0 }, sys.field(.exact));
+        worker.project(Solution{ .amplitude = 1.0 }, sys.field(.exact));
         // Set initial guess
         @memset(sys.field(.approx), 0.0);
 
@@ -200,7 +205,7 @@ const PoissonEquation = struct {
         try method.solve(
             &worker,
             PoissonOperator{},
-            Boundary{},
+            BoundarySet{},
             sys.field(.approx),
             sys.field(.source),
         );
