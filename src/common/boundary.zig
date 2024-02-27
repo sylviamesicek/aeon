@@ -126,22 +126,22 @@ pub fn BoundaryEngine(comptime N: usize, comptime M: usize, comptime Set: type) 
                     // This is the central node, off of which we are filling ghost nodes.
                     const node = IndexMixin.addSigned(off, IndexMixin.toSigned(cell));
 
-                    // if (comptime kind == .symmetric) {
-                    //     var is_odd = false;
+                    if (comptime kind == .symmetric) {
+                        var is_odd = false;
 
-                    //     inline for (comptime mregion.adjacentFaces()) |face| {
-                    //         const boundary = traits.boundaryFromId(self.set, Set.boundaryIdFromFace(face));
+                        inline for (comptime mregion.adjacentFaces()) |face| {
+                            const boundary = traits.boundaryFromId(self.set, Set.boundaryIdFromFace(face));
 
-                    //         // Flip sign if we have odd polarity
-                    //         if (boundary.polarity == .odd) {
-                    //             is_odd = true;
-                    //         }
-                    //     }
+                            // Flip sign if we have odd polarity
+                            if (boundary.polarity == .odd) {
+                                is_odd = true;
+                            }
+                        }
 
-                    //     if (is_odd) {
-                    //         self.space.setValue(node, field[self.range.start..self.range.end], 0.0);
-                    //     }
-                    // }
+                        if (is_odd) {
+                            self.space.setValue(node, field[self.range.start..self.range.end], 0.0);
+                        }
+                    }
 
                     // Loop over extends
                     comptime var extents = mregion.extentOffsets(O);

@@ -192,10 +192,10 @@ const PoissonEquation = struct {
         var method = try MultigridMethod.init(
             allocator,
             manager.numNodes(),
-            BiCGStabSolver.new(10000, 10e-12),
+            BiCGStabSolver.new(10000, 10e-15),
             .{
                 .max_iters = 20,
-                .tolerance = 10e-10,
+                .tolerance = 10e-11,
                 .presmooth = 5,
                 .postsmooth = 5,
             },

@@ -473,7 +473,7 @@ pub fn NodeSpace(comptime N: usize, comptime M: usize) type {
 
             // Covariantly transform result
             inline for (0..N) |i| {
-                var scale: f64 = @floatFromInt(self.size[i]);
+                var scale: f64 = @floatFromInt(self.size[i] - 1);
                 scale /= self.bounds.size[i];
 
                 switch (op.ranks[i]) {
@@ -522,7 +522,7 @@ pub fn NodeSpace(comptime N: usize, comptime M: usize) type {
 
             // Covariantly transform result
             inline for (0..N) |i| {
-                var scale: f64 = @floatFromInt(self.size[i]);
+                var scale: f64 = @floatFromInt(self.size[i] - 1);
                 scale /= self.bounds.size[i];
 
                 switch (op.ranks[i]) {
@@ -556,7 +556,7 @@ pub fn NodeSpace(comptime N: usize, comptime M: usize) type {
 
             // Covariantly transform result
             inline for (0..N) |i| {
-                var scale: f64 = @floatFromInt(self.size[i]);
+                var scale: f64 = @floatFromInt(self.size[i] - 1);
                 scale /= self.bounds.size[i];
 
                 switch (op.ranks[i]) {
@@ -608,47 +608,46 @@ test "node space iteration" {
     }
 }
 
-// test "node space restriction and prolongation" {
-//     const expect = std.testing.expect;
-//     const allocator = std.testing.allocator;
+test "node space restriction and prolongation" {
+    const expect = std.testing.expect;
+    const allocator = std.testing.allocator;
 
-//     const N = 2;
-//     const M = 1;
-//     const Nodes = NodeSpace(N, M);
-//     const RealBox = geometry.RealBox(N);
+    const N = 2;
+    const M = 1;
+    const Nodes = NodeSpace(N, M);
+    const RealBox = geometry.RealBox(N);
 
-//     const space: Nodes = .{ .size = .{ 20, 20 }, .bounds = RealBox.unit };
+    const space: Nodes = .{ .size = .{ 20, 20 }, .bounds = RealBox.unit };
 
-//     const function = try allocator.alloc(f64, space.numNodes());
-//     defer allocator.free(function);
+    const function = try allocator.alloc(f64, space.numNodes());
+    defer allocator.free(function);
 
-//     // **************************
-//     // Set function values
+    // **************************
+    // Set function values
 
-//     var nodes = space.nodes(M);
+    var nodes = space.nodes(M);
 
-//     while (nodes.next()) |node| {
-//         const x: f64 = @floatFromInt(node[0]);
-//         const y: f64 = @floatFromInt(node[1]);
-//         space.setNodeValue(node, function, x + y);
-//     }
+    while (nodes.next()) |node| {
+        const x: f64 = @floatFromInt(node[0]);
+        const y: f64 = @floatFromInt(node[1]);
+        space.setValue(node, function, x + y);
+    }
 
-//     // **************************
-//     // Test restriction
+    // **************************
+    // Test restriction
 
-//     const order = space.order(M);
+    try expect(space.restrictFull(1, .{ 0, 0 }, function) == 0.0);
+    try expect(space.restrictFull(1, .{ 1, 1 }, function) == 4.0);
+    try expect(space.restrictFull(1, .{ 2, 2 }, function) == 8.0);
 
-//     try expect(order.restrict(.{ 0, 0 }, function) == 1.0);
-//     try expect(order.restrict(.{ 1, 1 }, function) == 5.0);
-//     try expect(order.restrict(.{ 2, 2 }, function) == 9.0);
+    // **************************
+    // Test prolongation
 
-//     // **************************
-//     // Test prolongation
-
-//     try expect(order.prolongCell(.{ 0, 0 }, function) == -0.5);
-//     try expect(order.prolongCell(.{ 1, 1 }, function) == 0.5);
-//     try expect(order.prolongCell(.{ 2, 2 }, function) == 1.5);
-// }
+    std.debug.print("{}\n", .{space.restrictFull(1, .{ 2, 2 }, function)});
+    // try expect(order.prolongCell(.{ 0, 0 }, function) == -0.5);
+    // try expect(order.prolongCell(.{ 1, 1 }, function) == 0.5);
+    // try expect(order.prolongCell(.{ 2, 2 }, function) == 1.5);
+}
 
 // test "node space smoothing" {
 //     const expect = std.testing.expect;
