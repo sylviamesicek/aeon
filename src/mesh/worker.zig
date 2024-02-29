@@ -88,6 +88,30 @@ pub fn NodeWorker(comptime N: usize, comptime M: usize) type {
             return @sqrt(result);
         }
 
+        pub fn normLevel(self: @This(), level: usize, field: []const f64) f64 {
+            const manager = self.manager;
+
+            assert(field.len == manager.numNodes());
+
+            var result: f64 = 0.0;
+
+            const blocks = manager.level_to_blocks.range(level);
+
+            for (blocks.start..blocks.end) |block_id| {
+                const block_field = manager.blockNodes(block_id, field);
+                const node_space = self.blockNodeSpace(block_id);
+
+                var nodes = node_space.nodes(0);
+
+                while (nodes.next()) |node| {
+                    const v = node_space.value(node, block_field);
+                    result += v * v;
+                }
+            }
+
+            return @sqrt(result);
+        }
+
         pub fn normScaled(self: @This(), field: []const f64) f64 {
             const dimension: f64 = @floatFromInt(field.len);
             return self.norm(field) / @sqrt(dimension);

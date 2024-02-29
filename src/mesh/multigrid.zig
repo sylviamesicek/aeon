@@ -122,10 +122,29 @@ pub fn MultigridMethod(comptime N: usize, comptime M: usize, comptime BaseSolver
                 // Iterate
                 try recursive.iterate(levels - 1, x);
 
+                // for (0..worker.mesh.numLevels()) |rev_id| {
+                //     const id = worker.mesh.numLevels() - 1 - rev_id;
+                //     worker.restrictLevel(0, id, x);
+                // }
+
                 // Check if residual is less than tolerance.
                 worker.residual(self.scr, self.rhs, operator, x);
 
                 const nres = worker.norm(self.scr);
+
+                std.debug.print("Iteration {}, Residual {}\n", .{ iteration, nres });
+
+                for (0..worker.mesh.numLevels()) |i| {
+                    std.debug.print("    Level: {}, Residual {}\n", .{ i, worker.normLevel(i, self.scr) });
+                }
+
+                // worker.residual(self.scr, b, operator, x);
+
+                // std.debug.print("Iteration {}, Residual {}\n", .{ iteration, worker.norm(self.scr) });
+
+                // for (0..worker.mesh.numLevels()) |i| {
+                //     std.debug.print("    Level: {}, Residual {}\n", .{ i, worker.normLevel(i, self.scr) });
+                // }
 
                 if (nres <= tol) {
                     break;
@@ -160,7 +179,6 @@ pub fn MultigridMethod(comptime N: usize, comptime M: usize, comptime BaseSolver
 
                 // try buf.flush();
 
-                std.debug.print("Iteration {}, Residual {}\n", .{ iteration, nres });
             }
         }
 
@@ -239,7 +257,7 @@ pub fn MultigridMethod(comptime N: usize, comptime M: usize, comptime BaseSolver
                     // Restrict Solution
 
                     worker.fillLevelGhostNodes(O, level, self.set, sys);
-                    worker.restrictLevel(1, level, sys);
+                    worker.restrictLevel(0, level, sys);
 
                     // worker.fillLevelGhostNodes(level, self.bound, sys);
 
@@ -258,7 +276,8 @@ pub fn MultigridMethod(comptime N: usize, comptime M: usize, comptime BaseSolver
                     // Right Hand Side (Tau Correction)
 
                     worker.residualLevel(level, scr, rhs, self.oper, sys);
-                    worker.restrictLevel(0, level, scr);
+                    worker.fillLevelGhostNodes(O, level, self.set, scr);
+                    worker.restrictLevel(1, level, scr);
                     worker.tauCorrectLevel(level, rhs, scr, self.oper, sys);
 
                     // ********************************
@@ -273,7 +292,7 @@ pub fn MultigridMethod(comptime N: usize, comptime M: usize, comptime BaseSolver
                     self.worker.copyLevel(level - 1, scr, sys);
                     self.worker.subAssignLevel(level - 1, scr, old);
 
-                    worker.prolongLevel(O, level, scr);
+                    worker.prolongLevel(1, level, scr);
 
                     self.worker.addAssignLevel(level, sys, scr);
 

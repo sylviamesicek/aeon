@@ -209,7 +209,11 @@ pub fn DataOut(comptime N: usize, comptime M: usize) type {
                         continue;
                     }
 
-                    // This is a leaf
+                    // Check if this cell is visible.
+                    if (!mesh.isLeaf(cell_id) and cell_level + 1 < levels) {
+                        continue;
+                    }
+
                     const origin = IndexMixin.mul(mcell, manager.cell_size);
 
                     // Append Point Data

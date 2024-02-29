@@ -107,6 +107,7 @@ const PoissonEquation = struct {
         approx,
         exact,
         err,
+        residual,
         source,
     };
 
@@ -215,23 +216,48 @@ const PoissonEquation = struct {
             sys.field(.err)[i] = sys.field(.approx)[i] - sys.field(.exact)[i];
         }
 
-        // Output result
-        std.debug.print("Writing Solution To File\n", .{});
+        worker.residual(sys.field(.residual), sys.field(.source), PoissonOperator{}, sys.field(.approx));
 
-        const file = try std.fs.cwd().createFile("output/poisson.vtu", .{});
-        defer file.close();
+        {
+            // Output result
+            std.debug.print("Writing Solution To File\n", .{});
 
-        var buf = std.io.bufferedWriter(file.writer());
+            const file = try std.fs.cwd().createFile("output/poisson.vtu", .{});
+            defer file.close();
 
-        try DataOut.writeVtk(
-            Tag,
-            allocator,
-            &worker,
-            sys.toConst(),
-            buf.writer(),
-        );
+            var buf = std.io.bufferedWriter(file.writer());
 
-        try buf.flush();
+            try DataOut.writeVtk(
+                Tag,
+                allocator,
+                &worker,
+                sys.toConst(),
+                buf.writer(),
+            );
+
+            try buf.flush();
+        }
+
+        {
+            // Output result
+            std.debug.print("Writing Solution To File\n", .{});
+
+            const file = try std.fs.cwd().createFile("output/poisson-cover.vtu", .{});
+            defer file.close();
+
+            var buf = std.io.bufferedWriter(file.writer());
+
+            try DataOut.writeLevelsVtk(
+                Tag,
+                allocator,
+                &worker,
+                mesh.numLevels() - 1,
+                sys.toConst(),
+                buf.writer(),
+            );
+
+            try buf.flush();
+        }
     }
 };
 
