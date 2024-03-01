@@ -120,7 +120,7 @@ pub fn BoundaryEngine(comptime N: usize, comptime M: usize, comptime Set: type) 
 
             while (inner_face_cells.next()) |cell| {
                 // Some functional patterns perhaps?
-                comptime var offsets = oregion.extentOffsets(O);
+                comptime var offsets = oregion.extentOffsets(M);
 
                 inline while (comptime offsets.next()) |off| {
                     // This is the central node, off of which we are filling ghost nodes.
@@ -144,7 +144,7 @@ pub fn BoundaryEngine(comptime N: usize, comptime M: usize, comptime Set: type) 
                     }
 
                     // Loop over extends
-                    comptime var extents = mregion.extentOffsets(O);
+                    comptime var extents = mregion.extentOffsets(M);
 
                     inline while (comptime extents.next()) |extent| {
                         self.fillGhostNode(
@@ -178,6 +178,8 @@ pub fn BoundaryEngine(comptime N: usize, comptime M: usize, comptime Set: type) 
             const bfield = field[self.range.start..self.range.end];
             // Get value of function at node.
             const f = self.space.value(node, bfield);
+            // // Get poisition of node.
+            // const pos = self.space.position(node);
 
             // Target node
             const target = IndexMixin.addSigned(node, extent);
@@ -224,16 +226,18 @@ pub fn BoundaryEngine(comptime N: usize, comptime M: usize, comptime Set: type) 
                             if (extent[axis] != 0) {
                                 axes[cur] = axis;
                                 cur += 1;
+
+                                if (extent[axis] < 0) {
+                                    sign *= -1.0;
+                                }
+
+                                stencil.setAxisBoundaryDerivative(axis, O, extent[axis]);
                             }
 
                             signs[axis] = if (extent[axis] >= 0) 1.0 else -1.0;
-
-                            if (extent[axis] < 0) {
-                                sign *= -1.0;
-                            }
-
-                            stencil.setAxisBoundaryDerivative(axis, O, extent[axis]);
                         }
+
+                        assert(cur == region.adjacency());
                     }
 
                     // Compute target value for mixed derivative.
@@ -249,6 +253,8 @@ pub fn BoundaryEngine(comptime N: usize, comptime M: usize, comptime Set: type) 
                             break :blk alpha * f + beta;
                         },
                         2 => blk: {
+                            // std.debug.print("Running Mixed\n", .{});
+
                             comptime var s0 = NodeOperator.value();
                             comptime var s1 = NodeOperator.value();
                             s0.setAxisCentered(axes[0], O, .derivative);
@@ -264,6 +270,7 @@ pub fn BoundaryEngine(comptime N: usize, comptime M: usize, comptime Set: type) 
 
                             const alpha0 = self.fieldValue(node, boundary0.robin_value);
                             const alpha1 = self.fieldValue(node, boundary1.robin_value);
+
                             const beta0 = self.fieldValue(node, boundary0.robin_rhs);
                             const beta1 = self.fieldValue(node, boundary1.robin_rhs);
 
@@ -272,7 +279,7 @@ pub fn BoundaryEngine(comptime N: usize, comptime M: usize, comptime Set: type) 
                             const beta0_1 = sign1 * self.fieldEval(s1, node, boundary0.robin_rhs);
                             const beta1_0 = sign0 * self.fieldEval(s0, node, boundary1.robin_rhs);
 
-                            break :blk (alpha0_1 + alpha1_0 + alpha0 * alpha1) * f + alpha0 * beta1 + alpha1 * beta0 + beta0_1 + beta1_0;
+                            break :blk ((alpha0_1 + alpha1_0) / 2 + alpha0 * alpha1) * f + (alpha0 * beta1 + alpha1 * beta0 + beta0_1 + beta1_0) / 2;
                         },
                         else => @compileError("Robin boundary conditions only supported for N <= 2"),
                     };

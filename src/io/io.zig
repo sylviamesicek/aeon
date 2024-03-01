@@ -220,15 +220,29 @@ pub fn DataOut(comptime N: usize, comptime M: usize) type {
 
                     const point_offset: usize = positions.items.len / N;
 
-                    const point_size = manager.verticesPerCell();
+                    var point_size = manager.verticesPerCell();
+                    var cell_size = manager.cell_size;
+
+                    const cnspace = NodeSpace(N, M){ .bounds = node_space.bounds, .size = point_size };
+
+                    for (0..N) |axis| {
+                        point_size[axis] += 2 * M;
+                        cell_size[axis] += 2 * M;
+                    }
+
                     const point_space = IndexSpace.fromSize(point_size);
-                    const cell_space = IndexSpace.fromSize(manager.cell_size);
+                    const cell_space = IndexSpace.fromSize(cell_size);
 
                     {
-                        var points = point_space.cartesianIndices();
+                        // var points = point_space.cartesianIndices();
+
+                        var points = cnspace.nodes(M);
 
                         while (points.next()) |point| {
-                            const position = node_space.position(IndexMixin.toSigned(IndexMixin.add(origin, point)));
+                            const sorigin = IndexMixin.toSigned(origin);
+                            const spoint = point;
+
+                            const position = node_space.position(IndexMixin.addSigned(sorigin, spoint));
                             for (0..N) |i| {
                                 try positions.append(allocator, position[i]);
                             }
@@ -270,9 +284,9 @@ pub fn DataOut(comptime N: usize, comptime M: usize) type {
                             const v3: usize = point_space.linearFromCartesian(IndexMixin.add(cell, [3]usize{ 1, 1, 0 }));
                             const v4: usize = point_space.linearFromCartesian(IndexMixin.add(cell, [3]usize{ 1, 0, 0 }));
                             const v5: usize = point_space.linearFromCartesian(IndexMixin.add(cell, [3]usize{ 0, 0, 1 }));
-                            const v6: usize = point_space.linearFromCartesian(IndexMixin.add(cell, [3]usize{ 0, 1, 3 }));
-                            const v7: usize = point_space.linearFromCartesian(IndexMixin.add(cell, [3]usize{ 1, 1, 3 }));
-                            const v8: usize = point_space.linearFromCartesian(IndexMixin.add(cell, [3]usize{ 1, 0, 3 }));
+                            const v6: usize = point_space.linearFromCartesian(IndexMixin.add(cell, [3]usize{ 0, 1, 1 }));
+                            const v7: usize = point_space.linearFromCartesian(IndexMixin.add(cell, [3]usize{ 1, 1, 1 }));
+                            const v8: usize = point_space.linearFromCartesian(IndexMixin.add(cell, [3]usize{ 1, 0, 1 }));
 
                             try vertices.append(allocator, point_offset + v1);
                             try vertices.append(allocator, point_offset + v2);
@@ -287,10 +301,13 @@ pub fn DataOut(comptime N: usize, comptime M: usize) type {
 
                     {
                         // Append Field data
-                        var points = point_space.cartesianIndices();
+                        var points = cnspace.nodes(M);
 
                         while (points.next()) |point| {
-                            const node = IndexMixin.toSigned(IndexMixin.add(origin, point));
+                            // const node = IndexMixin.toSigned(IndexMixin.add(origin, point));
+
+                            const sorigin = IndexMixin.toSigned(origin);
+                            const node = IndexMixin.addSigned(sorigin, point);
 
                             inline for (comptime std.enums.values(Tag), 0..) |field, idx| {
                                 const value = node_space.value(node, block_sys.field(field));

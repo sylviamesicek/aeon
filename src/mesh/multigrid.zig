@@ -134,9 +134,9 @@ pub fn MultigridMethod(comptime N: usize, comptime M: usize, comptime BaseSolver
 
                 std.debug.print("Iteration {}, Residual {}\n", .{ iteration, nres });
 
-                for (0..worker.mesh.numLevels()) |i| {
-                    std.debug.print("    Level: {}, Residual {}\n", .{ i, worker.normLevel(i, self.scr) });
-                }
+                // for (0..worker.mesh.numLevels()) |i| {
+                //     std.debug.print("    Level: {}, Residual {}\n", .{ i, worker.normLevel(i, self.scr) });
+                // }
 
                 // worker.residual(self.scr, b, operator, x);
 
@@ -150,7 +150,7 @@ pub fn MultigridMethod(comptime N: usize, comptime M: usize, comptime BaseSolver
                     break;
                 }
 
-                // Debugging code
+                // // Debugging code
 
                 // const DataOut = @import("../aeon.zig").DataOut(N, M);
 
@@ -161,6 +161,8 @@ pub fn MultigridMethod(comptime N: usize, comptime M: usize, comptime BaseSolver
                 // defer file.close();
 
                 // const Output = enum { residual, sys };
+
+                // worker.fillGhostNodes(Oper.order, set, x);
 
                 // const output = common.SystemConst(Output).view(worker.manager.numNodes(), .{
                 //     .residual = self.scr,
@@ -178,7 +180,6 @@ pub fn MultigridMethod(comptime N: usize, comptime M: usize, comptime BaseSolver
                 // );
 
                 // try buf.flush();
-
             }
         }
 

@@ -48,6 +48,8 @@ pub fn NodeManager(comptime N: usize, comptime M: usize) type {
         const Mesh = mesh_.Mesh(N);
         const CellPermutation = permute.CellPermutation(N);
 
+        const NodeSpace = common.NodeSpace(N, M);
+
         const AxisMask = geometry.AxisMask(N);
         const FaceIndex = geometry.FaceIndex(N);
         const IndexSpace = geometry.IndexSpace(N);
@@ -461,6 +463,17 @@ pub fn NodeManager(comptime N: usize, comptime M: usize) type {
             return result;
         }
 
+        /// Helper function for determining the node space of a block
+        pub fn blockNodeSpace(self: @This(), block_id: usize) NodeSpace {
+            const block_bounds = self.manager.blocks.items(.bounds)[block_id];
+            const block_size = self.manager.blockNodeSize(block_id);
+
+            return .{
+                .bounds = block_bounds,
+                .size = block_size,
+            };
+        }
+
         pub fn blockNodeParentOrigin(self: *const @This(), block_id: usize) [N]usize {
             var origin = self.blocks.items(.index)[block_id];
 
@@ -508,7 +521,7 @@ pub fn NodeManager(comptime N: usize, comptime M: usize) type {
 
         /// Retrieves the spatial spacing of a given level
         pub fn spacing(self: *const @This(), level: usize) [N]f64 {
-            var result: [N]f64 = self.blocks.items[0].bounds.size;
+            var result: [N]f64 = self.blocks.items(.bounds)[0].size;
 
             for (0..N) |axis| {
                 result[axis] /= @floatFromInt(self.cell_size[axis]);

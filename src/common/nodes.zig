@@ -223,6 +223,18 @@ pub fn NodeSpace(comptime N: usize, comptime M: usize) type {
             return self.bounds.localToGlobal(result);
         }
 
+        /// Returns the distance between two adjacent nodes in the node space along each axis.
+        pub fn spacing(self: Self) [N]f64 {
+            var result: [N]f64 = undefined;
+
+            inline for (0..N) |i| {
+                result[i] = self.bounds.size[i];
+                result[i] /= @floatFromInt(self.size[i] - 1);
+            }
+
+            return result;
+        }
+
         /// Computes the value of a field at a given node.
         pub fn value(self: Self, node: [N]isize, field: []const f64) f64 {
             const linear = self.indexSpace().linearFromCartesian(indexFromNode(node));
@@ -293,9 +305,7 @@ pub fn NodeSpace(comptime N: usize, comptime M: usize) type {
                 }
             }
 
-            assert(false);
-
-            return 0.0;
+            panic("Prolong branch is unreachable\n", .{});
         }
 
         /// Prolong values to the given supervertex assuming
@@ -335,6 +345,8 @@ pub fn NodeSpace(comptime N: usize, comptime M: usize) type {
                     if (comptime parity.isSet(axis)) {
                         coef *= pstencil[index[axis]];
                         offset[axis] = sindex[axis] - O + 1;
+                    } else {
+                        offset[axis] = 0;
                     }
                 }
 
@@ -350,20 +362,9 @@ pub fn NodeSpace(comptime N: usize, comptime M: usize) type {
             return result;
         }
 
-        /// Performs direct restriction (i.e. injection).
-        pub fn restrict(self: @This(), subnode: [N]isize, field: []const f64) f64 {
-            var node: [N]isize = undefined;
-
-            for (0..N) |i| {
-                node[i] = 2 * subnode[i];
-            }
-
-            return self.value(node, field);
-        }
-
         /// Performs restriction with full weighting (i.e. the restriction compatible with the prolongation operator
         /// of the same order).
-        pub fn restrictFull(self: @This(), comptime O: usize, subnode: [N]isize, field: []const f64) f64 {
+        pub fn restrict(self: @This(), comptime O: usize, subnode: [N]isize, field: []const f64) f64 {
             const stencil: [2 * O + 1]f64 = comptime Stencils.restrict(O);
 
             // Accumulate result to this variable
@@ -376,7 +377,7 @@ pub fn NodeSpace(comptime N: usize, comptime M: usize) type {
             }
 
             // Iterate over stencil space
-            comptime var indices = IndexSpace.fromSize(IndexMixin.splat(2 * O + 1)).cartesianIndices();
+            comptime var indices = IndexSpace.fromSize(IndexMixin.splat(stencil.len)).cartesianIndices();
 
             inline while (comptime indices.next()) |index| {
                 const sindex = comptime toSigned(index);
@@ -417,7 +418,7 @@ pub fn NodeSpace(comptime N: usize, comptime M: usize) type {
             return result;
         }
 
-        fn dissipationAxis(self: @This(), comptime O: usize, comptime axis: usize, node: [N]isize, field: []const f64) f64 {
+        pub fn dissipationAxis(self: @This(), comptime O: usize, comptime axis: usize, node: [N]isize, field: []const f64) f64 {
             const stencil = Stencils.dissipation(O);
 
             var result: f64 = 0.0;
@@ -431,7 +432,7 @@ pub fn NodeSpace(comptime N: usize, comptime M: usize) type {
                 result += stencil[i] * self.value(offset_node, field);
             }
 
-            var scale: f64 = @floatFromInt(self.size[axis]);
+            var scale: f64 = @floatFromInt(self.size[axis] - 1);
             scale /= self.bounds.size[axis];
 
             return scale * result;
@@ -471,14 +472,13 @@ pub fn NodeSpace(comptime N: usize, comptime M: usize) type {
                 result += coef * self.value(node, field);
             }
 
+            const space = self.spacing();
+
             // Covariantly transform result
             inline for (0..N) |i| {
-                var scale: f64 = @floatFromInt(self.size[i] - 1);
-                scale /= self.bounds.size[i];
-
                 switch (op.ranks[i]) {
-                    .derivative => result *= scale,
-                    .second_derivative => result *= scale * scale,
+                    .derivative => result /= space[i],
+                    .second_derivative => result /= space[i] * space[i],
                     else => {},
                 }
             }
@@ -636,17 +636,33 @@ test "node space restriction and prolongation" {
     // **************************
     // Test restriction
 
-    try expect(space.restrictFull(1, .{ 0, 0 }, function) == 0.0);
-    try expect(space.restrictFull(1, .{ 1, 1 }, function) == 4.0);
-    try expect(space.restrictFull(1, .{ 2, 2 }, function) == 8.0);
+    try expect(space.restrict(1, .{ 0, 0 }, function) == 0.0);
+    try expect(space.restrict(1, .{ 1, 1 }, function) == 4.0);
+    try expect(space.restrict(1, .{ 2, 2 }, function) == 8.0);
+}
+
+test "node space stencils" {
+    const expect = std.testing.expect;
+
+    const N = 2;
+    const M = 1;
+
+    const RealBox = geometry.RealBox(N);
+    const Nodes = NodeSpace(N, M);
 
     // **************************
-    // Test prolongation
+    // Mesh
 
-    std.debug.print("{}\n", .{space.restrictFull(1, .{ 2, 2 }, function)});
-    // try expect(order.prolongCell(.{ 0, 0 }, function) == -0.5);
-    // try expect(order.prolongCell(.{ 1, 1 }, function) == 0.5);
-    // try expect(order.prolongCell(.{ 2, 2 }, function) == 1.5);
+    const space: Nodes = .{
+        .size = [2]usize{ 3, 3 },
+        .bounds = RealBox.unit,
+    };
+
+    const operator = comptime NodeOperator(2).centered(M, [1]NodeOperatorRank{.derivative} ** N);
+
+    try expect(space.evalCoef(operator, .{ -1, -1 }) == 1.0);
+    try expect(space.evalCoef(operator, .{ 0, 0 }) == 0.0);
+    try expect(space.evalCoef(operator, .{ 1, 1 }) == 1.0);
 }
 
 // test "node space smoothing" {

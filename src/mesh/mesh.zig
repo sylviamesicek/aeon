@@ -475,6 +475,409 @@ pub fn Mesh(comptime N: usize) type {
     };
 }
 
+/// Provides an additional block structure for quadtree based meshes.
+/// This unifies uniform blocks of cells, so that storage and computation
+/// is more efficient, and less duplicate cells are used.
+pub fn BlockStructure(comptime N: usize) type {
+    return struct {
+        /// The set of blocks that make up the mesh.
+        blocks: MultiArrayList(Block),
+        /// Additional info stored per mesh cell.
+        cells: MultiArrayList(Cell),
+        /// Map from levels to block ranges.
+        level_to_blocks: RangeMap,
+        /// A cell permutation structure,
+        cell_permute: CellPermutation,
+
+        const AxisMask = geometry.AxisMask(N);
+        const FaceIndex = geometry.FaceIndex(N);
+        const IndexSpace = geometry.IndexSpace(N);
+        const RealBox = geometry.RealBox(N);
+        const Region = geometry.Region(N);
+
+        const CellPermutation = permute.CellPermutation(N);
+
+        const Range = utils.Range;
+        const RangeMap = utils.RangeMap;
+
+        // Subtypes
+
+        /// Represents blocks of uniform and contiguous cells which all share a common anscestor.
+        pub const Block = struct {
+            /// Physical bounds of block.
+            bounds: RealBox = RealBox.unit,
+            /// Number of cells along each axis of block.
+            size: [N]usize = [1]usize{1} ** N,
+            /// Boolean array indicating whether or not a given face is on the physical boundary.
+            boundary: [FaceIndex.count]bool,
+            /// Refinement level of block.
+            refinement: usize,
+            /// Parent of this block
+            parent: usize = null_index,
+            /// Position within parent
+            index: [N]usize = [1]usize{0} ** N,
+            /// Cell offset
+            cells: usize,
+        };
+
+        /// Additional information stored for each cell of the mesh.
+        pub const Cell = struct {
+            /// Block that this cell belongs to.
+            block: usize = null_index,
+            /// Position within block of this cell.
+            index: [N]usize = [1]usize{0} ** N,
+            /// Cache of neighboring cells.
+            neighbors: [Region.count]usize,
+        };
+
+        /// Builds a new block structure from a mesh.
+        pub fn init(allocator: Allocator, mesh: *const Mesh(N), max_refinement: usize) !@This() {
+            const cell_permute = try CellPermutation.init(allocator, max_refinement);
+            errdefer cell_permute.deinit(allocator);
+
+            assert(max_refinement > 0);
+
+            var self = @This(){
+                .blocks = .{},
+                .cells = .{},
+                .level_to_blocks = .{},
+                .cell_permute = cell_permute,
+            };
+            errdefer self.deinit(allocator);
+
+            try self.build(allocator, mesh);
+
+            return self;
+        }
+
+        /// Frees the data associated with this block structure.
+        pub fn deinit(self: *@This(), allocator: Allocator) void {
+            self.blocks.deinit(allocator);
+            self.cells.deinit(allocator);
+            self.level_to_blocks.deinit(allocator);
+            self.cell_permute.deinit(allocator);
+        }
+
+        /// Builds a new `NodeManager` from a mesh, using the given allocator for scratch allocations.
+        pub fn build(self: *@This(), allocator: Allocator, mesh: *const Mesh) !void {
+            // ****************************
+            // Computes Blocks + Offsets
+            try self.buildBlocks(allocator, mesh);
+
+            // *****************************
+            // Compute neighbors
+            try self.buildCells(mesh);
+
+            // *****************************
+            // Compute block cell maps
+            self.buildBlockCellMaps(mesh);
+        }
+
+        /// Runs a recursive algorithm that traverses the tree from root to leaves, computing valid blocks while doing so.
+        /// This algorithm works level by level (queueing up blocks for use on the next level). And thus preserves the invariant
+        /// that all blocks on the same level are contiguous in the block array.
+        fn buildBlocks(self: *@This(), allocator: Allocator, mesh: *const Mesh) !void {
+            // Cache
+            const cells = mesh.cells.slice();
+            const levels = mesh.numLevels();
+
+            // Reset level offsets
+            try self.level_to_blocks.resize(allocator, levels);
+
+            // Iterate levels
+            const BlockMeta = struct {
+                /// Base cell
+                base: usize,
+                /// Physical Boundaries
+                boundary: [FaceIndex.count]bool,
+                /// Refinement level
+                refinement: usize,
+            };
+
+            // Allocate block meta data
+            var blocks: ArrayListUnmanaged(BlockMeta) = .{};
+            defer blocks.deinit(allocator);
+            // Stack for each level
+            var stack: ArrayListUnmanaged(BlockMeta) = .{};
+            defer stack.deinit(allocator);
+
+            try blocks.append(allocator, .{
+                .base = 0,
+                .boundary = [1]bool{true} ** FaceIndex.count,
+                .refinement = 0,
+            });
+
+            // Set base level offset
+            self.level_to_blocks.set(0, 0);
+            self.level_to_blocks.set(1, 1);
+
+            for (1..levels) |level| {
+                const coarse = self.level_to_blocks.range(level - 1);
+
+                // Reset stack
+                stack.clearRetainingCapacity();
+
+                // Transfer all blocks on l - 1 to stack in reverse order
+                for (0..coarse.end - coarse.start) |rev_idx| {
+                    const idx = coarse.end - 1 - rev_idx;
+
+                    try stack.append(allocator, blocks.items[idx]);
+                }
+
+                // Iterate until the stack is empty
+                while (stack.popOrNull()) |block| {
+                    // Find cell offset and cell total.
+                    var cell_offset: usize = block.base;
+
+                    for (0..block.refinement) |_| {
+                        cell_offset = cells.items(.children)[cell_offset];
+                    }
+
+                    const cell_total = cellTotalFromRefinement(block.refinement);
+
+                    // Count number of leaves
+                    var leaf_count: usize = 0;
+
+                    for (cell_offset..cell_offset + cell_total) |cell| {
+                        if (cells.items(.children)[cell] == null_index) {
+                            leaf_count += 1;
+                        }
+                    }
+
+                    if (leaf_count == cell_total) {
+                        // Skip block if it is a leaf
+                        continue;
+                    } else if (leaf_count == 0 and block.refinement + 1 < self.cell_permute.numLevels()) {
+                        // Accept
+                        try blocks.append(allocator, .{
+                            .boundary = block.boundary,
+                            .base = block.base,
+                            .refinement = block.refinement + 1,
+                        });
+
+                        continue;
+                    }
+
+                    assert(block.refinement > 0);
+
+                    const children = cells.items(.children)[block.base];
+
+                    assert(children != null_index);
+
+                    for (AxisMask.enumerate()) |split| {
+                        var boundary = block.boundary;
+
+                        for (split.innerFaces()) |face| {
+                            boundary[face.toLinear()] = false;
+                        }
+
+                        try stack.append(allocator, .{
+                            .boundary = boundary,
+                            .refinement = block.refinement - 1,
+                            .base = children + split.toLinear(),
+                        });
+                    }
+                }
+
+                // Update level to blocks
+                self.level_to_blocks.set(level + 1, blocks.items.len);
+            }
+
+            // Transfer to blocks
+            self.blocks.shrinkRetainingCapacity(0);
+
+            for (blocks.items) |meta| {
+                // Find cell offset and cell total.
+                var cell_offset: usize = meta.base;
+
+                for (0..meta.refinement) |_| {
+                    cell_offset = cells.items(.children)[cell_offset];
+                }
+
+                try self.blocks.append(self.gpa, .{
+                    .bounds = cells.items(.bounds)[meta.base],
+                    .size = cellSizeFromRefinement(meta.refinement),
+                    .boundary = meta.boundary,
+                    .refinement = meta.refinement,
+                    .cells = cell_offset,
+                });
+            }
+        }
+
+        /// Builds extra per-cell information like neighbors.
+        fn buildCells(self: *@This(), mesh: *const Mesh) !void {
+            // Cache pointers
+            const cells = mesh.cells.slice();
+
+            // Reset and reserve
+            try self.cells.resize(self.gpa, cells.len);
+            // Set root
+            self.cells.set(0, Cell{
+                .neighbors = [1]usize{boundary_index} ** Region.count,
+            });
+
+            // Loop through every non root cell
+            for (1..cells.len) |cell| {
+                // Store all neighbors of this cell
+                var neighbors: [Region.count]usize = undefined;
+
+                // Get split index
+                const parent = cells.items(.parent)[cell];
+                const children = cells.items(.children)[parent];
+                const split = AxisMask.fromLinear(cell - cells.items(.children)[parent]);
+
+                for (Region.enumerate()) |region| {
+                    // Central region is simply null
+                    if (std.meta.eql(region, Region.central())) {
+                        neighbors[region.toLinear()] = null_index;
+                        continue;
+                    }
+
+                    // Get neighbor split
+                    var nsplit = split;
+
+                    for (0..N) |axis| {
+                        if (region.sides[axis] != .middle) {
+                            nsplit.toggle(axis);
+                        }
+                    }
+
+                    // Masked region
+                    const mregion = region.maskedBySplit(split);
+
+                    if (std.meta.eql(mregion, Region.central())) {
+                        // Inner face
+                        neighbors[region.toLinear()] = children + nsplit.toLinear();
+
+                        continue;
+                    }
+
+                    const neighbor = self.cells.items(.neighbors)[parent][mregion.toLinear()];
+
+                    if (neighbor == null_index) {
+                        neighbors[region.toLinear()] = null_index;
+                        continue;
+                    }
+
+                    assert(neighbor != null_index);
+
+                    if (neighbor == boundary_index) {
+                        neighbors[region.toLinear()] = boundary_index;
+                    } else {
+                        const nchildren = cells.items(.children)[neighbor];
+
+                        if (nchildren == null_index) {
+                            neighbors[region.toLinear()] = null_index;
+                        } else {
+                            neighbors[region.toLinear()] = nchildren + nsplit.toLinear();
+                        }
+                    }
+                }
+
+                // Set neighbors
+                self.cells.items(.neighbors)[cell] = neighbors;
+            }
+        }
+
+        /// Fills cell to block, and block to parent maps.
+        fn buildBlockCellMaps(self: *@This(), mesh: *const Mesh) void {
+            // Set block and index of cells
+            for (0..self.numBlocks()) |block| {
+                var cell_indices = IndexSpace.fromSize(self.blocks.items(.size)[block]).cartesianIndices();
+                while (cell_indices.next()) |index| {
+                    const cell = self.cellFromBlock(block, index);
+                    self.cells.items(.block)[cell] = block;
+                    self.cells.items(.index)[cell] = index;
+                }
+            }
+
+            // Set block parents and indices
+            for (0..self.numBlocks()) |block| {
+                // Get cell in bottom left corner
+                const cell = self.blocks.items(.cells)[block];
+                // Get parent
+                const parent = mesh.cells.items(.parent)[cell];
+
+                if (parent == null_index) {
+                    self.blocks.items(.parent)[block] = 0;
+                    self.blocks.items(.index)[block] = [1]usize{0} ** N;
+                } else {
+                    self.blocks.items(.parent)[block] = self.cells.items(.block)[parent];
+                    self.blocks.items(.index)[block] = self.cells.items(.index)[parent];
+                }
+            }
+        }
+
+        /// Total number of cells in a block given refinement.
+        fn cellTotalFromRefinement(refinement: usize) usize {
+            var result: usize = 1;
+
+            for (0..refinement) |_| {
+                result *= AxisMask.count;
+            }
+
+            return result;
+        }
+
+        /// Total number of cells along each axis of a block given refinement.
+        fn cellSizeFromRefinement(refinement: usize) [N]usize {
+            var result: usize = 1;
+
+            for (0..refinement) |_| {
+                result *= 2;
+            }
+
+            return [1]usize{result} ** N;
+        }
+
+        // *****************************
+        // Helpers *********************
+        // *****************************
+
+        /// Number of blocks in the mesh.
+        pub fn numBlocks(self: *const @This()) usize {
+            return self.blocks.len;
+        }
+
+        /// Finds the index of the cell that lies at the given position in the block.
+        pub fn cellFromBlock(self: *const @This(), block_id: usize, index: [N]usize) usize {
+            const size = self.blocks.items(.size)[block_id];
+            const refinement = self.blocks.items(.refinement)[block_id];
+            const cells = self.blocks.items(.cells)[block_id];
+
+            const linear = IndexSpace.fromSize(size).linearFromCartesian(index);
+
+            assert(refinement <= self.cell_permute.numLevels());
+
+            return cells + self.cell_permute.permutation(refinement)[linear];
+        }
+
+        /// Checks whether or not the mesh datastructure is wellformed.
+        pub fn isWellFormed(self: *const @This()) bool {
+            for (0..self.cells.len) |cell_id| {
+                const neighbors = self.cells.items(.neighbors)[cell_id];
+
+                for (Region.enumerate()) |region| {
+                    if (region.toLinear() == Region.central().toLinear()) {
+                        continue;
+                    }
+
+                    const neighbor = neighbors[region.toLinear()];
+
+                    if (neighbor != null_index and neighbor != boundary_index) {
+                        // Check that this cell's neighbor's neighbor is itself.
+                        if (cell_id != self.cells.items(.neighbors)[neighbor][region.reversed().toLinear()]) {
+                            return false;
+                        }
+                    }
+                }
+            }
+
+            return true;
+        }
+    };
+}
+
 test {
     _ = manager;
     _ = permute;

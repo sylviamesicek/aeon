@@ -500,7 +500,7 @@ pub fn NodeWorker(comptime N: usize, comptime M: usize) type {
                 const app = operator.apply(engine, src);
                 const appDiag = operator.applyDiag(engine);
 
-                node_space.setValue(node, block_field, sval + 2.0 / 3.0 * (rval - app) / appDiag);
+                node_space.setValue(node, block_field, sval + 1.0 / 2.0 * (rval - app) / appDiag);
             }
         }
 
@@ -631,7 +631,7 @@ pub fn NodeWorker(comptime N: usize, comptime M: usize) type {
                 var result: f64 = 0.0;
 
                 inline for (0..N) |axis| {
-                    result += eps / spacing[axis] * block_node_space.dissipation(O, axis, node, block_src);
+                    result += eps / spacing[axis] * block_node_space.dissipationAxis(O, axis, node, block_src);
                 }
 
                 block_node_space.setValue(node, block_deriv, v + result);
@@ -797,7 +797,7 @@ pub fn NodeWorker(comptime N: usize, comptime M: usize) type {
                     }
 
                     // Iterate over node offsets
-                    var offsets = region.nodes(O, self.manager.verticesPerCell());
+                    var offsets = region.nodes(M, self.manager.verticesPerCell());
 
                     while (offsets.next()) |offset| {
                         const node: [N]isize = addSigned(origin, offset);
@@ -823,7 +823,7 @@ pub fn NodeWorker(comptime N: usize, comptime M: usize) type {
                         }
                     }
 
-                    var offsets = region.nodes(O, self.manager.verticesPerCell());
+                    var offsets = region.nodes(M, self.manager.verticesPerCell());
 
                     while (offsets.next()) |offset| {
                         const node = addSigned(origin, offset);
