@@ -996,7 +996,7 @@ pub const BrillEvolution = struct {
         //     try mesh.refine(allocator, flags);
         // }
 
-        var manager = try NodeManager.init(allocator, [1]usize{16} ** N, 8);
+        var manager = try NodeManager.init(allocator, &mesh, [1]usize{16} ** N, 8);
         defer manager.deinit();
 
         try manager.build(allocator, &mesh);

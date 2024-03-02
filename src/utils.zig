@@ -16,6 +16,12 @@ pub const RangeMap = struct {
         self.offsets.deinit(allocator);
     }
 
+    pub fn clone(self: *const @This(), allocator: Allocator) !@This() {
+        return .{
+            .offsets = try self.offsets.clone(allocator),
+        };
+    }
+
     pub fn offset(self: @This(), idx: usize) usize {
         return self.offsets.items[idx];
     }

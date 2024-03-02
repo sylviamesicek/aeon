@@ -10,11 +10,9 @@ const utils = @import("../utils.zig");
 const manager = @import("manager.zig");
 const multigrid = @import("multigrid.zig");
 const permute = @import("permute.zig");
-const worker = @import("worker.zig");
 
 pub const MultigridMethod = multigrid.MultigridMethod;
 pub const NodeManager = manager.NodeManager;
-pub const NodeWorker = worker.NodeWorker;
 
 /// A null index.
 pub const null_index: usize = std.math.maxInt(usize);
@@ -99,6 +97,21 @@ pub fn Mesh(comptime N: usize) type {
         pub fn deinit(self: *Self) void {
             self.cells.deinit(self.gpa);
             self.levels.deinit(self.gpa);
+        }
+
+        pub fn clone(self: *const Self, allocator: Allocator) !Self {
+            var cells = try self.cells.clone(allocator);
+            errdefer cells.deinit(allocator);
+
+            var levels = try self.levels.clone(allocator);
+            errdefer levels.deinit(allocator);
+
+            return .{
+                .gpa = allocator,
+                .bounds = self.bounds,
+                .cells = cells,
+                .levels = levels,
+            };
         }
 
         /// Returns the number of cells in the mesh
@@ -559,14 +572,14 @@ pub fn BlockStructure(comptime N: usize) type {
         }
 
         /// Builds a new `NodeManager` from a mesh, using the given allocator for scratch allocations.
-        pub fn build(self: *@This(), allocator: Allocator, mesh: *const Mesh) !void {
+        pub fn build(self: *@This(), allocator: Allocator, mesh: *const Mesh(N)) !void {
             // ****************************
             // Computes Blocks + Offsets
             try self.buildBlocks(allocator, mesh);
 
             // *****************************
             // Compute neighbors
-            try self.buildCells(mesh);
+            try self.buildCells(allocator, mesh);
 
             // *****************************
             // Compute block cell maps
@@ -576,7 +589,7 @@ pub fn BlockStructure(comptime N: usize) type {
         /// Runs a recursive algorithm that traverses the tree from root to leaves, computing valid blocks while doing so.
         /// This algorithm works level by level (queueing up blocks for use on the next level). And thus preserves the invariant
         /// that all blocks on the same level are contiguous in the block array.
-        fn buildBlocks(self: *@This(), allocator: Allocator, mesh: *const Mesh) !void {
+        fn buildBlocks(self: *@This(), allocator: Allocator, mesh: *const Mesh(N)) !void {
             // Cache
             const cells = mesh.cells.slice();
             const levels = mesh.numLevels();
@@ -694,7 +707,7 @@ pub fn BlockStructure(comptime N: usize) type {
                     cell_offset = cells.items(.children)[cell_offset];
                 }
 
-                try self.blocks.append(self.gpa, .{
+                try self.blocks.append(allocator, .{
                     .bounds = cells.items(.bounds)[meta.base],
                     .size = cellSizeFromRefinement(meta.refinement),
                     .boundary = meta.boundary,
@@ -705,12 +718,12 @@ pub fn BlockStructure(comptime N: usize) type {
         }
 
         /// Builds extra per-cell information like neighbors.
-        fn buildCells(self: *@This(), mesh: *const Mesh) !void {
+        fn buildCells(self: *@This(), allocator: Allocator, mesh: *const Mesh(N)) !void {
             // Cache pointers
             const cells = mesh.cells.slice();
 
             // Reset and reserve
-            try self.cells.resize(self.gpa, cells.len);
+            try self.cells.resize(allocator, cells.len);
             // Set root
             self.cells.set(0, Cell{
                 .neighbors = [1]usize{boundary_index} ** Region.count,
@@ -780,12 +793,12 @@ pub fn BlockStructure(comptime N: usize) type {
         }
 
         /// Fills cell to block, and block to parent maps.
-        fn buildBlockCellMaps(self: *@This(), mesh: *const Mesh) void {
+        fn buildBlockCellMaps(self: *@This(), mesh: *const Mesh(N)) void {
             // Set block and index of cells
             for (0..self.numBlocks()) |block| {
                 var cell_indices = IndexSpace.fromSize(self.blocks.items(.size)[block]).cartesianIndices();
                 while (cell_indices.next()) |index| {
-                    const cell = self.cellFromBlock(block, index);
+                    const cell = self.blockCell(block, index);
                     self.cells.items(.block)[cell] = block;
                     self.cells.items(.index)[cell] = index;
                 }
@@ -834,13 +847,21 @@ pub fn BlockStructure(comptime N: usize) type {
         // Helpers *********************
         // *****************************
 
+        pub fn numLevels(self: *const @This()) usize {
+            return self.level_to_blocks.len();
+        }
+
+        pub fn levelBlocks(self: *const @This(), level_id: usize) Range {
+            return self.level_to_blocks.range(level_id);
+        }
+
         /// Number of blocks in the mesh.
         pub fn numBlocks(self: *const @This()) usize {
             return self.blocks.len;
         }
 
         /// Finds the index of the cell that lies at the given position in the block.
-        pub fn cellFromBlock(self: *const @This(), block_id: usize, index: [N]usize) usize {
+        pub fn blockCell(self: *const @This(), block_id: usize, index: [N]usize) usize {
             const size = self.blocks.items(.size)[block_id];
             const refinement = self.blocks.items(.refinement)[block_id];
             const cells = self.blocks.items(.cells)[block_id];
@@ -850,6 +871,42 @@ pub fn BlockStructure(comptime N: usize) type {
             assert(refinement <= self.cell_permute.numLevels());
 
             return cells + self.cell_permute.permutation(refinement)[linear];
+        }
+
+        pub fn blockBounds(self: *const @This(), block_id: usize) RealBox {
+            return self.blocks.items(.bounds)[block_id];
+        }
+
+        pub fn blockSize(self: *const @This(), block_id: usize) [N]usize {
+            return self.blocks.items(.size)[block_id];
+        }
+
+        pub fn blockBoundary(self: *const @This(), block_id: usize) [FaceIndex.count]bool {
+            return self.blocks.items(.boundary)[block_id];
+        }
+
+        pub fn blockParent(self: *const @This(), block_id: usize) usize {
+            return self.blocks.items(.parent)[block_id];
+        }
+
+        pub fn blockParentIndex(self: *const @This(), block_id: usize) [N]usize {
+            return self.blocks.items(.index)[block_id];
+        }
+
+        pub fn numCells(self: *const @This()) usize {
+            return self.cells.len;
+        }
+
+        pub fn cellNeighbors(self: *const @This(), cell_id: usize) [Region.count]usize {
+            return self.cells.items(.neighbors)[cell_id];
+        }
+
+        pub fn cellBlock(self: *const @This(), cell_id: usize) usize {
+            return self.cells.items(.block)[cell_id];
+        }
+
+        pub fn cellBlockIndex(self: *const @This(), cell_id: usize) [N]usize {
+            return self.cells.items(.index)[cell_id];
         }
 
         /// Checks whether or not the mesh datastructure is wellformed.
@@ -881,5 +938,4 @@ pub fn BlockStructure(comptime N: usize) type {
 test {
     _ = manager;
     _ = permute;
-    _ = worker;
 }

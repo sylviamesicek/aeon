@@ -29,7 +29,6 @@ pub fn MultigridMethod(comptime N: usize, comptime M: usize, comptime BaseSolver
         const Self = @This();
         const Mesh = mesh_.Mesh(N);
         const NodeManager = mesh_.NodeManager(N, M);
-        const NodeWorker = mesh_.NodeWorker(N, M);
 
         const checkBoundarySet = common.checkBoundarySet;
         const checkOperator = common.checkOperator;
@@ -74,7 +73,7 @@ pub fn MultigridMethod(comptime N: usize, comptime M: usize, comptime BaseSolver
 
         pub fn solve(
             self: *Self,
-            worker: *const NodeWorker,
+            manager: *const NodeManager,
             operator: anytype,
             set: anytype,
             x: []f64,
@@ -86,17 +85,17 @@ pub fn MultigridMethod(comptime N: usize, comptime M: usize, comptime BaseSolver
             checkBoundarySet(N, Set);
             checkOperator(N, M, Oper);
 
-            assert(x.len == worker.manager.numNodes());
-            assert(b.len == worker.manager.numNodes());
-            assert(self.scr.len == worker.manager.numNodes());
+            assert(x.len == manager.numNodes());
+            assert(b.len == manager.numNodes());
+            assert(self.scr.len == manager.numNodes());
 
-            const levels = worker.mesh.numLevels();
+            const levels = manager.numLevels();
 
             @memset(self.scr, 0.0);
             @memcpy(self.rhs, b);
 
             // Use initial right hand side to set tolerance.
-            const irhs = worker.norm(self.rhs);
+            const irhs = manager.norm(self.rhs);
             const tol: f64 = self.config.tolerance * @abs(irhs);
 
             if (irhs <= 1e-60) {
@@ -111,7 +110,7 @@ pub fn MultigridMethod(comptime N: usize, comptime M: usize, comptime BaseSolver
 
             const recursive: Recursive(Oper, Set) = .{
                 .method = self,
-                .worker = worker,
+                .manager = manager,
                 .oper = operator,
                 .set = set,
             };
@@ -128,9 +127,9 @@ pub fn MultigridMethod(comptime N: usize, comptime M: usize, comptime BaseSolver
                 // }
 
                 // Check if residual is less than tolerance.
-                worker.residual(self.scr, self.rhs, operator, x);
+                manager.residual(self.scr, self.rhs, operator, x);
 
-                const nres = worker.norm(self.scr);
+                const nres = manager.norm(self.scr);
 
                 std.debug.print("Iteration {}, Residual {}\n", .{ iteration, nres });
 
@@ -188,7 +187,7 @@ pub fn MultigridMethod(comptime N: usize, comptime M: usize, comptime BaseSolver
 
             return struct {
                 method: *Self,
-                worker: *const NodeWorker,
+                manager: *const NodeManager,
                 oper: Oper,
                 set: Set,
 
@@ -197,13 +196,13 @@ pub fn MultigridMethod(comptime N: usize, comptime M: usize, comptime BaseSolver
                     const old = self.method.old;
                     const scr = self.method.scr;
 
-                    const worker = self.worker;
+                    const manager = self.manager;
 
                     if (level == 0) {
                         defer _ = self.method.base_buffer.reset(.retain_capacity);
                         const allocator = self.method.base_buffer.allocator();
 
-                        const num_base_nodes = worker.numBaseNodes();
+                        const num_base_nodes = manager.numBaseNodes();
 
                         const sys_base = try allocator.alloc(f64, num_base_nodes);
                         defer allocator.free(sys_base);
@@ -211,36 +210,36 @@ pub fn MultigridMethod(comptime N: usize, comptime M: usize, comptime BaseSolver
                         const rhs_base = try allocator.alloc(f64, num_base_nodes);
                         defer allocator.free(rhs_base);
 
-                        worker.packBase(sys_base, sys);
-                        worker.packBase(rhs_base, rhs);
+                        manager.packBase(sys_base, sys);
+                        manager.packBase(rhs_base, rhs);
 
                         const BaseOperator = struct {
-                            worker: *const NodeWorker,
+                            manager: *const NodeManager,
                             oper: Oper,
                             set: Set,
                             scr: []f64,
                             sys: []f64,
 
                             pub fn apply(base: *const @This(), out: []f64, in: []const f64) void {
-                                base.worker.unpackBase(base.sys, in);
-                                base.worker.fillLevelGhostNodes(O, 0, base.set, base.sys);
-                                base.worker.applyLevel(0, base.scr, base.oper, base.sys);
-                                base.worker.packBase(out, base.scr);
+                                base.manager.unpackBase(base.sys, in);
+                                base.manager.fillLevelGhostNodes(O, 0, base.set, base.sys);
+                                base.manager.applyLevel(0, base.scr, base.oper, base.sys);
+                                base.manager.packBase(out, base.scr);
                             }
                         };
 
                         try self.method.base_solver.solve(allocator, BaseOperator{
-                            .worker = self.worker,
+                            .manager = self.manager,
                             .oper = self.oper,
                             .set = self.set,
                             .scr = scr,
                             .sys = sys,
                         }, sys_base, rhs_base);
 
-                        worker.unpackBase(sys, sys_base);
-                        worker.unpackBase(rhs, rhs_base);
+                        manager.unpackBase(sys, sys_base);
+                        manager.unpackBase(rhs, rhs_base);
 
-                        worker.fillLevelGhostNodes(O, 0, self.set, sys);
+                        manager.fillLevelGhostNodes(O, 0, self.set, sys);
 
                         return;
                     }
@@ -249,37 +248,32 @@ pub fn MultigridMethod(comptime N: usize, comptime M: usize, comptime BaseSolver
                     // Presmoothing
 
                     for (0..self.method.config.presmooth) |_| {
-                        worker.fillLevelGhostNodes(O, level, self.set, sys);
-                        worker.smoothLevel(level, scr, self.oper, sys, rhs);
-                        self.worker.copyLevel(level, sys, scr);
+                        manager.fillLevelGhostNodes(O, level, self.set, sys);
+                        manager.smoothLevel(level, scr, self.oper, sys, rhs);
+                        manager.copyLevel(level, sys, scr);
                     }
 
                     // ********************************
                     // Restrict Solution
 
-                    worker.fillLevelGhostNodes(O, level, self.set, sys);
-                    worker.restrictLevel(0, level, sys);
-
-                    // worker.fillLevelGhostNodes(level, self.bound, sys);
-
-                    // self.worker.copyLevel(level, scr, sys);
-                    // self.worker.copyLevel(level - 1, scr, sys);
-
-                    // worker.restrictLevel(level, scr);
-                    // worker.fillLevelGhostNodes(level - 1, self.bound, scr);
-
-                    // self.worker.copyLevel(level - 1, old, scr);
-
-                    worker.fillLevelGhostNodes(O, level - 1, self.set, sys);
-                    self.worker.copyLevel(level - 1, old, sys);
+                    manager.fillLevelGhostNodes(O, level, self.set, sys);
+                    // Direct injection to lower level
+                    manager.restrictLevel(0, level, sys);
+                    // Fill lower level ghost nodes
+                    manager.fillLevelGhostNodes(O, level - 1, self.set, sys);
+                    // Save old data
+                    manager.copyLevel(level - 1, old, sys);
 
                     // ********************************
                     // Right Hand Side (Tau Correction)
 
-                    worker.residualLevel(level, scr, rhs, self.oper, sys);
-                    worker.fillLevelGhostNodes(O, level, self.set, scr);
-                    worker.restrictLevel(1, level, scr);
-                    worker.tauCorrectLevel(level, rhs, scr, self.oper, sys);
+                    // Compute residual on l
+                    manager.residualLevel(level, scr, rhs, self.oper, sys);
+                    // Restrict residual to l-1
+                    manager.fillLevelGhostNodes(O, level, self.set, scr);
+                    manager.restrictLevel(1, level, scr);
+                    // Correct right hand side on l-1
+                    manager.tauCorrectLevel(level, rhs, scr, self.oper, sys);
 
                     // ********************************
                     // Recurse
@@ -289,24 +283,21 @@ pub fn MultigridMethod(comptime N: usize, comptime M: usize, comptime BaseSolver
                     // ********************************
                     // Error Correction
 
-                    // Sys and Old should both have boundaries filled by this point
-                    self.worker.copyLevel(level - 1, scr, sys);
-                    self.worker.subAssignLevel(level - 1, scr, old);
+                    // System contains the solution for l - 1, Old contains the solution from before we recursed,
+                    // and both have filled boundary conditions.
 
-                    worker.prolongLevel(1, level, scr);
-
-                    self.worker.addAssignLevel(level, sys, scr);
+                    manager.sigmaCorrectLevel(O, level, sys, sys, old);
 
                     // **********************************
                     // Post smooth
 
                     for (0..self.method.config.postsmooth) |_| {
-                        worker.fillLevelGhostNodes(O, level, self.set, sys);
-                        worker.smoothLevel(level, scr, self.oper, sys, rhs);
-                        self.worker.copyLevel(level, sys, scr);
+                        manager.fillLevelGhostNodes(O, level, self.set, sys);
+                        manager.smoothLevel(level, scr, self.oper, sys, rhs);
+                        manager.copyLevel(level, sys, scr);
                     }
 
-                    worker.fillLevelGhostNodes(O, level, self.set, sys);
+                    manager.fillLevelGhostNodes(O, level, self.set, sys);
                 }
             };
         }

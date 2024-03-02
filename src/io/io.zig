@@ -25,15 +25,13 @@ const System = common.System;
 const SystemConst = common.SystemConst;
 const isSystemTag = common.isSystemTag;
 
-const NodeWorker = mesh_.NodeWorker;
-const boundary_index = mesh_.boundary_index;
-const null_index = mesh_.null_index;
-
 /// A namespace for outputting data defined on a mesh.
 pub fn DataOut(comptime N: usize, comptime M: usize) type {
     return struct {
         const Mesh = mesh_.Mesh(N);
         const NodeManager = mesh_.NodeManager(N, M);
+        const boundary_index = mesh_.boundary_index;
+        const null_index = mesh_.null_index;
 
         const FaceIndex = geometry.FaceIndex(N);
         const IndexMixin = geometry.IndexMixin(N);
@@ -41,18 +39,19 @@ pub fn DataOut(comptime N: usize, comptime M: usize) type {
         const Region = geometry.Region(N);
 
         pub fn writeMesh(
-            mesh: *const Mesh,
             manager: *const NodeManager,
             out_stream: anytype,
         ) !void {
-            for (0..mesh.cells.len) |cell_id| {
+            const mesh = &manager.mesh;
+            const blocks = &manager.blocks;
+            for (0..manager.numCells()) |cell_id| {
                 const parent = mesh.cells.items(.parent)[cell_id];
                 const children = mesh.cells.items(.children)[cell_id];
                 const bounds = mesh.cells.items(.bounds)[cell_id];
 
-                const block = manager.cells.items(.block)[cell_id];
-                const index = manager.cells.items(.index)[cell_id];
-                const neighbors = manager.cells.items(.neighbors)[cell_id];
+                const block = blocks.cells.items(.block)[cell_id];
+                const index = blocks.cells.items(.index)[cell_id];
+                const neighbors = blocks.cells.items(.neighbors)[cell_id];
 
                 try out_stream.print("Cell {}:\n", .{cell_id});
                 try out_stream.print("    Origin: {any}\n", .{bounds.origin});
@@ -119,7 +118,7 @@ pub fn DataOut(comptime N: usize, comptime M: usize) type {
             }
 
             for (0..manager.numBlocks()) |block_id| {
-                const block = manager.blocks.get(block_id);
+                const block = blocks.blocks.get(block_id);
 
                 var size: usize = 1;
 
@@ -134,32 +133,26 @@ pub fn DataOut(comptime N: usize, comptime M: usize) type {
             }
         }
 
+        pub const WriteVtkConfig = struct {
+            levels: ?usize = null,
+            ghost: bool = false,
+        };
+
         pub fn writeVtk(
             comptime Tag: type,
             allocator: Allocator,
-            worker: *const NodeWorker(N, M),
+            manager: *const NodeManager,
             sys: SystemConst(Tag),
-            out_stream: anytype,
-        ) !void {
-            try writeLevelsVtk(Tag, allocator, worker, worker.mesh.numLevels(), sys, out_stream);
-        }
-
-        pub fn writeLevelsVtk(
-            comptime Tag: type,
-            allocator: Allocator,
-            worker: *const NodeWorker(N, M),
-            levels: usize,
-            sys: SystemConst(Tag),
+            config: WriteVtkConfig,
             out_stream: anytype,
         ) !void {
             if (comptime !isSystemTag(Tag)) {
                 @compileError("System must satisfy isSystemTag trait.");
             }
 
-            const mesh = worker.mesh;
-            const manager = worker.manager;
-
             assert(sys.len == manager.numNodes());
+
+            const levels = config.levels orelse manager.numLevels();
 
             if (levels == 0) {
                 return;
@@ -181,7 +174,7 @@ pub fn DataOut(comptime N: usize, comptime M: usize) type {
             var vertices: ArrayListUnmanaged(usize) = .{};
             defer vertices.deinit(allocator);
 
-            var fields = [1]ArrayListUnmanaged(f64){.{}} ** field_count;
+            var fields: [field_count]ArrayListUnmanaged(f64) = [1]ArrayListUnmanaged(f64){.{}} ** field_count;
 
             defer {
                 for (&fields) |*field| {
@@ -189,32 +182,31 @@ pub fn DataOut(comptime N: usize, comptime M: usize) type {
                 }
             }
 
-            const level = manager.level_to_blocks.range(levels - 1);
+            const level = manager.blocks.levelBlocks(levels - 1);
 
             for (0..level.end) |block_id| {
-                const node_space = worker.blockNodeSpace(block_id);
+                const node_space = manager.blockNodeSpace(block_id);
                 const block_range = manager.block_to_nodes.range(block_id);
                 const block_sys = sys.slice(block_range.start, block_range.end - block_range.start);
-                const block_size = manager.blocks.items(.size)[block_id];
+                const block_size = manager.blocks.blockSize(block_id);
 
                 var mcells = IndexSpace.fromSize(block_size).cartesianIndices();
 
                 while (mcells.next()) |mcell| {
                     // Get Cell ID
-                    const cell_id = manager.cellFromBlock(block_id, mcell);
-
-                    const cell_level = mesh.cells.items(.level)[cell_id];
+                    const cell_id = manager.blocks.blockCell(block_id, mcell);
+                    const cell_level = manager.mesh.cells.items(.level)[cell_id];
 
                     if (cell_level >= levels) {
                         continue;
                     }
 
                     // Check if this cell is visible.
-                    if (!mesh.isLeaf(cell_id) and cell_level + 1 < levels) {
+                    if (!manager.mesh.isLeaf(cell_id) and cell_level + 1 < levels) {
                         continue;
                     }
 
-                    const origin = IndexMixin.mul(mcell, manager.cell_size);
+                    const origin = IndexMixin.toSigned(IndexMixin.mul(mcell, manager.cell_size));
 
                     // Append Point Data
 
@@ -223,34 +215,51 @@ pub fn DataOut(comptime N: usize, comptime M: usize) type {
                     var point_size = manager.verticesPerCell();
                     var cell_size = manager.cell_size;
 
-                    const cnspace = NodeSpace(N, M){ .bounds = node_space.bounds, .size = point_size };
+                    const space = NodeSpace(N, M){ .bounds = node_space.bounds, .size = point_size };
 
-                    for (0..N) |axis| {
-                        point_size[axis] += 2 * M;
-                        cell_size[axis] += 2 * M;
+                    if (config.ghost) {
+                        for (0..N) |axis| {
+                            point_size[axis] += 2 * M;
+                            cell_size[axis] += 2 * M;
+                        }
+
+                        var points = space.nodes(M);
+
+                        while (points.next()) |point| {
+                            const node = IndexMixin.addSigned(origin, point);
+
+                            const position = node_space.position(node);
+                            for (0..N) |i| {
+                                try positions.append(allocator, position[i]);
+                            }
+
+                            inline for (comptime std.enums.values(Tag), 0..) |field, idx| {
+                                const value = node_space.value(node, block_sys.field(field));
+                                try fields[idx].append(allocator, value);
+                            }
+                        }
+                    } else {
+                        var points = space.nodes(0);
+
+                        while (points.next()) |point| {
+                            const node = IndexMixin.addSigned(origin, point);
+
+                            const position = node_space.position(node);
+                            for (0..N) |i| {
+                                try positions.append(allocator, position[i]);
+                            }
+
+                            inline for (comptime std.enums.values(Tag), 0..) |field, idx| {
+                                const value = node_space.value(node, block_sys.field(field));
+                                try fields[idx].append(allocator, value);
+                            }
+                        }
                     }
 
                     const point_space = IndexSpace.fromSize(point_size);
                     const cell_space = IndexSpace.fromSize(cell_size);
 
-                    {
-                        // var points = point_space.cartesianIndices();
-
-                        var points = cnspace.nodes(M);
-
-                        while (points.next()) |point| {
-                            const sorigin = IndexMixin.toSigned(origin);
-                            const spoint = point;
-
-                            const position = node_space.position(IndexMixin.addSigned(sorigin, spoint));
-                            for (0..N) |i| {
-                                try positions.append(allocator, position[i]);
-                            }
-                        }
-                    }
-
                     // Append Vertex data
-
                     if (N == 1) {
                         var cells = cell_space.cartesianIndices();
 
@@ -296,23 +305,6 @@ pub fn DataOut(comptime N: usize, comptime M: usize) type {
                             try vertices.append(allocator, point_offset + v6);
                             try vertices.append(allocator, point_offset + v7);
                             try vertices.append(allocator, point_offset + v8);
-                        }
-                    }
-
-                    {
-                        // Append Field data
-                        var points = cnspace.nodes(M);
-
-                        while (points.next()) |point| {
-                            // const node = IndexMixin.toSigned(IndexMixin.add(origin, point));
-
-                            const sorigin = IndexMixin.toSigned(origin);
-                            const node = IndexMixin.addSigned(sorigin, point);
-
-                            inline for (comptime std.enums.values(Tag), 0..) |field, idx| {
-                                const value = node_space.value(node, block_sys.field(field));
-                                try fields[idx].append(allocator, value);
-                            }
                         }
                     }
                 }

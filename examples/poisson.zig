@@ -23,7 +23,6 @@ const PoissonEquation = struct {
 
     const MultigridMethod = mesh_.MultigridMethod(N, M, BiCGStabSolver);
     const NodeManager = mesh_.NodeManager(N, M);
-    const NodeWorker = mesh_.NodeWorker(N, M);
     const Mesh = mesh_.Mesh(N);
 
     const RealBox = geometry.RealBox(N);
@@ -122,14 +121,14 @@ const PoissonEquation = struct {
         });
         defer mesh.deinit();
 
-        var manager = try NodeManager.init(allocator, [1]usize{16} ** N, 8);
-        defer manager.deinit();
-
         // Globally refine two times
         for (0..2) |r| {
             std.debug.print("Running Global Refinement {}\n", .{r});
             try mesh.refineGlobal(allocator);
         }
+
+        var manager = try NodeManager.init(allocator, &mesh, .{ 16, 16 }, 8);
+        defer manager.deinit();
 
         // // Locally refine once
         // for (0..1) |r| {
@@ -156,9 +155,7 @@ const PoissonEquation = struct {
         //     try mesh.refine(allocator, flags);
         // }
 
-        try manager.build(allocator, &mesh);
-
-        std.debug.print("Num Cells: {}\n", .{mesh.numCells()});
+        std.debug.print("Num Cells: {}\n", .{manager.numCells()});
         std.debug.print("Num Nodes: {}\n", .{manager.numNodes()});
         std.debug.print("Writing Mesh To File\n", .{});
 
@@ -168,7 +165,7 @@ const PoissonEquation = struct {
 
             var buf = std.io.bufferedWriter(file.writer());
 
-            try DataOut.writeMesh(&mesh, &manager, buf.writer());
+            try DataOut.writeMesh(&manager, buf.writer());
 
             try buf.flush();
         }
@@ -177,14 +174,12 @@ const PoissonEquation = struct {
         const sys = try System.init(allocator, manager.numNodes());
         defer sys.deinit(allocator);
 
-        // Create worker
-        var worker = try NodeWorker.init(&mesh, &manager);
-        defer worker.deinit();
-
         // Project Source
-        worker.project(Source{ .amplitude = 1.0 }, sys.field(.source));
+        manager.project(Source{ .amplitude = 1.0 }, sys.field(.source));
         // Project Solution
-        worker.project(Solution{ .amplitude = 1.0 }, sys.field(.exact));
+        manager.project(Solution{ .amplitude = 1.0 }, sys.field(.exact));
+        // Fill Boundary of exact
+        manager.fillGhostNodes(M, BoundarySet{}, sys.field(.exact));
         // Set initial guess
         @memset(sys.field(.approx), 0.0);
 
@@ -204,7 +199,7 @@ const PoissonEquation = struct {
         defer method.deinit();
 
         try method.solve(
-            &worker,
+            &manager,
             PoissonOperator{},
             BoundarySet{},
             sys.field(.approx),
@@ -216,7 +211,7 @@ const PoissonEquation = struct {
             sys.field(.err)[i] = sys.field(.approx)[i] - sys.field(.exact)[i];
         }
 
-        worker.residual(sys.field(.residual), sys.field(.source), PoissonOperator{}, sys.field(.approx));
+        manager.residual(sys.field(.residual), sys.field(.source), PoissonOperator{}, sys.field(.approx));
 
         {
             // Output result
@@ -230,8 +225,9 @@ const PoissonEquation = struct {
             try DataOut.writeVtk(
                 Tag,
                 allocator,
-                &worker,
+                &manager,
                 sys.toConst(),
+                .{ .ghost = true },
                 buf.writer(),
             );
 
@@ -247,12 +243,15 @@ const PoissonEquation = struct {
 
             var buf = std.io.bufferedWriter(file.writer());
 
-            try DataOut.writeLevelsVtk(
+            try DataOut.writeVtk(
                 Tag,
                 allocator,
-                &worker,
-                mesh.numLevels() - 1,
+                &manager,
                 sys.toConst(),
+                .{
+                    .levels = mesh.numLevels() - 1,
+                    .ghost = true,
+                },
                 buf.writer(),
             );
 
