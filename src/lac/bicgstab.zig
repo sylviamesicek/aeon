@@ -93,6 +93,7 @@ pub const BiCGStabSolver = struct {
             rho1 = dot(rg, rh);
 
             if (rho1 == 0.0) {
+                std.debug.print("BiCGStab solver failed.\n", .{});
                 break;
             }
 
@@ -130,7 +131,6 @@ pub const BiCGStabSolver = struct {
                 }
 
                 residual = norm(rg);
-
                 break;
             }
 
@@ -149,7 +149,9 @@ pub const BiCGStabSolver = struct {
                 oper.callback(iter, residual, x);
             }
 
-            if (residual <= tol) break;
+            if (residual <= tol) {
+                break;
+            }
         }
 
         if (iter < self.max_iters) iter += 1;

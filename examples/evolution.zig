@@ -18,6 +18,8 @@ pub const O = 2;
 
 const cfl: f64 = 0.1;
 
+const radius = 10.0;
+
 pub const BrillEvolution = struct {
     const DataOut = aeon.DataOut(N, M);
 
@@ -38,6 +40,10 @@ pub const BrillEvolution = struct {
     const NodeManager = mesh_.NodeManager(N, M);
 
     const MultigridMethod = mesh_.MultigridMethod(N, M, BiCGStabSolver);
+
+    fn isCloseTo(f: f64, v: f64) bool {
+        return std.math.approxEqRel(f64, f, v, 10e-10);
+    }
 
     pub const RField = struct {
         pub fn eval(_: @This(), pos: [N]f64) f64 {
@@ -129,14 +135,61 @@ pub const BrillEvolution = struct {
         }
     };
 
+    pub const EvenExtrapolateBoundarySet = struct {
+        pub const card: usize = 2;
+
+        pub fn boundaryIdFromFace(face: FaceIndex) usize {
+            if (face.axis == 0 and face.side == false) {
+                return 0;
+            } else {
+                return 1;
+            }
+        }
+
+        pub const BoundaryType0: type = common.EvenBoundary;
+        pub const BoundaryType1: type = common.ExtrapolationBoundary;
+
+        pub fn boundary0(_: @This()) BoundaryType0 {
+            return .{};
+        }
+
+        pub fn boundary1(_: @This()) BoundaryType1 {
+            return .{};
+        }
+    };
+
+    pub const OddExtrapolateBoundarySet = struct {
+        pub const card: usize = 2;
+
+        pub fn boundaryIdFromFace(face: FaceIndex) usize {
+            if (face.axis == 0 and face.side == false) {
+                return 0;
+            } else {
+                return 1;
+            }
+        }
+
+        pub const BoundaryType0: type = common.OddBoundary;
+        pub const BoundaryType1: type = common.ExtrapolationBoundary;
+
+        pub fn boundary0(_: @This()) BoundaryType0 {
+            return .{};
+        }
+
+        pub fn boundary1(_: @This()) BoundaryType1 {
+            return .{};
+        }
+    };
+
     const lapse_boundary = EvenBoundarySet{};
     const shiftr_boundary = OddBoundarySet{};
     const shiftz_boundary = EvenBoundarySet{};
-    const psi_boundary = EvenBoundarySet{};
-    const seed_boundary = OddBoundarySet{};
-    const w_boundary = OddBoundarySet{};
-    const u_boundary = EvenBoundarySet{};
-    const x_boundary = OddBoundarySet{};
+    const psi_initial_boundary = EvenBoundarySet{};
+    const psi_boundary = EvenExtrapolateBoundarySet{};
+    const seed_boundary = OddExtrapolateBoundarySet{};
+    const w_boundary = OddExtrapolateBoundarySet{};
+    const u_boundary = EvenExtrapolateBoundarySet{};
+    const x_boundary = OddExtrapolateBoundarySet{};
     const constraint_boundary = EvenBoundarySet{};
 
     pub const Seed = struct {
@@ -197,7 +250,7 @@ pub const BrillEvolution = struct {
 
             var term1 = hessian[0][0] + hessian[1][1];
 
-            if (r == 0.0) {
+            if (isCloseTo(r, 0.0)) {
                 term1 += hessian[0][0];
             } else {
                 term1 += grad[0] / r;
@@ -221,7 +274,7 @@ pub const BrillEvolution = struct {
 
             var term1 = hessian[0][0] + hessian[1][1];
 
-            if (r == 0.0) {
+            if (isCloseTo(r, 0.0)) {
                 term1 += hessian[0][0];
             } else {
                 term1 += grad[0] / r;
@@ -288,7 +341,7 @@ pub const BrillEvolution = struct {
 
             var term1 = hessian[0][0] + hessian[1][1];
 
-            if (rho == 0.0) {
+            if (isCloseTo(rho, 0.0)) {
                 term1 += hessian[0][0];
             } else {
                 term1 += grad[0] / rho;
@@ -322,7 +375,7 @@ pub const BrillEvolution = struct {
 
             var term1 = hessian[0][0] + hessian[1][1];
 
-            if (rho == 0.0) {
+            if (isCloseTo(rho, 0.0)) {
                 term1 += hessian[0][0];
             } else {
                 term1 += grad[0] / rho;
@@ -426,7 +479,7 @@ pub const BrillEvolution = struct {
 
             var term1 = phess[0][0] + phess[1][1];
 
-            if (rho == 0.0) {
+            if (isCloseTo(rho, 0.0)) {
                 term1 += phess[0][0];
             } else {
                 term1 += pgrad[0] / rho;
@@ -455,6 +508,7 @@ pub const BrillEvolution = struct {
         pub fn eval(self: PsiEvolution, engine: Engine) f64 {
             const pos = engine.position();
             const rho = pos[0];
+            const z = pos[1];
 
             const lapse = engine.value(self.lapse) + 1.0;
             const shiftr = engine.value(self.shiftr);
@@ -466,10 +520,26 @@ pub const BrillEvolution = struct {
             const u = engine.value(self.u);
             const w = engine.value(self.w);
 
+            // Sommerfeld term
+
+            if (isCloseTo(rho, radius)) {
+                const r = @sqrt(rho * rho + z * z);
+                const term1 = -r / rho * pgrad[0];
+                const term2 = -psi / r;
+
+                return term1 + term2;
+            } else if (isCloseTo(z, radius) or isCloseTo(z, -radius)) {
+                const r = @sqrt(rho * rho + z * z);
+                const term1 = -r / z * pgrad[1];
+                const term2 = -psi / r;
+
+                return term1 + term2;
+            }
+
             const term1 = shiftr * pgrad[0] + shiftz * pgrad[1];
             const term2 = psi * lapse / 6.0 * (u + 2 * rho * w);
 
-            if (rho == 0.0) {
+            if (isCloseTo(rho, 0.0)) {
                 return term1 + term2 + psi / 2.0 * shiftr_grad[0];
             } else {
                 return term1 + term2 + psi * shiftr / (2.0 * rho);
@@ -489,14 +559,29 @@ pub const BrillEvolution = struct {
         pub fn eval(self: SeedEvolution, engine: Engine) f64 {
             const pos = engine.position();
             const rho = pos[0];
+            const z = pos[1];
             const rho2 = rho * rho;
 
-            if (rho == 0.0) {
+            if (isCloseTo(rho, 0.0)) {
                 return 0.0;
             }
 
             const seed = engine.value(self.seed);
             const sgrad = engine.gradient(self.seed);
+
+            if (isCloseTo(rho, radius)) {
+                const r = @sqrt(rho * rho + z * z);
+                const term1 = -r / rho * sgrad[0];
+                const term2 = -seed / r;
+
+                return term1 + term2;
+            } else if (isCloseTo(z, radius) or isCloseTo(z, -radius)) {
+                const r = @sqrt(rho * rho + z * z);
+                const term1 = -r / z * sgrad[1];
+                const term2 = -seed / r;
+
+                return term1 + term2;
+            }
 
             const lapse = engine.value(self.lapse) + 1.0;
             const shiftr = engine.value(self.shiftr);
@@ -528,9 +613,10 @@ pub const BrillEvolution = struct {
         pub fn eval(self: WEvolution, engine: Engine) f64 {
             const pos = engine.position();
             const rho = pos[0];
+            const z = pos[1];
             const rho2 = rho * rho;
 
-            if (rho == 0.0) {
+            if (isCloseTo(rho, 0.0)) {
                 return 0.0;
             }
 
@@ -554,6 +640,20 @@ pub const BrillEvolution = struct {
             const x = engine.value(self.x);
             const w = engine.value(self.w);
             const wgrad = engine.gradient(self.w);
+
+            if (isCloseTo(rho, radius)) {
+                const r = @sqrt(rho * rho + z * z);
+                const term1 = -r / rho * wgrad[0];
+                const term2 = -w / r;
+
+                return term1 + term2;
+            } else if (isCloseTo(z, radius) or isCloseTo(z, -radius)) {
+                const r = @sqrt(rho * rho + z * z);
+                const term1 = -r / z * wgrad[1];
+                const term2 = -w / r;
+
+                return term1 + term2;
+            }
 
             const term1 = shiftr * wgrad[0] + shiftz * wgrad[1] + shiftr * w / rho;
             const term2 = x / rho * (shiftz_grad[0] - shiftr_grad[1]);
@@ -585,6 +685,7 @@ pub const BrillEvolution = struct {
         pub fn eval(self: UEvolution, engine: Engine) f64 {
             const pos = engine.position();
             const rho = pos[0];
+            const z = pos[1];
 
             const lapse = engine.value(self.lapse) + 1.0;
             const lgrad = engine.gradient(self.lapse);
@@ -603,7 +704,22 @@ pub const BrillEvolution = struct {
             const sgrad = engine.gradient(self.seed);
 
             const x = engine.value(self.x);
+            const u = engine.value(self.u);
             const ugrad = engine.gradient(self.u);
+
+            if (isCloseTo(rho, radius)) {
+                const r = @sqrt(rho * rho + z * z);
+                const term1 = -r / rho * ugrad[0];
+                const term2 = -u / r;
+
+                return term1 + term2;
+            } else if (isCloseTo(z, radius) or isCloseTo(z, -radius)) {
+                const r = @sqrt(rho * rho + z * z);
+                const term1 = -r / z * ugrad[1];
+                const term2 = -u / r;
+
+                return term1 + term2;
+            }
 
             const term1 = shiftr * ugrad[0] + shiftz * ugrad[1];
             const term2 = 2 * x * (shiftr_grad[1] - shiftz_grad[0]);
@@ -642,6 +758,7 @@ pub const BrillEvolution = struct {
         pub fn eval(self: XEvolution, engine: Engine) f64 {
             const pos = engine.position();
             const rho = pos[0];
+            const z = pos[1];
 
             if (rho == 0.0) {
                 return 0.0;
@@ -664,7 +781,22 @@ pub const BrillEvolution = struct {
             const sgrad = engine.gradient(self.seed);
 
             const u = engine.value(self.u);
+            const x = engine.value(self.x);
             const xgrad = engine.gradient(self.x);
+
+            if (isCloseTo(rho, radius)) {
+                const r = @sqrt(rho * rho + z * z);
+                const term1 = -r / rho * xgrad[0];
+                const term2 = -x / r;
+
+                return term1 + term2;
+            } else if (isCloseTo(z, radius) or isCloseTo(z, -radius)) {
+                const r = @sqrt(rho * rho + z * z);
+                const term1 = -r / z * xgrad[1];
+                const term2 = -x / r;
+
+                return term1 + term2;
+            }
 
             const term1 = shiftr * xgrad[0] + shiftz * xgrad[1];
             const term2 = 1.0 / 2.0 * u * (shiftz_grad[0] - shiftr_grad[1]);
@@ -945,13 +1077,13 @@ pub const BrillEvolution = struct {
 
             self.manager.project(x_evolve, deriv.field(.x));
 
-            // const eps = 10.0;
+            const eps = 0.1;
 
-            // self.manager.dissipation(M, eps, deriv.field(.psi), psi);
-            // self.manager.dissipation(M, eps, deriv.field(.seed), seed);
-            // self.manager.dissipation(M, eps, deriv.field(.u), u);
-            // self.manager.dissipation(M, eps, deriv.field(.w), w);
-            // self.manager.dissipation(M, eps, deriv.field(.x), x);
+            self.manager.dissipation(M, eps, deriv.field(.psi), psi);
+            self.manager.dissipation(M, eps, deriv.field(.seed), seed);
+            self.manager.dissipation(M, eps, deriv.field(.u), u);
+            self.manager.dissipation(M, eps, deriv.field(.w), w);
+            self.manager.dissipation(M, eps, deriv.field(.x), x);
         }
     };
 

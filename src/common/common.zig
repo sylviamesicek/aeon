@@ -57,6 +57,7 @@ pub const checkBoundary = traits.checkBoundary;
 pub const NuemannBoundary = traits.NuemannBoundary;
 pub const OddBoundary = traits.OddBoundary;
 pub const EvenBoundary = traits.EvenBoundary;
+pub const ExtrapolationBoundary = traits.ExtrapolationBoundary;
 
 pub const isBoundarySet = traits.isBoundarySet;
 pub const checkBoundarySet = traits.checkBoundarySet;

@@ -250,6 +250,10 @@ pub fn MultigridMethod(comptime N: usize, comptime M: usize, comptime BaseSolver
 
                         manager.fillLevelGhostNodes(O, 0, self.set, sys);
 
+                        manager.residual(scr, rhs, self.oper, sys);
+
+                        // std.debug.print("Residual {}\n", .{manager.norm(scr)});
+
                         return;
                     }
 

@@ -60,7 +60,7 @@ pub fn NodeOperator(comptime N: usize) type {
         }
 
         pub fn extrapolate(order: usize, extent: [N]isize) @This() {
-            const result = value();
+            var result = value();
 
             for (0..N) |axis| {
                 if (extent[axis] > 0) {
@@ -71,6 +71,10 @@ pub fn NodeOperator(comptime N: usize) type {
                     result.right[axis] = 2 * order;
                     result.left[axis] = 0;
                     result.ranks[axis] = .{ .extrapolate = extent[axis] };
+                } else {
+                    result.left[axis] = 0;
+                    result.right[axis] = 0;
+                    result.ranks[axis] = .{ .value = {} };
                 }
             }
 
@@ -327,9 +331,11 @@ pub fn NodeSpace(comptime N: usize, comptime M: usize) type {
             // Loop over stencil space.
             comptime var stencil_sizes: [N]usize = [1]usize{1} ** N;
 
-            inline for (0..N) |axis| {
-                if (comptime parity.isSet(axis)) {
-                    stencil_sizes[axis] = 2 * O;
+            comptime {
+                for (0..N) |axis| {
+                    if (parity.isSet(axis)) {
+                        stencil_sizes[axis] = 2 * O;
+                    }
                 }
             }
 
@@ -341,18 +347,20 @@ pub fn NodeSpace(comptime N: usize, comptime M: usize) type {
                 comptime var offset: [N]isize = [1]isize{0} ** N;
                 comptime var coef: f64 = 1.0;
 
-                inline for (0..N) |axis| {
-                    if (comptime parity.isSet(axis)) {
-                        coef *= pstencil[index[axis]];
-                        offset[axis] = sindex[axis] - O + 1;
-                    } else {
-                        offset[axis] = 0;
+                comptime {
+                    for (0..N) |axis| {
+                        if (parity.isSet(axis)) {
+                            coef *= pstencil[index[axis]];
+                            offset[axis] = sindex[axis] - O + 1;
+                        } else {
+                            offset[axis] = 0;
+                        }
                     }
-                }
 
-                // Short circuit in comptime
-                if (comptime coef == 0.0 or coef == -0.0) {
-                    continue;
+                    // Short circuit in comptime
+                    if (coef == 0.0 or coef == -0.0) {
+                        continue;
+                    }
                 }
 
                 const node = IndexMixin.addSigned(central, offset);
@@ -386,14 +394,16 @@ pub fn NodeSpace(comptime N: usize, comptime M: usize) type {
                 comptime var coef: f64 = 1.0;
                 comptime var offset: [N]isize = undefined;
 
-                inline for (0..N) |axis| {
-                    coef *= stencil[index[axis]];
-                    offset[axis] = sindex[axis] - O;
-                }
+                comptime {
+                    for (0..N) |axis| {
+                        coef *= stencil[index[axis]];
+                        offset[axis] = sindex[axis] - O;
+                    }
 
-                // Short circuit in comptime
-                if (comptime coef == 0.0 or coef == -0.0) {
-                    continue;
+                    // Short circuit in comptime
+                    if (coef == 0.0 or coef == -0.0) {
+                        continue;
+                    }
                 }
 
                 const node = IndexMixin.addSigned(central, offset);
@@ -455,14 +465,16 @@ pub fn NodeSpace(comptime N: usize, comptime M: usize) type {
                 comptime var offset: [N]isize = undefined;
                 comptime var coef: f64 = 1.0;
 
-                inline for (0..N) |axis| {
-                    coef *= stencils[axis][index[axis]];
-                    offset[axis] = sindex[axis] - op.left[axis];
-                }
+                comptime {
+                    for (0..N) |axis| {
+                        coef *= stencils[axis][index[axis]];
+                        offset[axis] = sindex[axis] - op.left[axis];
+                    }
 
-                // Short circuit in comptime
-                if (comptime coef == 0.0 or coef == -0.0) {
-                    continue;
+                    // Short circuit in comptime
+                    if (coef == 0.0 or coef == -0.0) {
+                        continue;
+                    }
                 }
 
                 const node = IndexMixin.addSigned(vertex, offset);
@@ -503,14 +515,16 @@ pub fn NodeSpace(comptime N: usize, comptime M: usize) type {
                 comptime var offset: [N]isize = undefined;
                 comptime var coef: f64 = 1.0;
 
-                inline for (0..N) |axis| {
-                    coef *= stencils[axis][index[axis]];
-                    offset[axis] = sindex[axis] - op.left[axis];
-                }
+                comptime {
+                    for (0..N) |axis| {
+                        coef *= stencils[axis][index[axis]];
+                        offset[axis] = sindex[axis] - op.left[axis];
+                    }
 
-                // Short circuit in comptime
-                if (comptime coef == 0.0 or coef == -0.0) {
-                    continue;
+                    // Short circuit in comptime
+                    if (coef == 0.0 or coef == -0.0) {
+                        continue;
+                    }
                 }
 
                 const node = IndexMixin.addSigned(vertex, offset);

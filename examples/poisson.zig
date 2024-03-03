@@ -50,9 +50,8 @@ const PoissonEquation = struct {
 
             // }
 
-            const term1 = (y * @sin(pi * y)) * (x * pi * pi * @sin(pi * x) - 2 * pi * @cos(pi * x));
-            const term2 = (x * @sin(pi * x)) * (y * pi * pi * @sin(pi * y) - 2 * pi * @cos(pi * y));
-
+            const term1 = -2 * pi * (@sin(pi * x) * y * @cos(pi * y) + @sin(pi * y) * x * @cos(pi * x));
+            const term2 = (-1 - 2 * pi * pi) * x * y * @cos(pi * x) * @cos(pi * y);
             return self.amplitude * (term1 + term2);
         }
     };
@@ -73,7 +72,7 @@ const PoissonEquation = struct {
             //
             // }
 
-            return self.amplitude * x * y * @sin(pi * x) * @sin(pi * y);
+            return self.amplitude * x * y * @cos(pi * x) * @cos(pi * y);
         }
     };
 
@@ -84,7 +83,7 @@ const PoissonEquation = struct {
             const x = pos[0];
             const y = pos[1];
 
-            return self.amplitude * y * @sin(pi * y) * (@sin(pi * x) + pi * x * @cos(pi * x));
+            return self.amplitude * y * @cos(pi * y) * (@cos(pi * x) - pi * x * @sin(pi * x));
         }
     };
 
@@ -95,7 +94,7 @@ const PoissonEquation = struct {
             const x = pos[0];
             const y = pos[1];
 
-            return self.amplitude * x * @sin(pi * x) * (@sin(pi * y) + pi * y * @cos(pi * y));
+            return self.amplitude * x * @cos(pi * x) * (@cos(pi * y) - pi * y * @sin(pi * y));
         }
     };
 
@@ -138,7 +137,7 @@ const PoissonEquation = struct {
             }
         }
 
-        pub const BoundaryType0: type = common.EvenBoundary;
+        pub const BoundaryType0: type = common.OddBoundary;
         pub const BoundaryType1: type = XBoundary;
         pub const BoundaryType2: type = YBoundary;
 
@@ -155,22 +154,22 @@ const PoissonEquation = struct {
         }
     };
 
-    pub const PoissonOperator = struct {
+    pub const HemholtzOperator = struct {
         pub const order: usize = M;
 
         pub fn apply(
-            _: PoissonOperator,
+            _: HemholtzOperator,
             engine: Engine,
             field: []const f64,
         ) f64 {
-            return -engine.laplacian(field);
+            return engine.laplacian(field) - engine.value(field);
         }
 
         pub fn applyDiag(
-            _: PoissonOperator,
+            _: HemholtzOperator,
             engine: Engine,
         ) f64 {
-            return -engine.laplacianDiag();
+            return engine.laplacianDiag() - engine.valueDiag();
         }
     };
 
@@ -190,21 +189,21 @@ const PoissonEquation = struct {
         const source = Source{ .amplitude = 1.0 };
         const solution = Solution{ .amplitude = 1.0 };
         const set = BoundarySet{ .amplitude = 1.0 };
-        const op = PoissonOperator{};
+        const op = HemholtzOperator{};
 
         var mesh = try Mesh.init(allocator, .{
             .origin = [2]f64{ 0.0, 0.0 },
-            .size = [2]f64{ 1.0, 1.0 },
+            .size = [2]f64{ 0.5, 0.5 },
         });
         defer mesh.deinit();
 
         // Globally refine two times
-        // for (0..2) |r| {
-        //     std.debug.print("Running Global Refinement {}\n", .{r});
-        //     try mesh.refineGlobal(allocator);
-        // }
+        for (0..0) |r| {
+            std.debug.print("Running Global Refinement {}\n", .{r});
+            try mesh.refineGlobal(allocator);
+        }
 
-        var manager = try NodeManager.init(allocator, &mesh, .{ 32, 32 }, 8);
+        var manager = try NodeManager.init(allocator, &mesh, .{ 16, 16 }, 8);
         defer manager.deinit();
 
         // // Locally refine once
@@ -260,30 +259,28 @@ const PoissonEquation = struct {
         // Set initial guess
         @memset(sys.field(.approx), 0.0);
 
-        manager.fillGhostNodes(M, set, sys.field(.approx));
-
         // Solve
 
-        // var method = try MultigridMethod.init(
-        //     allocator,
-        //     manager.numNodes(),
-        //     BiCGStabSolver.new(10000, 10e-15),
-        //     .{
-        //         .max_iters = 1,
-        //         .tolerance = 10e-11,
-        //         .presmooth = 5,
-        //         .postsmooth = 5,
-        //     },
-        // );
-        // defer method.deinit();
+        var method = try MultigridMethod.init(
+            allocator,
+            manager.numNodes(),
+            BiCGStabSolver.new(1000, 10e-15),
+            .{
+                .max_iters = 1,
+                .tolerance = 10e-11,
+                .presmooth = 5,
+                .postsmooth = 5,
+            },
+        );
+        defer method.deinit();
 
-        // try method.solve(
-        //     &manager,
-        //     op,
-        //     set,
-        //     sys.field(.approx),
-        //     sys.field(.source),
-        // );
+        try method.solve(
+            &manager,
+            op,
+            set,
+            sys.field(.approx),
+            sys.field(.source),
+        );
 
         // Compute error
         for (0..manager.numNodes()) |i| {

@@ -232,6 +232,11 @@ pub const EvenBoundary = struct {
     pub const priority: usize = 1;
 };
 
+pub const ExtrapolationBoundary = struct {
+    pub const kind: BoundaryKind = .extrapolate;
+    pub const priority: usize = 0;
+};
+
 /// A trait for defining boundary sets, i.e. a collection of boundaries along with a mapping from faces
 /// to boundaries
 pub fn isBoundarySet(comptime N: usize, comptime T: type) bool {

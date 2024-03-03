@@ -62,7 +62,9 @@ pub fn Engine(comptime N: usize, comptime M: usize, comptime O: usize) type {
 
             inline for (0..N) |i| {
                 comptime var ranks: [N]usize = [1]usize{0} ** N;
-                ranks[i] += 1;
+                comptime {
+                    ranks[i] += 1;
+                }
 
                 result[i] = self.eval(ranks, field);
             }
@@ -75,7 +77,9 @@ pub fn Engine(comptime N: usize, comptime M: usize, comptime O: usize) type {
 
             inline for (0..N) |i| {
                 comptime var ranks: [N]usize = [1]usize{0} ** N;
-                ranks[i] += 1;
+                comptime {
+                    ranks[i] += 1;
+                }
 
                 result[i] = self.evalDiag(ranks);
             }
@@ -90,8 +94,10 @@ pub fn Engine(comptime N: usize, comptime M: usize, comptime O: usize) type {
             inline for (0..N) |i| {
                 inline for (0..N) |j| {
                     comptime var ranks: [N]usize = [1]usize{0} ** N;
-                    ranks[i] += 1;
-                    ranks[j] += 1;
+                    comptime {
+                        ranks[i] += 1;
+                        ranks[j] += 1;
+                    }
 
                     result[i][j] = self.eval(ranks, field);
                 }
@@ -106,8 +112,10 @@ pub fn Engine(comptime N: usize, comptime M: usize, comptime O: usize) type {
             inline for (0..N) |i| {
                 inline for (0..N) |j| {
                     comptime var ranks: [N]usize = [1]usize{0} ** N;
-                    ranks[i] += 1;
-                    ranks[j] += 1;
+                    comptime {
+                        ranks[i] += 1;
+                        ranks[j] += 1;
+                    }
 
                     result[i][j] = self.evalDiag(ranks);
                 }
@@ -122,7 +130,9 @@ pub fn Engine(comptime N: usize, comptime M: usize, comptime O: usize) type {
 
             inline for (0..N) |i| {
                 comptime var ranks: [N]usize = [1]usize{0} ** N;
-                ranks[i] = 2;
+                comptime {
+                    ranks[i] = 2;
+                }
 
                 result += self.eval(ranks, field);
             }
@@ -135,7 +145,9 @@ pub fn Engine(comptime N: usize, comptime M: usize, comptime O: usize) type {
 
             inline for (0..N) |i| {
                 comptime var ranks: [N]usize = [1]usize{0} ** N;
-                ranks[i] = 2;
+                comptime {
+                    ranks[i] = 2;
+                }
 
                 result += self.evalDiag(ranks);
             }
