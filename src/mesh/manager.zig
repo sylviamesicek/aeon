@@ -120,7 +120,7 @@ pub fn NodeManager(comptime N: usize, comptime M: usize) type {
 
         /// Retrieves the spatial spacing of a given level
         pub fn spacing(self: *const @This(), level: usize) [N]f64 {
-            var result: [N]f64 = self.mesh.physicalBounds();
+            var result: [N]f64 = self.mesh.physicalBounds().size;
 
             for (0..N) |axis| {
                 result[axis] /= @floatFromInt(self.cell_size[axis]);
@@ -576,7 +576,7 @@ pub fn NodeManager(comptime N: usize, comptime M: usize) type {
                 const app = operator.apply(engine, src);
                 const appDiag = operator.applyDiag(engine);
 
-                node_space.setValue(node, block_field, sval + 2.0 / 3.0 * (rval - app) / appDiag);
+                node_space.setValue(node, block_field, sval + 1.0 / 3.0 * (rval - app) / appDiag);
             }
         }
 
@@ -713,8 +713,6 @@ pub fn NodeManager(comptime N: usize, comptime M: usize) type {
             const parent_old = self.blockNodes(parent, old);
 
             const parent_node_space = self.blockNodeSpace(parent);
-
-            std.debug.print("Num Nodes {}, Slice {}\n", .{ parent_node_space.numNodes(), parent_new.len });
 
             const origin = toSigned(IndexMixin.refined(self.blockNodeParentOrigin(block_id)));
 

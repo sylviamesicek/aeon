@@ -6,6 +6,7 @@ const utils = @import("../utils.zig");
 
 const Range = utils.Range;
 
+const engine_ = @import("engine.zig");
 const nodes_ = @import("nodes.zig");
 const traits = @import("traits.zig");
 
@@ -257,8 +258,14 @@ pub fn BoundaryEngine(comptime N: usize, comptime M: usize, comptime Set: type) 
 
                             comptime var s0 = NodeOperator.value();
                             comptime var s1 = NodeOperator.value();
-                            s0.setAxisCentered(axes[0], O, .derivative);
-                            s1.setAxisCentered(axes[1], O, .derivative);
+
+                            comptime {
+                                s0.setAxisCentered(axes[0], O, .derivative);
+                                s1.setAxisCentered(axes[1], O, .derivative);
+
+                                // s0.setAxisBoundaryDerivative(axes[0], O, extent[axes[0]]);
+                                // s1.setAxisBoundaryDerivative(axes[1], O, extent[axes[1]]);
+                            }
 
                             const sign0: f64 = signs[axes[0]];
                             const sign1: f64 = signs[axes[1]];
@@ -279,7 +286,36 @@ pub fn BoundaryEngine(comptime N: usize, comptime M: usize, comptime Set: type) 
                             const beta0_1 = sign1 * self.fieldEval(s1, node, boundary0.robin_rhs);
                             const beta1_0 = sign0 * self.fieldEval(s0, node, boundary1.robin_rhs);
 
-                            break :blk ((alpha0_1 + alpha1_0) / 2 + alpha0 * alpha1) * f + (alpha0 * beta1 + alpha1 * beta0 + beta0_1 + beta1_0) / 2;
+                            const result = ((alpha0_1 + alpha1_0) / 2 + alpha0 * alpha1) * f + (alpha0 * beta1 + alpha1 * beta0 + beta0_1 + beta1_0) / 2;
+
+                            // var center0 = node;
+                            // var center1 = node;
+
+                            // center0[axes[1]] += extent[axes[1]];
+                            // center1[axes[0]] += extent[axes[0]];
+
+                            // const alpha0 = self.fieldValue(center0, boundary0.robin_value);
+                            // const alpha1 = self.fieldValue(center1, boundary1.robin_value);
+
+                            // const beta0 = self.fieldValue(center0, boundary0.robin_rhs);
+                            // const beta1 = self.fieldValue(center1, boundary1.robin_rhs);
+
+                            // std.debug.print("Node {any}, Extent {any}\n", .{ node, extent });
+
+                            // std.debug.print("Value of Beta0_1 {}\n", .{beta0_1});
+                            // std.debug.print("Value of Beta1_0 {}\n", .{beta1_0});
+
+                            // std.debug.print("Boundary0 {}\n", .{boundary0.robin_rhs});
+                            // std.debug.print("Boundary1 {}\n", .{boundary1.robin_rhs});
+
+                            // std.debug.print("Stencil0 {}\n", .{s0});
+                            // std.debug.print("Stencil1 {}\n", .{s1});
+
+                            // std.debug.print("Total Stencil {}\n", .{stencil});
+
+                            // std.debug.print("Result {}\n", .{result});
+
+                            break :blk result;
                         },
                         else => @compileError("Robin boundary conditions only supported for N <= 2"),
                     };
@@ -426,11 +462,209 @@ test "2d boundary filling" {
     for (0..node_space.numNodes()) |i| {
         const err = @abs(field[i] - exact[i]);
         try expect(err < 1e-8);
-
-        // if (err > 1e-8) {
-        //     std.debug.print("Failed at {} with error {}\n", .{ i, err });
-        // }
     }
+}
+
+test "mixed boundary filling" {
+    const N = 2;
+    const M = 2;
+
+    const FaceIndex = geometry.FaceIndex(N);
+    const NodeSpace = nodes_.NodeSpace(N, M);
+    const NodeOperator = nodes_.NodeOperator(N);
+    const RealBox = geometry.RealBox(N);
+
+    const pi = std.math.pi;
+
+    const Solution = struct {
+        amplitude: f64,
+
+        pub const order: usize = M;
+
+        pub fn eval(self: @This(), pos: [N]f64) f64 {
+            const x = pos[0];
+            const y = pos[1];
+
+            return self.amplitude * x * y * @sin(pi * x) * @sin(pi * y);
+        }
+    };
+
+    const XDerivative = struct {
+        amplitude: f64,
+
+        pub fn eval(self: @This(), pos: [N]f64) f64 {
+            const x = pos[0];
+            const y = pos[1];
+
+            return self.amplitude * y * @sin(pi * y) * (@sin(pi * x) + pi * x * @cos(pi * x));
+        }
+    };
+
+    const YDerivative = struct {
+        amplitude: f64,
+
+        pub fn eval(self: @This(), pos: [N]f64) f64 {
+            const x = pos[0];
+            const y = pos[1];
+
+            return self.amplitude * x * @sin(pi * x) * (@sin(pi * y) + pi * y * @cos(pi * y));
+        }
+    };
+
+    const XYDerivative = struct {
+        amplitude: f64,
+
+        pub fn eval(self: @This(), pos: [N]f64) f64 {
+            const x = pos[0];
+            const y = pos[1];
+
+            return self.amplitude * (@sin(pi * y) + pi * y * @cos(pi * y)) * (@sin(pi * x) + pi * x * @cos(pi * x));
+        }
+    };
+
+    const XBoundary = struct {
+        robin_rhs: XDerivative,
+        comptime robin_value: traits.ZeroField(N) = .{},
+
+        pub const kind: BoundaryKind = .robin;
+        pub const priority: usize = 0;
+
+        pub fn new(amplitude: f64) @This() {
+            return .{ .robin_rhs = .{ .amplitude = amplitude } };
+        }
+    };
+
+    const YBoundary = struct {
+        robin_rhs: YDerivative,
+        comptime robin_value: traits.ZeroField(N) = .{},
+
+        pub const kind: BoundaryKind = .robin;
+        pub const priority: usize = 0;
+
+        pub fn new(amplitude: f64) @This() {
+            return .{ .robin_rhs = .{ .amplitude = amplitude } };
+        }
+    };
+
+    const BoundarySet = struct {
+        amplitude: f64,
+
+        pub const card: usize = 3;
+
+        pub fn boundaryIdFromFace(face: FaceIndex) usize {
+            if (face.side == true and face.axis == 1) {
+                return 2;
+            } else if (face.side == true and face.axis == 0) {
+                return 1;
+            } else {
+                return 0;
+            }
+        }
+
+        pub const BoundaryType0: type = traits.EvenBoundary;
+        pub const BoundaryType1: type = XBoundary;
+        pub const BoundaryType2: type = YBoundary;
+
+        pub fn boundary0(_: @This()) BoundaryType0 {
+            return .{};
+        }
+
+        pub fn boundary1(self: @This()) BoundaryType1 {
+            return XBoundary.new(self.amplitude);
+        }
+
+        pub fn boundary2(self: @This()) BoundaryType2 {
+            return YBoundary.new(self.amplitude);
+        }
+    };
+
+    const allocator = std.testing.allocator;
+
+    const solution = Solution{
+        .amplitude = 1.0,
+    };
+
+    const mixed = XYDerivative{
+        .amplitude = 1.0,
+    };
+
+    const xderivative = XDerivative{
+        .amplitude = 1.0,
+    };
+
+    // const yderivative = YDerivative{
+    //     .amplitude = 1.0,
+    // };
+
+    const space = NodeSpace{
+        .bounds = RealBox.unit,
+        .size = .{ 201, 201 },
+    };
+
+    const range = Range{ .start = 0, .end = space.numNodes() };
+
+    const engine = BoundaryEngine(N, M, BoundarySet){
+        .space = space,
+        .range = range,
+        .set = .{ .amplitude = 1.0 },
+    };
+
+    const field = try allocator.alloc(f64, space.numNodes());
+    defer allocator.free(field);
+
+    {
+        var nodes = space.nodes(0);
+
+        while (nodes.next()) |node| {
+            const pos = space.position(node);
+            space.setValue(node, field, solution.eval(pos));
+        }
+    }
+
+    // Fill ghost nodes
+    engine.fill(M, field);
+
+    const zeros = try allocator.alloc(f64, space.numNodes());
+    defer allocator.free(zeros);
+
+    @memset(zeros, 0.0);
+
+    engine.fill(M, zeros);
+
+    comptime var o1 = NodeOperator.value();
+    comptime var o2 = NodeOperator.value();
+
+    comptime var n1 = NodeOperator.value();
+    comptime var n2 = NodeOperator.value();
+
+    comptime {
+        o1.setAxisBoundaryDerivative(0, M, M);
+        o1.setAxisBoundaryDerivative(1, M, M);
+
+        o2.setAxisCentered(0, M, .derivative);
+        o2.setAxisCentered(1, M, .derivative);
+
+        n1.setAxisCentered(0, M, .derivative);
+        n2.setAxisCentered(1, M, .derivative);
+    }
+
+    const corner: [N]isize = .{ 200, 200 };
+
+    const position = space.position(corner);
+
+    const val = space.eval(o1, corner, zeros);
+    const valc = space.eval(o2, corner, zeros);
+    const exact = mixed.eval(space.position(corner));
+
+    std.debug.print("Corner at {any}\n", .{position});
+    std.debug.print("Diff at Corner {}\n", .{val - exact});
+    std.debug.print("Diff at Corner Centered {}\n", .{valc - exact});
+
+    const normal = space.eval(n1, corner, zeros);
+    const enormal = xderivative.eval(position);
+
+    std.debug.print("Diff at Corner {}\n", .{normal - enormal});
+    // std.debug.print("Diff at Corner Centered {}\n", .{valc - exact});
 }
 
 // test "mixed boundary filling" {

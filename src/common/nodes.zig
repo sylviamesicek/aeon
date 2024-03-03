@@ -432,10 +432,7 @@ pub fn NodeSpace(comptime N: usize, comptime M: usize) type {
                 result += stencil[i] * self.value(offset_node, field);
             }
 
-            var scale: f64 = @floatFromInt(self.size[axis] - 1);
-            scale /= self.bounds.size[axis];
-
-            return scale * result;
+            return result / self.spacing()[axis];
         }
 
         // ******************************
@@ -472,13 +469,13 @@ pub fn NodeSpace(comptime N: usize, comptime M: usize) type {
                 result += coef * self.value(node, field);
             }
 
-            const space = self.spacing();
+            const sp = self.spacing();
 
             // Covariantly transform result
             inline for (0..N) |i| {
                 switch (op.ranks[i]) {
-                    .derivative => result /= space[i],
-                    .second_derivative => result /= space[i] * space[i],
+                    .derivative => result /= sp[i],
+                    .second_derivative => result /= sp[i] * sp[i],
                     else => {},
                 }
             }
@@ -520,14 +517,25 @@ pub fn NodeSpace(comptime N: usize, comptime M: usize) type {
                 result += coef * field.eval(self.position(node));
             }
 
+            // // Covariantly transform result
+            // inline for (0..N) |i| {
+            //     var scale: f64 = @floatFromInt(self.size[i] - 1);
+            //     scale /= self.bounds.size[i];
+
+            //     switch (op.ranks[i]) {
+            //         .derivative => result *= scale,
+            //         .second_derivative => result *= scale * scale,
+            //         else => {},
+            //     }
+            // }
+
+            const sp = self.spacing();
+
             // Covariantly transform result
             inline for (0..N) |i| {
-                var scale: f64 = @floatFromInt(self.size[i] - 1);
-                scale /= self.bounds.size[i];
-
                 switch (op.ranks[i]) {
-                    .derivative => result *= scale,
-                    .second_derivative => result *= scale * scale,
+                    .derivative => result /= sp[i],
+                    .second_derivative => result /= sp[i] * sp[i],
                     else => {},
                 }
             }
@@ -554,14 +562,13 @@ pub fn NodeSpace(comptime N: usize, comptime M: usize) type {
 
             var result: f64 = coef;
 
+            const sp = self.spacing();
+
             // Covariantly transform result
             inline for (0..N) |i| {
-                var scale: f64 = @floatFromInt(self.size[i] - 1);
-                scale /= self.bounds.size[i];
-
                 switch (op.ranks[i]) {
-                    .derivative => result *= scale,
-                    .second_derivative => result *= scale * scale,
+                    .derivative => result /= sp[i],
+                    .second_derivative => result /= sp[i] * sp[i],
                     else => {},
                 }
             }

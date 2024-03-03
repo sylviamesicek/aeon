@@ -36,7 +36,6 @@ pub const BrillEvolution = struct {
 
     const Mesh = mesh_.Mesh(N);
     const NodeManager = mesh_.NodeManager(N, M);
-    const NodeWorker = mesh_.NodeWorker(N, M);
 
     const MultigridMethod = mesh_.MultigridMethod(N, M, BiCGStabSolver);
 
@@ -707,7 +706,7 @@ pub const BrillEvolution = struct {
     pub const Gauge = struct {
         gpa: Allocator,
         // Worker
-        worker: *const NodeWorker,
+        manager: *const NodeManager,
         // Gauge variables
         lapse: []f64,
         shiftr: []f64,
@@ -725,7 +724,7 @@ pub const BrillEvolution = struct {
             // ***********************************
             // Solve Elliptic Gauges Conditions
 
-            var solver = try MultigridMethod.init(self.gpa, self.worker.manager.numNodes(), BiCGStabSolver.new(20000, 10e-14), .{
+            var solver = try MultigridMethod.init(self.gpa, self.manager.numNodes(), BiCGStabSolver.new(20000, 10e-14), .{
                 .max_iters = 100,
                 .tolerance = 10e-10,
                 .presmooth = 5,
@@ -753,17 +752,17 @@ pub const BrillEvolution = struct {
             };
 
             @memset(self.lapse, 0.0);
-            self.worker.project(lapse_rhs, self.rhs);
+            self.manager.project(lapse_rhs, self.rhs);
 
             try solver.solve(
-                self.worker,
+                self.manager,
                 lapse_op,
                 lapse_boundary,
                 self.lapse,
                 self.rhs,
             );
 
-            self.worker.fillGhostNodes(O, lapse_boundary, self.lapse);
+            self.manager.fillGhostNodes(O, lapse_boundary, self.lapse);
 
             // ***********************************
             // Solve Shift
@@ -784,31 +783,31 @@ pub const BrillEvolution = struct {
 
             // ShiftR
             @memset(self.shiftr, 0.0);
-            self.worker.project(shiftr_rhs, self.rhs);
+            self.manager.project(shiftr_rhs, self.rhs);
 
             try solver.solve(
-                self.worker,
+                self.manager,
                 shift_op,
                 shiftr_boundary,
                 self.shiftr,
                 self.rhs,
             );
 
-            self.worker.fillGhostNodes(O, shiftr_boundary, self.shiftr);
+            self.manager.fillGhostNodes(O, shiftr_boundary, self.shiftr);
 
             // ShiftZ
             @memset(self.shiftz, 0.0);
-            self.worker.project(shiftz_rhs, self.rhs);
+            self.manager.project(shiftz_rhs, self.rhs);
 
             try solver.solve(
-                self.worker,
+                self.manager,
                 shift_op,
                 shiftz_boundary,
                 self.shiftz,
                 self.rhs,
             );
 
-            self.worker.fillGhostNodes(O, shiftz_boundary, self.shiftz);
+            self.manager.fillGhostNodes(O, shiftz_boundary, self.shiftz);
         }
     };
 
@@ -816,7 +815,7 @@ pub const BrillEvolution = struct {
         // GPA allocator
         gpa: Allocator,
         // Worker
-        worker: *const NodeWorker,
+        manager: *const NodeManager,
         // Gauge variables
         lapse: []f64,
         shiftr: []f64,
@@ -834,22 +833,21 @@ pub const BrillEvolution = struct {
             const x = dynamic.field(.x);
             const w = dynamic.field(.w);
 
-            for (0..self.worker.mesh.numLevels()) |rev_level| {
-                const level = self.worker.mesh.numLevels() - 1 - rev_level;
+            for (0..self.manager.numLevels()) |rev_level| {
+                const level = self.manager.numLevels() - 1 - rev_level;
 
-                self.worker.restrictLevel(0, level, psi);
-                self.worker.restrictLevel(0, level, psi);
-                self.worker.restrictLevel(0, level, seed);
-                self.worker.restrictLevel(0, level, u);
-                self.worker.restrictLevel(0, level, x);
-                self.worker.restrictLevel(0, level, w);
+                self.manager.restrictLevel(0, level, psi);
+                self.manager.restrictLevel(0, level, seed);
+                self.manager.restrictLevel(0, level, u);
+                self.manager.restrictLevel(0, level, x);
+                self.manager.restrictLevel(0, level, w);
             }
 
-            self.worker.fillGhostNodes(O, psi_boundary, psi);
-            self.worker.fillGhostNodes(O, seed_boundary, seed);
-            self.worker.fillGhostNodes(O, u_boundary, u);
-            self.worker.fillGhostNodes(O, x_boundary, x);
-            self.worker.fillGhostNodes(O, w_boundary, w);
+            self.manager.fillGhostNodes(O, psi_boundary, psi);
+            self.manager.fillGhostNodes(O, seed_boundary, seed);
+            self.manager.fillGhostNodes(O, u_boundary, u);
+            self.manager.fillGhostNodes(O, x_boundary, x);
+            self.manager.fillGhostNodes(O, w_boundary, w);
         }
 
         pub fn derivative(self: Evolution, deriv: System(Tag), dynamic: SystemConst(Tag), time: f64) Error!void {
@@ -866,7 +864,7 @@ pub const BrillEvolution = struct {
 
             const gauge: Gauge = .{
                 .gpa = self.gpa,
-                .worker = self.worker,
+                .manager = self.manager,
                 .lapse = self.lapse,
                 .shiftr = self.shiftr,
                 .shiftz = self.shiftz,
@@ -887,7 +885,7 @@ pub const BrillEvolution = struct {
                 .w = w,
             };
 
-            self.worker.project(psi_evolve, deriv.field(.psi));
+            self.manager.project(psi_evolve, deriv.field(.psi));
 
             // ************************************
             // Evolve seed
@@ -900,7 +898,7 @@ pub const BrillEvolution = struct {
                 .w = w,
             };
 
-            self.worker.project(seed_evolve, deriv.field(.seed));
+            self.manager.project(seed_evolve, deriv.field(.seed));
 
             // ************************************
             // Evolve W
@@ -915,7 +913,7 @@ pub const BrillEvolution = struct {
                 .x = x,
             };
 
-            self.worker.project(w_evolve, deriv.field(.w));
+            self.manager.project(w_evolve, deriv.field(.w));
 
             // ***********************************
             // Evolve U
@@ -930,7 +928,7 @@ pub const BrillEvolution = struct {
                 .x = x,
             };
 
-            self.worker.project(u_evolve, deriv.field(.u));
+            self.manager.project(u_evolve, deriv.field(.u));
 
             // ************************************
             // Evolve X
@@ -945,15 +943,15 @@ pub const BrillEvolution = struct {
                 .x = x,
             };
 
-            self.worker.project(x_evolve, deriv.field(.x));
+            self.manager.project(x_evolve, deriv.field(.x));
 
-            const eps = 10.0;
+            // const eps = 10.0;
 
-            self.worker.dissipation(M, eps, deriv.field(.psi), psi);
-            self.worker.dissipation(M, eps, deriv.field(.seed), seed);
-            self.worker.dissipation(M, eps, deriv.field(.u), u);
-            self.worker.dissipation(M, eps, deriv.field(.w), w);
-            self.worker.dissipation(M, eps, deriv.field(.x), x);
+            // self.manager.dissipation(M, eps, deriv.field(.psi), psi);
+            // self.manager.dissipation(M, eps, deriv.field(.seed), seed);
+            // self.manager.dissipation(M, eps, deriv.field(.u), u);
+            // self.manager.dissipation(M, eps, deriv.field(.w), w);
+            // self.manager.dissipation(M, eps, deriv.field(.x), x);
         }
     };
 
@@ -999,14 +997,8 @@ pub const BrillEvolution = struct {
         var manager = try NodeManager.init(allocator, &mesh, [1]usize{16} ** N, 8);
         defer manager.deinit();
 
-        try manager.build(allocator, &mesh);
-
         std.debug.print("Num nodes: {}\n", .{manager.numNodes()});
         std.debug.print("Min spacing {}\n", .{manager.minSpacing()});
-
-        // Create worker
-        var worker = try NodeWorker.init(&mesh, &manager);
-        defer worker.deinit();
 
         std.debug.print("Allocating Memory\n", .{});
 
@@ -1039,8 +1031,8 @@ pub const BrillEvolution = struct {
         std.debug.print("Solving Initial Data\n", .{});
 
         // Seed
-        worker.project(Seed{ .amplitude = 1.0, .sigma = 1.0 }, rk4.sys.field(.seed));
-        worker.fillGhostNodes(O, seed_boundary, rk4.sys.field(.seed));
+        manager.project(Seed{ .amplitude = 1.0, .sigma = 1.0 }, rk4.sys.field(.seed));
+        manager.fillGhostNodes(O, seed_boundary, rk4.sys.field(.seed));
 
         // Conformal factor
         const initial_rhs: InitialPsiRhs = .{
@@ -1051,7 +1043,7 @@ pub const BrillEvolution = struct {
             .seed = rk4.sys.field(.seed),
         };
 
-        worker.project(initial_rhs, rhs);
+        manager.project(initial_rhs, rhs);
 
         var solver = try MultigridMethod.init(allocator, manager.numNodes(), BiCGStabSolver.new(20000, 10e-14), .{
             .max_iters = 100,
@@ -1064,7 +1056,7 @@ pub const BrillEvolution = struct {
         @memset(rk4.sys.field(.psi), 0.0);
 
         try solver.solve(
-            &worker,
+            &manager,
             initial_op,
             psi_boundary,
             rk4.sys.field(.psi),
@@ -1079,7 +1071,7 @@ pub const BrillEvolution = struct {
         {
             const evolution: Evolution = .{
                 .gpa = allocator,
-                .worker = &worker,
+                .manager = &manager,
                 .lapse = lapse,
                 .shiftr = shiftr,
                 .shiftz = shiftz,
@@ -1090,7 +1082,7 @@ pub const BrillEvolution = struct {
 
             const gauge: Gauge = .{
                 .gpa = allocator,
-                .worker = &worker,
+                .manager = &manager,
                 .lapse = lapse,
                 .shiftr = shiftr,
                 .shiftz = shiftz,
@@ -1109,9 +1101,9 @@ pub const BrillEvolution = struct {
 
             @memset(constraint, 0.0);
 
-            worker.project(hamiltonain, constraint);
+            manager.project(hamiltonain, constraint);
 
-            std.debug.print("Initial Constraint Violation {}\n", .{worker.normScaled(constraint)});
+            std.debug.print("Initial Constraint Violation {}\n", .{manager.normScaled(constraint)});
         }
 
         // Output Base Data
@@ -1137,12 +1129,12 @@ pub const BrillEvolution = struct {
 
                 var buffer = std.io.bufferedWriter(file.writer());
 
-                try DataOut.writeLevelsVtk(
+                try DataOut.writeVtk(
                     Output,
                     allocator,
-                    &worker,
-                    level + 1,
+                    &manager,
                     output,
+                    .{ .ghost = true },
                     buffer.writer(),
                 );
 
@@ -1172,8 +1164,9 @@ pub const BrillEvolution = struct {
             try DataOut.writeVtk(
                 Output,
                 allocator,
-                &worker,
+                &manager,
                 output,
+                .{ .ghost = true },
                 buffer.writer(),
             );
 
@@ -1193,7 +1186,7 @@ pub const BrillEvolution = struct {
         const h: f64 = cfl * manager.minSpacing();
 
         for (0..steps) |step| {
-            const con = worker.normScaled(constraint);
+            const con = manager.normScaled(constraint);
             std.debug.print("Step {}/{}, Time: {}, Constraint: {}\n", .{ step + 1, steps, rk4.time, con });
 
             // ********************************
@@ -1201,7 +1194,7 @@ pub const BrillEvolution = struct {
 
             const evolution: Evolution = .{
                 .gpa = scratch,
-                .worker = &worker,
+                .manager = &manager,
                 .lapse = lapse,
                 .shiftr = shiftr,
                 .shiftz = shiftz,
@@ -1218,7 +1211,7 @@ pub const BrillEvolution = struct {
 
             const gauge: Gauge = .{
                 .gpa = scratch,
-                .worker = &worker,
+                .manager = &manager,
                 .lapse = lapse,
                 .shiftr = shiftr,
                 .shiftz = shiftz,
@@ -1240,7 +1233,7 @@ pub const BrillEvolution = struct {
                 .w = rk4.sys.field(.w),
             };
 
-            worker.project(hamiltonian, constraint);
+            manager.project(hamiltonian, constraint);
 
             // *******************************
             // Output
@@ -1268,8 +1261,9 @@ pub const BrillEvolution = struct {
             try DataOut.writeVtk(
                 Output,
                 allocator,
-                &worker,
+                &manager,
                 output,
+                .{ .ghost = true },
                 buffer.writer(),
             );
 

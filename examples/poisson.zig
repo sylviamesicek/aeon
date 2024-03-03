@@ -44,12 +44,16 @@ const PoissonEquation = struct {
             const x = pos[0];
             const y = pos[1];
 
-            return self.amplitude * 2 * pi * pi * @sin(pi * x) * @sin(pi * y);
+            // if (is_symmetric) {
+            //     return self.amplitude * 2 * pi * pi * @sin(pi * x) * @sin(pi * y);
+            // } else {
 
-            // const term1 = (y * @sin(pi * y)) * (x * pi * pi * @sin(pi * x) - 2 * pi * @cos(pi * x));
-            // const term2 = (x * @sin(pi * x)) * (y * pi * pi * @sin(pi * y) - 2 * pi * @cos(pi * y));
+            // }
 
-            // return self.amplitude * (term1 + term2);
+            const term1 = (y * @sin(pi * y)) * (x * pi * pi * @sin(pi * x) - 2 * pi * @cos(pi * x));
+            const term2 = (x * @sin(pi * x)) * (y * pi * pi * @sin(pi * y) - 2 * pi * @cos(pi * y));
+
+            return self.amplitude * (term1 + term2);
         }
     };
 
@@ -63,23 +67,91 @@ const PoissonEquation = struct {
             const x = pos[0];
             const y = pos[1];
 
-            // return self.amplitude * x * y * @sin(pi * x) * @sin(pi * y);
+            // if (is_symmetric) {
+            //     return self.amplitude * @sin(pi * x) * @sin(pi * y);
+            // } else {
+            //
+            // }
 
-            return self.amplitude * @sin(pi * x) * @sin(pi * y);
+            return self.amplitude * x * y * @sin(pi * x) * @sin(pi * y);
+        }
+    };
+
+    pub const XDerivative = struct {
+        amplitude: f64,
+
+        pub fn eval(self: @This(), pos: [N]f64) f64 {
+            const x = pos[0];
+            const y = pos[1];
+
+            return self.amplitude * y * @sin(pi * y) * (@sin(pi * x) + pi * x * @cos(pi * x));
+        }
+    };
+
+    pub const YDerivative = struct {
+        amplitude: f64,
+
+        pub fn eval(self: @This(), pos: [N]f64) f64 {
+            const x = pos[0];
+            const y = pos[1];
+
+            return self.amplitude * x * @sin(pi * x) * (@sin(pi * y) + pi * y * @cos(pi * y));
+        }
+    };
+
+    pub const XBoundary = struct {
+        robin_rhs: XDerivative,
+        comptime robin_value: common.ZeroField(N) = .{},
+
+        pub const kind: BoundaryKind = .robin;
+        pub const priority: usize = 0;
+
+        pub fn new(amplitude: f64) @This() {
+            return .{ .robin_rhs = .{ .amplitude = amplitude } };
+        }
+    };
+
+    pub const YBoundary = struct {
+        robin_rhs: YDerivative,
+        comptime robin_value: common.ZeroField(N) = .{},
+
+        pub const kind: BoundaryKind = .robin;
+        pub const priority: usize = 0;
+
+        pub fn new(amplitude: f64) @This() {
+            return .{ .robin_rhs = .{ .amplitude = amplitude } };
         }
     };
 
     pub const BoundarySet = struct {
-        pub const card: usize = 1;
+        amplitude: f64,
 
-        pub fn boundaryIdFromFace(_: FaceIndex) usize {
-            return 0;
+        pub const card: usize = 3;
+
+        pub fn boundaryIdFromFace(face: FaceIndex) usize {
+            if (face.side == true and face.axis == 1) {
+                return 2;
+            } else if (face.side == true and face.axis == 0) {
+                return 1;
+            } else {
+                return 0;
+            }
         }
 
-        pub const BoundaryType0: type = common.OddBoundary;
+        pub const BoundaryType0: type = common.EvenBoundary;
+        pub const BoundaryType1: type = XBoundary;
+        pub const BoundaryType2: type = YBoundary;
 
         pub fn boundary0(_: @This()) BoundaryType0 {
             return .{};
+        }
+
+        pub fn boundary1(self: @This()) BoundaryType1 {
+            return XBoundary.new(self.amplitude);
+        }
+
+        pub fn boundary2(self: @This()) BoundaryType2 {
+            return YBoundary.new(self.amplitude);
         }
     };
 
@@ -115,6 +187,11 @@ const PoissonEquation = struct {
     fn run(allocator: Allocator) !void {
         std.debug.print("Running Poisson Elliptic Solver\n", .{});
 
+        const source = Source{ .amplitude = 1.0 };
+        const solution = Solution{ .amplitude = 1.0 };
+        const set = BoundarySet{ .amplitude = 1.0 };
+        const op = PoissonOperator{};
+
         var mesh = try Mesh.init(allocator, .{
             .origin = [2]f64{ 0.0, 0.0 },
             .size = [2]f64{ 1.0, 1.0 },
@@ -122,12 +199,12 @@ const PoissonEquation = struct {
         defer mesh.deinit();
 
         // Globally refine two times
-        for (0..2) |r| {
-            std.debug.print("Running Global Refinement {}\n", .{r});
-            try mesh.refineGlobal(allocator);
-        }
+        // for (0..2) |r| {
+        //     std.debug.print("Running Global Refinement {}\n", .{r});
+        //     try mesh.refineGlobal(allocator);
+        // }
 
-        var manager = try NodeManager.init(allocator, &mesh, .{ 16, 16 }, 8);
+        var manager = try NodeManager.init(allocator, &mesh, .{ 32, 32 }, 8);
         defer manager.deinit();
 
         // // Locally refine once
@@ -175,43 +252,45 @@ const PoissonEquation = struct {
         defer sys.deinit(allocator);
 
         // Project Source
-        manager.project(Source{ .amplitude = 1.0 }, sys.field(.source));
+        manager.project(source, sys.field(.source));
         // Project Solution
-        manager.project(Solution{ .amplitude = 1.0 }, sys.field(.exact));
+        manager.project(solution, sys.field(.exact));
         // Fill Boundary of exact
-        manager.fillGhostNodes(M, BoundarySet{}, sys.field(.exact));
+        manager.fillGhostNodes(M, set, sys.field(.exact));
         // Set initial guess
         @memset(sys.field(.approx), 0.0);
 
+        manager.fillGhostNodes(M, set, sys.field(.approx));
+
         // Solve
 
-        var method = try MultigridMethod.init(
-            allocator,
-            manager.numNodes(),
-            BiCGStabSolver.new(10000, 10e-15),
-            .{
-                .max_iters = 20,
-                .tolerance = 10e-11,
-                .presmooth = 5,
-                .postsmooth = 5,
-            },
-        );
-        defer method.deinit();
+        // var method = try MultigridMethod.init(
+        //     allocator,
+        //     manager.numNodes(),
+        //     BiCGStabSolver.new(10000, 10e-15),
+        //     .{
+        //         .max_iters = 1,
+        //         .tolerance = 10e-11,
+        //         .presmooth = 5,
+        //         .postsmooth = 5,
+        //     },
+        // );
+        // defer method.deinit();
 
-        try method.solve(
-            &manager,
-            PoissonOperator{},
-            BoundarySet{},
-            sys.field(.approx),
-            sys.field(.source),
-        );
+        // try method.solve(
+        //     &manager,
+        //     op,
+        //     set,
+        //     sys.field(.approx),
+        //     sys.field(.source),
+        // );
 
         // Compute error
         for (0..manager.numNodes()) |i| {
             sys.field(.err)[i] = sys.field(.approx)[i] - sys.field(.exact)[i];
         }
 
-        manager.residual(sys.field(.residual), sys.field(.source), PoissonOperator{}, sys.field(.approx));
+        manager.residual(sys.field(.residual), sys.field(.source), op, sys.field(.exact));
 
         {
             // Output result

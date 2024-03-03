@@ -131,7 +131,7 @@ pub fn MultigridMethod(comptime N: usize, comptime M: usize, comptime BaseSolver
 
                 const nres = manager.norm(self.scr);
 
-                std.debug.print("Iteration {}, Residual {}\n", .{ iteration, nres });
+                // std.debug.print("Iteration {}, Residual {}\n", .{ iteration, nres });
 
                 // for (0..worker.mesh.numLevels()) |i| {
                 //     std.debug.print("    Level: {}, Residual {}\n", .{ i, worker.normLevel(i, self.scr) });
@@ -149,6 +149,8 @@ pub fn MultigridMethod(comptime N: usize, comptime M: usize, comptime BaseSolver
                     break;
                 }
 
+                // std.debug.print("Outputing Iteration {}\n", .{iteration});
+
                 // // Debugging code
 
                 // const DataOut = @import("../aeon.zig").DataOut(N, M);
@@ -161,9 +163,9 @@ pub fn MultigridMethod(comptime N: usize, comptime M: usize, comptime BaseSolver
 
                 // const Output = enum { residual, sys };
 
-                // worker.fillGhostNodes(Oper.order, set, x);
+                // manager.fillGhostNodes(Oper.order, set, x);
 
-                // const output = common.SystemConst(Output).view(worker.manager.numNodes(), .{
+                // const output = common.SystemConst(Output).view(manager.numNodes(), .{
                 //     .residual = self.scr,
                 //     .sys = x,
                 // });
@@ -173,8 +175,11 @@ pub fn MultigridMethod(comptime N: usize, comptime M: usize, comptime BaseSolver
                 // try DataOut.writeVtk(
                 //     Output,
                 //     self.gpa,
-                //     worker,
+                //     manager,
                 //     output,
+                //     .{
+                //         .ghost = true,
+                //     },
                 //     buf.writer(),
                 // );
 
@@ -226,6 +231,10 @@ pub fn MultigridMethod(comptime N: usize, comptime M: usize, comptime BaseSolver
                                 base.manager.applyLevel(0, base.scr, base.oper, base.sys);
                                 base.manager.packBase(out, base.scr);
                             }
+
+                            pub fn callback(_: *const @This(), _: usize, _: f64, _: []const f64) void {
+                                // std.debug.print("Linear Solve Iteration {}, Residual {}\n", .{ iter, res });
+                            }
                         };
 
                         try self.method.base_solver.solve(allocator, BaseOperator{
@@ -247,6 +256,8 @@ pub fn MultigridMethod(comptime N: usize, comptime M: usize, comptime BaseSolver
                     // ********************************
                     // Presmoothing
 
+                    // std.debug.print("Presmoothing Level {}\n", .{level});
+
                     for (0..self.method.config.presmooth) |_| {
                         manager.fillLevelGhostNodes(O, level, self.set, sys);
                         manager.smoothLevel(level, scr, self.oper, sys, rhs);
@@ -255,6 +266,8 @@ pub fn MultigridMethod(comptime N: usize, comptime M: usize, comptime BaseSolver
 
                     // ********************************
                     // Restrict Solution
+
+                    // std.debug.print("Tau correcting Level {}\n", .{level});
 
                     manager.fillLevelGhostNodes(O, level, self.set, sys);
                     // Direct injection to lower level
@@ -280,6 +293,8 @@ pub fn MultigridMethod(comptime N: usize, comptime M: usize, comptime BaseSolver
 
                     try self.iterate(level - 1, sys);
 
+                    // std.debug.print("Sigma correcting Level {}\n", .{level});
+
                     // ********************************
                     // Error Correction
 
@@ -291,6 +306,8 @@ pub fn MultigridMethod(comptime N: usize, comptime M: usize, comptime BaseSolver
                     // **********************************
                     // Post smooth
 
+                    // std.debug.print("Post smoothing Level {}\n", .{level});
+
                     for (0..self.method.config.postsmooth) |_| {
                         manager.fillLevelGhostNodes(O, level, self.set, sys);
                         manager.smoothLevel(level, scr, self.oper, sys, rhs);
@@ -298,6 +315,8 @@ pub fn MultigridMethod(comptime N: usize, comptime M: usize, comptime BaseSolver
                     }
 
                     manager.fillLevelGhostNodes(O, level, self.set, sys);
+
+                    // std.debug.print("Finished Level {}\n", .{level});
                 }
             };
         }
