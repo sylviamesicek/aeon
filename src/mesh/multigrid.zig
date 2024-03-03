@@ -149,6 +149,10 @@ pub fn MultigridMethod(comptime N: usize, comptime M: usize, comptime BaseSolver
                     break;
                 }
 
+                if (iteration == self.config.max_iters - 1) {
+                    std.debug.print("Multigrid Failed to Converge\n", .{});
+                }
+
                 // std.debug.print("Outputing Iteration {}\n", .{iteration});
 
                 // // Debugging code
