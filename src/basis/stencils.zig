@@ -36,7 +36,6 @@ pub const Stencils = struct {
     /// Produces an extrapolation stencil, which is always a centered delta function.
     pub fn extrapolate(comptime L: usize, comptime R: usize, off: isize) [L + R + 1]f64 {
         const point: f128 = @floatFromInt(off);
-
         var result: [L + R + 1]f128 = undefined;
         Lagrange.value(&grid(L, R), point, &result);
         return floatCastSlice(L + R + 1, result);
@@ -120,4 +119,6 @@ test "stencils" {
     try expectEqualDeep([_]f64{ 0.0, -0.0, 1.0, 0.0, -0.0 }, Stencils.value(2, 2));
     try expectEqualDeep([_]f64{ 1.0 / 12.0, -2.0 / 3.0, 0.0, 2.0 / 3.0, -1.0 / 12.0 }, Stencils.derivative(2, 2));
     try expectEqualDeep([_]f64{ -1.0 / 12.0, 4.0 / 3.0, -5.0 / 2.0, 4.0 / 3.0, -1.0 / 12.0 }, Stencils.secondDerivative(2, 2));
+
+    std.debug.print("{any}\n", .{Stencils.extrapolate(3, 0, 1)});
 }

@@ -19,7 +19,7 @@ pub fn isOrdinaryDiffEq(comptime T: type) bool {
         return false;
     }
 
-    if (comptime !(hasFn(T, "derivative") and @TypeOf(T.derivative) == fn (T, system.System(T.Tag), system.SystemConst(T.Tag), f64) T.Error!void)) {
+    if (comptime !(hasFn(T, "derivative") and @TypeOf(T.derivative) == fn (T, system.System(T.Tag), system.System(T.Tag), f64) T.Error!void)) {
         return false;
     }
 
@@ -63,7 +63,7 @@ pub fn ForwardEulerIntegrator(comptime Tag: type) type {
 
             // Calculate derivative
             try deriv.preprocess(self.sys);
-            try deriv.derivative(self.scr, self.sys.toConst(), self.time);
+            try deriv.derivative(self.scr, self.sys, self.time);
             // Step
             inline for (comptime std.enums.values(Tag)) |field| {
                 for (0..self.sys.len) |idx| {
@@ -137,7 +137,7 @@ pub fn RungeKutta4Integrator(comptime Tag: type) type {
 
             // Calculate k1
             try deriv.preprocess(self.sys);
-            try deriv.derivative(self.k1, self.sys.toConst(), self.time);
+            try deriv.derivative(self.k1, self.sys, self.time);
 
             // Calculate k2
             inline for (comptime std.enums.values(Tag)) |field| {
@@ -147,7 +147,7 @@ pub fn RungeKutta4Integrator(comptime Tag: type) type {
             }
 
             try deriv.preprocess(self.scr);
-            try deriv.derivative(self.k2, self.scr.toConst(), self.time + h / 2.0);
+            try deriv.derivative(self.k2, self.scr, self.time + h / 2.0);
 
             // Calculate k3
             inline for (comptime std.enums.values(Tag)) |field| {
@@ -157,7 +157,7 @@ pub fn RungeKutta4Integrator(comptime Tag: type) type {
             }
 
             try deriv.preprocess(self.scr);
-            try deriv.derivative(self.k3, self.scr.toConst(), self.time + h / 2.0);
+            try deriv.derivative(self.k3, self.scr, self.time + h / 2.0);
 
             // Calculate k4
             inline for (comptime std.enums.values(Tag)) |field| {
@@ -167,7 +167,7 @@ pub fn RungeKutta4Integrator(comptime Tag: type) type {
             }
 
             try deriv.preprocess(self.scr);
-            try deriv.derivative(self.k4, self.scr.toConst(), self.time + h);
+            try deriv.derivative(self.k4, self.scr, self.time + h);
 
             // Update sys
             inline for (comptime std.enums.values(Tag)) |field| {

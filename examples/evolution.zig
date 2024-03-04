@@ -75,6 +75,22 @@ pub const BrillEvolution = struct {
         pub const priority: usize = 0;
     };
 
+    pub const RSommerfeld = struct {
+        comptime robin_value: RField = .{},
+        robin_rhs: []const f64,
+
+        pub const kind: BoundaryKind = .robin;
+        pub const priority: usize = 0;
+    };
+
+    pub const ZSommerfeld = struct {
+        comptime robin_value: ZField = .{},
+        robin_rhs: []const f64,
+
+        pub const kind: BoundaryKind = .robin;
+        pub const priority: usize = 0;
+    };
+
     pub const EvenBoundarySet = struct {
         pub const card: usize = 3;
 
@@ -181,16 +197,81 @@ pub const BrillEvolution = struct {
         }
     };
 
+    pub const EvenSommerfeldBoundarySet = struct {
+        derivative: []const f64,
+
+        pub const card: usize = 3;
+
+        pub fn boundaryIdFromFace(face: FaceIndex) usize {
+            if (face.axis == 0 and face.side == false) {
+                return 0;
+            } else if (face.axis == 0 and face.side == true) {
+                return 1;
+            } else {
+                return 2;
+            }
+        }
+
+        pub const BoundaryType0: type = common.EvenBoundary;
+        pub const BoundaryType1: type = RSommerfeld;
+        pub const BoundaryType2: type = ZSommerfeld;
+
+        pub fn boundary0(_: @This()) BoundaryType0 {
+            return .{};
+        }
+
+        pub fn boundary1(self: @This()) BoundaryType1 {
+            return .{ .robin_rhs = self.derivative };
+        }
+
+        pub fn boundary2(self: @This()) BoundaryType2 {
+            return .{ .robin_rhs = self.derivative };
+        }
+    };
+
+    pub const OddSommerfeldBoundarySet = struct {
+        derivative: []const f64,
+
+        pub const card: usize = 3;
+
+        pub fn boundaryIdFromFace(face: FaceIndex) usize {
+            if (face.axis == 0 and face.side == false) {
+                return 0;
+            } else if (face.axis == 0 and face.side == true) {
+                return 1;
+            } else {
+                return 2;
+            }
+        }
+
+        pub const BoundaryType0: type = common.OddBoundary;
+        pub const BoundaryType1: type = RSommerfeld;
+        pub const BoundaryType2: type = ZSommerfeld;
+
+        pub fn boundary0(_: @This()) BoundaryType0 {
+            return .{};
+        }
+
+        pub fn boundary1(self: @This()) BoundaryType1 {
+            return .{ .robin_rhs = self.derivative };
+        }
+
+        pub fn boundary2(self: @This()) BoundaryType2 {
+            return .{ .robin_rhs = self.derivative };
+        }
+    };
+
     const lapse_boundary = EvenBoundarySet{};
     const shiftr_boundary = OddBoundarySet{};
     const shiftz_boundary = EvenBoundarySet{};
     const psi_initial_boundary = EvenBoundarySet{};
-    const psi_boundary = EvenBoundarySet{};
-    const seed_boundary = OddBoundarySet{};
-    const w_boundary = OddBoundarySet{};
-    const u_boundary = EvenBoundarySet{};
-    const x_boundary = OddBoundarySet{};
     const constraint_boundary = EvenBoundarySet{};
+
+    const psi_ext_boundary = EvenExtrapolateBoundarySet{};
+    const seed_ext_boundary = OddExtrapolateBoundarySet{};
+    const w_ext_boundary = OddExtrapolateBoundarySet{};
+    const u_ext_boundary = EvenExtrapolateBoundarySet{};
+    const x_ext_boundary = OddExtrapolateBoundarySet{};
 
     pub const Seed = struct {
         amplitude: f64,
@@ -521,7 +602,7 @@ pub const BrillEvolution = struct {
             const w = engine.value(self.w);
 
             // Sommerfeld term
-
+            // ETK
             // if (isCloseTo(rho, radius)) {
             //     const r = @sqrt(rho * rho + z * z);
             //     const term1 = -r / rho * pgrad[0];
@@ -534,6 +615,13 @@ pub const BrillEvolution = struct {
             //     const term2 = -psi / r;
 
             //     return term1 + term2;
+            // }
+            // Rinne
+
+            // if (isCloseTo(rho, radius) or isCloseTo(z, radius/2.0) or isCloseTo(z, -radius/2.0)) {
+            //     const R = @sqrt(rho * rho + z * z);
+
+            //     return -1.0/R * (rho * pgrad[0] + z * pgrad[1] + psi);
             // }
 
             const term1 = shiftr * pgrad[0] + shiftz * pgrad[1];
@@ -958,7 +1046,33 @@ pub const BrillEvolution = struct {
         pub const Tag = Dynamic;
         pub const Error = error{OutOfMemory};
 
-        pub fn preprocess(self: Evolution, dynamic: System(Tag)) Error!void {
+        pub fn preprocess(_: Evolution, _: System(Tag)) Error!void {
+            // const psi = dynamic.field(.psi);
+            // const seed = dynamic.field(.seed);
+            // const u = dynamic.field(.u);
+            // const x = dynamic.field(.x);
+            // const w = dynamic.field(.w);
+
+            // for (0..self.manager.numLevels()) |rev_level| {
+            //     const level = self.manager.numLevels() - 1 - rev_level;
+
+            //     self.manager.restrictLevel(0, level, psi);
+            //     self.manager.restrictLevel(0, level, seed);
+            //     self.manager.restrictLevel(0, level, u);
+            //     self.manager.restrictLevel(0, level, x);
+            //     self.manager.restrictLevel(0, level, w);
+            // }
+
+            // self.manager.fillGhostNodes(M, psi_ext_boundary, psi);
+            // self.manager.fillGhostNodes(M, seed_ext_boundary, seed);
+            // self.manager.fillGhostNodes(M, u_ext_boundary, u);
+            // self.manager.fillGhostNodes(M, x_ext_boundary, x);
+            // self.manager.fillGhostNodes(M, w_ext_boundary, w);
+        }
+
+        pub fn derivative(self: Evolution, deriv: System(Tag), dynamic: System(Tag), time: f64) Error!void {
+            _ = time;
+
             const psi = dynamic.field(.psi);
             const seed = dynamic.field(.seed);
             const u = dynamic.field(.u);
@@ -975,107 +1089,147 @@ pub const BrillEvolution = struct {
                 self.manager.restrictLevel(0, level, w);
             }
 
-            self.manager.fillGhostNodes(M, psi_boundary, psi);
-            self.manager.fillGhostNodes(M, seed_boundary, seed);
-            self.manager.fillGhostNodes(M, u_boundary, u);
-            self.manager.fillGhostNodes(M, x_boundary, x);
-            self.manager.fillGhostNodes(M, w_boundary, w);
-        }
+            self.manager.fillGhostNodes(M, psi_ext_boundary, psi);
+            self.manager.fillGhostNodes(M, seed_ext_boundary, seed);
+            self.manager.fillGhostNodes(M, u_ext_boundary, u);
+            self.manager.fillGhostNodes(M, x_ext_boundary, x);
+            self.manager.fillGhostNodes(M, w_ext_boundary, w);
 
-        pub fn derivative(self: Evolution, deriv: System(Tag), dynamic: SystemConst(Tag), time: f64) Error!void {
-            _ = time;
+            for (0..2) |_| {
 
-            const psi = dynamic.field(.psi);
-            const seed = dynamic.field(.seed);
-            const u = dynamic.field(.u);
-            const x = dynamic.field(.x);
-            const w = dynamic.field(.w);
+                // ************************************
+                // Solve Gauge
 
-            // ************************************
-            // Solve Gauge
+                const gauge: Gauge = .{
+                    .gpa = self.gpa,
+                    .manager = self.manager,
+                    .lapse = self.lapse,
+                    .shiftr = self.shiftr,
+                    .shiftz = self.shiftz,
+                    .rhs = self.rhs,
+                };
 
-            const gauge: Gauge = .{
-                .gpa = self.gpa,
-                .manager = self.manager,
-                .lapse = self.lapse,
-                .shiftr = self.shiftr,
-                .shiftz = self.shiftz,
-                .rhs = self.rhs,
-            };
+                try gauge.solve(dynamic.toConst());
 
-            try gauge.solve(dynamic);
+                // ************************************
+                // Evolve Psi
 
-            // ************************************
-            // Evolve Psi
+                const psi_evolve: PsiEvolution = .{
+                    .lapse = self.lapse,
+                    .shiftr = self.shiftr,
+                    .shiftz = self.shiftz,
+                    .psi = psi,
+                    .u = u,
+                    .w = w,
+                };
 
-            const psi_evolve: PsiEvolution = .{
-                .lapse = self.lapse,
-                .shiftr = self.shiftr,
-                .shiftz = self.shiftz,
-                .psi = psi,
-                .u = u,
-                .w = w,
-            };
+                self.manager.project(psi_evolve, deriv.field(.psi));
 
-            self.manager.project(psi_evolve, deriv.field(.psi));
+                // ************************************
+                // Evolve seed
 
-            // ************************************
-            // Evolve seed
+                const seed_evolve: SeedEvolution = .{
+                    .lapse = self.lapse,
+                    .shiftr = self.shiftr,
+                    .shiftz = self.shiftz,
+                    .seed = seed,
+                    .w = w,
+                };
 
-            const seed_evolve: SeedEvolution = .{
-                .lapse = self.lapse,
-                .shiftr = self.shiftr,
-                .shiftz = self.shiftz,
-                .seed = seed,
-                .w = w,
-            };
+                self.manager.project(seed_evolve, deriv.field(.seed));
 
-            self.manager.project(seed_evolve, deriv.field(.seed));
+                // ************************************
+                // Evolve W
 
-            // ************************************
-            // Evolve W
+                const w_evolve: WEvolution = .{
+                    .lapse = self.lapse,
+                    .shiftr = self.shiftr,
+                    .shiftz = self.shiftz,
+                    .psi = psi,
+                    .seed = seed,
+                    .w = w,
+                    .x = x,
+                };
 
-            const w_evolve: WEvolution = .{
-                .lapse = self.lapse,
-                .shiftr = self.shiftr,
-                .shiftz = self.shiftz,
-                .psi = psi,
-                .seed = seed,
-                .w = w,
-                .x = x,
-            };
+                self.manager.project(w_evolve, deriv.field(.w));
 
-            self.manager.project(w_evolve, deriv.field(.w));
+                // ***********************************
+                // Evolve U
 
-            // ***********************************
-            // Evolve U
+                const u_evolve: UEvolution = .{
+                    .lapse = self.lapse,
+                    .shiftr = self.shiftr,
+                    .shiftz = self.shiftz,
+                    .psi = psi,
+                    .seed = seed,
+                    .u = u,
+                    .x = x,
+                };
 
-            const u_evolve: UEvolution = .{
-                .lapse = self.lapse,
-                .shiftr = self.shiftr,
-                .shiftz = self.shiftz,
-                .psi = psi,
-                .seed = seed,
-                .u = u,
-                .x = x,
-            };
+                self.manager.project(u_evolve, deriv.field(.u));
 
-            self.manager.project(u_evolve, deriv.field(.u));
+                // ************************************
+                // Evolve X
 
-            // ************************************
-            // Evolve X
+                const x_evolve: XEvolution = .{
+                    .lapse = self.lapse,
+                    .shiftr = self.shiftr,
+                    .shiftz = self.shiftz,
+                    .psi = psi,
+                    .seed = seed,
+                    .u = u,
+                    .x = x,
+                };
 
-            const x_evolve: XEvolution = .{
-                .lapse = self.lapse,
-                .shiftr = self.shiftr,
-                .shiftz = self.shiftz,
-                .psi = psi,
-                .seed = seed,
-                .u = u,
-                .x = x,
-            };
+                self.manager.project(x_evolve, deriv.field(.x));
 
-            self.manager.project(x_evolve, deriv.field(.x));
+                self.manager.fillGhostNodes(M, psi_ext_boundary, deriv.field(.psi));
+                self.manager.fillGhostNodes(M, seed_ext_boundary, deriv.field(.seed));
+                self.manager.fillGhostNodes(M, u_ext_boundary, deriv.field(.u));
+                self.manager.fillGhostNodes(M, x_ext_boundary, deriv.field(.x));
+                self.manager.fillGhostNodes(M, w_ext_boundary, deriv.field(.w));
+
+                // Flip signs
+
+                for (0..self.manager.numNodes()) |i| {
+                    deriv.field(.psi)[i] *= -1;
+                    deriv.field(.seed)[i] *= -1;
+                    deriv.field(.w)[i] *= -1;
+                    deriv.field(.u)[i] *= -1;
+                    deriv.field(.x)[i] *= -1;
+                }
+
+                const psi_som_boundary = EvenSommerfeldBoundarySet{
+                    .derivative = deriv.field(.psi),
+                };
+                const seed_som_boundary = OddSommerfeldBoundarySet{
+                    .derivative = deriv.field(.seed),
+                };
+                const w_som_boundary = OddSommerfeldBoundarySet{
+                    .derivative = deriv.field(.w),
+                };
+                const u_som_boundary = EvenSommerfeldBoundarySet{
+                    .derivative = deriv.field(.u),
+                };
+                const x_som_boundary = OddSommerfeldBoundarySet{
+                    .derivative = deriv.field(.x),
+                };
+
+                self.manager.fillGhostNodes(M, psi_som_boundary, psi);
+                self.manager.fillGhostNodes(M, seed_som_boundary, seed);
+                self.manager.fillGhostNodes(M, u_som_boundary, u);
+                self.manager.fillGhostNodes(M, x_som_boundary, x);
+                self.manager.fillGhostNodes(M, w_som_boundary, w);
+
+                // Flip back
+                for (0..self.manager.numNodes()) |i| {
+                    deriv.field(.psi)[i] *= -1;
+                    deriv.field(.seed)[i] *= -1;
+                    deriv.field(.w)[i] *= -1;
+                    deriv.field(.u)[i] *= -1;
+                    deriv.field(.x)[i] *= -1;
+                }
+            }
 
             const eps = 0.5;
 
@@ -1164,7 +1318,7 @@ pub const BrillEvolution = struct {
 
         // Seed
         manager.project(Seed{ .amplitude = 1.0, .sigma = 1.0 }, rk4.sys.field(.seed));
-        manager.fillGhostNodes(O, seed_boundary, rk4.sys.field(.seed));
+        manager.fillGhostNodes(O, seed_ext_boundary, rk4.sys.field(.seed));
 
         // Conformal factor
         const initial_rhs: InitialPsiRhs = .{
