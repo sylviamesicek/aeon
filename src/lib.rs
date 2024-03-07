@@ -1,3 +1,4 @@
 pub mod common;
 pub mod geometry;
-pub mod stencils;
+pub mod lac;
+pub mod uniform;

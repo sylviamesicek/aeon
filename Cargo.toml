@@ -4,10 +4,14 @@ version = "0.1.0"
 edition = "2021"
 readme = "README.md"
 
+[workspace]
+
+members = ["crates/*"]
+
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-num = "0.4.1"
+aeon_stencils = { path = "crates/aeon_stencils" }
 
 [[example]]
 name = "poisson"

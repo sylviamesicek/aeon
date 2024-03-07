@@ -7,6 +7,7 @@ pub struct IndexRectangle<const N: usize> {
     pub origin: [f64; N],
 }
 
+#[derive(Debug, Clone, PartialEq)]
 pub struct Rectangle<const N: usize> {
     pub size: [f64; N],
     pub origin: [f64; N],
