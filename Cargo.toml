@@ -13,9 +13,10 @@ members = ["crates/*"]
 [dependencies]
 aeon_macros = { path = "crates/aeon_macros" }
 
-[dev-dependencies]
 bumpalo = { version = "3" }
 
+[dev-dependencies]
+
 [[example]]
-name = "poisson"
-path = "examples/poisson.rs"
+name = "evolution"
+path = "examples/evolution.rs"

@@ -71,7 +71,7 @@ impl LinearSolver for BiCGStabSolver {
 
     fn solve<M: LinearMap>(
         self: &mut Self,
-        map: M,
+        mut map: M,
         rhs: &[f64],
         solution: &mut [f64],
     ) -> Result<(), Self::Error> {

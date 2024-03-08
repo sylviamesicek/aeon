@@ -95,8 +95,9 @@ impl<const N: usize> UniformMesh<N> {
     pub fn level_block(self: &Self, level: usize) -> Block<N> {
         let space = self.level_node_space(level);
         let offset = self.level_node_offset(level);
+        let total = self.level_node_offset(level + 1) - offset;
 
-        Block::new(space, offset)
+        Block::new(space, offset, total)
     }
 
     pub fn restrict(self: &Self, field: &mut [f64]) {
@@ -174,7 +175,7 @@ impl<const N: usize> UniformMesh<N> {
     pub fn residual<O: Operator<N>>(
         self: &Self,
         b: &[f64],
-        operator: &O,
+        operator: &mut O,
         x: &[f64],
         dest: &mut [f64],
     ) {
@@ -187,7 +188,7 @@ impl<const N: usize> UniformMesh<N> {
         self: &Self,
         level: usize,
         b: &[f64],
-        operator: &O,
+        operator: &mut O,
         x: &[f64],
         dest: &mut [f64],
     ) {
@@ -195,7 +196,7 @@ impl<const N: usize> UniformMesh<N> {
 
         let block = self.level_block(level);
 
-        operator.apply(block, &x[range.clone()], &mut dest[range.clone()]);
+        operator.apply(&block, &x[range.clone()], &mut dest[range.clone()]);
 
         for i in range {
             dest[i] = b[i] - dest[i];

@@ -9,9 +9,7 @@ pub struct Block<const N: usize> {
 }
 
 impl<const N: usize> Block<N> {
-    pub fn new(space: NodeSpace<N>, offset: usize) -> Self {
-        let total = space.len();
-
+    pub fn new(space: NodeSpace<N>, offset: usize, total: usize) -> Self {
         Self {
             space,
             offset,
@@ -35,7 +33,7 @@ impl<const N: usize> Block<N> {
         self.offset + self.space.vertex_space().linear_from_cartesian(node)
     }
 
-    pub fn axis<'a>(self: &'a Self, axis: usize) -> BlockAxis<'a, N> {
+    pub fn axis<'b>(self: &'b Self, axis: usize) -> BlockAxis<'b, N> {
         BlockAxis {
             space: self.space.axis(axis),
             offset: self.offset,
@@ -91,6 +89,7 @@ impl<'a, const N: usize> BlockAxis<'a, N> {
 }
 
 pub trait Operator<const N: usize> {
-    fn apply(self: &Self, block: Block<N>, src: &[f64], dest: &mut [f64]);
-    fn apply_diag(self: &Self, block: Block<N>, src: &[f64], dest: &mut [f64]);
+    fn apply(self: &mut Self, block: &Block<N>, src: &[f64], dest: &mut [f64]);
+    fn apply_diag(self: &mut Self, block: &Block<N>, src: &[f64], dest: &mut [f64]);
+    fn diritchlet_bcs(self: &Self, _: &mut [f64]) {}
 }

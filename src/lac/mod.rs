@@ -11,7 +11,7 @@ pub trait LinearMap {
     fn dimension(self: &Self) -> usize;
 
     /// Application of the linear map.
-    fn apply(self: &Self, src: &[f64], dest: &mut [f64]);
+    fn apply(self: &mut Self, src: &[f64], dest: &mut [f64]);
 
     /// An optional callback for logging residuals and iterations.
     fn callback(self: &Self, iteration: usize, residual: f64, solution: &[f64]) {
@@ -56,7 +56,7 @@ impl LinearMap for IdentityMap {
         self.dimension
     }
 
-    fn apply(self: &Self, src: &[f64], dest: &mut [f64]) {
+    fn apply(self: &mut Self, src: &[f64], dest: &mut [f64]) {
         dest.clone_from_slice(src);
     }
 }

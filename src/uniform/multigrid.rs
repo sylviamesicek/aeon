@@ -46,7 +46,7 @@ impl<'mesh, const N: usize, Solver: LinearSolver> UniformMultigrid<'mesh, N, Sol
         }
     }
 
-    pub fn solve<O: Operator<N>>(self: &mut Self, operator: &O, b: &[f64], x: &mut [f64]) {
+    pub fn solve<O: Operator<N>>(self: &mut Self, operator: &mut O, b: &[f64], x: &mut [f64]) {
         self.scratch.fill(0.0);
 
         let irhs = self.mesh.norm(b);
@@ -80,7 +80,7 @@ impl<'mesh, const N: usize, Solver: LinearSolver> UniformMultigrid<'mesh, N, Sol
         println!("Multigrid Failed to Converge.");
     }
 
-    fn cycle<O: Operator<N>>(self: &mut Self, operator: &O, level: usize, x: &mut [f64]) {
+    fn cycle<O: Operator<N>>(self: &mut Self, operator: &mut O, level: usize, x: &mut [f64]) {
         if level == 0 {
             let base_node_count = self.mesh.level_node_offset(1);
             let block = self.mesh.level_block(level);
@@ -111,21 +111,17 @@ impl<'mesh, const N: usize, Solver: LinearSolver> UniformMultigrid<'mesh, N, Sol
         // Presmoothing
 
         for _ in 0..self.presmoothing {
-            operator.apply(
-                block.clone(),
-                &x[fine.clone()],
-                &mut self.scratch[fine.clone()],
-            );
-            operator.apply_diag(
-                block.clone(),
-                &x[fine.clone()],
-                &mut self.diagonal[fine.clone()],
-            );
+            operator.diritchlet_bcs(&mut x[fine.clone()]);
+
+            operator.apply(&block, &x[fine.clone()], &mut self.scratch[fine.clone()]);
+            operator.apply_diag(&block, &x[fine.clone()], &mut self.diagonal[fine.clone()]);
 
             for i in fine.clone() {
                 x[i] += 2.0 / 3.0 * 1.0 / self.diagonal[i] * (self.rhs[i] - self.scratch[i]);
             }
         }
+
+        operator.diritchlet_bcs(&mut x[fine.clone()]);
 
         // *****************************
         // Right hand side
@@ -165,27 +161,23 @@ impl<'mesh, const N: usize, Solver: LinearSolver> UniformMultigrid<'mesh, N, Sol
         // Postsmooth
 
         for _ in 0..self.postsmoothing {
-            operator.apply(
-                block.clone(),
-                &x[fine.clone()],
-                &mut self.scratch[fine.clone()],
-            );
-            operator.apply_diag(
-                block.clone(),
-                &x[fine.clone()],
-                &mut self.diagonal[fine.clone()],
-            );
+            operator.diritchlet_bcs(&mut x[fine.clone()]);
+
+            operator.apply(&block, &x[fine.clone()], &mut self.scratch[fine.clone()]);
+            operator.apply_diag(&block, &x[fine.clone()], &mut self.diagonal[fine.clone()]);
 
             for i in fine.clone() {
                 x[i] += 2.0 / 3.0 * 1.0 / self.diagonal[i] * (self.rhs[i] - self.scratch[i]);
             }
         }
+
+        operator.diritchlet_bcs(&mut x[fine.clone()]);
     }
 }
 
 struct BaseLinearMap<'a, const N: usize, O: Operator<N>> {
     dimension: usize,
-    operator: &'a O,
+    operator: &'a mut O,
     block: Block<N>,
 }
 
@@ -194,7 +186,7 @@ impl<'a, const N: usize, O: Operator<N>> LinearMap for BaseLinearMap<'a, N, O> {
         self.dimension
     }
 
-    fn apply(self: &Self, src: &[f64], dest: &mut [f64]) {
-        self.operator.apply(self.block.clone(), src, dest);
+    fn apply(self: &mut Self, src: &[f64], dest: &mut [f64]) {
+        self.operator.apply(&self.block, src, dest);
     }
 }
