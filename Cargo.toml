@@ -11,7 +11,10 @@ members = ["crates/*"]
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-aeon_stencils = { path = "crates/aeon_stencils" }
+aeon_macros = { path = "crates/aeon_macros" }
+
+[dev-dependencies]
+bumpalo = { version = "3" }
 
 [[example]]
 name = "poisson"

@@ -2,7 +2,7 @@ mod bicgstab;
 
 use std::fmt::Debug;
 
-pub use bicgstab::BiCGStabSolver;
+pub use bicgstab::{BiCGStabConfig, BiCGStabError, BiCGStabSolver};
 
 /// A linear map between vectors of
 /// a given dimension.

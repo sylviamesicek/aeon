@@ -1,5 +1,5 @@
 use super::stencils::*;
-use aeon_stencils::*;
+use aeon_macros::{derivative, second_derivative};
 
 /// A seperable kernal used for approximating a derivative or numerical operator
 /// to some order of accuracy.
@@ -27,15 +27,19 @@ impl Kernel for FDDerivative<2> {
     type BoundaryStencil = BoundaryStencil<3>;
 
     fn interior() -> Self::InteriorStencil {
-        CenteredSecondOrder(centered_derivative!(1))
+        CenteredSecondOrder(derivative!(1, 1, 0))
     }
 
     fn negative(_: usize) -> Self::BoundaryStencil {
-        BoundaryStencil(boundary_derivative_neg!(3, 0))
+        BoundaryStencil(derivative!(1, 1, -1))
     }
 
     fn positive(_: usize) -> Self::BoundaryStencil {
-        BoundaryStencil(boundary_derivative!(3, 0))
+        let mut result = derivative!(1, 1, 1);
+
+        result.reverse();
+
+        BoundaryStencil(result)
     }
 
     fn scale(spacing: f64) -> f64 {
@@ -48,23 +52,27 @@ impl Kernel for FDDerivative<4> {
     type BoundaryStencil = BoundaryStencil<5>;
 
     fn interior() -> Self::InteriorStencil {
-        CenteredFourthOrder(centered_derivative!(2))
+        CenteredFourthOrder(derivative!(2, 2, 0))
     }
 
     fn negative(left: usize) -> Self::BoundaryStencil {
         if left == 0 {
-            BoundaryStencil(boundary_derivative_neg!(5, 0))
+            BoundaryStencil(derivative!(0, 4, 0))
         } else {
-            BoundaryStencil(boundary_derivative_neg!(5, -1))
+            BoundaryStencil(derivative!(0, 4, 1))
         }
     }
 
     fn positive(right: usize) -> Self::BoundaryStencil {
-        if right == 0 {
-            BoundaryStencil(boundary_derivative!(5, 0))
+        let mut result = if right == 0 {
+            derivative!(4, 0, 0)
         } else {
-            BoundaryStencil(boundary_derivative!(5, -1))
-        }
+            derivative!(4, 0, -1)
+        };
+
+        result.reverse();
+
+        BoundaryStencil(result)
     }
 
     fn scale(spacing: f64) -> f64 {
@@ -79,15 +87,17 @@ impl Kernel for FDSecondDerivative<2> {
     type BoundaryStencil = BoundaryStencil<4>;
 
     fn interior() -> Self::InteriorStencil {
-        CenteredSecondOrder(centered_second_derivative!(1))
+        CenteredSecondOrder(second_derivative!(1, 1, 0))
     }
 
     fn negative(_: usize) -> Self::BoundaryStencil {
-        BoundaryStencil(boundary_second_derivative!(4, 0))
+        BoundaryStencil(second_derivative!(0, 3, 0))
     }
 
     fn positive(_: usize) -> Self::BoundaryStencil {
-        BoundaryStencil(boundary_second_derivative!(4, 0))
+        let mut result = second_derivative!(3, 0, 0);
+        result.reverse();
+        BoundaryStencil(result)
     }
 
     fn scale(spacing: f64) -> f64 {
@@ -100,23 +110,27 @@ impl Kernel for FDSecondDerivative<4> {
     type BoundaryStencil = BoundaryStencil<6>;
 
     fn interior() -> Self::InteriorStencil {
-        CenteredFourthOrder(centered_derivative!(2))
+        CenteredFourthOrder(second_derivative!(2, 2, 0))
     }
 
     fn negative(left: usize) -> Self::BoundaryStencil {
         if left == 0 {
-            BoundaryStencil(boundary_second_derivative!(6, 0))
+            BoundaryStencil(second_derivative!(0, 5, 0))
         } else {
-            BoundaryStencil(boundary_second_derivative!(6, -1))
+            BoundaryStencil(second_derivative!(0, 5, 1))
         }
     }
 
     fn positive(right: usize) -> Self::BoundaryStencil {
-        if right == 0 {
-            BoundaryStencil(boundary_second_derivative!(6, 0))
+        let mut result = if right == 0 {
+            second_derivative!(5, 0, 0)
         } else {
-            BoundaryStencil(boundary_second_derivative!(6, -1))
-        }
+            second_derivative!(5, 0, -1)
+        };
+
+        result.reverse();
+
+        BoundaryStencil(result)
     }
 
     fn scale(spacing: f64) -> f64 {

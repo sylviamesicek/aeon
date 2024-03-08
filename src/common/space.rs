@@ -118,7 +118,7 @@ impl<const N: usize> NodeSpace<N> {
 
         assert!(src.len() == src_space.len() && dest.len() == self.len());
 
-        for src_vertex in src_space.vertex_space().iterate() {
+        for src_vertex in src_space.vertex_space().iter() {
             let mut vertex = src_vertex;
 
             for i in 0..N {
@@ -137,7 +137,7 @@ impl<const N: usize> NodeSpace<N> {
 
         assert!(src.len() == self.len() && dest.len() == dest_space.len());
 
-        for dest_vertex in dest_space.vertex_space().iterate() {
+        for dest_vertex in dest_space.vertex_space().iter() {
             let mut vertex = dest_vertex;
 
             for i in 0..N {
@@ -311,6 +311,132 @@ impl<'a, const N: usize> NodeSpaceAxis<'a, N> {
         }
     }
 
+    pub fn evaluate_diag<K: Convolution<N>>(
+        self: &Self,
+        convolution: &K,
+        src: &[f64],
+        dest: &mut [f64],
+    ) {
+        let positive: usize = <K::Kernel as Kernel>::InteriorStencil::POSITIVE;
+        let negative: usize = <K::Kernel as Kernel>::InteriorStencil::NEGATIVE;
+
+        let negative_extent = K::NegativeBoundary::EXTENT;
+        let positive_extent = K::PositiveBoundary::EXTENT;
+
+        // Source lengths and dest lengths must match node space.
+        assert!(src.len() == self.space.len() && dest.len() == self.space.len());
+
+        // Get spacing along axis for covariant transformation of kernel.
+        let spacing = self.space.spacing(self.axis);
+        let scale = K::Kernel::scale(spacing);
+
+        // Number of nodes along this axis
+        let length: usize = self.space.size[self.axis] + 1;
+
+        // Loop over plane normal to axis
+        for mut node in self.space.vertex_space().plane(self.axis, 0) {
+            // Position of negative boundary vertex
+            node[self.axis] = 0;
+            let negative_position = self.space.position(node);
+
+            // Position of positive boundary vertex
+            node[self.axis] = length - 1;
+            let positive_position = self.space.position(node);
+
+            // *****************************
+            // Fill left boundary
+
+            let negative_boundary = convolution.negative(negative_position);
+
+            for left in 0..(negative - negative_extent) {
+                let mut result = 0.0;
+
+                let stencil = K::Kernel::negative(left);
+
+                for i in 0..negative_extent {
+                    let w = stencil.weight(i);
+
+                    let ghost = negative_boundary.stencil(i, spacing).weight(0);
+
+                    result += w * ghost;
+                }
+
+                result += stencil.weight(negative_extent);
+
+                node[self.axis] = left;
+                self.space.set_value(node, scale * result, dest);
+            }
+
+            for left in (negative - negative_extent)..negative {
+                let mut result = 0.0;
+
+                let stencil = K::Kernel::interior();
+
+                for i in 0..negative_extent {
+                    let w = stencil.weight(i);
+                    let ghost = negative_boundary.stencil(i, spacing).weight(0);
+
+                    result += w * ghost;
+                }
+
+                result += stencil.weight(negative_extent);
+
+                node[self.axis] = left;
+                self.space.set_value(node, scale * result, dest);
+            }
+
+            // *************************************
+            // Fill right boundary
+
+            let positive_boundary = convolution.positive(positive_position);
+
+            for right in 0..(positive - positive_extent) {
+                let mut result = 0.0;
+
+                let stencil = K::Kernel::positive(right);
+
+                for i in 0..positive_extent {
+                    let w = stencil.weight(i);
+                    let ghost = positive_boundary.stencil(i, spacing).weight(0);
+
+                    result += w * ghost;
+                }
+
+                result += stencil.weight(positive_extent);
+
+                node[self.axis] = length - 1 - right;
+                self.space.set_value(node, scale * result, dest);
+            }
+
+            for right in (positive - positive_extent)..positive {
+                let mut result = 0.0;
+
+                let stencil = K::Kernel::interior();
+
+                for i in 0..positive_extent {
+                    let w = stencil.weight(i);
+                    let ghost = positive_boundary.stencil(i, spacing).weight(0);
+
+                    result += w * ghost;
+                }
+
+                result += stencil.weight(positive_extent);
+
+                node[self.axis] = length - 1 - right;
+                self.space.set_value(node, scale * result, dest);
+            }
+
+            // *****************************
+            // Fill interior
+
+            for middle in negative..(length - positive) {
+                node[self.axis] = middle;
+                self.space
+                    .set_value(node, scale * K::Kernel::interior().weight(negative), dest);
+            }
+        }
+    }
+
     fn negative_ghost_value<B: Boundary>(
         self: &Self,
         mut node: [usize; N],
@@ -348,6 +474,14 @@ impl<'a, const N: usize> NodeSpaceAxis<'a, N> {
         }
 
         result
+    }
+
+    pub fn apply_diritchlet_bc(self: &Self, face: bool, field: &mut [f64]) {
+        let slice = if face { self.space.size[self.axis] } else { 0 };
+
+        for node in self.space.vertex_space().plane(self.axis, slice) {
+            self.space.set_value(node, 0.0, field);
+        }
     }
 
     /// Performs bilinear prolongation on the given field.

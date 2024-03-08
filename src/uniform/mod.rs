@@ -1,6 +1,6 @@
 use std::ops::Range;
 
-use crate::common::{Block, NodeSpace};
+use crate::common::{Block, NodeSpace, Operator};
 use crate::geometry::Rectangle;
 
 mod multigrid;
@@ -122,6 +122,23 @@ impl<const N: usize> UniformMesh<N> {
         space.restrict_inject(src, dest);
     }
 
+    pub fn restrict_level_full(self: &Self, level: usize, field: &mut [f64]) {
+        let range = self.level_node_range(level);
+        let space = self.level_node_space(level);
+
+        for i in 0..N {
+            space.axis(i).restrict(&mut field[range.clone()]);
+        }
+
+        self.restrict_level(level, field);
+    }
+
+    pub fn prolong(self: &Self, field: &mut [f64]) {
+        for level in 1..self.level_count() {
+            self.prolong_level(level, field);
+        }
+    }
+
     pub fn prolong_level(self: &Self, level: usize, field: &mut [f64]) {
         assert!(field.len() == self.node_count());
 
@@ -137,10 +154,52 @@ impl<const N: usize> UniformMesh<N> {
         space.prolong_inject(src, dest);
     }
 
+    pub fn prolong_level_full(self: &Self, level: usize, field: &mut [f64]) {
+        let range = self.level_node_range(level);
+        let space = self.level_node_space(level);
+
+        self.prolong_level(level, field);
+
+        for i in 0..N {
+            space.axis(i).prolong(&mut field[range.clone()]);
+        }
+    }
+
     pub fn copy_level(self: &Self, level: usize, src: &[f64], dest: &mut [f64]) {
         let range = self.level_node_range(level);
 
         (&mut dest[range.clone()]).copy_from_slice(&src[range.clone()]);
+    }
+
+    pub fn residual<O: Operator<N>>(
+        self: &Self,
+        b: &[f64],
+        operator: &O,
+        x: &[f64],
+        dest: &mut [f64],
+    ) {
+        for i in 0..self.level_count() {
+            self.residual_level(i, b, operator, x, dest);
+        }
+    }
+
+    pub fn residual_level<O: Operator<N>>(
+        self: &Self,
+        level: usize,
+        b: &[f64],
+        operator: &O,
+        x: &[f64],
+        dest: &mut [f64],
+    ) {
+        let range = self.level_node_range(level);
+
+        let block = self.level_block(level);
+
+        operator.apply(block, &x[range.clone()], &mut dest[range.clone()]);
+
+        for i in range {
+            dest[i] = b[i] - dest[i];
+        }
     }
 
     pub fn norm(self: &Self, field: &[f64]) -> f64 {

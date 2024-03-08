@@ -1,5 +1,5 @@
 use super::stencils::{BoundaryStencil, DirectedStencil};
-use aeon_stencils::boundary_derivative;
+use aeon_macros::derivative;
 
 pub trait Boundary {
     const EXTENT: usize;
@@ -113,7 +113,8 @@ impl Boundary for RobinBoundary<1> {
     type Stencil = BoundaryStencil<1>;
 
     fn stencil(self: &Self, _: usize, spacing: f64) -> Self::Stencil {
-        let mut derivative = boundary_derivative!(2, 0);
+        let mut derivative = derivative!(1, 0, 0);
+        derivative.reverse();
 
         for i in 0..derivative.len() {
             derivative[i] /= spacing;
@@ -129,7 +130,8 @@ impl Boundary for RobinBoundary<2> {
     type Stencil = BoundaryStencil<2>;
 
     fn stencil(self: &Self, _: usize, spacing: f64) -> Self::Stencil {
-        let mut derivative = boundary_derivative!(3, 0);
+        let mut derivative = derivative!(2, 0, 0);
+        derivative.reverse();
 
         for i in 0..derivative.len() {
             derivative[i] /= spacing;
@@ -150,13 +152,44 @@ impl Boundary for RobinBoundary<2> {
     }
 }
 
+impl Boundary for RobinBoundary<4> {
+    const EXTENT: usize = 1;
+
+    type Stencil = BoundaryStencil<4>;
+
+    fn stencil(self: &Self, _: usize, spacing: f64) -> Self::Stencil {
+        let mut derivative = derivative!(4, 0, 0);
+        derivative.reverse();
+
+        for i in 0..derivative.len() {
+            derivative[i] /= spacing;
+        }
+
+        let mut result = [0.0; 4];
+
+        result[0] = -derivative[1];
+        result[1] = -derivative[2];
+        result[2] = -derivative[3];
+        result[3] = -derivative[4];
+
+        result[0] += self.coefficient;
+
+        for i in 0..result.len() {
+            result[i] /= derivative[0];
+        }
+
+        BoundaryStencil(result)
+    }
+}
+
 impl Boundary for RobinBoundary<5> {
     const EXTENT: usize = 1;
 
     type Stencil = BoundaryStencil<5>;
 
     fn stencil(self: &Self, _: usize, spacing: f64) -> Self::Stencil {
-        let mut derivative = boundary_derivative!(6, 0);
+        let mut derivative = derivative!(5, 0, 0);
+        derivative.reverse();
 
         for i in 0..derivative.len() {
             derivative[i] /= spacing;

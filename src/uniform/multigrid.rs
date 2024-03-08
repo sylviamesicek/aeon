@@ -12,7 +12,6 @@ pub struct UniformMultigrid<'mesh, const N: usize, Solver: LinearSolver> {
 
     scratch: Vec<f64>,
     diagonal: Vec<f64>,
-    old: Vec<f64>,
     rhs: Vec<f64>,
 }
 
@@ -30,7 +29,6 @@ impl<'mesh, const N: usize, Solver: LinearSolver> UniformMultigrid<'mesh, N, Sol
 
         let scratch = vec![0.0; node_count];
         let diag = vec![0.0; node_count];
-        let old = vec![0.0; node_count];
         let rhs = vec![0.0; node_count];
 
         Self {
@@ -44,7 +42,6 @@ impl<'mesh, const N: usize, Solver: LinearSolver> UniformMultigrid<'mesh, N, Sol
 
             scratch,
             diagonal: diag,
-            old,
             rhs,
         }
     }
@@ -70,17 +67,8 @@ impl<'mesh, const N: usize, Solver: LinearSolver> UniformMultigrid<'mesh, N, Sol
             self.cycle(operator, self.mesh.level_count() - 1, x);
 
             // Compute residual
-            for level in 0..self.mesh.level_count() {
-                let range = self.mesh.level_node_range(level);
-
-                let block = self.mesh.level_block(level);
-
-                operator.apply(block, &x[range.clone()], &mut self.scratch[range.clone()]);
-
-                for i in range {
-                    self.scratch[i] = b[i] - self.scratch[i];
-                }
-            }
+            self.mesh
+                .residual(&self.rhs, operator, &x, &mut self.scratch);
 
             let nres = self.mesh.norm(&self.scratch);
 
@@ -115,7 +103,6 @@ impl<'mesh, const N: usize, Solver: LinearSolver> UniformMultigrid<'mesh, N, Sol
         }
 
         let block = self.mesh.level_block(level);
-        let space = self.mesh.level_node_space(level);
 
         let fine = self.mesh.level_node_range(level);
         let coarse = self.mesh.level_node_range(level - 1);
@@ -140,28 +127,18 @@ impl<'mesh, const N: usize, Solver: LinearSolver> UniformMultigrid<'mesh, N, Sol
             }
         }
 
-        // Restrict solution
-        self.mesh.restrict_level(level, x);
-        self.mesh.copy_level(level - 1, x, &mut self.old);
-
         // *****************************
         // Right hand side
 
-        operator.apply(
-            block.clone(),
-            &x[fine.clone()],
-            &mut self.scratch[fine.clone()],
-        );
+        self.mesh
+            .residual_level(level, &self.rhs, operator, &x, &mut self.scratch);
+        self.mesh.restrict_level_full(level, &mut self.scratch);
+        self.mesh.restrict_level(level, x);
 
-        for i in fine.clone() {
-            self.scratch[i] = self.rhs[i] - self.scratch[i];
+        // Tau correction
+        for i in coarse.clone() {
+            self.rhs[i] = x[i] + self.scratch[i];
         }
-
-        for i in 0..N {
-            space.axis(i).restrict(&mut self.scratch[fine.clone()]);
-        }
-
-        self.mesh.restrict_level(level, &mut self.scratch);
 
         // *************************
         // Recurse
@@ -171,15 +148,14 @@ impl<'mesh, const N: usize, Solver: LinearSolver> UniformMultigrid<'mesh, N, Sol
         // *************************
         // Error Correction
 
+        self.mesh.copy_level(level, &x, &mut self.scratch);
+        self.mesh.restrict_level(level, &mut self.scratch);
+
         for i in coarse.clone() {
-            self.scratch[i] = x[i] - self.old[i]
+            self.scratch[i] = x[i] - self.scratch[i];
         }
 
-        self.mesh.prolong_level(level, &mut self.scratch);
-
-        for i in 0..N {
-            space.axis(i).prolong(&mut self.scratch[fine.clone()]);
-        }
+        self.mesh.prolong_level_full(level, &mut self.scratch);
 
         for i in fine.clone() {
             x[i] += self.scratch[i];

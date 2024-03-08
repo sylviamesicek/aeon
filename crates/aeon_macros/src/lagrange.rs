@@ -7,14 +7,20 @@ pub struct Stencil {
 }
 
 impl Stencil {
-    pub fn centered(extent: u64) -> Self {
-        let range = -(extent as i64)..=(extent as i64);
-        let grid = range.into_iter().map(|i| Ratio::new(i, 1)).collect();
-        Self { grid }
-    }
+    // pub fn centered(extent: u64) -> Self {
+    //     let range = -(extent as i64)..=(extent as i64);
+    //     let grid = range.into_iter().map(|i| Ratio::new(i, 1)).collect();
+    //     Self { grid }
+    // }
 
-    pub fn backward(support: u64) -> Self {
-        let range = -(support as i64) + 1..=0;
+    // pub fn backward(support: u64) -> Self {
+    //     let range = -(support as i64) + 1..=0;
+    //     let grid = range.into_iter().map(|i| Ratio::new(i, 1)).collect();
+    //     Self { grid }
+    // }
+
+    pub fn vertex(left: u64, right: u64) -> Self {
+        let range = -(left as i64)..=(right as i64);
         let grid = range.into_iter().map(|i| Ratio::new(i, 1)).collect();
         Self { grid }
     }

@@ -37,8 +37,8 @@ pub enum BiCGStabError {
 }
 
 pub struct BiCGStabConfig {
-    max_iterations: usize,
-    tolerance: f64,
+    pub max_iterations: usize,
+    pub tolerance: f64,
 }
 
 impl LinearSolver for BiCGStabSolver {
