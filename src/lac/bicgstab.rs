@@ -18,26 +18,6 @@ pub struct BiCGStabSolver {
 }
 
 impl BiCGStabSolver {
-    /// Builds a new BiCGStabSolver with the given dimension and
-    /// configuration.
-    pub fn new(dimension: usize, max_iterations: usize, tolerance: f64) -> Self {
-        Self {
-            dimension,
-            max_iterations,
-            tolerance,
-
-            rg: vec![0.0; dimension],
-            rh: vec![0.0; dimension],
-            pg: vec![0.0; dimension],
-            ph: vec![0.0; dimension],
-            sg: vec![0.0; dimension],
-            sh: vec![0.0; dimension],
-            tg: vec![0.0; dimension],
-            vg: vec![0.0; dimension],
-            tp: vec![0.0; dimension],
-        }
-    }
-
     /// Retrieves the tolerance of the multigrid solver.
     pub fn tolerance(self: &Self) -> f64 {
         self.tolerance
@@ -56,8 +36,34 @@ pub enum BiCGStabError {
     FailedToConverge,
 }
 
+pub struct BiCGStabConfig {
+    max_iterations: usize,
+    tolerance: f64,
+}
+
 impl LinearSolver for BiCGStabSolver {
     type Error = BiCGStabError;
+    type Config = BiCGStabConfig;
+
+    /// Builds a new BiCGStabSolver with the given dimension and
+    /// configuration.
+    fn new(dimension: usize, config: &BiCGStabConfig) -> Self {
+        Self {
+            dimension,
+            max_iterations: config.max_iterations,
+            tolerance: config.tolerance,
+
+            rg: vec![0.0; dimension],
+            rh: vec![0.0; dimension],
+            pg: vec![0.0; dimension],
+            ph: vec![0.0; dimension],
+            sg: vec![0.0; dimension],
+            sh: vec![0.0; dimension],
+            tg: vec![0.0; dimension],
+            vg: vec![0.0; dimension],
+            tp: vec![0.0; dimension],
+        }
+    }
 
     fn dimension(self: &Self) -> usize {
         self.dimension
@@ -191,7 +197,7 @@ fn norm(v: &[f64]) -> f64 {
 
 #[cfg(test)]
 mod tests {
-    use super::{BiCGStabError, BiCGStabSolver};
+    use super::{BiCGStabConfig, BiCGStabError, BiCGStabSolver};
     use crate::lac::{IdentityMap, LinearSolver};
 
     #[test]
@@ -204,7 +210,13 @@ mod tests {
             rhs[i] = i as f64;
         }
 
-        let mut solver: BiCGStabSolver = BiCGStabSolver::new(100, 1000, 1e-10);
+        let mut solver: BiCGStabSolver = BiCGStabSolver::new(
+            100,
+            &BiCGStabConfig {
+                max_iterations: 1000,
+                tolerance: 10e-12,
+            },
+        );
 
         solver.solve(IdentityMap::new(100), &rhs, &mut solution)?;
 

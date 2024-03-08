@@ -6,7 +6,7 @@ pub trait Boundary {
 
     type Stencil: DirectedStencil;
 
-    fn stencil(self: &Self, extent: usize) -> Self::Stencil;
+    fn stencil(self: &Self, extent: usize, spacing: f64) -> Self::Stencil;
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -17,7 +17,7 @@ impl Boundary for FreeBoundary {
 
     type Stencil = BoundaryStencil<0>;
 
-    fn stencil(self: &Self, _: usize) -> Self::Stencil {
+    fn stencil(self: &Self, _: usize, _: f64) -> Self::Stencil {
         BoundaryStencil([])
     }
 }
@@ -30,7 +30,7 @@ impl<const EXTENT: usize> Boundary for SymmetricBoundary<EXTENT> {
 
     type Stencil = BoundaryStencil<EXTENT>;
 
-    fn stencil(self: &Self, extent: usize) -> Self::Stencil {
+    fn stencil(self: &Self, extent: usize, _: f64) -> Self::Stencil {
         let mut result = [0.0; EXTENT];
 
         result[extent] = 1.0;
@@ -47,7 +47,7 @@ impl<const EXTENT: usize> Boundary for AntiSymmetricBoundary<EXTENT> {
 
     type Stencil = BoundaryStencil<EXTENT>;
 
-    fn stencil(self: &Self, extent: usize) -> Self::Stencil {
+    fn stencil(self: &Self, extent: usize, _: f64) -> Self::Stencil {
         let mut result = [0.0; EXTENT];
 
         result[extent] = -1.0;
@@ -57,8 +57,17 @@ impl<const EXTENT: usize> Boundary for AntiSymmetricBoundary<EXTENT> {
 }
 
 pub struct RobinBoundary<const SUPPORT: usize> {
-    pub spacing: f64,
-    pub coef: f64,
+    pub coefficient: f64,
+}
+
+impl<const SUPPORT: usize> RobinBoundary<SUPPORT> {
+    pub fn new(coefficient: f64) -> Self {
+        Self { coefficient }
+    }
+
+    pub fn nuemann() -> Self {
+        Self::new(0.0)
+    }
 }
 
 // macro_rules! robin_boundary_impl {
@@ -103,14 +112,14 @@ impl Boundary for RobinBoundary<1> {
 
     type Stencil = BoundaryStencil<1>;
 
-    fn stencil(self: &Self, _: usize) -> Self::Stencil {
+    fn stencil(self: &Self, _: usize, spacing: f64) -> Self::Stencil {
         let mut derivative = boundary_derivative!(2, 0);
 
         for i in 0..derivative.len() {
-            derivative[i] /= self.spacing;
+            derivative[i] /= spacing;
         }
 
-        BoundaryStencil([1.0 / derivative[1] * (self.coef - derivative[0])])
+        BoundaryStencil([1.0 / derivative[0] * (self.coefficient - derivative[1])])
     }
 }
 
@@ -119,22 +128,22 @@ impl Boundary for RobinBoundary<2> {
 
     type Stencil = BoundaryStencil<2>;
 
-    fn stencil(self: &Self, _: usize) -> Self::Stencil {
+    fn stencil(self: &Self, _: usize, spacing: f64) -> Self::Stencil {
         let mut derivative = boundary_derivative!(3, 0);
 
         for i in 0..derivative.len() {
-            derivative[i] /= self.spacing;
+            derivative[i] /= spacing;
         }
 
         let mut result = [0.0; 2];
 
-        result[0] = -derivative[0];
-        result[1] = -derivative[1];
+        result[0] = -derivative[1];
+        result[1] = -derivative[2];
 
-        result[0] += self.coef;
+        result[0] += self.coefficient;
 
         for i in 0..result.len() {
-            result[i] /= derivative[2];
+            result[i] /= derivative[0];
         }
 
         BoundaryStencil(result)
@@ -146,25 +155,25 @@ impl Boundary for RobinBoundary<5> {
 
     type Stencil = BoundaryStencil<5>;
 
-    fn stencil(self: &Self, _: usize) -> Self::Stencil {
+    fn stencil(self: &Self, _: usize, spacing: f64) -> Self::Stencil {
         let mut derivative = boundary_derivative!(6, 0);
 
         for i in 0..derivative.len() {
-            derivative[i] /= self.spacing;
+            derivative[i] /= spacing;
         }
 
         let mut result = [0.0; 5];
 
-        result[0] = -derivative[0];
-        result[1] = -derivative[1];
-        result[2] = -derivative[2];
-        result[3] = -derivative[3];
-        result[4] = -derivative[4];
+        result[0] = -derivative[1];
+        result[1] = -derivative[2];
+        result[2] = -derivative[3];
+        result[3] = -derivative[4];
+        result[4] = -derivative[5];
 
-        result[0] += self.coef;
+        result[0] += self.coefficient;
 
         for i in 0..result.len() {
-            result[i] /= derivative[5];
+            result[i] /= derivative[0];
         }
 
         BoundaryStencil(result)

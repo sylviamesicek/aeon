@@ -1,5 +1,7 @@
 mod bicgstab;
 
+use std::fmt::Debug;
+
 pub use bicgstab::BiCGStabSolver;
 
 /// A linear map between vectors of
@@ -21,7 +23,10 @@ pub trait LinearMap {
 
 /// A matrix-free iterative linear solver.
 pub trait LinearSolver {
-    type Error;
+    type Error: Debug;
+    type Config;
+
+    fn new(dimension: usize, config: &Self::Config) -> Self;
 
     /// Dimension of the linear solver.
     fn dimension(self: &Self) -> usize;

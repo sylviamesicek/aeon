@@ -1,13 +1,19 @@
-use crate::common::NodeSpace;
+use std::ops::Range;
+
+use crate::common::{Block, NodeSpace};
 use crate::geometry::Rectangle;
 
-pub struct Mesh<const N: usize> {
+mod multigrid;
+
+pub use multigrid::UniformMultigrid;
+
+pub struct UniformMesh<const N: usize> {
     bounds: Rectangle<N>,
     size: [usize; N],
     offsets: Vec<usize>,
 }
 
-impl<const N: usize> Mesh<N> {
+impl<const N: usize> UniformMesh<N> {
     pub fn new(bounds: Rectangle<N>, size: [usize; N], levels: usize) -> Self {
         for i in 0..N {
             assert!(size[i] % 2 == 0);
@@ -39,7 +45,19 @@ impl<const N: usize> Mesh<N> {
         }
     }
 
-    pub fn levels(self: &Self) -> usize {
+    pub fn bounds(self: &Self) -> Rectangle<N> {
+        self.bounds.clone()
+    }
+
+    pub fn node_count(self: &Self) -> usize {
+        *self.offsets.last().unwrap()
+    }
+
+    pub fn base_node_count(self: &Self) -> usize {
+        self.offsets[1]
+    }
+
+    pub fn level_count(self: &Self) -> usize {
         self.offsets.len() - 1
     }
 
@@ -64,5 +82,74 @@ impl<const N: usize> Mesh<N> {
             bounds: self.bounds.clone(),
             size,
         }
+    }
+
+    pub fn level_node_offset(self: &Self, level: usize) -> usize {
+        self.offsets[level]
+    }
+
+    pub fn level_node_range(self: &Self, level: usize) -> Range<usize> {
+        self.offsets[level]..self.offsets[level + 1]
+    }
+
+    pub fn level_block(self: &Self, level: usize) -> Block<N> {
+        let space = self.level_node_space(level);
+        let offset = self.level_node_offset(level);
+
+        Block::new(space, offset)
+    }
+
+    pub fn restrict(self: &Self, field: &mut [f64]) {
+        assert!(field.len() == self.node_count());
+
+        for level in (1..self.level_count()).rev() {
+            self.restrict_level(level, field);
+        }
+    }
+
+    pub fn restrict_level(self: &Self, level: usize, field: &mut [f64]) {
+        assert!(field.len() == self.node_count());
+
+        let offset = self.level_node_offset(level);
+        let split = field.split_at_mut(offset);
+
+        let space = self.level_node_space(level);
+
+        let src = &split.1[..self.level_node_offset(level + 1)];
+        let dest = &mut split.0[self.level_node_offset(level - 1)..];
+
+        // Perform restriction
+        space.restrict_inject(src, dest);
+    }
+
+    pub fn prolong_level(self: &Self, level: usize, field: &mut [f64]) {
+        assert!(field.len() == self.node_count());
+
+        let offset = self.level_node_offset(level);
+        let split = field.split_at_mut(offset);
+
+        let space = self.level_node_space(level);
+
+        let dest = &mut split.1[..self.level_node_offset(level + 1)];
+        let src = &split.0[self.level_node_offset(level - 1)..];
+
+        // Perform restriction
+        space.prolong_inject(src, dest);
+    }
+
+    pub fn copy_level(self: &Self, level: usize, src: &[f64], dest: &mut [f64]) {
+        let range = self.level_node_range(level);
+
+        (&mut dest[range.clone()]).copy_from_slice(&src[range.clone()]);
+    }
+
+    pub fn norm(self: &Self, field: &[f64]) -> f64 {
+        let mut result = 0.0;
+
+        for &f in field {
+            result += f * f;
+        }
+
+        result.sqrt()
     }
 }
