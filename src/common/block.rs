@@ -1,5 +1,7 @@
-use crate::common::{Convolution, NodeSpace, NodeSpaceAxis};
+use crate::common::NodeSpace;
 use crate::geometry::CartesianIterator;
+
+use super::{BoundarySet, FDDerivative, FDSecondDerivative, Kernel};
 
 #[derive(Debug, Clone)]
 pub struct Block<const N: usize> {
@@ -33,58 +35,101 @@ impl<const N: usize> Block<N> {
         self.offset + self.space.vertex_space().linear_from_cartesian(node)
     }
 
-    pub fn axis<'b>(self: &'b Self, axis: usize) -> BlockAxis<'b, N> {
-        BlockAxis {
-            space: self.space.axis(axis),
-            offset: self.offset,
-            total: self.total,
-        }
+    pub fn auxillary<'a>(self: &Self, src: &'a [f64]) -> &'a [f64] {
+        &src[self.offset..self.offset + self.total]
+    }
+
+    pub fn evaluate<K: Kernel<N>, B: BoundarySet<N>>(
+        self: &Self,
+        axis: usize,
+        set: &B,
+        src: &[f64],
+        dest: &mut [f64],
+    ) {
+        self.space.axis(axis).evaluate::<K, B>(set, src, dest);
+    }
+
+    pub fn evaluate_diag<K: Kernel<N>, B: BoundarySet<N>>(
+        self: &Self,
+        axis: usize,
+        set: &B,
+        src: &[f64],
+        dest: &mut [f64],
+    ) {
+        self.space.axis(axis).evaluate_diag::<K, B>(set, src, dest);
+    }
+
+    pub fn axis<'a, const ORDER: usize>(self: &'a Self, axis: usize) -> BlockAxis<'a, N, ORDER> {
+        BlockAxis::<N, ORDER> { block: self, axis }
     }
 }
 
-pub struct BlockAxis<'a, const N: usize> {
-    space: NodeSpaceAxis<'a, N>,
-    offset: usize,
-    total: usize,
+pub struct BlockAxis<'a, const N: usize, const ORDER: usize> {
+    block: &'a Block<N>,
+    axis: usize,
 }
 
-impl<'a, const N: usize> BlockAxis<'a, N> {
-    pub fn evaluate_auxillary<K: Convolution<N>>(
-        self: &Self,
-        convolution: &K,
-        src: &[f64],
-        dest: &mut [f64],
-    ) {
-        let block_src = &src[self.offset..self.offset + self.total];
-        self.space.evaluate(convolution, block_src, dest);
+impl<'a, const N: usize> BlockAxis<'a, N, 2> {
+    pub fn derivative<B: BoundarySet<N>>(self: &Self, set: &B, src: &[f64], dest: &mut [f64]) {
+        self.block
+            .evaluate::<FDDerivative<2>, B>(self.axis, set, src, dest)
     }
 
-    pub fn evaluate<K: Convolution<N>>(
-        self: &Self,
-        convolution: &K,
-        src: &[f64],
-        dest: &mut [f64],
-    ) {
-        self.space.evaluate(convolution, src, dest);
+    pub fn derivative_diag<B: BoundarySet<N>>(self: &Self, set: &B, src: &[f64], dest: &mut [f64]) {
+        self.block
+            .evaluate_diag::<FDDerivative<2>, B>(self.axis, set, src, dest)
     }
 
-    pub fn evaluate_diag_auxillary<K: Convolution<N>>(
+    pub fn second_derivative<B: BoundarySet<N>>(
         self: &Self,
-        convolution: &K,
+        set: &B,
         src: &[f64],
         dest: &mut [f64],
     ) {
-        let block_src = &src[self.offset..self.offset + self.total];
-        self.space.evaluate_diag(convolution, block_src, dest);
+        self.block
+            .evaluate::<FDSecondDerivative<2>, B>(self.axis, set, src, dest)
     }
 
-    pub fn evaluate_diag<K: Convolution<N>>(
+    pub fn second_derivative_diag<B: BoundarySet<N>>(
         self: &Self,
-        convolution: &K,
+        set: &B,
         src: &[f64],
         dest: &mut [f64],
     ) {
-        self.space.evaluate_diag(convolution, src, dest);
+        self.block
+            .evaluate_diag::<FDSecondDerivative<2>, B>(self.axis, set, src, dest)
+    }
+}
+
+impl<'a, const N: usize> BlockAxis<'a, N, 4> {
+    pub fn derivative<B: BoundarySet<N>>(self: &Self, set: &B, src: &[f64], dest: &mut [f64]) {
+        self.block
+            .evaluate::<FDDerivative<4>, B>(self.axis, set, src, dest)
+    }
+
+    pub fn derivative_diag<B: BoundarySet<N>>(self: &Self, set: &B, src: &[f64], dest: &mut [f64]) {
+        self.block
+            .evaluate_diag::<FDDerivative<4>, B>(self.axis, set, src, dest)
+    }
+
+    pub fn second_derivative<B: BoundarySet<N>>(
+        self: &Self,
+        set: &B,
+        src: &[f64],
+        dest: &mut [f64],
+    ) {
+        self.block
+            .evaluate::<FDSecondDerivative<4>, B>(self.axis, set, src, dest)
+    }
+
+    pub fn second_derivative_diag<B: BoundarySet<N>>(
+        self: &Self,
+        set: &B,
+        src: &[f64],
+        dest: &mut [f64],
+    ) {
+        self.block
+            .evaluate_diag::<FDSecondDerivative<4>, B>(self.axis, set, src, dest)
     }
 }
 

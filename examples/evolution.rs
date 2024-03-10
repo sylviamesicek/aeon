@@ -1,258 +1,54 @@
 use aeon::{
     common::{
-        AntiSymmetricBoundary, FDDerivative, FDSecondDerivative, FreeBoundary, RobinBoundary,
-        SymmetricBoundary,
+        AntiSymmetricBoundary, AsymptoticFlatness, FreeBoundary, Mixed, Simple, SymmetricBoundary,
     },
     prelude::*,
 };
 use bumpalo::Bump;
 
-fn asymptotic_flatness_rho(pos: [f64; 2]) -> RobinBoundary<4> {
-    RobinBoundary::new(-pos[0] / (pos[0] * pos[0] + pos[1] * pos[1]))
-}
-
-fn asymptotic_flatness_z(pos: [f64; 2]) -> RobinBoundary<4> {
-    RobinBoundary::new(-pos[1] / (pos[0] * pos[0] + pos[1] * pos[1]))
-}
-
-pub struct SecondDerivativeRhoOdd;
-
-impl Convolution<2> for SecondDerivativeRhoOdd {
-    type Kernel = FDSecondDerivative<4>;
-
-    type NegativeBoundary = AntiSymmetricBoundary<2>;
-    type PositiveBoundary = RobinBoundary<4>;
-
-    fn negative(self: &Self, _: [f64; 2]) -> Self::NegativeBoundary {
-        AntiSymmetricBoundary::<2>
-    }
-
-    fn positive(self: &Self, pos: [f64; 2]) -> Self::PositiveBoundary {
-        asymptotic_flatness_rho(pos)
-    }
-}
-
-pub struct SecondDerivativeRhoEven;
-
-impl Convolution<2> for SecondDerivativeRhoEven {
-    type Kernel = FDSecondDerivative<4>;
-
-    type NegativeBoundary = SymmetricBoundary<2>;
-    type PositiveBoundary = RobinBoundary<4>;
-
-    fn negative(self: &Self, _: [f64; 2]) -> Self::NegativeBoundary {
-        SymmetricBoundary::<2>
-    }
-
-    fn positive(self: &Self, pos: [f64; 2]) -> Self::PositiveBoundary {
-        asymptotic_flatness_rho(pos)
-    }
-}
-
-pub struct SecondDerivativeZOdd;
-
-impl Convolution<2> for SecondDerivativeZOdd {
-    type Kernel = FDSecondDerivative<4>;
-
-    type NegativeBoundary = AntiSymmetricBoundary<2>;
-    type PositiveBoundary = RobinBoundary<4>;
-
-    fn negative(self: &Self, _: [f64; 2]) -> Self::NegativeBoundary {
-        AntiSymmetricBoundary::<2>
-    }
-
-    fn positive(self: &Self, pos: [f64; 2]) -> Self::PositiveBoundary {
-        asymptotic_flatness_z(pos)
-    }
-}
-
-pub struct SecondDerivativeZEven;
-
-impl Convolution<2> for SecondDerivativeZEven {
-    type Kernel = FDSecondDerivative<4>;
-
-    type NegativeBoundary = SymmetricBoundary<2>;
-    type PositiveBoundary = RobinBoundary<4>;
-
-    fn negative(self: &Self, _: [f64; 2]) -> Self::NegativeBoundary {
-        SymmetricBoundary::<2>
-    }
-
-    fn positive(self: &Self, pos: [f64; 2]) -> Self::PositiveBoundary {
-        asymptotic_flatness_z(pos)
-    }
-}
-
-pub struct DerivativeRhoOdd;
-
-impl Convolution<2> for DerivativeRhoOdd {
-    type Kernel = FDDerivative<4>;
-
-    type NegativeBoundary = AntiSymmetricBoundary<2>;
-    type PositiveBoundary = RobinBoundary<4>;
-
-    fn negative(self: &Self, _: [f64; 2]) -> Self::NegativeBoundary {
-        AntiSymmetricBoundary::<2>
-    }
-
-    fn positive(self: &Self, pos: [f64; 2]) -> Self::PositiveBoundary {
-        asymptotic_flatness_rho(pos)
-    }
-}
-
-pub struct DerivativeRhoEven;
-
-impl Convolution<2> for DerivativeRhoEven {
-    type Kernel = FDDerivative<4>;
-
-    type NegativeBoundary = SymmetricBoundary<2>;
-    type PositiveBoundary = RobinBoundary<4>;
-
-    fn negative(self: &Self, _: [f64; 2]) -> Self::NegativeBoundary {
-        SymmetricBoundary::<2>
-    }
-
-    fn positive(self: &Self, pos: [f64; 2]) -> Self::PositiveBoundary {
-        asymptotic_flatness_rho(pos)
-    }
-}
-
-pub struct DerivativeZOdd;
-
-impl Convolution<2> for DerivativeZOdd {
-    type Kernel = FDDerivative<4>;
-
-    type NegativeBoundary = AntiSymmetricBoundary<2>;
-    type PositiveBoundary = RobinBoundary<4>;
-
-    fn negative(self: &Self, _: [f64; 2]) -> Self::NegativeBoundary {
-        AntiSymmetricBoundary::<2>
-    }
-
-    fn positive(self: &Self, pos: [f64; 2]) -> Self::PositiveBoundary {
-        asymptotic_flatness_z(pos)
-    }
-}
-
-pub struct DerivativeZEven;
-
-impl Convolution<2> for DerivativeZEven {
-    type Kernel = FDDerivative<4>;
-
-    type NegativeBoundary = SymmetricBoundary<2>;
-    type PositiveBoundary = RobinBoundary<4>;
-
-    fn negative(self: &Self, _: [f64; 2]) -> Self::NegativeBoundary {
-        SymmetricBoundary::<2>
-    }
-
-    fn positive(self: &Self, pos: [f64; 2]) -> Self::PositiveBoundary {
-        asymptotic_flatness_z(pos)
-    }
-}
-
-pub struct SecondDerivativeOddFree;
-
-impl Convolution<2> for SecondDerivativeOddFree {
-    type Kernel = FDSecondDerivative<4>;
-
-    type NegativeBoundary = AntiSymmetricBoundary<2>;
-    type PositiveBoundary = FreeBoundary;
-
-    fn negative(self: &Self, _: [f64; 2]) -> Self::NegativeBoundary {
-        AntiSymmetricBoundary::<2>
-    }
-
-    fn positive(self: &Self, _: [f64; 2]) -> Self::PositiveBoundary {
-        FreeBoundary
-    }
-}
-
-pub struct SecondDerivativeEvenFree;
-
-impl Convolution<2> for SecondDerivativeEvenFree {
-    type Kernel = FDSecondDerivative<4>;
-
-    type NegativeBoundary = SymmetricBoundary<2>;
-    type PositiveBoundary = FreeBoundary;
-
-    fn negative(self: &Self, _: [f64; 2]) -> Self::NegativeBoundary {
-        SymmetricBoundary::<2>
-    }
-
-    fn positive(self: &Self, _: [f64; 2]) -> Self::PositiveBoundary {
-        FreeBoundary
-    }
-}
-
-pub struct DerivativeOddFree;
-
-impl Convolution<2> for DerivativeOddFree {
-    type Kernel = FDDerivative<4>;
-
-    type NegativeBoundary = AntiSymmetricBoundary<2>;
-    type PositiveBoundary = FreeBoundary;
-
-    fn negative(self: &Self, _: [f64; 2]) -> Self::NegativeBoundary {
-        AntiSymmetricBoundary::<2>
-    }
-
-    fn positive(self: &Self, _: [f64; 2]) -> Self::PositiveBoundary {
-        FreeBoundary
-    }
-}
-
-pub struct DerivativeEvenFree;
-
-impl Convolution<2> for DerivativeEvenFree {
-    type Kernel = FDDerivative<4>;
-
-    type NegativeBoundary = SymmetricBoundary<2>;
-    type PositiveBoundary = FreeBoundary;
-
-    fn negative(self: &Self, _: [f64; 2]) -> Self::NegativeBoundary {
-        SymmetricBoundary::<2>
-    }
-
-    fn positive(self: &Self, _: [f64; 2]) -> Self::PositiveBoundary {
-        FreeBoundary
-    }
-}
-
-const LAPSE_DERIVATIVE_RHO: DerivativeRhoEven = DerivativeRhoEven {};
-const LAPSE_SECOND_DERIVATIVE_RHO: SecondDerivativeRhoEven = SecondDerivativeRhoEven {};
-const LAPSE_DERIVATIVE_Z: DerivativeZEven = DerivativeZEven {};
-const LAPSE_SECOND_DERIVATIVE_Z: SecondDerivativeZEven = SecondDerivativeZEven {};
-
-const SHIFTRHO_DERIVATIVE_RHO: DerivativeRhoOdd = DerivativeRhoOdd {};
-const SHIFTRHO_SECOND_DERIVATIVE_RHO: SecondDerivativeRhoOdd = SecondDerivativeRhoOdd {};
-const SHIFTRHO_DERIVATIVE_Z: DerivativeZOdd = DerivativeZOdd {};
-const SHIFTRHO_SECOND_DERIVATIVE_Z: SecondDerivativeZOdd = SecondDerivativeZOdd {};
-
-const SHIFTZ_DERIVATIVE_RHO: DerivativeRhoEven = DerivativeRhoEven {};
-const SHIFTZ_SECOND_DERIVATIVE_RHO: SecondDerivativeRhoEven = SecondDerivativeRhoEven {};
-const SHIFTZ_DERIVATIVE_Z: DerivativeZEven = DerivativeZEven {};
-const SHIFTZ_SECOND_DERIVATIVE_Z: SecondDerivativeZEven = SecondDerivativeZEven {};
-
-const PSI_INITIAL_DERIVATIVE_RHO: DerivativeRhoEven = DerivativeRhoEven {};
-const PSI_INITIAL_SECOND_DERIVATIVE_RHO: SecondDerivativeRhoEven = SecondDerivativeRhoEven {};
-const PSI_INITIAL_DERIVATIVE_Z: DerivativeZEven = DerivativeZEven {};
-const PSI_INITIAL_SECOND_DERIVATIVE_Z: SecondDerivativeZEven = SecondDerivativeZEven {};
-
-const PSI_SECOND_DERIVATIVE: SecondDerivativeEvenFree = SecondDerivativeEvenFree {};
-const PSI_DERIVATIVE: DerivativeEvenFree = DerivativeEvenFree {};
-
-const SEED_SECOND_DERIVATIVE: SecondDerivativeOddFree = SecondDerivativeOddFree {};
-const SEED_DERIVATIVE: DerivativeOddFree = DerivativeOddFree {};
-
-const W_SECOND_DERIVATIVE: SecondDerivativeOddFree = SecondDerivativeOddFree {};
-const W_DERIVATIVE: DerivativeOddFree = DerivativeOddFree {};
-
-const U_SECOND_DERIVATIVE: SecondDerivativeEvenFree = SecondDerivativeEvenFree {};
-const U_DERIVATIVE: DerivativeEvenFree = DerivativeEvenFree {};
-
-const X_SECOND_DERIVATIVE: SecondDerivativeOddFree = SecondDerivativeOddFree {};
-const X_DERIVATIVE: DerivativeOddFree = DerivativeOddFree {};
+type AsymptoticOdd = Mixed<2, Simple<AntiSymmetricBoundary<4>>, AsymptoticFlatness<4>>;
+type AsymptoticEven = Mixed<2, Simple<SymmetricBoundary<4>>, AsymptoticFlatness<4>>;
+type FreeOdd = Mixed<2, Simple<AntiSymmetricBoundary<4>>, Simple<FreeBoundary>>;
+type FreeEven = Mixed<2, Simple<SymmetricBoundary<4>>, Simple<FreeBoundary>>;
+
+const ASYMPTOTIC_ODD_RHO: AsymptoticOdd = Mixed::new(
+    Simple::new(AntiSymmetricBoundary),
+    AsymptoticFlatness::new(0),
+);
+
+const ASYMPTOTIC_EVEN_RHO: AsymptoticEven =
+    Mixed::new(Simple::new(SymmetricBoundary), AsymptoticFlatness::new(0));
+
+const ASYMPTOTIC_ODD_Z: AsymptoticOdd = Mixed::new(
+    Simple::new(AntiSymmetricBoundary),
+    AsymptoticFlatness::new(1),
+);
+
+const ASYMPTOTIC_EVEN_Z: AsymptoticEven =
+    Mixed::new(Simple::new(SymmetricBoundary), AsymptoticFlatness::new(1));
+
+const FREE_ODD: FreeOdd = Mixed::new(
+    Simple::new(AntiSymmetricBoundary),
+    Simple::new(FreeBoundary),
+);
+
+const FREE_EVEN: FreeEven = Mixed::new(Simple::new(SymmetricBoundary), Simple::new(FreeBoundary));
+
+// ******************************
+// Boundary Aliases
+
+// Initial
+const PSI_INITIAL_RHO: AsymptoticEven = ASYMPTOTIC_EVEN_RHO;
+// Gauge
+const LAPSE_RHO: AsymptoticEven = ASYMPTOTIC_EVEN_RHO;
+const SHIFTR_RHO: AsymptoticOdd = ASYMPTOTIC_ODD_RHO;
+const SHIFTZ_RHO: AsymptoticEven = ASYMPTOTIC_EVEN_RHO;
+// Dynamic
+const PSI_RHO: FreeEven = FREE_EVEN;
+const SEED_RHO: FreeOdd = FREE_ODD;
+const W_RHO: FreeOdd = FREE_ODD;
+const U_RHO: FreeEven = FREE_EVEN;
+const X_RHO: FreeOdd = FREE_ODD;
 
 fn is_approximately_equal(a: f64, b: f64) -> bool {
     (a - b).abs() < 10e-10

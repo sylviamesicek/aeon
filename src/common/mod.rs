@@ -2,10 +2,11 @@ mod block;
 mod boundary;
 mod kernel;
 mod space;
-mod stencils;
 
-pub use block::*;
-pub use boundary::*;
-pub use kernel::*;
-pub use space::*;
-pub use stencils::*;
+pub use block::{Block, BlockAxis, Operator};
+pub use boundary::{
+    AntiSymmetricBoundary, AsymptoticFlatness, Boundary, BoundarySet, FreeBoundary, Mixed,
+    RobinBoundary, Simple, SymmetricBoundary,
+};
+pub use kernel::{FDDerivative, FDSecondDerivative, Kernel};
+pub use space::{NodeSpace, NodeSpaceAxis};
