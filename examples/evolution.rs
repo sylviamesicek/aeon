@@ -59,6 +59,11 @@ const U_Z: FreeEven = FREE_EVEN;
 const X_RHO: FreeOdd = FREE_ODD;
 const X_Z: FreeOdd = FREE_ODD;
 
+// **********************************
+// Settings
+
+const RADIUS: f64 = 10.0;
+
 fn is_approximately_equal(a: f64, b: f64) -> bool {
     (a - b).abs() < 10e-10
 }
@@ -492,6 +497,134 @@ impl Operator<2> for ShiftZOp {
 
         for (i, _) in block.iter().enumerate() {
             dest[i] = shiftz_rr[i] + shiftz_zz[i];
+        }
+    }
+}
+
+pub struct Hamiltonian<'a> {
+    psi: &'a [f64],
+    seed: &'a [f64],
+    u: &'a [f64],
+    x: &'a [f64],
+    w: &'a [f64],
+}
+
+impl<'a> Projection<2> for Hamiltonian<'a> {
+    fn evaluate(self: &Self, arena: &Arena, block: &Block<2>, dest: &mut [f64]) {
+        let psi_rr = arena.alloc::<f64>(block.len());
+        let psi_zz = arena.alloc::<f64>(block.len());
+        let psi_r = arena.alloc::<f64>(block.len());
+
+        let psi = block.auxillary(self.psi);
+
+        block.axis::<4>(0).second_derivative(&PSI_RHO, psi, psi_rr);
+        block.axis::<4>(1).second_derivative(&PSI_Z, psi, psi_zz);
+        block.axis::<4>(0).derivative(&PSI_RHO, psi, psi_r);
+
+        let s_rr = arena.alloc::<f64>(block.len());
+        let s_zz = arena.alloc::<f64>(block.len());
+        let s_r = arena.alloc::<f64>(block.len());
+
+        let seed = block.auxillary(self.seed);
+
+        block.axis::<4>(0).second_derivative(&SEED_RHO, seed, s_rr);
+        block.axis::<4>(1).second_derivative(&SEED_Z, seed, s_zz);
+        block.axis::<4>(0).derivative(&SEED_RHO, seed, s_r);
+
+        let w = block.auxillary(self.w);
+        let u = block.auxillary(self.u);
+        let x = block.auxillary(self.x);
+
+        for (i, node) in block.iter().enumerate() {
+            let position = block.position(node);
+            let rho = position[0];
+
+            let psi = psi[i] + 1.0;
+
+            let mut term1 = psi_rr[i] + psi_zz[i];
+
+            if is_approximately_equal(rho, 0.0) {
+                term1 += psi_rr[i];
+            } else {
+                term1 += psi_r[i];
+            }
+
+            let term2 = psi / 4.0 * (rho * s_rr[i] + 2.0 * s_r[i] + rho * s_zz[i]);
+
+            let scale = psi * psi * psi * psi * psi * (2.0 * rho * seed[i]).exp() / 4.0;
+
+            let term3 = 1.0 / 3.0 * (rho * rho * w[i] + rho * u[i] * w[i] + u[i] * u[i]);
+            let term4 = x[i] * x[i];
+
+            dest[i] = term1 + term2 + scale * (term3 + term4);
+        }
+    }
+}
+
+pub struct PsiEvolution<'a> {
+    lapse: &'a [f64],
+    shiftr: &'a [f64],
+    shiftz: &'a [f64],
+    psi: &'a [f64],
+    u: &'a [f64],
+    w: &'a [f64],
+}
+
+impl<'a> Projection<2> for PsiEvolution<'a> {
+    fn evaluate(self: &Self, arena: &Arena, block: &Block<2>, dest: &mut [f64]) {
+        let lapse = block.auxillary(self.lapse);
+        let shiftr = block.auxillary(self.shiftr);
+        let shiftz = block.auxillary(self.shiftz);
+
+        let shiftr_r = arena.alloc::<f64>(block.len());
+        block.axis::<4>(0).derivative(&SHIFTR_RHO, shiftr, shiftr_r);
+
+        let psi_r = arena.alloc::<f64>(block.len());
+        let psi_z = arena.alloc::<f64>(block.len());
+
+        let psi = block.auxillary(self.psi);
+
+        block.axis::<4>(0).derivative(&PSI_RHO, psi, psi_r);
+        block.axis::<4>(1).derivative(&PSI_Z, psi, psi_z);
+
+        let u = block.auxillary(self.u);
+        let w = block.auxillary(self.w);
+
+        for (i, node) in block.iter().enumerate() {
+            let position = block.position(node);
+            let rho = position[0];
+            let z = position[1];
+
+            if is_approximately_equal(rho, RADIUS) {
+                let r = (rho * rho + z * z).sqrt();
+
+                let term1 = -r / rho * psi_r[i];
+                let term2 = -psi[i] / r;
+
+                dest[i] = term1 + term2;
+
+                continue;
+            } else if is_approximately_equal(z, RADIUS) {
+                let r = (rho * rho + z * z).sqrt();
+
+                let term1 = -r / z * psi_z[i];
+                let term2 = -psi[i] / r;
+
+                dest[i] = term1 + term2;
+
+                continue;
+            }
+
+            let psi = psi[i] + 1.0;
+
+            let term1 = shiftr[i] * psi_r[i] + shiftz[i] * psi_z[i];
+            let term2 = psi * lapse[i] / 6.0 * (u[i] + 2.0 * rho * w[i]);
+
+            if is_approximately_equal(rho, 0.0) {
+                dest[i] = term1 + term2 + psi / 2.0 * shiftr_r[i];
+            } else {
+                dest[i] = term1 + term2 + psi * shiftr[i] / (2.0 * rho);
+            }
         }
     }
 }
