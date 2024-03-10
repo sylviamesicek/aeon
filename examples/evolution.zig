@@ -589,7 +589,7 @@ pub const BrillEvolution = struct {
         pub fn eval(self: PsiEvolution, engine: Engine) f64 {
             const pos = engine.position();
             const rho = pos[0];
-            // const z = pos[1];
+            const z = pos[1];
 
             const lapse = engine.value(self.lapse) + 1.0;
             const shiftr = engine.value(self.shiftr);
@@ -603,19 +603,19 @@ pub const BrillEvolution = struct {
 
             // Sommerfeld term
             // ETK
-            // if (isCloseTo(rho, radius)) {
-            //     const r = @sqrt(rho * rho + z * z);
-            //     const term1 = -r / rho * pgrad[0];
-            //     const term2 = -psi / r;
+            if (isCloseTo(rho, radius)) {
+                const r = @sqrt(rho * rho + z * z);
+                const term1 = -r / rho * pgrad[0];
+                const term2 = -(psi - 1.0) / r;
 
-            //     return term1 + term2;
-            // } else if (isCloseTo(z, radius / 2.0) or isCloseTo(z, -radius / 2.0)) {
-            //     const r = @sqrt(rho * rho + z * z);
-            //     const term1 = -r / z * pgrad[1];
-            //     const term2 = -psi / r;
+                return term1 + term2;
+            } else if (isCloseTo(z, radius / 2.0) or isCloseTo(z, -radius / 2.0)) {
+                const r = @sqrt(rho * rho + z * z);
+                const term1 = -r / z * pgrad[1];
+                const term2 = -(psi - 1.0) / r;
 
-            //     return term1 + term2;
-            // }
+                return term1 + term2;
+            }
             // Rinne
 
             // if (isCloseTo(rho, radius) or isCloseTo(z, radius/2.0) or isCloseTo(z, -radius/2.0)) {
@@ -647,7 +647,7 @@ pub const BrillEvolution = struct {
         pub fn eval(self: SeedEvolution, engine: Engine) f64 {
             const pos = engine.position();
             const rho = pos[0];
-            // const z = pos[1];
+            const z = pos[1];
             const rho2 = rho * rho;
 
             if (isCloseTo(rho, 0.0)) {
@@ -657,19 +657,19 @@ pub const BrillEvolution = struct {
             const seed = engine.value(self.seed);
             const sgrad = engine.gradient(self.seed);
 
-            // if (isCloseTo(rho, radius)) {
-            //     const r = @sqrt(rho * rho + z * z);
-            //     const term1 = -r / rho * sgrad[0];
-            //     const term2 = -seed / r;
+            if (isCloseTo(rho, radius)) {
+                const r = @sqrt(rho * rho + z * z);
+                const term1 = -r / rho * sgrad[0];
+                const term2 = -seed / r;
 
-            //     return term1 + term2;
-            // } else if (isCloseTo(z, radius / 2.0) or isCloseTo(z, -radius / 2.0)) {
-            //     const r = @sqrt(rho * rho + z * z);
-            //     const term1 = -r / z * sgrad[1];
-            //     const term2 = -seed / r;
+                return term1 + term2;
+            } else if (isCloseTo(z, radius / 2.0) or isCloseTo(z, -radius / 2.0)) {
+                const r = @sqrt(rho * rho + z * z);
+                const term1 = -r / z * sgrad[1];
+                const term2 = -seed / r;
 
-            //     return term1 + term2;
-            // }
+                return term1 + term2;
+            }
 
             const lapse = engine.value(self.lapse) + 1.0;
             const shiftr = engine.value(self.shiftr);
@@ -701,7 +701,7 @@ pub const BrillEvolution = struct {
         pub fn eval(self: WEvolution, engine: Engine) f64 {
             const pos = engine.position();
             const rho = pos[0];
-            // const z = pos[1];
+            const z = pos[1];
             const rho2 = rho * rho;
 
             if (isCloseTo(rho, 0.0)) {
@@ -729,19 +729,19 @@ pub const BrillEvolution = struct {
             const w = engine.value(self.w);
             const wgrad = engine.gradient(self.w);
 
-            // if (isCloseTo(rho, radius)) {
-            //     const r = @sqrt(rho * rho + z * z);
-            //     const term1 = -r / rho * wgrad[0];
-            //     const term2 = -w / r;
+            if (isCloseTo(rho, radius)) {
+                const r = @sqrt(rho * rho + z * z);
+                const term1 = -r / rho * wgrad[0];
+                const term2 = -w / r;
 
-            //     return term1 + term2;
-            // } else if (isCloseTo(z, radius / 2.0) or isCloseTo(z, -radius / 2.0)) {
-            //     const r = @sqrt(rho * rho + z * z);
-            //     const term1 = -r / z * wgrad[1];
-            //     const term2 = -w / r;
+                return term1 + term2;
+            } else if (isCloseTo(z, radius / 2.0) or isCloseTo(z, -radius / 2.0)) {
+                const r = @sqrt(rho * rho + z * z);
+                const term1 = -r / z * wgrad[1];
+                const term2 = -w / r;
 
-            //     return term1 + term2;
-            // }
+                return term1 + term2;
+            }
 
             const term1 = shiftr * wgrad[0] + shiftz * wgrad[1] + shiftr * w / rho;
             const term2 = x / rho * (shiftz_grad[0] - shiftr_grad[1]);
@@ -773,7 +773,7 @@ pub const BrillEvolution = struct {
         pub fn eval(self: UEvolution, engine: Engine) f64 {
             const pos = engine.position();
             const rho = pos[0];
-            // const z = pos[1];
+            const z = pos[1];
 
             const lapse = engine.value(self.lapse) + 1.0;
             const lgrad = engine.gradient(self.lapse);
@@ -792,22 +792,22 @@ pub const BrillEvolution = struct {
             const sgrad = engine.gradient(self.seed);
 
             const x = engine.value(self.x);
-            // const u = engine.value(self.u);
+            const u = engine.value(self.u);
             const ugrad = engine.gradient(self.u);
 
-            // if (isCloseTo(rho, radius)) {
-            //     const r = @sqrt(rho * rho + z * z);
-            //     const term1 = -r / rho * ugrad[0];
-            //     const term2 = -u / r;
+            if (isCloseTo(rho, radius)) {
+                const r = @sqrt(rho * rho + z * z);
+                const term1 = -r / rho * ugrad[0];
+                const term2 = -u / r;
 
-            //     return term1 + term2;
-            // } else if (isCloseTo(z, radius / 2.0) or isCloseTo(z, -radius / 2.0)) {
-            //     const r = @sqrt(rho * rho + z * z);
-            //     const term1 = -r / z * ugrad[1];
-            //     const term2 = -u / r;
+                return term1 + term2;
+            } else if (isCloseTo(z, radius / 2.0) or isCloseTo(z, -radius / 2.0)) {
+                const r = @sqrt(rho * rho + z * z);
+                const term1 = -r / z * ugrad[1];
+                const term2 = -u / r;
 
-            //     return term1 + term2;
-            // }
+                return term1 + term2;
+            }
 
             const term1 = shiftr * ugrad[0] + shiftz * ugrad[1];
             const term2 = 2 * x * (shiftr_grad[1] - shiftz_grad[0]);
@@ -846,7 +846,7 @@ pub const BrillEvolution = struct {
         pub fn eval(self: XEvolution, engine: Engine) f64 {
             const pos = engine.position();
             const rho = pos[0];
-            // const z = pos[1];
+            const z = pos[1];
 
             if (isCloseTo(rho, 0.0)) {
                 return 0.0;
@@ -869,22 +869,22 @@ pub const BrillEvolution = struct {
             const sgrad = engine.gradient(self.seed);
 
             const u = engine.value(self.u);
-            // const x = engine.value(self.x);
+            const x = engine.value(self.x);
             const xgrad = engine.gradient(self.x);
 
-            // if (isCloseTo(rho, radius)) {
-            //     const r = @sqrt(rho * rho + z * z);
-            //     const term1 = -r / rho * xgrad[0];
-            //     const term2 = -x / r;
+            if (isCloseTo(rho, radius)) {
+                const r = @sqrt(rho * rho + z * z);
+                const term1 = -r / rho * xgrad[0];
+                const term2 = -x / r;
 
-            //     return term1 + term2;
-            // } else if (isCloseTo(z, radius / 2.0) or isCloseTo(z, -radius / 2.0)) {
-            //     const r = @sqrt(rho * rho + z * z);
-            //     const term1 = -r / z * xgrad[1];
-            //     const term2 = -x / r;
+                return term1 + term2;
+            } else if (isCloseTo(z, radius / 2.0) or isCloseTo(z, -radius / 2.0)) {
+                const r = @sqrt(rho * rho + z * z);
+                const term1 = -r / z * xgrad[1];
+                const term2 = -x / r;
 
-            //     return term1 + term2;
-            // }
+                return term1 + term2;
+            }
 
             const term1 = shiftr * xgrad[0] + shiftz * xgrad[1];
             const term2 = 1.0 / 2.0 * u * (shiftz_grad[0] - shiftr_grad[1]);
