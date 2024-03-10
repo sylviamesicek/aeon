@@ -27,6 +27,10 @@ impl<const N: usize> NodeSpace<N> {
         result
     }
 
+    pub fn cell_size(self: &Self) -> [usize; N] {
+        self.size
+    }
+
     /// Returns the number of vertices along each axis.
     pub fn vertex_size(self: &Self) -> [usize; N] {
         let mut size = self.size;
@@ -41,6 +45,10 @@ impl<const N: usize> NodeSpace<N> {
     /// Returns an index space over the vertices in this node space.
     pub fn vertex_space(self: &Self) -> IndexSpace<N> {
         IndexSpace::new(self.vertex_size())
+    }
+
+    pub fn cell_space(self: &Self) -> IndexSpace<N> {
+        IndexSpace::new(self.cell_size())
     }
 
     /// Computes the position of the given node.
@@ -163,8 +171,8 @@ impl<'a, const N: usize> NodeSpaceAxis<'a, N> {
         let boundary_support: usize = K::BoundaryStencil::LEN;
         let interior_support = positive + negative + 1;
 
-        let negative_extent = <B::NegativeBoundary as Boundary>::Stencil::LEN;
-        let positive_extent = <B::PositiveBoundary as Boundary>::Stencil::LEN;
+        let negative_extent = <B::NegativeBoundary as Boundary>::EXTENT;
+        let positive_extent = <B::PositiveBoundary as Boundary>::EXTENT;
 
         // Source lengths and dest lengths must match node space.
         assert!(src.len() == self.space.len() && dest.len() == self.space.len());
@@ -191,14 +199,14 @@ impl<'a, const N: usize> NodeSpaceAxis<'a, N> {
 
             let negative_boundary = set.negative(negative_position);
 
-            for left in 0..(negative - negative_extent) {
+            for left in 0..negative.saturating_sub(negative_extent) {
                 let mut result = 0.0;
 
                 let stencil = K::negative(left);
 
                 for i in 0..negative_extent {
                     let w = stencil[i];
-                    let ghost = self.negative_ghost_value(node, src, &negative_boundary, i);
+                    let ghost = self.negative_ghost_value(node, src, &negative_boundary, i + 1);
 
                     result += w * ghost;
                 }
@@ -214,14 +222,14 @@ impl<'a, const N: usize> NodeSpaceAxis<'a, N> {
                 self.space.set_value(node, scale * result, dest);
             }
 
-            for left in (negative - negative_extent)..negative {
+            for left in negative.saturating_sub(negative_extent)..negative {
                 let mut result = 0.0;
 
                 let stencil = K::interior();
 
                 for i in 0..negative_extent {
                     let w = stencil[i];
-                    let ghost = self.negative_ghost_value(node, src, &negative_boundary, i);
+                    let ghost = self.negative_ghost_value(node, src, &negative_boundary, i + 1);
 
                     result += w * ghost;
                 }
@@ -242,14 +250,14 @@ impl<'a, const N: usize> NodeSpaceAxis<'a, N> {
 
             let positive_boundary = set.positive(positive_position);
 
-            for right in 0..(positive - positive_extent) {
+            for right in 0..positive.saturating_sub(positive_extent) {
                 let mut result = 0.0;
 
                 let stencil = K::positive(right);
 
                 for i in 0..positive_extent {
                     let w = stencil[i];
-                    let ghost = self.positive_ghost_value(node, src, &positive_boundary, i);
+                    let ghost = self.positive_ghost_value(node, src, &positive_boundary, i + 1);
 
                     result += w * ghost;
                 }
@@ -265,21 +273,22 @@ impl<'a, const N: usize> NodeSpaceAxis<'a, N> {
                 self.space.set_value(node, scale * result, dest);
             }
 
-            for right in (positive - positive_extent)..positive {
+            for right in positive.saturating_sub(positive_extent)..positive {
                 let mut result = 0.0;
 
+                // TODO Fix this nonsense (interior needs to be fliped for positive extents).
                 let stencil = K::interior();
 
                 for i in 0..positive_extent {
-                    let w = stencil[i];
-                    let ghost = self.positive_ghost_value(node, src, &positive_boundary, i);
+                    let w = stencil[interior_support - 1 - i];
+                    let ghost = self.positive_ghost_value(node, src, &positive_boundary, i + 1);
 
                     result += w * ghost;
                 }
 
                 for i in positive_extent..interior_support {
                     node[self.axis] = length - 1 - (i - positive_extent);
-                    let w = stencil[i];
+                    let w = stencil[interior_support - i];
 
                     result += w * self.space.value(node, src);
                 }
@@ -309,8 +318,8 @@ impl<'a, const N: usize> NodeSpaceAxis<'a, N> {
         let positive: usize = K::POSITIVE_SUPPORT;
         let negative: usize = K::NEGATIVE_SUPPORT;
 
-        let negative_extent = <B::NegativeBoundary as Boundary>::Stencil::LEN;
-        let positive_extent = <B::PositiveBoundary as Boundary>::Stencil::LEN;
+        let negative_extent = <B::NegativeBoundary as Boundary>::EXTENT;
+        let positive_extent = <B::PositiveBoundary as Boundary>::EXTENT;
 
         // Source lengths and dest lengths must match node space.
         assert!(dest.len() == self.space.len());
@@ -337,7 +346,7 @@ impl<'a, const N: usize> NodeSpaceAxis<'a, N> {
 
             let negative_boundary = set.negative(negative_position);
 
-            for left in 0..(negative - negative_extent) {
+            for left in 0..negative.saturating_sub(negative_extent) {
                 let mut result = 0.0;
 
                 let stencil = K::negative(left);
@@ -345,7 +354,7 @@ impl<'a, const N: usize> NodeSpaceAxis<'a, N> {
                 for i in 0..negative_extent {
                     let w = stencil[i];
 
-                    let ghost = negative_boundary.stencil(i, spacing)[0];
+                    let ghost = negative_boundary.stencil(i + 1, spacing)[0];
 
                     result += w * ghost;
                 }
@@ -356,14 +365,14 @@ impl<'a, const N: usize> NodeSpaceAxis<'a, N> {
                 self.space.set_value(node, scale * result, dest);
             }
 
-            for left in (negative - negative_extent)..negative {
+            for left in negative.saturating_sub(negative_extent)..negative {
                 let mut result = 0.0;
 
                 let stencil = K::interior();
 
                 for i in 0..negative_extent {
                     let w = stencil[i];
-                    let ghost = negative_boundary.stencil(i, spacing)[0];
+                    let ghost = negative_boundary.stencil(i + 1, spacing)[0];
 
                     result += w * ghost;
                 }
@@ -379,14 +388,14 @@ impl<'a, const N: usize> NodeSpaceAxis<'a, N> {
 
             let positive_boundary = set.positive(positive_position);
 
-            for right in 0..(positive - positive_extent) {
+            for right in 0..positive.saturating_sub(positive_extent) {
                 let mut result = 0.0;
 
                 let stencil = K::positive(right);
 
                 for i in 0..positive_extent {
                     let w = stencil[i];
-                    let ghost = positive_boundary.stencil(i, spacing)[0];
+                    let ghost = positive_boundary.stencil(i + 1, spacing)[0];
 
                     result += w * ghost;
                 }
@@ -397,14 +406,14 @@ impl<'a, const N: usize> NodeSpaceAxis<'a, N> {
                 self.space.set_value(node, scale * result, dest);
             }
 
-            for right in (positive - positive_extent)..positive {
+            for right in positive.saturating_sub(positive_extent)..positive {
                 let mut result = 0.0;
 
                 let stencil = K::interior();
 
                 for i in 0..positive_extent {
                     let w = stencil[i];
-                    let ghost = positive_boundary.stencil(i, spacing)[0];
+                    let ghost = positive_boundary.stencil(i + 1, spacing)[0];
 
                     result += w * ghost;
                 }

@@ -129,6 +129,8 @@ impl<const N: usize> BoundarySet<N> for AsymptoticFlatness<4> {
 }
 
 pub trait Boundary: Clone {
+    const EXTENT: usize;
+
     type Stencil: Array<f64>;
 
     fn stencil(self: &Self, extent: usize, spacing: f64) -> Self::Stencil;
@@ -138,6 +140,7 @@ pub trait Boundary: Clone {
 pub struct FreeBoundary;
 
 impl Boundary for FreeBoundary {
+    const EXTENT: usize = 0;
     type Stencil = [f64; 0];
 
     fn stencil(self: &Self, _: usize, _: f64) -> Self::Stencil {
@@ -151,10 +154,12 @@ pub struct SymmetricBoundary<const ORDER: usize>;
 macro_rules! impl_symmetric_boundary {
     ($n:expr) => {
         impl Boundary for SymmetricBoundary<{ $n * 2 }> {
-            type Stencil = [f64; $n];
+            const EXTENT: usize = $n;
+
+            type Stencil = [f64; { $n + 1 }];
 
             fn stencil(self: &Self, extent: usize, _: f64) -> Self::Stencil {
-                let mut result = [0.0; $n];
+                let mut result = [0.0; { $n + 1 }];
 
                 result[extent] = 1.0;
 
@@ -174,10 +179,12 @@ pub struct AntiSymmetricBoundary<const ORDER: usize>;
 macro_rules! impl_antisymmetric_boundary {
     ($n:expr) => {
         impl Boundary for AntiSymmetricBoundary<{ $n * 2 }> {
-            type Stencil = [f64; $n];
+            const EXTENT: usize = $n;
+
+            type Stencil = [f64; { $n + 1 }];
 
             fn stencil(self: &Self, extent: usize, _: f64) -> Self::Stencil {
-                let mut result = [0.0; $n];
+                let mut result = [0.0; { $n + 1 }];
 
                 result[extent] = -1.0;
 
@@ -197,11 +204,11 @@ pub struct RobinBoundary<const ORDER: usize> {
 }
 
 impl<const ORDER: usize> RobinBoundary<ORDER> {
-    pub fn new(coefficient: f64) -> Self {
+    pub const fn new(coefficient: f64) -> Self {
         Self { coefficient }
     }
 
-    pub fn nuemann() -> Self {
+    pub const fn nuemann() -> Self {
         Self::new(0.0)
     }
 }
@@ -244,6 +251,8 @@ impl<const ORDER: usize> RobinBoundary<ORDER> {
 // robin_boundary_impl!(5, 4, 3, 2, 1, 0);
 
 impl Boundary for RobinBoundary<2> {
+    const EXTENT: usize = 1;
+
     type Stencil = [f64; 2];
 
     fn stencil(self: &Self, _: usize, spacing: f64) -> Self::Stencil {
@@ -270,6 +279,7 @@ impl Boundary for RobinBoundary<2> {
 }
 
 impl Boundary for RobinBoundary<4> {
+    const EXTENT: usize = 1;
     type Stencil = [f64; 4];
 
     fn stencil(self: &Self, _: usize, spacing: f64) -> Self::Stencil {

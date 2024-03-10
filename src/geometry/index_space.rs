@@ -12,6 +12,16 @@ impl<const N: usize> IndexSpace<N> {
         Self { size }
     }
 
+    pub fn len(self: &Self) -> usize {
+        let mut result = 1;
+
+        for i in 0..N {
+            result *= self.size[i]
+        }
+
+        result
+    }
+
     /// Returns the dimensions of the index space along each axis.
     pub fn size(self: Self) -> [usize; N] {
         self.size
@@ -35,7 +45,7 @@ impl<const N: usize> IndexSpace<N> {
     /// Converts a cartesian index into a linear index.
     pub fn linear_from_cartesian(self: Self, cartesian: [usize; N]) -> usize {
         let mut result = 0;
-        let mut stride = 0;
+        let mut stride = 1;
 
         for i in 0..N {
             result += stride * cartesian[i];

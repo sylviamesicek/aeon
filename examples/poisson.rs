@@ -1,0 +1,211 @@
+use aeon::{
+    common::{AntiSymmetricBoundary, Mixed, RobinBoundary, Simple},
+    prelude::*,
+};
+use std::{f64::consts::PI, path::PathBuf};
+use vtkio::model::*;
+
+type BoundarySet = Mixed<2, Simple<AntiSymmetricBoundary<2>>, Simple<RobinBoundary<2>>>;
+
+const BOUNDARY_SET: BoundarySet = Mixed::new(
+    Simple::new(AntiSymmetricBoundary),
+    Simple::new(RobinBoundary::nuemann()),
+);
+
+struct Field {}
+
+impl Projection<2> for Field {
+    fn evaluate(self: &Self, _: &Arena, block: &Block<2>, dest: &mut [f64]) {
+        for (i, node) in block.iter().enumerate() {
+            let position = block.position(node);
+
+            dest[i] = (position[0] * PI / 2.0).sin() * (position[1] * PI / 2.0).sin();
+        }
+    }
+}
+
+struct Laplacian<'a> {
+    field: &'a [f64],
+}
+
+impl<'a> Projection<2> for Laplacian<'a> {
+    fn evaluate(self: &Self, arena: &Arena, block: &Block<2>, dest: &mut [f64]) {
+        let f_rr = arena.alloc(block.len());
+        let f_zz = arena.alloc(block.len());
+
+        let field = block.auxillary(self.field);
+
+        block
+            .axis::<2>(0)
+            .second_derivative(&BOUNDARY_SET, field, f_rr);
+        block
+            .axis::<2>(1)
+            .second_derivative(&BOUNDARY_SET, field, f_zz);
+
+        for (i, _) in block.iter().enumerate() {
+            dest[i] = f_rr[i] + f_zz[i];
+        }
+    }
+}
+
+struct LaplacianDiag {}
+
+impl Projection<2> for LaplacianDiag {
+    fn evaluate(self: &Self, arena: &Arena, block: &Block<2>, dest: &mut [f64]) {
+        let f_rr = arena.alloc(block.len());
+        let f_zz = arena.alloc(block.len());
+
+        block
+            .axis::<4>(0)
+            .second_derivative_diag(&BOUNDARY_SET, f_rr);
+        block
+            .axis::<4>(1)
+            .second_derivative_diag(&BOUNDARY_SET, f_zz);
+
+        for (i, _) in block.iter().enumerate() {
+            dest[i] = f_rr[i] + f_zz[i];
+        }
+    }
+}
+
+fn write_vtk_output(
+    mesh: &UniformMesh<2>,
+    field: &[f64],
+    laplacian: &[f64],
+    laplacian_diag: &[f64],
+) {
+    let title = "poisson".to_string();
+
+    let range = mesh.level_node_range(mesh.level_count() - 1);
+
+    let field = &field[range.clone()];
+    let laplacian = &laplacian[range.clone()];
+    let laplacian_diag = &laplacian_diag[range.clone()];
+
+    let node_space = mesh.level_node_space(mesh.level_count() - 1);
+
+    let cell_space = node_space.cell_space();
+    let vertex_space = node_space.vertex_space();
+
+    let cell_total = node_space.cell_space().len();
+
+    // Generate Cells
+
+    let mut connectivity = Vec::new();
+    let mut offsets = Vec::new();
+
+    for cell in cell_space.iter() {
+        let v1 = vertex_space.linear_from_cartesian(cell);
+        let v2 = vertex_space.linear_from_cartesian([cell[0], cell[1] + 1]);
+        let v3 = vertex_space.linear_from_cartesian([cell[0] + 1, cell[1] + 1]);
+        let v4 = vertex_space.linear_from_cartesian([cell[0] + 1, cell[1]]);
+
+        connectivity.push(v1 as u64);
+        connectivity.push(v2 as u64);
+        connectivity.push(v3 as u64);
+        connectivity.push(v4 as u64);
+
+        offsets.push(connectivity.len() as u64);
+    }
+
+    let cell_verts = VertexNumbers::XML {
+        connectivity,
+        offsets,
+    };
+
+    let cell_types = vec![CellType::Quad; cell_total];
+
+    let cells = Cells {
+        cell_verts,
+        types: cell_types,
+    };
+
+    // Generate points
+
+    let mut vertices = Vec::new();
+
+    for vertex in vertex_space.iter() {
+        let position = node_space.position(vertex);
+        vertices.extend([position[0], position[1], 0.0]);
+    }
+
+    let points = IOBuffer::new(vertices);
+
+    // Attributes
+
+    let field_attr = Attribute::DataArray(DataArrayBase {
+        name: "field".to_string(),
+        elem: ElementType::Scalars {
+            num_comp: 1,
+            lookup_table: None,
+        },
+        data: IOBuffer::new(field.to_vec()),
+    });
+
+    let laplacian_attr = Attribute::DataArray(DataArrayBase {
+        name: "laplacian".to_string(),
+        elem: ElementType::Scalars {
+            num_comp: 1,
+            lookup_table: None,
+        },
+        data: IOBuffer::new(laplacian.to_vec()),
+    });
+
+    let diag_attr = Attribute::DataArray(DataArrayBase {
+        name: "diag".to_string(),
+        elem: ElementType::Scalars {
+            num_comp: 1,
+            lookup_table: None,
+        },
+        data: IOBuffer::new(laplacian_diag.to_vec()),
+    });
+
+    let attributes = Attributes {
+        point: vec![field_attr, laplacian_attr, diag_attr],
+        cell: Vec::new(),
+    };
+
+    let piece = UnstructuredGridPiece {
+        points,
+        cells,
+        data: attributes,
+    };
+
+    let vtk = Vtk {
+        version: (2, 2).into(),
+        title: title.clone(),
+        byte_order: ByteOrder::LittleEndian,
+        data: DataSet::UnstructuredGrid {
+            meta: None,
+            pieces: vec![Piece::Inline(Box::new(piece))],
+        },
+        file_path: None,
+    };
+
+    // Write to output
+    let file_path = PathBuf::from(format!("output/{title}.vtu"));
+    vtk.export(&file_path).unwrap();
+}
+
+pub fn main() {
+    let mut arena = Arena::new();
+
+    let mesh = UniformMesh::new(
+        Rectangle {
+            size: [1.0, 1.0],
+            origin: [0.0, 0.0],
+        },
+        [8, 8],
+        3,
+    );
+
+    let mut field = vec![0.0; mesh.node_count()];
+    let mut laplacian = vec![0.0; mesh.node_count()];
+    let mut laplacian_diag = vec![0.0; mesh.node_count()];
+
+    mesh.project(&mut arena, &Field {}, &mut field);
+    mesh.project(&mut arena, &Laplacian { field: &field }, &mut laplacian);
+    mesh.project(&mut arena, &LaplacianDiag {}, &mut laplacian_diag);
+
+    write_vtk_output(&mesh, &field, &laplacian, &laplacian_diag);
+}

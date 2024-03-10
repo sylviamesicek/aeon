@@ -14,9 +14,15 @@ members = ["crates/*"]
 aeon_macros = { path = "crates/aeon_macros" }
 
 bumpalo = { version = "3" }
+vtkio = { version = "0.6.3" }
 
 [dev-dependencies]
+soa_derive = "0.13"
 
 [[example]]
 name = "evolution"
-path = "examples/evolution.rs"
+path = "examples/evolution/main.rs"
+
+[[example]]
+name = "poisson"
+path = "examples/poisson.rs"

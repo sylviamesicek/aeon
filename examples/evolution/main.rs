@@ -1,63 +1,14 @@
-use aeon::{
-    common::{
-        AntiSymmetricBoundary, AsymptoticFlatness, FreeBoundary, Mixed, Projection, Simple,
-        SymmetricBoundary,
-    },
-    prelude::*,
-};
+use std::path::PathBuf;
 
-type AsymptoticOdd = Mixed<2, Simple<AntiSymmetricBoundary<4>>, AsymptoticFlatness<4>>;
-type AsymptoticEven = Mixed<2, Simple<SymmetricBoundary<4>>, AsymptoticFlatness<4>>;
-type FreeOdd = Mixed<2, Simple<AntiSymmetricBoundary<4>>, Simple<FreeBoundary>>;
-type FreeEven = Mixed<2, Simple<SymmetricBoundary<4>>, Simple<FreeBoundary>>;
+// Global imports
+use aeon::prelude::*;
+use soa_derive::StructOfArray;
+use vtkio::model::*;
 
-const ASYMPTOTIC_ODD_RHO: AsymptoticOdd = Mixed::new(
-    Simple::new(AntiSymmetricBoundary),
-    AsymptoticFlatness::new(0),
-);
+// Submodules
+mod bcs;
 
-const ASYMPTOTIC_EVEN_RHO: AsymptoticEven =
-    Mixed::new(Simple::new(SymmetricBoundary), AsymptoticFlatness::new(0));
-
-const ASYMPTOTIC_ODD_Z: AsymptoticOdd = Mixed::new(
-    Simple::new(AntiSymmetricBoundary),
-    AsymptoticFlatness::new(1),
-);
-
-const ASYMPTOTIC_EVEN_Z: AsymptoticEven =
-    Mixed::new(Simple::new(SymmetricBoundary), AsymptoticFlatness::new(1));
-
-const FREE_ODD: FreeOdd = Mixed::new(
-    Simple::new(AntiSymmetricBoundary),
-    Simple::new(FreeBoundary),
-);
-
-const FREE_EVEN: FreeEven = Mixed::new(Simple::new(SymmetricBoundary), Simple::new(FreeBoundary));
-
-// ******************************
-// Boundary Aliases
-
-// Initial
-const PSI_INITIAL_RHO: AsymptoticEven = ASYMPTOTIC_EVEN_RHO;
-const PSI_INITIAL_Z: AsymptoticEven = ASYMPTOTIC_EVEN_Z;
-// Gauge
-const LAPSE_RHO: AsymptoticEven = ASYMPTOTIC_EVEN_RHO;
-const LAPSE_Z: AsymptoticEven = ASYMPTOTIC_EVEN_Z;
-const SHIFTR_RHO: AsymptoticOdd = ASYMPTOTIC_ODD_RHO;
-const SHIFTR_Z: AsymptoticEven = ASYMPTOTIC_EVEN_Z;
-const SHIFTZ_RHO: AsymptoticEven = ASYMPTOTIC_EVEN_RHO;
-const SHIFTZ_Z: AsymptoticOdd = ASYMPTOTIC_ODD_Z;
-// Dynamic
-const PSI_RHO: FreeEven = FREE_EVEN;
-const PSI_Z: FreeEven = FREE_EVEN;
-const SEED_RHO: FreeOdd = FREE_ODD;
-const SEED_Z: FreeEven = FREE_EVEN;
-const W_RHO: FreeOdd = FREE_ODD;
-const W_Z: FreeEven = FREE_EVEN;
-const U_RHO: FreeEven = FREE_EVEN;
-const U_Z: FreeEven = FREE_EVEN;
-const X_RHO: FreeOdd = FREE_ODD;
-const X_Z: FreeOdd = FREE_ODD;
+pub use bcs::*;
 
 // **********************************
 // Settings
@@ -92,7 +43,7 @@ pub struct InitialPsiOp<'a> {
 }
 
 impl<'a> Operator<2> for InitialPsiOp<'a> {
-    fn apply(self: &mut Self, arena: &Arena, block: &Block<2>, psi: &[f64], dest: &mut [f64]) {
+    fn apply(self: &Self, arena: &Arena, block: &Block<2>, psi: &[f64], dest: &mut [f64]) {
         let psi_rr = arena.alloc::<f64>(block.len());
         let psi_zz = arena.alloc::<f64>(block.len());
         let psi_r = arena.alloc::<f64>(block.len());
@@ -133,7 +84,7 @@ impl<'a> Operator<2> for InitialPsiOp<'a> {
         }
     }
 
-    fn apply_diag(self: &mut Self, arena: &Arena, block: &Block<2>, dest: &mut [f64]) {
+    fn apply_diag(self: &Self, arena: &Arena, block: &Block<2>, dest: &mut [f64]) {
         let psi_rr = arena.alloc::<f64>(block.len());
         let psi_zz = arena.alloc::<f64>(block.len());
         let psi_r = arena.alloc::<f64>(block.len());
@@ -209,7 +160,7 @@ pub struct LapseOp<'a> {
 }
 
 impl<'a> Operator<2> for LapseOp<'a> {
-    fn apply(self: &mut Self, arena: &Arena, block: &Block<2>, lapse: &[f64], dest: &mut [f64]) {
+    fn apply(self: &Self, arena: &Arena, block: &Block<2>, lapse: &[f64], dest: &mut [f64]) {
         let lapse_rr = arena.alloc::<f64>(block.len());
         let lapse_zz = arena.alloc::<f64>(block.len());
         let lapse_r = arena.alloc::<f64>(block.len());
@@ -265,7 +216,7 @@ impl<'a> Operator<2> for LapseOp<'a> {
         }
     }
 
-    fn apply_diag(self: &mut Self, arena: &Arena, block: &Block<2>, dest: &mut [f64]) {
+    fn apply_diag(self: &Self, arena: &Arena, block: &Block<2>, dest: &mut [f64]) {
         let lapse_rr = arena.alloc::<f64>(block.len());
         let lapse_zz = arena.alloc::<f64>(block.len());
         let lapse_r = arena.alloc::<f64>(block.len());
@@ -432,7 +383,7 @@ impl<'a> Projection<2> for ShiftZRhs<'a> {
 pub struct ShiftROp;
 
 impl Operator<2> for ShiftROp {
-    fn apply(self: &mut Self, arena: &Arena, block: &Block<2>, shiftr: &[f64], dest: &mut [f64]) {
+    fn apply(self: &Self, arena: &Arena, block: &Block<2>, shiftr: &[f64], dest: &mut [f64]) {
         let shiftr_rr = arena.alloc::<f64>(block.len());
         let shiftr_zz = arena.alloc::<f64>(block.len());
 
@@ -448,7 +399,7 @@ impl Operator<2> for ShiftROp {
         }
     }
 
-    fn apply_diag(self: &mut Self, arena: &Arena, block: &Block<2>, dest: &mut [f64]) {
+    fn apply_diag(self: &Self, arena: &Arena, block: &Block<2>, dest: &mut [f64]) {
         let shiftr_rr = arena.alloc::<f64>(block.len());
         let shiftr_zz = arena.alloc::<f64>(block.len());
 
@@ -468,7 +419,7 @@ impl Operator<2> for ShiftROp {
 pub struct ShiftZOp;
 
 impl Operator<2> for ShiftZOp {
-    fn apply(self: &mut Self, arena: &Arena, block: &Block<2>, shiftz: &[f64], dest: &mut [f64]) {
+    fn apply(self: &Self, arena: &Arena, block: &Block<2>, shiftz: &[f64], dest: &mut [f64]) {
         let shiftz_rr = arena.alloc::<f64>(block.len());
         let shiftz_zz = arena.alloc::<f64>(block.len());
 
@@ -484,7 +435,7 @@ impl Operator<2> for ShiftZOp {
         }
     }
 
-    fn apply_diag(self: &mut Self, arena: &Arena, block: &Block<2>, dest: &mut [f64]) {
+    fn apply_diag(self: &Self, arena: &Arena, block: &Block<2>, dest: &mut [f64]) {
         let shiftz_rr = arena.alloc::<f64>(block.len());
         let shiftz_zz = arena.alloc::<f64>(block.len());
 
@@ -1076,7 +1027,387 @@ impl<'a> Projection<2> for XEvolution<'a> {
     }
 }
 
+#[derive(Default, StructOfArray)]
+pub struct Gauge {
+    lapse: f64,
+    shiftr: f64,
+    shiftz: f64,
+}
+
+#[derive(Default, StructOfArray)]
+pub struct Dynamic {
+    psi: f64,
+    seed: f64,
+    u: f64,
+    w: f64,
+    x: f64,
+}
+
+fn gauge_new(node_count: usize) -> GaugeVec {
+    let mut gauge = GaugeVec::new();
+
+    gauge.reserve(node_count);
+
+    for _ in 0..node_count {
+        gauge.push(Default::default());
+    }
+
+    gauge
+}
+
+fn dynamic_new(node_count: usize) -> DynamicVec {
+    let mut dynamic = DynamicVec::new();
+
+    dynamic.reserve(node_count);
+
+    for _ in 0..node_count {
+        dynamic.push(Default::default());
+    }
+
+    dynamic
+}
+
+pub struct InitialSolver<'m> {
+    mesh: &'m UniformMesh<2>,
+    multigrid: UniformMultigrid<'m, 2, BiCGStabSolver>,
+    rhs: Vec<f64>,
+}
+
+impl<'m> InitialSolver<'m> {
+    pub fn new(mesh: &'m UniformMesh<2>) -> Self {
+        let multigrid: UniformMultigrid<'_, 2, BiCGStabSolver> = UniformMultigrid::new(
+            &mesh,
+            100,
+            10e-12,
+            5,
+            5,
+            &BiCGStabConfig {
+                max_iterations: 1000,
+                tolerance: 10e-12,
+            },
+        );
+
+        Self {
+            mesh,
+            multigrid,
+            rhs: vec![0.0; mesh.node_count()],
+        }
+    }
+
+    pub fn solve(
+        self: &mut Self,
+        arena: &mut Arena,
+        dynamic: DynamicSliceMut,
+        gauge: GaugeSliceMut,
+    ) {
+        let initial_seed = InitialSeed {};
+        self.mesh.project(arena, &initial_seed, dynamic.seed);
+
+        let psi_rhs = InitialPsiRhs { seed: dynamic.seed };
+        self.mesh.project(arena, &psi_rhs, &mut self.rhs);
+
+        println!("Solving Initial psi");
+
+        dynamic.psi.fill(0.0);
+        let psi_op = InitialPsiOp { seed: dynamic.seed };
+        self.multigrid.solve(arena, &psi_op, &self.rhs, dynamic.psi);
+
+        dynamic.u.fill(0.0);
+        dynamic.w.fill(0.0);
+        dynamic.x.fill(0.0);
+
+        gauge.lapse.fill(0.0);
+        gauge.shiftr.fill(0.0);
+        gauge.shiftz.fill(0.0);
+    }
+}
+
+pub struct GaugeSolver<'m> {
+    mesh: &'m UniformMesh<2>,
+    multigrid: UniformMultigrid<'m, 2, BiCGStabSolver>,
+    rhs: Vec<f64>,
+}
+
+impl<'m> GaugeSolver<'m> {
+    pub fn new(mesh: &'m UniformMesh<2>) -> Self {
+        let multigrid: UniformMultigrid<'_, 2, BiCGStabSolver> = UniformMultigrid::new(
+            &mesh,
+            100,
+            10e-12,
+            5,
+            5,
+            &BiCGStabConfig {
+                max_iterations: 1000,
+                tolerance: 10e-12,
+            },
+        );
+
+        Self {
+            mesh,
+            multigrid,
+            rhs: vec![0.0; mesh.node_count()],
+        }
+    }
+
+    pub fn solve(self: &mut Self, arena: &mut Arena, dynamic: DynamicSlice, gauge: GaugeSliceMut) {
+        // **********************
+        // Lapse
+
+        let lapse_rhs = LapseRhs {
+            psi: dynamic.psi,
+            seed: dynamic.seed,
+            u: dynamic.u,
+            w: dynamic.w,
+            x: dynamic.x,
+        };
+        self.mesh.project(arena, &lapse_rhs, &mut self.rhs);
+
+        // Memset 0
+        gauge.lapse.fill(0.0);
+
+        let lapse_op = LapseOp {
+            psi: dynamic.psi,
+            seed: dynamic.seed,
+            u: dynamic.u,
+            w: dynamic.w,
+            x: dynamic.x,
+        };
+        self.multigrid
+            .solve(arena, &lapse_op, &self.rhs, gauge.lapse);
+
+        // **********************
+        // ShiftR
+
+        let shiftr_rhs = ShiftRRhs {
+            lapse: gauge.lapse,
+            u: dynamic.u,
+            x: dynamic.x,
+        };
+        self.mesh.project(arena, &shiftr_rhs, &mut self.rhs);
+
+        gauge.shiftr.fill(0.0);
+
+        self.multigrid
+            .solve(arena, &ShiftROp {}, &self.rhs, gauge.shiftr);
+
+        // **********************
+        // ShiftZ
+
+        let shiftz_rhs = ShiftZRhs {
+            lapse: gauge.lapse,
+            u: dynamic.u,
+            x: dynamic.x,
+        };
+
+        self.mesh.project(arena, &shiftz_rhs, &mut self.rhs);
+
+        gauge.shiftz.fill(0.0);
+
+        self.multigrid
+            .solve(arena, &ShiftZOp {}, &self.rhs, gauge.shiftz);
+    }
+}
+
+pub struct DynamicIntegrator {}
+
+fn write_vtk_output(
+    step: usize,
+    mesh: &UniformMesh<2>,
+    dynamic: DynamicSlice,
+    gauge: GaugeSlice,
+    constraint: &[f64],
+) {
+    let title = format!("evolution{step}");
+
+    let range = mesh.level_node_range(mesh.level_count() - 1);
+
+    let psi = &dynamic.psi[range.clone()];
+    let seed = &dynamic.seed[range.clone()];
+    let u = &dynamic.u[range.clone()];
+    let w = &dynamic.w[range.clone()];
+    let x = &dynamic.x[range.clone()];
+
+    let lapse = &gauge.lapse[range.clone()];
+    let shiftr = &gauge.lapse[range.clone()];
+    let shiftz = &gauge.lapse[range.clone()];
+
+    let constraint = &constraint[range.clone()];
+
+    let node_space = mesh.level_node_space(mesh.level_count() - 1);
+
+    let cell_space = node_space.cell_space();
+    let vertex_space = node_space.vertex_space();
+
+    let cell_total = node_space.cell_space().len();
+
+    // Generate Cells
+
+    let mut connectivity = Vec::new();
+    let mut offsets = Vec::new();
+
+    for cell in cell_space.iter() {
+        let v1 = vertex_space.linear_from_cartesian(cell);
+        let v2 = vertex_space.linear_from_cartesian([cell[0], cell[1] + 1]);
+        let v3 = vertex_space.linear_from_cartesian([cell[0] + 1, cell[1] + 1]);
+        let v4 = vertex_space.linear_from_cartesian([cell[0] + 1, cell[1]]);
+
+        connectivity.push(v1 as u64);
+        connectivity.push(v2 as u64);
+        connectivity.push(v3 as u64);
+        connectivity.push(v4 as u64);
+
+        offsets.push(connectivity.len() as u64);
+    }
+
+    println!("{:?}", connectivity);
+
+    let cell_verts = VertexNumbers::XML {
+        connectivity,
+        offsets,
+    };
+
+    let cell_types = vec![CellType::Quad; cell_total];
+
+    let cells = Cells {
+        cell_verts,
+        types: cell_types,
+    };
+
+    // Generate points
+
+    let mut vertices = Vec::new();
+
+    for vertex in vertex_space.iter() {
+        let position = node_space.position(vertex);
+        vertices.extend([position[0], position[1], 0.0]);
+    }
+
+    let points = IOBuffer::new(vertices);
+
+    // Attributes
+
+    let psi_attr = Attribute::DataArray(DataArrayBase {
+        name: "psi".to_string(),
+        elem: ElementType::Scalars {
+            num_comp: 1,
+            lookup_table: None,
+        },
+        data: IOBuffer::new(psi.to_vec()),
+    });
+
+    let seed_attr = Attribute::DataArray(DataArrayBase {
+        name: "seed".to_string(),
+        elem: ElementType::Scalars {
+            num_comp: 1,
+            lookup_table: None,
+        },
+        data: IOBuffer::new(seed.to_vec()),
+    });
+
+    let u_attr = Attribute::DataArray(DataArrayBase {
+        name: "u".to_string(),
+        elem: ElementType::Scalars {
+            num_comp: 1,
+            lookup_table: None,
+        },
+        data: IOBuffer::new(u.to_vec()),
+    });
+
+    let w_attr = Attribute::DataArray(DataArrayBase {
+        name: "w".to_string(),
+        elem: ElementType::Scalars {
+            num_comp: 1,
+            lookup_table: None,
+        },
+        data: IOBuffer::new(w.to_vec()),
+    });
+
+    let x_attr = Attribute::DataArray(DataArrayBase {
+        name: "x".to_string(),
+        elem: ElementType::Scalars {
+            num_comp: 1,
+            lookup_table: None,
+        },
+        data: IOBuffer::new(x.to_vec()),
+    });
+
+    let lapse_attr = Attribute::DataArray(DataArrayBase {
+        name: "lapse".to_string(),
+        elem: ElementType::Scalars {
+            num_comp: 1,
+            lookup_table: None,
+        },
+        data: IOBuffer::new(lapse.to_vec()),
+    });
+
+    let shiftr_attr = Attribute::DataArray(DataArrayBase {
+        name: "shiftr".to_string(),
+        elem: ElementType::Scalars {
+            num_comp: 1,
+            lookup_table: None,
+        },
+        data: IOBuffer::new(shiftr.to_vec()),
+    });
+
+    let shiftz_attr = Attribute::DataArray(DataArrayBase {
+        name: "shiftz".to_string(),
+        elem: ElementType::Scalars {
+            num_comp: 1,
+            lookup_table: None,
+        },
+        data: IOBuffer::new(shiftz.to_vec()),
+    });
+
+    let constraint_attr = Attribute::DataArray(DataArrayBase {
+        name: "constraint".to_string(),
+        elem: ElementType::Scalars {
+            num_comp: 1,
+            lookup_table: None,
+        },
+        data: IOBuffer::new(constraint.to_vec()),
+    });
+
+    let attributes = Attributes {
+        point: vec![
+            psi_attr,
+            seed_attr,
+            u_attr,
+            w_attr,
+            x_attr,
+            lapse_attr,
+            shiftr_attr,
+            shiftz_attr,
+            constraint_attr,
+        ],
+        cell: Vec::new(),
+    };
+
+    let piece = UnstructuredGridPiece {
+        points,
+        cells,
+        data: attributes,
+    };
+
+    let vtk = Vtk {
+        version: (2, 2).into(),
+        title: title.clone(),
+        byte_order: ByteOrder::LittleEndian,
+        data: DataSet::UnstructuredGrid {
+            meta: None,
+            pieces: vec![Piece::Inline(Box::new(piece))],
+        },
+        file_path: None,
+    };
+
+    // Write to output
+    let file_path = PathBuf::from(format!("output/{title}.vtu"));
+    vtk.export(&file_path).unwrap();
+}
+
 pub fn main() {
+    // Scratch allocator
+    let mut arena = Arena::new();
+
     let mesh = UniformMesh::new(
         Rectangle {
             size: [1.0, 1.0],
@@ -1086,27 +1417,29 @@ pub fn main() {
         3,
     );
 
-    // Allocate solution
-    let mut solution = vec![0.0; mesh.node_count()];
+    let mut dynamic = dynamic_new(mesh.node_count());
+    let mut gauge = gauge_new(mesh.node_count());
+    let mut constraint = vec![0.0; mesh.node_count()];
 
-    // Fill right hand side
-    let mut rhs = vec![0.0; mesh.node_count()];
+    {
+        let mut initial_solver = InitialSolver::new(&mesh);
+        initial_solver.solve(&mut arena, dynamic.as_mut_slice(), gauge.as_mut_slice());
+    }
 
-    // Run solver
+    {
+        let hamiltonian = Hamiltonian {
+            psi: &dynamic.psi,
+            seed: &dynamic.seed,
+            u: &dynamic.u,
+            x: &dynamic.x,
+            w: &dynamic.w,
+        };
 
-    let mut multigrid: UniformMultigrid<'_, 2, BiCGStabSolver> = UniformMultigrid::new(
-        &mesh,
-        100,
-        10e-12,
-        5,
-        5,
-        &BiCGStabConfig {
-            max_iterations: 1000,
-            tolerance: 10e-12,
-        },
-    );
+        mesh.project(&mut arena, &hamiltonian, &mut constraint);
+    }
 
-    _ = multigrid;
+    // Write output
+    write_vtk_output(0, &mesh, dynamic.as_slice(), gauge.as_slice(), &constraint);
 
     // multigrid.solve(&Laplacian { bump: Bump::new() }, &rhs, &mut solution);
 

@@ -73,15 +73,9 @@ impl<const N: usize> UniformMesh<N> {
     }
 
     pub fn level_node_space(self: &Self, level: usize) -> NodeSpace<N> {
-        let mut size = self.level_size(level);
-
-        for i in 0..N {
-            size[i] += 1;
-        }
-
         NodeSpace {
             bounds: self.bounds.clone(),
-            size,
+            size: self.level_size(level),
         }
     }
 
@@ -117,8 +111,8 @@ impl<const N: usize> UniformMesh<N> {
 
         let space = self.level_node_space(level);
 
-        let src = &split.1[..self.level_node_offset(level + 1)];
-        let dest = &mut split.0[self.level_node_offset(level - 1)..];
+        let src = &split.1[0..self.level_node_offset(level + 1) - self.level_node_offset(level)];
+        let dest = &mut split.0[self.level_node_offset(level - 1)..self.level_node_offset(level)];
 
         // Perform restriction
         space.restrict_inject(src, dest);
@@ -202,7 +196,7 @@ impl<const N: usize> UniformMesh<N> {
         self: &Self,
         arena: &mut Arena,
         b: &[f64],
-        operator: &mut O,
+        operator: &O,
         x: &[f64],
         dest: &mut [f64],
     ) {
@@ -216,7 +210,7 @@ impl<const N: usize> UniformMesh<N> {
         level: usize,
         arena: &mut Arena,
         b: &[f64],
-        operator: &mut O,
+        operator: &O,
         x: &[f64],
         dest: &mut [f64],
     ) {

@@ -26,7 +26,7 @@ pub fn derivative(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
     let stencils = Stencil::vertex(left, right);
     let weights = stencils.derivative_weights(Ratio::from(point));
 
-    let tokens = weights.iter().rev().map(|ratio| {
+    let tokens = weights.iter().map(|ratio| {
         let numerator = *ratio.numer() as f64;
         let denomenator = *ratio.denom() as f64;
 
@@ -54,7 +54,7 @@ pub fn second_derivative(input: proc_macro::TokenStream) -> proc_macro::TokenStr
     let stencils = Stencil::vertex(left, right);
     let weights = stencils.second_derivative_weights(Ratio::from(point));
 
-    let tokens = weights.iter().rev().map(|ratio| {
+    let tokens = weights.iter().map(|ratio| {
         let numerator = *ratio.numer() as f64;
         let denomenator = *ratio.denom() as f64;
 

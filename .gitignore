@@ -15,3 +15,7 @@ Cargo.lock
 
 # VScode settings
 .vscode/
+
+# Output
+output/
+examples/output

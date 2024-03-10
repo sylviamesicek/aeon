@@ -47,7 +47,7 @@ impl<'mesh, const N: usize, Solver: LinearSolver> UniformMultigrid<'mesh, N, Sol
     pub fn solve<O: Operator<N>>(
         self: &mut Self,
         arena: &mut Arena,
-        operator: &mut O,
+        operator: &O,
         b: &[f64],
         x: &mut [f64],
     ) {
@@ -63,7 +63,7 @@ impl<'mesh, const N: usize, Solver: LinearSolver> UniformMultigrid<'mesh, N, Sol
             return;
         }
 
-        for _ in 0..self.max_iterations {
+        for i in 0..self.max_iterations {
             // Reset rhs
             self.rhs.copy_from_slice(b);
 
@@ -76,6 +76,8 @@ impl<'mesh, const N: usize, Solver: LinearSolver> UniformMultigrid<'mesh, N, Sol
 
             let nres = self.mesh.norm(&self.scratch);
 
+            println!("Iteration {i}, Residual {nres}");
+
             if nres <= tol {
                 return;
             }
@@ -87,13 +89,17 @@ impl<'mesh, const N: usize, Solver: LinearSolver> UniformMultigrid<'mesh, N, Sol
     fn cycle<O: Operator<N>>(
         self: &mut Self,
         arena: &mut Arena,
-        operator: &mut O,
+        operator: &O,
         level: usize,
         x: &mut [f64],
     ) {
         if level == 0 {
-            let base_node_count = self.mesh.level_node_offset(1);
+            let base_node_count = self.mesh.base_node_count();
             let block = self.mesh.level_block(level);
+
+            println!("Solving BASE multigrid, node count {base_node_count}");
+            // println!("{:?}", &self.rhs[0..base_node_count]);
+            // println!("{:?}", &x[0..base_node_count]);
 
             let map = BaseLinearMap {
                 dimension: base_node_count,
@@ -132,8 +138,9 @@ impl<'mesh, const N: usize, Solver: LinearSolver> UniformMultigrid<'mesh, N, Sol
             );
             operator.apply_diag(arena, &block, diag);
 
-            for i in fine.clone() {
-                x[i] += 2.0 / 3.0 * 1.0 / diag[i] * (self.rhs[i] - self.scratch[i]);
+            for (local, global) in fine.clone().enumerate() {
+                x[global] +=
+                    2.0 / 3.0 * 1.0 / diag[local] * (self.rhs[global] - self.scratch[global]);
             }
 
             arena.reset();
@@ -187,8 +194,9 @@ impl<'mesh, const N: usize, Solver: LinearSolver> UniformMultigrid<'mesh, N, Sol
             );
             operator.apply_diag(arena, &block, diag);
 
-            for i in fine.clone() {
-                x[i] += 2.0 / 3.0 * 1.0 / diag[i] * (self.rhs[i] - self.scratch[i]);
+            for (local, global) in fine.clone().enumerate() {
+                x[global] +=
+                    2.0 / 3.0 * 1.0 / diag[local] * (self.rhs[global] - self.scratch[global]);
             }
 
             arena.reset();
@@ -198,7 +206,7 @@ impl<'mesh, const N: usize, Solver: LinearSolver> UniformMultigrid<'mesh, N, Sol
 
 struct BaseLinearMap<'a, const N: usize, O: Operator<N>> {
     dimension: usize,
-    operator: &'a mut O,
+    operator: &'a O,
     block: Block<N>,
     arena: &'a mut Arena,
 }
@@ -211,5 +219,9 @@ impl<'a, const N: usize, O: Operator<N>> LinearMap for BaseLinearMap<'a, N, O> {
     fn apply(self: &mut Self, src: &[f64], dest: &mut [f64]) {
         self.operator.apply(&mut self.arena, &self.block, src, dest);
         self.arena.reset();
+    }
+
+    fn callback(self: &Self, iteration: usize, residual: f64, _: &[f64]) {
+        println!("Base Iteration {iteration}, Residual {residual}");
     }
 }

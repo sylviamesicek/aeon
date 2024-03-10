@@ -124,8 +124,8 @@ impl<'a, const N: usize> BlockAxis<'a, N, 4> {
 }
 
 pub trait Operator<const N: usize> {
-    fn apply(self: &mut Self, arena: &Arena, block: &Block<N>, src: &[f64], dest: &mut [f64]);
-    fn apply_diag(self: &mut Self, arena: &Arena, block: &Block<N>, dest: &mut [f64]);
+    fn apply(self: &Self, arena: &Arena, block: &Block<N>, src: &[f64], dest: &mut [f64]);
+    fn apply_diag(self: &Self, arena: &Arena, block: &Block<N>, dest: &mut [f64]);
 }
 
 pub trait Projection<const N: usize> {
