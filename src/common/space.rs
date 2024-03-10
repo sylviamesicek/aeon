@@ -305,12 +305,7 @@ impl<'a, const N: usize> NodeSpaceAxis<'a, N> {
         }
     }
 
-    pub fn evaluate_diag<K: Kernel<N>, B: BoundarySet<N>>(
-        self: &Self,
-        set: &B,
-        src: &[f64],
-        dest: &mut [f64],
-    ) {
+    pub fn evaluate_diag<K: Kernel<N>, B: BoundarySet<N>>(self: &Self, set: &B, dest: &mut [f64]) {
         let positive: usize = K::POSITIVE_SUPPORT;
         let negative: usize = K::NEGATIVE_SUPPORT;
 
@@ -318,7 +313,7 @@ impl<'a, const N: usize> NodeSpaceAxis<'a, N> {
         let positive_extent = <B::PositiveBoundary as Boundary>::Stencil::LEN;
 
         // Source lengths and dest lengths must match node space.
-        assert!(src.len() == self.space.len() && dest.len() == self.space.len());
+        assert!(dest.len() == self.space.len());
 
         // Get spacing along axis for covariant transformation of kernel.
         let spacing = self.space.spacing(self.axis);

@@ -3,7 +3,7 @@ mod boundary;
 mod kernel;
 mod space;
 
-pub use block::{Block, BlockAxis, Operator};
+pub use block::{Block, BlockAxis, Operator, Projection};
 pub use boundary::{
     AntiSymmetricBoundary, AsymptoticFlatness, Boundary, BoundarySet, FreeBoundary, Mixed,
     RobinBoundary, Simple, SymmetricBoundary,

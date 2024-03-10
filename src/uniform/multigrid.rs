@@ -1,3 +1,4 @@
+use crate::arena::Arena;
 use crate::common::{Block, Operator};
 use crate::lac::{LinearMap, LinearSolver};
 use crate::uniform::UniformMesh;
@@ -11,7 +12,6 @@ pub struct UniformMultigrid<'mesh, const N: usize, Solver: LinearSolver> {
     postsmoothing: usize,
 
     scratch: Vec<f64>,
-    diagonal: Vec<f64>,
     rhs: Vec<f64>,
 }
 
@@ -28,7 +28,6 @@ impl<'mesh, const N: usize, Solver: LinearSolver> UniformMultigrid<'mesh, N, Sol
         let node_count = mesh.node_count();
 
         let scratch = vec![0.0; node_count];
-        let diag = vec![0.0; node_count];
         let rhs = vec![0.0; node_count];
 
         Self {
@@ -41,12 +40,17 @@ impl<'mesh, const N: usize, Solver: LinearSolver> UniformMultigrid<'mesh, N, Sol
             postsmoothing,
 
             scratch,
-            diagonal: diag,
             rhs,
         }
     }
 
-    pub fn solve<O: Operator<N>>(self: &mut Self, operator: &mut O, b: &[f64], x: &mut [f64]) {
+    pub fn solve<O: Operator<N>>(
+        self: &mut Self,
+        arena: &mut Arena,
+        operator: &mut O,
+        b: &[f64],
+        x: &mut [f64],
+    ) {
         self.scratch.fill(0.0);
 
         let irhs = self.mesh.norm(b);
@@ -64,11 +68,11 @@ impl<'mesh, const N: usize, Solver: LinearSolver> UniformMultigrid<'mesh, N, Sol
             self.rhs.copy_from_slice(b);
 
             // Cycle
-            self.cycle(operator, self.mesh.level_count() - 1, x);
+            self.cycle(arena, operator, self.mesh.level_count() - 1, x);
 
             // Compute residual
             self.mesh
-                .residual(&self.rhs, operator, &x, &mut self.scratch);
+                .residual(arena, &self.rhs, operator, &x, &mut self.scratch);
 
             let nres = self.mesh.norm(&self.scratch);
 
@@ -80,7 +84,13 @@ impl<'mesh, const N: usize, Solver: LinearSolver> UniformMultigrid<'mesh, N, Sol
         println!("Multigrid Failed to Converge.");
     }
 
-    fn cycle<O: Operator<N>>(self: &mut Self, operator: &mut O, level: usize, x: &mut [f64]) {
+    fn cycle<O: Operator<N>>(
+        self: &mut Self,
+        arena: &mut Arena,
+        operator: &mut O,
+        level: usize,
+        x: &mut [f64],
+    ) {
         if level == 0 {
             let base_node_count = self.mesh.level_node_offset(1);
             let block = self.mesh.level_block(level);
@@ -89,6 +99,7 @@ impl<'mesh, const N: usize, Solver: LinearSolver> UniformMultigrid<'mesh, N, Sol
                 dimension: base_node_count,
                 operator,
                 block,
+                arena,
             };
 
             self.solver
@@ -111,23 +122,28 @@ impl<'mesh, const N: usize, Solver: LinearSolver> UniformMultigrid<'mesh, N, Sol
         // Presmoothing
 
         for _ in 0..self.presmoothing {
-            operator.diritchlet_bcs(&mut x[fine.clone()]);
+            let diag: &mut [f64] = arena.alloc::<f64>(block.len());
 
-            operator.apply(&block, &x[fine.clone()], &mut self.scratch[fine.clone()]);
-            operator.apply_diag(&block, &x[fine.clone()], &mut self.diagonal[fine.clone()]);
+            operator.apply(
+                arena,
+                &block,
+                &x[fine.clone()],
+                &mut self.scratch[fine.clone()],
+            );
+            operator.apply_diag(arena, &block, diag);
 
             for i in fine.clone() {
-                x[i] += 2.0 / 3.0 * 1.0 / self.diagonal[i] * (self.rhs[i] - self.scratch[i]);
+                x[i] += 2.0 / 3.0 * 1.0 / diag[i] * (self.rhs[i] - self.scratch[i]);
             }
-        }
 
-        operator.diritchlet_bcs(&mut x[fine.clone()]);
+            arena.reset();
+        }
 
         // *****************************
         // Right hand side
 
         self.mesh
-            .residual_level(level, &self.rhs, operator, &x, &mut self.scratch);
+            .residual_level(level, arena, &self.rhs, operator, &x, &mut self.scratch);
         self.mesh.restrict_level_full(level, &mut self.scratch);
         self.mesh.restrict_level(level, x);
 
@@ -139,7 +155,7 @@ impl<'mesh, const N: usize, Solver: LinearSolver> UniformMultigrid<'mesh, N, Sol
         // *************************
         // Recurse
 
-        self.cycle(operator, level - 1, x);
+        self.cycle(arena, operator, level - 1, x);
 
         // *************************
         // Error Correction
@@ -161,17 +177,22 @@ impl<'mesh, const N: usize, Solver: LinearSolver> UniformMultigrid<'mesh, N, Sol
         // Postsmooth
 
         for _ in 0..self.postsmoothing {
-            operator.diritchlet_bcs(&mut x[fine.clone()]);
+            let diag: &mut [f64] = arena.alloc::<f64>(block.len());
 
-            operator.apply(&block, &x[fine.clone()], &mut self.scratch[fine.clone()]);
-            operator.apply_diag(&block, &x[fine.clone()], &mut self.diagonal[fine.clone()]);
+            operator.apply(
+                arena,
+                &block,
+                &x[fine.clone()],
+                &mut self.scratch[fine.clone()],
+            );
+            operator.apply_diag(arena, &block, diag);
 
             for i in fine.clone() {
-                x[i] += 2.0 / 3.0 * 1.0 / self.diagonal[i] * (self.rhs[i] - self.scratch[i]);
+                x[i] += 2.0 / 3.0 * 1.0 / diag[i] * (self.rhs[i] - self.scratch[i]);
             }
-        }
 
-        operator.diritchlet_bcs(&mut x[fine.clone()]);
+            arena.reset();
+        }
     }
 }
 
@@ -179,6 +200,7 @@ struct BaseLinearMap<'a, const N: usize, O: Operator<N>> {
     dimension: usize,
     operator: &'a mut O,
     block: Block<N>,
+    arena: &'a mut Arena,
 }
 
 impl<'a, const N: usize, O: Operator<N>> LinearMap for BaseLinearMap<'a, N, O> {
@@ -187,6 +209,7 @@ impl<'a, const N: usize, O: Operator<N>> LinearMap for BaseLinearMap<'a, N, O> {
     }
 
     fn apply(self: &mut Self, src: &[f64], dest: &mut [f64]) {
-        self.operator.apply(&self.block, src, dest);
+        self.operator.apply(&mut self.arena, &self.block, src, dest);
+        self.arena.reset();
     }
 }

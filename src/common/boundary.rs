@@ -17,7 +17,7 @@ pub struct Mixed<const N: usize, NB: BoundarySet<N>, PB: BoundarySet<N>> {
 }
 
 impl<const N: usize, NB: BoundarySet<N>, PB: BoundarySet<N>> Mixed<N, NB, PB> {
-    pub fn new(negative: NB, positive: PB) -> Self {
+    pub const fn new(negative: NB, positive: PB) -> Self {
         Self { negative, positive }
     }
 }
@@ -42,7 +42,7 @@ pub struct Simple<B: Boundary> {
 }
 
 impl<B: Boundary> Simple<B> {
-    pub fn new(boundary: B) -> Self {
+    pub const fn new(boundary: B) -> Self {
         Self { boundary }
     }
 }
@@ -65,7 +65,7 @@ pub struct AsymptoticFlatness<const ORDER: usize> {
 }
 
 impl<const ORDER: usize> AsymptoticFlatness<ORDER> {
-    pub fn new(axis: usize) -> Self {
+    pub const fn new(axis: usize) -> Self {
         Self { axis: axis }
     }
 }

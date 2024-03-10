@@ -1,9 +1,10 @@
+use crate::arena::Arena;
 use crate::common::NodeSpace;
 use crate::geometry::CartesianIterator;
 
 use super::{BoundarySet, FDDerivative, FDSecondDerivative, Kernel};
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct Block<const N: usize> {
     space: NodeSpace<N>,
     offset: usize,
@@ -31,9 +32,9 @@ impl<const N: usize> Block<N> {
         self.space.vertex_space().iter()
     }
 
-    pub fn global_from_local(self: &Self, node: [usize; N]) -> usize {
-        self.offset + self.space.vertex_space().linear_from_cartesian(node)
-    }
+    // pub fn global_from_local(self: &Self, node: [usize; N]) -> usize {
+    //     self.offset + self.space.vertex_space().linear_from_cartesian(node)
+    // }
 
     pub fn auxillary<'a>(self: &Self, src: &'a [f64]) -> &'a [f64] {
         &src[self.offset..self.offset + self.total]
@@ -53,10 +54,9 @@ impl<const N: usize> Block<N> {
         self: &Self,
         axis: usize,
         set: &B,
-        src: &[f64],
         dest: &mut [f64],
     ) {
-        self.space.axis(axis).evaluate_diag::<K, B>(set, src, dest);
+        self.space.axis(axis).evaluate_diag::<K, B>(set, dest);
     }
 
     pub fn axis<'a, const ORDER: usize>(self: &'a Self, axis: usize) -> BlockAxis<'a, N, ORDER> {
@@ -75,9 +75,9 @@ impl<'a, const N: usize> BlockAxis<'a, N, 2> {
             .evaluate::<FDDerivative<2>, B>(self.axis, set, src, dest)
     }
 
-    pub fn derivative_diag<B: BoundarySet<N>>(self: &Self, set: &B, src: &[f64], dest: &mut [f64]) {
+    pub fn derivative_diag<B: BoundarySet<N>>(self: &Self, set: &B, dest: &mut [f64]) {
         self.block
-            .evaluate_diag::<FDDerivative<2>, B>(self.axis, set, src, dest)
+            .evaluate_diag::<FDDerivative<2>, B>(self.axis, set, dest)
     }
 
     pub fn second_derivative<B: BoundarySet<N>>(
@@ -90,14 +90,9 @@ impl<'a, const N: usize> BlockAxis<'a, N, 2> {
             .evaluate::<FDSecondDerivative<2>, B>(self.axis, set, src, dest)
     }
 
-    pub fn second_derivative_diag<B: BoundarySet<N>>(
-        self: &Self,
-        set: &B,
-        src: &[f64],
-        dest: &mut [f64],
-    ) {
+    pub fn second_derivative_diag<B: BoundarySet<N>>(self: &Self, set: &B, dest: &mut [f64]) {
         self.block
-            .evaluate_diag::<FDSecondDerivative<2>, B>(self.axis, set, src, dest)
+            .evaluate_diag::<FDSecondDerivative<2>, B>(self.axis, set, dest)
     }
 }
 
@@ -107,9 +102,9 @@ impl<'a, const N: usize> BlockAxis<'a, N, 4> {
             .evaluate::<FDDerivative<4>, B>(self.axis, set, src, dest)
     }
 
-    pub fn derivative_diag<B: BoundarySet<N>>(self: &Self, set: &B, src: &[f64], dest: &mut [f64]) {
+    pub fn derivative_diag<B: BoundarySet<N>>(self: &Self, set: &B, dest: &mut [f64]) {
         self.block
-            .evaluate_diag::<FDDerivative<4>, B>(self.axis, set, src, dest)
+            .evaluate_diag::<FDDerivative<4>, B>(self.axis, set, dest)
     }
 
     pub fn second_derivative<B: BoundarySet<N>>(
@@ -122,19 +117,17 @@ impl<'a, const N: usize> BlockAxis<'a, N, 4> {
             .evaluate::<FDSecondDerivative<4>, B>(self.axis, set, src, dest)
     }
 
-    pub fn second_derivative_diag<B: BoundarySet<N>>(
-        self: &Self,
-        set: &B,
-        src: &[f64],
-        dest: &mut [f64],
-    ) {
+    pub fn second_derivative_diag<B: BoundarySet<N>>(self: &Self, set: &B, dest: &mut [f64]) {
         self.block
-            .evaluate_diag::<FDSecondDerivative<4>, B>(self.axis, set, src, dest)
+            .evaluate_diag::<FDSecondDerivative<4>, B>(self.axis, set, dest)
     }
 }
 
 pub trait Operator<const N: usize> {
-    fn apply(self: &mut Self, block: &Block<N>, src: &[f64], dest: &mut [f64]);
-    fn apply_diag(self: &mut Self, block: &Block<N>, src: &[f64], dest: &mut [f64]);
-    fn diritchlet_bcs(self: &Self, _: &mut [f64]) {}
+    fn apply(self: &mut Self, arena: &Arena, block: &Block<N>, src: &[f64], dest: &mut [f64]);
+    fn apply_diag(self: &mut Self, arena: &Arena, block: &Block<N>, dest: &mut [f64]);
+}
+
+pub trait Projection<const N: usize> {
+    fn evaluate(self: &Self, arena: &Arena, block: &Block<N>, dest: &mut [f64]);
 }

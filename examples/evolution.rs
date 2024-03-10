@@ -1,10 +1,10 @@
 use aeon::{
     common::{
-        AntiSymmetricBoundary, AsymptoticFlatness, FreeBoundary, Mixed, Simple, SymmetricBoundary,
+        AntiSymmetricBoundary, AsymptoticFlatness, FreeBoundary, Mixed, Projection, Simple,
+        SymmetricBoundary,
     },
     prelude::*,
 };
-use bumpalo::Bump;
 
 type AsymptoticOdd = Mixed<2, Simple<AntiSymmetricBoundary<4>>, AsymptoticFlatness<4>>;
 type AsymptoticEven = Mixed<2, Simple<SymmetricBoundary<4>>, AsymptoticFlatness<4>>;
@@ -39,112 +39,79 @@ const FREE_EVEN: FreeEven = Mixed::new(Simple::new(SymmetricBoundary), Simple::n
 
 // Initial
 const PSI_INITIAL_RHO: AsymptoticEven = ASYMPTOTIC_EVEN_RHO;
+const PSI_INITIAL_Z: AsymptoticEven = ASYMPTOTIC_EVEN_Z;
 // Gauge
 const LAPSE_RHO: AsymptoticEven = ASYMPTOTIC_EVEN_RHO;
+const LAPSE_Z: AsymptoticEven = ASYMPTOTIC_EVEN_Z;
 const SHIFTR_RHO: AsymptoticOdd = ASYMPTOTIC_ODD_RHO;
+const SHIFTR_Z: AsymptoticEven = ASYMPTOTIC_EVEN_Z;
 const SHIFTZ_RHO: AsymptoticEven = ASYMPTOTIC_EVEN_RHO;
+const SHIFTZ_Z: AsymptoticOdd = ASYMPTOTIC_ODD_Z;
 // Dynamic
 const PSI_RHO: FreeEven = FREE_EVEN;
+const PSI_Z: FreeEven = FREE_EVEN;
 const SEED_RHO: FreeOdd = FREE_ODD;
+const SEED_Z: FreeEven = FREE_EVEN;
 const W_RHO: FreeOdd = FREE_ODD;
+const W_Z: FreeEven = FREE_EVEN;
 const U_RHO: FreeEven = FREE_EVEN;
+const U_Z: FreeEven = FREE_EVEN;
 const X_RHO: FreeOdd = FREE_ODD;
+const X_Z: FreeOdd = FREE_ODD;
 
 fn is_approximately_equal(a: f64, b: f64) -> bool {
     (a - b).abs() < 10e-10
 }
 
-fn initial_seed(mesh: &UniformMesh<2>, seed: &mut [f64]) {
-    let block = mesh.level_block(mesh.level_count() - 1);
+struct InitialSeed;
 
-    for node in block.iter() {
-        let index = block.global_from_local(node);
-        let position = block.position(node);
+impl Projection<2> for InitialSeed {
+    fn evaluate(self: &Self, _: &Arena, block: &Block<2>, dest: &mut [f64]) {
+        for (i, node) in block.iter().enumerate() {
+            let position = block.position(node);
 
-        let rho = position[0];
-        let z = position[1];
+            let rho = position[0];
+            let z = position[1];
 
-        let rho2 = rho * rho;
-        let z2 = z * z;
-        let sigma2 = 1.0;
+            let rho2 = rho * rho;
+            let z2 = z * z;
+            let sigma2 = 1.0;
 
-        seed[index] = rho * (-(rho2 + z2) / sigma2).exp();
+            dest[i] = rho * (-(rho2 + z2) / sigma2).exp();
+        }
     }
-
-    mesh.restrict(seed);
 }
 
-pub struct InitialPhs<'a> {
+pub struct InitialPsiOp<'a> {
     seed: &'a [f64],
-    bump: Bump,
 }
 
-impl<'a> InitialPhs<'a> {
-    pub fn rhs(self: &mut Self, mesh: &UniformMesh<2>, rhs: &mut [f64]) {
-        let block = mesh.level_block(mesh.level_count() - 1);
-
-        let s_rr = self.bump.alloc_slice_fill_default(block.len());
-        let s_zz = self.bump.alloc_slice_fill_default(block.len());
-        let s_r = self.bump.alloc_slice_fill_default(block.len());
+impl<'a> Operator<2> for InitialPsiOp<'a> {
+    fn apply(self: &mut Self, arena: &Arena, block: &Block<2>, psi: &[f64], dest: &mut [f64]) {
+        let psi_rr = arena.alloc::<f64>(block.len());
+        let psi_zz = arena.alloc::<f64>(block.len());
+        let psi_r = arena.alloc::<f64>(block.len());
 
         block
-            .axis(0)
-            .evaluate_auxillary(&SEED_SECOND_DERIVATIVE, self.seed, s_rr);
+            .axis::<4>(0)
+            .second_derivative(&PSI_INITIAL_RHO, psi, psi_rr);
         block
-            .axis(1)
-            .evaluate_auxillary(&SEED_SECOND_DERIVATIVE, self.seed, s_zz);
-        block
-            .axis(0)
-            .evaluate_auxillary(&SEED_DERIVATIVE, self.seed, s_r);
+            .axis::<4>(1)
+            .second_derivative(&PSI_INITIAL_Z, psi, psi_zz);
+        block.axis::<4>(0).derivative(&PSI_INITIAL_RHO, psi, psi_r);
 
-        for (i, node) in block.iter().enumerate() {
-            let index = block.global_from_local(node);
-            let position = block.position(node);
+        let s_rr = arena.alloc::<f64>(block.len());
+        let s_zz = arena.alloc::<f64>(block.len());
+        let s_r = arena.alloc::<f64>(block.len());
 
-            let rho = position[0];
+        let seed = block.auxillary(self.seed);
 
-            rhs[index] = -1.0 / 4.0 * (rho * s_rr[i] + 2.0 * s_r[i] + rho * s_zz[i]);
-        }
-
-        self.bump.reset();
-
-        mesh.restrict(rhs);
-    }
-}
-
-impl<'a> Operator<2> for InitialPhs<'a> {
-    fn apply(self: &mut Self, block: &Block<2>, psi: &[f64], dest: &mut [f64]) {
-        let s_rr = self.bump.alloc_slice_fill_default(block.len());
-        let s_zz = self.bump.alloc_slice_fill_default(block.len());
-        let s_r = self.bump.alloc_slice_fill_default(block.len());
-
-        block
-            .axis(0)
-            .evaluate_auxillary(&SEED_SECOND_DERIVATIVE, self.seed, s_rr);
-        block
-            .axis(1)
-            .evaluate_auxillary(&SEED_SECOND_DERIVATIVE, self.seed, s_zz);
-        block
-            .axis(0)
-            .evaluate_auxillary(&SEED_DERIVATIVE, self.seed, s_r);
-
-        let psi_rr = self.bump.alloc_slice_fill_default(block.len());
-        let psi_zz = self.bump.alloc_slice_fill_default(block.len());
-        let psi_r = self.bump.alloc_slice_fill_default(block.len());
-
-        block
-            .axis(0)
-            .evaluate(&PSI_INITIAL_SECOND_DERIVATIVE_RHO, self.seed, psi_rr);
-        block
-            .axis(1)
-            .evaluate(&PSI_INITIAL_SECOND_DERIVATIVE_Z, self.seed, psi_zz);
-        block
-            .axis(0)
-            .evaluate(&PSI_INITIAL_DERIVATIVE_RHO, self.seed, psi_r);
+        block.axis::<4>(0).second_derivative(&SEED_RHO, seed, s_rr);
+        block.axis::<4>(1).second_derivative(&SEED_Z, seed, s_zz);
+        block.axis::<4>(0).derivative(&SEED_RHO, seed, s_r);
 
         for (i, node) in block.iter().enumerate() {
             let position = block.position(node);
-
             let rho = position[0];
 
             let mut term1 = psi_rr[i] + psi_zz[i];
@@ -159,42 +126,33 @@ impl<'a> Operator<2> for InitialPhs<'a> {
 
             dest[i] = term1 + term2;
         }
-
-        self.bump.reset();
     }
 
-    fn apply_diag(self: &mut Self, block: &Block<2>, psi: &[f64], dest: &mut [f64]) {
-        let s_rr = self.bump.alloc_slice_fill_default(block.len());
-        let s_zz = self.bump.alloc_slice_fill_default(block.len());
-        let s_r = self.bump.alloc_slice_fill_default(block.len());
+    fn apply_diag(self: &mut Self, arena: &Arena, block: &Block<2>, dest: &mut [f64]) {
+        let psi_rr = arena.alloc::<f64>(block.len());
+        let psi_zz = arena.alloc::<f64>(block.len());
+        let psi_r = arena.alloc::<f64>(block.len());
 
         block
-            .axis(0)
-            .evaluate_auxillary(&SEED_SECOND_DERIVATIVE, self.seed, s_rr);
+            .axis::<4>(0)
+            .second_derivative_diag(&PSI_INITIAL_RHO, psi_rr);
         block
-            .axis(1)
-            .evaluate_auxillary(&SEED_SECOND_DERIVATIVE, self.seed, s_zz);
-        block
-            .axis(0)
-            .evaluate_auxillary(&SEED_DERIVATIVE, self.seed, s_r);
+            .axis::<4>(1)
+            .second_derivative_diag(&PSI_INITIAL_Z, psi_zz);
+        block.axis::<4>(0).derivative_diag(&PSI_INITIAL_RHO, psi_r);
 
-        let psi_rr = self.bump.alloc_slice_fill_default(block.len());
-        let psi_zz = self.bump.alloc_slice_fill_default(block.len());
-        let psi_r = self.bump.alloc_slice_fill_default(block.len());
+        let s_rr = arena.alloc::<f64>(block.len());
+        let s_zz = arena.alloc::<f64>(block.len());
+        let s_r = arena.alloc::<f64>(block.len());
 
-        block
-            .axis(0)
-            .evaluate_diag(&PSI_INITIAL_SECOND_DERIVATIVE_RHO, psi, psi_rr);
-        block
-            .axis(1)
-            .evaluate_diag(&PSI_INITIAL_SECOND_DERIVATIVE_Z, psi, psi_zz);
-        block
-            .axis(0)
-            .evaluate_diag(&PSI_INITIAL_DERIVATIVE_RHO, psi, psi_r);
+        let seed = block.auxillary(self.seed);
+
+        block.axis::<4>(0).second_derivative(&SEED_RHO, seed, s_rr);
+        block.axis::<4>(1).second_derivative(&SEED_Z, seed, s_zz);
+        block.axis::<4>(0).derivative(&SEED_RHO, seed, s_r);
 
         for (i, node) in block.iter().enumerate() {
             let position = block.position(node);
-
             let rho = position[0];
 
             let mut term1 = psi_rr[i] + psi_zz[i];
@@ -205,12 +163,35 @@ impl<'a> Operator<2> for InitialPhs<'a> {
                 term1 += psi_r[i] / rho;
             }
 
-            let term2 = psi[i] / 4.0 * (rho * s_rr[i] + 2.0 * s_r[i] + rho * s_zz[i]);
+            let term2 = 1.0 / 4.0 * (rho * s_rr[i] + 2.0 * s_r[i] + rho * s_zz[i]);
 
             dest[i] = term1 + term2;
         }
+    }
+}
 
-        self.bump.reset();
+pub struct InitialPsiRhs<'a> {
+    seed: &'a [f64],
+}
+
+impl<'a> Projection<2> for InitialPsiRhs<'a> {
+    fn evaluate(self: &Self, arena: &Arena, block: &Block<2>, dest: &mut [f64]) {
+        let s_rr = arena.alloc::<f64>(block.len());
+        let s_zz = arena.alloc::<f64>(block.len());
+        let s_r = arena.alloc::<f64>(block.len());
+
+        let seed = block.auxillary(self.seed);
+
+        block.axis::<4>(0).second_derivative(&SEED_RHO, seed, s_rr);
+        block.axis::<4>(1).second_derivative(&SEED_Z, seed, s_zz);
+        block.axis::<4>(0).derivative(&SEED_RHO, seed, s_r);
+
+        for (i, node) in block.iter().enumerate() {
+            let position = block.position(node);
+            let rho = position[0];
+
+            dest[i] = -1.0 / 4.0 * (rho * s_rr[i] + 2.0 * s_r[i] + rho * s_zz[i]);
+        }
     }
 }
 
@@ -220,321 +201,297 @@ pub struct LapseOp<'a> {
     u: &'a [f64],
     w: &'a [f64],
     x: &'a [f64],
-    bump: &'a mut Bump,
-}
-
-impl<'a> LapseOp<'a> {
-    pub fn rhs(self: &mut Self, mesh: &UniformMesh<2>, rhs: &mut [f64]) {
-        let block = mesh.level_block(mesh.level_count() - 1);
-
-        for node in block.iter() {
-            let i = block.global_from_local(node);
-            let position = block.position(node);
-            let rho = position[0];
-
-            let psi = self.psi[i] + 1.0;
-            let w = self.w[i];
-            let u = self.u[i];
-            let x = self.x[i];
-
-            let scale = (2.0 * rho * self.seed[i]).exp() * psi * psi * psi * psi;
-
-            let term1 = 2.0 / 3.0 * (rho * rho * w * w + rho * u * w + u * u);
-            let term2 = 2.0 * x * x;
-
-            rhs[i] = scale * (term1 + term2);
-        }
-
-        self.bump.reset();
-
-        mesh.restrict(rhs);
-    }
 }
 
 impl<'a> Operator<2> for LapseOp<'a> {
-    fn apply(self: &mut Self, block: &Block<2>, lapse: &[f64], dest: &mut [f64]) {
-        let lapse_rr = self.bump.alloc_slice_fill_default(block.len());
-        let lapse_zz = self.bump.alloc_slice_fill_default(block.len());
-        let lapse_r = self.bump.alloc_slice_fill_default(block.len());
-        let lapse_z = self.bump.alloc_slice_fill_default(block.len());
+    fn apply(self: &mut Self, arena: &Arena, block: &Block<2>, lapse: &[f64], dest: &mut [f64]) {
+        let lapse_rr = arena.alloc::<f64>(block.len());
+        let lapse_zz = arena.alloc::<f64>(block.len());
+        let lapse_r = arena.alloc::<f64>(block.len());
+        let lapse_z = arena.alloc::<f64>(block.len());
 
         block
-            .axis(0)
-            .evaluate(&LAPSE_SECOND_DERIVATIVE_RHO, lapse, lapse_rr);
+            .axis::<4>(0)
+            .second_derivative(&LAPSE_RHO, lapse, lapse_rr);
         block
-            .axis(1)
-            .evaluate(&LAPSE_SECOND_DERIVATIVE_Z, lapse, lapse_zz);
-        block
-            .axis(0)
-            .evaluate(&LAPSE_DERIVATIVE_RHO, lapse, lapse_r);
-        block.axis(1).evaluate(&LAPSE_DERIVATIVE_Z, lapse, lapse_z);
+            .axis::<4>(1)
+            .second_derivative(&LAPSE_Z, lapse, lapse_zz);
+        block.axis::<4>(0).derivative(&LAPSE_RHO, lapse, lapse_r);
+        block.axis::<4>(1).derivative(&LAPSE_Z, lapse, lapse_z);
 
-        let psi_r = self.bump.alloc_slice_fill_default(block.len());
-        let psi_z = self.bump.alloc_slice_fill_default(block.len());
+        let psi_r = arena.alloc::<f64>(block.len());
+        let psi_z = arena.alloc::<f64>(block.len());
+        let psi = block.auxillary(self.psi);
 
-        block
-            .axis(0)
-            .evaluate_auxillary(&PSI_DERIVATIVE, self.psi, psi_r);
+        block.axis::<4>(0).derivative(&PSI_RHO, self.psi, psi_r);
+        block.axis::<4>(1).derivative(&PSI_Z, self.psi, psi_z);
 
-        block
-            .axis(1)
-            .evaluate_auxillary(&PSI_DERIVATIVE, self.psi, psi_z);
+        let seed = block.auxillary(self.seed);
+        let w = block.auxillary(self.w);
+        let u = block.auxillary(self.u);
+        let x = block.auxillary(self.x);
 
-        for (local, node) in block.iter().enumerate() {
-            let global = block.global_from_local(node);
+        for (i, node) in block.iter().enumerate() {
             let position = block.position(node);
             let rho = position[0];
 
-            let psi = self.psi[global] + 1.0;
+            let psi = psi[i] + 1.0;
+            let seed = seed[i];
+            let w = w[i];
+            let u = u[i];
+            let x = x[i];
 
-            let seed = self.seed[global];
-            let u = self.u[global];
-            let x = self.x[global];
-            let w = self.w[global];
-
-            let mut term1 = lapse_rr[local] + lapse_zz[local];
+            let mut term1 = lapse_rr[i] + lapse_zz[i];
 
             if is_approximately_equal(rho, 0.0) {
-                term1 += lapse_rr[local];
+                term1 += lapse_rr[i];
             } else {
-                term1 += lapse_r[local] / rho;
+                term1 += lapse_r[i] / rho;
             }
 
-            let term2 = 2.0 / psi * (psi_r[local] * lapse_r[local] + psi_z[local] * lapse_z[local]);
+            let term2 = 2.0 / psi * (psi_r[i] * lapse_r[i] + psi_z[i] * lapse_z[i]);
 
-            let scale = -lapse[local] * (2.0 * rho * seed) * psi * psi * psi * psi;
+            let scale = -lapse[i] * (2.0 * rho * seed).exp() * psi * psi * psi * psi;
 
             let term3 = 2.0 / 3.0 * (rho * rho * w * w + rho * u * w + u * u);
             let term4 = 2.0 * x * x;
 
-            dest[local] = term1 + term2 + scale * (term3 + term4);
+            dest[i] = term1 + term2 + scale * (term3 + term4);
         }
-
-        self.bump.reset();
     }
 
-    fn apply_diag(self: &mut Self, block: &Block<2>, lapse: &[f64], dest: &mut [f64]) {
-        let lapse_rr = self.bump.alloc_slice_fill_default(block.len());
-        let lapse_zz = self.bump.alloc_slice_fill_default(block.len());
-        let lapse_r = self.bump.alloc_slice_fill_default(block.len());
-        let lapse_z = self.bump.alloc_slice_fill_default(block.len());
+    fn apply_diag(self: &mut Self, arena: &Arena, block: &Block<2>, dest: &mut [f64]) {
+        let lapse_rr = arena.alloc::<f64>(block.len());
+        let lapse_zz = arena.alloc::<f64>(block.len());
+        let lapse_r = arena.alloc::<f64>(block.len());
+        let lapse_z = arena.alloc::<f64>(block.len());
 
         block
-            .axis(0)
-            .evaluate_diag(&LAPSE_SECOND_DERIVATIVE_RHO, lapse, lapse_rr);
+            .axis::<4>(0)
+            .second_derivative_diag(&LAPSE_RHO, lapse_rr);
         block
-            .axis(1)
-            .evaluate_diag(&LAPSE_SECOND_DERIVATIVE_Z, lapse, lapse_zz);
-        block
-            .axis(0)
-            .evaluate_diag(&LAPSE_DERIVATIVE_RHO, lapse, lapse_r);
-        block
-            .axis(1)
-            .evaluate_diag(&LAPSE_DERIVATIVE_Z, lapse, lapse_z);
+            .axis::<4>(1)
+            .second_derivative_diag(&LAPSE_Z, lapse_zz);
+        block.axis::<4>(0).derivative_diag(&LAPSE_RHO, lapse_r);
+        block.axis::<4>(1).derivative_diag(&LAPSE_Z, lapse_z);
 
-        let psi_r = self.bump.alloc_slice_fill_default(block.len());
-        let psi_z = self.bump.alloc_slice_fill_default(block.len());
+        let psi_r = arena.alloc::<f64>(block.len());
+        let psi_z = arena.alloc::<f64>(block.len());
+        let psi = block.auxillary(self.psi);
 
-        block
-            .axis(0)
-            .evaluate_auxillary(&PSI_DERIVATIVE, self.psi, psi_r);
+        block.axis::<4>(0).derivative(&PSI_RHO, self.psi, psi_r);
+        block.axis::<4>(1).derivative(&PSI_Z, self.psi, psi_z);
 
-        block
-            .axis(1)
-            .evaluate_auxillary(&PSI_DERIVATIVE, self.psi, psi_z);
+        let seed = block.auxillary(self.seed);
+        let w = block.auxillary(self.w);
+        let u = block.auxillary(self.u);
+        let x = block.auxillary(self.x);
 
-        for (local, node) in block.iter().enumerate() {
-            let global = block.global_from_local(node);
+        for (i, node) in block.iter().enumerate() {
             let position = block.position(node);
             let rho = position[0];
 
-            let psi = self.psi[global] + 1.0;
+            let psi = psi[i] + 1.0;
+            let seed = seed[i];
+            let w = w[i];
+            let u = u[i];
+            let x = x[i];
 
-            let seed = self.seed[global];
-            let u = self.u[global];
-            let x = self.x[global];
-            let w = self.w[global];
-
-            let mut term1 = lapse_rr[local] + lapse_zz[local];
+            let mut term1 = lapse_rr[i] + lapse_zz[i];
 
             if is_approximately_equal(rho, 0.0) {
-                term1 += lapse_rr[local];
+                term1 += lapse_rr[i];
             } else {
-                term1 += lapse_r[local] / rho;
+                term1 += lapse_r[i] / rho;
             }
 
-            let term2 = 2.0 / psi * (psi_r[local] * lapse_r[local] + psi_z[local] * lapse_z[local]);
+            let term2 = 2.0 / psi * (psi_r[i] * lapse_r[i] + psi_z[i] * lapse_z[i]);
 
-            let scale = -lapse[local] * (2.0 * rho * seed) * psi * psi * psi * psi;
+            let scale = -(2.0 * rho * seed).exp() * psi * psi * psi * psi;
 
             let term3 = 2.0 / 3.0 * (rho * rho * w * w + rho * u * w + u * u);
             let term4 = 2.0 * x * x;
 
-            dest[local] = term1 + term2 + scale * (term3 + term4);
+            dest[i] = term1 + term2 + scale * (term3 + term4);
         }
-
-        self.bump.reset();
     }
 }
 
-pub struct ShiftRhoOp<'a> {
+pub struct LapseRhs<'a> {
+    psi: &'a [f64],
+    seed: &'a [f64],
+    u: &'a [f64],
+    w: &'a [f64],
+    x: &'a [f64],
+}
+
+impl<'a> Projection<2> for LapseRhs<'a> {
+    fn evaluate(self: &Self, _: &Arena, block: &Block<2>, dest: &mut [f64]) {
+        let psi = block.auxillary(self.psi);
+        let seed = block.auxillary(self.seed);
+        let w = block.auxillary(self.w);
+        let u = block.auxillary(self.u);
+        let x = block.auxillary(self.x);
+
+        for (i, node) in block.iter().enumerate() {
+            let position = block.position(node);
+            let rho = position[0];
+
+            let psi = psi[i] + 1.0;
+            let seed = seed[i];
+            let w = w[i];
+            let u = u[i];
+            let x = x[i];
+
+            let scale = (2.0 * rho * seed).exp() * psi * psi * psi * psi;
+            let term1 = 2.0 / 3.0 * (rho * rho * w * w + rho * u * w + u * u);
+            let term2 = 2.0 * x * x;
+
+            dest[i] = scale * (term1 + term2);
+        }
+    }
+}
+
+pub struct ShiftRRhs<'a> {
     lapse: &'a [f64],
     x: &'a [f64],
     u: &'a [f64],
-    bump: &'a mut Bump,
 }
 
-impl<'a> ShiftRhoOp<'a> {
-    pub fn rhs(self: &mut Self, mesh: &UniformMesh<2>, rhs: &mut [f64]) {
-        let block = mesh.level_block(mesh.level_count() - 1);
+impl<'a> Projection<2> for ShiftRRhs<'a> {
+    fn evaluate(self: &Self, arena: &Arena, block: &Block<2>, dest: &mut [f64]) {
+        let lapse = block.auxillary(self.lapse);
+        let lapse_r = arena.alloc(block.len());
+        let lapse_z = arena.alloc(block.len());
 
-        let lapse_r = self.bump.alloc_slice_fill_default(block.len());
-        let lapse_z = self.bump.alloc_slice_fill_default(block.len());
+        block.axis::<4>(0).derivative(&LAPSE_RHO, lapse, lapse_r);
+        block.axis::<4>(1).derivative(&LAPSE_Z, lapse, lapse_z);
 
-        let x_z = self.bump.alloc_slice_fill_default(block.len());
-        let u_r = self.bump.alloc_slice_fill_default(block.len());
+        let x = block.auxillary(self.x);
+        let x_z = arena.alloc(block.len());
 
-        block
-            .axis(0)
-            .evaluate_auxillary(&LAPSE_DERIVATIVE_RHO, self.lapse, lapse_r);
-        block
-            .axis(1)
-            .evaluate_auxillary(&LAPSE_DERIVATIVE_Z, self.lapse, lapse_z);
+        block.axis::<4>(1).derivative(&X_Z, x, x_z);
 
-        block.axis(0).evaluate_auxillary(&U_DERIVATIVE, self.u, u_r);
-        block.axis(1).evaluate_auxillary(&X_DERIVATIVE, self.x, x_z);
+        let u = block.auxillary(self.u);
+        let u_r = arena.alloc(block.len());
 
-        for (local, node) in block.iter().enumerate() {
-            let global = block.global_from_local(node);
+        block.axis::<4>(0).derivative(&U_RHO, u, u_r);
 
-            let lapse = self.lapse[global] + 1.0;
-            let x = self.x[global];
-            let u = self.u[global];
+        for (i, _) in block.iter().enumerate() {
+            let lapse = lapse[i] + 1.0;
 
-            rhs[global] = 2.0 * (x * lapse_z[local] + lapse * x_z[local])
-                - u * lapse_r[local]
-                - lapse * u_r[local];
-        }
+            let term1 = 2.0 * (x[i] * lapse_z[i] + lapse * x_z[i]);
+            let term2 = -u[i] * lapse_r[i] - lapse * u_r[i];
 
-        self.bump.reset();
-
-        mesh.restrict(rhs);
-    }
-}
-
-impl<'a> Operator<2> for ShiftRhoOp<'a> {
-    fn apply(self: &mut Self, block: &Block<2>, shift: &[f64], dest: &mut [f64]) {
-        let shift_rr = self.bump.alloc_slice_fill_default(block.len());
-        let shift_zz = self.bump.alloc_slice_fill_default(block.len());
-
-        block
-            .axis(0)
-            .evaluate(&SHIFTRHO_SECOND_DERIVATIVE_RHO, shift, shift_rr);
-        block
-            .axis(1)
-            .evaluate(&SHIFTRHO_SECOND_DERIVATIVE_Z, shift, shift_zz);
-
-        for (local, _) in block.iter().enumerate() {
-            dest[local] = shift_rr[local] + shift_zz[local];
-        }
-
-        self.bump.reset();
-    }
-
-    fn apply_diag(self: &mut Self, block: &Block<2>, shift: &[f64], dest: &mut [f64]) {
-        let shift_rr = self.bump.alloc_slice_fill_default(block.len());
-        let shift_zz = self.bump.alloc_slice_fill_default(block.len());
-
-        block
-            .axis(0)
-            .evaluate_diag(&SHIFTRHO_SECOND_DERIVATIVE_RHO, shift, shift_rr);
-        block
-            .axis(1)
-            .evaluate_diag(&SHIFTRHO_SECOND_DERIVATIVE_Z, shift, shift_zz);
-
-        for (local, _) in block.iter().enumerate() {
-            dest[local] = shift_rr[local] + shift_zz[local];
+            dest[i] = term1 + term2;
         }
     }
 }
 
-pub struct ShiftZOp<'a> {
+pub struct ShiftZRhs<'a> {
     lapse: &'a [f64],
     x: &'a [f64],
     u: &'a [f64],
-    bump: &'a mut Bump,
 }
 
-impl<'a> ShiftZOp<'a> {
-    pub fn rhs(self: &mut Self, mesh: &UniformMesh<2>, rhs: &mut [f64]) {
-        let block = mesh.level_block(mesh.level_count() - 1);
+impl<'a> Projection<2> for ShiftZRhs<'a> {
+    fn evaluate(self: &Self, arena: &Arena, block: &Block<2>, dest: &mut [f64]) {
+        let lapse = block.auxillary(self.lapse);
+        let lapse_r = arena.alloc(block.len());
+        let lapse_z = arena.alloc(block.len());
 
-        let lapse_r = self.bump.alloc_slice_fill_default(block.len());
-        let lapse_z = self.bump.alloc_slice_fill_default(block.len());
+        block.axis::<4>(0).derivative(&LAPSE_RHO, lapse, lapse_r);
+        block.axis::<4>(1).derivative(&LAPSE_Z, lapse, lapse_z);
 
-        let x_r = self.bump.alloc_slice_fill_default(block.len());
-        let u_z = self.bump.alloc_slice_fill_default(block.len());
+        let x = block.auxillary(self.x);
+        let x_r = arena.alloc(block.len());
 
-        block
-            .axis(0)
-            .evaluate_auxillary(&LAPSE_DERIVATIVE_RHO, self.lapse, lapse_r);
-        block
-            .axis(1)
-            .evaluate_auxillary(&LAPSE_DERIVATIVE_Z, self.lapse, lapse_z);
+        block.axis::<4>(0).derivative(&X_RHO, x, x_r);
 
-        block.axis(0).evaluate_auxillary(&U_DERIVATIVE, self.u, u_z);
-        block.axis(1).evaluate_auxillary(&X_DERIVATIVE, self.x, x_r);
+        let u = block.auxillary(self.u);
+        let u_z = arena.alloc(block.len());
 
-        for (local, node) in block.iter().enumerate() {
-            let global = block.global_from_local(node);
+        block.axis::<4>(1).derivative(&U_Z, u, u_z);
 
-            let lapse = self.lapse[global] + 1.0;
-            let x = self.x[global];
-            let u = self.u[global];
+        for (i, _) in block.iter().enumerate() {
+            let lapse = lapse[i] + 1.0;
 
-            rhs[global] = 2.0 * (x * lapse_r[local] + lapse * x_r[local])
-                + u * lapse_z[local]
-                + lapse * u_z[local];
+            let term1 = 2.0 * (x[i] * lapse_r[i] + lapse * x_r[i]);
+            let term2 = u[i] * lapse_z[i] - lapse * u_z[i];
+
+            dest[i] = term1 + term2;
         }
-
-        self.bump.reset();
-
-        mesh.restrict(rhs);
     }
 }
 
-impl<'a> Operator<2> for ShiftZOp<'a> {
-    fn apply(self: &mut Self, block: &Block<2>, shift: &[f64], dest: &mut [f64]) {
-        let shift_rr = self.bump.alloc_slice_fill_default(block.len());
-        let shift_zz = self.bump.alloc_slice_fill_default(block.len());
+pub struct ShiftROp;
+
+impl Operator<2> for ShiftROp {
+    fn apply(self: &mut Self, arena: &Arena, block: &Block<2>, shiftr: &[f64], dest: &mut [f64]) {
+        let shiftr_rr = arena.alloc::<f64>(block.len());
+        let shiftr_zz = arena.alloc::<f64>(block.len());
 
         block
-            .axis(0)
-            .evaluate(&SHIFTZ_SECOND_DERIVATIVE_RHO, shift, shift_rr);
+            .axis::<4>(0)
+            .second_derivative(&SHIFTR_RHO, shiftr, shiftr_rr);
         block
-            .axis(1)
-            .evaluate(&SHIFTZ_SECOND_DERIVATIVE_Z, shift, shift_zz);
+            .axis::<4>(1)
+            .second_derivative(&SHIFTR_Z, shiftr, shiftr_zz);
 
-        for (local, _) in block.iter().enumerate() {
-            dest[local] = shift_rr[local] + shift_zz[local];
+        for (i, _) in block.iter().enumerate() {
+            dest[i] = shiftr_rr[i] + shiftr_zz[i];
         }
-
-        self.bump.reset();
     }
 
-    fn apply_diag(self: &mut Self, block: &Block<2>, shift: &[f64], dest: &mut [f64]) {
-        let shift_rr = self.bump.alloc_slice_fill_default(block.len());
-        let shift_zz = self.bump.alloc_slice_fill_default(block.len());
+    fn apply_diag(self: &mut Self, arena: &Arena, block: &Block<2>, dest: &mut [f64]) {
+        let shiftr_rr = arena.alloc::<f64>(block.len());
+        let shiftr_zz = arena.alloc::<f64>(block.len());
 
         block
-            .axis(0)
-            .evaluate_diag(&SHIFTZ_SECOND_DERIVATIVE_RHO, shift, shift_rr);
+            .axis::<4>(0)
+            .second_derivative_diag(&SHIFTR_RHO, shiftr_rr);
         block
-            .axis(1)
-            .evaluate_diag(&SHIFTZ_SECOND_DERIVATIVE_Z, shift, shift_zz);
+            .axis::<4>(1)
+            .second_derivative_diag(&SHIFTR_Z, shiftr_zz);
 
-        for (local, _) in block.iter().enumerate() {
-            dest[local] = shift_rr[local] + shift_zz[local];
+        for (i, _) in block.iter().enumerate() {
+            dest[i] = shiftr_rr[i] + shiftr_zz[i];
+        }
+    }
+}
+
+pub struct ShiftZOp;
+
+impl Operator<2> for ShiftZOp {
+    fn apply(self: &mut Self, arena: &Arena, block: &Block<2>, shiftz: &[f64], dest: &mut [f64]) {
+        let shiftz_rr = arena.alloc::<f64>(block.len());
+        let shiftz_zz = arena.alloc::<f64>(block.len());
+
+        block
+            .axis::<4>(0)
+            .second_derivative(&SHIFTZ_RHO, shiftz, shiftz_rr);
+        block
+            .axis::<4>(1)
+            .second_derivative(&SHIFTZ_Z, shiftz, shiftz_zz);
+
+        for (i, _) in block.iter().enumerate() {
+            dest[i] = shiftz_rr[i] + shiftz_zz[i];
+        }
+    }
+
+    fn apply_diag(self: &mut Self, arena: &Arena, block: &Block<2>, dest: &mut [f64]) {
+        let shiftz_rr = arena.alloc::<f64>(block.len());
+        let shiftz_zz = arena.alloc::<f64>(block.len());
+
+        block
+            .axis::<4>(0)
+            .second_derivative_diag(&SHIFTZ_RHO, shiftz_rr);
+        block
+            .axis::<4>(1)
+            .second_derivative_diag(&SHIFTZ_Z, shiftz_zz);
+
+        for (i, _) in block.iter().enumerate() {
+            dest[i] = shiftz_rr[i] + shiftz_zz[i];
         }
     }
 }
@@ -554,17 +511,6 @@ pub fn main() {
 
     // Fill right hand side
     let mut rhs = vec![0.0; mesh.node_count()];
-
-    let block = mesh.level_block(mesh.level_count() - 1);
-
-    for node in block.iter() {
-        let index = block.global_from_local(node);
-        let position = block.position(node);
-
-        rhs[index] = position[0] + position[1];
-    }
-
-    mesh.restrict(&mut rhs);
 
     // Run solver
 

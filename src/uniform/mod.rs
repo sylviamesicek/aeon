@@ -1,6 +1,7 @@
 use std::ops::Range;
 
-use crate::common::{Block, NodeSpace, Operator};
+use crate::arena::Arena;
+use crate::common::{Block, NodeSpace, Operator, Projection};
 use crate::geometry::Rectangle;
 
 mod multigrid;
@@ -172,31 +173,57 @@ impl<const N: usize> UniformMesh<N> {
         (&mut dest[range.clone()]).copy_from_slice(&src[range.clone()]);
     }
 
+    pub fn project<P: Projection<N>>(
+        self: &Self,
+        arena: &mut Arena,
+        projection: &P,
+        dest: &mut [f64],
+    ) {
+        self.project_level(self.level_count() - 1, arena, projection, dest);
+        self.restrict(dest);
+    }
+
+    pub fn project_level<P: Projection<N>>(
+        self: &Self,
+        level: usize,
+        arena: &mut Arena,
+        projection: &P,
+        dest: &mut [f64],
+    ) {
+        let range = self.level_node_range(level);
+        let block = self.level_block(level);
+
+        projection.evaluate(arena, &block, &mut dest[range]);
+
+        arena.reset();
+    }
+
     pub fn residual<O: Operator<N>>(
         self: &Self,
+        arena: &mut Arena,
         b: &[f64],
         operator: &mut O,
         x: &[f64],
         dest: &mut [f64],
     ) {
         for i in 0..self.level_count() {
-            self.residual_level(i, b, operator, x, dest);
+            self.residual_level(i, arena, b, operator, x, dest);
         }
     }
 
     pub fn residual_level<O: Operator<N>>(
         self: &Self,
         level: usize,
+        arena: &mut Arena,
         b: &[f64],
         operator: &mut O,
         x: &[f64],
         dest: &mut [f64],
     ) {
         let range = self.level_node_range(level);
-
         let block = self.level_block(level);
 
-        operator.apply(&block, &x[range.clone()], &mut dest[range.clone()]);
+        operator.apply(arena, &block, &x[range.clone()], &mut dest[range.clone()]);
 
         for i in range {
             dest[i] = b[i] - dest[i];
