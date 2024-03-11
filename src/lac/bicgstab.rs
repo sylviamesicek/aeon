@@ -78,6 +78,8 @@ impl LinearSolver for BiCGStabSolver {
         // Set termination tolerance
         map.apply(solution, &mut self.tp);
 
+        // let nrhs = norm(rhs);
+
         for i in 0..self.dimension {
             self.rg[i] = rhs[i] - self.tp[i];
         }
@@ -87,6 +89,8 @@ impl LinearSolver for BiCGStabSolver {
         self.ph.fill(0.0);
 
         let mut residual = norm(&self.rg);
+
+        let tolerance = self.tolerance * residual;
 
         let mut iter = 0;
         let mut rho0 = 0.0;
@@ -124,6 +128,14 @@ impl LinearSolver for BiCGStabSolver {
 
             pra = rho1 / dot(&self.rh, &self.vg);
 
+            // if dot(&self.rh, &self.vg).is_nan() {
+            //     println!("DOT Hmm");
+            //     println!("RH {:?}", &self.rh);
+            //     println!("VG {:?}", &self.vg);
+
+            //     panic!("Testing");
+            // }
+
             for i in 0..self.dimension {
                 self.sg[i] = self.rg[i] - pra * self.vg[i];
             }
@@ -156,7 +168,7 @@ impl LinearSolver for BiCGStabSolver {
             residual = norm(&self.rg);
             map.callback(iter, residual, &solution);
 
-            if residual <= self.tolerance {
+            if residual <= tolerance {
                 break;
             }
 
@@ -182,7 +194,7 @@ fn dot(v: &[f64], w: &[f64]) -> f64 {
         residual += ve * we;
     }
 
-    residual.sqrt()
+    residual
 }
 
 fn norm(v: &[f64]) -> f64 {

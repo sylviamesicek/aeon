@@ -143,10 +143,11 @@ impl<const N: usize> UniformMesh<N> {
 
         let space = self.level_node_space(level);
 
-        let dest = &mut split.1[..self.level_node_offset(level + 1)];
-        let src = &split.0[self.level_node_offset(level - 1)..];
+        let dest =
+            &mut split.1[0..self.level_node_offset(level + 1) - self.level_node_offset(level)];
+        let src = &split.0[self.level_node_offset(level - 1)..self.level_node_offset(level)];
 
-        // Perform restriction
+        // Perform prolongation
         space.prolong_inject(src, dest);
     }
 
@@ -190,6 +191,32 @@ impl<const N: usize> UniformMesh<N> {
         projection.evaluate(arena, &block, &mut dest[range]);
 
         arena.reset();
+    }
+
+    pub fn apply<O: Operator<N>>(
+        self: &Self,
+        arena: &mut Arena,
+        operator: &O,
+        x: &[f64],
+        dest: &mut [f64],
+    ) {
+        for i in 0..self.level_count() {
+            self.apply_level(i, arena, operator, x, dest);
+        }
+    }
+
+    pub fn apply_level<O: Operator<N>>(
+        self: &Self,
+        level: usize,
+        arena: &mut Arena,
+        operator: &O,
+        x: &[f64],
+        dest: &mut [f64],
+    ) {
+        let range = self.level_node_range(level);
+        let block = self.level_block(level);
+
+        operator.apply(arena, &block, &x[range.clone()], &mut dest[range.clone()]);
     }
 
     pub fn residual<O: Operator<N>>(

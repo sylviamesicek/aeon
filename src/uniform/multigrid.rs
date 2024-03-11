@@ -97,7 +97,7 @@ impl<'mesh, const N: usize, Solver: LinearSolver> UniformMultigrid<'mesh, N, Sol
             let base_node_count = self.mesh.base_node_count();
             let block = self.mesh.level_block(level);
 
-            println!("Solving BASE multigrid, node count {base_node_count}");
+            // println!("Solving BASE multigrid, node count {base_node_count}");
             // println!("{:?}", &self.rhs[0..base_node_count]);
             // println!("{:?}", &x[0..base_node_count]);
 
@@ -152,11 +152,18 @@ impl<'mesh, const N: usize, Solver: LinearSolver> UniformMultigrid<'mesh, N, Sol
         self.mesh
             .residual_level(level, arena, &self.rhs, operator, &x, &mut self.scratch);
         self.mesh.restrict_level_full(level, &mut self.scratch);
-        self.mesh.restrict_level(level, x);
 
         // Tau correction
         for i in coarse.clone() {
-            self.rhs[i] = x[i] + self.scratch[i];
+            self.rhs[i] = self.scratch[i];
+        }
+
+        self.mesh.restrict_level(level, x);
+        self.mesh
+            .apply_level(level - 1, arena, operator, x, &mut self.scratch);
+
+        for i in coarse.clone() {
+            self.rhs[i] += self.scratch[i];
         }
 
         // *************************
@@ -221,7 +228,7 @@ impl<'a, const N: usize, O: Operator<N>> LinearMap for BaseLinearMap<'a, N, O> {
         self.arena.reset();
     }
 
-    fn callback(self: &Self, iteration: usize, residual: f64, _: &[f64]) {
-        println!("Base Iteration {iteration}, Residual {residual}");
+    fn callback(self: &Self, _: usize, _: f64, _: &[f64]) {
+        // println!("Base Iteration {iteration}, Residual {residual}");
     }
 }

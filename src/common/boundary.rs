@@ -256,7 +256,7 @@ impl Boundary for RobinBoundary<2> {
     type Stencil = [f64; 2];
 
     fn stencil(self: &Self, _: usize, spacing: f64) -> Self::Stencil {
-        let mut derivative = derivative!(2, 0, 0);
+        let mut derivative = derivative!(2, 0, -1);
         derivative.reverse();
 
         for i in 0..derivative.len() {
@@ -283,7 +283,7 @@ impl Boundary for RobinBoundary<4> {
     type Stencil = [f64; 4];
 
     fn stencil(self: &Self, _: usize, spacing: f64) -> Self::Stencil {
-        let mut derivative = derivative!(4, 0, 0);
+        let mut derivative = derivative!(4, 0, -1);
         derivative.reverse();
 
         for i in 0..derivative.len() {

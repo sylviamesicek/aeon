@@ -1137,7 +1137,7 @@ impl<'m> GaugeSolver<'m> {
             5,
             5,
             &BiCGStabConfig {
-                max_iterations: 1000,
+                max_iterations: 10000,
                 tolerance: 10e-12,
             },
         );
@@ -1258,8 +1258,6 @@ fn write_vtk_output(
 
         offsets.push(connectivity.len() as u64);
     }
-
-    println!("{:?}", connectivity);
 
     let cell_verts = VertexNumbers::XML {
         connectivity,
@@ -1410,7 +1408,7 @@ pub fn main() {
 
     let mesh = UniformMesh::new(
         Rectangle {
-            size: [1.0, 1.0],
+            size: [RADIUS, RADIUS],
             origin: [0.0, 0.0],
         },
         [8, 8],
