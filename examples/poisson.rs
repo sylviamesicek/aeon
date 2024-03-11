@@ -1,11 +1,11 @@
 use aeon::{
-    common::{AntiSymmetricBoundary, Mixed, RobinBoundary, Simple, SymmetricBoundary},
+    common::{AntiSymmetricBoundary, Mixed, Simple, SymmetricBoundary},
     prelude::*,
 };
 use std::{f64::consts::PI, path::PathBuf};
 use vtkio::model::*;
 
-type BoundarySet = Mixed<2, Simple<AntiSymmetricBoundary<2>>, Simple<RobinBoundary<2>>>;
+// type BoundarySet = Mixed<2, Simple<AntiSymmetricBoundary<2>>, Simple<RobinBoundary<2>>>;
 type BoundarySet2 = Mixed<2, Simple<AntiSymmetricBoundary<2>>, Simple<SymmetricBoundary<2>>>;
 
 // const BOUNDARY_SET: BoundarySet = Mixed::new(

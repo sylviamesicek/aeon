@@ -490,14 +490,14 @@ impl<'a> Projection<2> for Hamiltonian<'a> {
             let position = block.position(node);
             let rho = position[0];
 
-            let psi = psi[i] + 1.0;
+            let psi: f64 = psi[i] + 1.0;
 
             let mut term1 = psi_rr[i] + psi_zz[i];
 
             if is_approximately_equal(rho, 0.0) {
                 term1 += psi_rr[i];
             } else {
-                term1 += psi_r[i];
+                term1 += psi_r[i] / rho;
             }
 
             let term2 = psi / 4.0 * (rho * s_rr[i] + 2.0 * s_r[i] + rho * s_zz[i]);
@@ -1208,7 +1208,212 @@ impl<'m> GaugeSolver<'m> {
     }
 }
 
-pub struct DynamicIntegrator {}
+pub struct DynamicIntegrator<'a> {
+    mesh: &'a UniformMesh<2>,
+    solver: GaugeSolver<'a>,
+
+    gauge: GaugeVec,
+    dynamic: DynamicVec,
+
+    scratch: DynamicVec,
+
+    k1: DynamicVec,
+    k2: DynamicVec,
+    k3: DynamicVec,
+    k4: DynamicVec,
+
+    time: f64,
+}
+
+impl<'a> DynamicIntegrator<'a> {
+    pub fn new(mesh: &'a UniformMesh<2>, dynamic: DynamicVec, gauge: GaugeVec) -> Self {
+        let node_count = mesh.node_count();
+
+        Self {
+            mesh,
+            solver: GaugeSolver::new(mesh),
+
+            gauge,
+            dynamic,
+
+            scratch: dynamic_new(node_count),
+
+            k1: dynamic_new(node_count),
+            k2: dynamic_new(node_count),
+            k3: dynamic_new(node_count),
+            k4: dynamic_new(node_count),
+
+            time: 0.0,
+        }
+    }
+
+    pub fn step(self: &mut Self, arena: &mut Arena, k: f64) {
+        // ************************
+        // K1
+
+        self.solver
+            .solve(arena, self.dynamic.as_slice(), self.gauge.as_mut_slice());
+
+        Self::compute_derivative(
+            self.mesh,
+            arena,
+            self.dynamic.as_slice(),
+            self.gauge.as_slice(),
+            self.k1.as_mut_slice(),
+        );
+
+        // ********************************
+        // K2
+
+        for i in 0..self.dynamic.len() {
+            self.scratch.psi[i] = self.dynamic.psi[i] + k / 2.0 * self.k1.psi[i];
+            self.scratch.seed[i] = self.dynamic.seed[i] + k / 2.0 * self.k1.seed[i];
+            self.scratch.u[i] = self.dynamic.u[i] + k / 2.0 * self.k1.u[i];
+            self.scratch.w[i] = self.dynamic.w[i] + k / 2.0 * self.k1.w[i];
+            self.scratch.x[i] = self.dynamic.x[i] + k / 2.0 * self.k1.x[i];
+        }
+
+        self.solver
+            .solve(arena, self.scratch.as_slice(), self.gauge.as_mut_slice());
+
+        Self::compute_derivative(
+            self.mesh,
+            arena,
+            self.scratch.as_slice(),
+            self.gauge.as_slice(),
+            self.k2.as_mut_slice(),
+        );
+
+        // **************************************
+        // K3
+
+        for i in 0..self.dynamic.len() {
+            self.scratch.psi[i] = self.dynamic.psi[i] + k / 2.0 * self.k2.psi[i];
+            self.scratch.seed[i] = self.dynamic.seed[i] + k / 2.0 * self.k2.seed[i];
+            self.scratch.u[i] = self.dynamic.u[i] + k / 2.0 * self.k2.u[i];
+            self.scratch.w[i] = self.dynamic.w[i] + k / 2.0 * self.k2.w[i];
+            self.scratch.x[i] = self.dynamic.x[i] + k / 2.0 * self.k2.x[i];
+        }
+
+        self.solver
+            .solve(arena, self.scratch.as_slice(), self.gauge.as_mut_slice());
+
+        Self::compute_derivative(
+            self.mesh,
+            arena,
+            self.scratch.as_slice(),
+            self.gauge.as_slice(),
+            self.k3.as_mut_slice(),
+        );
+
+        // ****************************************
+        // K4
+
+        for i in 0..self.dynamic.len() {
+            self.scratch.psi[i] = self.dynamic.psi[i] + k * self.k3.psi[i];
+            self.scratch.seed[i] = self.dynamic.seed[i] + k * self.k3.seed[i];
+            self.scratch.u[i] = self.dynamic.u[i] + k * self.k3.u[i];
+            self.scratch.w[i] = self.dynamic.w[i] + k * self.k3.w[i];
+            self.scratch.x[i] = self.dynamic.x[i] + k * self.k3.x[i];
+        }
+
+        self.solver
+            .solve(arena, self.scratch.as_slice(), self.gauge.as_mut_slice());
+
+        Self::compute_derivative(
+            self.mesh,
+            arena,
+            self.scratch.as_slice(),
+            self.gauge.as_slice(),
+            self.k4.as_mut_slice(),
+        );
+
+        // ******************************
+        // Update
+
+        for i in 0..self.dynamic.len() {
+            self.dynamic.psi[i] += k / 6.0
+                * (self.k1.psi[i] + 2.0 * self.k2.psi[i] + 2.0 * self.k3.psi[i] + self.k4.psi[i]);
+            self.dynamic.seed[i] += k / 6.0
+                * (self.k1.seed[i]
+                    + 2.0 * self.k2.seed[i]
+                    + 2.0 * self.k3.seed[i]
+                    + self.k4.seed[i]);
+            self.dynamic.u[i] +=
+                k / 6.0 * (self.k1.u[i] + 2.0 * self.k2.u[i] + 2.0 * self.k3.u[i] + self.k4.u[i]);
+            self.dynamic.w[i] +=
+                k / 6.0 * (self.k1.w[i] + 2.0 * self.k2.w[i] + 2.0 * self.k3.w[i] + self.k4.w[i]);
+            self.dynamic.x[i] +=
+                k / 6.0 * (self.k1.x[i] + 2.0 * self.k2.x[i] + 2.0 * self.k3.x[i] + self.k4.x[i]);
+        }
+
+        self.solver
+            .solve(arena, self.dynamic.as_slice(), self.gauge.as_mut_slice());
+
+        self.time += k;
+    }
+
+    fn compute_derivative(
+        mesh: &'a UniformMesh<2>,
+        arena: &mut Arena,
+        dynamic: DynamicSlice,
+        gauge: GaugeSlice,
+        result: DynamicSliceMut,
+    ) {
+        let psi = PsiEvolution {
+            lapse: gauge.lapse,
+            shiftr: gauge.shiftr,
+            shiftz: gauge.shiftz,
+            psi: dynamic.psi,
+            u: dynamic.u,
+            w: dynamic.w,
+        };
+
+        let seed = SeedEvolution {
+            lapse: gauge.lapse,
+            shiftr: gauge.shiftr,
+            shiftz: gauge.shiftz,
+            seed: dynamic.seed,
+            w: dynamic.w,
+        };
+
+        let u = UEvolution {
+            lapse: gauge.lapse,
+            shiftr: gauge.shiftr,
+            shiftz: gauge.shiftz,
+            psi: dynamic.psi,
+            seed: dynamic.seed,
+            u: dynamic.u,
+            x: dynamic.x,
+        };
+
+        let w = WEvolution {
+            lapse: gauge.lapse,
+            shiftr: gauge.shiftr,
+            shiftz: gauge.shiftz,
+            psi: dynamic.psi,
+            seed: dynamic.seed,
+            w: dynamic.w,
+            x: dynamic.x,
+        };
+
+        let x = XEvolution {
+            lapse: gauge.lapse,
+            shiftr: gauge.shiftr,
+            shiftz: gauge.shiftz,
+            psi: dynamic.psi,
+            seed: dynamic.seed,
+            u: dynamic.u,
+            x: dynamic.x,
+        };
+
+        mesh.project(arena, &psi, result.psi);
+        mesh.project(arena, &seed, result.seed);
+        mesh.project(arena, &u, result.u);
+        mesh.project(arena, &w, result.w);
+        mesh.project(arena, &x, result.x);
+    }
+}
 
 fn write_vtk_output(
     step: usize,
@@ -1412,7 +1617,7 @@ pub fn main() {
             origin: [0.0, 0.0],
         },
         [8, 8],
-        3,
+        5,
     );
 
     let mut dynamic = dynamic_new(mesh.node_count());
@@ -1438,6 +1643,37 @@ pub fn main() {
 
     // Write output
     write_vtk_output(0, &mesh, dynamic.as_slice(), gauge.as_slice(), &constraint);
+
+    let mut system = DynamicIntegrator::new(&mesh, dynamic, gauge);
+
+    let steps = 100;
+    let cfl = 0.1;
+
+    let k = cfl * 0.1;
+
+    for i in 0..steps {
+        println!("Step {}", i);
+        // Step
+        system.step(&mut arena, k);
+        // Solve constraint
+        let hamiltonian = Hamiltonian {
+            psi: &system.dynamic.psi,
+            seed: &system.dynamic.seed,
+            u: &system.dynamic.u,
+            x: &system.dynamic.x,
+            w: &system.dynamic.w,
+        };
+
+        mesh.project(&mut arena, &hamiltonian, &mut constraint);
+        // Write output
+        write_vtk_output(
+            i + 1,
+            &mesh,
+            system.dynamic.as_slice(),
+            system.gauge.as_slice(),
+            &constraint,
+        );
+    }
 
     // multigrid.solve(&Laplacian { bump: Bump::new() }, &rhs, &mut solution);
 

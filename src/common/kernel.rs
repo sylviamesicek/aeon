@@ -41,11 +41,7 @@ impl<const N: usize> Kernel<N> for FDDerivative<2> {
     }
 
     fn positive(_: usize) -> Self::BoundaryStencil {
-        let mut result = derivative!(1, 1, 1);
-
-        result.reverse();
-
-        result
+        derivative!(1, 1, 1)
     }
 
     fn scale(spacing: f64) -> f64 {
@@ -73,15 +69,11 @@ impl<const N: usize> Kernel<N> for FDDerivative<4> {
     }
 
     fn positive(right: usize) -> Self::BoundaryStencil {
-        let mut result = if right == 0 {
+        if right == 0 {
             derivative!(4, 0, 0)
         } else {
             derivative!(4, 0, -1)
-        };
-
-        result.reverse();
-
-        result
+        }
     }
 
     fn scale(spacing: f64) -> f64 {
@@ -107,9 +99,7 @@ impl<const N: usize> Kernel<N> for FDSecondDerivative<2> {
     }
 
     fn positive(_: usize) -> Self::BoundaryStencil {
-        let mut result = second_derivative!(3, 0, 0);
-        result.reverse();
-        result
+        second_derivative!(3, 0, 0)
     }
 
     fn scale(spacing: f64) -> f64 {
@@ -137,15 +127,11 @@ impl<const N: usize> Kernel<N> for FDSecondDerivative<4> {
     }
 
     fn positive(right: usize) -> Self::BoundaryStencil {
-        let mut result = if right == 0 {
+        if right == 0 {
             second_derivative!(5, 0, 0)
         } else {
             second_derivative!(5, 0, -1)
-        };
-
-        result.reverse();
-
-        result
+        }
     }
 
     fn scale(spacing: f64) -> f64 {

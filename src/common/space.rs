@@ -168,12 +168,6 @@ impl<'a, const N: usize> NodeSpaceAxis<'a, N> {
         let positive: usize = K::POSITIVE_SUPPORT;
         let negative: usize = K::NEGATIVE_SUPPORT;
 
-        let boundary_support: usize = K::BoundaryStencil::LEN;
-        let interior_support = positive + negative + 1;
-
-        let negative_extent = <B::NegativeBoundary as Boundary>::EXTENT;
-        let positive_extent = <B::PositiveBoundary as Boundary>::EXTENT;
-
         // Source lengths and dest lengths must match node space.
         assert!(src.len() == self.space.len() && dest.len() == self.space.len());
 
@@ -186,115 +180,13 @@ impl<'a, const N: usize> NodeSpaceAxis<'a, N> {
 
         // Loop over plane normal to axis
         for mut node in self.space.vertex_space().plane(self.axis, 0) {
-            // Position of negative boundary vertex
-            node[self.axis] = 0;
-            let negative_position = self.space.position(node);
-
-            // Position of positive boundary vertex
-            node[self.axis] = length - 1;
-            let positive_position = self.space.position(node);
-
             // *****************************
             // Fill left boundary
-
-            let negative_boundary = set.negative(negative_position);
-
-            for left in 0..negative.saturating_sub(negative_extent) {
-                let mut result = 0.0;
-
-                let stencil = K::negative(left);
-
-                for i in 0..negative_extent {
-                    let w = stencil[i];
-                    let ghost = self.negative_ghost_value(node, src, &negative_boundary, i + 1);
-
-                    result += w * ghost;
-                }
-
-                for i in negative_extent..boundary_support {
-                    node[self.axis] = i - negative_extent;
-                    let w = stencil[i];
-
-                    result += w * self.space.value(node, src);
-                }
-
-                node[self.axis] = left;
-                self.space.set_value(node, scale * result, dest);
-            }
-
-            for left in negative.saturating_sub(negative_extent)..negative {
-                let mut result = 0.0;
-
-                let stencil = K::interior();
-
-                for i in 0..negative_extent {
-                    let w = stencil[i];
-                    let ghost = self.negative_ghost_value(node, src, &negative_boundary, i + 1);
-
-                    result += w * ghost;
-                }
-
-                for i in negative_extent..interior_support {
-                    node[self.axis] = i - negative_extent;
-                    let w = stencil[i];
-
-                    result += w * self.space.value(node, src);
-                }
-
-                node[self.axis] = left;
-                self.space.set_value(node, scale * result, dest);
-            }
+            self.evaluate_negative::<K, B>(node, set, src, dest);
 
             // *************************************
             // Fill right boundary
-
-            let positive_boundary = set.positive(positive_position);
-
-            for right in 0..positive.saturating_sub(positive_extent) {
-                let mut result = 0.0;
-
-                let stencil = K::positive(right);
-
-                for i in 0..positive_extent {
-                    let w = stencil[i];
-                    let ghost = self.positive_ghost_value(node, src, &positive_boundary, i + 1);
-
-                    result += w * ghost;
-                }
-
-                for i in positive_extent..boundary_support {
-                    node[self.axis] = length - 1 - (i - positive_extent);
-                    let w = stencil[i];
-
-                    result += w * self.space.value(node, src);
-                }
-
-                node[self.axis] = length - 1 - right;
-                self.space.set_value(node, scale * result, dest);
-            }
-
-            for right in positive.saturating_sub(positive_extent)..positive {
-                let mut result = 0.0;
-
-                let stencil = K::interior();
-
-                for i in 0..positive_extent {
-                    let w = stencil[interior_support - 1 - i];
-                    let ghost = self.positive_ghost_value(node, src, &positive_boundary, i + 1);
-
-                    result += w * ghost;
-                }
-
-                for i in positive_extent..interior_support {
-                    node[self.axis] = length - 1 - (i - positive_extent);
-                    let w = stencil[interior_support - 1 - i];
-
-                    result += w * self.space.value(node, src);
-                }
-
-                node[self.axis] = length - 1 - right;
-                self.space.set_value(node, scale * result, dest);
-            }
+            self.evaluate_positive::<K, B>(node, set, src, dest);
 
             // *****************************
             // Fill interior
@@ -317,11 +209,6 @@ impl<'a, const N: usize> NodeSpaceAxis<'a, N> {
         let positive: usize = K::POSITIVE_SUPPORT;
         let negative: usize = K::NEGATIVE_SUPPORT;
 
-        let negative_extent = <B::NegativeBoundary as Boundary>::EXTENT;
-        let positive_extent = <B::PositiveBoundary as Boundary>::EXTENT;
-
-        let interior_support = positive + negative + 1;
-
         // Source lengths and dest lengths must match node space.
         assert!(dest.len() == self.space.len());
 
@@ -334,96 +221,15 @@ impl<'a, const N: usize> NodeSpaceAxis<'a, N> {
 
         // Loop over plane normal to axis
         for mut node in self.space.vertex_space().plane(self.axis, 0) {
-            // Position of negative boundary vertex
-            node[self.axis] = 0;
-            let negative_position = self.space.position(node);
-
-            // Position of positive boundary vertex
-            node[self.axis] = length - 1;
-            let positive_position = self.space.position(node);
-
             // *****************************
             // Fill left boundary
 
-            let negative_boundary = set.negative(negative_position);
-
-            for left in 0..negative.saturating_sub(negative_extent) {
-                let mut result = 0.0;
-
-                let stencil = K::negative(left);
-
-                for i in 0..negative_extent {
-                    let w = stencil[i];
-
-                    let ghost = negative_boundary.stencil(i + 1, spacing)[0];
-
-                    result += w * ghost;
-                }
-
-                result += stencil[negative_extent];
-
-                node[self.axis] = left;
-                self.space.set_value(node, scale * result, dest);
-            }
-
-            for left in negative.saturating_sub(negative_extent)..negative {
-                let mut result = 0.0;
-
-                let stencil = K::interior();
-
-                for i in 0..negative_extent {
-                    let w = stencil[i];
-                    let ghost = negative_boundary.stencil(i + 1, spacing)[0];
-
-                    result += w * ghost;
-                }
-
-                result += stencil[negative_extent];
-
-                node[self.axis] = left;
-                self.space.set_value(node, scale * result, dest);
-            }
+            self.evaluate_negative_diag::<K, B>(node, set, dest);
 
             // *************************************
             // Fill right boundary
 
-            let positive_boundary = set.positive(positive_position);
-
-            for right in 0..positive.saturating_sub(positive_extent) {
-                let mut result = 0.0;
-
-                let stencil = K::positive(right);
-
-                for i in 0..positive_extent {
-                    let w = stencil[i];
-                    let ghost = positive_boundary.stencil(i + 1, spacing)[0];
-
-                    result += w * ghost;
-                }
-
-                result += stencil[positive_extent];
-
-                node[self.axis] = length - 1 - right;
-                self.space.set_value(node, scale * result, dest);
-            }
-
-            for right in positive.saturating_sub(positive_extent)..positive {
-                let mut result = 0.0;
-
-                let stencil = K::interior();
-
-                for i in 0..positive_extent {
-                    let w = stencil[interior_support - 1 - i];
-                    let ghost = positive_boundary.stencil(i + 1, spacing)[0];
-
-                    result += w * ghost;
-                }
-
-                result += stencil[interior_support - 1 - positive_extent];
-
-                node[self.axis] = length - 1 - right;
-                self.space.set_value(node, scale * result, dest);
-            }
+            self.evaluate_positive_diag::<K, B>(node, set, dest);
 
             // *****************************
             // Fill interior
@@ -433,6 +239,265 @@ impl<'a, const N: usize> NodeSpaceAxis<'a, N> {
                 self.space
                     .set_value(node, scale * K::interior()[negative], dest);
             }
+        }
+    }
+
+    pub fn evaluate_negative<K: Kernel<N>, B: BoundarySet<N>>(
+        self: &Self,
+        mut node: [usize; N],
+        set: &B,
+        src: &[f64],
+        dest: &mut [f64],
+    ) {
+        let kernel_negative_support: usize = K::NEGATIVE_SUPPORT;
+        let kernel_interior_support: usize = K::NEGATIVE_SUPPORT + K::POSITIVE_SUPPORT + 1;
+        let kernel_boundary_support: usize = K::BoundaryStencil::LEN;
+        let ghost_extent = <B::NegativeBoundary as Boundary>::EXTENT;
+
+        // Get spacing along axis for covariant transformation of kernel.
+        let spacing = self.space.spacing(self.axis);
+        let scale = K::scale(spacing);
+
+        // Position of negative boundary vertex
+        node[self.axis] = 0;
+        let negative_position = self.space.position(node);
+        let negative_boundary = set.negative(negative_position);
+
+        // First loop over points that require a one-sided stencil and ghost values
+        for left in 0..kernel_negative_support.saturating_sub(ghost_extent) {
+            let mut result = 0.0;
+
+            let stencil = K::negative(left);
+
+            for i in 0..ghost_extent {
+                let w = stencil[i];
+                let ghost =
+                    self.negative_ghost_value(node, src, &negative_boundary, ghost_extent - i);
+
+                result += w * ghost;
+            }
+
+            for i in ghost_extent..kernel_boundary_support {
+                node[self.axis] = i - ghost_extent;
+                result += stencil[i] * self.space.value(node, src);
+            }
+
+            node[self.axis] = left;
+            self.space.set_value(node, scale * result, dest);
+        }
+
+        // Next loop over points that require a central stencil and ghost values
+        for left in kernel_negative_support.saturating_sub(ghost_extent)..kernel_negative_support {
+            let mut result = 0.0;
+
+            let stencil = K::interior();
+
+            // How many ghost points does this stencil require?
+            let negative_edge = kernel_negative_support - left;
+
+            // Use ghost node values
+            for i in 0..negative_edge {
+                let ghost =
+                    self.negative_ghost_value(node, src, &negative_boundary, negative_edge - i);
+                result += stencil[i] * ghost;
+            }
+
+            // Fill from interior
+            for i in negative_edge..kernel_interior_support {
+                node[self.axis] = i - negative_edge;
+                result += stencil[i] * self.space.value(node, src);
+            }
+
+            node[self.axis] = left;
+            self.space.set_value(node, scale * result, dest);
+        }
+    }
+
+    pub fn evaluate_positive<K: Kernel<N>, B: BoundarySet<N>>(
+        self: &Self,
+        mut node: [usize; N],
+        set: &B,
+        src: &[f64],
+        dest: &mut [f64],
+    ) {
+        let kernel_positive_support: usize = K::POSITIVE_SUPPORT;
+        let kernel_interior_support: usize = K::NEGATIVE_SUPPORT + K::POSITIVE_SUPPORT + 1;
+        let kernel_boundary_support: usize = K::BoundaryStencil::LEN;
+        let ghost_extent = <B::PositiveBoundary as Boundary>::EXTENT;
+
+        // Get spacing along axis for covariant transformation of kernel.
+        let spacing = self.space.spacing(self.axis);
+        let scale = K::scale(spacing);
+
+        let length = self.space.vertex_size()[self.axis];
+
+        // Position of positive boundary vertex
+        node[self.axis] = length - 1;
+        let positive_position = self.space.position(node);
+        let positive_boundary = set.positive(positive_position);
+
+        // First loop over points that require a one-sided stencil and ghost values
+        for right in 0..kernel_positive_support.saturating_sub(ghost_extent) {
+            let mut result = 0.0;
+
+            let stencil = K::positive(right);
+
+            for i in 0..ghost_extent {
+                let ghost =
+                    self.positive_ghost_value(node, src, &positive_boundary, ghost_extent - i);
+
+                result += stencil[kernel_boundary_support - 1 - i] * ghost;
+            }
+
+            for i in ghost_extent..kernel_boundary_support {
+                node[self.axis] = length - 1 - (i - ghost_extent);
+                result += stencil[kernel_boundary_support - 1 - i] * self.space.value(node, src);
+            }
+
+            node[self.axis] = length - 1 - right;
+            self.space.set_value(node, scale * result, dest);
+        }
+
+        // Next loop over points that require a central stencil and ghost values
+        for right in kernel_positive_support.saturating_sub(ghost_extent)..kernel_positive_support {
+            let mut result = 0.0;
+
+            let stencil = K::interior();
+
+            // How many ghost points does this stencil require?
+            let positive_edge = kernel_positive_support - right;
+
+            // Use ghost node values
+            for i in 0..positive_edge {
+                let ghost =
+                    self.positive_ghost_value(node, src, &positive_boundary, positive_edge - i);
+                result += stencil[kernel_interior_support - 1 - i] * ghost;
+            }
+
+            // Fill from interior
+            for i in positive_edge..kernel_interior_support {
+                node[self.axis] = length - 1 - (i - positive_edge);
+                result += stencil[kernel_interior_support - 1 - i] * self.space.value(node, src);
+            }
+
+            node[self.axis] = length - 1 - right;
+            self.space.set_value(node, scale * result, dest);
+        }
+    }
+
+    pub fn evaluate_negative_diag<K: Kernel<N>, B: BoundarySet<N>>(
+        self: &Self,
+        mut node: [usize; N],
+        set: &B,
+        dest: &mut [f64],
+    ) {
+        let kernel_negative_support: usize = K::NEGATIVE_SUPPORT;
+        let ghost_extent = <B::NegativeBoundary as Boundary>::EXTENT;
+
+        // Get spacing along axis for covariant transformation of kernel.
+        let spacing = self.space.spacing(self.axis);
+        let scale = K::scale(spacing);
+
+        // Position of negative boundary vertex
+        node[self.axis] = 0;
+        let negative_position = self.space.position(node);
+        let negative_boundary = set.negative(negative_position);
+
+        // First loop over points that require a one-sided stencil and ghost values
+        for left in 0..kernel_negative_support.saturating_sub(ghost_extent) {
+            let mut result = 0.0;
+
+            let stencil = K::negative(left);
+
+            for i in 0..ghost_extent {
+                result += stencil[i] * negative_boundary.stencil(ghost_extent - i, spacing)[left];
+            }
+
+            result += stencil[ghost_extent + left];
+
+            node[self.axis] = left;
+            self.space.set_value(node, scale * result, dest);
+        }
+
+        // Next loop over points that require a central stencil and ghost values
+        for left in kernel_negative_support.saturating_sub(ghost_extent)..kernel_negative_support {
+            let mut result = 0.0;
+
+            let stencil = K::interior();
+
+            // How many ghost points does this stencil require?
+            let negative_edge = kernel_negative_support - left;
+
+            // Use ghost node values
+            for i in 0..negative_edge {
+                result += stencil[i] * negative_boundary.stencil(negative_edge - i, spacing)[left];
+            }
+
+            result += stencil[negative_edge + left];
+
+            node[self.axis] = left;
+            self.space.set_value(node, scale * result, dest);
+        }
+    }
+
+    pub fn evaluate_positive_diag<K: Kernel<N>, B: BoundarySet<N>>(
+        self: &Self,
+        mut node: [usize; N],
+        set: &B,
+        dest: &mut [f64],
+    ) {
+        let kernel_positive_support: usize = K::POSITIVE_SUPPORT;
+        let kernel_interior_support: usize = K::NEGATIVE_SUPPORT + K::POSITIVE_SUPPORT + 1;
+        let kernel_boundary_support: usize = K::BoundaryStencil::LEN;
+        let ghost_extent = <B::PositiveBoundary as Boundary>::EXTENT;
+
+        // Get spacing along axis for covariant transformation of kernel.
+        let spacing = self.space.spacing(self.axis);
+        let scale = K::scale(spacing);
+
+        let length = self.space.vertex_size()[self.axis];
+
+        // Position of positive boundary vertex
+        node[self.axis] = length - 1;
+        let positive_position = self.space.position(node);
+        let positive_boundary = set.positive(positive_position);
+
+        // First loop over points that require a one-sided stencil and ghost values
+        for right in 0..kernel_positive_support.saturating_sub(ghost_extent) {
+            let mut result = 0.0;
+
+            let stencil = K::positive(right);
+
+            for i in 0..ghost_extent {
+                result += stencil[kernel_boundary_support - 1 - i]
+                    * positive_boundary.stencil(ghost_extent - i, spacing)[right];
+            }
+
+            result += stencil[kernel_boundary_support - 1 - ghost_extent - right];
+
+            node[self.axis] = length - 1 - right;
+            self.space.set_value(node, scale * result, dest);
+        }
+
+        // Next loop over points that require a central stencil and ghost values
+        for right in kernel_positive_support.saturating_sub(ghost_extent)..kernel_positive_support {
+            let mut result = 0.0;
+
+            let stencil = K::interior();
+
+            // How many ghost points does this stencil require?
+            let positive_edge = kernel_positive_support - right;
+
+            // Use ghost node values
+            for i in 0..positive_edge {
+                result += stencil[kernel_interior_support - 1 - i]
+                    * positive_boundary.stencil(positive_edge - i, spacing)[right];
+            }
+
+            result += stencil[kernel_interior_support - 1 - (positive_edge + right)];
+
+            node[self.axis] = length - 1 - right;
+            self.space.set_value(node, scale * result, dest);
         }
     }
 
@@ -531,7 +596,7 @@ impl<'a, const N: usize> NodeSpaceAxis<'a, N> {
                 self.space.set_value(node, (left + 2.0 * edge) / 4.0, dest);
             }
 
-            for i in (2..length - 1).step_by(2) {
+            for i in (2..=length - 3).step_by(2) {
                 node[self.axis] = i - 1;
                 let left = self.space.value(node, dest);
                 node[self.axis] = i + 1;

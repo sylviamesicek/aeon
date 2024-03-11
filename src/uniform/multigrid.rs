@@ -151,7 +151,9 @@ impl<'mesh, const N: usize, Solver: LinearSolver> UniformMultigrid<'mesh, N, Sol
 
         self.mesh
             .residual_level(level, arena, &self.rhs, operator, &x, &mut self.scratch);
-        self.mesh.restrict_level_full(level, &mut self.scratch);
+        self.mesh.restrict_level(level, &mut self.scratch);
+        // Must be some error in restrict implementation
+        // self.mesh.restrict_level_full(level, &mut self.scratch);
 
         // Tau correction
         for i in coarse.clone() {
