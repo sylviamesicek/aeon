@@ -76,9 +76,10 @@ impl<'mesh, const N: usize, Solver: LinearSolver> UniformMultigrid<'mesh, N, Sol
 
             let nres = self.mesh.norm(&self.scratch);
 
-            println!("Iteration {i}, Residual {nres}");
+            // println!("Iteration {i}, Residual {nres}");
 
             if nres <= tol {
+                println!("Multigrid Converged in {i} Iterations");
                 return;
             }
         }

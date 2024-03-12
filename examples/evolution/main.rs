@@ -13,7 +13,10 @@ pub use bcs::*;
 // **********************************
 // Settings
 
-const RADIUS: f64 = 10.0;
+const RADIUS: f64 = 20.0;
+const CFL: f64 = 0.1;
+const DISS: f64 = 1.0;
+const STEPS: usize = 200;
 
 fn is_approximately_equal(a: f64, b: f64) -> bool {
     (a - b).abs() < 10e-10
@@ -49,12 +52,14 @@ impl<'a> Operator<2> for InitialPsiOp<'a> {
         let psi_r = arena.alloc::<f64>(block.len());
 
         block
-            .axis::<4>(0)
+            .axis::<ORDER>(0)
             .second_derivative(&PSI_INITIAL_RHO, psi, psi_rr);
         block
-            .axis::<4>(1)
+            .axis::<ORDER>(1)
             .second_derivative(&PSI_INITIAL_Z, psi, psi_zz);
-        block.axis::<4>(0).derivative(&PSI_INITIAL_RHO, psi, psi_r);
+        block
+            .axis::<ORDER>(0)
+            .derivative(&PSI_INITIAL_RHO, psi, psi_r);
 
         let s_rr = arena.alloc::<f64>(block.len());
         let s_zz = arena.alloc::<f64>(block.len());
@@ -62,9 +67,13 @@ impl<'a> Operator<2> for InitialPsiOp<'a> {
 
         let seed = block.auxillary(self.seed);
 
-        block.axis::<4>(0).second_derivative(&SEED_RHO, seed, s_rr);
-        block.axis::<4>(1).second_derivative(&SEED_Z, seed, s_zz);
-        block.axis::<4>(0).derivative(&SEED_RHO, seed, s_r);
+        block
+            .axis::<ORDER>(0)
+            .second_derivative(&SEED_RHO, seed, s_rr);
+        block
+            .axis::<ORDER>(1)
+            .second_derivative(&SEED_Z, seed, s_zz);
+        block.axis::<ORDER>(0).derivative(&SEED_RHO, seed, s_r);
 
         for (i, node) in block.iter().enumerate() {
             let position = block.position(node);
@@ -90,12 +99,14 @@ impl<'a> Operator<2> for InitialPsiOp<'a> {
         let psi_r = arena.alloc::<f64>(block.len());
 
         block
-            .axis::<4>(0)
+            .axis::<ORDER>(0)
             .second_derivative_diag(&PSI_INITIAL_RHO, psi_rr);
         block
-            .axis::<4>(1)
+            .axis::<ORDER>(1)
             .second_derivative_diag(&PSI_INITIAL_Z, psi_zz);
-        block.axis::<4>(0).derivative_diag(&PSI_INITIAL_RHO, psi_r);
+        block
+            .axis::<ORDER>(0)
+            .derivative_diag(&PSI_INITIAL_RHO, psi_r);
 
         let s_rr = arena.alloc::<f64>(block.len());
         let s_zz = arena.alloc::<f64>(block.len());
@@ -103,9 +114,13 @@ impl<'a> Operator<2> for InitialPsiOp<'a> {
 
         let seed = block.auxillary(self.seed);
 
-        block.axis::<4>(0).second_derivative(&SEED_RHO, seed, s_rr);
-        block.axis::<4>(1).second_derivative(&SEED_Z, seed, s_zz);
-        block.axis::<4>(0).derivative(&SEED_RHO, seed, s_r);
+        block
+            .axis::<ORDER>(0)
+            .second_derivative(&SEED_RHO, seed, s_rr);
+        block
+            .axis::<ORDER>(1)
+            .second_derivative(&SEED_Z, seed, s_zz);
+        block.axis::<ORDER>(0).derivative(&SEED_RHO, seed, s_r);
 
         for (i, node) in block.iter().enumerate() {
             let position = block.position(node);
@@ -138,9 +153,13 @@ impl<'a> Projection<2> for InitialPsiRhs<'a> {
 
         let seed = block.auxillary(self.seed);
 
-        block.axis::<4>(0).second_derivative(&SEED_RHO, seed, s_rr);
-        block.axis::<4>(1).second_derivative(&SEED_Z, seed, s_zz);
-        block.axis::<4>(0).derivative(&SEED_RHO, seed, s_r);
+        block
+            .axis::<ORDER>(0)
+            .second_derivative(&SEED_RHO, seed, s_rr);
+        block
+            .axis::<ORDER>(1)
+            .second_derivative(&SEED_Z, seed, s_zz);
+        block.axis::<ORDER>(0).derivative(&SEED_RHO, seed, s_r);
 
         for (i, node) in block.iter().enumerate() {
             let position = block.position(node);
@@ -167,20 +186,22 @@ impl<'a> Operator<2> for LapseOp<'a> {
         let lapse_z = arena.alloc::<f64>(block.len());
 
         block
-            .axis::<4>(0)
+            .axis::<ORDER>(0)
             .second_derivative(&LAPSE_RHO, lapse, lapse_rr);
         block
-            .axis::<4>(1)
+            .axis::<ORDER>(1)
             .second_derivative(&LAPSE_Z, lapse, lapse_zz);
-        block.axis::<4>(0).derivative(&LAPSE_RHO, lapse, lapse_r);
-        block.axis::<4>(1).derivative(&LAPSE_Z, lapse, lapse_z);
+        block
+            .axis::<ORDER>(0)
+            .derivative(&LAPSE_RHO, lapse, lapse_r);
+        block.axis::<ORDER>(1).derivative(&LAPSE_Z, lapse, lapse_z);
 
         let psi_r = arena.alloc::<f64>(block.len());
         let psi_z = arena.alloc::<f64>(block.len());
         let psi = block.auxillary(self.psi);
 
-        block.axis::<4>(0).derivative(&PSI_RHO, self.psi, psi_r);
-        block.axis::<4>(1).derivative(&PSI_Z, self.psi, psi_z);
+        block.axis::<ORDER>(0).derivative(&PSI_RHO, psi, psi_r);
+        block.axis::<ORDER>(1).derivative(&PSI_Z, psi, psi_z);
 
         let seed = block.auxillary(self.seed);
         let w = block.auxillary(self.w);
@@ -223,20 +244,20 @@ impl<'a> Operator<2> for LapseOp<'a> {
         let lapse_z = arena.alloc::<f64>(block.len());
 
         block
-            .axis::<4>(0)
+            .axis::<ORDER>(0)
             .second_derivative_diag(&LAPSE_RHO, lapse_rr);
         block
-            .axis::<4>(1)
+            .axis::<ORDER>(1)
             .second_derivative_diag(&LAPSE_Z, lapse_zz);
-        block.axis::<4>(0).derivative_diag(&LAPSE_RHO, lapse_r);
-        block.axis::<4>(1).derivative_diag(&LAPSE_Z, lapse_z);
+        block.axis::<ORDER>(0).derivative_diag(&LAPSE_RHO, lapse_r);
+        block.axis::<ORDER>(1).derivative_diag(&LAPSE_Z, lapse_z);
 
         let psi_r = arena.alloc::<f64>(block.len());
         let psi_z = arena.alloc::<f64>(block.len());
         let psi = block.auxillary(self.psi);
 
-        block.axis::<4>(0).derivative(&PSI_RHO, self.psi, psi_r);
-        block.axis::<4>(1).derivative(&PSI_Z, self.psi, psi_z);
+        block.axis::<ORDER>(0).derivative(&PSI_RHO, psi, psi_r);
+        block.axis::<ORDER>(1).derivative(&PSI_Z, psi, psi_z);
 
         let seed = block.auxillary(self.seed);
         let w = block.auxillary(self.w);
@@ -320,18 +341,20 @@ impl<'a> Projection<2> for ShiftRRhs<'a> {
         let lapse_r = arena.alloc(block.len());
         let lapse_z = arena.alloc(block.len());
 
-        block.axis::<4>(0).derivative(&LAPSE_RHO, lapse, lapse_r);
-        block.axis::<4>(1).derivative(&LAPSE_Z, lapse, lapse_z);
+        block
+            .axis::<ORDER>(0)
+            .derivative(&LAPSE_RHO, lapse, lapse_r);
+        block.axis::<ORDER>(1).derivative(&LAPSE_Z, lapse, lapse_z);
 
         let x = block.auxillary(self.x);
         let x_z = arena.alloc(block.len());
 
-        block.axis::<4>(1).derivative(&X_Z, x, x_z);
+        block.axis::<ORDER>(1).derivative(&X_Z, x, x_z);
 
         let u = block.auxillary(self.u);
         let u_r = arena.alloc(block.len());
 
-        block.axis::<4>(0).derivative(&U_RHO, u, u_r);
+        block.axis::<ORDER>(0).derivative(&U_RHO, u, u_r);
 
         for (i, _) in block.iter().enumerate() {
             let lapse = lapse[i] + 1.0;
@@ -356,24 +379,26 @@ impl<'a> Projection<2> for ShiftZRhs<'a> {
         let lapse_r = arena.alloc(block.len());
         let lapse_z = arena.alloc(block.len());
 
-        block.axis::<4>(0).derivative(&LAPSE_RHO, lapse, lapse_r);
-        block.axis::<4>(1).derivative(&LAPSE_Z, lapse, lapse_z);
+        block
+            .axis::<ORDER>(0)
+            .derivative(&LAPSE_RHO, lapse, lapse_r);
+        block.axis::<ORDER>(1).derivative(&LAPSE_Z, lapse, lapse_z);
 
         let x = block.auxillary(self.x);
         let x_r = arena.alloc(block.len());
 
-        block.axis::<4>(0).derivative(&X_RHO, x, x_r);
+        block.axis::<ORDER>(0).derivative(&X_RHO, x, x_r);
 
         let u = block.auxillary(self.u);
         let u_z = arena.alloc(block.len());
 
-        block.axis::<4>(1).derivative(&U_Z, u, u_z);
+        block.axis::<ORDER>(1).derivative(&U_Z, u, u_z);
 
         for (i, _) in block.iter().enumerate() {
             let lapse = lapse[i] + 1.0;
 
             let term1 = 2.0 * (x[i] * lapse_r[i] + lapse * x_r[i]);
-            let term2 = u[i] * lapse_z[i] - lapse * u_z[i];
+            let term2 = u[i] * lapse_z[i] + lapse * u_z[i];
 
             dest[i] = term1 + term2;
         }
@@ -388,10 +413,10 @@ impl Operator<2> for ShiftROp {
         let shiftr_zz = arena.alloc::<f64>(block.len());
 
         block
-            .axis::<4>(0)
+            .axis::<ORDER>(0)
             .second_derivative(&SHIFTR_RHO, shiftr, shiftr_rr);
         block
-            .axis::<4>(1)
+            .axis::<ORDER>(1)
             .second_derivative(&SHIFTR_Z, shiftr, shiftr_zz);
 
         for (i, _) in block.iter().enumerate() {
@@ -404,10 +429,10 @@ impl Operator<2> for ShiftROp {
         let shiftr_zz = arena.alloc::<f64>(block.len());
 
         block
-            .axis::<4>(0)
+            .axis::<ORDER>(0)
             .second_derivative_diag(&SHIFTR_RHO, shiftr_rr);
         block
-            .axis::<4>(1)
+            .axis::<ORDER>(1)
             .second_derivative_diag(&SHIFTR_Z, shiftr_zz);
 
         for (i, _) in block.iter().enumerate() {
@@ -424,10 +449,10 @@ impl Operator<2> for ShiftZOp {
         let shiftz_zz = arena.alloc::<f64>(block.len());
 
         block
-            .axis::<4>(0)
+            .axis::<ORDER>(0)
             .second_derivative(&SHIFTZ_RHO, shiftz, shiftz_rr);
         block
-            .axis::<4>(1)
+            .axis::<ORDER>(1)
             .second_derivative(&SHIFTZ_Z, shiftz, shiftz_zz);
 
         for (i, _) in block.iter().enumerate() {
@@ -440,10 +465,10 @@ impl Operator<2> for ShiftZOp {
         let shiftz_zz = arena.alloc::<f64>(block.len());
 
         block
-            .axis::<4>(0)
+            .axis::<ORDER>(0)
             .second_derivative_diag(&SHIFTZ_RHO, shiftz_rr);
         block
-            .axis::<4>(1)
+            .axis::<ORDER>(1)
             .second_derivative_diag(&SHIFTZ_Z, shiftz_zz);
 
         for (i, _) in block.iter().enumerate() {
@@ -468,9 +493,13 @@ impl<'a> Projection<2> for Hamiltonian<'a> {
 
         let psi = block.auxillary(self.psi);
 
-        block.axis::<4>(0).second_derivative(&PSI_RHO, psi, psi_rr);
-        block.axis::<4>(1).second_derivative(&PSI_Z, psi, psi_zz);
-        block.axis::<4>(0).derivative(&PSI_RHO, psi, psi_r);
+        block
+            .axis::<ORDER>(0)
+            .second_derivative(&PSI_RHO, psi, psi_rr);
+        block
+            .axis::<ORDER>(1)
+            .second_derivative(&PSI_Z, psi, psi_zz);
+        block.axis::<ORDER>(0).derivative(&PSI_RHO, psi, psi_r);
 
         let s_rr = arena.alloc::<f64>(block.len());
         let s_zz = arena.alloc::<f64>(block.len());
@@ -478,9 +507,13 @@ impl<'a> Projection<2> for Hamiltonian<'a> {
 
         let seed = block.auxillary(self.seed);
 
-        block.axis::<4>(0).second_derivative(&SEED_RHO, seed, s_rr);
-        block.axis::<4>(1).second_derivative(&SEED_Z, seed, s_zz);
-        block.axis::<4>(0).derivative(&SEED_RHO, seed, s_r);
+        block
+            .axis::<ORDER>(0)
+            .second_derivative(&SEED_RHO, seed, s_rr);
+        block
+            .axis::<ORDER>(1)
+            .second_derivative(&SEED_Z, seed, s_zz);
+        block.axis::<ORDER>(0).derivative(&SEED_RHO, seed, s_r);
 
         let w = block.auxillary(self.w);
         let u = block.auxillary(self.u);
@@ -504,7 +537,7 @@ impl<'a> Projection<2> for Hamiltonian<'a> {
 
             let scale = psi * psi * psi * psi * psi * (2.0 * rho * seed[i]).exp() / 4.0;
 
-            let term3 = 1.0 / 3.0 * (rho * rho * w[i] + rho * u[i] * w[i] + u[i] * u[i]);
+            let term3 = 1.0 / 3.0 * (rho * rho * w[i] * w[i] + rho * u[i] * w[i] + u[i] * u[i]);
             let term4 = x[i] * x[i];
 
             dest[i] = term1 + term2 + scale * (term3 + term4);
@@ -528,43 +561,68 @@ impl<'a> Projection<2> for PsiEvolution<'a> {
         let shiftz = block.auxillary(self.shiftz);
 
         let shiftr_r = arena.alloc::<f64>(block.len());
-        block.axis::<4>(0).derivative(&SHIFTR_RHO, shiftr, shiftr_r);
+        block
+            .axis::<ORDER>(0)
+            .derivative(&SHIFTR_RHO, shiftr, shiftr_r);
 
         let psi_r = arena.alloc::<f64>(block.len());
         let psi_z = arena.alloc::<f64>(block.len());
 
         let psi = block.auxillary(self.psi);
 
-        block.axis::<4>(0).derivative(&PSI_RHO, psi, psi_r);
-        block.axis::<4>(1).derivative(&PSI_Z, psi, psi_z);
+        block.axis::<ORDER>(0).derivative(&PSI_RHO, psi, psi_r);
+        block.axis::<ORDER>(1).derivative(&PSI_Z, psi, psi_z);
 
         let u = block.auxillary(self.u);
         let w = block.auxillary(self.w);
+
+        let diss_r = arena.alloc(block.len());
+        let diss_z = arena.alloc(block.len());
+
+        block.axis::<ORDER>(0).dissipation(&PSI_RHO, psi, diss_r);
+        block.axis::<ORDER>(1).dissipation(&PSI_Z, psi, diss_z);
 
         for (i, node) in block.iter().enumerate() {
             let position = block.position(node);
             let rho = position[0];
             let z = position[1];
 
-            if is_approximately_equal(rho, RADIUS) {
-                let r = (rho * rho + z * z).sqrt();
+            // if is_approximately_equal(rho, RADIUS) {
+            //     let r = (rho * rho + z * z).sqrt();
 
-                let term1 = -r / rho * psi_r[i];
-                let term2 = -psi[i] / r;
+            //     let term1 = -r / rho * psi_r[i];
+            //     let term2 = -psi[i] / r;
 
-                dest[i] = term1 + term2;
+            //     dest[i] = term1 + term2;
 
-                continue;
-            } else if is_approximately_equal(z, RADIUS) {
-                let r = (rho * rho + z * z).sqrt();
+            //     continue;
+            // } else if is_approximately_equal(z, RADIUS) {
+            //     let r = (rho * rho + z * z).sqrt();
 
-                let term1 = -r / z * psi_z[i];
-                let term2 = -psi[i] / r;
+            //     let term1 = -r / z * psi_z[i];
+            //     let term2 = -psi[i] / r;
 
-                dest[i] = term1 + term2;
+            //     dest[i] = term1 + term2;
 
-                continue;
-            }
+            //     continue;
+            // }
+
+            // if is_approximately_equal(rho, RADIUS) || is_approximately_equal(z, RADIUS) {
+            //     let r = (rho * rho + z * z).sqrt();
+
+            //     let term1 = rho / r * psi_r[i];
+            //     let term2 = z / r * psi_z[i];
+
+            //     dest[i] = -term1 - term2 - psi[i] / r;
+
+            //     continue;
+            // }
+
+            // if is_approximately_equal(rho, RADIUS) || is_approximately_equal(z, RADIUS) {
+            //     dest[i] = shiftr[i] * psi_r[i] + shiftz[i] * psi_z[i];
+
+            //     continue;
+            // }
 
             let psi = psi[i] + 1.0;
             let lapse = lapse[i] + 1.0;
@@ -577,6 +635,8 @@ impl<'a> Projection<2> for PsiEvolution<'a> {
             } else {
                 dest[i] = term1 + term2 + psi * shiftr[i] / (2.0 * rho);
             }
+
+            dest[i] += DISS * (diss_r[i] + diss_z[i]);
         }
     }
 }
@@ -596,17 +656,25 @@ impl<'a> Projection<2> for SeedEvolution<'a> {
         let shiftz = block.auxillary(self.shiftz);
 
         let shiftr_r = arena.alloc::<f64>(block.len());
-        block.axis::<4>(0).derivative(&SHIFTR_RHO, shiftr, shiftr_r);
+        block
+            .axis::<ORDER>(0)
+            .derivative(&SHIFTR_RHO, shiftr, shiftr_r);
 
         let s_r = arena.alloc::<f64>(block.len());
         let s_z = arena.alloc::<f64>(block.len());
 
         let s = block.auxillary(self.seed);
 
-        block.axis::<4>(0).derivative(&SEED_RHO, s, s_r);
-        block.axis::<4>(1).derivative(&SEED_Z, s, s_z);
+        block.axis::<ORDER>(0).derivative(&SEED_RHO, s, s_r);
+        block.axis::<ORDER>(1).derivative(&SEED_Z, s, s_z);
 
         let w = block.auxillary(self.w);
+
+        let diss_r = arena.alloc(block.len());
+        let diss_z = arena.alloc(block.len());
+
+        block.axis::<ORDER>(0).dissipation(&SEED_RHO, s, diss_r);
+        block.axis::<ORDER>(1).dissipation(&SEED_Z, s, diss_z);
 
         for (i, node) in block.iter().enumerate() {
             let position = block.position(node);
@@ -619,25 +687,42 @@ impl<'a> Projection<2> for SeedEvolution<'a> {
                 continue;
             }
 
-            if is_approximately_equal(rho, RADIUS) {
-                let r = (rho * rho + z * z).sqrt();
+            // if is_approximately_equal(rho, RADIUS) {
+            //     let r = (rho * rho + z * z).sqrt();
 
-                let term1 = -r / rho * s_r[i];
-                let term2 = -s[i] / r;
+            //     let term1 = -r / rho * s_r[i];
+            //     let term2 = -s[i] / r;
 
-                dest[i] = term1 + term2;
+            //     dest[i] = term1 + term2;
 
-                continue;
-            } else if is_approximately_equal(z, RADIUS) {
-                let r = (rho * rho + z * z).sqrt();
+            //     continue;
+            // } else if is_approximately_equal(z, RADIUS) {
+            //     let r = (rho * rho + z * z).sqrt();
 
-                let term1 = -r / z * s_z[i];
-                let term2 = -s[i] / r;
+            //     let term1 = -r / z * s_z[i];
+            //     let term2 = -s[i] / r;
 
-                dest[i] = term1 + term2;
+            //     dest[i] = term1 + term2;
 
-                continue;
-            }
+            //     continue;
+            // }
+
+            // if is_approximately_equal(rho, RADIUS) || is_approximately_equal(z, RADIUS) {
+            //     let r = (rho * rho + z * z).sqrt();
+
+            //     let term1 = rho / r * s_r[i];
+            //     let term2 = z / r * s_z[i];
+
+            //     dest[i] = -term1 - term2 - s[i] / r;
+
+            //     continue;
+            // }
+
+            // if is_approximately_equal(rho, RADIUS) || is_approximately_equal(z, RADIUS) {
+            //     dest[i] = shiftr[i] * s_r[i] + shiftz[i] * s_z[i] + shiftr[i] * s[i] / rho;
+
+            //     continue;
+            // }
 
             let lapse = lapse[i] + 1.0;
 
@@ -646,6 +731,8 @@ impl<'a> Projection<2> for SeedEvolution<'a> {
             let term3 = shiftr_r[i] / rho - shiftr[i] / (rho * rho);
 
             dest[i] = term1 + term2 + term3;
+
+            dest[i] += DISS * (diss_r[i] + diss_z[i]);
         }
     }
 }
@@ -669,23 +756,29 @@ impl<'a> Projection<2> for WEvolution<'a> {
         let lapse = block.auxillary(self.lapse);
 
         block
-            .axis::<4>(0)
+            .axis::<ORDER>(0)
             .second_derivative(&LAPSE_RHO, lapse, lapse_rr);
         block
-            .axis::<4>(1)
+            .axis::<ORDER>(1)
             .second_derivative(&LAPSE_Z, lapse, lapse_zz);
-        block.axis::<4>(0).derivative(&LAPSE_RHO, lapse, lapse_r);
-        block.axis::<4>(1).derivative(&LAPSE_Z, lapse, lapse_z);
+        block
+            .axis::<ORDER>(0)
+            .derivative(&LAPSE_RHO, lapse, lapse_r);
+        block.axis::<ORDER>(1).derivative(&LAPSE_Z, lapse, lapse_z);
 
         let shiftr_z = arena.alloc(block.len());
         let shiftr = block.auxillary(self.shiftr);
 
-        block.axis::<4>(1).derivative(&SHIFTR_Z, shiftr, shiftr_z);
+        block
+            .axis::<ORDER>(1)
+            .derivative(&SHIFTR_Z, shiftr, shiftr_z);
 
         let shiftz_r = arena.alloc(block.len());
         let shiftz = block.auxillary(self.shiftz);
 
-        block.axis::<4>(0).derivative(&SHIFTZ_RHO, shiftz, shiftz_r);
+        block
+            .axis::<ORDER>(0)
+            .derivative(&SHIFTZ_RHO, shiftz, shiftz_r);
 
         let psi_rr = arena.alloc::<f64>(block.len());
         let psi_zz = arena.alloc::<f64>(block.len());
@@ -694,10 +787,14 @@ impl<'a> Projection<2> for WEvolution<'a> {
 
         let psi = block.auxillary(self.psi);
 
-        block.axis::<4>(0).second_derivative(&PSI_RHO, psi, psi_rr);
-        block.axis::<4>(1).second_derivative(&PSI_Z, psi, psi_zz);
-        block.axis::<4>(0).derivative(&PSI_RHO, psi, psi_r);
-        block.axis::<4>(1).derivative(&PSI_Z, psi, psi_z);
+        block
+            .axis::<ORDER>(0)
+            .second_derivative(&PSI_RHO, psi, psi_rr);
+        block
+            .axis::<ORDER>(1)
+            .second_derivative(&PSI_Z, psi, psi_zz);
+        block.axis::<ORDER>(0).derivative(&PSI_RHO, psi, psi_r);
+        block.axis::<ORDER>(1).derivative(&PSI_Z, psi, psi_z);
 
         let s_rr = arena.alloc::<f64>(block.len());
         let s_zz = arena.alloc::<f64>(block.len());
@@ -706,10 +803,14 @@ impl<'a> Projection<2> for WEvolution<'a> {
 
         let seed = block.auxillary(self.seed);
 
-        block.axis::<4>(0).second_derivative(&SEED_RHO, seed, s_rr);
-        block.axis::<4>(1).second_derivative(&SEED_Z, seed, s_zz);
-        block.axis::<4>(0).derivative(&SEED_RHO, seed, s_r);
-        block.axis::<4>(1).derivative(&SEED_Z, seed, s_z);
+        block
+            .axis::<ORDER>(0)
+            .second_derivative(&SEED_RHO, seed, s_rr);
+        block
+            .axis::<ORDER>(1)
+            .second_derivative(&SEED_Z, seed, s_zz);
+        block.axis::<ORDER>(0).derivative(&SEED_RHO, seed, s_r);
+        block.axis::<ORDER>(1).derivative(&SEED_Z, seed, s_z);
 
         let w = block.auxillary(self.w);
         let x = block.auxillary(self.x);
@@ -717,8 +818,14 @@ impl<'a> Projection<2> for WEvolution<'a> {
         let w_r = arena.alloc(block.len());
         let w_z = arena.alloc(block.len());
 
-        block.axis::<4>(0).derivative(&W_RHO, w, w_r);
-        block.axis::<4>(1).derivative(&W_Z, w, w_z);
+        block.axis::<ORDER>(0).derivative(&W_RHO, w, w_r);
+        block.axis::<ORDER>(1).derivative(&W_Z, w, w_z);
+
+        let diss_r = arena.alloc(block.len());
+        let diss_z = arena.alloc(block.len());
+
+        block.axis::<ORDER>(0).dissipation(&W_RHO, w, diss_r);
+        block.axis::<ORDER>(1).dissipation(&W_Z, w, diss_z);
 
         for (i, node) in block.iter().enumerate() {
             let position = block.position(node);
@@ -731,25 +838,42 @@ impl<'a> Projection<2> for WEvolution<'a> {
                 continue;
             }
 
-            if is_approximately_equal(rho, RADIUS) {
-                let r = (rho * rho + z * z).sqrt();
+            // if is_approximately_equal(rho, RADIUS) {
+            //     let r = (rho * rho + z * z).sqrt();
 
-                let term1 = -r / rho * w_r[i];
-                let term2 = -w[i] / r;
+            //     let term1 = -r / rho * w_r[i];
+            //     let term2 = -w[i] / r;
 
-                dest[i] = term1 + term2;
+            //     dest[i] = term1 + term2;
 
-                continue;
-            } else if is_approximately_equal(z, RADIUS) {
-                let r = (rho * rho + z * z).sqrt();
+            //     continue;
+            // } else if is_approximately_equal(z, RADIUS) {
+            //     let r = (rho * rho + z * z).sqrt();
 
-                let term1 = -r / z * w_z[i];
-                let term2 = -w[i] / r;
+            //     let term1 = -r / z * w_z[i];
+            //     let term2 = -w[i] / r;
 
-                dest[i] = term1 + term2;
+            //     dest[i] = term1 + term2;
 
-                continue;
-            }
+            //     continue;
+            // }
+
+            // if is_approximately_equal(rho, RADIUS) || is_approximately_equal(z, RADIUS) {
+            //     let r = (rho * rho + z * z).sqrt();
+
+            //     let term1 = rho / r * w_r[i];
+            //     let term2 = z / r * w_z[i];
+
+            //     dest[i] = -term1 - term2 - w[i] / r;
+
+            //     continue;
+            // }
+
+            // if is_approximately_equal(rho, RADIUS) || is_approximately_equal(z, RADIUS) {
+            //     dest[i] = shiftr[i] * w_r[i] + shiftz[i] * w_z[i] + shiftr[i] * w[i] / rho;
+
+            //     continue;
+            // }
 
             let psi = psi[i] + 1.0;
             let lapse = lapse[i] + 1.0;
@@ -771,6 +895,8 @@ impl<'a> Projection<2> for WEvolution<'a> {
             let term7 = 2.0 / psi * (psi_r[i] / (rho * rho) - psi_rr[i] / rho);
 
             dest[i] = term1 + term2 + scale1 * (term3 + term4) + scale2 * (term5 + term6 + term7);
+
+            dest[i] += DISS * (diss_r[i] + diss_z[i]);
         }
     }
 }
@@ -794,23 +920,29 @@ impl<'a> Projection<2> for UEvolution<'a> {
         let lapse = block.auxillary(self.lapse);
 
         block
-            .axis::<4>(0)
+            .axis::<ORDER>(0)
             .second_derivative(&LAPSE_RHO, lapse, lapse_rr);
         block
-            .axis::<4>(1)
+            .axis::<ORDER>(1)
             .second_derivative(&LAPSE_Z, lapse, lapse_zz);
-        block.axis::<4>(0).derivative(&LAPSE_RHO, lapse, lapse_r);
-        block.axis::<4>(1).derivative(&LAPSE_Z, lapse, lapse_z);
+        block
+            .axis::<ORDER>(0)
+            .derivative(&LAPSE_RHO, lapse, lapse_r);
+        block.axis::<ORDER>(1).derivative(&LAPSE_Z, lapse, lapse_z);
 
         let shiftr_z = arena.alloc(block.len());
         let shiftr = block.auxillary(self.shiftr);
 
-        block.axis::<4>(1).derivative(&SHIFTR_Z, shiftr, shiftr_z);
+        block
+            .axis::<ORDER>(1)
+            .derivative(&SHIFTR_Z, shiftr, shiftr_z);
 
         let shiftz_r = arena.alloc(block.len());
         let shiftz = block.auxillary(self.shiftz);
 
-        block.axis::<4>(0).derivative(&SHIFTZ_RHO, shiftz, shiftz_r);
+        block
+            .axis::<ORDER>(0)
+            .derivative(&SHIFTZ_RHO, shiftz, shiftz_r);
 
         let psi_rr = arena.alloc::<f64>(block.len());
         let psi_zz = arena.alloc::<f64>(block.len());
@@ -819,10 +951,14 @@ impl<'a> Projection<2> for UEvolution<'a> {
 
         let psi = block.auxillary(self.psi);
 
-        block.axis::<4>(0).second_derivative(&PSI_RHO, psi, psi_rr);
-        block.axis::<4>(1).second_derivative(&PSI_Z, psi, psi_zz);
-        block.axis::<4>(0).derivative(&PSI_RHO, psi, psi_r);
-        block.axis::<4>(1).derivative(&PSI_Z, psi, psi_z);
+        block
+            .axis::<ORDER>(0)
+            .second_derivative(&PSI_RHO, psi, psi_rr);
+        block
+            .axis::<ORDER>(1)
+            .second_derivative(&PSI_Z, psi, psi_zz);
+        block.axis::<ORDER>(0).derivative(&PSI_RHO, psi, psi_r);
+        block.axis::<ORDER>(1).derivative(&PSI_Z, psi, psi_z);
 
         let s_rr = arena.alloc::<f64>(block.len());
         let s_zz = arena.alloc::<f64>(block.len());
@@ -831,10 +967,14 @@ impl<'a> Projection<2> for UEvolution<'a> {
 
         let seed = block.auxillary(self.seed);
 
-        block.axis::<4>(0).second_derivative(&SEED_RHO, seed, s_rr);
-        block.axis::<4>(1).second_derivative(&SEED_Z, seed, s_zz);
-        block.axis::<4>(0).derivative(&SEED_RHO, seed, s_r);
-        block.axis::<4>(1).derivative(&SEED_Z, seed, s_z);
+        block
+            .axis::<ORDER>(0)
+            .second_derivative(&SEED_RHO, seed, s_rr);
+        block
+            .axis::<ORDER>(1)
+            .second_derivative(&SEED_Z, seed, s_zz);
+        block.axis::<ORDER>(0).derivative(&SEED_RHO, seed, s_r);
+        block.axis::<ORDER>(1).derivative(&SEED_Z, seed, s_z);
 
         let u = block.auxillary(self.u);
         let x = block.auxillary(self.x);
@@ -845,30 +985,53 @@ impl<'a> Projection<2> for UEvolution<'a> {
         block.axis::<4>(0).derivative(&U_RHO, u, u_r);
         block.axis::<4>(1).derivative(&U_Z, u, u_z);
 
+        let diss_r = arena.alloc(block.len());
+        let diss_z = arena.alloc(block.len());
+
+        block.axis::<ORDER>(0).dissipation(&U_RHO, u, diss_r);
+        block.axis::<ORDER>(1).dissipation(&U_Z, u, diss_z);
+
         for (i, node) in block.iter().enumerate() {
             let position = block.position(node);
             let rho = position[0];
             let z = position[1];
 
-            if is_approximately_equal(rho, RADIUS) {
-                let r = (rho * rho + z * z).sqrt();
+            // if is_approximately_equal(rho, RADIUS) {
+            //     let r = (rho * rho + z * z).sqrt();
 
-                let term1 = -r / rho * u_r[i];
-                let term2 = -u[i] / r;
+            //     let term1 = -r / rho * u_r[i];
+            //     let term2 = -u[i] / r;
 
-                dest[i] = term1 + term2;
+            //     dest[i] = term1 + term2;
 
-                continue;
-            } else if is_approximately_equal(z, RADIUS) {
-                let r = (rho * rho + z * z).sqrt();
+            //     continue;
+            // } else if is_approximately_equal(z, RADIUS) {
+            //     let r = (rho * rho + z * z).sqrt();
 
-                let term1 = -r / z * u_z[i];
-                let term2 = -u[i] / r;
+            //     let term1 = -r / z * u_z[i];
+            //     let term2 = -u[i] / r;
 
-                dest[i] = term1 + term2;
+            //     dest[i] = term1 + term2;
 
-                continue;
-            }
+            //     continue;
+            // }
+
+            // if is_approximately_equal(rho, RADIUS) || is_approximately_equal(z, RADIUS) {
+            //     let r = (rho * rho + z * z).sqrt();
+
+            //     let term1 = rho / r * u_r[i];
+            //     let term2 = z / r * u_z[i];
+
+            //     dest[i] = -term1 - term2 - u[i] / r;
+
+            //     continue;
+            // }
+
+            // if is_approximately_equal(rho, RADIUS) || is_approximately_equal(z, RADIUS) {
+            //     dest[i] = shiftr[i] * u_r[i] + shiftz[i] * u_z[i];
+
+            //     continue;
+            // }
 
             let psi = psi[i] + 1.0;
             let lapse = lapse[i] + 1.0;
@@ -876,7 +1039,7 @@ impl<'a> Projection<2> for UEvolution<'a> {
             let term1 = shiftr[i] * u_r[i] + shiftz[i] * u_z[i];
             let term2 = 2.0 * x[i] * (shiftr_z[i] - shiftz_r[i]);
 
-            let scale1 = (-2.0 * rho * seed[i]) / (psi * psi * psi * psi);
+            let scale1 = (-2.0 * rho * seed[i]).exp() / (psi * psi * psi * psi);
             let term3 = 2.0 * lapse_z[i] * (2.0 * psi_z[i] / psi + rho * s_z[i]);
             let term4 = -2.0 * lapse_r[i] * (rho * s_r[i] + seed[i] + 2.0 * psi_r[i] / psi);
             let term5 = lapse_rr[i] - lapse_zz[i];
@@ -896,6 +1059,8 @@ impl<'a> Projection<2> for UEvolution<'a> {
 
             dest[i] =
                 term1 + term2 + scale1 * (term3 + term4 + term5) + scale2 * (term6 + term7 + term8);
+
+            dest[i] += DISS * (diss_r[i] + diss_z[i]);
         }
     }
 }
@@ -920,24 +1085,32 @@ impl<'a> Projection<2> for XEvolution<'a> {
         let lapse = block.auxillary(self.lapse);
 
         block
-            .axis::<4>(0)
+            .axis::<ORDER>(0)
             .second_derivative(&LAPSE_RHO, lapse, lapse_rr);
         block
-            .axis::<4>(1)
+            .axis::<ORDER>(1)
             .second_derivative(&LAPSE_Z, lapse, lapse_zz);
-        block.axis::<4>(0).derivative(&LAPSE_RHO, lapse, lapse_r);
-        block.axis::<4>(1).derivative(&LAPSE_Z, lapse, lapse_z);
-        block.axis::<4>(1).derivative(&LAPSE_Z, lapse_r, lapse_rz);
+        block
+            .axis::<ORDER>(0)
+            .derivative(&LAPSE_RHO, lapse, lapse_r);
+        block.axis::<ORDER>(1).derivative(&LAPSE_Z, lapse, lapse_z);
+        block
+            .axis::<ORDER>(1)
+            .derivative(&LAPSE_Z, lapse_r, lapse_rz);
 
         let shiftr_z = arena.alloc(block.len());
         let shiftr = block.auxillary(self.shiftr);
 
-        block.axis::<4>(1).derivative(&SHIFTR_Z, shiftr, shiftr_z);
+        block
+            .axis::<ORDER>(1)
+            .derivative(&SHIFTR_Z, shiftr, shiftr_z);
 
         let shiftz_r = arena.alloc(block.len());
         let shiftz = block.auxillary(self.shiftz);
 
-        block.axis::<4>(0).derivative(&SHIFTZ_RHO, shiftz, shiftz_r);
+        block
+            .axis::<ORDER>(0)
+            .derivative(&SHIFTZ_RHO, shiftz, shiftz_r);
 
         let psi_rr = arena.alloc::<f64>(block.len());
         let psi_zz = arena.alloc::<f64>(block.len());
@@ -947,11 +1120,15 @@ impl<'a> Projection<2> for XEvolution<'a> {
 
         let psi = block.auxillary(self.psi);
 
-        block.axis::<4>(0).second_derivative(&PSI_RHO, psi, psi_rr);
-        block.axis::<4>(1).second_derivative(&PSI_Z, psi, psi_zz);
-        block.axis::<4>(0).derivative(&PSI_RHO, psi, psi_r);
-        block.axis::<4>(1).derivative(&PSI_Z, psi, psi_z);
-        block.axis::<4>(1).derivative(&PSI_Z, psi_r, psi_rz);
+        block
+            .axis::<ORDER>(0)
+            .second_derivative(&PSI_RHO, psi, psi_rr);
+        block
+            .axis::<ORDER>(1)
+            .second_derivative(&PSI_Z, psi, psi_zz);
+        block.axis::<ORDER>(0).derivative(&PSI_RHO, psi, psi_r);
+        block.axis::<ORDER>(1).derivative(&PSI_Z, psi, psi_z);
+        block.axis::<ORDER>(1).derivative(&PSI_Z, psi_r, psi_rz);
 
         let s_rr = arena.alloc::<f64>(block.len());
         let s_zz = arena.alloc::<f64>(block.len());
@@ -960,10 +1137,14 @@ impl<'a> Projection<2> for XEvolution<'a> {
 
         let seed = block.auxillary(self.seed);
 
-        block.axis::<4>(0).second_derivative(&SEED_RHO, seed, s_rr);
-        block.axis::<4>(1).second_derivative(&SEED_Z, seed, s_zz);
-        block.axis::<4>(0).derivative(&SEED_RHO, seed, s_r);
-        block.axis::<4>(1).derivative(&SEED_Z, seed, s_z);
+        block
+            .axis::<ORDER>(0)
+            .second_derivative(&SEED_RHO, seed, s_rr);
+        block
+            .axis::<ORDER>(1)
+            .second_derivative(&SEED_Z, seed, s_zz);
+        block.axis::<ORDER>(0).derivative(&SEED_RHO, seed, s_r);
+        block.axis::<ORDER>(1).derivative(&SEED_Z, seed, s_z);
 
         let u = block.auxillary(self.u);
         let x = block.auxillary(self.x);
@@ -971,8 +1152,14 @@ impl<'a> Projection<2> for XEvolution<'a> {
         let x_r = arena.alloc(block.len());
         let x_z = arena.alloc(block.len());
 
-        block.axis::<4>(0).derivative(&X_RHO, x, x_r);
-        block.axis::<4>(1).derivative(&X_Z, x, x_z);
+        block.axis::<ORDER>(0).derivative(&X_RHO, x, x_r);
+        block.axis::<ORDER>(1).derivative(&X_Z, x, x_z);
+
+        let diss_r = arena.alloc(block.len());
+        let diss_z = arena.alloc(block.len());
+
+        block.axis::<ORDER>(0).dissipation(&X_RHO, x, diss_r);
+        block.axis::<ORDER>(1).dissipation(&X_Z, x, diss_z);
 
         for (i, node) in block.iter().enumerate() {
             let position = block.position(node);
@@ -985,25 +1172,42 @@ impl<'a> Projection<2> for XEvolution<'a> {
                 continue;
             }
 
-            if is_approximately_equal(rho, RADIUS) {
-                let r = (rho * rho + z * z).sqrt();
+            // if is_approximately_equal(rho, RADIUS) {
+            //     let r = (rho * rho + z * z).sqrt();
 
-                let term1 = -r / rho * x_r[i];
-                let term2 = -x[i] / r;
+            //     let term1 = -r / rho * x_r[i];
+            //     let term2 = -x[i] / r;
 
-                dest[i] = term1 + term2;
+            //     dest[i] = term1 + term2;
 
-                continue;
-            } else if is_approximately_equal(z, RADIUS) {
-                let r = (rho * rho + z * z).sqrt();
+            //     continue;
+            // } else if is_approximately_equal(z, RADIUS) {
+            //     let r = (rho * rho + z * z).sqrt();
 
-                let term1 = -r / z * x_z[i];
-                let term2 = -x[i] / r;
+            //     let term1 = -r / z * x_z[i];
+            //     let term2 = -x[i] / r;
 
-                dest[i] = term1 + term2;
+            //     dest[i] = term1 + term2;
 
-                continue;
-            }
+            //     continue;
+            // }
+
+            // if is_approximately_equal(rho, RADIUS) || is_approximately_equal(z, RADIUS) {
+            //     let r = (rho * rho + z * z).sqrt();
+
+            //     let term1 = rho / r * x_r[i];
+            //     let term2 = z / r * x_z[i];
+
+            //     dest[i] = -term1 - term2 - x[i] / r;
+
+            //     continue;
+            // }
+
+            // if is_approximately_equal(rho, RADIUS) || is_approximately_equal(z, RADIUS) {
+            //     dest[i] = shiftr[i] * x_r[i] + shiftz[i] * x_z[i];
+
+            //     continue;
+            // }
 
             let psi = psi[i] + 1.0;
             let lapse = lapse[i] + 1.0;
@@ -1011,7 +1215,7 @@ impl<'a> Projection<2> for XEvolution<'a> {
             let term1 = shiftr[i] * x_r[i] + shiftz[i] * x_z[i];
             let term2 = 1.0 / 2.0 * u[i] * (shiftz_r[i] - shiftr_z[i]);
 
-            let scale1 = (-2.0 * rho * seed[i]) / (psi * psi * psi * psi);
+            let scale1 = (-2.0 * rho * seed[i]).exp() / (psi * psi * psi * psi);
             let term3 = lapse_r[i] * (rho * s_z[i] + 2.0 * psi_z[i] / psi);
             let term4 = lapse_z[i] * (rho * s_r[i] + seed[i] + 2.0 * psi_r[i] / psi);
             let term5 = -lapse_rz[i];
@@ -1023,6 +1227,8 @@ impl<'a> Projection<2> for XEvolution<'a> {
 
             dest[i] =
                 term1 + term2 + scale1 * (term3 + term4 + term5) + scale2 * (term6 + term7 + term8);
+
+            dest[i] += DISS * (diss_r[i] + diss_z[i]);
         }
     }
 }
@@ -1433,8 +1639,8 @@ fn write_vtk_output(
     let x = &dynamic.x[range.clone()];
 
     let lapse = &gauge.lapse[range.clone()];
-    let shiftr = &gauge.lapse[range.clone()];
-    let shiftz = &gauge.lapse[range.clone()];
+    let shiftr = &gauge.shiftr[range.clone()];
+    let shiftz = &gauge.shiftz[range.clone()];
 
     let constraint = &constraint[range.clone()];
 
@@ -1646,13 +1852,19 @@ pub fn main() {
 
     let mut system = DynamicIntegrator::new(&mesh, dynamic, gauge);
 
-    let steps = 100;
-    let cfl = 0.1;
+    let min_spacing = mesh.min_spacing();
 
-    let k = cfl * 0.1;
+    let k = CFL * min_spacing;
 
-    for i in 0..steps {
-        println!("Step {}", i);
+    println!("Step Size {k}");
+
+    for i in 0..STEPS {
+        println!(
+            "Step {}, Residual {}, Time {}",
+            i,
+            mesh.norm(&constraint) / (constraint.len() as f64).sqrt(),
+            k * i as f64,
+        );
         // Step
         system.step(&mut arena, k);
         // Solve constraint

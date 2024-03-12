@@ -2,7 +2,7 @@ use crate::arena::Arena;
 use crate::common::NodeSpace;
 use crate::geometry::CartesianIterator;
 
-use super::{BoundarySet, FDDerivative, FDSecondDerivative, Kernel};
+use super::{kernel::FDDissipation, BoundarySet, FDDerivative, FDSecondDerivative, Kernel};
 
 #[derive(Debug)]
 pub struct Block<const N: usize> {
@@ -13,6 +13,7 @@ pub struct Block<const N: usize> {
 
 impl<const N: usize> Block<N> {
     pub fn new(space: NodeSpace<N>, offset: usize, total: usize) -> Self {
+        assert!(total == space.len());
         Self {
             space,
             offset,
@@ -37,7 +38,7 @@ impl<const N: usize> Block<N> {
     // }
 
     pub fn auxillary<'a>(self: &Self, src: &'a [f64]) -> &'a [f64] {
-        &src[self.offset..self.offset + self.total]
+        &src[self.offset..(self.offset + self.total)]
     }
 
     pub fn evaluate<K: Kernel<N>, B: BoundarySet<N>>(
@@ -94,6 +95,11 @@ impl<'a, const N: usize> BlockAxis<'a, N, 2> {
         self.block
             .evaluate_diag::<FDSecondDerivative<2>, B>(self.axis, set, dest)
     }
+
+    pub fn dissipation<B: BoundarySet<N>>(self: &Self, set: &B, src: &[f64], dest: &mut [f64]) {
+        self.block
+            .evaluate::<FDDissipation<2>, B>(self.axis, set, src, dest)
+    }
 }
 
 impl<'a, const N: usize> BlockAxis<'a, N, 4> {
@@ -120,6 +126,11 @@ impl<'a, const N: usize> BlockAxis<'a, N, 4> {
     pub fn second_derivative_diag<B: BoundarySet<N>>(self: &Self, set: &B, dest: &mut [f64]) {
         self.block
             .evaluate_diag::<FDSecondDerivative<4>, B>(self.axis, set, dest)
+    }
+
+    pub fn dissipation<B: BoundarySet<N>>(self: &Self, set: &B, src: &[f64], dest: &mut [f64]) {
+        self.block
+            .evaluate::<FDDissipation<4>, B>(self.axis, set, src, dest)
     }
 }
 

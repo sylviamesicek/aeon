@@ -95,6 +95,18 @@ impl<const N: usize> UniformMesh<N> {
         Block::new(space, offset, total)
     }
 
+    pub fn min_spacing(self: &Self) -> f64 {
+        let space = self.level_node_space(self.level_count() - 1);
+
+        let mut result = f64::MAX;
+
+        for i in 0..N {
+            result = result.min(space.spacing(i));
+        }
+
+        result
+    }
+
     pub fn restrict(self: &Self, field: &mut [f64]) {
         assert!(field.len() == self.node_count());
 

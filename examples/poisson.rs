@@ -1,22 +1,22 @@
 use aeon::{
-    common::{AntiSymmetricBoundary, Mixed, Simple, SymmetricBoundary},
+    common::{AntiSymmetricBoundary, Mixed, RobinBoundary, Simple, SymmetricBoundary},
     prelude::*,
 };
 use std::{f64::consts::PI, path::PathBuf};
 use vtkio::model::*;
 
-// type BoundarySet = Mixed<2, Simple<AntiSymmetricBoundary<2>>, Simple<RobinBoundary<2>>>;
-type BoundarySet2 = Mixed<2, Simple<AntiSymmetricBoundary<2>>, Simple<SymmetricBoundary<2>>>;
+type BoundarySet = Mixed<2, Simple<AntiSymmetricBoundary<4>>, Simple<RobinBoundary<4>>>;
+// type BoundarySet2 = Mixed<2, Simple<AntiSymmetricBoundary<4>>, Simple<SymmetricBoundary<4>>>;
 
-// const BOUNDARY_SET: BoundarySet = Mixed::new(
-//     Simple::new(AntiSymmetricBoundary),
-//     Simple::new(RobinBoundary::nuemann()),
-// );
-
-const BOUNDARY_SET: BoundarySet2 = Mixed::new(
+const BOUNDARY_SET: BoundarySet = Mixed::new(
     Simple::new(AntiSymmetricBoundary),
-    Simple::new(SymmetricBoundary),
+    Simple::new(RobinBoundary::nuemann()),
 );
+
+// const BOUNDARY_SET: BoundarySet2 = Mixed::new(
+//     Simple::new(AntiSymmetricBoundary),
+//     Simple::new(SymmetricBoundary),
+// );
 
 struct Field {}
 
@@ -38,10 +38,10 @@ impl Operator<2> for LaplacianOp {
         let f_zz = arena.alloc(block.len());
 
         block
-            .axis::<2>(0)
+            .axis::<4>(0)
             .second_derivative(&BOUNDARY_SET, src, f_rr);
         block
-            .axis::<2>(1)
+            .axis::<4>(1)
             .second_derivative(&BOUNDARY_SET, src, f_zz);
 
         for (i, _) in block.iter().enumerate() {
@@ -54,10 +54,10 @@ impl Operator<2> for LaplacianOp {
         let f_zz = arena.alloc(block.len());
 
         block
-            .axis::<2>(0)
+            .axis::<4>(0)
             .second_derivative_diag(&BOUNDARY_SET, f_rr);
         block
-            .axis::<2>(1)
+            .axis::<4>(1)
             .second_derivative_diag(&BOUNDARY_SET, f_zz);
 
         for (i, _) in block.iter().enumerate() {
@@ -256,6 +256,9 @@ pub fn main() {
     mesh.project(&mut arena, &Field {}, &mut field);
     // mesh.project(&mut arena, &LaplacianOp, &mut laplacian);
     solution.fill(0.0);
+
+    // mesh.apply(&mut arena, &LaplacianOp {}, &field, &mut solution);
+
     mesh.project(&mut arena, &LaplacianRhs, &mut rhs);
 
     let mut multigrid: UniformMultigrid<'_, 2, BiCGStabSolver> = UniformMultigrid::new(
@@ -273,7 +276,7 @@ pub fn main() {
     multigrid.solve(&mut arena, &LaplacianOp, &rhs, &mut solution);
 
     for i in 0..rhs.len() {
-        rhs[i] = solution[i] - field[i];
+        rhs[i] = field[i] - solution[i];
     }
 
     write_vtk_output(&mesh, &field, &solution, &rhs);

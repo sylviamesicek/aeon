@@ -267,7 +267,7 @@ impl<'a, const N: usize> NodeSpaceAxis<'a, N> {
         for left in 0..kernel_negative_support.saturating_sub(ghost_extent) {
             let mut result = 0.0;
 
-            let stencil = K::negative(left);
+            let stencil = K::negative(left + ghost_extent);
 
             for i in 0..ghost_extent {
                 let w = stencil[i];
@@ -340,7 +340,7 @@ impl<'a, const N: usize> NodeSpaceAxis<'a, N> {
         for right in 0..kernel_positive_support.saturating_sub(ghost_extent) {
             let mut result = 0.0;
 
-            let stencil = K::positive(right);
+            let stencil = K::positive(right + ghost_extent);
 
             for i in 0..ghost_extent {
                 let ghost =
@@ -407,7 +407,7 @@ impl<'a, const N: usize> NodeSpaceAxis<'a, N> {
         for left in 0..kernel_negative_support.saturating_sub(ghost_extent) {
             let mut result = 0.0;
 
-            let stencil = K::negative(left);
+            let stencil = K::negative(left + ghost_extent);
 
             for i in 0..ghost_extent {
                 result += stencil[i] * negative_boundary.stencil(ghost_extent - i, spacing)[left];
@@ -466,7 +466,7 @@ impl<'a, const N: usize> NodeSpaceAxis<'a, N> {
         for right in 0..kernel_positive_support.saturating_sub(ghost_extent) {
             let mut result = 0.0;
 
-            let stencil = K::positive(right);
+            let stencil = K::positive(right + ghost_extent);
 
             for i in 0..ghost_extent {
                 result += stencil[kernel_boundary_support - 1 - i]

@@ -2,10 +2,14 @@ use aeon::common::{
     AntiSymmetricBoundary, AsymptoticFlatness, FreeBoundary, Mixed, Simple, SymmetricBoundary,
 };
 
-pub type AsymptoticOdd = Mixed<2, Simple<AntiSymmetricBoundary<4>>, AsymptoticFlatness<4>>;
-pub type AsymptoticEven = Mixed<2, Simple<SymmetricBoundary<4>>, AsymptoticFlatness<4>>;
-pub type FreeOdd = Mixed<2, Simple<AntiSymmetricBoundary<4>>, Simple<FreeBoundary>>;
-pub type FreeEven = Mixed<2, Simple<SymmetricBoundary<4>>, Simple<FreeBoundary>>;
+pub const ORDER: usize = 4;
+
+pub type AsymptoticOdd =
+    Mixed<2, Simple<AntiSymmetricBoundary<{ ORDER + 2 }>>, AsymptoticFlatness<ORDER>>;
+pub type AsymptoticEven =
+    Mixed<2, Simple<SymmetricBoundary<{ ORDER + 2 }>>, AsymptoticFlatness<ORDER>>;
+pub type FreeOdd = Mixed<2, Simple<AntiSymmetricBoundary<{ ORDER + 2 }>>, Simple<FreeBoundary>>;
+pub type FreeEven = Mixed<2, Simple<SymmetricBoundary<{ ORDER + 2 }>>, Simple<FreeBoundary>>;
 
 pub const ASYMPTOTIC_ODD_RHO: AsymptoticOdd = Mixed::new(
     Simple::new(AntiSymmetricBoundary),

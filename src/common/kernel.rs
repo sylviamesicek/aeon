@@ -138,3 +138,95 @@ impl<const N: usize> Kernel<N> for FDSecondDerivative<4> {
         1.0 / (spacing * spacing)
     }
 }
+
+pub struct FDDissipation<const ORDER: usize>;
+
+impl<const N: usize> Kernel<N> for FDDissipation<2> {
+    type InteriorStencil = [f64; 5];
+    type BoundaryStencil = [f64; 5];
+
+    const NEGATIVE_SUPPORT: usize = 3;
+    const POSITIVE_SUPPORT: usize = 3;
+
+    fn interior() -> Self::InteriorStencil {
+        [1.0, -4.0, 6.0, -4.0, 1.0]
+    }
+
+    fn negative(_: usize) -> Self::BoundaryStencil {
+        [0.0; 5]
+    }
+
+    fn positive(_: usize) -> Self::BoundaryStencil {
+        [0.0; 5]
+    }
+
+    fn scale(spacing: f64) -> f64 {
+        -1.0 / spacing * 1.0 / 16.0
+    }
+}
+
+impl<const N: usize> Kernel<N> for FDDissipation<4> {
+    type InteriorStencil = [f64; 7];
+    type BoundaryStencil = [f64; 10];
+
+    const NEGATIVE_SUPPORT: usize = 3;
+    const POSITIVE_SUPPORT: usize = 3;
+
+    fn interior() -> Self::InteriorStencil {
+        [1.0, -6.0, 15.0, -20.0, 15.0, -6.0, 1.0]
+    }
+
+    fn negative(left: usize) -> Self::BoundaryStencil {
+        // if left == 0 {
+        //     [
+        //         75.0 / 4.0,
+        //         -154.0,
+        //         563.0,
+        //         -1203.0,
+        //         3313.0 / 3.0,
+        //         -1525.0,
+        //         939.0,
+        //         -373.0,
+        //         347.0 / 4.0,
+        //         -9.0,
+        //     ]
+        // } else if left == 1 {
+        //     [
+        //         9.0,
+        //         -285.0 / 4.0,
+        //         251.0,
+        //         -517.0,
+        //         687.0,
+        //         -1223.0 / 2.0,
+        //         365.0,
+        //         -141.0,
+        //         32.0,
+        //         -13.0 / 4.0,
+        //     ]
+        // } else if left == 2 {
+        //     [
+        //         13.0 / 4.0,
+        //         -47.0 / 2.0,
+        //         75.0,
+        //         -139.0,
+        //         331.0 / 2.0,
+        //         -132.0,
+        //         71.0,
+        //         -25.0,
+        //         21.0 / 4.0,
+        //         -1.0 / 2.0,
+        //     ]
+        // } else {
+        //     panic!("Wait a second");
+        // }
+        [0.0; 10]
+    }
+
+    fn positive(_: usize) -> Self::BoundaryStencil {
+        [0.0; 10]
+    }
+
+    fn scale(spacing: f64) -> f64 {
+        1.0 / spacing * 1.0 / 64.0
+    }
+}
