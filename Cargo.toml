@@ -13,10 +13,12 @@ members = ["crates/*"]
 [dependencies]
 aeon_macros = { path = "crates/aeon_macros" }
 
-bumpalo = { version = "3" }
-vtkio = { version = "0.6.3" }
+bumpalo = "3"
+log = "0.4"
+vtkio = "0.6"
 
 [dev-dependencies]
+env_logger = "0.11"
 soa_derive = "0.13"
 
 [[example]]

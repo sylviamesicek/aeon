@@ -3,7 +3,7 @@ use aeon_macros::{derivative, second_derivative};
 
 /// A seperable kernal used for approximating a derivative or numerical operator
 /// to some order of accuracy.
-pub trait Kernel<const N: usize> {
+pub trait Kernel {
     type InteriorStencil: Array<f64>;
     type BoundaryStencil: Array<f64>;
 
@@ -25,7 +25,7 @@ pub trait Kernel<const N: usize> {
 
 pub struct FDDerivative<const ORDER: usize>;
 
-impl<const N: usize> Kernel<N> for FDDerivative<2> {
+impl Kernel for FDDerivative<2> {
     type InteriorStencil = [f64; 3];
     type BoundaryStencil = [f64; 3];
 
@@ -49,7 +49,7 @@ impl<const N: usize> Kernel<N> for FDDerivative<2> {
     }
 }
 
-impl<const N: usize> Kernel<N> for FDDerivative<4> {
+impl Kernel for FDDerivative<4> {
     type InteriorStencil = [f64; 5];
     type BoundaryStencil = [f64; 5];
 
@@ -83,7 +83,7 @@ impl<const N: usize> Kernel<N> for FDDerivative<4> {
 
 pub struct FDSecondDerivative<const ORDER: usize>;
 
-impl<const N: usize> Kernel<N> for FDSecondDerivative<2> {
+impl Kernel for FDSecondDerivative<2> {
     type InteriorStencil = [f64; 3];
     type BoundaryStencil = [f64; 4];
 
@@ -107,7 +107,7 @@ impl<const N: usize> Kernel<N> for FDSecondDerivative<2> {
     }
 }
 
-impl<const N: usize> Kernel<N> for FDSecondDerivative<4> {
+impl Kernel for FDSecondDerivative<4> {
     type InteriorStencil = [f64; 5];
     type BoundaryStencil = [f64; 6];
 
@@ -141,33 +141,33 @@ impl<const N: usize> Kernel<N> for FDSecondDerivative<4> {
 
 pub struct FDDissipation<const ORDER: usize>;
 
-impl<const N: usize> Kernel<N> for FDDissipation<2> {
+impl Kernel for FDDissipation<2> {
     type InteriorStencil = [f64; 5];
     type BoundaryStencil = [f64; 5];
 
-    const NEGATIVE_SUPPORT: usize = 3;
-    const POSITIVE_SUPPORT: usize = 3;
+    const NEGATIVE_SUPPORT: usize = 2;
+    const POSITIVE_SUPPORT: usize = 2;
 
     fn interior() -> Self::InteriorStencil {
         [1.0, -4.0, 6.0, -4.0, 1.0]
     }
 
     fn negative(_: usize) -> Self::BoundaryStencil {
-        [0.0; 5]
+        [1.0, -4.0, 6.0, -4.0, 1.0]
     }
 
     fn positive(_: usize) -> Self::BoundaryStencil {
-        [0.0; 5]
+        [1.0, -4.0, 6.0, -4.0, 1.0]
     }
 
-    fn scale(spacing: f64) -> f64 {
-        -1.0 / spacing * 1.0 / 16.0
+    fn scale(_: f64) -> f64 {
+        -1.0 / 16.0
     }
 }
 
-impl<const N: usize> Kernel<N> for FDDissipation<4> {
+impl Kernel for FDDissipation<4> {
     type InteriorStencil = [f64; 7];
-    type BoundaryStencil = [f64; 10];
+    type BoundaryStencil = [f64; 7];
 
     const NEGATIVE_SUPPORT: usize = 3;
     const POSITIVE_SUPPORT: usize = 3;
@@ -176,57 +176,15 @@ impl<const N: usize> Kernel<N> for FDDissipation<4> {
         [1.0, -6.0, 15.0, -20.0, 15.0, -6.0, 1.0]
     }
 
-    fn negative(left: usize) -> Self::BoundaryStencil {
-        // if left == 0 {
-        //     [
-        //         75.0 / 4.0,
-        //         -154.0,
-        //         563.0,
-        //         -1203.0,
-        //         3313.0 / 3.0,
-        //         -1525.0,
-        //         939.0,
-        //         -373.0,
-        //         347.0 / 4.0,
-        //         -9.0,
-        //     ]
-        // } else if left == 1 {
-        //     [
-        //         9.0,
-        //         -285.0 / 4.0,
-        //         251.0,
-        //         -517.0,
-        //         687.0,
-        //         -1223.0 / 2.0,
-        //         365.0,
-        //         -141.0,
-        //         32.0,
-        //         -13.0 / 4.0,
-        //     ]
-        // } else if left == 2 {
-        //     [
-        //         13.0 / 4.0,
-        //         -47.0 / 2.0,
-        //         75.0,
-        //         -139.0,
-        //         331.0 / 2.0,
-        //         -132.0,
-        //         71.0,
-        //         -25.0,
-        //         21.0 / 4.0,
-        //         -1.0 / 2.0,
-        //     ]
-        // } else {
-        //     panic!("Wait a second");
-        // }
-        [0.0; 10]
+    fn negative(_: usize) -> Self::BoundaryStencil {
+        [1.0, -6.0, 15.0, -20.0, 15.0, -6.0, 1.0]
     }
 
     fn positive(_: usize) -> Self::BoundaryStencil {
-        [0.0; 10]
+        [1.0, -6.0, 15.0, -20.0, 15.0, -6.0, 1.0]
     }
 
-    fn scale(spacing: f64) -> f64 {
-        1.0 / spacing * 1.0 / 64.0
+    fn scale(_: f64) -> f64 {
+        1.0 / 64.0
     }
 }

@@ -4,10 +4,13 @@ use crate::arena::Arena;
 use crate::common::{Block, NodeSpace, Operator, Projection};
 use crate::geometry::Rectangle;
 
+mod io;
 mod multigrid;
 
+pub use io::DataOut;
 pub use multigrid::UniformMultigrid;
 
+#[derive(Debug)]
 pub struct UniformMesh<const N: usize> {
     bounds: Rectangle<N>,
     size: [usize; N],

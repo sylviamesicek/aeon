@@ -41,7 +41,7 @@ impl<const N: usize> Block<N> {
         &src[self.offset..(self.offset + self.total)]
     }
 
-    pub fn evaluate<K: Kernel<N>, B: BoundarySet<N>>(
+    pub fn evaluate<K: Kernel, B: BoundarySet<N>>(
         self: &Self,
         axis: usize,
         set: &B,
@@ -51,7 +51,7 @@ impl<const N: usize> Block<N> {
         self.space.axis(axis).evaluate::<K, B>(set, src, dest);
     }
 
-    pub fn evaluate_diag<K: Kernel<N>, B: BoundarySet<N>>(
+    pub fn evaluate_diag<K: Kernel, B: BoundarySet<N>>(
         self: &Self,
         axis: usize,
         set: &B,

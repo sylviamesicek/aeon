@@ -10,5 +10,5 @@ pub mod prelude {
     pub use crate::common::{Block, Boundary, Kernel, Operator, Projection};
     pub use crate::geometry::{IndexSpace, Rectangle};
     pub use crate::lac::{BiCGStabConfig, BiCGStabSolver, IdentityMap, LinearMap, LinearSolver};
-    pub use crate::uniform::{UniformMesh, UniformMultigrid};
+    pub use crate::uniform::{DataOut, UniformMesh, UniformMultigrid};
 }

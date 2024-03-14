@@ -2,7 +2,7 @@ use aeon::common::{
     AntiSymmetricBoundary, AsymptoticFlatness, FreeBoundary, Mixed, Simple, SymmetricBoundary,
 };
 
-pub const ORDER: usize = 4;
+use crate::config::*;
 
 pub type AsymptoticOdd =
     Mixed<2, Simple<AntiSymmetricBoundary<{ ORDER + 2 }>>, AsymptoticFlatness<ORDER>>;

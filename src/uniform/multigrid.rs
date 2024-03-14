@@ -57,7 +57,7 @@ impl<'mesh, const N: usize, Solver: LinearSolver> UniformMultigrid<'mesh, N, Sol
         let tol = self.tolerance * irhs;
 
         if irhs <= 1e-60 {
-            println!("Trivial Linear Problem.");
+            log::trace!("Trivial Linear Problem.");
 
             x.fill(0.0);
             return;
@@ -79,12 +79,12 @@ impl<'mesh, const N: usize, Solver: LinearSolver> UniformMultigrid<'mesh, N, Sol
             // println!("Iteration {i}, Residual {nres}");
 
             if nres <= tol {
-                println!("Multigrid Converged in {i} Iterations");
+                log::trace!("Multigrid Converged in {i} Iterations");
                 return;
             }
         }
 
-        println!("Multigrid Failed to Converge.");
+        log::error!("Multigrid Failed to Converge.");
     }
 
     fn cycle<O: Operator<N>>(

@@ -159,7 +159,7 @@ pub struct NodeSpaceAxis<'a, const N: usize> {
 
 impl<'a, const N: usize> NodeSpaceAxis<'a, N> {
     /// Evaluates the operation of a kernel on the node space.
-    pub fn evaluate<K: Kernel<N>, B: BoundarySet<N>>(
+    pub fn evaluate<K: Kernel, B: BoundarySet<N>>(
         self: &Self,
         set: &B,
         src: &[f64],
@@ -205,7 +205,7 @@ impl<'a, const N: usize> NodeSpaceAxis<'a, N> {
         }
     }
 
-    pub fn evaluate_diag<K: Kernel<N>, B: BoundarySet<N>>(self: &Self, set: &B, dest: &mut [f64]) {
+    pub fn evaluate_diag<K: Kernel, B: BoundarySet<N>>(self: &Self, set: &B, dest: &mut [f64]) {
         let positive: usize = K::POSITIVE_SUPPORT;
         let negative: usize = K::NEGATIVE_SUPPORT;
 
@@ -242,7 +242,7 @@ impl<'a, const N: usize> NodeSpaceAxis<'a, N> {
         }
     }
 
-    pub fn evaluate_negative<K: Kernel<N>, B: BoundarySet<N>>(
+    pub fn evaluate_negative<K: Kernel, B: BoundarySet<N>>(
         self: &Self,
         mut node: [usize; N],
         set: &B,
@@ -313,7 +313,7 @@ impl<'a, const N: usize> NodeSpaceAxis<'a, N> {
         }
     }
 
-    pub fn evaluate_positive<K: Kernel<N>, B: BoundarySet<N>>(
+    pub fn evaluate_positive<K: Kernel, B: BoundarySet<N>>(
         self: &Self,
         mut node: [usize; N],
         set: &B,
@@ -385,7 +385,7 @@ impl<'a, const N: usize> NodeSpaceAxis<'a, N> {
         }
     }
 
-    pub fn evaluate_negative_diag<K: Kernel<N>, B: BoundarySet<N>>(
+    pub fn evaluate_negative_diag<K: Kernel, B: BoundarySet<N>>(
         self: &Self,
         mut node: [usize; N],
         set: &B,
@@ -440,7 +440,7 @@ impl<'a, const N: usize> NodeSpaceAxis<'a, N> {
         }
     }
 
-    pub fn evaluate_positive_diag<K: Kernel<N>, B: BoundarySet<N>>(
+    pub fn evaluate_positive_diag<K: Kernel, B: BoundarySet<N>>(
         self: &Self,
         mut node: [usize; N],
         set: &B,
