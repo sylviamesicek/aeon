@@ -3,26 +3,39 @@ use crate::common::{Block, Operator};
 use crate::lac::{LinearMap, LinearSolver};
 use crate::uniform::UniformMesh;
 
-pub struct UniformMultigrid<'mesh, const N: usize, Solver: LinearSolver> {
-    mesh: &'mesh UniformMesh<N>,
-    solver: Solver,
-    max_iterations: usize,
-    tolerance: f64,
-    presmoothing: usize,
-    postsmoothing: usize,
+/// Configuration for uniform multigrid.
+#[derive(Debug, Clone)]
+pub struct UniformMultigridConfig {
+    /// Maximum allowed iterations.
+    pub max_iterations: usize,
+    /// Tolerance from error.
+    pub tolerance: f64,
+    /// Number of Presmoothing
+    pub presmoothing: usize,
+    /// Number of postsmoothing steps
+    pub postsmoothing: usize,
+}
 
+/// Implements the multigrid algorithm for a uniform mesh.
+pub struct UniformMultigrid<'m, const N: usize, Solver: LinearSolver> {
+    /// Mesh that the multigrid algorithm operators over.
+    mesh: &'m UniformMesh<N>,
+    /// Iterative Config
+    config: UniformMultigridConfig,
+    /// Base solver.
+    solver: Solver,
+    /// Scratch vector
     scratch: Vec<f64>,
+    /// Right hand side scratch vector
     rhs: Vec<f64>,
 }
 
-impl<'mesh, const N: usize, Solver: LinearSolver> UniformMultigrid<'mesh, N, Solver> {
+impl<'m, const N: usize, Solver: LinearSolver> UniformMultigrid<'m, N, Solver> {
+    /// Creates a new uniform multigrid manager.
     pub fn new(
-        mesh: &'mesh UniformMesh<N>,
-        max_iterations: usize,
-        tolerance: f64,
-        presmoothing: usize,
-        postsmoothing: usize,
-        config: &Solver::Config,
+        mesh: &'m UniformMesh<N>,
+        base_config: &Solver::Config,
+        grid_config: &UniformMultigridConfig,
     ) -> Self {
         let base_node_count = mesh.base_node_count();
         let node_count = mesh.node_count();
@@ -32,13 +45,8 @@ impl<'mesh, const N: usize, Solver: LinearSolver> UniformMultigrid<'mesh, N, Sol
 
         Self {
             mesh,
-            solver: Solver::new(base_node_count, config),
-            max_iterations,
-            tolerance,
-
-            presmoothing,
-            postsmoothing,
-
+            config: grid_config.clone(),
+            solver: Solver::new(base_node_count, base_config),
             scratch,
             rhs,
         }
@@ -54,7 +62,7 @@ impl<'mesh, const N: usize, Solver: LinearSolver> UniformMultigrid<'mesh, N, Sol
         self.scratch.fill(0.0);
 
         let irhs = self.mesh.norm(b);
-        let tol = self.tolerance * irhs;
+        let tol = self.config.tolerance * irhs;
 
         if irhs <= 1e-60 {
             log::trace!("Trivial Linear Problem.");
@@ -63,7 +71,7 @@ impl<'mesh, const N: usize, Solver: LinearSolver> UniformMultigrid<'mesh, N, Sol
             return;
         }
 
-        for i in 0..self.max_iterations {
+        for i in 0..self.config.max_iterations {
             // Reset rhs
             self.rhs.copy_from_slice(b);
 
@@ -87,6 +95,7 @@ impl<'mesh, const N: usize, Solver: LinearSolver> UniformMultigrid<'mesh, N, Sol
         log::error!("Multigrid Failed to Converge.");
     }
 
+    /// Runs a v-cycle.
     fn cycle<O: Operator<N>>(
         self: &mut Self,
         arena: &mut Arena,
@@ -97,10 +106,6 @@ impl<'mesh, const N: usize, Solver: LinearSolver> UniformMultigrid<'mesh, N, Sol
         if level == 0 {
             let base_node_count = self.mesh.base_node_count();
             let block = self.mesh.level_block(level);
-
-            // println!("Solving BASE multigrid, node count {base_node_count}");
-            // println!("{:?}", &self.rhs[0..base_node_count]);
-            // println!("{:?}", &x[0..base_node_count]);
 
             let map = BaseLinearMap {
                 dimension: base_node_count,
@@ -128,7 +133,7 @@ impl<'mesh, const N: usize, Solver: LinearSolver> UniformMultigrid<'mesh, N, Sol
         // ******************************
         // Presmoothing
 
-        for _ in 0..self.presmoothing {
+        for _ in 0..self.config.presmoothing {
             let diag: &mut [f64] = arena.alloc::<f64>(block.len());
 
             operator.apply(
@@ -193,7 +198,7 @@ impl<'mesh, const N: usize, Solver: LinearSolver> UniformMultigrid<'mesh, N, Sol
         // *************************
         // Postsmooth
 
-        for _ in 0..self.postsmoothing {
+        for _ in 0..self.config.postsmoothing {
             let diag: &mut [f64] = arena.alloc::<f64>(block.len());
 
             operator.apply(
@@ -214,6 +219,7 @@ impl<'mesh, const N: usize, Solver: LinearSolver> UniformMultigrid<'mesh, N, Sol
     }
 }
 
+/// A wrapper for applying the operator to the base level.
 struct BaseLinearMap<'a, const N: usize, O: Operator<N>> {
     dimension: usize,
     operator: &'a O,

@@ -90,13 +90,15 @@ impl<'m> InitialSolver<'m> {
     pub fn new(mesh: &'m UniformMesh<2>) -> Self {
         let multigrid: UniformMultigrid<'_, 2, BiCGStabSolver> = UniformMultigrid::new(
             &mesh,
-            100,
-            10e-12,
-            5,
-            5,
             &BiCGStabConfig {
                 max_iterations: 1000,
                 tolerance: 10e-12,
+            },
+            &UniformMultigridConfig {
+                max_iterations: 100,
+                tolerance: 10e-12,
+                presmoothing: 5,
+                postsmoothing: 5,
             },
         );
 
@@ -113,8 +115,7 @@ impl<'m> InitialSolver<'m> {
         dynamic: DynamicSliceMut,
         gauge: GaugeSliceMut,
     ) {
-        let initial_seed = InitialSeed {};
-        self.mesh.project(arena, &initial_seed, dynamic.seed);
+        self.mesh.project(arena, &InitialSeed, dynamic.seed);
 
         let psi_rhs = InitialPsiRhs { seed: dynamic.seed };
         self.mesh.project(arena, &psi_rhs, &mut self.rhs);
@@ -143,13 +144,15 @@ impl<'m> GaugeSolver<'m> {
     pub fn new(mesh: &'m UniformMesh<2>) -> Self {
         let multigrid: UniformMultigrid<'_, 2, BiCGStabSolver> = UniformMultigrid::new(
             &mesh,
-            100,
-            10e-12,
-            5,
-            5,
             &BiCGStabConfig {
                 max_iterations: 10000,
                 tolerance: 10e-12,
+            },
+            &UniformMultigridConfig {
+                max_iterations: 100,
+                tolerance: 10e-12,
+                presmoothing: 5,
+                postsmoothing: 5,
             },
         );
 
@@ -216,6 +219,74 @@ impl<'m> GaugeSolver<'m> {
 
         self.multigrid
             .solve(arena, &ShiftZOp {}, &self.rhs, gauge.shiftz);
+    }
+}
+
+pub struct ResidualSolver<'m> {
+    mesh: &'m UniformMesh<2>,
+    rhs: Vec<f64>,
+}
+
+impl<'m> ResidualSolver<'m> {
+    pub fn new(mesh: &'m UniformMesh<2>) -> Self {
+        Self {
+            mesh,
+            rhs: vec![0.0; mesh.node_count()],
+        }
+    }
+
+    pub fn solve(
+        self: &mut Self,
+        arena: &mut Arena,
+        dynamic: DynamicSlice,
+        gauge: GaugeSlice,
+        residuals: GaugeSliceMut,
+    ) {
+        // **********************
+        // Lapse
+
+        let lapse_rhs = LapseRhs {
+            psi: dynamic.psi,
+            seed: dynamic.seed,
+            u: dynamic.u,
+            w: dynamic.w,
+            x: dynamic.x,
+        };
+        self.mesh.project(arena, &lapse_rhs, &mut self.rhs);
+
+        let lapse_op = LapseOp {
+            psi: dynamic.psi,
+            seed: dynamic.seed,
+            u: dynamic.u,
+            w: dynamic.w,
+            x: dynamic.x,
+        };
+        self.mesh
+            .residual(arena, &self.rhs, &lapse_op, gauge.lapse, residuals.lapse);
+
+        // **********************
+        // ShiftR
+
+        let shiftr_rhs = ShiftRRhs {
+            lapse: gauge.lapse,
+            u: dynamic.u,
+            x: dynamic.x,
+        };
+        self.mesh.project(arena, &shiftr_rhs, &mut self.rhs);
+        self.mesh
+            .residual(arena, &self.rhs, &ShiftROp, gauge.shiftr, residuals.shiftr);
+
+        // **********************
+        // ShiftZ
+
+        let shiftz_rhs = ShiftZRhs {
+            lapse: gauge.lapse,
+            u: dynamic.u,
+            x: dynamic.x,
+        };
+        self.mesh.project(arena, &shiftz_rhs, &mut self.rhs);
+        self.mesh
+            .residual(arena, &self.rhs, &ShiftZOp, gauge.shiftz, residuals.shiftz);
     }
 }
 
@@ -496,6 +567,7 @@ fn write_vtk_output(
     mesh: &UniformMesh<2>,
     dynamic: DynamicSlice,
     gauge: GaugeSlice,
+    residuals: GaugeSlice,
     constraint: &[f64],
 ) {
     let title = format!("evolution{step}");
@@ -508,9 +580,15 @@ fn write_vtk_output(
     output.attrib_scalar("u", dynamic.u);
     output.attrib_scalar("x", dynamic.x);
     output.attrib_scalar("w", dynamic.w);
+
     output.attrib_scalar("lapse", gauge.lapse);
     output.attrib_scalar("shiftr", gauge.shiftr);
     output.attrib_scalar("shiftz", gauge.shiftz);
+
+    output.attrib_scalar("lapse_residual", residuals.lapse);
+    output.attrib_scalar("shiftr_residual", residuals.shiftr);
+    output.attrib_scalar("shiftz_residual", residuals.shiftz);
+
     output.attrib_scalar("contraint", constraint);
 
     output.export_vtk(&title, file_path).unwrap()
@@ -518,6 +596,7 @@ fn write_vtk_output(
 
 pub fn main() {
     env_logger::builder()
+        .format_timestamp(None)
         .filter_level(log::LevelFilter::max())
         .init();
 
@@ -530,13 +609,14 @@ pub fn main() {
             origin: [0.0, 0.0],
         },
         [8, 8],
-        6,
+        LEVELS,
     );
 
     log::info!("Node Count: {}", mesh.node_count());
 
     let mut dynamic = dynamic_new(mesh.node_count());
     let mut gauge = gauge_new(mesh.node_count());
+    let mut residuals = gauge_new(mesh.node_count());
     let mut constraint = vec![0.0; mesh.node_count()];
 
     {
@@ -556,8 +636,25 @@ pub fn main() {
         mesh.project(&mut arena, &hamiltonian, &mut constraint);
     }
 
+    // Build residual solver
+    let mut residual_solver = ResidualSolver::new(&mesh);
+    // Compute residuals
+    residual_solver.solve(
+        &mut arena,
+        dynamic.as_slice(),
+        gauge.as_slice(),
+        residuals.as_mut_slice(),
+    );
+
     // Write output
-    write_vtk_output(0, &mesh, dynamic.as_slice(), gauge.as_slice(), &constraint);
+    write_vtk_output(
+        0,
+        &mesh,
+        dynamic.as_slice(),
+        gauge.as_slice(),
+        residuals.as_slice(),
+        &constraint,
+    );
 
     let mut system = DynamicIntegrator::new(&mesh, dynamic, gauge);
 
@@ -585,12 +682,21 @@ pub fn main() {
         };
 
         mesh.project(&mut arena, &hamiltonian, &mut constraint);
+
+        residual_solver.solve(
+            &mut arena,
+            system.dynamic.as_slice(),
+            system.gauge.as_slice(),
+            residuals.as_mut_slice(),
+        );
+
         // Write output
         write_vtk_output(
             i + 1,
             &mesh,
             system.dynamic.as_slice(),
             system.gauge.as_slice(),
+            residuals.as_slice(),
             &constraint,
         );
     }

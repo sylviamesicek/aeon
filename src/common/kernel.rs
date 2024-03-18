@@ -2,13 +2,13 @@ use crate::array::Array;
 use aeon_macros::{derivative, second_derivative};
 
 /// A seperable kernal used for approximating a derivative or numerical operator
-/// to some order of accuracy.
+/// to some order of accuracy. All kernel weights are applied negative to positive.
 pub trait Kernel {
     type InteriorStencil: Array<f64>;
     type BoundaryStencil: Array<f64>;
 
-    const POSITIVE_SUPPORT: usize = 0;
-    const NEGATIVE_SUPPORT: usize = 0;
+    const POSITIVE_SUPPORT: usize;
+    const NEGATIVE_SUPPORT: usize;
 
     /// Stencil weights for the interior of the domain.
     fn interior() -> Self::InteriorStencil;

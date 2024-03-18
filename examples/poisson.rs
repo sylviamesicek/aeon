@@ -126,13 +126,15 @@ pub fn main() {
         solution.fill(0.0);
         let mut multigrid: UniformMultigrid<'_, 2, BiCGStabSolver> = UniformMultigrid::new(
             &mesh,
-            20,
-            10e-12,
-            5,
-            5,
             &BiCGStabConfig {
                 max_iterations: 10000,
                 tolerance: 10e-12,
+            },
+            &UniformMultigridConfig {
+                max_iterations: 100,
+                tolerance: 10e-12,
+                presmoothing: 5,
+                postsmoothing: 5,
             },
         );
 

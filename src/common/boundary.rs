@@ -17,6 +17,7 @@ pub struct Mixed<const N: usize, NB: BoundarySet<N>, PB: BoundarySet<N>> {
 }
 
 impl<const N: usize, NB: BoundarySet<N>, PB: BoundarySet<N>> Mixed<N, NB, PB> {
+    /// Builds a new mixed boundary set.
     pub const fn new(negative: NB, positive: PB) -> Self {
         Self { negative, positive }
     }
@@ -42,6 +43,7 @@ pub struct Simple<B: Boundary> {
 }
 
 impl<B: Boundary> Simple<B> {
+    /// Constructs a new simple boundary set.
     pub const fn new(boundary: B) -> Self {
         Self { boundary }
     }

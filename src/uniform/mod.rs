@@ -8,16 +8,22 @@ mod io;
 mod multigrid;
 
 pub use io::DataOut;
-pub use multigrid::UniformMultigrid;
+pub use multigrid::{UniformMultigrid, UniformMultigridConfig};
 
+/// Represents a uniform mesh defined on a domain. Such a mesh consists
+/// of a set of uniform levels over some rectangular bounds.
 #[derive(Debug)]
 pub struct UniformMesh<const N: usize> {
+    /// Uniform bounds for mesh.
     bounds: Rectangle<N>,
+    /// Number of cells on base block.
     size: [usize; N],
+    /// Node offsets for each level.
     offsets: Vec<usize>,
 }
 
 impl<const N: usize> UniformMesh<N> {
+    /// Constructs a new uniform mesh.
     pub fn new(bounds: Rectangle<N>, size: [usize; N], levels: usize) -> Self {
         for i in 0..N {
             assert!(size[i] % 2 == 0);
@@ -49,22 +55,27 @@ impl<const N: usize> UniformMesh<N> {
         }
     }
 
+    /// Physical bounds of the mesh.
     pub fn bounds(self: &Self) -> Rectangle<N> {
         self.bounds.clone()
     }
 
+    /// Total number of nodes in the mesh.
     pub fn node_count(self: &Self) -> usize {
         *self.offsets.last().unwrap()
     }
 
+    /// Number of nodes on base level of the mesh.
     pub fn base_node_count(self: &Self) -> usize {
         self.offsets[1]
     }
 
+    /// Number of levels in mesh.
     pub fn level_count(self: &Self) -> usize {
         self.offsets.len() - 1
     }
 
+    /// Number of cells along each axis for a given level.
     pub fn level_size(self: &Self, level: usize) -> [usize; N] {
         let mut result = self.size;
 
@@ -75,6 +86,7 @@ impl<const N: usize> UniformMesh<N> {
         result
     }
 
+    /// Constructs a node space for a level in the mesh.
     pub fn level_node_space(self: &Self, level: usize) -> NodeSpace<N> {
         NodeSpace {
             bounds: self.bounds.clone(),
@@ -82,14 +94,17 @@ impl<const N: usize> UniformMesh<N> {
         }
     }
 
+    /// Offset into a node vector for the given level.
     pub fn level_node_offset(self: &Self, level: usize) -> usize {
         self.offsets[level]
     }
 
+    /// Node range for a level.
     pub fn level_node_range(self: &Self, level: usize) -> Range<usize> {
         self.offsets[level]..self.offsets[level + 1]
     }
 
+    /// Constructs a block for a level in the mesh.
     pub fn level_block(self: &Self, level: usize) -> Block<N> {
         let space = self.level_node_space(level);
         let offset = self.level_node_offset(level);
@@ -98,6 +113,7 @@ impl<const N: usize> UniformMesh<N> {
         Block::new(space, offset, total)
     }
 
+    /// Computes the spacing for the finest level of the mesh.
     pub fn min_spacing(self: &Self) -> f64 {
         let space = self.level_node_space(self.level_count() - 1);
 
@@ -110,6 +126,11 @@ impl<const N: usize> UniformMesh<N> {
         result
     }
 
+    // ***********************************
+    // Node Operations *******************
+    // ***********************************
+
+    /// Injects values from the finest level to lower levels.
     pub fn restrict(self: &Self, field: &mut [f64]) {
         assert!(field.len() == self.node_count());
 
@@ -118,6 +139,7 @@ impl<const N: usize> UniformMesh<N> {
         }
     }
 
+    /// Injects values from `level -> level - 1`.
     pub fn restrict_level(self: &Self, level: usize, field: &mut [f64]) {
         assert!(field.len() == self.node_count());
 
@@ -133,6 +155,7 @@ impl<const N: usize> UniformMesh<N> {
         space.restrict_inject(src, dest);
     }
 
+    /// Fully restricts values from `level -> level - 1`.
     pub fn restrict_level_full(self: &Self, level: usize, field: &mut [f64]) {
         let range = self.level_node_range(level);
         let space = self.level_node_space(level);

@@ -164,6 +164,8 @@ pub struct LapseOp<'a> {
 
 impl<'a> Operator<2> for LapseOp<'a> {
     fn apply(self: &Self, arena: &Arena, block: &Block<2>, lapse: &[f64], dest: &mut [f64]) {
+        assert!(lapse.len() == block.len());
+
         let lapse_rr = arena.alloc::<f64>(block.len());
         let lapse_zz = arena.alloc::<f64>(block.len());
         let lapse_r = arena.alloc::<f64>(block.len());
@@ -197,10 +199,6 @@ impl<'a> Operator<2> for LapseOp<'a> {
             let rho = position[0];
 
             let psi = psi[i] + 1.0;
-            let seed = seed[i];
-            let w = w[i];
-            let u = u[i];
-            let x = x[i];
 
             let mut term1 = lapse_rr[i] + lapse_zz[i];
 
@@ -212,10 +210,10 @@ impl<'a> Operator<2> for LapseOp<'a> {
 
             let term2 = 2.0 / psi * (psi_r[i] * lapse_r[i] + psi_z[i] * lapse_z[i]);
 
-            let scale = -lapse[i] * (2.0 * rho * seed).exp() * psi * psi * psi * psi;
+            let scale = -lapse[i] * (2.0 * rho * seed[i]).exp() * psi * psi * psi * psi;
 
-            let term3 = 2.0 / 3.0 * (rho * rho * w * w + rho * u * w + u * u);
-            let term4 = 2.0 * x * x;
+            let term3 = 2.0 / 3.0 * (rho * rho * w[i] * w[i] + rho * u[i] * w[i] + u[i] * u[i]);
+            let term4 = 2.0 * x[i] * x[i];
 
             dest[i] = term1 + term2 + scale * (term3 + term4);
         }
@@ -253,10 +251,6 @@ impl<'a> Operator<2> for LapseOp<'a> {
             let rho = position[0];
 
             let psi = psi[i] + 1.0;
-            let seed = seed[i];
-            let w = w[i];
-            let u = u[i];
-            let x = x[i];
 
             let mut term1 = lapse_rr[i] + lapse_zz[i];
 
@@ -268,10 +262,10 @@ impl<'a> Operator<2> for LapseOp<'a> {
 
             let term2 = 2.0 / psi * (psi_r[i] * lapse_r[i] + psi_z[i] * lapse_z[i]);
 
-            let scale = -(2.0 * rho * seed).exp() * psi * psi * psi * psi;
+            let scale = -(2.0 * rho * seed[i]).exp() * psi * psi * psi * psi;
 
-            let term3 = 2.0 / 3.0 * (rho * rho * w * w + rho * u * w + u * u);
-            let term4 = 2.0 * x * x;
+            let term3 = 2.0 / 3.0 * (rho * rho * w[i] * w[i] + rho * u[i] * w[i] + u[i] * u[i]);
+            let term4 = 2.0 * x[i] * x[i];
 
             dest[i] = term1 + term2 + scale * (term3 + term4);
         }
@@ -299,14 +293,10 @@ impl<'a> Projection<2> for LapseRhs<'a> {
             let rho = position[0];
 
             let psi = psi[i] + 1.0;
-            let seed = seed[i];
-            let w = w[i];
-            let u = u[i];
-            let x = x[i];
 
-            let scale = (2.0 * rho * seed).exp() * psi * psi * psi * psi;
-            let term1 = 2.0 / 3.0 * (rho * rho * w * w + rho * u * w + u * u);
-            let term2 = 2.0 * x * x;
+            let scale = (2.0 * rho * seed[i]).exp() * psi * psi * psi * psi;
+            let term1 = 2.0 / 3.0 * (rho * rho * w[i] * w[i] + rho * u[i] * w[i] + u[i] * u[i]);
+            let term2 = 2.0 * x[i] * x[i];
 
             dest[i] = scale * (term1 + term2);
         }
@@ -848,7 +838,6 @@ impl<'a> Projection<2> for WEvolution<'a> {
             let term4 = lapse_r[i] / (rho * rho) - lapse_rr[i] / rho - lapse_z[i] * s_z[i];
 
             let scale2 = lapse * scale1;
-
             let term5 = 2.0 * psi_r[i] / (rho * psi)
                 * (rho * s_r[i] + seed[i] + 3.0 * psi_r[i] / psi)
                 - 2.0 * psi_z[i] / psi * s_z[i];

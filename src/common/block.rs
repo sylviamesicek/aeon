@@ -21,14 +21,17 @@ impl<const N: usize> Block<N> {
         }
     }
 
+    /// Number of nodes in block.
     pub fn len(self: &Self) -> usize {
         self.total
     }
 
+    /// Position of a given node in the block.
     pub fn position(self: &Self, node: [usize; N]) -> [f64; N] {
         self.space.position(node)
     }
 
+    /// Iterates over the nodes in the block.
     pub fn iter(self: &Self) -> CartesianIterator<N> {
         self.space.vertex_space().iter()
     }
