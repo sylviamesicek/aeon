@@ -1,10 +1,9 @@
-use crate::arena::Arena;
 use crate::common::NodeSpace;
 use crate::geometry::CartesianIterator;
 
 use super::{kernel::FDDissipation, BoundarySet, FDDerivative, FDSecondDerivative, Kernel};
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Block<const N: usize> {
     space: NodeSpace<N>,
     offset: usize,
@@ -44,6 +43,10 @@ impl<const N: usize> Block<N> {
         &src[self.offset..(self.offset + self.total)]
     }
 
+    pub fn auxillary_mut<'a>(self: &Self, src: &'a mut [f64]) -> &'a mut [f64] {
+        &mut src[self.offset..(self.offset + self.total)]
+    }
+
     pub fn evaluate<K: Kernel, B: BoundarySet<N>>(
         self: &Self,
         axis: usize,
@@ -61,6 +64,10 @@ impl<const N: usize> Block<N> {
         dest: &mut [f64],
     ) {
         self.space.axis(axis).evaluate_diag::<K, B>(set, dest);
+    }
+
+    pub fn diritchlet(self: &Self, axis: usize, face: bool, dest: &mut [f64]) {
+        self.space.axis(axis).apply_diritchlet_bc(face, dest);
     }
 
     pub fn axis<'a, const ORDER: usize>(self: &'a Self, axis: usize) -> BlockAxis<'a, N, ORDER> {
@@ -135,13 +142,4 @@ impl<'a, const N: usize> BlockAxis<'a, N, 4> {
         self.block
             .evaluate::<FDDissipation<4>, B>(self.axis, set, src, dest)
     }
-}
-
-pub trait Operator<const N: usize> {
-    fn apply(self: &Self, arena: &Arena, block: &Block<N>, src: &[f64], dest: &mut [f64]);
-    fn apply_diag(self: &Self, arena: &Arena, block: &Block<N>, dest: &mut [f64]);
-}
-
-pub trait Projection<const N: usize> {
-    fn evaluate(self: &Self, arena: &Arena, block: &Block<N>, dest: &mut [f64]);
 }

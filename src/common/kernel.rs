@@ -188,3 +188,32 @@ impl Kernel for FDDissipation<4> {
         1.0 / 64.0
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn fd_kernel_weights() {
+        assert_eq!(FDDerivative::<2>::negative(0), [-1.5, 2.0, -0.5]);
+        assert_eq!(FDDerivative::<2>::interior(), [-0.5, 0.0, 0.5]);
+        assert_eq!(FDDerivative::<2>::positive(0), [0.5, -2.0, 1.5]);
+
+        assert_eq!(
+            FDDerivative::<4>::negative(0),
+            [-25.0 / 12.0, 4.0, -3.0, 4.0 / 3.0, -1.0 / 4.0]
+        );
+        assert_eq!(
+            FDDerivative::<4>::interior(),
+            [1.0 / 12.0, -2.0 / 3.0, 0.0, 2.0 / 3.0, -1.0 / 12.0]
+        );
+        assert_eq!(
+            FDDerivative::<4>::positive(0),
+            [1.0 / 4.0, -4.0 / 3.0, 3.0, -4.0, 25.0 / 12.0]
+        );
+
+        assert_eq!(FDSecondDerivative::<2>::negative(0), [2.0, -5.0, 4.0, -1.0]);
+        assert_eq!(FDSecondDerivative::<2>::interior(), [1.0, -2.0, 1.0]);
+        assert_eq!(FDSecondDerivative::<2>::positive(0), [-1.0, 4.0, -5.0, 2.0]);
+    }
+}

@@ -62,11 +62,13 @@ impl<const N: usize, B: Boundary> BoundarySet<N> for Simple<B> {
     }
 }
 
+/// Asymptotic flatness along a given axis, as used in ETK.
 pub struct AsymptoticFlatness<const ORDER: usize> {
     axis: usize,
 }
 
 impl<const ORDER: usize> AsymptoticFlatness<ORDER> {
+    /// Constructs a new asymptotic flatness boundary set.
     pub const fn new(axis: usize) -> Self {
         Self { axis: axis }
     }
@@ -306,5 +308,41 @@ impl Boundary for RobinBoundary<4> {
         }
 
         result
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const SPACING: f64 = 0.1;
+
+    #[test]
+    fn symmetric_boundary() {
+        let boundary = SymmetricBoundary::<4>;
+
+        assert_eq!(boundary.stencil(0, SPACING), [1.0, 0.0, 0.0]);
+        assert_eq!(boundary.stencil(1, SPACING), [0.0, 1.0, 0.0]);
+        assert_eq!(boundary.stencil(2, SPACING), [0.0, 0.0, 1.0]);
+
+        let boundary = AntiSymmetricBoundary::<4>;
+
+        assert_eq!(boundary.stencil(0, SPACING), [-1.0, 0.0, 0.0]);
+        assert_eq!(boundary.stencil(1, SPACING), [0.0, -1.0, 0.0]);
+        assert_eq!(boundary.stencil(2, SPACING), [0.0, 0.0, -1.0]);
+    }
+
+    #[test]
+    fn robin_boundary() {
+        let boundary = RobinBoundary::<2>::nuemann();
+        // Second order robin boundary condition should behave the same as symmetric boundary condition.
+        assert_eq!(boundary.stencil(1, SPACING), [0.0, 1.0]);
+
+        let boundary = RobinBoundary::<4>::nuemann();
+        // Desmos agrees, this should work.
+        assert_eq!(
+            boundary.stencil(1, SPACING),
+            [-3.3333333333333335, 6.0, -2.0, 0.3333333333333333]
+        );
     }
 }

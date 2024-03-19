@@ -123,6 +123,10 @@ impl<'a> Operator<2> for InitialPsiOp<'a> {
             dest[i] = term1 + term2;
         }
     }
+
+    fn diritchlet(_axis: usize, _face: bool) -> bool {
+        false
+    }
 }
 
 pub struct InitialPsiRhs<'a> {
@@ -270,6 +274,10 @@ impl<'a> Operator<2> for LapseOp<'a> {
             dest[i] = term1 + term2 + scale * (term3 + term4);
         }
     }
+
+    fn diritchlet(_axis: usize, _face: bool) -> bool {
+        false
+    }
 }
 
 pub struct LapseRhs<'a> {
@@ -413,6 +421,13 @@ impl Operator<2> for ShiftROp {
             dest[i] = shiftr_rr[i] + shiftr_zz[i];
         }
     }
+
+    fn diritchlet(axis: usize, face: bool) -> bool {
+        match (axis, face) {
+            (0, false) => true,
+            _ => false,
+        }
+    }
 }
 
 pub struct ShiftZOp;
@@ -447,6 +462,13 @@ impl Operator<2> for ShiftZOp {
 
         for (i, _) in block.iter().enumerate() {
             dest[i] = shiftz_rr[i] + shiftz_zz[i];
+        }
+    }
+
+    fn diritchlet(axis: usize, face: bool) -> bool {
+        match (axis, face) {
+            (1, false) => true,
+            _ => false,
         }
     }
 }

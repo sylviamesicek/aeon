@@ -289,6 +289,27 @@ impl<const N: usize> UniformMesh<N> {
         }
     }
 
+    pub fn diritchlet<O: Operator<N>>(self: &Self, dest: &mut [f64]) {
+        for level in 0..self.level_count() {
+            self.diritchlet_level::<O>(level, dest);
+        }
+    }
+
+    pub fn diritchlet_level<O: Operator<N>>(self: &Self, level: usize, dest: &mut [f64]) {
+        let block = self.level_block(level);
+        let dest = block.auxillary_mut(dest);
+
+        for axis in 0..N {
+            if O::diritchlet(axis, false) {
+                block.diritchlet(axis, false, dest);
+            }
+
+            if O::diritchlet(axis, true) {
+                block.diritchlet(axis, true, dest);
+            }
+        }
+    }
+
     pub fn norm(self: &Self, field: &[f64]) -> f64 {
         let mut result = 0.0;
 

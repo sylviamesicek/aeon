@@ -47,6 +47,7 @@ impl<const N: usize> NodeSpace<N> {
         IndexSpace::new(self.vertex_size())
     }
 
+    /// Returns an index space over the cells in this node space.
     pub fn cell_space(self: &Self) -> IndexSpace<N> {
         IndexSpace::new(self.cell_size())
     }
@@ -533,7 +534,6 @@ impl<'a, const N: usize> NodeSpaceAxis<'a, N> {
         let mut result = 0.0;
 
         for (i, w) in boundary.stencil(extent, spacing).into_iter().enumerate() {
-            // println!("Boundary Stencil {}, {}", i, w);
             node[self.axis] = length - 1 - i;
             result += self.space.value(node, src) * w;
         }
@@ -607,6 +607,147 @@ impl<'a, const N: usize> NodeSpaceAxis<'a, N> {
                 self.space
                     .set_value(node, (left + 2.0 * middle + right) / 4.0, dest)
             }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::common::{FDDerivative, Simple, SymmetricBoundary};
+
+    const CELLS: usize = 10;
+
+    fn source_field() -> Vec<f64> {
+        let space = NodeSpace {
+            bounds: Rectangle::UNIT,
+            size: [CELLS, CELLS],
+        };
+
+        let mut source = vec![0.0; space.len()];
+
+        // Source should be filled with sin(x) * cos(y).
+        for vert in space.vertex_space().iter() {
+            let pos = space.position(vert);
+            let value = pos[0].sin() * pos[1].cos();
+            space.set_value(vert, value, &mut source);
+        }
+
+        source
+    }
+
+    #[test]
+    fn evaluate_derivative() {
+        let space = NodeSpace {
+            bounds: Rectangle::UNIT,
+            size: [CELLS, CELLS],
+        };
+
+        let hy = 1.0 / space.spacing(1);
+
+        let source = source_field();
+
+        let mut dest = vec![0.0; space.len()];
+
+        let set = Simple::new(SymmetricBoundary::<2>);
+        space
+            .axis(1)
+            .evaluate::<FDDerivative<2>, _>(&set, &source, &mut dest);
+
+        for vert in space.vertex_space().iter() {
+            let xi = vert[0];
+            let yi = vert[1];
+
+            if yi == CELLS {
+                assert_eq!(space.value(vert, &dest), 0.0);
+            } else if yi == 0 {
+                assert_eq!(space.value(vert, &dest), 0.0);
+            } else {
+                let positive = space.value([xi, yi + 1], &source);
+                let negative = space.value([xi, yi - 1], &source);
+
+                assert_eq!(
+                    space.value(vert, &dest),
+                    (0.5 * positive - 0.5 * negative) * hy
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn prolong() {
+        let space = NodeSpace {
+            bounds: Rectangle::UNIT,
+            size: [CELLS, CELLS],
+        };
+
+        let source = source_field();
+        let mut dest = source_field();
+        space.axis(0).prolong(&mut dest);
+        space.axis(1).prolong(&mut dest);
+
+        for vert in space.vertex_space().iter() {
+            let xi = vert[0];
+            let yi = vert[1];
+
+            let src = |xoff: isize, yoff: isize| {
+                let xnode = xi as isize + xoff;
+                let ynode = yi as isize + yoff;
+
+                space.value([xnode as usize, ynode as usize], &source)
+            };
+
+            let value = match (xi % 2 == 1, yi % 2 == 1) {
+                (false, false) => src(0, 0),
+                (false, true) => 0.5 * src(0, -1) + 0.5 * src(0, 1),
+                (true, false) => 0.5 * src(-1, 0) + 0.5 * src(1, 0),
+                (true, true) => {
+                    0.25 * src(-1, -1) + 0.25 * src(1, -1) + 0.25 * src(-1, 1) + 0.25 * src(1, 1)
+                }
+            };
+
+            assert!((space.value([xi, yi], &dest) - value).abs() < 1e-10);
+        }
+    }
+
+    #[test]
+    fn restrict_full() {
+        let space = NodeSpace {
+            bounds: Rectangle::UNIT,
+            size: [CELLS, CELLS],
+        };
+
+        let source = source_field();
+        let mut dest = source_field();
+        space.axis(0).restrict(&mut dest);
+        space.axis(1).restrict(&mut dest);
+
+        for vert in space.coarsened().vertex_space().iter() {
+            let xi = vert[0];
+            let yi = vert[1];
+
+            let src = |xoff: isize, yoff: isize| {
+                if xi == 0 && xoff < 0 {
+                    return 0.0;
+                } else if yi == 0 && yoff < 0 {
+                    return 0.0;
+                } else if xi == CELLS / 2 && xoff > 0 {
+                    return 0.0;
+                } else if yi == CELLS / 2 && yoff > 0 {
+                    return 0.0;
+                }
+
+                let xnode = 2 * xi as isize + xoff;
+                let ynode = 2 * yi as isize + yoff;
+
+                space.value([xnode as usize, ynode as usize], &source)
+            };
+
+            let corners = src(-1, -1) + src(1, -1) + src(1, 1) + src(-1, 1);
+            let edges = src(-1, 0) + src(1, 0) + src(0, 1) + src(0, -1);
+            let value = 1.0 / 16.0 * corners + 1.0 / 8.0 * edges + 1.0 / 4.0 * src(0, 0);
+
+            assert!((space.value([2 * xi, 2 * yi], &dest) - value).abs() < 1e-10);
         }
     }
 }

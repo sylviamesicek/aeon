@@ -133,6 +133,8 @@ impl<'m, const N: usize, Solver: LinearSolver> UniformMultigrid<'m, N, Solver> {
         // ******************************
         // Presmoothing
 
+        self.mesh.diritchlet_level::<O>(level, x);
+
         for _ in 0..self.config.presmoothing {
             let diag: &mut [f64] = arena.alloc::<f64>(block.len());
 
@@ -150,6 +152,8 @@ impl<'m, const N: usize, Solver: LinearSolver> UniformMultigrid<'m, N, Solver> {
             }
 
             arena.reset();
+
+            self.mesh.diritchlet_level::<O>(level, x);
         }
 
         // *****************************
@@ -158,6 +162,8 @@ impl<'m, const N: usize, Solver: LinearSolver> UniformMultigrid<'m, N, Solver> {
         self.mesh
             .residual_level(level, arena, &self.rhs, operator, &x, &mut self.scratch);
         self.mesh.restrict_level(level, &mut self.scratch);
+        // Any diritchlet boundary should be set to zero for the residual
+        self.mesh.diritchlet_level::<O>(level, &mut self.scratch);
         // Must be some error in restrict implementation
         // self.mesh.restrict_level_full(level, &mut self.scratch);
 
@@ -195,6 +201,8 @@ impl<'m, const N: usize, Solver: LinearSolver> UniformMultigrid<'m, N, Solver> {
             x[i] += self.scratch[i];
         }
 
+        self.mesh.diritchlet_level::<O>(level, x);
+
         // *************************
         // Postsmooth
 
@@ -215,6 +223,8 @@ impl<'m, const N: usize, Solver: LinearSolver> UniformMultigrid<'m, N, Solver> {
             }
 
             arena.reset();
+
+            self.mesh.diritchlet_level::<O>(level, x);
         }
     }
 }

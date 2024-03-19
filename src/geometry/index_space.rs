@@ -132,3 +132,48 @@ impl<const N: usize> Iterator for PlaneIterator<N> {
         Some(index)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn index_iteration() {
+        let space = IndexSpace::new([3, 2]);
+        let mut indices = space.iter();
+
+        assert_eq!(indices.next(), Some([0, 0]));
+        assert_eq!(indices.next(), Some([1, 0]));
+        assert_eq!(indices.next(), Some([2, 0]));
+        assert_eq!(indices.next(), Some([0, 1]));
+        assert_eq!(indices.next(), Some([1, 1]));
+        assert_eq!(indices.next(), Some([2, 1]));
+        assert_eq!(indices.next(), None);
+
+        let space = IndexSpace::new([2, 3, 10]);
+        let mut plane = space.plane(2, 5);
+
+        assert_eq!(plane.next(), Some([0, 0, 5]));
+        assert_eq!(plane.next(), Some([1, 0, 5]));
+        assert_eq!(plane.next(), Some([0, 1, 5]));
+        assert_eq!(plane.next(), Some([1, 1, 5]));
+        assert_eq!(plane.next(), Some([0, 2, 5]));
+        assert_eq!(plane.next(), Some([1, 2, 5]));
+        assert_eq!(plane.next(), None);
+    }
+
+    #[test]
+    fn index_conversion() {
+        let space = IndexSpace::new([2, 4, 3]);
+
+        assert_eq!(space.linear_from_cartesian([1, 0, 0]), 1);
+        assert_eq!(space.linear_from_cartesian([0, 1, 0]), 2);
+        assert_eq!(space.linear_from_cartesian([0, 0, 2]), 8 * 2);
+        assert_eq!(space.linear_from_cartesian([1, 1, 2]), 8 * 2 + 2 + 1);
+
+        assert_eq!(space.cartesian_from_linear(1), [1, 0, 0]);
+        assert_eq!(space.cartesian_from_linear(2), [0, 1, 0]);
+        assert_eq!(space.cartesian_from_linear(8 * 2), [0, 0, 2]);
+        assert_eq!(space.cartesian_from_linear(8 * 2 + 2 + 1), [1, 1, 2]);
+    }
+}

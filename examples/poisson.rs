@@ -57,6 +57,10 @@ impl Operator<2> for LaplacianOp {
             dest[i] = f_rr[i] + f_zz[i];
         }
     }
+
+    fn diritchlet(_axis: usize, face: bool) -> bool {
+        face == false
+    }
 }
 
 struct LaplacianRhs;

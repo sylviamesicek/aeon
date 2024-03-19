@@ -3,6 +3,7 @@ pub mod array;
 pub mod common;
 pub mod geometry;
 pub mod lac;
+// pub mod ode;
 pub mod uniform;
 
 pub mod prelude {
