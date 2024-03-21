@@ -12,8 +12,8 @@ const RADIUS: f64 = 10.0;
 const CFL: f64 = 0.1;
 const STEPS: usize = 1000;
 const SIGMA: f64 = 1.0;
-const DISS: f64 = 0.0;
-const LEVELS: usize = 4;
+const DISS: f64 = 0.1;
+const LEVELS: usize = 6;
 const ORDER: usize = 2;
 const OUTPUT: bool = true;
 
@@ -26,18 +26,18 @@ struct Exact {
 }
 
 impl Projection<DIMENSION> for Exact {
-    fn evaluate(self: &Self, _: &Arena, block: &Block<DIMENSION>, dest: &mut [f64]) {
+    fn evaluate(&self, _: &Arena, block: &Block<DIMENSION>, dest: &mut [f64]) {
         for (i, node) in block.iter().enumerate() {
             let position = block.position(node);
 
             let mut offset = position;
             offset[0] -= self.time;
 
-            let mut r2 = 0.0;
+            let r2 = offset[0] * offset[0];
 
-            for axis in 0..DIMENSION {
-                r2 += offset[axis] * offset[axis];
-            }
+            // for axis in 0..DIMENSION {
+            //     r2 += offset[axis] * offset[axis];
+            // }
 
             dest[i] = (-r2 / (SIGMA * SIGMA)).exp();
         }
@@ -49,7 +49,7 @@ struct Derivative<'a> {
 }
 
 impl<'a> Projection<DIMENSION> for Derivative<'a> {
-    fn evaluate(self: &Self, arena: &Arena, block: &Block<DIMENSION>, dest: &mut [f64]) {
+    fn evaluate(&self, arena: &Arena, block: &Block<DIMENSION>, dest: &mut [f64]) {
         let source_x = arena.alloc(block.len());
         let source = block.auxillary(self.source);
 
@@ -77,7 +77,7 @@ pub struct Dissipation<'a> {
 }
 
 impl<'a> Projection<DIMENSION> for Dissipation<'a> {
-    fn evaluate(self: &Self, arena: &Arena, block: &Block<DIMENSION>, dest: &mut [f64]) {
+    fn evaluate(&self, arena: &Arena, block: &Block<DIMENSION>, dest: &mut [f64]) {
         // Bizarre rust analyzer warning.
         let mut _f = dest;
 
@@ -243,6 +243,12 @@ fn main() {
         LEVELS,
     );
 
+    log::info!(
+        "Node Count {}, Nodes Per Axis {}",
+        mesh.node_count(),
+        mesh.level_size(mesh.level_count() - 1)[0],
+    );
+
     let mut system = vec![0.0; mesh.node_count()];
     mesh.project(&mut arena, &Exact { time: 0.0 }, &mut system);
 
@@ -264,6 +270,8 @@ fn main() {
     let k = CFL * min_spacing;
 
     log::info!("Step Size {k}");
+
+    let mut maxerror = 0.0;
 
     for i in 0..STEPS {
         log::info!(
@@ -288,7 +296,28 @@ fn main() {
         for i in 0..integrator.system.len() {
             residual[i] = exact[i] - integrator.system[i];
         }
+
+        for i in 0..residual.len() {
+            let err = residual[i].abs();
+
+            if err > maxerror {
+                maxerror = err
+            }
+        }
+
         // Write output
         write_vtk_output(i + 1, &mesh, &integrator.system, &exact, &residual);
     }
+
+    let mut maxfinalerror: f64 = 0.0;
+
+    for i in 0..residual.len() {
+        let err = residual[i].abs();
+
+        if err > maxfinalerror {
+            maxfinalerror = err
+        }
+    }
+
+    log::info!("Max error {maxerror:10.5e} Final Error {maxfinalerror:10.5e}");
 }

@@ -6,8 +6,8 @@ pub trait BoundarySet<const N: usize> {
     type NegativeBoundary: Boundary;
     type PositiveBoundary: Boundary;
 
-    fn negative(self: &Self, position: [f64; N]) -> Self::NegativeBoundary;
-    fn positive(self: &Self, position: [f64; N]) -> Self::PositiveBoundary;
+    fn negative(&self, position: [f64; N]) -> Self::NegativeBoundary;
+    fn positive(&self, position: [f64; N]) -> Self::PositiveBoundary;
 }
 
 /// A transformer used to combine different kinds of boundary set.
@@ -27,11 +27,11 @@ impl<const N: usize, NB: BoundarySet<N>, PB: BoundarySet<N>> BoundarySet<N> for 
     type NegativeBoundary = NB::NegativeBoundary;
     type PositiveBoundary = PB::PositiveBoundary;
 
-    fn negative(self: &Self, position: [f64; N]) -> Self::NegativeBoundary {
+    fn negative(&self, position: [f64; N]) -> Self::NegativeBoundary {
         self.negative.negative(position)
     }
 
-    fn positive(self: &Self, position: [f64; N]) -> Self::PositiveBoundary {
+    fn positive(&self, position: [f64; N]) -> Self::PositiveBoundary {
         self.positive.positive(position)
     }
 }
@@ -53,11 +53,11 @@ impl<const N: usize, B: Boundary> BoundarySet<N> for Simple<B> {
     type NegativeBoundary = B;
     type PositiveBoundary = B;
 
-    fn negative(self: &Self, _: [f64; N]) -> Self::NegativeBoundary {
+    fn negative(&self, _: [f64; N]) -> Self::NegativeBoundary {
         self.boundary.clone()
     }
 
-    fn positive(self: &Self, _: [f64; N]) -> Self::PositiveBoundary {
+    fn positive(&self, _: [f64; N]) -> Self::PositiveBoundary {
         self.boundary.clone()
     }
 }
@@ -70,7 +70,7 @@ pub struct AsymptoticFlatness<const ORDER: usize> {
 impl<const ORDER: usize> AsymptoticFlatness<ORDER> {
     /// Constructs a new asymptotic flatness boundary set.
     pub const fn new(axis: usize) -> Self {
-        Self { axis: axis }
+        Self { axis }
     }
 }
 
@@ -78,11 +78,11 @@ impl<const N: usize> BoundarySet<N> for AsymptoticFlatness<2> {
     type PositiveBoundary = RobinBoundary<2>;
     type NegativeBoundary = RobinBoundary<2>;
 
-    fn negative(self: &Self, position: [f64; N]) -> Self::NegativeBoundary {
+    fn negative(&self, position: [f64; N]) -> Self::NegativeBoundary {
         let mut r2 = 0.0;
 
-        for i in 0..N {
-            r2 += position[i] * position[i];
+        for pos in position.iter() {
+            r2 += pos * pos;
         }
 
         RobinBoundary {
@@ -90,11 +90,11 @@ impl<const N: usize> BoundarySet<N> for AsymptoticFlatness<2> {
         }
     }
 
-    fn positive(self: &Self, position: [f64; N]) -> Self::PositiveBoundary {
+    fn positive(&self, position: [f64; N]) -> Self::PositiveBoundary {
         let mut r2 = 0.0;
 
-        for i in 0..N {
-            r2 += position[i] * position[i];
+        for pos in position.iter() {
+            r2 += pos * pos;
         }
 
         RobinBoundary {
@@ -107,11 +107,11 @@ impl<const N: usize> BoundarySet<N> for AsymptoticFlatness<4> {
     type PositiveBoundary = RobinBoundary<4>;
     type NegativeBoundary = RobinBoundary<4>;
 
-    fn negative(self: &Self, position: [f64; N]) -> Self::NegativeBoundary {
+    fn negative(&self, position: [f64; N]) -> Self::NegativeBoundary {
         let mut r2 = 0.0;
 
-        for i in 0..N {
-            r2 += position[i] * position[i];
+        for pos in position.iter() {
+            r2 += pos * pos;
         }
 
         RobinBoundary {
@@ -119,11 +119,11 @@ impl<const N: usize> BoundarySet<N> for AsymptoticFlatness<4> {
         }
     }
 
-    fn positive(self: &Self, position: [f64; N]) -> Self::PositiveBoundary {
+    fn positive(&self, position: [f64; N]) -> Self::PositiveBoundary {
         let mut r2 = 0.0;
 
-        for i in 0..N {
-            r2 += position[i] * position[i];
+        for pos in position.iter() {
+            r2 += pos * pos;
         }
 
         RobinBoundary {
@@ -137,7 +137,7 @@ pub trait Boundary: Clone {
 
     type Stencil: Array<f64>;
 
-    fn stencil(self: &Self, extent: usize, spacing: f64) -> Self::Stencil;
+    fn stencil(&self, extent: usize, spacing: f64) -> Self::Stencil;
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -147,7 +147,7 @@ impl Boundary for FreeBoundary {
     const EXTENT: usize = 0;
     type Stencil = [f64; 0];
 
-    fn stencil(self: &Self, _: usize, _: f64) -> Self::Stencil {
+    fn stencil(&self, _: usize, _: f64) -> Self::Stencil {
         []
     }
 }
@@ -162,7 +162,7 @@ macro_rules! impl_symmetric_boundary {
 
             type Stencil = [f64; { $n + 1 }];
 
-            fn stencil(self: &Self, extent: usize, _: f64) -> Self::Stencil {
+            fn stencil(&self, extent: usize, _: f64) -> Self::Stencil {
                 let mut result = [0.0; { $n + 1 }];
 
                 result[extent] = 1.0;
@@ -187,7 +187,7 @@ macro_rules! impl_antisymmetric_boundary {
 
             type Stencil = [f64; { $n + 1 }];
 
-            fn stencil(self: &Self, extent: usize, _: f64) -> Self::Stencil {
+            fn stencil(&self, extent: usize, _: f64) -> Self::Stencil {
                 let mut result = [0.0; { $n + 1 }];
 
                 result[extent] = -1.0;
@@ -224,7 +224,7 @@ impl<const ORDER: usize> RobinBoundary<ORDER> {
 
 //             type Stencil = BoundaryStencil<$n>;
 
-//             fn stencil(self: &Self, _: usize) -> Self::Stencil {
+//             fn stencil(&self, _: usize) -> Self::Stencil {
 //                 let mut derivative = boundary_derivative!(($n - 1), 0);
 
 //                 for i in 0..derivative.len() {
@@ -259,12 +259,12 @@ impl Boundary for RobinBoundary<2> {
 
     type Stencil = [f64; 2];
 
-    fn stencil(self: &Self, _: usize, spacing: f64) -> Self::Stencil {
+    fn stencil(&self, _: usize, spacing: f64) -> Self::Stencil {
         let mut derivative = derivative!(2, 0, -1);
         derivative.reverse();
 
-        for i in 0..derivative.len() {
-            derivative[i] /= spacing;
+        for d in derivative.iter_mut() {
+            *d /= spacing;
         }
 
         let mut result = [0.0; 2];
@@ -274,8 +274,8 @@ impl Boundary for RobinBoundary<2> {
 
         result[0] += self.coefficient;
 
-        for i in 0..result.len() {
-            result[i] /= derivative[0];
+        for res in result.iter_mut() {
+            *res /= derivative[0]
         }
 
         result
@@ -286,12 +286,12 @@ impl Boundary for RobinBoundary<4> {
     const EXTENT: usize = 1;
     type Stencil = [f64; 4];
 
-    fn stencil(self: &Self, _: usize, spacing: f64) -> Self::Stencil {
+    fn stencil(&self, _: usize, spacing: f64) -> Self::Stencil {
         let mut derivative = derivative!(4, 0, -1);
         derivative.reverse();
 
-        for i in 0..derivative.len() {
-            derivative[i] /= spacing;
+        for d in derivative.iter_mut() {
+            *d /= spacing;
         }
 
         let mut result = [0.0; 4];
@@ -303,8 +303,8 @@ impl Boundary for RobinBoundary<4> {
 
         result[0] += self.coefficient;
 
-        for i in 0..result.len() {
-            result[i] /= derivative[0];
+        for res in result.iter_mut() {
+            *res /= derivative[0]
         }
 
         result

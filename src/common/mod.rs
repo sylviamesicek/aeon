@@ -1,3 +1,5 @@
+#![allow(clippy::len_without_is_empty)]
+
 mod block;
 mod boundary;
 mod kernel;
@@ -15,12 +17,12 @@ use crate::arena::Arena;
 
 pub trait Operator<const N: usize> {
     /// Applies the operator to the source function on the block, storing the result in dest.
-    fn apply(self: &Self, arena: &Arena, block: &Block<N>, src: &[f64], dest: &mut [f64]);
-    fn apply_diag(self: &Self, arena: &Arena, block: &Block<N>, dest: &mut [f64]);
+    fn apply(&self, arena: &Arena, block: &Block<N>, src: &[f64], dest: &mut [f64]);
+    fn apply_diag(&self, arena: &Arena, block: &Block<N>, dest: &mut [f64]);
 
     fn diritchlet(axis: usize, face: bool) -> bool;
 }
 
 pub trait Projection<const N: usize> {
-    fn evaluate(self: &Self, arena: &Arena, block: &Block<N>, dest: &mut [f64]);
+    fn evaluate(&self, arena: &Arena, block: &Block<N>, dest: &mut [f64]);
 }

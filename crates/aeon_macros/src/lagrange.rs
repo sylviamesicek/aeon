@@ -34,7 +34,7 @@ impl Stencil {
         Self { grid }
     }
 
-    pub fn value_weights(self: Self, point: Ratio) -> Vec<Ratio> {
+    pub fn value_weights(self, point: Ratio) -> Vec<Ratio> {
         let mut weights = vec![Ratio::one(); self.grid.len()];
 
         for i in 0..self.grid.len() {
@@ -48,7 +48,7 @@ impl Stencil {
         weights
     }
 
-    pub fn derivative_weights(self: Self, point: Ratio) -> Vec<Ratio> {
+    pub fn derivative_weights(self, point: Ratio) -> Vec<Ratio> {
         let mut weights = vec![Ratio::zero(); self.grid.len()];
 
         for i in 0..self.grid.len() {
@@ -70,7 +70,7 @@ impl Stencil {
         weights
     }
 
-    pub fn second_derivative_weights(self: Self, point: Ratio) -> Vec<Ratio> {
+    pub fn second_derivative_weights(self, point: Ratio) -> Vec<Ratio> {
         let mut weights = vec![Ratio::zero(); self.grid.len()];
 
         for i in 0..self.grid.len() {

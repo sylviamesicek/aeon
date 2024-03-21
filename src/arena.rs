@@ -13,12 +13,18 @@ impl Arena {
     }
 
     /// Allocates a new slice of the given length, filled with the default value of a type.
-    pub fn alloc<T: Default>(self: &Self, len: usize) -> &mut [T] {
+    pub fn alloc<T: Default>(&self, len: usize) -> &mut [T] {
         self.bump.alloc_slice_fill_default(len)
     }
 
     /// Resets the arena without calling drop.
-    pub fn reset(self: &mut Self) {
+    pub fn reset(&mut self) {
         self.bump.reset();
+    }
+}
+
+impl Default for Arena {
+    fn default() -> Self {
+        Self::new()
     }
 }

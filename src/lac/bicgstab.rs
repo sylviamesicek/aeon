@@ -1,3 +1,5 @@
+#![allow(clippy::needless_range_loop)]
+
 use super::{LinearMap, LinearSolver};
 
 /// Implementation of the stabilized bi-conjugate gradient method.
@@ -19,13 +21,13 @@ pub struct BiCGStabSolver {
 
 impl BiCGStabSolver {
     /// Retrieves the tolerance of the multigrid solver.
-    pub fn tolerance(self: &Self) -> f64 {
+    pub fn tolerance(&self) -> f64 {
         self.tolerance
     }
 
     /// Retrieves the maximum number of iterations before the multigrid
     /// solver fails.
-    pub fn max_iterations(self: &Self) -> usize {
+    pub fn max_iterations(&self) -> usize {
         self.max_iterations
     }
 }
@@ -65,12 +67,12 @@ impl LinearSolver for BiCGStabSolver {
         }
     }
 
-    fn dimension(self: &Self) -> usize {
+    fn dimension(&self) -> usize {
         self.dimension
     }
 
     fn solve<M: LinearMap>(
-        self: &mut Self,
+        &mut self,
         mut map: M,
         rhs: &[f64],
         solution: &mut [f64],
@@ -145,7 +147,7 @@ impl LinearSolver for BiCGStabSolver {
                     solution[i] += pra * self.ph[i];
                 }
 
-                map.apply(&solution, &mut self.tp);
+                map.apply(solution, &mut self.tp);
 
                 for i in 0..self.dimension {
                     self.rg[i] = rhs[i] - self.tp[i];
@@ -166,7 +168,7 @@ impl LinearSolver for BiCGStabSolver {
             }
 
             residual = norm(&self.rg);
-            map.callback(iter, residual, &solution);
+            map.callback(iter, residual, solution);
 
             if residual <= tolerance {
                 break;
@@ -213,7 +215,7 @@ mod tests {
     use crate::lac::{IdentityMap, LinearSolver};
 
     #[test]
-    fn convergence() -> Result<(), BiCGStabError> {
+    fn identity_convergence() -> Result<(), BiCGStabError> {
         let mut solution = vec![0.0; 100];
         let mut rhs = vec![0.0; 100];
 

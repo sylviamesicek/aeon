@@ -17,11 +17,11 @@ impl<'a, const N: usize> DataOut<'a, N> {
         }
     }
 
-    pub fn attrib_scalar(self: &mut Self, name: &str, field: &[f64]) {
+    pub fn attrib_scalar(&mut self, name: &str, field: &[f64]) {
         self.attribs.push((name.to_string(), field.to_vec()));
     }
 
-    pub fn vtk_model(self: &Self, title: &str) -> Vtk {
+    pub fn vtk_model(&self, title: &str) -> Vtk {
         assert!(N > 0 && N <= 2, "Vtk Output only supported for 0 < N ≤ 2");
 
         let node_space = self.mesh.level_node_space(self.mesh.level_count() - 1);
@@ -89,11 +89,8 @@ impl<'a, const N: usize> DataOut<'a, N> {
         for vertex in vertex_space.iter() {
             let position = node_space.position(vertex);
             let mut vertex = [0.0; 3];
-
-            for i in 0..N {
-                vertex[i] = position[i];
-            }
-
+            vertex[..N].copy_from_slice(&position);
+            // Push to vertices
             vertices.extend(vertex);
         }
 
@@ -134,7 +131,7 @@ impl<'a, const N: usize> DataOut<'a, N> {
         }
     }
 
-    pub fn export_vtk(self: &Self, title: &str, path: impl AsRef<Path>) -> Result<(), io::Error> {
+    pub fn export_vtk(&self, title: &str, path: impl AsRef<Path>) -> Result<(), io::Error> {
         let model = self.vtk_model(title);
         model.export(path).map_err(|i| match i {
             vtkio::Error::IO(io) => io,

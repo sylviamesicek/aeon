@@ -1,3 +1,5 @@
+#![allow(clippy::needless_range_loop)]
+
 /// Describes an abstract index space. Allows for iteration of indices
 /// in N dimensions, and transformations between cartesian and linear
 /// indices.
@@ -12,7 +14,7 @@ impl<const N: usize> IndexSpace<N> {
         Self { size }
     }
 
-    pub fn len(self: &Self) -> usize {
+    pub fn len(&self) -> usize {
         let mut result = 1;
 
         for i in 0..N {
@@ -22,8 +24,12 @@ impl<const N: usize> IndexSpace<N> {
         result
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
     /// Returns the dimensions of the index space along each axis.
-    pub fn size(self: Self) -> [usize; N] {
+    pub fn size(self) -> [usize; N] {
         self.size
     }
 
@@ -31,7 +37,7 @@ impl<const N: usize> IndexSpace<N> {
     /// will likely be an order of magnitude slower than
     /// `linear_from_cartesian()` due to several
     /// modulus operations.
-    pub fn cartesian_from_linear(self: Self, mut linear: usize) -> [usize; N] {
+    pub fn cartesian_from_linear(self, mut linear: usize) -> [usize; N] {
         let mut result = [0; N];
 
         for i in 0..N {
@@ -43,7 +49,7 @@ impl<const N: usize> IndexSpace<N> {
     }
 
     /// Converts a cartesian index into a linear index.
-    pub fn linear_from_cartesian(self: Self, cartesian: [usize; N]) -> usize {
+    pub fn linear_from_cartesian(self, cartesian: [usize; N]) -> usize {
         let mut result = 0;
         let mut stride = 1;
 
@@ -55,14 +61,14 @@ impl<const N: usize> IndexSpace<N> {
         result
     }
 
-    pub fn iter(self: Self) -> CartesianIterator<N> {
+    pub fn iter(self) -> CartesianIterator<N> {
         CartesianIterator {
             size: self.size,
             cursor: [0; N],
         }
     }
 
-    pub fn plane(self: Self, axis: usize, intercept: usize) -> PlaneIterator<N> {
+    pub fn plane(self, axis: usize, intercept: usize) -> PlaneIterator<N> {
         let mut plane_size = self.size;
         plane_size[axis] = 1;
 

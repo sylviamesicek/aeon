@@ -17,7 +17,7 @@ pub struct NodeSpace<const N: usize> {
 
 impl<const N: usize> NodeSpace<N> {
     /// Computes the total number of nodes in the space.
-    pub fn len(self: &Self) -> usize {
+    pub fn len(&self) -> usize {
         let mut result = 1;
 
         for i in 0..N {
@@ -27,33 +27,33 @@ impl<const N: usize> NodeSpace<N> {
         result
     }
 
-    pub fn cell_size(self: &Self) -> [usize; N] {
+    pub fn cell_size(&self) -> [usize; N] {
         self.size
     }
 
     /// Returns the number of vertices along each axis.
-    pub fn vertex_size(self: &Self) -> [usize; N] {
+    pub fn vertex_size(&self) -> [usize; N] {
         let mut size = self.size;
 
-        for i in 0..N {
-            size[i] += 1;
+        for s in size.iter_mut() {
+            *s += 1;
         }
 
         size
     }
 
     /// Returns an index space over the vertices in this node space.
-    pub fn vertex_space(self: &Self) -> IndexSpace<N> {
+    pub fn vertex_space(&self) -> IndexSpace<N> {
         IndexSpace::new(self.vertex_size())
     }
 
     /// Returns an index space over the cells in this node space.
-    pub fn cell_space(self: &Self) -> IndexSpace<N> {
+    pub fn cell_space(&self) -> IndexSpace<N> {
         IndexSpace::new(self.cell_size())
     }
 
     /// Computes the position of the given node.
-    pub fn position(self: &Self, node: [usize; N]) -> [f64; N] {
+    pub fn position(&self, node: [usize; N]) -> [f64; N] {
         let mut result = [0.0; N];
 
         for i in 0..N {
@@ -64,59 +64,59 @@ impl<const N: usize> NodeSpace<N> {
     }
 
     /// Returns the spacing along a given axis.
-    pub fn spacing(self: &Self, axis: usize) -> f64 {
+    pub fn spacing(&self, axis: usize) -> f64 {
         self.bounds.size[axis] / self.size[axis] as f64
     }
 
     /// Returns the value of the field at the given node.
-    pub fn value(self: &Self, node: [usize; N], src: &[f64]) -> f64 {
+    pub fn value(&self, node: [usize; N], src: &[f64]) -> f64 {
         let linear = self.vertex_space().linear_from_cartesian(node);
         src[linear]
     }
 
     /// Sets the value of the field at the given node.
-    pub fn set_value(self: &Self, node: [usize; N], v: f64, dest: &mut [f64]) {
+    pub fn set_value(&self, node: [usize; N], v: f64, dest: &mut [f64]) {
         let linear = self.vertex_space().linear_from_cartesian(node);
         dest[linear] = v;
     }
 
     /// Produces a node space with half the number of
     /// nodes along each direction.
-    pub fn coarsened(self: &Self) -> Self {
+    pub fn coarsened(&self) -> Self {
         let mut cells: [usize; N] = self.size;
 
-        for i in 0..N {
-            cells[i] /= 2;
+        for c in cells.iter_mut() {
+            *c /= 2;
         }
 
-        return Self {
+        Self {
             size: cells,
             bounds: self.bounds.clone(),
-        };
+        }
     }
 
     /// Produces a node space with double the number of nodes
     /// along each direction.
-    pub fn refined(self: &Self) -> Self {
+    pub fn refined(&self) -> Self {
         let mut cells: [usize; N] = self.size;
 
-        for i in 0..N {
-            cells[i] *= 2;
+        for c in cells.iter_mut() {
+            *c *= 2;
         }
 
-        return Self {
+        Self {
             size: cells,
             bounds: self.bounds.clone(),
-        };
+        }
     }
 
-    pub fn axis<'a>(&'a self, axis: usize) -> NodeSpaceAxis<'a, N> {
+    pub fn axis(&self, axis: usize) -> NodeSpaceAxis<'_, N> {
         NodeSpaceAxis { space: self, axis }
     }
 
     /// Prolong values from src -> dest by simply copying values
     /// from aligned vertices, and ignorning intermediate fine vertices.
-    pub fn prolong_inject(self: &Self, src: &[f64], dest: &mut [f64]) {
+    pub fn prolong_inject(&self, src: &[f64], dest: &mut [f64]) {
         let src_space = self.coarsened();
 
         assert!(src.len() == src_space.len() && dest.len() == self.len());
@@ -124,8 +124,8 @@ impl<const N: usize> NodeSpace<N> {
         for src_vertex in src_space.vertex_space().iter() {
             let mut vertex = src_vertex;
 
-            for i in 0..N {
-                vertex[i] *= 2;
+            for v in vertex.iter_mut() {
+                *v *= 2;
             }
 
             let value = src_space.value(src_vertex, src);
@@ -135,7 +135,7 @@ impl<const N: usize> NodeSpace<N> {
 
     /// Restrict values from src -> dest by copying values from the
     /// fine vertices directly to the corresponding coarse vertices.
-    pub fn restrict_inject(self: &Self, src: &[f64], dest: &mut [f64]) {
+    pub fn restrict_inject(&self, src: &[f64], dest: &mut [f64]) {
         let dest_space = self.coarsened();
 
         assert!(src.len() == self.len() && dest.len() == dest_space.len());
@@ -143,8 +143,8 @@ impl<const N: usize> NodeSpace<N> {
         for dest_vertex in dest_space.vertex_space().iter() {
             let mut vertex = dest_vertex;
 
-            for i in 0..N {
-                vertex[i] *= 2;
+            for v in vertex.iter_mut() {
+                *v *= 2;
             }
 
             let value = self.value(vertex, src);
@@ -160,12 +160,7 @@ pub struct NodeSpaceAxis<'a, const N: usize> {
 
 impl<'a, const N: usize> NodeSpaceAxis<'a, N> {
     /// Evaluates the operation of a kernel on the node space.
-    pub fn evaluate<K: Kernel, B: BoundarySet<N>>(
-        self: &Self,
-        set: &B,
-        src: &[f64],
-        dest: &mut [f64],
-    ) {
+    pub fn evaluate<K: Kernel, B: BoundarySet<N>>(&self, set: &B, src: &[f64], dest: &mut [f64]) {
         let positive: usize = K::POSITIVE_SUPPORT;
         let negative: usize = K::NEGATIVE_SUPPORT;
 
@@ -206,7 +201,7 @@ impl<'a, const N: usize> NodeSpaceAxis<'a, N> {
         }
     }
 
-    pub fn evaluate_diag<K: Kernel, B: BoundarySet<N>>(self: &Self, set: &B, dest: &mut [f64]) {
+    pub fn evaluate_diag<K: Kernel, B: BoundarySet<N>>(&self, set: &B, dest: &mut [f64]) {
         let positive: usize = K::POSITIVE_SUPPORT;
         let negative: usize = K::NEGATIVE_SUPPORT;
 
@@ -244,7 +239,7 @@ impl<'a, const N: usize> NodeSpaceAxis<'a, N> {
     }
 
     pub fn evaluate_negative<K: Kernel, B: BoundarySet<N>>(
-        self: &Self,
+        &self,
         mut node: [usize; N],
         set: &B,
         src: &[f64],
@@ -315,7 +310,7 @@ impl<'a, const N: usize> NodeSpaceAxis<'a, N> {
     }
 
     pub fn evaluate_positive<K: Kernel, B: BoundarySet<N>>(
-        self: &Self,
+        &self,
         mut node: [usize; N],
         set: &B,
         src: &[f64],
@@ -387,7 +382,7 @@ impl<'a, const N: usize> NodeSpaceAxis<'a, N> {
     }
 
     pub fn evaluate_negative_diag<K: Kernel, B: BoundarySet<N>>(
-        self: &Self,
+        &self,
         mut node: [usize; N],
         set: &B,
         dest: &mut [f64],
@@ -442,7 +437,7 @@ impl<'a, const N: usize> NodeSpaceAxis<'a, N> {
     }
 
     pub fn evaluate_positive_diag<K: Kernel, B: BoundarySet<N>>(
-        self: &Self,
+        &self,
         mut node: [usize; N],
         set: &B,
         dest: &mut [f64],
@@ -503,7 +498,7 @@ impl<'a, const N: usize> NodeSpaceAxis<'a, N> {
     }
 
     fn negative_ghost_value<B: Boundary>(
-        self: &Self,
+        &self,
         mut node: [usize; N],
         src: &[f64],
         boundary: &B,
@@ -522,7 +517,7 @@ impl<'a, const N: usize> NodeSpaceAxis<'a, N> {
     }
 
     fn positive_ghost_value<B: Boundary>(
-        self: &Self,
+        &self,
         mut node: [usize; N],
         src: &[f64],
         boundary: &B,
@@ -541,7 +536,7 @@ impl<'a, const N: usize> NodeSpaceAxis<'a, N> {
         result
     }
 
-    pub fn apply_diritchlet_bc(self: &Self, face: bool, field: &mut [f64]) {
+    pub fn apply_diritchlet_bc(&self, face: bool, field: &mut [f64]) {
         let slice = if face { self.space.size[self.axis] } else { 0 };
 
         for node in self.space.vertex_space().plane(self.axis, slice) {
@@ -550,7 +545,7 @@ impl<'a, const N: usize> NodeSpaceAxis<'a, N> {
     }
 
     /// Performs bilinear prolongation on the given field.
-    pub fn prolong(self: &Self, dest: &mut [f64]) {
+    pub fn prolong(&self, dest: &mut [f64]) {
         let length = self.space.size[self.axis] + 1;
 
         for mut node in self.space.vertex_space().plane(self.axis, 0) {
@@ -568,7 +563,7 @@ impl<'a, const N: usize> NodeSpaceAxis<'a, N> {
     }
 
     /// Performs full weighted restriction on the given field.
-    pub fn restrict(self: &Self, dest: &mut [f64]) {
+    pub fn restrict(&self, dest: &mut [f64]) {
         let length = self.space.size[self.axis] + 1;
 
         for mut node in self.space.vertex_space().plane(self.axis, 0) {
@@ -634,6 +629,19 @@ mod tests {
         }
 
         source
+    }
+
+    #[test]
+    fn positions_and_spacing() {
+        let space = NodeSpace {
+            bounds: Rectangle::UNIT,
+            size: [CELLS, CELLS],
+        };
+
+        assert!(space.position([0, 0]) == [0.0, 0.0]);
+        assert!(space.position([CELLS / 2, CELLS / 2]) == [0.5, 0.5]);
+        assert!(space.position([CELLS, CELLS]) == [1.0, 1.0]);
+        assert!(space.spacing(0) == 0.1);
     }
 
     #[test]

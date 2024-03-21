@@ -8,13 +8,13 @@ pub use bicgstab::{BiCGStabConfig, BiCGStabError, BiCGStabSolver};
 /// a given dimension.
 pub trait LinearMap {
     /// Dimension of the linear map.
-    fn dimension(self: &Self) -> usize;
+    fn dimension(&self) -> usize;
 
     /// Application of the linear map.
-    fn apply(self: &mut Self, src: &[f64], dest: &mut [f64]);
+    fn apply(&mut self, src: &[f64], dest: &mut [f64]);
 
     /// An optional callback for logging residuals and iterations.
-    fn callback(self: &Self, iteration: usize, residual: f64, solution: &[f64]) {
+    fn callback(&self, iteration: usize, residual: f64, solution: &[f64]) {
         _ = iteration;
         _ = residual;
         _ = solution;
@@ -29,11 +29,11 @@ pub trait LinearSolver {
     fn new(dimension: usize, config: &Self::Config) -> Self;
 
     /// Dimension of the linear solver.
-    fn dimension(self: &Self) -> usize;
+    fn dimension(&self) -> usize;
 
     /// Inverts a linear problem.
     fn solve<M: LinearMap>(
-        self: &mut Self,
+        &mut self,
         map: M,
         rhs: &[f64],
         solution: &mut [f64],
@@ -52,11 +52,11 @@ impl IdentityMap {
 }
 
 impl LinearMap for IdentityMap {
-    fn dimension(self: &Self) -> usize {
+    fn dimension(&self) -> usize {
         self.dimension
     }
 
-    fn apply(self: &mut Self, src: &[f64], dest: &mut [f64]) {
+    fn apply(&mut self, src: &[f64], dest: &mut [f64]) {
         dest.clone_from_slice(src);
     }
 }

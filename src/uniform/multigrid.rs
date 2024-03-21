@@ -53,7 +53,7 @@ impl<'m, const N: usize, Solver: LinearSolver> UniformMultigrid<'m, N, Solver> {
     }
 
     pub fn solve<O: Operator<N>>(
-        self: &mut Self,
+        &mut self,
         arena: &mut Arena,
         operator: &O,
         b: &[f64],
@@ -80,7 +80,7 @@ impl<'m, const N: usize, Solver: LinearSolver> UniformMultigrid<'m, N, Solver> {
 
             // Compute residual
             self.mesh
-                .residual(arena, &self.rhs, operator, &x, &mut self.scratch);
+                .residual(arena, &self.rhs, operator, x, &mut self.scratch);
 
             let nres = self.mesh.norm(&self.scratch);
 
@@ -97,7 +97,7 @@ impl<'m, const N: usize, Solver: LinearSolver> UniformMultigrid<'m, N, Solver> {
 
     /// Runs a v-cycle.
     fn cycle<O: Operator<N>>(
-        self: &mut Self,
+        &mut self,
         arena: &mut Arena,
         operator: &O,
         level: usize,
@@ -160,7 +160,7 @@ impl<'m, const N: usize, Solver: LinearSolver> UniformMultigrid<'m, N, Solver> {
         // Right hand side
 
         self.mesh
-            .residual_level(level, arena, &self.rhs, operator, &x, &mut self.scratch);
+            .residual_level(level, arena, &self.rhs, operator, x, &mut self.scratch);
         self.mesh.restrict_level(level, &mut self.scratch);
         // Any diritchlet boundary should be set to zero for the residual
         self.mesh.diritchlet_level::<O>(level, &mut self.scratch);
@@ -188,7 +188,7 @@ impl<'m, const N: usize, Solver: LinearSolver> UniformMultigrid<'m, N, Solver> {
         // *************************
         // Error Correction
 
-        self.mesh.copy_level(level, &x, &mut self.scratch);
+        self.mesh.copy_level(level, x, &mut self.scratch);
         self.mesh.restrict_level(level, &mut self.scratch);
 
         for i in coarse.clone() {
@@ -238,16 +238,16 @@ struct BaseLinearMap<'a, const N: usize, O: Operator<N>> {
 }
 
 impl<'a, const N: usize, O: Operator<N>> LinearMap for BaseLinearMap<'a, N, O> {
-    fn dimension(self: &Self) -> usize {
+    fn dimension(&self) -> usize {
         self.dimension
     }
 
-    fn apply(self: &mut Self, src: &[f64], dest: &mut [f64]) {
-        self.operator.apply(&mut self.arena, &self.block, src, dest);
+    fn apply(&mut self, src: &[f64], dest: &mut [f64]) {
+        self.operator.apply(self.arena, &self.block, src, dest);
         self.arena.reset();
     }
 
-    fn callback(self: &Self, _: usize, _: f64, _: &[f64]) {
+    fn callback(&self, _: usize, _: f64, _: &[f64]) {
         // println!("Base Iteration {iteration}, Residual {residual}");
     }
 }

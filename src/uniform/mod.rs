@@ -25,8 +25,8 @@ pub struct UniformMesh<const N: usize> {
 impl<const N: usize> UniformMesh<N> {
     /// Constructs a new uniform mesh.
     pub fn new(bounds: Rectangle<N>, size: [usize; N], levels: usize) -> Self {
-        for i in 0..N {
-            assert!(size[i] % 2 == 0);
+        for &size in size.iter() {
+            assert!(size % 2 == 0);
         }
 
         let mut offsets = vec![0; levels + 1];
@@ -35,16 +35,12 @@ impl<const N: usize> UniformMesh<N> {
         offsets[0] = 0;
 
         for i in 0..levels {
-            let mut total = 1;
-
-            for i in 0..N {
-                total *= level_size[i] + 1;
-            }
+            let total = level_size.iter().map(|i| i + 1).product::<usize>();
 
             offsets[i + 1] = total + offsets[i];
 
-            for i in 0..N {
-                level_size[i] *= 2;
+            for size in level_size.iter_mut() {
+                *size *= 2;
             }
         }
 
@@ -56,38 +52,38 @@ impl<const N: usize> UniformMesh<N> {
     }
 
     /// Physical bounds of the mesh.
-    pub fn bounds(self: &Self) -> Rectangle<N> {
+    pub fn bounds(&self) -> Rectangle<N> {
         self.bounds.clone()
     }
 
     /// Total number of nodes in the mesh.
-    pub fn node_count(self: &Self) -> usize {
+    pub fn node_count(&self) -> usize {
         *self.offsets.last().unwrap()
     }
 
     /// Number of nodes on base level of the mesh.
-    pub fn base_node_count(self: &Self) -> usize {
+    pub fn base_node_count(&self) -> usize {
         self.offsets[1]
     }
 
     /// Number of levels in mesh.
-    pub fn level_count(self: &Self) -> usize {
+    pub fn level_count(&self) -> usize {
         self.offsets.len() - 1
     }
 
     /// Number of cells along each axis for a given level.
-    pub fn level_size(self: &Self, level: usize) -> [usize; N] {
+    pub fn level_size(&self, level: usize) -> [usize; N] {
         let mut result = self.size;
 
-        for i in 0..N {
-            result[i] *= 1 << level;
+        for r in result.iter_mut() {
+            *r *= 1 << level;
         }
 
         result
     }
 
     /// Constructs a node space for a level in the mesh.
-    pub fn level_node_space(self: &Self, level: usize) -> NodeSpace<N> {
+    pub fn level_node_space(&self, level: usize) -> NodeSpace<N> {
         NodeSpace {
             bounds: self.bounds.clone(),
             size: self.level_size(level),
@@ -95,17 +91,17 @@ impl<const N: usize> UniformMesh<N> {
     }
 
     /// Offset into a node vector for the given level.
-    pub fn level_node_offset(self: &Self, level: usize) -> usize {
+    pub fn level_node_offset(&self, level: usize) -> usize {
         self.offsets[level]
     }
 
     /// Node range for a level.
-    pub fn level_node_range(self: &Self, level: usize) -> Range<usize> {
+    pub fn level_node_range(&self, level: usize) -> Range<usize> {
         self.offsets[level]..self.offsets[level + 1]
     }
 
     /// Constructs a block for a level in the mesh.
-    pub fn level_block(self: &Self, level: usize) -> Block<N> {
+    pub fn level_block(&self, level: usize) -> Block<N> {
         let space = self.level_node_space(level);
         let offset = self.level_node_offset(level);
         let total = self.level_node_offset(level + 1) - offset;
@@ -114,7 +110,7 @@ impl<const N: usize> UniformMesh<N> {
     }
 
     /// Computes the spacing for the finest level of the mesh.
-    pub fn min_spacing(self: &Self) -> f64 {
+    pub fn min_spacing(&self) -> f64 {
         let space = self.level_node_space(self.level_count() - 1);
 
         let mut result = f64::MAX;
@@ -131,7 +127,7 @@ impl<const N: usize> UniformMesh<N> {
     // ***********************************
 
     /// Injects values from the finest level to lower levels.
-    pub fn restrict(self: &Self, field: &mut [f64]) {
+    pub fn restrict(&self, field: &mut [f64]) {
         assert!(field.len() == self.node_count());
 
         for level in (1..self.level_count()).rev() {
@@ -140,7 +136,7 @@ impl<const N: usize> UniformMesh<N> {
     }
 
     /// Injects values from `level -> level - 1`.
-    pub fn restrict_level(self: &Self, level: usize, field: &mut [f64]) {
+    pub fn restrict_level(&self, level: usize, field: &mut [f64]) {
         assert!(field.len() == self.node_count());
 
         let offset = self.level_node_offset(level);
@@ -156,7 +152,7 @@ impl<const N: usize> UniformMesh<N> {
     }
 
     /// Fully restricts values from `level -> level - 1`.
-    pub fn restrict_level_full(self: &Self, level: usize, field: &mut [f64]) {
+    pub fn restrict_level_full(&self, level: usize, field: &mut [f64]) {
         let range = self.level_node_range(level);
         let space = self.level_node_space(level);
 
@@ -167,13 +163,13 @@ impl<const N: usize> UniformMesh<N> {
         self.restrict_level(level, field);
     }
 
-    pub fn prolong(self: &Self, field: &mut [f64]) {
+    pub fn prolong(&self, field: &mut [f64]) {
         for level in 1..self.level_count() {
             self.prolong_level(level, field);
         }
     }
 
-    pub fn prolong_level(self: &Self, level: usize, field: &mut [f64]) {
+    pub fn prolong_level(&self, level: usize, field: &mut [f64]) {
         assert!(field.len() == self.node_count());
 
         let offset = self.level_node_offset(level);
@@ -189,7 +185,7 @@ impl<const N: usize> UniformMesh<N> {
         space.prolong_inject(src, dest);
     }
 
-    pub fn prolong_level_full(self: &Self, level: usize, field: &mut [f64]) {
+    pub fn prolong_level_full(&self, level: usize, field: &mut [f64]) {
         let range = self.level_node_range(level);
         let space = self.level_node_space(level);
 
@@ -200,24 +196,19 @@ impl<const N: usize> UniformMesh<N> {
         }
     }
 
-    pub fn copy_level(self: &Self, level: usize, src: &[f64], dest: &mut [f64]) {
+    pub fn copy_level(&self, level: usize, src: &[f64], dest: &mut [f64]) {
         let range = self.level_node_range(level);
 
-        (&mut dest[range.clone()]).copy_from_slice(&src[range.clone()]);
+        dest[range.clone()].copy_from_slice(&src[range.clone()]);
     }
 
-    pub fn project<P: Projection<N>>(
-        self: &Self,
-        arena: &mut Arena,
-        projection: &P,
-        dest: &mut [f64],
-    ) {
+    pub fn project<P: Projection<N>>(&self, arena: &mut Arena, projection: &P, dest: &mut [f64]) {
         self.project_level(self.level_count() - 1, arena, projection, dest);
         self.restrict(dest);
     }
 
     pub fn project_level<P: Projection<N>>(
-        self: &Self,
+        &self,
         level: usize,
         arena: &mut Arena,
         projection: &P,
@@ -232,7 +223,7 @@ impl<const N: usize> UniformMesh<N> {
     }
 
     pub fn apply<O: Operator<N>>(
-        self: &Self,
+        &self,
         arena: &mut Arena,
         operator: &O,
         x: &[f64],
@@ -244,7 +235,7 @@ impl<const N: usize> UniformMesh<N> {
     }
 
     pub fn apply_level<O: Operator<N>>(
-        self: &Self,
+        &self,
         level: usize,
         arena: &mut Arena,
         operator: &O,
@@ -258,7 +249,7 @@ impl<const N: usize> UniformMesh<N> {
     }
 
     pub fn residual<O: Operator<N>>(
-        self: &Self,
+        &self,
         arena: &mut Arena,
         b: &[f64],
         operator: &O,
@@ -271,7 +262,7 @@ impl<const N: usize> UniformMesh<N> {
     }
 
     pub fn residual_level<O: Operator<N>>(
-        self: &Self,
+        &self,
         level: usize,
         arena: &mut Arena,
         b: &[f64],
@@ -289,13 +280,13 @@ impl<const N: usize> UniformMesh<N> {
         }
     }
 
-    pub fn diritchlet<O: Operator<N>>(self: &Self, dest: &mut [f64]) {
+    pub fn diritchlet<O: Operator<N>>(&self, dest: &mut [f64]) {
         for level in 0..self.level_count() {
             self.diritchlet_level::<O>(level, dest);
         }
     }
 
-    pub fn diritchlet_level<O: Operator<N>>(self: &Self, level: usize, dest: &mut [f64]) {
+    pub fn diritchlet_level<O: Operator<N>>(&self, level: usize, dest: &mut [f64]) {
         let block = self.level_block(level);
         let dest = block.auxillary_mut(dest);
 
@@ -310,7 +301,7 @@ impl<const N: usize> UniformMesh<N> {
         }
     }
 
-    pub fn norm(self: &Self, field: &[f64]) -> f64 {
+    pub fn norm(&self, field: &[f64]) -> f64 {
         let mut result = 0.0;
 
         for &f in field {
