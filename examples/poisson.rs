@@ -76,8 +76,8 @@ impl Projection<2> for LaplacianRhs {
     }
 }
 
-fn write_vtk_output(
-    mesh: &UniformMesh<2>,
+fn write_vtk_output<const N: usize>(
+    mesh: &UniformMesh<N>,
     exact: &[f64],
     solution: &[f64],
     rhs: &[f64],

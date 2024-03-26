@@ -240,6 +240,7 @@ impl<'m> ResidualSolver<'m> {
         arena: &mut Arena,
         dynamic: DynamicSlice,
         gauge: GaugeSlice,
+        derivatives: DynamicSliceMut,
         residuals: GaugeSliceMut,
     ) {
         // **********************
@@ -287,6 +288,61 @@ impl<'m> ResidualSolver<'m> {
         self.mesh.project(arena, &shiftz_rhs, &mut self.rhs);
         self.mesh
             .residual(arena, &self.rhs, &ShiftZOp, gauge.shiftz, residuals.shiftz);
+
+        // Dynamic
+
+        let psi = PsiEvolution {
+            lapse: gauge.lapse,
+            shiftr: gauge.shiftr,
+            shiftz: gauge.shiftz,
+            psi: dynamic.psi,
+            u: dynamic.u,
+            w: dynamic.w,
+        };
+
+        let seed = SeedEvolution {
+            lapse: gauge.lapse,
+            shiftr: gauge.shiftr,
+            shiftz: gauge.shiftz,
+            seed: dynamic.seed,
+            w: dynamic.w,
+        };
+
+        let u = UEvolution {
+            lapse: gauge.lapse,
+            shiftr: gauge.shiftr,
+            shiftz: gauge.shiftz,
+            psi: dynamic.psi,
+            seed: dynamic.seed,
+            u: dynamic.u,
+            x: dynamic.x,
+        };
+
+        let w = WEvolution {
+            lapse: gauge.lapse,
+            shiftr: gauge.shiftr,
+            shiftz: gauge.shiftz,
+            psi: dynamic.psi,
+            seed: dynamic.seed,
+            w: dynamic.w,
+            x: dynamic.x,
+        };
+
+        let x = XEvolution {
+            lapse: gauge.lapse,
+            shiftr: gauge.shiftr,
+            shiftz: gauge.shiftz,
+            psi: dynamic.psi,
+            seed: dynamic.seed,
+            u: dynamic.u,
+            x: dynamic.x,
+        };
+
+        self.mesh.project(arena, &psi, derivatives.psi);
+        self.mesh.project(arena, &seed, derivatives.seed);
+        self.mesh.project(arena, &u, derivatives.u);
+        self.mesh.project(arena, &w, derivatives.w);
+        self.mesh.project(arena, &x, derivatives.x);
     }
 }
 
@@ -344,71 +400,73 @@ impl<'a> DynamicIntegrator<'a> {
             self.k1.as_mut_slice(),
         );
 
-        // ********************************
-        // K2
+        if !EULER {
+            // ********************************
+            // K2
 
-        for i in 0..self.dynamic.len() {
-            self.scratch.psi[i] = self.dynamic.psi[i] + k / 2.0 * self.k1.psi[i];
-            self.scratch.seed[i] = self.dynamic.seed[i] + k / 2.0 * self.k1.seed[i];
-            self.scratch.u[i] = self.dynamic.u[i] + k / 2.0 * self.k1.u[i];
-            self.scratch.w[i] = self.dynamic.w[i] + k / 2.0 * self.k1.w[i];
-            self.scratch.x[i] = self.dynamic.x[i] + k / 2.0 * self.k1.x[i];
+            for i in 0..self.dynamic.len() {
+                self.scratch.psi[i] = self.dynamic.psi[i] + k / 2.0 * self.k1.psi[i];
+                self.scratch.seed[i] = self.dynamic.seed[i] + k / 2.0 * self.k1.seed[i];
+                self.scratch.u[i] = self.dynamic.u[i] + k / 2.0 * self.k1.u[i];
+                self.scratch.w[i] = self.dynamic.w[i] + k / 2.0 * self.k1.w[i];
+                self.scratch.x[i] = self.dynamic.x[i] + k / 2.0 * self.k1.x[i];
+            }
+
+            self.solver
+                .solve(arena, self.scratch.as_slice(), self.gauge.as_mut_slice());
+
+            Self::compute_derivative(
+                self.mesh,
+                arena,
+                self.scratch.as_slice(),
+                self.gauge.as_slice(),
+                self.k2.as_mut_slice(),
+            );
+
+            // **************************************
+            // K3
+
+            for i in 0..self.dynamic.len() {
+                self.scratch.psi[i] = self.dynamic.psi[i] + k / 2.0 * self.k2.psi[i];
+                self.scratch.seed[i] = self.dynamic.seed[i] + k / 2.0 * self.k2.seed[i];
+                self.scratch.u[i] = self.dynamic.u[i] + k / 2.0 * self.k2.u[i];
+                self.scratch.w[i] = self.dynamic.w[i] + k / 2.0 * self.k2.w[i];
+                self.scratch.x[i] = self.dynamic.x[i] + k / 2.0 * self.k2.x[i];
+            }
+
+            self.solver
+                .solve(arena, self.scratch.as_slice(), self.gauge.as_mut_slice());
+
+            Self::compute_derivative(
+                self.mesh,
+                arena,
+                self.scratch.as_slice(),
+                self.gauge.as_slice(),
+                self.k3.as_mut_slice(),
+            );
+
+            // ****************************************
+            // K4
+
+            for i in 0..self.dynamic.len() {
+                self.scratch.psi[i] = self.dynamic.psi[i] + k * self.k3.psi[i];
+                self.scratch.seed[i] = self.dynamic.seed[i] + k * self.k3.seed[i];
+                self.scratch.u[i] = self.dynamic.u[i] + k * self.k3.u[i];
+                self.scratch.w[i] = self.dynamic.w[i] + k * self.k3.w[i];
+                self.scratch.x[i] = self.dynamic.x[i] + k * self.k3.x[i];
+            }
+
+            self.solver
+                .solve(arena, self.scratch.as_slice(), self.gauge.as_mut_slice());
+
+            Self::compute_derivative(
+                self.mesh,
+                arena,
+                self.scratch.as_slice(),
+                self.gauge.as_slice(),
+                self.k4.as_mut_slice(),
+            );
         }
-
-        self.solver
-            .solve(arena, self.scratch.as_slice(), self.gauge.as_mut_slice());
-
-        Self::compute_derivative(
-            self.mesh,
-            arena,
-            self.scratch.as_slice(),
-            self.gauge.as_slice(),
-            self.k2.as_mut_slice(),
-        );
-
-        // **************************************
-        // K3
-
-        for i in 0..self.dynamic.len() {
-            self.scratch.psi[i] = self.dynamic.psi[i] + k / 2.0 * self.k2.psi[i];
-            self.scratch.seed[i] = self.dynamic.seed[i] + k / 2.0 * self.k2.seed[i];
-            self.scratch.u[i] = self.dynamic.u[i] + k / 2.0 * self.k2.u[i];
-            self.scratch.w[i] = self.dynamic.w[i] + k / 2.0 * self.k2.w[i];
-            self.scratch.x[i] = self.dynamic.x[i] + k / 2.0 * self.k2.x[i];
-        }
-
-        self.solver
-            .solve(arena, self.scratch.as_slice(), self.gauge.as_mut_slice());
-
-        Self::compute_derivative(
-            self.mesh,
-            arena,
-            self.scratch.as_slice(),
-            self.gauge.as_slice(),
-            self.k3.as_mut_slice(),
-        );
-
-        // ****************************************
-        // K4
-
-        for i in 0..self.dynamic.len() {
-            self.scratch.psi[i] = self.dynamic.psi[i] + k * self.k3.psi[i];
-            self.scratch.seed[i] = self.dynamic.seed[i] + k * self.k3.seed[i];
-            self.scratch.u[i] = self.dynamic.u[i] + k * self.k3.u[i];
-            self.scratch.w[i] = self.dynamic.w[i] + k * self.k3.w[i];
-            self.scratch.x[i] = self.dynamic.x[i] + k * self.k3.x[i];
-        }
-
-        self.solver
-            .solve(arena, self.scratch.as_slice(), self.gauge.as_mut_slice());
-
-        Self::compute_derivative(
-            self.mesh,
-            arena,
-            self.scratch.as_slice(),
-            self.gauge.as_slice(),
-            self.k4.as_mut_slice(),
-        );
 
         // ******************************
         // Update
@@ -464,20 +522,33 @@ impl<'a> DynamicIntegrator<'a> {
             &mut self.scratch.x,
         );
 
-        for i in 0..self.dynamic.len() {
-            self.dynamic.psi[i] += k / 6.0
-                * (self.k1.psi[i] + 2.0 * self.k2.psi[i] + 2.0 * self.k3.psi[i] + self.k4.psi[i]);
-            self.dynamic.seed[i] += k / 6.0
-                * (self.k1.seed[i]
-                    + 2.0 * self.k2.seed[i]
-                    + 2.0 * self.k3.seed[i]
-                    + self.k4.seed[i]);
-            self.dynamic.u[i] +=
-                k / 6.0 * (self.k1.u[i] + 2.0 * self.k2.u[i] + 2.0 * self.k3.u[i] + self.k4.u[i]);
-            self.dynamic.w[i] +=
-                k / 6.0 * (self.k1.w[i] + 2.0 * self.k2.w[i] + 2.0 * self.k3.w[i] + self.k4.w[i]);
-            self.dynamic.x[i] +=
-                k / 6.0 * (self.k1.x[i] + 2.0 * self.k2.x[i] + 2.0 * self.k3.x[i] + self.k4.x[i]);
+        if EULER {
+            for i in 0..self.dynamic.len() {
+                self.dynamic.psi[i] += k * self.k1.psi[i];
+                self.dynamic.seed[i] += k * self.k1.seed[i];
+                self.dynamic.u[i] += k * self.k1.u[i];
+                self.dynamic.w[i] += k * self.k1.w[i];
+                self.dynamic.x[i] += k * self.k1.x[i];
+            }
+        } else {
+            for i in 0..self.dynamic.len() {
+                self.dynamic.psi[i] += k / 6.0
+                    * (self.k1.psi[i]
+                        + 2.0 * self.k2.psi[i]
+                        + 2.0 * self.k3.psi[i]
+                        + self.k4.psi[i]);
+                self.dynamic.seed[i] += k / 6.0
+                    * (self.k1.seed[i]
+                        + 2.0 * self.k2.seed[i]
+                        + 2.0 * self.k3.seed[i]
+                        + self.k4.seed[i]);
+                self.dynamic.u[i] += k / 6.0
+                    * (self.k1.u[i] + 2.0 * self.k2.u[i] + 2.0 * self.k3.u[i] + self.k4.u[i]);
+                self.dynamic.w[i] += k / 6.0
+                    * (self.k1.w[i] + 2.0 * self.k2.w[i] + 2.0 * self.k3.w[i] + self.k4.w[i]);
+                self.dynamic.x[i] += k / 6.0
+                    * (self.k1.x[i] + 2.0 * self.k2.x[i] + 2.0 * self.k3.x[i] + self.k4.x[i]);
+            }
         }
 
         for i in 0..self.dynamic.len() {
@@ -567,11 +638,14 @@ fn write_vtk_output(
     mesh: &UniformMesh<2>,
     dynamic: DynamicSlice,
     gauge: GaugeSlice,
+    derivatives: DynamicSlice,
     residuals: GaugeSlice,
     constraint: &[f64],
 ) {
     let title = format!("evolution{step}");
     let file_path = PathBuf::from(format!("output/{title}.vtu"));
+
+    log::trace!("Saving to {}.vtu", title);
 
     let mut output = DataOut::new(mesh);
 
@@ -584,6 +658,12 @@ fn write_vtk_output(
     output.attrib_scalar("lapse", gauge.lapse);
     output.attrib_scalar("shiftr", gauge.shiftr);
     output.attrib_scalar("shiftz", gauge.shiftz);
+
+    output.attrib_scalar("psi_deriv", derivatives.psi);
+    output.attrib_scalar("seed_deriv", derivatives.seed);
+    output.attrib_scalar("u_deriv", derivatives.u);
+    output.attrib_scalar("x_deriv", derivatives.x);
+    output.attrib_scalar("w_deriv", derivatives.w);
 
     output.attrib_scalar("lapse_residual", residuals.lapse);
     output.attrib_scalar("shiftr_residual", residuals.shiftr);
@@ -616,6 +696,7 @@ pub fn main() {
 
     let mut dynamic = dynamic_new(mesh.node_count());
     let mut gauge = gauge_new(mesh.node_count());
+    let mut derivatives = dynamic_new(mesh.node_count());
     let mut residuals = gauge_new(mesh.node_count());
     let mut constraint = vec![0.0; mesh.node_count()];
 
@@ -643,6 +724,7 @@ pub fn main() {
         &mut arena,
         dynamic.as_slice(),
         gauge.as_slice(),
+        derivatives.as_mut_slice(),
         residuals.as_mut_slice(),
     );
 
@@ -652,6 +734,7 @@ pub fn main() {
         &mesh,
         dynamic.as_slice(),
         gauge.as_slice(),
+        derivatives.as_slice(),
         residuals.as_slice(),
         &constraint,
     );
@@ -661,14 +744,18 @@ pub fn main() {
     let min_spacing = mesh.min_spacing();
     let k = CFL * min_spacing;
 
-    log::info!("Step Size {k}");
+    log::info!("Step Size {k:10.5e}");
 
     for i in 0..STEPS {
+        let l2 = mesh.norm(&constraint) / (constraint.len() as f64).sqrt();
+        let sup: f64 = constraint.iter().fold(0.0, |a, &b| a.max(b));
+
         log::info!(
-            "Step {}, Residual {}, Time {}",
+            "Step {}, Residual (L2: {}, Sup: {}), Time {}",
             i,
-            mesh.norm(&constraint) / (constraint.len() as f64).sqrt(),
-            k * i as f64,
+            l2,
+            sup,
+            system.time,
         );
         // Step
         system.step(&mut arena, k);
@@ -687,6 +774,7 @@ pub fn main() {
             &mut arena,
             system.dynamic.as_slice(),
             system.gauge.as_slice(),
+            derivatives.as_mut_slice(),
             residuals.as_mut_slice(),
         );
 
@@ -696,12 +784,11 @@ pub fn main() {
             &mesh,
             system.dynamic.as_slice(),
             system.gauge.as_slice(),
+            derivatives.as_slice(),
             residuals.as_slice(),
             &constraint,
         );
     }
-
-    // multigrid.solve(&Laplacian { bump: Bump::new() }, &rhs, &mut solution);
 
     log::info!("Evolved Brill Waves {STEPS} steps.");
 }

@@ -13,6 +13,10 @@ pub trait LinearMap {
     /// Application of the linear map.
     fn apply(&mut self, src: &[f64], dest: &mut [f64]);
 
+    fn mask(&self, mask: &mut [bool]) {
+        mask.fill(true);
+    }
+
     /// An optional callback for logging residuals and iterations.
     fn callback(&self, iteration: usize, residual: f64, solution: &[f64]) {
         _ = iteration;

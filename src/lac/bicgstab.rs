@@ -17,6 +17,8 @@ pub struct BiCGStabSolver {
     tg: Vec<f64>,
     vg: Vec<f64>,
     tp: Vec<f64>,
+
+    mask: Vec<bool>,
 }
 
 impl BiCGStabSolver {
@@ -64,6 +66,8 @@ impl LinearSolver for BiCGStabSolver {
             tg: vec![0.0; dimension],
             vg: vec![0.0; dimension],
             tp: vec![0.0; dimension],
+
+            mask: vec![true; dimension],
         }
     }
 
@@ -77,14 +81,29 @@ impl LinearSolver for BiCGStabSolver {
         rhs: &[f64],
         solution: &mut [f64],
     ) -> Result<(), Self::Error> {
+        // Mask dofs
+        map.mask(&mut self.mask);
+        // Mask closure
+        let mask = |dest: &mut [f64]| {
+            for i in
+                dest.iter_mut()
+                    .zip(self.mask.iter())
+                    .filter_map(|(v, &m)| if !m { Some(v) } else { None })
+            {
+                *i = 0.0;
+            }
+        };
+
         // Set termination tolerance
         map.apply(solution, &mut self.tp);
+        mask(&mut self.tp);
 
         // let nrhs = norm(rhs);
 
         for i in 0..self.dimension {
             self.rg[i] = rhs[i] - self.tp[i];
         }
+        mask(&mut self.rg);
 
         self.rh.clone_from_slice(&self.rg);
         self.sh.fill(0.0);
@@ -120,6 +139,7 @@ impl LinearSolver for BiCGStabSolver {
                 for i in 0..self.dimension {
                     self.pg[i] = self.rg[i] + prb * (self.pg[i] - prc * self.vg[i]);
                 }
+                mask(&mut self.pg);
             }
 
             rho0 = rho1;
@@ -142,6 +162,8 @@ impl LinearSolver for BiCGStabSolver {
                 self.sg[i] = self.rg[i] - pra * self.vg[i];
             }
 
+            mask(&mut self.sg);
+
             if norm(&self.sg) <= 1e-60 {
                 for i in 0..self.dimension {
                     solution[i] += pra * self.ph[i];
@@ -152,6 +174,8 @@ impl LinearSolver for BiCGStabSolver {
                 for i in 0..self.dimension {
                     self.rg[i] = rhs[i] - self.tp[i];
                 }
+
+                mask(&mut self.rg);
 
                 // residual = norm(&self.rg);
                 break;
@@ -166,6 +190,9 @@ impl LinearSolver for BiCGStabSolver {
                 solution[i] = solution[i] + pra * self.ph[i] + prc * self.sh[i];
                 self.rg[i] = self.sg[i] - prc * self.tg[i];
             }
+
+            mask(solution);
+            mask(&mut self.rg);
 
             residual = norm(&self.rg);
             map.callback(iter, residual, solution);
@@ -189,24 +216,12 @@ impl LinearSolver for BiCGStabSolver {
     }
 }
 
-fn dot(v: &[f64], w: &[f64]) -> f64 {
-    let mut residual = 0.0;
-
-    for (&ve, &we) in v.iter().zip(w.iter()) {
-        residual += ve * we;
-    }
-
-    residual
+fn dot(a: &[f64], b: &[f64]) -> f64 {
+    a.iter().zip(b.iter()).map(|(a, b)| a * b).sum()
 }
 
-fn norm(v: &[f64]) -> f64 {
-    let mut residual = 0.0;
-
-    for &elem in v {
-        residual += elem * elem;
-    }
-
-    residual.sqrt()
+fn norm(a: &[f64]) -> f64 {
+    dot(a, a).sqrt()
 }
 
 #[cfg(test)]

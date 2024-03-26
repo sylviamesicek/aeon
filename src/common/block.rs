@@ -20,6 +20,10 @@ impl<const N: usize> Block<N> {
         }
     }
 
+    pub fn size(&self) -> [usize; N] {
+        self.space.vertex_size()
+    }
+
     /// Number of nodes in block.
     pub fn len(&self) -> usize {
         self.total
@@ -131,5 +135,100 @@ impl<'a, const N: usize> BlockAxis<'a, N, 4> {
     pub fn dissipation<B: BoundarySet<N>>(&self, set: &B, src: &[f64], dest: &mut [f64]) {
         self.block
             .evaluate::<FDDissipation<4>, B>(self.axis, set, src, dest)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::common::*;
+    use crate::prelude::Rectangle;
+
+    /// A comprehensive test of 2nd order accurate stencils applied
+    /// to one dimensional domains.
+    #[test]
+    fn evaluation() {
+        // **********************
+        // Set up Block
+
+        let space = NodeSpace {
+            bounds: Rectangle {
+                size: [2.0],
+                origin: [-1.0],
+            },
+            size: [100],
+        };
+
+        let offset = 0;
+        let total = space.len();
+
+        let spacing = 1.0 / 50.0;
+
+        assert_eq!(space.spacing(0), spacing);
+
+        let block = Block::new(space, offset, total);
+
+        assert_eq!(block.len(), 101);
+
+        // **********************
+        // Initial data
+
+        let mut field = vec![0.0; block.len()];
+        let mut explicit = vec![0.0; block.len()];
+
+        for (i, vertex) in block.iter().enumerate() {
+            let position = block.position(vertex)[0];
+            field[i] = (-position * position / 10.0).exp();
+        }
+
+        for i in 0..block.len() {
+            let position = -1.0 + spacing * (i as f64);
+            explicit[i] = (-position * position / 10.0).exp();
+        }
+
+        assert_eq!(field, explicit);
+
+        // **********************
+        // Evolution
+
+        let mut derivative = vec![0.0; block.len()];
+
+        for _ in 0..10 {
+            // Field
+            block.axis::<2>(0).derivative(
+                &Mixed::new(
+                    Simple::new(SymmetricBoundary::<2>),
+                    Simple::new(FreeBoundary),
+                ),
+                &field,
+                &mut derivative,
+            );
+
+            for i in 0..block.len() {
+                field[i] -= 0.01 * derivative[i];
+            }
+
+            // Explicit
+            derivative[0] = 0.0;
+
+            for i in 1..block.len() - 1 {
+                derivative[i] = -0.5 * explicit[i - 1] + 0.5 * explicit[i + 1];
+            }
+
+            derivative[block.len() - 1] = 0.5 * explicit[block.len() - 3]
+                - 2.0 * explicit[block.len() - 2]
+                + 1.5 * explicit[block.len() - 1];
+
+            for i in derivative.iter_mut() {
+                *i *= 1.0 / spacing;
+            }
+
+            for i in 0..block.len() {
+                explicit[i] -= 0.01 * derivative[i];
+            }
+        }
+
+        for i in 0..block.len() {
+            assert!((explicit[i] - field[i]).abs() < 10e-15);
+        }
     }
 }

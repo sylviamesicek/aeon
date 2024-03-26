@@ -82,9 +82,11 @@ impl<'m, const N: usize, Solver: LinearSolver> UniformMultigrid<'m, N, Solver> {
             self.mesh
                 .residual(arena, &self.rhs, operator, x, &mut self.scratch);
 
+            self.mesh.diritchlet::<O>(&mut self.scratch);
+
             let nres = self.mesh.norm(&self.scratch);
 
-            // println!("Iteration {i}, Residual {nres}");
+            log::trace!("Iteration {i}, Residual {nres}");
 
             if nres <= tol {
                 log::trace!("Multigrid Converged in {i} Iterations");
@@ -247,7 +249,74 @@ impl<'a, const N: usize, O: Operator<N>> LinearMap for BaseLinearMap<'a, N, O> {
         self.arena.reset();
     }
 
-    fn callback(&self, _: usize, _: f64, _: &[f64]) {
-        // println!("Base Iteration {iteration}, Residual {residual}");
+    fn callback(&self, _iteration: usize, _residual: f64, _: &[f64]) {
+        // println!("Base Iteration {_iteration}, Residual {_residual}");
+    }
+
+    // fn dot(&self, src: &[f64], dest: &[f64]) -> f64 {
+    //     let mut result = 0.0;
+
+    //     let size = self.block.size();
+
+    //     'nodes: for (i, node) in self.block.iter().enumerate() {
+    //         for axis in 0..N {
+    //             if O::diritchlet(axis, false) && node[axis] == 0 {
+    //                 continue 'nodes;
+    //             }
+
+    //             if O::diritchlet(axis, false) && node[axis] == size[axis] - 1 {
+    //                 continue 'nodes;
+    //             }
+    //         }
+
+    //         result += src[i] * dest[i];
+    //     }
+
+    //     result
+    // }
+
+    fn mask(&self, mask: &mut [bool]) {
+        let size = self.block.size();
+
+        'nodes: for (i, node) in self.block.iter().enumerate() {
+            for axis in 0..N {
+                if O::diritchlet(axis, false) && node[axis] == 0 {
+                    mask[i] = false;
+                    continue 'nodes;
+                }
+
+                if O::diritchlet(axis, true) && node[axis] == size[axis] - 1 {
+                    mask[i] = false;
+                    continue 'nodes;
+                }
+            }
+
+            mask[i] = true;
+        }
     }
 }
+
+// fn compare() {
+//     let domain = [0.0, 1.0];
+//     let vertices = 101;
+//     let spacing = (domain[1] - domain[0]) / (vertices as f64 - 1.0);
+
+//     let solution = (0..vertices)
+//         .into_iter()
+//         .map(|i| {
+//             let pos = i as f64 * spacing;
+//             pos * (PI * pos).sin()
+//         })
+//         .collect::<Vec<_>>();
+
+//     let rhs = (0..vertices)
+//         .into_iter()
+//         .map(|i| {
+//             let pos = i as f64 * spacing;
+
+//             2.0 * (PI * pos).cos() - PI * PI * pos * (PI * pos).sin()
+//         })
+//         .collect::<Vec<_>>();
+
+//     let mut approx = vec![0.0; vertices];
+// }

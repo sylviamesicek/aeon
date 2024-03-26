@@ -625,6 +625,10 @@ impl<'a> Projection<2> for PsiEvolution<'a> {
             } else {
                 dest[i] = term1 + term2 + psi * shiftr[i] / (2.0 * rho);
             }
+
+            // if dest[i].abs() > 10e-15 {
+            //     println!("Stange Psi");
+            // }
         }
     }
 }
@@ -711,6 +715,10 @@ impl<'a> Projection<2> for SeedEvolution<'a> {
             let term1 = shiftr[i] * s_r[i] + shiftz[i] * s_z[i];
             let term2 = -lapse * w[i] + shiftr[i] * s[i] / rho;
             let term3 = shiftr_r[i] / rho - shiftr[i] / (rho * rho);
+
+            // if term1.abs() + term2.abs() + term3.abs() > 10e-15 {
+            //     println!("Strange Seed");
+            // }
 
             dest[i] = term1 + term2 + term3;
         }
@@ -858,6 +866,10 @@ impl<'a> Projection<2> for WEvolution<'a> {
             let scale1 = (-2.0 * rho * seed[i]).exp() / (psi * psi * psi * psi);
             let term3 = lapse_r[i] / rho * (rho * s_r[i] + seed[i] + 4.0 * psi_r[i] / psi);
             let term4 = lapse_r[i] / (rho * rho) - lapse_rr[i] / rho - lapse_z[i] * s_z[i];
+
+            // if term1.abs() + term2.abs() + scale1 * (term3 + term4).abs() > 10e-14 {
+            //     println!("Strange W")
+            // }
 
             let scale2 = lapse * scale1;
             let term5 = 2.0 * psi_r[i] / (rho * psi)
@@ -1008,6 +1020,10 @@ impl<'a> Projection<2> for UEvolution<'a> {
             let term3 = 2.0 * lapse_z[i] * (2.0 * psi_z[i] / psi + rho * s_z[i]);
             let term4 = -2.0 * lapse_r[i] * (rho * s_r[i] + seed[i] + 2.0 * psi_r[i] / psi);
             let term5 = lapse_rr[i] - lapse_zz[i];
+
+            // if term1.abs() + term2.abs() + scale1 * (term3 + term4 + term5).abs() > 10e-14 {
+            //     println!("Strange U")
+            // }
 
             let scale2 = 2.0 * lapse * scale1;
             let term6 = psi_z[i] / psi * (2.0 * rho * s_z[i] + 3.0 * psi_z[i] / psi);
@@ -1170,12 +1186,16 @@ impl<'a> Projection<2> for XEvolution<'a> {
             let lapse = lapse[i] + 1.0;
 
             let term1 = shiftr[i] * x_r[i] + shiftz[i] * x_z[i];
-            let term2 = 1.0 / 2.0 * u[i] * (shiftz_r[i] - shiftr_z[i]);
+            let term2 = u[i] / 2.0 * (shiftz_r[i] - shiftr_z[i]);
 
             let scale1 = (-2.0 * rho * seed[i]).exp() / (psi * psi * psi * psi);
             let term3 = lapse_r[i] * (rho * s_z[i] + 2.0 * psi_z[i] / psi);
             let term4 = lapse_z[i] * (rho * s_r[i] + seed[i] + 2.0 * psi_r[i] / psi);
             let term5 = -lapse_rz[i];
+
+            // if term1.abs() + term2.abs() + scale1 * (term3 + term4 + term5).abs() > 10e-14 {
+            //     println!("Strange X")
+            // }
 
             let scale2 = lapse * scale1;
             let term6 = psi_r[i] / psi * (2.0 * rho * s_z[i] + 6.0 * psi_z[i] / psi);

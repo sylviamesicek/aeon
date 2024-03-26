@@ -32,3 +32,7 @@ path = "examples/advection.rs"
 [[example]]
 name = "poisson"
 path = "examples/poisson.rs"
+
+[[example]]
+name = "poisson_1d"
+path = "examples/poisson_1d.rs"

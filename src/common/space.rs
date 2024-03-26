@@ -266,11 +266,10 @@ impl<'a, const N: usize> NodeSpaceAxis<'a, N> {
             let stencil = K::negative(left + ghost_extent);
 
             for i in 0..ghost_extent {
-                let w = stencil[i];
                 let ghost =
                     self.negative_ghost_value(node, src, &negative_boundary, ghost_extent - i);
 
-                result += w * ghost;
+                result += stencil[i] * ghost;
             }
 
             for i in ghost_extent..kernel_boundary_support {

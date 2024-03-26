@@ -215,5 +215,10 @@ mod tests {
         assert_eq!(FDSecondDerivative::<2>::negative(0), [2.0, -5.0, 4.0, -1.0]);
         assert_eq!(FDSecondDerivative::<2>::interior(), [1.0, -2.0, 1.0]);
         assert_eq!(FDSecondDerivative::<2>::positive(0), [-1.0, 4.0, -5.0, 2.0]);
+
+        assert_eq!(
+            FDSecondDerivative::<4>::interior(),
+            [-1.0 / 12.0, 4.0 / 3.0, -5.0 / 2.0, 4.0 / 3.0, -1.0 / 12.0]
+        );
     }
 }
