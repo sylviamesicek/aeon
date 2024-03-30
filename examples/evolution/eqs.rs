@@ -6,6 +6,105 @@ fn is_approximately_equal(a: f64, b: f64) -> bool {
     (a - b).abs() < 10e-10
 }
 
+// *********************
+// Debugging Operators
+// *********************
+
+macro_rules! Derivative {
+    ($name:ident, $set:ident, $axis:expr) => {
+        pub struct $name;
+
+        impl Operator<2> for $name {
+            fn apply(&self, _arena: &Arena, block: &Block<2>, src: &[f64], dest: &mut [f64]) {
+                block.axis::<ORDER>($axis).derivative(&$set, src, dest);
+            }
+
+            fn apply_diag(&self, _arena: &Arena, block: &Block<2>, dest: &mut [f64]) {
+                block.axis::<ORDER>($axis).derivative_diag(&$set, dest);
+            }
+
+            fn diritchlet(_axis: usize, _face: bool) -> bool {
+                false
+            }
+        }
+    };
+}
+
+macro_rules! MixedDerivative {
+    ($name:ident, $rset:ident, $zset:ident) => {
+        pub struct $name;
+
+        impl Operator<2> for $name {
+            fn apply(&self, arena: &Arena, block: &Block<2>, src: &[f64], dest: &mut [f64]) {
+                let src_r = arena.alloc::<f64>(block.len());
+                block.axis::<ORDER>(0).derivative(&$rset, src, src_r);
+                block.axis::<ORDER>(1).derivative(&$zset, src_r, dest);
+            }
+
+            fn apply_diag(&self, _arena: &Arena, _block: &Block<2>, _dest: &mut [f64]) {}
+
+            fn diritchlet(_axis: usize, _face: bool) -> bool {
+                false
+            }
+        }
+    };
+}
+
+macro_rules! SecondDerivative {
+    ($name:ident, $set:ident, $axis:expr) => {
+        pub struct $name;
+
+        impl Operator<2> for $name {
+            fn apply(&self, _arena: &Arena, block: &Block<2>, src: &[f64], dest: &mut [f64]) {
+                block
+                    .axis::<ORDER>($axis)
+                    .second_derivative(&$set, src, dest);
+            }
+
+            fn apply_diag(&self, _arena: &Arena, block: &Block<2>, dest: &mut [f64]) {
+                block
+                    .axis::<ORDER>($axis)
+                    .second_derivative_diag(&$set, dest);
+            }
+
+            fn diritchlet(_axis: usize, _face: bool) -> bool {
+                false
+            }
+        }
+    };
+}
+
+Derivative!(LapseDR, LAPSE_RHO, 0);
+Derivative!(LapseDZ, LAPSE_Z, 1);
+SecondDerivative!(LapseDRR, LAPSE_RHO, 0);
+SecondDerivative!(LapseDZZ, LAPSE_Z, 1);
+MixedDerivative!(LapseDRZ, LAPSE_RHO, LAPSE_Z);
+
+Derivative!(PsiDR, PSI_RHO, 0);
+Derivative!(PsiDZ, PSI_Z, 1);
+SecondDerivative!(PsiDRR, PSI_RHO, 0);
+SecondDerivative!(PsiDZZ, PSI_Z, 1);
+MixedDerivative!(PsiDRZ, PSI_RHO, PSI_Z);
+
+Derivative!(SeedDR, SEED_RHO, 0);
+Derivative!(SeedDZ, SEED_Z, 1);
+SecondDerivative!(SeedDRR, SEED_RHO, 0);
+SecondDerivative!(SeedDZZ, SEED_Z, 1);
+
+Derivative!(ShiftRDR, SHIFTR_RHO, 0);
+Derivative!(ShiftRDZ, SHIFTR_Z, 1);
+Derivative!(ShiftZDR, SHIFTZ_RHO, 0);
+Derivative!(ShiftZDZ, SHIFTZ_Z, 1);
+
+Derivative!(WDR, W_RHO, 0);
+Derivative!(WDZ, W_Z, 1);
+
+Derivative!(UDR, U_RHO, 0);
+Derivative!(UDZ, U_Z, 1);
+
+Derivative!(XDR, X_RHO, 0);
+Derivative!(XDZ, X_Z, 1);
+
 pub struct InitialSeed;
 
 impl Projection<2> for InitialSeed {
@@ -181,6 +280,7 @@ impl<'a> Operator<2> for LapseOp<'a> {
         block
             .axis::<ORDER>(1)
             .second_derivative(&LAPSE_Z, lapse, lapse_zz);
+
         block
             .axis::<ORDER>(0)
             .derivative(&LAPSE_RHO, lapse, lapse_r);
@@ -737,6 +837,9 @@ pub struct WEvolution<'a> {
 
 impl<'a> Projection<2> for WEvolution<'a> {
     fn evaluate(self: &Self, arena: &Arena, block: &Block<2>, dest: &mut [f64]) {
+        // *****************
+        // Lapse
+
         let lapse_rr = arena.alloc(block.len());
         let lapse_zz = arena.alloc(block.len());
         let lapse_r = arena.alloc(block.len());
@@ -754,6 +857,9 @@ impl<'a> Projection<2> for WEvolution<'a> {
             .derivative(&LAPSE_RHO, lapse, lapse_r);
         block.axis::<ORDER>(1).derivative(&LAPSE_Z, lapse, lapse_z);
 
+        // ****************
+        // Shift
+
         let shiftr_z = arena.alloc(block.len());
         let shiftr = block.auxillary(self.shiftr);
 
@@ -768,11 +874,13 @@ impl<'a> Projection<2> for WEvolution<'a> {
             .axis::<ORDER>(0)
             .derivative(&SHIFTZ_RHO, shiftz, shiftz_r);
 
+        // *******************
+        // Psi
+
         let psi_rr = arena.alloc::<f64>(block.len());
         let psi_zz = arena.alloc::<f64>(block.len());
         let psi_r = arena.alloc::<f64>(block.len());
         let psi_z = arena.alloc::<f64>(block.len());
-
         let psi = block.auxillary(self.psi);
 
         block
@@ -784,11 +892,13 @@ impl<'a> Projection<2> for WEvolution<'a> {
         block.axis::<ORDER>(0).derivative(&PSI_RHO, psi, psi_r);
         block.axis::<ORDER>(1).derivative(&PSI_Z, psi, psi_z);
 
+        // ********************
+        // Seed
+
         let s_rr = arena.alloc::<f64>(block.len());
         let s_zz = arena.alloc::<f64>(block.len());
         let s_r = arena.alloc::<f64>(block.len());
         let s_z = arena.alloc::<f64>(block.len());
-
         let seed = block.auxillary(self.seed);
 
         block
@@ -800,14 +910,17 @@ impl<'a> Projection<2> for WEvolution<'a> {
         block.axis::<ORDER>(0).derivative(&SEED_RHO, seed, s_r);
         block.axis::<ORDER>(1).derivative(&SEED_Z, seed, s_z);
 
-        let w = block.auxillary(self.w);
-        let x = block.auxillary(self.x);
+        // ****************************
+        // X and W
 
         let w_r = arena.alloc(block.len());
         let w_z = arena.alloc(block.len());
+        let w = block.auxillary(self.w);
 
         block.axis::<ORDER>(0).derivative(&W_RHO, w, w_r);
         block.axis::<ORDER>(1).derivative(&W_Z, w, w_z);
+
+        let x = block.auxillary(self.x);
 
         for (i, node) in block.iter().enumerate() {
             let position = block.position(node);
@@ -880,6 +993,33 @@ impl<'a> Projection<2> for WEvolution<'a> {
             let term7 = 2.0 / psi * (psi_r[i] / (rho * rho) - psi_rr[i] / rho);
 
             dest[i] = term1 + term2 + scale1 * (term3 + term4) + scale2 * (term5 + term6 + term7);
+
+            // Sean's Formulation
+            {
+                let term1 = shiftr[i] * w_r[i]
+                    + w[i] * shiftr[i] / rho
+                    + shiftz[i] * w_z[i]
+                    + x[i] / rho * (shiftz_r[i] - shiftr_z[i]);
+
+                let scale1 = (-2.0 * rho * seed[i]).exp() * psi.powi(-4);
+                let term2 = lapse_r[i] / (rho * rho) - lapse_rr[i] / rho - s_z[i] * lapse_z[i];
+                let term3 = lapse_r[i] * (seed[i] / rho + s_r[i] + 4.0 * psi_r[i] / (rho * psi));
+
+                let scale2 = -lapse * (-2.0 * rho * seed[i]).exp() * psi.powi(-6) * rho.powi(-2);
+                let term4 = rho * rho * psi * psi * s_rr[i] + rho * rho * psi * psi * s_zz[i];
+                let term5 = rho * psi * psi * s_r[i] + 2.0 * rho * rho * psi * s_z[i] * psi_z[i];
+                let term6 = -seed[i] * psi * psi - 6.0 * rho * psi_r[i].powi(2)
+                    + 2.0 * rho * psi * psi_rr[i];
+                let term7 = psi_r[i]
+                    * (-2.0 * rho * rho * psi * s_r[i] + (-2.0 * rho * seed[i] - 2.0) * psi);
+
+                let sean =
+                    term1 + scale1 * (term2 + term3) + scale2 * (term4 + term5 + term6 + term7);
+
+                if (dest[i] - sean).abs() > 1e-13 {
+                    println!("W Difference {:10.10e}", dest[i] - sean)
+                }
+            }
         }
     }
 }
@@ -965,8 +1105,8 @@ impl<'a> Projection<2> for UEvolution<'a> {
         let u_r = arena.alloc(block.len());
         let u_z = arena.alloc(block.len());
 
-        block.axis::<4>(0).derivative(&U_RHO, u, u_r);
-        block.axis::<4>(1).derivative(&U_Z, u, u_z);
+        block.axis::<ORDER>(0).derivative(&U_RHO, u, u_r);
+        block.axis::<ORDER>(1).derivative(&U_Z, u, u_z);
 
         for (i, node) in block.iter().enumerate() {
             let position = block.position(node);
@@ -1040,6 +1180,45 @@ impl<'a> Projection<2> for UEvolution<'a> {
 
             dest[i] =
                 term1 + term2 + scale1 * (term3 + term4 + term5) + scale2 * (term6 + term7 + term8);
+
+            // Sean's formulation
+
+            {
+                let term1 = shiftr[i] * u_r[i]
+                    + shiftz[i] * u_z[i]
+                    + 2.0 * x[i] * (shiftr_z[i] - shiftz_r[i]);
+
+                let scale1 = (-2.0 * rho * seed[i]).exp() * psi.powi(-4);
+                let term2 = lapse_z[i] * (4.0 * psi_z[i] / psi + 2.0 * rho * s_z[i])
+                    - (2.0 * seed[i] + 4.0 * psi_r[i] / psi + 2.0 * rho * s_r[i]) * lapse_r[i];
+                let term3 = lapse_rr[i] - lapse_zz[i];
+
+                let sean = if is_approximately_equal(rho, 0.0) {
+                    let scale2 = -lapse;
+                    let term4 = -4.0 * rho * s_z[i] * psi_z[i] / psi + 2.0 * s_r[i] + 2.0 * s_r[i]
+                        - 6.0 * (psi_z[i] * psi_z[i]) / (psi * psi);
+                    let term5 = 2.0 * psi_zz[i] / psi + 6.0 * (psi_r[i] * psi_r[i]) / (psi * psi)
+                        - 2.0 * psi_rr[i] / psi
+                        + (4.0 * rho * s_r[i] + 4.0 * seed[i]) * psi_r[i] / psi;
+
+                    term1 + scale1 * (term2 + term3 + scale2 * (term4 + term5))
+                } else {
+                    let scale2 = -lapse / rho * psi.powi(-2);
+                    let term4 = -4.0 * rho * rho * psi * s_z[i] * psi_z[i]
+                        + 2.0 * rho * psi * psi * s_r[i]
+                        + 2.0 * seed[i] * psi * psi
+                        - 6.0 * rho * (psi_z[i] * psi_z[i]);
+                    let term5 = 2.0 * rho * psi * psi_zz[i] + 6.0 * rho * (psi_r[i] * psi_r[i])
+                        - 2.0 * rho * psi * psi_rr[i]
+                        + (4.0 * rho * rho * psi * s_r[i] + 4.0 * rho * seed[i] * psi) * psi_r[i];
+
+                    term1 + scale1 * (term2 + term3 + scale2 * (term4 + term5))
+                };
+
+                if (dest[i] - sean).abs() > 1e-10 {
+                    println!("U Difference {:10.10e}", dest[i] - sean)
+                }
+            }
         }
     }
 }
@@ -1107,7 +1286,7 @@ impl<'a> Projection<2> for XEvolution<'a> {
             .second_derivative(&PSI_Z, psi, psi_zz);
         block.axis::<ORDER>(0).derivative(&PSI_RHO, psi, psi_r);
         block.axis::<ORDER>(1).derivative(&PSI_Z, psi, psi_z);
-        block.axis::<ORDER>(1).derivative(&PSI_Z, psi_r, psi_rz);
+        block.axis::<ORDER>(1).derivative(&PSI_RHOZ, psi_r, psi_rz);
 
         let s_rr = arena.alloc::<f64>(block.len());
         let s_zz = arena.alloc::<f64>(block.len());
@@ -1204,6 +1383,29 @@ impl<'a> Projection<2> for XEvolution<'a> {
 
             dest[i] =
                 term1 + term2 + scale1 * (term3 + term4 + term5) + scale2 * (term6 + term7 + term8);
+
+            // Seans formulation
+            {
+                let term1 = shiftr[i] * x_r[i]
+                    + shiftz[i] * x_z[i]
+                    + u[i] / 2.0 * (shiftz_r[i] - shiftr_z[i]);
+
+                let scale1 = (-2.0 * rho * seed[i]).exp() * psi.powi(-4);
+                let term2 = (seed[i] + 2.0 * psi_r[i] / psi + rho * s_r[i]) * lapse_z[i];
+                let term3 = (2.0 * psi_z[i] / psi + rho * s_z[i]) * lapse_r[i] - lapse_rz[i];
+
+                let scale2 = lapse * psi.powi(-2);
+                let term4 = 2.0 * rho * psi * s_z[i] * psi_r[i] + psi.powi(2) * s_z[i];
+                let term5 =
+                    psi_z[i] * (2.0 * rho * psi * s_r[i] + 2.0 * seed[i] * psi + 6.0 * psi_r[i]);
+                let term6 = -2.0 * psi * psi_rz[i];
+
+                let sean = term1 + scale1 * (term2 + term3 + scale2 * (term4 + term5 + term6));
+
+                if (dest[i] - sean).abs() > 1e-10 {
+                    println!("X Difference {:10.10e}", dest[i] - sean)
+                }
+            }
         }
     }
 }

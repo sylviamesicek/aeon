@@ -114,7 +114,7 @@ pub fn main() {
             origin: [0.0, 0.0],
         },
         [8, 8],
-        3,
+        4,
     );
 
     let mut exact = vec![0.0; mesh.node_count()];
@@ -132,13 +132,13 @@ pub fn main() {
             &mesh,
             &BiCGStabConfig {
                 max_iterations: 10000,
-                tolerance: 10e-12,
+                tolerance: 10e-14,
             },
             &UniformMultigridConfig {
                 max_iterations: 100,
-                tolerance: 10e-12,
-                presmoothing: 5,
-                postsmoothing: 5,
+                tolerance: 10e-14,
+                presmoothing: 10,
+                postsmoothing: 10,
             },
         );
 
@@ -148,6 +148,15 @@ pub fn main() {
     for i in 0..rhs.len() {
         error[i] = exact[i] - solution[i];
     }
+
+    log::info!(
+        "L2 Error: {:10.10e}, Sup Error: {:10.10e}",
+        mesh.norm(&error) / (error.len() as f64).sqrt(),
+        error
+            .iter()
+            .map(|f| f.abs())
+            .fold(0.0 as f64, |a, b| a.max(b))
+    );
 
     mesh.residual(&mut arena, &rhs, &LaplacianOp, &solution, &mut residual);
 

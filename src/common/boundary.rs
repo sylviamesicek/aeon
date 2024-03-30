@@ -74,38 +74,12 @@ impl<const ORDER: usize> AsymptoticFlatness<ORDER> {
     }
 }
 
-impl<const N: usize> BoundarySet<N> for AsymptoticFlatness<2> {
-    type PositiveBoundary = RobinBoundary<2>;
-    type NegativeBoundary = RobinBoundary<2>;
-
-    fn negative(&self, position: [f64; N]) -> Self::NegativeBoundary {
-        let mut r2 = 0.0;
-
-        for pos in position.iter() {
-            r2 += pos * pos;
-        }
-
-        RobinBoundary {
-            coefficient: -position[self.axis].abs() / r2,
-        }
-    }
-
-    fn positive(&self, position: [f64; N]) -> Self::PositiveBoundary {
-        let mut r2 = 0.0;
-
-        for pos in position.iter() {
-            r2 += pos * pos;
-        }
-
-        RobinBoundary {
-            coefficient: -position[self.axis].abs() / r2,
-        }
-    }
-}
-
-impl<const N: usize> BoundarySet<N> for AsymptoticFlatness<4> {
-    type PositiveBoundary = RobinBoundary<4>;
-    type NegativeBoundary = RobinBoundary<4>;
+impl<const N: usize, const ORDER: usize> BoundarySet<N> for AsymptoticFlatness<ORDER>
+where
+    RobinBoundary<ORDER>: Boundary,
+{
+    type PositiveBoundary = RobinBoundary<ORDER>;
+    type NegativeBoundary = RobinBoundary<ORDER>;
 
     fn negative(&self, position: [f64; N]) -> Self::NegativeBoundary {
         let mut r2 = 0.0;
@@ -300,6 +274,37 @@ impl Boundary for RobinBoundary<4> {
         result[1] = -derivative[2];
         result[2] = -derivative[3];
         result[3] = -derivative[4];
+
+        result[0] += self.coefficient;
+
+        for res in result.iter_mut() {
+            *res /= derivative[0]
+        }
+
+        result
+    }
+}
+
+impl Boundary for RobinBoundary<6> {
+    const EXTENT: usize = 1;
+    type Stencil = [f64; 6];
+
+    fn stencil(&self, _: usize, spacing: f64) -> Self::Stencil {
+        let mut derivative = derivative!(6, 0, -1);
+        derivative.reverse();
+
+        for d in derivative.iter_mut() {
+            *d /= spacing;
+        }
+
+        let mut result = [0.0; 6];
+
+        result[0] = -derivative[1];
+        result[1] = -derivative[2];
+        result[2] = -derivative[3];
+        result[3] = -derivative[4];
+        result[4] = -derivative[5];
+        result[5] = -derivative[6];
 
         result[0] += self.coefficient;
 

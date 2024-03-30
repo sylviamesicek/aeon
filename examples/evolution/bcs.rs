@@ -1,5 +1,6 @@
 use aeon::common::{
-    AntiSymmetricBoundary, AsymptoticFlatness, FreeBoundary, Mixed, Simple, SymmetricBoundary,
+    AntiSymmetricBoundary, AsymptoticFlatness, Boundary, BoundarySet, FreeBoundary, Mixed,
+    RobinBoundary, Simple, SymmetricBoundary,
 };
 
 use crate::config::*;
@@ -51,6 +52,7 @@ pub const SHIFTZ_Z: AsymptoticOdd = ASYMPTOTIC_ODD_Z;
 // Dynamic
 pub const PSI_RHO: FreeEven = FREE_EVEN;
 pub const PSI_Z: FreeEven = FREE_EVEN;
+pub const PSI_RHOZ: FreeEven = FREE_EVEN;
 pub const SEED_RHO: FreeOdd = FREE_ODD;
 pub const SEED_Z: FreeEven = FREE_EVEN;
 pub const W_RHO: FreeOdd = FREE_ODD;
@@ -59,3 +61,39 @@ pub const U_RHO: FreeEven = FREE_EVEN;
 pub const U_Z: FreeEven = FREE_EVEN;
 pub const X_RHO: FreeOdd = FREE_ODD;
 pub const X_Z: FreeOdd = FREE_ODD;
+
+// Mixed asymptotic boundaries
+
+pub struct AsymptoticFlatnessMixedDerivatve<const ORDER: usize>;
+
+impl<const ORDER: usize> BoundarySet<2> for AsymptoticFlatnessMixedDerivatve<ORDER>
+where
+    RobinBoundary<ORDER>: Boundary,
+{
+    type NegativeBoundary = RobinBoundary<ORDER>;
+    type PositiveBoundary = RobinBoundary<ORDER>;
+
+    fn negative(&self, position: [f64; 2]) -> Self::NegativeBoundary {
+        let mut r2 = 0.0;
+
+        for pos in position.iter() {
+            r2 += pos * pos;
+        }
+
+        RobinBoundary {
+            coefficient: 3.0 * position[0] * position[1] / (r2 * r2),
+        }
+    }
+
+    fn positive(&self, position: [f64; 2]) -> Self::PositiveBoundary {
+        let mut r2 = 0.0;
+
+        for pos in position.iter() {
+            r2 += pos * pos;
+        }
+
+        RobinBoundary {
+            coefficient: 3.0 * position[0] * position[1] / (r2 * r2),
+        }
+    }
+}

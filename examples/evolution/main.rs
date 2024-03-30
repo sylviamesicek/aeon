@@ -389,6 +389,12 @@ impl<'a> DynamicIntegrator<'a> {
         // ************************
         // K1
 
+        self.mesh.restrict(&mut self.dynamic.psi);
+        self.mesh.restrict(&mut self.dynamic.seed);
+        self.mesh.restrict(&mut self.dynamic.u);
+        self.mesh.restrict(&mut self.dynamic.w);
+        self.mesh.restrict(&mut self.dynamic.x);
+
         self.solver
             .solve(arena, self.dynamic.as_slice(), self.gauge.as_mut_slice());
 
@@ -412,6 +418,12 @@ impl<'a> DynamicIntegrator<'a> {
                 self.scratch.x[i] = self.dynamic.x[i] + k / 2.0 * self.k1.x[i];
             }
 
+            self.mesh.restrict(&mut self.scratch.psi);
+            self.mesh.restrict(&mut self.scratch.seed);
+            self.mesh.restrict(&mut self.scratch.u);
+            self.mesh.restrict(&mut self.scratch.w);
+            self.mesh.restrict(&mut self.scratch.x);
+
             self.solver
                 .solve(arena, self.scratch.as_slice(), self.gauge.as_mut_slice());
 
@@ -434,6 +446,12 @@ impl<'a> DynamicIntegrator<'a> {
                 self.scratch.x[i] = self.dynamic.x[i] + k / 2.0 * self.k2.x[i];
             }
 
+            self.mesh.restrict(&mut self.scratch.psi);
+            self.mesh.restrict(&mut self.scratch.seed);
+            self.mesh.restrict(&mut self.scratch.u);
+            self.mesh.restrict(&mut self.scratch.w);
+            self.mesh.restrict(&mut self.scratch.x);
+
             self.solver
                 .solve(arena, self.scratch.as_slice(), self.gauge.as_mut_slice());
 
@@ -455,6 +473,12 @@ impl<'a> DynamicIntegrator<'a> {
                 self.scratch.w[i] = self.dynamic.w[i] + k * self.k3.w[i];
                 self.scratch.x[i] = self.dynamic.x[i] + k * self.k3.x[i];
             }
+
+            self.mesh.restrict(&mut self.scratch.psi);
+            self.mesh.restrict(&mut self.scratch.seed);
+            self.mesh.restrict(&mut self.scratch.u);
+            self.mesh.restrict(&mut self.scratch.w);
+            self.mesh.restrict(&mut self.scratch.x);
 
             self.solver
                 .solve(arena, self.scratch.as_slice(), self.gauge.as_mut_slice());
@@ -636,12 +660,79 @@ impl<'a> DynamicIntegrator<'a> {
 fn write_vtk_output(
     step: usize,
     mesh: &UniformMesh<2>,
+    arena: &mut Arena,
     dynamic: DynamicSlice,
     gauge: GaugeSlice,
     derivatives: DynamicSlice,
     residuals: GaugeSlice,
     constraint: &[f64],
 ) {
+    // Store debugging variables
+
+    let mut lapse_r = vec![0.0; mesh.node_count()];
+    let mut lapse_z = vec![0.0; mesh.node_count()];
+    let mut lapse_rr = vec![0.0; mesh.node_count()];
+    let mut lapse_zz = vec![0.0; mesh.node_count()];
+    let mut lapse_rz = vec![0.0; mesh.node_count()];
+
+    mesh.apply(arena, &LapseDR, gauge.lapse, &mut lapse_r);
+    mesh.apply(arena, &LapseDZ, gauge.lapse, &mut lapse_z);
+    mesh.apply(arena, &LapseDRR, gauge.lapse, &mut lapse_rr);
+    mesh.apply(arena, &LapseDZZ, gauge.lapse, &mut lapse_zz);
+    mesh.apply(arena, &LapseDRZ, gauge.lapse, &mut lapse_rz);
+
+    let mut psi_r = vec![0.0; mesh.node_count()];
+    let mut psi_z = vec![0.0; mesh.node_count()];
+    let mut psi_rr = vec![0.0; mesh.node_count()];
+    let mut psi_zz = vec![0.0; mesh.node_count()];
+    let mut psi_rz = vec![0.0; mesh.node_count()];
+
+    mesh.apply(arena, &PsiDR, dynamic.psi, &mut psi_r);
+    mesh.apply(arena, &PsiDZ, dynamic.psi, &mut psi_z);
+    mesh.apply(arena, &PsiDRR, dynamic.psi, &mut psi_rr);
+    mesh.apply(arena, &PsiDZZ, dynamic.psi, &mut psi_zz);
+    mesh.apply(arena, &PsiDRZ, dynamic.psi, &mut psi_rz);
+
+    let mut seed_r = vec![0.0; mesh.node_count()];
+    let mut seed_z = vec![0.0; mesh.node_count()];
+    let mut seed_rr = vec![0.0; mesh.node_count()];
+    let mut seed_zz = vec![0.0; mesh.node_count()];
+
+    mesh.apply(arena, &SeedDR, dynamic.seed, &mut seed_r);
+    mesh.apply(arena, &SeedDZ, dynamic.seed, &mut seed_z);
+    mesh.apply(arena, &SeedDRR, dynamic.seed, &mut seed_rr);
+    mesh.apply(arena, &SeedDZZ, dynamic.seed, &mut seed_zz);
+
+    let mut shiftr_r = vec![0.0; mesh.node_count()];
+    let mut shiftr_z = vec![0.0; mesh.node_count()];
+
+    mesh.apply(arena, &ShiftRDR, gauge.shiftr, &mut shiftr_r);
+    mesh.apply(arena, &ShiftRDZ, gauge.shiftr, &mut shiftr_z);
+
+    let mut shiftz_r = vec![0.0; mesh.node_count()];
+    let mut shiftz_z = vec![0.0; mesh.node_count()];
+
+    mesh.apply(arena, &ShiftZDR, gauge.shiftz, &mut shiftz_r);
+    mesh.apply(arena, &ShiftZDZ, gauge.shiftz, &mut shiftz_z);
+
+    let mut w_r = vec![0.0; mesh.node_count()];
+    let mut w_z = vec![0.0; mesh.node_count()];
+
+    mesh.apply(arena, &WDR, dynamic.w, &mut w_r);
+    mesh.apply(arena, &WDZ, dynamic.w, &mut w_z);
+
+    let mut u_r = vec![0.0; mesh.node_count()];
+    let mut u_z = vec![0.0; mesh.node_count()];
+
+    mesh.apply(arena, &UDR, dynamic.u, &mut u_r);
+    mesh.apply(arena, &UDZ, dynamic.u, &mut u_z);
+
+    let mut x_r = vec![0.0; mesh.node_count()];
+    let mut x_z = vec![0.0; mesh.node_count()];
+
+    mesh.apply(arena, &XDR, dynamic.x, &mut x_r);
+    mesh.apply(arena, &XDZ, dynamic.x, &mut x_z);
+
     let title = format!("evolution{step}");
     let file_path = PathBuf::from(format!("output/{title}.vtu"));
 
@@ -670,6 +761,38 @@ fn write_vtk_output(
     output.attrib_scalar("shiftz_residual", residuals.shiftz);
 
     output.attrib_scalar("contraint", constraint);
+
+    output.attrib_scalar("lapse_r", &lapse_r);
+    output.attrib_scalar("lapse_z", &lapse_z);
+    output.attrib_scalar("lapse_rr", &lapse_rr);
+    output.attrib_scalar("lapse_zz", &lapse_zz);
+    output.attrib_scalar("lapse_rz", &lapse_rz);
+
+    output.attrib_scalar("psi_r", &psi_r);
+    output.attrib_scalar("psi_z", &psi_z);
+    output.attrib_scalar("psi_rr", &psi_rr);
+    output.attrib_scalar("psi_zz", &psi_zz);
+    output.attrib_scalar("psi_rz", &psi_rz);
+
+    output.attrib_scalar("seed_r", &seed_r);
+    output.attrib_scalar("seed_z", &seed_z);
+    output.attrib_scalar("seed_rr", &seed_rr);
+    output.attrib_scalar("seed_zz", &seed_zz);
+
+    output.attrib_scalar("shiftr_r", &shiftr_r);
+    output.attrib_scalar("shiftr_z", &shiftr_z);
+
+    output.attrib_scalar("shiftz_r", &shiftz_r);
+    output.attrib_scalar("shiftz_z", &shiftz_z);
+
+    output.attrib_scalar("w_r", &w_r);
+    output.attrib_scalar("w_z", &w_z);
+
+    output.attrib_scalar("u_r", &u_r);
+    output.attrib_scalar("u_z", &u_z);
+
+    output.attrib_scalar("x_r", &x_r);
+    output.attrib_scalar("x_z", &x_z);
 
     output.export_vtk(&title, file_path).unwrap()
 }
@@ -732,6 +855,7 @@ pub fn main() {
     write_vtk_output(
         0,
         &mesh,
+        &mut arena,
         dynamic.as_slice(),
         gauge.as_slice(),
         derivatives.as_slice(),
@@ -751,7 +875,7 @@ pub fn main() {
         let sup: f64 = constraint.iter().fold(0.0, |a, &b| a.max(b));
 
         log::info!(
-            "Step {}, Residual (L2: {}, Sup: {}), Time {}",
+            "Step {}, Residual (L2: {:10.5e}, Sup: {:10.5e}), Time {}",
             i,
             l2,
             sup,
@@ -782,6 +906,7 @@ pub fn main() {
         write_vtk_output(
             i + 1,
             &mesh,
+            &mut arena,
             system.dynamic.as_slice(),
             system.gauge.as_slice(),
             derivatives.as_slice(),
