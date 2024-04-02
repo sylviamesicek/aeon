@@ -1,13 +1,12 @@
 use aeon::{
-    common::{FreeBoundary, Mixed, Simple, SymmetricBoundary},
+    common::{BlockExt, FreeBoundary, Mixed, SymmetricBoundary},
     prelude::*,
 };
 use std::{f64::consts::PI, path::PathBuf};
 
-type BoundarySet = Mixed<1, Simple<SymmetricBoundary<2>>, Simple<FreeBoundary>>;
+type BoundarySet = Mixed<1, SymmetricBoundary<2>, FreeBoundary>;
 
-const BOUNDARY_SET: BoundarySet =
-    Mixed::new(Simple::new(SymmetricBoundary), Simple::new(FreeBoundary));
+const BOUNDARY_SET: BoundarySet = Mixed::new(SymmetricBoundary, FreeBoundary);
 
 struct Solution;
 
@@ -39,17 +38,16 @@ pub struct Laplacian;
 
 impl Operator<1> for Laplacian {
     fn apply(self: &Self, _: &Arena, block: &Block<1>, u: &[f64], dest: &mut [f64]) {
-        block.axis::<2>(0).second_derivative(&BOUNDARY_SET, u, dest);
+        block.second_derivative::<2>(0, &BOUNDARY_SET, u, dest);
     }
 
     fn apply_diag(self: &Self, _: &Arena, block: &Block<1>, dest: &mut [f64]) {
-        block
-            .axis::<2>(0)
-            .second_derivative_diag(&BOUNDARY_SET, dest);
+        block.second_derivative_diag::<2>(0, &BOUNDARY_SET, dest);
     }
 
-    fn diritchlet(_: usize, _: bool) -> bool {
-        true
+    fn boundary(&self, mut callback: impl aeon::common::BoundaryCallback<1>) {
+        callback.axis(0, &BOUNDARY_SET);
+        callback.axis(1, &BOUNDARY_SET);
     }
 }
 

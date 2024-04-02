@@ -1,5 +1,6 @@
 use crate::bcs::*;
 use crate::config::*;
+use aeon::common::BoundaryCallback;
 use aeon::prelude::*;
 
 fn is_approximately_equal(a: f64, b: f64) -> bool {
@@ -16,15 +17,15 @@ macro_rules! Derivative {
 
         impl Operator<2> for $name {
             fn apply(&self, _arena: &Arena, block: &Block<2>, src: &[f64], dest: &mut [f64]) {
-                block.axis::<ORDER>($axis).derivative(&$set, src, dest);
+                block.derivative::<ORDER>($axis, &$set, src, dest);
             }
 
             fn apply_diag(&self, _arena: &Arena, block: &Block<2>, dest: &mut [f64]) {
-                block.axis::<ORDER>($axis).derivative_diag(&$set, dest);
+                block.derivative_diag::<ORDER>($axis, &$set, dest);
             }
 
-            fn diritchlet(_axis: usize, _face: bool) -> bool {
-                false
+            fn boundary(&self, mut callback: impl BoundaryCallback<2>) {
+                callback.axis($axis, &$set);
             }
         }
     };
@@ -37,14 +38,15 @@ macro_rules! MixedDerivative {
         impl Operator<2> for $name {
             fn apply(&self, arena: &Arena, block: &Block<2>, src: &[f64], dest: &mut [f64]) {
                 let src_r = arena.alloc::<f64>(block.len());
-                block.axis::<ORDER>(0).derivative(&$rset, src, src_r);
-                block.axis::<ORDER>(1).derivative(&$zset, src_r, dest);
+                block.derivative::<ORDER>(0, &$rset, src, src_r);
+                block.derivative::<ORDER>(1, &$zset, src_r, dest);
             }
 
             fn apply_diag(&self, _arena: &Arena, _block: &Block<2>, _dest: &mut [f64]) {}
 
-            fn diritchlet(_axis: usize, _face: bool) -> bool {
-                false
+            fn boundary(&self, mut callback: impl BoundaryCallback<2>) {
+                callback.axis(0, &$rset);
+                callback.axis(1, &$zset);
             }
         }
     };
@@ -56,19 +58,15 @@ macro_rules! SecondDerivative {
 
         impl Operator<2> for $name {
             fn apply(&self, _arena: &Arena, block: &Block<2>, src: &[f64], dest: &mut [f64]) {
-                block
-                    .axis::<ORDER>($axis)
-                    .second_derivative(&$set, src, dest);
+                block.second_derivative::<ORDER>($axis, &$set, src, dest);
             }
 
             fn apply_diag(&self, _arena: &Arena, block: &Block<2>, dest: &mut [f64]) {
-                block
-                    .axis::<ORDER>($axis)
-                    .second_derivative_diag(&$set, dest);
+                block.second_derivative_diag::<ORDER>($axis, &$set, dest);
             }
 
-            fn diritchlet(_axis: usize, _face: bool) -> bool {
-                false
+            fn boundary(&self, mut callback: impl BoundaryCallback<2>) {
+                callback.axis($axis, &$set);
             }
         }
     };
@@ -134,15 +132,9 @@ impl<'a> Operator<2> for InitialPsiOp<'a> {
         let psi_zz = arena.alloc::<f64>(block.len());
         let psi_r = arena.alloc::<f64>(block.len());
 
-        block
-            .axis::<ORDER>(0)
-            .second_derivative(&PSI_INITIAL_RHO, psi, psi_rr);
-        block
-            .axis::<ORDER>(1)
-            .second_derivative(&PSI_INITIAL_Z, psi, psi_zz);
-        block
-            .axis::<ORDER>(0)
-            .derivative(&PSI_INITIAL_RHO, psi, psi_r);
+        block.second_derivative::<ORDER>(0, &PSI_INITIAL_RHO, psi, psi_rr);
+        block.second_derivative::<ORDER>(1, &PSI_INITIAL_Z, psi, psi_zz);
+        block.derivative::<ORDER>(0, &PSI_INITIAL_RHO, psi, psi_r);
 
         let s_rr = arena.alloc::<f64>(block.len());
         let s_zz = arena.alloc::<f64>(block.len());
@@ -150,13 +142,9 @@ impl<'a> Operator<2> for InitialPsiOp<'a> {
 
         let seed = block.auxillary(self.seed);
 
-        block
-            .axis::<ORDER>(0)
-            .second_derivative(&SEED_RHO, seed, s_rr);
-        block
-            .axis::<ORDER>(1)
-            .second_derivative(&SEED_Z, seed, s_zz);
-        block.axis::<ORDER>(0).derivative(&SEED_RHO, seed, s_r);
+        block.second_derivative::<ORDER>(0, &SEED_RHO, seed, s_rr);
+        block.second_derivative::<ORDER>(1, &SEED_Z, seed, s_zz);
+        block.derivative::<ORDER>(0, &SEED_RHO, seed, s_r);
 
         for (i, node) in block.iter().enumerate() {
             let position = block.position(node);
@@ -181,15 +169,9 @@ impl<'a> Operator<2> for InitialPsiOp<'a> {
         let psi_zz = arena.alloc::<f64>(block.len());
         let psi_r = arena.alloc::<f64>(block.len());
 
-        block
-            .axis::<ORDER>(0)
-            .second_derivative_diag(&PSI_INITIAL_RHO, psi_rr);
-        block
-            .axis::<ORDER>(1)
-            .second_derivative_diag(&PSI_INITIAL_Z, psi_zz);
-        block
-            .axis::<ORDER>(0)
-            .derivative_diag(&PSI_INITIAL_RHO, psi_r);
+        block.second_derivative_diag::<ORDER>(0, &PSI_INITIAL_RHO, psi_rr);
+        block.second_derivative_diag::<ORDER>(1, &PSI_INITIAL_Z, psi_zz);
+        block.derivative_diag::<ORDER>(0, &PSI_INITIAL_RHO, psi_r);
 
         let s_rr = arena.alloc::<f64>(block.len());
         let s_zz = arena.alloc::<f64>(block.len());
@@ -197,13 +179,9 @@ impl<'a> Operator<2> for InitialPsiOp<'a> {
 
         let seed = block.auxillary(self.seed);
 
-        block
-            .axis::<ORDER>(0)
-            .second_derivative(&SEED_RHO, seed, s_rr);
-        block
-            .axis::<ORDER>(1)
-            .second_derivative(&SEED_Z, seed, s_zz);
-        block.axis::<ORDER>(0).derivative(&SEED_RHO, seed, s_r);
+        block.second_derivative::<ORDER>(0, &SEED_RHO, seed, s_rr);
+        block.second_derivative::<ORDER>(1, &SEED_Z, seed, s_zz);
+        block.derivative::<ORDER>(0, &SEED_RHO, seed, s_r);
 
         for (i, node) in block.iter().enumerate() {
             let position = block.position(node);
@@ -223,8 +201,9 @@ impl<'a> Operator<2> for InitialPsiOp<'a> {
         }
     }
 
-    fn diritchlet(_axis: usize, _face: bool) -> bool {
-        false
+    fn boundary(&self, mut callback: impl aeon::common::BoundaryCallback<2>) {
+        callback.axis(0, &PSI_INITIAL_RHO);
+        callback.axis(1, &PSI_INITIAL_Z);
     }
 }
 
@@ -240,13 +219,9 @@ impl<'a> Projection<2> for InitialPsiRhs<'a> {
 
         let seed = block.auxillary(self.seed);
 
-        block
-            .axis::<ORDER>(0)
-            .second_derivative(&SEED_RHO, seed, s_rr);
-        block
-            .axis::<ORDER>(1)
-            .second_derivative(&SEED_Z, seed, s_zz);
-        block.axis::<ORDER>(0).derivative(&SEED_RHO, seed, s_r);
+        block.second_derivative::<ORDER>(0, &SEED_RHO, seed, s_rr);
+        block.second_derivative::<ORDER>(1, &SEED_Z, seed, s_zz);
+        block.derivative::<ORDER>(0, &SEED_RHO, seed, s_r);
 
         for (i, node) in block.iter().enumerate() {
             let position = block.position(node);
@@ -274,24 +249,17 @@ impl<'a> Operator<2> for LapseOp<'a> {
         let lapse_r = arena.alloc::<f64>(block.len());
         let lapse_z = arena.alloc::<f64>(block.len());
 
-        block
-            .axis::<ORDER>(0)
-            .second_derivative(&LAPSE_RHO, lapse, lapse_rr);
-        block
-            .axis::<ORDER>(1)
-            .second_derivative(&LAPSE_Z, lapse, lapse_zz);
-
-        block
-            .axis::<ORDER>(0)
-            .derivative(&LAPSE_RHO, lapse, lapse_r);
-        block.axis::<ORDER>(1).derivative(&LAPSE_Z, lapse, lapse_z);
+        block.second_derivative::<ORDER>(0, &LAPSE_RHO, lapse, lapse_rr);
+        block.second_derivative::<ORDER>(1, &LAPSE_Z, lapse, lapse_zz);
+        block.derivative::<ORDER>(0, &LAPSE_RHO, lapse, lapse_r);
+        block.derivative::<ORDER>(1, &LAPSE_Z, lapse, lapse_z);
 
         let psi_r = arena.alloc::<f64>(block.len());
         let psi_z = arena.alloc::<f64>(block.len());
         let psi = block.auxillary(self.psi);
 
-        block.axis::<ORDER>(0).derivative(&PSI_RHO, psi, psi_r);
-        block.axis::<ORDER>(1).derivative(&PSI_Z, psi, psi_z);
+        block.derivative::<ORDER>(0, &PSI_RHO, psi, psi_r);
+        block.derivative::<ORDER>(1, &PSI_Z, psi, psi_z);
 
         let seed = block.auxillary(self.seed);
         let w = block.auxillary(self.w);
@@ -329,21 +297,17 @@ impl<'a> Operator<2> for LapseOp<'a> {
         let lapse_r = arena.alloc::<f64>(block.len());
         let lapse_z = arena.alloc::<f64>(block.len());
 
-        block
-            .axis::<ORDER>(0)
-            .second_derivative_diag(&LAPSE_RHO, lapse_rr);
-        block
-            .axis::<ORDER>(1)
-            .second_derivative_diag(&LAPSE_Z, lapse_zz);
-        block.axis::<ORDER>(0).derivative_diag(&LAPSE_RHO, lapse_r);
-        block.axis::<ORDER>(1).derivative_diag(&LAPSE_Z, lapse_z);
+        block.second_derivative_diag::<ORDER>(0, &LAPSE_RHO, lapse_rr);
+        block.second_derivative_diag::<ORDER>(1, &LAPSE_Z, lapse_zz);
+        block.derivative_diag::<ORDER>(0, &LAPSE_RHO, lapse_r);
+        block.derivative_diag::<ORDER>(1, &LAPSE_Z, lapse_z);
 
         let psi_r = arena.alloc::<f64>(block.len());
         let psi_z = arena.alloc::<f64>(block.len());
         let psi = block.auxillary(self.psi);
 
-        block.axis::<ORDER>(0).derivative(&PSI_RHO, psi, psi_r);
-        block.axis::<ORDER>(1).derivative(&PSI_Z, psi, psi_z);
+        block.derivative::<ORDER>(0, &PSI_RHO, psi, psi_r);
+        block.derivative::<ORDER>(1, &PSI_Z, psi, psi_z);
 
         let seed = block.auxillary(self.seed);
         let w = block.auxillary(self.w);
@@ -375,8 +339,9 @@ impl<'a> Operator<2> for LapseOp<'a> {
         }
     }
 
-    fn diritchlet(_axis: usize, _face: bool) -> bool {
-        false
+    fn boundary(&self, mut callback: impl BoundaryCallback<2>) {
+        callback.axis(0, &LAPSE_RHO);
+        callback.axis(1, &LAPSE_Z);
     }
 }
 
@@ -423,20 +388,18 @@ impl<'a> Projection<2> for ShiftRRhs<'a> {
         let lapse_r = arena.alloc(block.len());
         let lapse_z = arena.alloc(block.len());
 
-        block
-            .axis::<ORDER>(0)
-            .derivative(&LAPSE_RHO, lapse, lapse_r);
-        block.axis::<ORDER>(1).derivative(&LAPSE_Z, lapse, lapse_z);
+        block.derivative::<ORDER>(0, &LAPSE_RHO, lapse, lapse_r);
+        block.derivative::<ORDER>(1, &LAPSE_Z, lapse, lapse_z);
 
         let x = block.auxillary(self.x);
         let x_z = arena.alloc(block.len());
 
-        block.axis::<ORDER>(1).derivative(&X_Z, x, x_z);
+        block.derivative::<ORDER>(1, &X_Z, x, x_z);
 
         let u = block.auxillary(self.u);
         let u_r = arena.alloc(block.len());
 
-        block.axis::<ORDER>(0).derivative(&U_RHO, u, u_r);
+        block.derivative::<ORDER>(0, &U_RHO, u, u_r);
 
         for (i, _) in block.iter().enumerate() {
             let lapse = lapse[i] + 1.0;
@@ -461,20 +424,18 @@ impl<'a> Projection<2> for ShiftZRhs<'a> {
         let lapse_r = arena.alloc(block.len());
         let lapse_z = arena.alloc(block.len());
 
-        block
-            .axis::<ORDER>(0)
-            .derivative(&LAPSE_RHO, lapse, lapse_r);
-        block.axis::<ORDER>(1).derivative(&LAPSE_Z, lapse, lapse_z);
+        block.derivative::<ORDER>(0, &LAPSE_RHO, lapse, lapse_r);
+        block.derivative::<ORDER>(1, &LAPSE_Z, lapse, lapse_z);
 
         let x = block.auxillary(self.x);
         let x_r = arena.alloc(block.len());
 
-        block.axis::<ORDER>(0).derivative(&X_RHO, x, x_r);
+        block.derivative::<ORDER>(0, &X_RHO, x, x_r);
 
         let u = block.auxillary(self.u);
         let u_z = arena.alloc(block.len());
 
-        block.axis::<ORDER>(1).derivative(&U_Z, u, u_z);
+        block.derivative::<ORDER>(1, &U_Z, u, u_z);
 
         for (i, _) in block.iter().enumerate() {
             let lapse = lapse[i] + 1.0;
@@ -494,12 +455,8 @@ impl Operator<2> for ShiftROp {
         let shiftr_rr = arena.alloc::<f64>(block.len());
         let shiftr_zz = arena.alloc::<f64>(block.len());
 
-        block
-            .axis::<ORDER>(0)
-            .second_derivative(&SHIFTR_RHO, shiftr, shiftr_rr);
-        block
-            .axis::<ORDER>(1)
-            .second_derivative(&SHIFTR_Z, shiftr, shiftr_zz);
+        block.second_derivative::<ORDER>(0, &SHIFTR_RHO, shiftr, shiftr_rr);
+        block.second_derivative::<ORDER>(1, &SHIFTR_Z, shiftr, shiftr_zz);
 
         for (i, _) in block.iter().enumerate() {
             dest[i] = shiftr_rr[i] + shiftr_zz[i];
@@ -510,23 +467,17 @@ impl Operator<2> for ShiftROp {
         let shiftr_rr = arena.alloc::<f64>(block.len());
         let shiftr_zz = arena.alloc::<f64>(block.len());
 
-        block
-            .axis::<ORDER>(0)
-            .second_derivative_diag(&SHIFTR_RHO, shiftr_rr);
-        block
-            .axis::<ORDER>(1)
-            .second_derivative_diag(&SHIFTR_Z, shiftr_zz);
+        block.second_derivative_diag::<ORDER>(0, &SHIFTR_RHO, shiftr_rr);
+        block.second_derivative_diag::<ORDER>(1, &SHIFTR_Z, shiftr_zz);
 
         for (i, _) in block.iter().enumerate() {
             dest[i] = shiftr_rr[i] + shiftr_zz[i];
         }
     }
 
-    fn diritchlet(axis: usize, face: bool) -> bool {
-        match (axis, face) {
-            (0, false) => true,
-            _ => false,
-        }
+    fn boundary(&self, mut callback: impl BoundaryCallback<2>) {
+        callback.axis(0, &SHIFTR_RHO);
+        callback.axis(1, &SHIFTR_Z);
     }
 }
 
@@ -537,12 +488,8 @@ impl Operator<2> for ShiftZOp {
         let shiftz_rr = arena.alloc::<f64>(block.len());
         let shiftz_zz = arena.alloc::<f64>(block.len());
 
-        block
-            .axis::<ORDER>(0)
-            .second_derivative(&SHIFTZ_RHO, shiftz, shiftz_rr);
-        block
-            .axis::<ORDER>(1)
-            .second_derivative(&SHIFTZ_Z, shiftz, shiftz_zz);
+        block.second_derivative::<ORDER>(0, &SHIFTZ_RHO, shiftz, shiftz_rr);
+        block.second_derivative::<ORDER>(1, &SHIFTZ_Z, shiftz, shiftz_zz);
 
         for (i, _) in block.iter().enumerate() {
             dest[i] = shiftz_rr[i] + shiftz_zz[i];
@@ -553,23 +500,17 @@ impl Operator<2> for ShiftZOp {
         let shiftz_rr = arena.alloc::<f64>(block.len());
         let shiftz_zz = arena.alloc::<f64>(block.len());
 
-        block
-            .axis::<ORDER>(0)
-            .second_derivative_diag(&SHIFTZ_RHO, shiftz_rr);
-        block
-            .axis::<ORDER>(1)
-            .second_derivative_diag(&SHIFTZ_Z, shiftz_zz);
+        block.second_derivative_diag::<ORDER>(0, &SHIFTZ_RHO, shiftz_rr);
+        block.second_derivative_diag::<ORDER>(1, &SHIFTZ_Z, shiftz_zz);
 
         for (i, _) in block.iter().enumerate() {
             dest[i] = shiftz_rr[i] + shiftz_zz[i];
         }
     }
 
-    fn diritchlet(axis: usize, face: bool) -> bool {
-        match (axis, face) {
-            (1, false) => true,
-            _ => false,
-        }
+    fn boundary(&self, mut callback: impl BoundaryCallback<2>) {
+        callback.axis(0, &SHIFTZ_RHO);
+        callback.axis(1, &SHIFTZ_Z);
     }
 }
 
@@ -589,13 +530,9 @@ impl<'a> Projection<2> for Hamiltonian<'a> {
 
         let psi = block.auxillary(self.psi);
 
-        block
-            .axis::<ORDER>(0)
-            .second_derivative(&PSI_RHO, psi, psi_rr);
-        block
-            .axis::<ORDER>(1)
-            .second_derivative(&PSI_Z, psi, psi_zz);
-        block.axis::<ORDER>(0).derivative(&PSI_RHO, psi, psi_r);
+        block.second_derivative::<ORDER>(0, &PSI_RHO, psi, psi_rr);
+        block.second_derivative::<ORDER>(1, &PSI_Z, psi, psi_zz);
+        block.derivative::<ORDER>(0, &PSI_RHO, psi, psi_r);
 
         let s_rr = arena.alloc::<f64>(block.len());
         let s_zz = arena.alloc::<f64>(block.len());
@@ -603,13 +540,9 @@ impl<'a> Projection<2> for Hamiltonian<'a> {
 
         let seed = block.auxillary(self.seed);
 
-        block
-            .axis::<ORDER>(0)
-            .second_derivative(&SEED_RHO, seed, s_rr);
-        block
-            .axis::<ORDER>(1)
-            .second_derivative(&SEED_Z, seed, s_zz);
-        block.axis::<ORDER>(0).derivative(&SEED_RHO, seed, s_r);
+        block.second_derivative::<ORDER>(0, &SEED_RHO, seed, s_rr);
+        block.second_derivative::<ORDER>(1, &SEED_Z, seed, s_zz);
+        block.derivative::<ORDER>(0, &SEED_RHO, seed, s_r);
 
         let w = block.auxillary(self.w);
         let u = block.auxillary(self.u);
@@ -657,17 +590,15 @@ impl<'a> Projection<2> for PsiEvolution<'a> {
         let shiftz = block.auxillary(self.shiftz);
 
         let shiftr_r = arena.alloc::<f64>(block.len());
-        block
-            .axis::<ORDER>(0)
-            .derivative(&SHIFTR_RHO, shiftr, shiftr_r);
+        block.derivative::<ORDER>(0, &SHIFTR_RHO, shiftr, shiftr_r);
 
         let psi_r = arena.alloc::<f64>(block.len());
         let psi_z = arena.alloc::<f64>(block.len());
 
         let psi = block.auxillary(self.psi);
 
-        block.axis::<ORDER>(0).derivative(&PSI_RHO, psi, psi_r);
-        block.axis::<ORDER>(1).derivative(&PSI_Z, psi, psi_z);
+        block.derivative::<ORDER>(0, &PSI_RHO, psi, psi_r);
+        block.derivative::<ORDER>(1, &PSI_Z, psi, psi_z);
 
         let u = block.auxillary(self.u);
         let w = block.auxillary(self.w);
@@ -748,17 +679,15 @@ impl<'a> Projection<2> for SeedEvolution<'a> {
         let shiftz = block.auxillary(self.shiftz);
 
         let shiftr_r = arena.alloc::<f64>(block.len());
-        block
-            .axis::<ORDER>(0)
-            .derivative(&SHIFTR_RHO, shiftr, shiftr_r);
+        block.derivative::<ORDER>(0, &SHIFTR_RHO, shiftr, shiftr_r);
 
         let s_r = arena.alloc::<f64>(block.len());
         let s_z = arena.alloc::<f64>(block.len());
 
         let s = block.auxillary(self.seed);
 
-        block.axis::<ORDER>(0).derivative(&SEED_RHO, s, s_r);
-        block.axis::<ORDER>(1).derivative(&SEED_Z, s, s_z);
+        block.derivative::<ORDER>(0, &SEED_RHO, s, s_r);
+        block.derivative::<ORDER>(1, &SEED_Z, s, s_z);
 
         let w = block.auxillary(self.w);
 
@@ -846,16 +775,10 @@ impl<'a> Projection<2> for WEvolution<'a> {
         let lapse_z = arena.alloc(block.len());
         let lapse = block.auxillary(self.lapse);
 
-        block
-            .axis::<ORDER>(0)
-            .second_derivative(&LAPSE_RHO, lapse, lapse_rr);
-        block
-            .axis::<ORDER>(1)
-            .second_derivative(&LAPSE_Z, lapse, lapse_zz);
-        block
-            .axis::<ORDER>(0)
-            .derivative(&LAPSE_RHO, lapse, lapse_r);
-        block.axis::<ORDER>(1).derivative(&LAPSE_Z, lapse, lapse_z);
+        block.second_derivative::<ORDER>(0, &LAPSE_RHO, lapse, lapse_rr);
+        block.second_derivative::<ORDER>(1, &LAPSE_Z, lapse, lapse_zz);
+        block.derivative::<ORDER>(0, &LAPSE_RHO, lapse, lapse_r);
+        block.derivative::<ORDER>(1, &LAPSE_Z, lapse, lapse_z);
 
         // ****************
         // Shift
@@ -863,16 +786,11 @@ impl<'a> Projection<2> for WEvolution<'a> {
         let shiftr_z = arena.alloc(block.len());
         let shiftr = block.auxillary(self.shiftr);
 
-        block
-            .axis::<ORDER>(1)
-            .derivative(&SHIFTR_Z, shiftr, shiftr_z);
+        block.derivative::<ORDER>(1, &SHIFTR_Z, shiftr, shiftr_z);
 
         let shiftz_r = arena.alloc(block.len());
         let shiftz = block.auxillary(self.shiftz);
-
-        block
-            .axis::<ORDER>(0)
-            .derivative(&SHIFTZ_RHO, shiftz, shiftz_r);
+        block.derivative::<ORDER>(0, &SHIFTZ_RHO, shiftz, shiftz_r);
 
         // *******************
         // Psi
@@ -883,14 +801,10 @@ impl<'a> Projection<2> for WEvolution<'a> {
         let psi_z = arena.alloc::<f64>(block.len());
         let psi = block.auxillary(self.psi);
 
-        block
-            .axis::<ORDER>(0)
-            .second_derivative(&PSI_RHO, psi, psi_rr);
-        block
-            .axis::<ORDER>(1)
-            .second_derivative(&PSI_Z, psi, psi_zz);
-        block.axis::<ORDER>(0).derivative(&PSI_RHO, psi, psi_r);
-        block.axis::<ORDER>(1).derivative(&PSI_Z, psi, psi_z);
+        block.second_derivative::<ORDER>(0, &PSI_RHO, psi, psi_rr);
+        block.second_derivative::<ORDER>(1, &PSI_Z, psi, psi_zz);
+        block.derivative::<ORDER>(0, &PSI_RHO, psi, psi_r);
+        block.derivative::<ORDER>(1, &PSI_Z, psi, psi_z);
 
         // ********************
         // Seed
@@ -901,14 +815,10 @@ impl<'a> Projection<2> for WEvolution<'a> {
         let s_z = arena.alloc::<f64>(block.len());
         let seed = block.auxillary(self.seed);
 
-        block
-            .axis::<ORDER>(0)
-            .second_derivative(&SEED_RHO, seed, s_rr);
-        block
-            .axis::<ORDER>(1)
-            .second_derivative(&SEED_Z, seed, s_zz);
-        block.axis::<ORDER>(0).derivative(&SEED_RHO, seed, s_r);
-        block.axis::<ORDER>(1).derivative(&SEED_Z, seed, s_z);
+        block.second_derivative::<ORDER>(0, &SEED_RHO, seed, s_rr);
+        block.second_derivative::<ORDER>(1, &SEED_Z, seed, s_zz);
+        block.derivative::<ORDER>(0, &SEED_RHO, seed, s_r);
+        block.derivative::<ORDER>(1, &SEED_Z, seed, s_z);
 
         // ****************************
         // X and W
@@ -917,8 +827,8 @@ impl<'a> Projection<2> for WEvolution<'a> {
         let w_z = arena.alloc(block.len());
         let w = block.auxillary(self.w);
 
-        block.axis::<ORDER>(0).derivative(&W_RHO, w, w_r);
-        block.axis::<ORDER>(1).derivative(&W_Z, w, w_z);
+        block.derivative::<ORDER>(0, &W_RHO, w, w_r);
+        block.derivative::<ORDER>(1, &W_Z, w, w_z);
 
         let x = block.auxillary(self.x);
 
@@ -1042,30 +952,18 @@ impl<'a> Projection<2> for UEvolution<'a> {
         let lapse_z = arena.alloc(block.len());
         let lapse = block.auxillary(self.lapse);
 
-        block
-            .axis::<ORDER>(0)
-            .second_derivative(&LAPSE_RHO, lapse, lapse_rr);
-        block
-            .axis::<ORDER>(1)
-            .second_derivative(&LAPSE_Z, lapse, lapse_zz);
-        block
-            .axis::<ORDER>(0)
-            .derivative(&LAPSE_RHO, lapse, lapse_r);
-        block.axis::<ORDER>(1).derivative(&LAPSE_Z, lapse, lapse_z);
+        block.second_derivative::<ORDER>(0, &LAPSE_RHO, lapse, lapse_rr);
+        block.second_derivative::<ORDER>(1, &LAPSE_Z, lapse, lapse_zz);
+        block.derivative::<ORDER>(0, &LAPSE_RHO, lapse, lapse_r);
+        block.derivative::<ORDER>(1, &LAPSE_Z, lapse, lapse_z);
 
         let shiftr_z = arena.alloc(block.len());
         let shiftr = block.auxillary(self.shiftr);
-
-        block
-            .axis::<ORDER>(1)
-            .derivative(&SHIFTR_Z, shiftr, shiftr_z);
+        block.derivative::<ORDER>(1, &SHIFTR_Z, shiftr, shiftr_z);
 
         let shiftz_r = arena.alloc(block.len());
         let shiftz = block.auxillary(self.shiftz);
-
-        block
-            .axis::<ORDER>(0)
-            .derivative(&SHIFTZ_RHO, shiftz, shiftz_r);
+        block.derivative::<ORDER>(0, &SHIFTZ_RHO, shiftz, shiftz_r);
 
         let psi_rr = arena.alloc::<f64>(block.len());
         let psi_zz = arena.alloc::<f64>(block.len());
@@ -1074,14 +972,10 @@ impl<'a> Projection<2> for UEvolution<'a> {
 
         let psi = block.auxillary(self.psi);
 
-        block
-            .axis::<ORDER>(0)
-            .second_derivative(&PSI_RHO, psi, psi_rr);
-        block
-            .axis::<ORDER>(1)
-            .second_derivative(&PSI_Z, psi, psi_zz);
-        block.axis::<ORDER>(0).derivative(&PSI_RHO, psi, psi_r);
-        block.axis::<ORDER>(1).derivative(&PSI_Z, psi, psi_z);
+        block.second_derivative::<ORDER>(0, &PSI_RHO, psi, psi_rr);
+        block.second_derivative::<ORDER>(1, &PSI_Z, psi, psi_zz);
+        block.derivative::<ORDER>(0, &PSI_RHO, psi, psi_r);
+        block.derivative::<ORDER>(1, &PSI_Z, psi, psi_z);
 
         let s_rr = arena.alloc::<f64>(block.len());
         let s_zz = arena.alloc::<f64>(block.len());
@@ -1090,14 +984,10 @@ impl<'a> Projection<2> for UEvolution<'a> {
 
         let seed = block.auxillary(self.seed);
 
-        block
-            .axis::<ORDER>(0)
-            .second_derivative(&SEED_RHO, seed, s_rr);
-        block
-            .axis::<ORDER>(1)
-            .second_derivative(&SEED_Z, seed, s_zz);
-        block.axis::<ORDER>(0).derivative(&SEED_RHO, seed, s_r);
-        block.axis::<ORDER>(1).derivative(&SEED_Z, seed, s_z);
+        block.second_derivative::<ORDER>(0, &SEED_RHO, seed, s_rr);
+        block.second_derivative::<ORDER>(1, &SEED_Z, seed, s_zz);
+        block.derivative::<ORDER>(0, &SEED_RHO, seed, s_r);
+        block.derivative::<ORDER>(1, &SEED_Z, seed, s_z);
 
         let u = block.auxillary(self.u);
         let x = block.auxillary(self.x);
@@ -1105,8 +995,8 @@ impl<'a> Projection<2> for UEvolution<'a> {
         let u_r = arena.alloc(block.len());
         let u_z = arena.alloc(block.len());
 
-        block.axis::<ORDER>(0).derivative(&U_RHO, u, u_r);
-        block.axis::<ORDER>(1).derivative(&U_Z, u, u_z);
+        block.derivative::<ORDER>(0, &U_RHO, u, u_r);
+        block.derivative::<ORDER>(1, &U_Z, u, u_z);
 
         for (i, node) in block.iter().enumerate() {
             let position = block.position(node);
@@ -1242,33 +1132,19 @@ impl<'a> Projection<2> for XEvolution<'a> {
         let lapse_z = arena.alloc(block.len());
         let lapse = block.auxillary(self.lapse);
 
-        block
-            .axis::<ORDER>(0)
-            .second_derivative(&LAPSE_RHO, lapse, lapse_rr);
-        block
-            .axis::<ORDER>(1)
-            .second_derivative(&LAPSE_Z, lapse, lapse_zz);
-        block
-            .axis::<ORDER>(0)
-            .derivative(&LAPSE_RHO, lapse, lapse_r);
-        block.axis::<ORDER>(1).derivative(&LAPSE_Z, lapse, lapse_z);
-        block
-            .axis::<ORDER>(1)
-            .derivative(&LAPSE_Z, lapse_r, lapse_rz);
+        block.second_derivative::<ORDER>(0, &LAPSE_RHO, lapse, lapse_rr);
+        block.second_derivative::<ORDER>(1, &LAPSE_Z, lapse, lapse_zz);
+        block.derivative::<ORDER>(0, &LAPSE_RHO, lapse, lapse_r);
+        block.derivative::<ORDER>(1, &LAPSE_Z, lapse, lapse_z);
+        block.derivative::<ORDER>(1, &LAPSE_RHOZ, lapse_r, lapse_rz);
 
         let shiftr_z = arena.alloc(block.len());
         let shiftr = block.auxillary(self.shiftr);
-
-        block
-            .axis::<ORDER>(1)
-            .derivative(&SHIFTR_Z, shiftr, shiftr_z);
+        block.derivative::<ORDER>(1, &SHIFTR_Z, shiftr, shiftr_z);
 
         let shiftz_r = arena.alloc(block.len());
         let shiftz = block.auxillary(self.shiftz);
-
-        block
-            .axis::<ORDER>(0)
-            .derivative(&SHIFTZ_RHO, shiftz, shiftz_r);
+        block.derivative::<ORDER>(0, &SHIFTZ_RHO, shiftz, shiftz_r);
 
         let psi_rr = arena.alloc::<f64>(block.len());
         let psi_zz = arena.alloc::<f64>(block.len());
@@ -1278,15 +1154,11 @@ impl<'a> Projection<2> for XEvolution<'a> {
 
         let psi = block.auxillary(self.psi);
 
-        block
-            .axis::<ORDER>(0)
-            .second_derivative(&PSI_RHO, psi, psi_rr);
-        block
-            .axis::<ORDER>(1)
-            .second_derivative(&PSI_Z, psi, psi_zz);
-        block.axis::<ORDER>(0).derivative(&PSI_RHO, psi, psi_r);
-        block.axis::<ORDER>(1).derivative(&PSI_Z, psi, psi_z);
-        block.axis::<ORDER>(1).derivative(&PSI_RHOZ, psi_r, psi_rz);
+        block.second_derivative::<ORDER>(0, &PSI_RHO, psi, psi_rr);
+        block.second_derivative::<ORDER>(1, &PSI_Z, psi, psi_zz);
+        block.derivative::<ORDER>(0, &PSI_RHO, psi, psi_r);
+        block.derivative::<ORDER>(1, &PSI_Z, psi, psi_z);
+        block.derivative::<ORDER>(1, &PSI_RHOZ, psi_r, psi_rz);
 
         let s_rr = arena.alloc::<f64>(block.len());
         let s_zz = arena.alloc::<f64>(block.len());
@@ -1295,14 +1167,10 @@ impl<'a> Projection<2> for XEvolution<'a> {
 
         let seed = block.auxillary(self.seed);
 
-        block
-            .axis::<ORDER>(0)
-            .second_derivative(&SEED_RHO, seed, s_rr);
-        block
-            .axis::<ORDER>(1)
-            .second_derivative(&SEED_Z, seed, s_zz);
-        block.axis::<ORDER>(0).derivative(&SEED_RHO, seed, s_r);
-        block.axis::<ORDER>(1).derivative(&SEED_Z, seed, s_z);
+        block.second_derivative::<ORDER>(0, &SEED_RHO, seed, s_rr);
+        block.second_derivative::<ORDER>(1, &SEED_Z, seed, s_zz);
+        block.derivative::<ORDER>(0, &SEED_RHO, seed, s_r);
+        block.derivative::<ORDER>(1, &SEED_Z, seed, s_z);
 
         let u = block.auxillary(self.u);
         let x = block.auxillary(self.x);
@@ -1310,8 +1178,8 @@ impl<'a> Projection<2> for XEvolution<'a> {
         let x_r = arena.alloc(block.len());
         let x_z = arena.alloc(block.len());
 
-        block.axis::<ORDER>(0).derivative(&X_RHO, x, x_r);
-        block.axis::<ORDER>(1).derivative(&X_Z, x, x_z);
+        block.derivative::<ORDER>(0, &X_RHO, x, x_r);
+        block.derivative::<ORDER>(1, &X_Z, x, x_z);
 
         for (i, node) in block.iter().enumerate() {
             let position = block.position(node);

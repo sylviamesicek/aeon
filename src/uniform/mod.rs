@@ -1,7 +1,7 @@
 use std::ops::Range;
 
 use crate::arena::Arena;
-use crate::common::{Block, NodeSpace, Operator, Projection};
+use crate::common::{Block, BoundaryCallback, BoundarySet, NodeSpace, Operator, Projection};
 use crate::geometry::Rectangle;
 
 mod io;
@@ -156,10 +156,7 @@ impl<const N: usize> UniformMesh<N> {
         let range = self.level_node_range(level);
         let space = self.level_node_space(level);
 
-        for i in 0..N {
-            space.axis(i).restrict(&mut field[range.clone()]);
-        }
-
+        space.restrict(&mut field[range.clone()]);
         self.restrict_level(level, field);
     }
 
@@ -190,10 +187,7 @@ impl<const N: usize> UniformMesh<N> {
         let space = self.level_node_space(level);
 
         self.prolong_level(level, field);
-
-        for i in 0..N {
-            space.axis(i).prolong(&mut field[range.clone()]);
-        }
+        space.prolong(&mut field[range.clone()]);
     }
 
     pub fn copy_level(&self, level: usize, src: &[f64], dest: &mut [f64]) {
@@ -280,25 +274,31 @@ impl<const N: usize> UniformMesh<N> {
         }
     }
 
-    pub fn diritchlet<O: Operator<N>>(&self, dest: &mut [f64]) {
+    pub fn diritchlet<O: Operator<N>>(&self, operator: &O, dest: &mut [f64]) {
         for level in 0..self.level_count() {
-            self.diritchlet_level::<O>(level, dest);
+            self.diritchlet_level(level, operator, dest);
         }
     }
 
-    pub fn diritchlet_level<O: Operator<N>>(&self, level: usize, dest: &mut [f64]) {
+    pub fn diritchlet_level<O: Operator<N>>(&self, level: usize, operator: &O, dest: &mut [f64]) {
         let block = self.level_block(level);
         let dest = block.auxillary_mut(dest);
 
-        for axis in 0..N {
-            if O::diritchlet(axis, false) {
-                block.diritchlet(axis, false, dest);
-            }
+        pub struct Callback<'a, const N: usize> {
+            block: &'a Block<N>,
+            dest: &'a mut [f64],
+        }
 
-            if O::diritchlet(axis, true) {
-                block.diritchlet(axis, true, dest);
+        impl<'a, const N: usize> BoundaryCallback<N> for Callback<'a, N> {
+            fn axis<B: BoundarySet<N>>(&mut self, axis: usize, boundary: &B) {
+                self.block.diritchlet(axis, boundary, self.dest);
             }
         }
+
+        operator.boundary(Callback {
+            block: &block,
+            dest,
+        });
     }
 
     pub fn norm(&self, field: &[f64]) -> f64 {

@@ -5,7 +5,7 @@ use super::{kernel::FDDissipation, BoundarySet, FDDerivative, FDSecondDerivative
 
 #[derive(Debug, Clone)]
 pub struct Block<const N: usize> {
-    space: NodeSpace<N>,
+    pub(crate) space: NodeSpace<N>,
     offset: usize,
     total: usize,
 }
@@ -58,7 +58,7 @@ impl<const N: usize> Block<N> {
         src: &[f64],
         dest: &mut [f64],
     ) {
-        self.space.axis(axis).evaluate::<K, B>(set, src, dest);
+        self.space.axis(axis, set).evaluate::<K>(src, dest);
     }
 
     pub fn evaluate_diag<K: Kernel, B: BoundarySet<N>>(
@@ -67,74 +67,116 @@ impl<const N: usize> Block<N> {
         set: &B,
         dest: &mut [f64],
     ) {
-        self.space.axis(axis).evaluate_diag::<K, B>(set, dest);
+        self.space.axis(axis, set).evaluate_diag::<K>(dest);
     }
 
-    pub fn diritchlet(&self, axis: usize, face: bool, dest: &mut [f64]) {
-        self.space.axis(axis).apply_diritchlet_bc(face, dest);
-    }
-
-    pub fn axis<const ORDER: usize>(&self, axis: usize) -> BlockAxis<'_, N, ORDER> {
-        BlockAxis::<N, ORDER> { block: self, axis }
+    pub fn diritchlet<B: BoundarySet<N>>(&self, axis: usize, set: &B, dest: &mut [f64]) {
+        self.space.axis(axis, set).diritchlet(dest);
     }
 }
 
-pub struct BlockAxis<'a, const N: usize, const ORDER: usize> {
-    block: &'a Block<N>,
-    axis: usize,
+pub trait BlockExt<const N: usize> {
+    fn derivative<const ORDER: usize>(
+        &self,
+        axis: usize,
+        set: &impl BoundarySet<N>,
+        src: &[f64],
+        dest: &mut [f64],
+    ) where
+        FDDerivative<ORDER>: Kernel;
+
+    fn derivative_diag<const ORDER: usize>(
+        &self,
+        axis: usize,
+        set: &impl BoundarySet<N>,
+        dest: &mut [f64],
+    ) where
+        FDDerivative<ORDER>: Kernel;
+
+    fn second_derivative<const ORDER: usize>(
+        &self,
+        axis: usize,
+        set: &impl BoundarySet<N>,
+        src: &[f64],
+        dest: &mut [f64],
+    ) where
+        FDSecondDerivative<ORDER>: Kernel;
+
+    fn second_derivative_diag<const ORDER: usize>(
+        &self,
+        axis: usize,
+        set: &impl BoundarySet<N>,
+        dest: &mut [f64],
+    ) where
+        FDSecondDerivative<ORDER>: Kernel;
+
+    fn dissipation<const ORDER: usize>(
+        &self,
+        axis: usize,
+        set: &impl BoundarySet<N>,
+        src: &[f64],
+        dest: &mut [f64],
+    ) where
+        FDDissipation<ORDER>: Kernel;
 }
 
-impl<'a, const N: usize> BlockAxis<'a, N, 2> {
-    pub fn derivative<B: BoundarySet<N>>(&self, set: &B, src: &[f64], dest: &mut [f64]) {
-        self.block
-            .evaluate::<FDDerivative<2>, B>(self.axis, set, src, dest)
+impl<const N: usize> BlockExt<N> for Block<N> {
+    fn derivative<const ORDER: usize>(
+        &self,
+        axis: usize,
+        set: &impl BoundarySet<N>,
+        src: &[f64],
+        dest: &mut [f64],
+    ) where
+        FDDerivative<ORDER>: Kernel,
+    {
+        self.evaluate::<FDDerivative<ORDER>, _>(axis, set, src, dest)
     }
 
-    pub fn derivative_diag<B: BoundarySet<N>>(&self, set: &B, dest: &mut [f64]) {
-        self.block
-            .evaluate_diag::<FDDerivative<2>, B>(self.axis, set, dest)
+    fn derivative_diag<const ORDER: usize>(
+        &self,
+        axis: usize,
+        set: &impl BoundarySet<N>,
+        dest: &mut [f64],
+    ) where
+        FDDerivative<ORDER>: Kernel,
+    {
+        self.evaluate_diag::<FDDerivative<ORDER>, _>(axis, set, dest)
     }
 
-    pub fn second_derivative<B: BoundarySet<N>>(&self, set: &B, src: &[f64], dest: &mut [f64]) {
-        self.block
-            .evaluate::<FDSecondDerivative<2>, B>(self.axis, set, src, dest)
+    fn second_derivative<const ORDER: usize>(
+        &self,
+        axis: usize,
+        set: &impl BoundarySet<N>,
+        src: &[f64],
+        dest: &mut [f64],
+    ) where
+        FDSecondDerivative<ORDER>: Kernel,
+    {
+        self.evaluate::<FDSecondDerivative<ORDER>, _>(axis, set, src, dest);
     }
 
-    pub fn second_derivative_diag<B: BoundarySet<N>>(&self, set: &B, dest: &mut [f64]) {
-        self.block
-            .evaluate_diag::<FDSecondDerivative<2>, B>(self.axis, set, dest)
+    fn second_derivative_diag<const ORDER: usize>(
+        &self,
+        axis: usize,
+        set: &impl BoundarySet<N>,
+        dest: &mut [f64],
+    ) where
+        FDSecondDerivative<ORDER>: Kernel,
+    {
+        self.evaluate_diag::<FDSecondDerivative<ORDER>, _>(axis, set, dest)
     }
 
-    pub fn dissipation<B: BoundarySet<N>>(&self, set: &B, src: &[f64], dest: &mut [f64]) {
-        self.block
-            .evaluate::<FDDissipation<2>, B>(self.axis, set, src, dest)
-    }
-}
-
-impl<'a, const N: usize> BlockAxis<'a, N, 4> {
-    pub fn derivative<B: BoundarySet<N>>(&self, set: &B, src: &[f64], dest: &mut [f64]) {
-        self.block
-            .evaluate::<FDDerivative<4>, B>(self.axis, set, src, dest)
-    }
-
-    pub fn derivative_diag<B: BoundarySet<N>>(&self, set: &B, dest: &mut [f64]) {
-        self.block
-            .evaluate_diag::<FDDerivative<4>, B>(self.axis, set, dest)
-    }
-
-    pub fn second_derivative<B: BoundarySet<N>>(&self, set: &B, src: &[f64], dest: &mut [f64]) {
-        self.block
-            .evaluate::<FDSecondDerivative<4>, B>(self.axis, set, src, dest)
-    }
-
-    pub fn second_derivative_diag<B: BoundarySet<N>>(&self, set: &B, dest: &mut [f64]) {
-        self.block
-            .evaluate_diag::<FDSecondDerivative<4>, B>(self.axis, set, dest)
-    }
-
-    pub fn dissipation<B: BoundarySet<N>>(&self, set: &B, src: &[f64], dest: &mut [f64]) {
-        self.block
-            .evaluate::<FDDissipation<4>, B>(self.axis, set, src, dest)
+    fn dissipation<const ORDER: usize>(
+        &self,
+        axis: usize,
+        set: &impl BoundarySet<N>,
+        src: &[f64],
+        dest: &mut [f64],
+    ) where
+        FDDissipation<ORDER>: Kernel,
+    {
+        self.evaluate::<FDDissipation<ORDER>, _>(axis, set, src, dest)
     }
 }
 
@@ -194,11 +236,9 @@ mod tests {
 
         for _ in 0..10 {
             // Field
-            block.axis::<2>(0).derivative(
-                &Mixed::new(
-                    Simple::new(SymmetricBoundary::<2>),
-                    Simple::new(FreeBoundary),
-                ),
+            block.derivative::<2>(
+                0,
+                &Mixed::new(SymmetricBoundary::<2>, FreeBoundary),
                 &field,
                 &mut derivative,
             );

@@ -110,8 +110,16 @@ impl<const N: usize> NodeSpace<N> {
         }
     }
 
-    pub fn axis(&self, axis: usize) -> NodeSpaceAxis<'_, N> {
-        NodeSpaceAxis { space: self, axis }
+    pub fn axis<'a, B: BoundarySet<N>>(
+        &'a self,
+        axis: usize,
+        set: &'a B,
+    ) -> NodeSpaceAxis<'a, N, B> {
+        NodeSpaceAxis {
+            space: self,
+            set,
+            axis,
+        }
     }
 
     /// Prolong values from src -> dest by simply copying values
@@ -151,16 +159,85 @@ impl<const N: usize> NodeSpace<N> {
             dest_space.set_value(dest_vertex, value, dest);
         }
     }
+
+    /// Performs bilinear prolongation on the given field.
+    pub fn prolong(&self, dest: &mut [f64]) {
+        let vertex_size = self.vertex_size();
+
+        for axis in 0..N {
+            let length = vertex_size[axis];
+
+            for mut node in self.vertex_space().plane(axis, 0) {
+                for i in (1..length - 1).step_by(2) {
+                    node[axis] = i - 1;
+                    let left = self.value(node, dest);
+                    node[axis] = i + 1;
+                    let right = self.value(node, dest);
+
+                    // Bilinear prolongation
+                    node[axis] = i;
+                    self.set_value(node, (left + right) / 2.0, dest)
+                }
+            }
+        }
+    }
+
+    /// Performs full weighted restriction on the given field.
+    pub fn restrict(&self, dest: &mut [f64]) {
+        let vertex_size = self.vertex_size();
+
+        for axis in 0..N {
+            let length = vertex_size[axis];
+
+            for mut node in self.vertex_space().plane(axis, 0) {
+                // Fill left hand side
+                {
+                    node[axis] = 0;
+                    let edge = self.value(node, dest);
+
+                    node[axis] = 1;
+                    let right = self.value(node, dest);
+
+                    node[axis] = 0;
+                    self.set_value(node, (2.0 * edge + right) / 4.0, dest);
+                }
+
+                // Fill right hand side
+                {
+                    node[axis] = length - 1;
+                    let edge = self.value(node, dest);
+
+                    node[axis] = length - 2;
+                    let left = self.value(node, dest);
+
+                    node[axis] = length - 1;
+                    self.set_value(node, (left + 2.0 * edge) / 4.0, dest);
+                }
+
+                for i in (2..=length - 3).step_by(2) {
+                    node[axis] = i - 1;
+                    let left = self.value(node, dest);
+                    node[axis] = i + 1;
+                    let right = self.value(node, dest);
+                    node[axis] = i;
+                    let middle = self.value(node, dest);
+                    // Full weighted restriction
+                    self.set_value(node, (left + 2.0 * middle + right) / 4.0, dest)
+                }
+            }
+        }
+    }
 }
 
-pub struct NodeSpaceAxis<'a, const N: usize> {
+pub struct NodeSpaceAxis<'a, const N: usize, B: BoundarySet<N>> {
     space: &'a NodeSpace<N>,
+    set: &'a B,
     axis: usize,
 }
 
-impl<'a, const N: usize> NodeSpaceAxis<'a, N> {
+impl<'a, const N: usize, B: BoundarySet<N>> NodeSpaceAxis<'a, N, B> {
     /// Evaluates the operation of a kernel on the node space.
-    pub fn evaluate<K: Kernel, B: BoundarySet<N>>(&self, set: &B, src: &[f64], dest: &mut [f64]) {
+    pub fn evaluate<K: Kernel>(&self, src: &[f64], dest: &mut [f64]) {
         let positive: usize = K::POSITIVE_SUPPORT;
         let negative: usize = K::NEGATIVE_SUPPORT;
 
@@ -178,11 +255,11 @@ impl<'a, const N: usize> NodeSpaceAxis<'a, N> {
         for mut node in self.space.vertex_space().plane(self.axis, 0) {
             // *****************************
             // Fill left boundary
-            self.evaluate_negative::<K, B>(node, set, src, dest);
+            self.evaluate_negative::<K>(node, Some(src), dest);
 
             // *************************************
             // Fill right boundary
-            self.evaluate_positive::<K, B>(node, set, src, dest);
+            self.evaluate_positive::<K>(node, Some(src), dest);
 
             // *****************************
             // Fill interior
@@ -201,7 +278,7 @@ impl<'a, const N: usize> NodeSpaceAxis<'a, N> {
         }
     }
 
-    pub fn evaluate_diag<K: Kernel, B: BoundarySet<N>>(&self, set: &B, dest: &mut [f64]) {
+    pub fn evaluate_diag<K: Kernel>(&self, dest: &mut [f64]) {
         let positive: usize = K::POSITIVE_SUPPORT;
         let negative: usize = K::NEGATIVE_SUPPORT;
 
@@ -220,12 +297,12 @@ impl<'a, const N: usize> NodeSpaceAxis<'a, N> {
             // *****************************
             // Fill left boundary
 
-            self.evaluate_negative_diag::<K, B>(node, set, dest);
+            self.evaluate_negative::<K>(node, None, dest);
 
             // *************************************
             // Fill right boundary
 
-            self.evaluate_positive_diag::<K, B>(node, set, dest);
+            self.evaluate_positive::<K>(node, None, dest);
 
             // *****************************
             // Fill interior
@@ -238,17 +315,16 @@ impl<'a, const N: usize> NodeSpaceAxis<'a, N> {
         }
     }
 
-    pub fn evaluate_negative<K: Kernel, B: BoundarySet<N>>(
+    fn evaluate_negative<K: Kernel>(
         &self,
         mut node: [usize; N],
-        set: &B,
-        src: &[f64],
+        src: Option<&[f64]>,
         dest: &mut [f64],
     ) {
         let kernel_negative_support: usize = K::NEGATIVE_SUPPORT;
         let kernel_interior_support: usize = K::NEGATIVE_SUPPORT + K::POSITIVE_SUPPORT + 1;
         let kernel_boundary_support: usize = K::BoundaryStencil::LEN;
-        let ghost_extent = <B::NegativeBoundary as Boundary>::EXTENT;
+        let ghost = <B::NegativeBoundary as Boundary>::GHOST;
 
         // Get spacing along axis for covariant transformation of kernel.
         let spacing = self.space.spacing(self.axis);
@@ -257,24 +333,33 @@ impl<'a, const N: usize> NodeSpaceAxis<'a, N> {
         // Position of negative boundary vertex
         node[self.axis] = 0;
         let negative_position = self.space.position(node);
-        let negative_boundary = set.negative(negative_position);
+        let negative_boundary = self.set.negative(negative_position);
 
         // First loop over points that require a one-sided stencil and ghost values
-        for left in 0..kernel_negative_support.saturating_sub(ghost_extent) {
+        for left in 0..kernel_negative_support.saturating_sub(ghost) {
+            // Get negative stencil
+            let stencil = K::negative(left + ghost);
+
+            // Accumulate result
             let mut result = 0.0;
 
-            let stencil = K::negative(left + ghost_extent);
+            if let Some(src) = src {
+                for i in 0..ghost {
+                    node[self.axis] = 0;
+                    result += stencil[i] * self.negative_ghost_value(node, ghost - 1 - i, src);
+                }
 
-            for i in 0..ghost_extent {
-                let ghost =
-                    self.negative_ghost_value(node, src, &negative_boundary, ghost_extent - i);
+                for i in ghost..kernel_boundary_support {
+                    node[self.axis] = i - ghost;
+                    result += stencil[i] * self.space.value(node, src);
+                }
+            } else {
+                for i in 0..ghost {
+                    // Each ghost vertex could possibly contribute
+                    result += stencil[i] * negative_boundary.stencil(ghost - 1 - i, spacing)[left];
+                }
 
-                result += stencil[i] * ghost;
-            }
-
-            for i in ghost_extent..kernel_boundary_support {
-                node[self.axis] = i - ghost_extent;
-                result += stencil[i] * self.space.value(node, src);
+                result += stencil[ghost + left]
             }
 
             node[self.axis] = left;
@@ -282,25 +367,35 @@ impl<'a, const N: usize> NodeSpaceAxis<'a, N> {
         }
 
         // Next loop over points that require a central stencil and ghost values
-        for left in kernel_negative_support.saturating_sub(ghost_extent)..kernel_negative_support {
-            let mut result = 0.0;
-
+        for left in kernel_negative_support.saturating_sub(ghost)..kernel_negative_support {
             let stencil = K::interior();
 
             // How many ghost points does this stencil require?
             let negative_edge = kernel_negative_support - left;
 
-            // Use ghost node values
-            for i in 0..negative_edge {
-                let ghost =
-                    self.negative_ghost_value(node, src, &negative_boundary, negative_edge - i);
-                result += stencil[i] * ghost;
-            }
+            // Accumulate result
+            let mut result = 0.0;
 
-            // Fill from interior
-            for i in negative_edge..kernel_interior_support {
-                node[self.axis] = i - negative_edge;
-                result += stencil[i] * self.space.value(node, src);
+            if let Some(src) = src {
+                // Use ghost node values
+                for i in 0..negative_edge {
+                    node[self.axis] = 0;
+                    result +=
+                        stencil[i] * self.negative_ghost_value(node, negative_edge - 1 - i, src);
+                }
+
+                // Fill from interior
+                for i in negative_edge..kernel_interior_support {
+                    node[self.axis] = i - negative_edge;
+                    result += stencil[i] * self.space.value(node, src);
+                }
+            } else {
+                for i in 0..negative_edge {
+                    result += stencil[i]
+                        * negative_boundary.stencil(negative_edge - 1 - i, spacing)[left];
+                }
+
+                result += stencil[kernel_negative_support];
             }
 
             node[self.axis] = left;
@@ -308,17 +403,16 @@ impl<'a, const N: usize> NodeSpaceAxis<'a, N> {
         }
     }
 
-    pub fn evaluate_positive<K: Kernel, B: BoundarySet<N>>(
+    fn evaluate_positive<K: Kernel>(
         &self,
         mut node: [usize; N],
-        set: &B,
-        src: &[f64],
+        src: Option<&[f64]>,
         dest: &mut [f64],
     ) {
         let kernel_positive_support: usize = K::POSITIVE_SUPPORT;
         let kernel_interior_support: usize = K::NEGATIVE_SUPPORT + K::POSITIVE_SUPPORT + 1;
         let kernel_boundary_support: usize = K::BoundaryStencil::LEN;
-        let ghost_extent = <B::PositiveBoundary as Boundary>::EXTENT;
+        let ghost = <B::PositiveBoundary as Boundary>::GHOST;
 
         // Get spacing along axis for covariant transformation of kernel.
         let spacing = self.space.spacing(self.axis);
@@ -329,24 +423,34 @@ impl<'a, const N: usize> NodeSpaceAxis<'a, N> {
         // Position of positive boundary vertex
         node[self.axis] = length - 1;
         let positive_position = self.space.position(node);
-        let positive_boundary = set.positive(positive_position);
+        let positive_boundary = self.set.positive(positive_position);
 
         // First loop over points that require a one-sided stencil and ghost values
-        for right in 0..kernel_positive_support.saturating_sub(ghost_extent) {
+        for right in 0..kernel_positive_support.saturating_sub(ghost) {
+            let stencil = K::positive(right + ghost);
+
+            // Accumulate result
             let mut result = 0.0;
 
-            let stencil = K::positive(right + ghost_extent);
+            if let Some(src) = src {
+                for i in 0..ghost {
+                    node[self.axis] = length - 1;
+                    result += stencil[kernel_boundary_support - 1 - i]
+                        * self.positive_ghost_value(node, ghost - 1 - i, src);
+                }
 
-            for i in 0..ghost_extent {
-                let ghost =
-                    self.positive_ghost_value(node, src, &positive_boundary, ghost_extent - i);
+                for i in ghost..kernel_boundary_support {
+                    node[self.axis] = length - 1 - (i - ghost);
+                    result +=
+                        stencil[kernel_boundary_support - 1 - i] * self.space.value(node, src);
+                }
+            } else {
+                for i in 0..ghost {
+                    result += stencil[kernel_boundary_support - 1 - i]
+                        * positive_boundary.stencil(ghost - 1 - i, spacing)[right];
+                }
 
-                result += stencil[kernel_boundary_support - 1 - i] * ghost;
-            }
-
-            for i in ghost_extent..kernel_boundary_support {
-                node[self.axis] = length - 1 - (i - ghost_extent);
-                result += stencil[kernel_boundary_support - 1 - i] * self.space.value(node, src);
+                result += stencil[kernel_boundary_support - 1 - ghost - right];
             }
 
             node[self.axis] = length - 1 - right;
@@ -354,25 +458,36 @@ impl<'a, const N: usize> NodeSpaceAxis<'a, N> {
         }
 
         // Next loop over points that require a central stencil and ghost values
-        for right in kernel_positive_support.saturating_sub(ghost_extent)..kernel_positive_support {
-            let mut result = 0.0;
-
+        for right in kernel_positive_support.saturating_sub(ghost)..kernel_positive_support {
             let stencil = K::interior();
 
             // How many ghost points does this stencil require?
             let positive_edge = kernel_positive_support - right;
 
-            // Use ghost node values
-            for i in 0..positive_edge {
-                let ghost =
-                    self.positive_ghost_value(node, src, &positive_boundary, positive_edge - i);
-                result += stencil[kernel_interior_support - 1 - i] * ghost;
-            }
+            // Accumulate result
+            let mut result = 0.0;
 
-            // Fill from interior
-            for i in positive_edge..kernel_interior_support {
-                node[self.axis] = length - 1 - (i - positive_edge);
-                result += stencil[kernel_interior_support - 1 - i] * self.space.value(node, src);
+            if let Some(src) = src {
+                // Use ghost node values
+                for i in 0..positive_edge {
+                    result += stencil[kernel_interior_support - 1 - i]
+                        * self.positive_ghost_value(node, positive_edge - 1 - i, src);
+                }
+
+                // Fill from interior
+                for i in positive_edge..kernel_interior_support {
+                    node[self.axis] = length - 1 - (i - positive_edge);
+                    result +=
+                        stencil[kernel_interior_support - 1 - i] * self.space.value(node, src);
+                }
+            } else {
+                // Use ghost node values
+                for i in 0..positive_edge {
+                    result += stencil[kernel_interior_support - 1 - i]
+                        * positive_boundary.stencil(positive_edge - 1 - i, spacing)[right];
+                }
+
+                result += stencil[K::NEGATIVE_SUPPORT];
             }
 
             node[self.axis] = length - 1 - right;
@@ -380,134 +495,15 @@ impl<'a, const N: usize> NodeSpaceAxis<'a, N> {
         }
     }
 
-    pub fn evaluate_negative_diag<K: Kernel, B: BoundarySet<N>>(
-        &self,
-        mut node: [usize; N],
-        set: &B,
-        dest: &mut [f64],
-    ) {
-        let kernel_negative_support: usize = K::NEGATIVE_SUPPORT;
-        let ghost_extent = <B::NegativeBoundary as Boundary>::EXTENT;
-
-        // Get spacing along axis for covariant transformation of kernel.
+    fn negative_ghost_value(&self, mut node: [usize; N], ghost: usize, src: &[f64]) -> f64 {
+        let position = self.space.position(node);
         let spacing = self.space.spacing(self.axis);
-        let scale = K::scale(spacing);
 
-        // Position of negative boundary vertex
-        node[self.axis] = 0;
-        let negative_position = self.space.position(node);
-        let negative_boundary = set.negative(negative_position);
-
-        // First loop over points that require a one-sided stencil and ghost values
-        for left in 0..kernel_negative_support.saturating_sub(ghost_extent) {
-            let mut result = 0.0;
-
-            let stencil = K::negative(left + ghost_extent);
-
-            for i in 0..ghost_extent {
-                result += stencil[i] * negative_boundary.stencil(ghost_extent - i, spacing)[left];
-            }
-
-            result += stencil[ghost_extent + left];
-
-            node[self.axis] = left;
-            self.space.set_value(node, scale * result, dest);
-        }
-
-        // Next loop over points that require a central stencil and ghost values
-        for left in kernel_negative_support.saturating_sub(ghost_extent)..kernel_negative_support {
-            let mut result = 0.0;
-
-            let stencil = K::interior();
-
-            // How many ghost points does this stencil require?
-            let negative_edge = kernel_negative_support - left;
-
-            // Use ghost node values
-            for i in 0..negative_edge {
-                result += stencil[i] * negative_boundary.stencil(negative_edge - i, spacing)[left];
-            }
-
-            result += stencil[negative_edge + left];
-
-            node[self.axis] = left;
-            self.space.set_value(node, scale * result, dest);
-        }
-    }
-
-    pub fn evaluate_positive_diag<K: Kernel, B: BoundarySet<N>>(
-        &self,
-        mut node: [usize; N],
-        set: &B,
-        dest: &mut [f64],
-    ) {
-        let kernel_positive_support: usize = K::POSITIVE_SUPPORT;
-        let kernel_interior_support: usize = K::NEGATIVE_SUPPORT + K::POSITIVE_SUPPORT + 1;
-        let kernel_boundary_support: usize = K::BoundaryStencil::LEN;
-        let ghost_extent = <B::PositiveBoundary as Boundary>::EXTENT;
-
-        // Get spacing along axis for covariant transformation of kernel.
-        let spacing = self.space.spacing(self.axis);
-        let scale = K::scale(spacing);
-
-        let length = self.space.vertex_size()[self.axis];
-
-        // Position of positive boundary vertex
-        node[self.axis] = length - 1;
-        let positive_position = self.space.position(node);
-        let positive_boundary = set.positive(positive_position);
-
-        // First loop over points that require a one-sided stencil and ghost values
-        for right in 0..kernel_positive_support.saturating_sub(ghost_extent) {
-            let mut result = 0.0;
-
-            let stencil = K::positive(right + ghost_extent);
-
-            for i in 0..ghost_extent {
-                result += stencil[kernel_boundary_support - 1 - i]
-                    * positive_boundary.stencil(ghost_extent - i, spacing)[right];
-            }
-
-            result += stencil[kernel_boundary_support - 1 - ghost_extent - right];
-
-            node[self.axis] = length - 1 - right;
-            self.space.set_value(node, scale * result, dest);
-        }
-
-        // Next loop over points that require a central stencil and ghost values
-        for right in kernel_positive_support.saturating_sub(ghost_extent)..kernel_positive_support {
-            let mut result = 0.0;
-
-            let stencil = K::interior();
-
-            // How many ghost points does this stencil require?
-            let positive_edge = kernel_positive_support - right;
-
-            // Use ghost node values
-            for i in 0..positive_edge {
-                result += stencil[kernel_interior_support - 1 - i]
-                    * positive_boundary.stencil(positive_edge - i, spacing)[right];
-            }
-
-            result += stencil[kernel_interior_support - 1 - (positive_edge + right)];
-
-            node[self.axis] = length - 1 - right;
-            self.space.set_value(node, scale * result, dest);
-        }
-    }
-
-    fn negative_ghost_value<B: Boundary>(
-        &self,
-        mut node: [usize; N],
-        src: &[f64],
-        boundary: &B,
-        extent: usize,
-    ) -> f64 {
-        let spacing = self.space.spacing(self.axis);
+        let boundary = self.set.negative(position);
 
         let mut result = 0.0;
 
-        for (i, w) in boundary.stencil(extent, spacing).into_iter().enumerate() {
+        for (i, w) in boundary.stencil(ghost, spacing).into_iter().enumerate() {
             node[self.axis] = i;
             result += self.space.value(node, src) * w;
         }
@@ -515,19 +511,17 @@ impl<'a, const N: usize> NodeSpaceAxis<'a, N> {
         result
     }
 
-    fn positive_ghost_value<B: Boundary>(
-        &self,
-        mut node: [usize; N],
-        src: &[f64],
-        boundary: &B,
-        extent: usize,
-    ) -> f64 {
-        let length: usize = self.space.size[self.axis] + 1;
+    fn positive_ghost_value(&self, mut node: [usize; N], ghost: usize, src: &[f64]) -> f64 {
+        let length: usize = self.space.vertex_size()[self.axis];
+
+        let position = self.space.position(node);
         let spacing = self.space.spacing(self.axis);
+
+        let boundary = self.set.positive(position);
 
         let mut result = 0.0;
 
-        for (i, w) in boundary.stencil(extent, spacing).into_iter().enumerate() {
+        for (i, w) in boundary.stencil(ghost, spacing).into_iter().enumerate() {
             node[self.axis] = length - 1 - i;
             result += self.space.value(node, src) * w;
         }
@@ -535,71 +529,20 @@ impl<'a, const N: usize> NodeSpaceAxis<'a, N> {
         result
     }
 
-    pub fn apply_diritchlet_bc(&self, face: bool, field: &mut [f64]) {
-        let slice = if face { self.space.size[self.axis] } else { 0 };
-
-        for node in self.space.vertex_space().plane(self.axis, slice) {
-            self.space.set_value(node, 0.0, field);
-        }
-    }
-
-    /// Performs bilinear prolongation on the given field.
-    pub fn prolong(&self, dest: &mut [f64]) {
-        let length = self.space.size[self.axis] + 1;
-
-        for mut node in self.space.vertex_space().plane(self.axis, 0) {
-            for i in (1..length - 1).step_by(2) {
-                node[self.axis] = i - 1;
-                let left = self.space.value(node, dest);
-                node[self.axis] = i + 1;
-                let right = self.space.value(node, dest);
-
-                // Bilinear prolongation
-                node[self.axis] = i;
-                self.space.set_value(node, (left + right) / 2.0, dest)
+    pub fn diritchlet(&self, field: &mut [f64]) {
+        if B::NegativeBoundary::IS_DIRITCHLET {
+            for node in self.space.vertex_space().plane(self.axis, 0) {
+                self.space.set_value(node, 0.0, field);
             }
         }
-    }
 
-    /// Performs full weighted restriction on the given field.
-    pub fn restrict(&self, dest: &mut [f64]) {
-        let length = self.space.size[self.axis] + 1;
-
-        for mut node in self.space.vertex_space().plane(self.axis, 0) {
-            // Fill left hand side
+        if B::PositiveBoundary::IS_DIRITCHLET {
+            for node in self
+                .space
+                .vertex_space()
+                .plane(self.axis, self.space.size[self.axis])
             {
-                node[self.axis] = 0;
-                let edge = self.space.value(node, dest);
-
-                node[self.axis] = 1;
-                let right = self.space.value(node, dest);
-
-                node[self.axis] = 0;
-                self.space.set_value(node, (2.0 * edge + right) / 4.0, dest);
-            }
-
-            // Fill right hand side
-            {
-                node[self.axis] = length - 1;
-                let edge = self.space.value(node, dest);
-
-                node[self.axis] = length - 2;
-                let left = self.space.value(node, dest);
-
-                node[self.axis] = length - 1;
-                self.space.set_value(node, (left + 2.0 * edge) / 4.0, dest);
-            }
-
-            for i in (2..=length - 3).step_by(2) {
-                node[self.axis] = i - 1;
-                let left = self.space.value(node, dest);
-                node[self.axis] = i + 1;
-                let right = self.space.value(node, dest);
-                node[self.axis] = i;
-                let middle = self.space.value(node, dest);
-                // Full weighted restriction
-                self.space
-                    .set_value(node, (left + 2.0 * middle + right) / 4.0, dest)
+                self.space.set_value(node, 0.0, field);
             }
         }
     }
@@ -608,7 +551,7 @@ impl<'a, const N: usize> NodeSpaceAxis<'a, N> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::common::{FDDerivative, Simple, SymmetricBoundary};
+    use crate::common::{FDDerivative, SymmetricBoundary};
 
     const CELLS: usize = 10;
 
@@ -652,14 +595,14 @@ mod tests {
 
         let hy = 1.0 / space.spacing(1);
 
-        let source = source_field();
+        let src = source_field();
 
         let mut dest = vec![0.0; space.len()];
 
-        let set = Simple::new(SymmetricBoundary::<2>);
+        let set = SymmetricBoundary::<2>;
         space
-            .axis(1)
-            .evaluate::<FDDerivative<2>, _>(&set, &source, &mut dest);
+            .axis(1, &set)
+            .evaluate::<FDDerivative<2>>(&src, &mut dest);
 
         for vert in space.vertex_space().iter() {
             let xi = vert[0];
@@ -670,8 +613,8 @@ mod tests {
             } else if yi == 0 {
                 assert_eq!(space.value(vert, &dest), 0.0);
             } else {
-                let positive = space.value([xi, yi + 1], &source);
-                let negative = space.value([xi, yi - 1], &source);
+                let positive = space.value([xi, yi + 1], &src);
+                let negative = space.value([xi, yi - 1], &src);
 
                 assert_eq!(
                     space.value(vert, &dest),
@@ -690,8 +633,7 @@ mod tests {
 
         let source = source_field();
         let mut dest = source_field();
-        space.axis(0).prolong(&mut dest);
-        space.axis(1).prolong(&mut dest);
+        space.prolong(&mut dest);
 
         for vert in space.vertex_space().iter() {
             let xi = vert[0];
@@ -726,8 +668,7 @@ mod tests {
 
         let source = source_field();
         let mut dest = source_field();
-        space.axis(0).restrict(&mut dest);
-        space.axis(1).restrict(&mut dest);
+        space.restrict(&mut dest);
 
         for vert in space.coarsened().vertex_space().iter() {
             let xi = vert[0];

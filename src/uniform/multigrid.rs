@@ -1,5 +1,5 @@
 use crate::arena::Arena;
-use crate::common::{Block, Operator};
+use crate::common::{Block, Boundary, BoundaryCallback, BoundarySet, Operator};
 use crate::lac::{LinearMap, LinearSolver};
 use crate::uniform::UniformMesh;
 
@@ -82,7 +82,7 @@ impl<'m, const N: usize, Solver: LinearSolver> UniformMultigrid<'m, N, Solver> {
             self.mesh
                 .residual(arena, &self.rhs, operator, x, &mut self.scratch);
 
-            self.mesh.diritchlet::<O>(&mut self.scratch);
+            self.mesh.diritchlet(operator, &mut self.scratch);
 
             let nres = self.mesh.norm(&self.scratch);
 
@@ -98,7 +98,7 @@ impl<'m, const N: usize, Solver: LinearSolver> UniformMultigrid<'m, N, Solver> {
         self.mesh
             .residual(arena, &self.rhs, operator, x, &mut self.scratch);
 
-        self.mesh.diritchlet::<O>(&mut self.scratch);
+        self.mesh.diritchlet(operator, &mut self.scratch);
 
         let nres = self.mesh.norm(&self.scratch);
 
@@ -145,7 +145,7 @@ impl<'m, const N: usize, Solver: LinearSolver> UniformMultigrid<'m, N, Solver> {
         // ******************************
         // Presmoothing
 
-        self.mesh.diritchlet_level::<O>(level, x);
+        self.mesh.diritchlet_level(level, operator, x);
 
         for _ in 0..self.config.presmoothing {
             let diag: &mut [f64] = arena.alloc::<f64>(block.len());
@@ -165,7 +165,7 @@ impl<'m, const N: usize, Solver: LinearSolver> UniformMultigrid<'m, N, Solver> {
 
             arena.reset();
 
-            self.mesh.diritchlet_level::<O>(level, x);
+            self.mesh.diritchlet_level(level, operator, x);
         }
 
         // *****************************
@@ -175,7 +175,8 @@ impl<'m, const N: usize, Solver: LinearSolver> UniformMultigrid<'m, N, Solver> {
             .residual_level(level, arena, &self.rhs, operator, x, &mut self.scratch);
         self.mesh.restrict_level(level, &mut self.scratch);
         // Any diritchlet boundary should be set to zero for the residual
-        self.mesh.diritchlet_level::<O>(level, &mut self.scratch);
+        self.mesh
+            .diritchlet_level(level, operator, &mut self.scratch);
         // Must be some error in restrict implementation
         // self.mesh.restrict_level_full(level, &mut self.scratch);
 
@@ -213,7 +214,7 @@ impl<'m, const N: usize, Solver: LinearSolver> UniformMultigrid<'m, N, Solver> {
             x[i] += self.scratch[i];
         }
 
-        self.mesh.diritchlet_level::<O>(level, x);
+        self.mesh.diritchlet_level(level, operator, x);
 
         // *************************
         // Postsmooth
@@ -236,7 +237,7 @@ impl<'m, const N: usize, Solver: LinearSolver> UniformMultigrid<'m, N, Solver> {
 
             arena.reset();
 
-            self.mesh.diritchlet_level::<O>(level, x);
+            self.mesh.diritchlet_level(level, operator, x);
         }
     }
 }
@@ -286,23 +287,42 @@ impl<'a, const N: usize, O: Operator<N>> LinearMap for BaseLinearMap<'a, N, O> {
     // }
 
     fn mask(&self, mask: &mut [bool]) {
-        let size = self.block.size();
+        pub struct Callback<'a, const N: usize> {
+            block: &'a Block<N>,
+            mask: &'a mut [bool],
+        }
 
-        'nodes: for (i, node) in self.block.iter().enumerate() {
-            for axis in 0..N {
-                if O::diritchlet(axis, false) && node[axis] == 0 {
-                    mask[i] = false;
-                    continue 'nodes;
+        impl<'a, const N: usize> BoundaryCallback<N> for Callback<'a, N> {
+            fn axis<B: BoundarySet<N>>(&mut self, axis: usize, _: &B) {
+                if B::PositiveBoundary::IS_DIRITCHLET {
+                    let space = self.block.space.vertex_space();
+
+                    let length = space.size()[axis];
+
+                    for node in space.plane(axis, length - 1) {
+                        let linear = space.linear_from_cartesian(node);
+
+                        self.mask[linear] = false;
+                    }
                 }
 
-                if O::diritchlet(axis, true) && node[axis] == size[axis] - 1 {
-                    mask[i] = false;
-                    continue 'nodes;
+                if B::NegativeBoundary::IS_DIRITCHLET {
+                    let space = self.block.space.vertex_space();
+
+                    for node in space.plane(axis, 0) {
+                        let linear = space.linear_from_cartesian(node);
+
+                        self.mask[linear] = false;
+                    }
                 }
             }
-
-            mask[i] = true;
         }
+
+        mask.fill(true);
+        self.operator.boundary(Callback {
+            block: &self.block,
+            mask,
+        });
     }
 }
 

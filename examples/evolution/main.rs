@@ -31,8 +31,8 @@ impl<'a, Rho: BoundarySet<2>, Z: BoundarySet<2>> Projection<2> for Dissipation<'
         let diss_z = arena.alloc(block.len());
         let src = block.auxillary(self.src);
 
-        block.axis::<ORDER>(0).dissipation(self.rho, src, diss_r);
-        block.axis::<ORDER>(1).dissipation(self.z, src, diss_z);
+        block.dissipation::<ORDER>(0, self.rho, src, diss_r);
+        block.dissipation::<ORDER>(1, self.z, src, diss_z);
 
         for (i, _) in block.iter().enumerate() {
             _f[i] = DISS * (diss_r[i] + diss_z[i]);

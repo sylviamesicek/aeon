@@ -36,32 +36,6 @@ impl<const N: usize, NB: BoundarySet<N>, PB: BoundarySet<N>> BoundarySet<N> for 
     }
 }
 
-/// A simple wrapper around an ordinary boundary (thus a simple boundary set has no position
-/// dependence).
-pub struct Simple<B: Boundary> {
-    boundary: B,
-}
-
-impl<B: Boundary> Simple<B> {
-    /// Constructs a new simple boundary set.
-    pub const fn new(boundary: B) -> Self {
-        Self { boundary }
-    }
-}
-
-impl<const N: usize, B: Boundary> BoundarySet<N> for Simple<B> {
-    type NegativeBoundary = B;
-    type PositiveBoundary = B;
-
-    fn negative(&self, _: [f64; N]) -> Self::NegativeBoundary {
-        self.boundary.clone()
-    }
-
-    fn positive(&self, _: [f64; N]) -> Self::PositiveBoundary {
-        self.boundary.clone()
-    }
-}
-
 /// Asymptotic flatness along a given axis, as used in ETK.
 pub struct AsymptoticFlatness<const ORDER: usize> {
     axis: usize,
@@ -106,19 +80,37 @@ where
     }
 }
 
+/// Generic representation of a boundary.
 pub trait Boundary: Clone {
-    const EXTENT: usize;
-
+    /// Number of ghost points which can be filled using this boundary.
+    const GHOST: usize;
+    /// Should the boundary be set to zero?.
+    const IS_DIRITCHLET: bool = false;
+    /// Interior support required for this boundary.
     type Stencil: Array<f64>;
+    /// Produces the stencil used for computing the given ghost value.
+    fn stencil(&self, ghost: usize, spacing: f64) -> Self::Stencil;
+}
 
-    fn stencil(&self, extent: usize, spacing: f64) -> Self::Stencil;
+/// Blanket implementation of boundary set for all boundaries.
+impl<T: Boundary, const N: usize> BoundarySet<N> for T {
+    type NegativeBoundary = T;
+    type PositiveBoundary = T;
+
+    fn negative(&self, _: [f64; N]) -> Self::NegativeBoundary {
+        self.clone()
+    }
+
+    fn positive(&self, _: [f64; N]) -> Self::PositiveBoundary {
+        self.clone()
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
 pub struct FreeBoundary;
 
 impl Boundary for FreeBoundary {
-    const EXTENT: usize = 0;
+    const GHOST: usize = 0;
     type Stencil = [f64; 0];
 
     fn stencil(&self, _: usize, _: f64) -> Self::Stencil {
@@ -132,14 +124,14 @@ pub struct SymmetricBoundary<const ORDER: usize>;
 macro_rules! impl_symmetric_boundary {
     ($n:expr) => {
         impl Boundary for SymmetricBoundary<{ $n * 2 }> {
-            const EXTENT: usize = $n;
+            const GHOST: usize = $n;
 
             type Stencil = [f64; { $n + 1 }];
 
-            fn stencil(&self, extent: usize, _: f64) -> Self::Stencil {
+            fn stencil(&self, ghost: usize, _: f64) -> Self::Stencil {
                 let mut result = [0.0; { $n + 1 }];
 
-                result[extent] = 1.0;
+                result[ghost + 1] = 1.0;
 
                 result
             }
@@ -157,14 +149,15 @@ pub struct AntiSymmetricBoundary<const ORDER: usize>;
 macro_rules! impl_antisymmetric_boundary {
     ($n:expr) => {
         impl Boundary for AntiSymmetricBoundary<{ $n * 2 }> {
-            const EXTENT: usize = $n;
+            const GHOST: usize = $n;
+            const IS_DIRITCHLET: bool = true;
 
             type Stencil = [f64; { $n + 1 }];
 
-            fn stencil(&self, extent: usize, _: f64) -> Self::Stencil {
+            fn stencil(&self, ghost: usize, _: f64) -> Self::Stencil {
                 let mut result = [0.0; { $n + 1 }];
 
-                result[extent] = -1.0;
+                result[ghost + 1] = -1.0;
 
                 result
             }
@@ -228,93 +221,131 @@ impl<const ORDER: usize> RobinBoundary<ORDER> {
 
 // robin_boundary_impl!(5, 4, 3, 2, 1, 0);
 
-impl Boundary for RobinBoundary<2> {
-    const EXTENT: usize = 1;
+macro_rules! robin_boundary_impl {
+    ($order:expr) => {
+        impl Boundary for RobinBoundary<$order> {
+            const GHOST: usize = 1;
 
-    type Stencil = [f64; 2];
+            type Stencil = [f64; $order];
 
-    fn stencil(&self, _: usize, spacing: f64) -> Self::Stencil {
-        let mut derivative = derivative!(2, 0, -1);
-        derivative.reverse();
+            fn stencil(&self, _: usize, spacing: f64) -> Self::Stencil {
+                let mut derivative = derivative!($order, 0, -1);
+                derivative.reverse();
 
-        for d in derivative.iter_mut() {
-            *d /= spacing;
+                for d in derivative.iter_mut() {
+                    *d /= spacing;
+                }
+
+                let mut result = [0.0; $order];
+
+                for i in 0..($order) {
+                    result[i] = -derivative[i + 1];
+                }
+
+                result[0] += self.coefficient;
+
+                for res in result.iter_mut() {
+                    *res /= derivative[0]
+                }
+
+                result
+            }
         }
-
-        let mut result = [0.0; 2];
-
-        result[0] = -derivative[1];
-        result[1] = -derivative[2];
-
-        result[0] += self.coefficient;
-
-        for res in result.iter_mut() {
-            *res /= derivative[0]
-        }
-
-        result
-    }
+    };
 }
 
-impl Boundary for RobinBoundary<4> {
-    const EXTENT: usize = 1;
-    type Stencil = [f64; 4];
+robin_boundary_impl!(2);
+robin_boundary_impl!(4);
+robin_boundary_impl!(6);
+robin_boundary_impl!(8);
 
-    fn stencil(&self, _: usize, spacing: f64) -> Self::Stencil {
-        let mut derivative = derivative!(4, 0, -1);
-        derivative.reverse();
+// impl Boundary for RobinBoundary<2> {
+//     const GHOST: usize = 1;
 
-        for d in derivative.iter_mut() {
-            *d /= spacing;
-        }
+//     type Stencil = [f64; 2];
 
-        let mut result = [0.0; 4];
+//     fn stencil(&self, _: usize, spacing: f64) -> Self::Stencil {
+//         let mut derivative = derivative!(2, 0, -1);
+//         derivative.reverse();
 
-        result[0] = -derivative[1];
-        result[1] = -derivative[2];
-        result[2] = -derivative[3];
-        result[3] = -derivative[4];
+//         for d in derivative.iter_mut() {
+//             *d /= spacing;
+//         }
 
-        result[0] += self.coefficient;
+//         let mut result = [0.0; 2];
 
-        for res in result.iter_mut() {
-            *res /= derivative[0]
-        }
+//         result[0] = -derivative[1];
+//         result[1] = -derivative[2];
 
-        result
-    }
-}
+//         result[0] += self.coefficient;
 
-impl Boundary for RobinBoundary<6> {
-    const EXTENT: usize = 1;
-    type Stencil = [f64; 6];
+//         for res in result.iter_mut() {
+//             *res /= derivative[0]
+//         }
 
-    fn stencil(&self, _: usize, spacing: f64) -> Self::Stencil {
-        let mut derivative = derivative!(6, 0, -1);
-        derivative.reverse();
+//         result
+//     }
+// }
 
-        for d in derivative.iter_mut() {
-            *d /= spacing;
-        }
+// impl Boundary for RobinBoundary<4> {
+//     const GHOST: usize = 1;
+//     type Stencil = [f64; 4];
 
-        let mut result = [0.0; 6];
+//     fn stencil(&self, _: usize, spacing: f64) -> Self::Stencil {
+//         let mut derivative = derivative!(4, 0, -1);
+//         derivative.reverse();
 
-        result[0] = -derivative[1];
-        result[1] = -derivative[2];
-        result[2] = -derivative[3];
-        result[3] = -derivative[4];
-        result[4] = -derivative[5];
-        result[5] = -derivative[6];
+//         for d in derivative.iter_mut() {
+//             *d /= spacing;
+//         }
 
-        result[0] += self.coefficient;
+//         let mut result = [0.0; 4];
 
-        for res in result.iter_mut() {
-            *res /= derivative[0]
-        }
+//         result[0] = -derivative[1];
+//         result[1] = -derivative[2];
+//         result[2] = -derivative[3];
+//         result[3] = -derivative[4];
 
-        result
-    }
-}
+//         result[0] += self.coefficient;
+
+//         for res in result.iter_mut() {
+//             *res /= derivative[0]
+//         }
+
+//         result
+//     }
+// }
+
+// impl Boundary for RobinBoundary<6> {
+//     const GHOST: usize = 1;
+//     type Stencil = [f64; 6];
+
+//     fn stencil(&self, _: usize, spacing: f64) -> Self::Stencil {
+//         let mut derivative = derivative!(6, 0, -1);
+//         derivative.reverse();
+
+//         for d in derivative.iter_mut() {
+//             *d /= spacing;
+//         }
+
+//         let mut result = [0.0; 6];
+
+//         result[0] = -derivative[1];
+//         result[1] = -derivative[2];
+//         result[2] = -derivative[3];
+//         result[3] = -derivative[4];
+//         result[4] = -derivative[5];
+//         result[5] = -derivative[6];
+
+//         result[0] += self.coefficient;
+
+//         for res in result.iter_mut() {
+//             *res /= derivative[0]
+//         }
+
+//         result
+//     }
+// }
 
 #[cfg(test)]
 mod tests {
@@ -326,15 +357,13 @@ mod tests {
     fn symmetric_boundary() {
         let boundary = SymmetricBoundary::<4>;
 
-        assert_eq!(boundary.stencil(0, SPACING), [1.0, 0.0, 0.0]);
-        assert_eq!(boundary.stencil(1, SPACING), [0.0, 1.0, 0.0]);
-        assert_eq!(boundary.stencil(2, SPACING), [0.0, 0.0, 1.0]);
+        assert_eq!(boundary.stencil(0, SPACING), [0.0, 1.0, 0.0]);
+        assert_eq!(boundary.stencil(1, SPACING), [0.0, 0.0, 1.0]);
 
         let boundary = AntiSymmetricBoundary::<4>;
 
-        assert_eq!(boundary.stencil(0, SPACING), [-1.0, 0.0, 0.0]);
-        assert_eq!(boundary.stencil(1, SPACING), [0.0, -1.0, 0.0]);
-        assert_eq!(boundary.stencil(2, SPACING), [0.0, 0.0, -1.0]);
+        assert_eq!(boundary.stencil(0, SPACING), [0.0, -1.0, 0.0]);
+        assert_eq!(boundary.stencil(1, SPACING), [0.0, 0.0, -1.0]);
     }
 
     #[test]

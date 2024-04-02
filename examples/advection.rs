@@ -1,11 +1,10 @@
 use aeon::{
-    common::{FreeBoundary, Simple},
+    common::{BlockExt, FreeBoundary},
     prelude::*,
 };
 use std::path::PathBuf;
 
-type BoundarySet = Simple<FreeBoundary>;
-const BOUNDARY_SET: BoundarySet = Simple::new(FreeBoundary);
+const BOUNDARY_SET: FreeBoundary = FreeBoundary;
 
 const DIMENSION: usize = 2;
 const RADIUS: f64 = 10.0;
@@ -53,9 +52,7 @@ impl<'a> Projection<DIMENSION> for Derivative<'a> {
         let source_x = arena.alloc(block.len());
         let source = block.auxillary(self.source);
 
-        block
-            .axis::<ORDER>(0)
-            .derivative(&BOUNDARY_SET, source, source_x);
+        block.derivative::<ORDER>(0, &BOUNDARY_SET, source, source_x);
 
         for (i, node) in block.iter().enumerate() {
             let position = block.position(node);
@@ -85,9 +82,8 @@ impl<'a> Projection<DIMENSION> for Dissipation<'a> {
         // let diss_y = arena.alloc(block.len());
         let src = block.auxillary(self.source);
 
-        block
-            .axis::<ORDER>(0)
-            .dissipation(&BOUNDARY_SET, src, diss_x);
+        block.dissipation::<ORDER>(0, &BOUNDARY_SET, src, diss_x);
+
         // block
         //     .axis::<ORDER>(1)
         //     .dissipation(&BOUNDARY_SET, src, diss_y);

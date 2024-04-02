@@ -1,15 +1,12 @@
 use aeon::{
-    common::{AntiSymmetricBoundary, Mixed, RobinBoundary, Simple},
+    common::{AntiSymmetricBoundary, BlockExt, Mixed, RobinBoundary},
     prelude::*,
 };
 use std::{f64::consts::PI, path::PathBuf};
 
-type BoundarySet = Mixed<2, Simple<AntiSymmetricBoundary<4>>, Simple<RobinBoundary<4>>>;
+type BoundarySet = Mixed<2, AntiSymmetricBoundary<4>, RobinBoundary<4>>;
 
-const BOUNDARY_SET: BoundarySet = Mixed::new(
-    Simple::new(AntiSymmetricBoundary),
-    Simple::new(RobinBoundary::nuemann()),
-);
+const BOUNDARY_SET: BoundarySet = Mixed::new(AntiSymmetricBoundary, RobinBoundary::nuemann());
 
 struct Exact;
 
@@ -30,12 +27,8 @@ impl Operator<2> for LaplacianOp {
         let f_rr = arena.alloc(block.len());
         let f_zz = arena.alloc(block.len());
 
-        block
-            .axis::<4>(0)
-            .second_derivative(&BOUNDARY_SET, src, f_rr);
-        block
-            .axis::<4>(1)
-            .second_derivative(&BOUNDARY_SET, src, f_zz);
+        block.second_derivative::<4>(0, &BOUNDARY_SET, src, f_rr);
+        block.second_derivative::<4>(1, &BOUNDARY_SET, src, f_zz);
 
         for (i, _) in block.iter().enumerate() {
             dest[i] = f_rr[i] + f_zz[i];
@@ -46,20 +39,17 @@ impl Operator<2> for LaplacianOp {
         let f_rr = arena.alloc(block.len());
         let f_zz = arena.alloc(block.len());
 
-        block
-            .axis::<4>(0)
-            .second_derivative_diag(&BOUNDARY_SET, f_rr);
-        block
-            .axis::<4>(1)
-            .second_derivative_diag(&BOUNDARY_SET, f_zz);
+        block.second_derivative_diag::<4>(0, &BOUNDARY_SET, f_rr);
+        block.second_derivative_diag::<4>(1, &BOUNDARY_SET, f_zz);
 
         for (i, _) in block.iter().enumerate() {
             dest[i] = f_rr[i] + f_zz[i];
         }
     }
 
-    fn diritchlet(_axis: usize, face: bool) -> bool {
-        face == false
+    fn boundary(&self, mut callback: impl aeon::common::BoundaryCallback<2>) {
+        callback.axis(0, &BOUNDARY_SET);
+        callback.axis(1, &BOUNDARY_SET);
     }
 }
 
@@ -113,8 +103,8 @@ pub fn main() {
             size: [1.0, 1.0],
             origin: [0.0, 0.0],
         },
-        [8, 8],
-        4,
+        [4, 4],
+        5,
     );
 
     let mut exact = vec![0.0; mesh.node_count()];
@@ -132,7 +122,7 @@ pub fn main() {
             &mesh,
             &BiCGStabConfig {
                 max_iterations: 10000,
-                tolerance: 10e-14,
+                tolerance: 10e-15,
             },
             &UniformMultigridConfig {
                 max_iterations: 100,
