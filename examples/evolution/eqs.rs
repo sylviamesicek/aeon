@@ -1,6 +1,5 @@
 use crate::bcs::*;
 use crate::config::*;
-use aeon::common::BoundaryCallback;
 use aeon::prelude::*;
 
 fn is_approximately_equal(a: f64, b: f64) -> bool {
@@ -1105,7 +1104,7 @@ impl<'a> Projection<2> for UEvolution<'a> {
                     term1 + scale1 * (term2 + term3 + scale2 * (term4 + term5))
                 };
 
-                if (dest[i] - sean).abs() > 1e-10 {
+                if (dest[i] - sean).abs() > 1e-13 {
                     println!("U Difference {:10.10e}", dest[i] - sean)
                 }
             }
@@ -1270,7 +1269,7 @@ impl<'a> Projection<2> for XEvolution<'a> {
 
                 let sean = term1 + scale1 * (term2 + term3 + scale2 * (term4 + term5 + term6));
 
-                if (dest[i] - sean).abs() > 1e-10 {
+                if (dest[i] - sean).abs() > 1e-13 {
                     println!("X Difference {:10.10e}", dest[i] - sean)
                 }
             }

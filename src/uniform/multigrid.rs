@@ -86,7 +86,7 @@ impl<'m, const N: usize, Solver: LinearSolver> UniformMultigrid<'m, N, Solver> {
 
             let nres = self.mesh.norm(&self.scratch);
 
-            log::trace!("Iteration {i}, Residual {nres:10.5e}");
+            // log::trace!("Iteration {i}, Residual {nres:10.5e}");
 
             if nres <= tol {
                 log::trace!("Multigrid Converged in {i} Iterations with Residual {nres:10.5e}");

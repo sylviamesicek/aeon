@@ -30,9 +30,9 @@ impl Projection<DIMENSION> for Exact {
             let position = block.position(node);
 
             let mut offset = position;
-            offset[0] -= self.time;
+            offset[1] -= self.time;
 
-            let r2 = offset[0] * offset[0];
+            let r2 = offset[1] * offset[1];
 
             // for axis in 0..DIMENSION {
             //     r2 += offset[axis] * offset[axis];
@@ -52,11 +52,11 @@ impl<'a> Projection<DIMENSION> for Derivative<'a> {
         let source_x = arena.alloc(block.len());
         let source = block.auxillary(self.source);
 
-        block.derivative::<ORDER>(0, &BOUNDARY_SET, source, source_x);
+        block.derivative::<ORDER>(1, &BOUNDARY_SET, source, source_x);
 
         for (i, node) in block.iter().enumerate() {
             let position = block.position(node);
-            let x = position[0];
+            let x = position[1];
 
             if is_approximately_equal(x, RADIUS) {
                 dest[i] = -source_x[i];
@@ -82,7 +82,7 @@ impl<'a> Projection<DIMENSION> for Dissipation<'a> {
         // let diss_y = arena.alloc(block.len());
         let src = block.auxillary(self.source);
 
-        block.dissipation::<ORDER>(0, &BOUNDARY_SET, src, diss_x);
+        block.dissipation::<ORDER>(1, &BOUNDARY_SET, src, diss_x);
 
         // block
         //     .axis::<ORDER>(1)
