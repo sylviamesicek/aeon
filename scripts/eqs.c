@@ -27,8 +27,8 @@ typedef struct HyperbolicVars
 
 typedef struct HyperbolicDerivs
 {
-    double grr_t, gzz_t, grz_t, s_t;
-    double Krr_t, Kzz_t, Krz_t, Y_t;
+    double grr_t, gzz_t, grz_t;
+    double Krr_t, Kzz_t, Krz_t;
     double theta_t, Zr_t, Zz_t;
 } HyperbolicDerivs;
 
@@ -37,7 +37,7 @@ typedef struct HyperbolicDerivs
 
 #define DERIVS(NAME) derivs.##NAME##_t = NAME##_t
 
-HyperbolicDerivs hyperbolic_derivs(HyperbolicVars vars)
+HyperbolicDerivs hyperbolic(HyperbolicVars vars)
 {
     VARS_SECOND(grr);
     VARS_SECOND(gzz);
