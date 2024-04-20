@@ -12,6 +12,7 @@ members = ["crates/*"]
 
 [dependencies]
 aeon_macros = { path = "crates/aeon_macros" }
+aeon_axisymmetry = { path = "crates/aeon_axisymmetry" }
 
 bumpalo = "3"
 log = "0.4"
