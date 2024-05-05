@@ -27,6 +27,10 @@ name = "evolution"
 path = "examples/evolution/main.rs"
 
 [[example]]
+name = "evolution2"
+path = "examples/evolution2/main.rs"
+
+[[example]]
 name = "advection"
 path = "examples/advection.rs"
 

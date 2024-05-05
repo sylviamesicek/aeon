@@ -4,15 +4,15 @@ use crate::arena::Arena;
 use crate::common::{Block, BoundaryCallback, BoundarySet, NodeSpace, Operator, Projection};
 use crate::geometry::Rectangle;
 
-mod io;
+mod model;
 mod multigrid;
 
-pub use io::DataOut;
+pub use model::Model;
 pub use multigrid::{UniformMultigrid, UniformMultigridConfig};
 
 /// Represents a uniform mesh defined on a domain. Such a mesh consists
 /// of a set of uniform levels over some rectangular bounds.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct UniformMesh<const N: usize> {
     /// Uniform bounds for mesh.
     bounds: Rectangle<N>,

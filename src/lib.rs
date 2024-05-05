@@ -3,7 +3,8 @@ pub mod array;
 pub mod common;
 pub mod geometry;
 pub mod lac;
-// pub mod ode;
+pub mod ode;
+pub mod system;
 pub mod uniform;
 
 pub mod prelude {
@@ -13,5 +14,7 @@ pub mod prelude {
     };
     pub use crate::geometry::{IndexSpace, Rectangle};
     pub use crate::lac::{BiCGStabConfig, BiCGStabSolver, IdentityMap, LinearMap, LinearSolver};
-    pub use crate::uniform::{DataOut, UniformMesh, UniformMultigrid, UniformMultigridConfig};
+    pub use crate::ode::{DiffEq, Rk4};
+    pub use crate::system::{System, SystemLabel};
+    pub use crate::uniform::{Model, UniformMesh, UniformMultigrid, UniformMultigridConfig};
 }

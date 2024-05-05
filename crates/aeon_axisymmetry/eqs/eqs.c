@@ -31,6 +31,7 @@ typedef struct HyperbolicDerivs
     double grr_t, grz_t, gzz_t, s_t;
     double krr_t, krz_t, kzz_t, y_t;
     double theta_t, zr_t, zz_t;
+    double lapse_t, shiftr_t, shiftz_t;
 } HyperbolicDerivs;
 
 #define VARS_FIRST(NAME) double NAME = vars.NAME, NAME##_r = vars.NAME##_r, NAME##_z = vars.NAME##_z
@@ -80,6 +81,9 @@ HyperbolicDerivs hyperbolic(HyperbolicSystem vars, double rho, double z)
     DERIVS(theta);
     DERIVS(zr);
     DERIVS(zz);
+    DERIVS(lapse);
+    DERIVS(shiftr);
+    DERIVS(shiftz);
 
     return derivs;
 }
@@ -126,6 +130,9 @@ HyperbolicDerivs hyperbolic_regular(HyperbolicSystem vars, double rho, double z)
     DERIVS(theta);
     DERIVS(zr);
     DERIVS(zz);
+    DERIVS(lapse);
+    DERIVS(shiftr);
+    DERIVS(shiftz);
 
     return derivs;
 }

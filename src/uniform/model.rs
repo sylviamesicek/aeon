@@ -1,27 +1,78 @@
-use std::{io, path::Path};
+use std::{collections::HashMap, io, mem::take, path::Path};
 
 use super::UniformMesh;
+use crate::system::{System, SystemLabel};
 use vtkio::model::*;
 
+/// A model of numerical data which can be serialized and deserialized from the disk,
+/// as well as converted to other visualization formats (such as VTK).
 #[derive(Debug, Clone)]
-pub struct DataOut<'a, const N: usize> {
-    mesh: &'a UniformMesh<N>,
-    attribs: Vec<(String, Vec<f64>)>,
+pub struct Model<const N: usize> {
+    mesh: UniformMesh<N>,
+    systems: HashMap<String, SystemMeta>,
+    fields: Vec<FieldMeta>,
+    debug_fields: Vec<FieldMeta>,
 }
 
-impl<'a, const N: usize> DataOut<'a, N> {
-    pub fn new(mesh: &'a UniformMesh<N>) -> Self {
+impl<const N: usize> Model<N> {
+    pub fn new(mesh: UniformMesh<N>) -> Self {
         Self {
             mesh,
-            attribs: Vec::new(),
+            systems: HashMap::new(),
+            fields: Vec::new(),
+            debug_fields: Vec::new(),
         }
     }
 
-    pub fn attrib_scalar(&mut self, name: &str, field: &[f64]) {
-        self.attribs.push((name.to_string(), field.to_vec()));
+    pub fn mesh(&self) -> &UniformMesh<N> {
+        &self.mesh
     }
 
-    pub fn vtk_model(&self, title: &str) -> Vtk {
+    pub fn attach_system<Label: SystemLabel>(&mut self, system: System<Label>) {
+        assert!(self.systems.contains_key(Label::NAME) == false);
+
+        let offset = self.fields.len();
+        self.systems.insert(
+            Label::NAME.to_string(),
+            SystemMeta {
+                offset,
+                len: Label::FIELDS,
+            },
+        );
+
+        let mut fields = system.into_untyped_fields();
+
+        for i in (0..Label::FIELDS)
+            .into_iter()
+            .map(|idx| Label::from_index(idx))
+        {
+            self.fields.push(FieldMeta {
+                name: i.field_name(),
+                data: take(&mut fields[i.field_index()]),
+            });
+        }
+    }
+
+    pub fn read_system<Label: SystemLabel>(&self) -> Option<System<Label>> {
+        let mut fields = Vec::new();
+
+        let meta = self.systems.get(Label::NAME)?;
+
+        for i in 0..Label::FIELDS {
+            fields.push(self.fields[meta.offset + i].data.clone());
+        }
+
+        Some(System::from_untyped_fields(fields))
+    }
+
+    pub fn attach_debug_field(&mut self, name: &str, data: Vec<f64>) {
+        self.debug_fields.push(FieldMeta {
+            name: name.to_string(),
+            data,
+        })
+    }
+
+    fn vtk_model(&self, title: &str) -> Vtk {
         assert!(N > 0 && N <= 2, "Vtk Output only supported for 0 < N ≤ 2");
 
         let node_space = self.mesh.level_node_space(self.mesh.level_count() - 1);
@@ -102,9 +153,25 @@ impl<'a, const N: usize> DataOut<'a, N> {
             cell: Vec::new(),
         };
 
-        for (name, data) in self.attribs.iter() {
+        for (name, system) in self.systems.iter() {
+            for idx in system.offset..system.offset + system.len {
+                let field = &self.fields[idx];
+                let name = format!("{}::{}", name, field.name);
+
+                attributes.point.push(Attribute::DataArray(DataArrayBase {
+                    name: name,
+                    elem: ElementType::Scalars {
+                        num_comp: 1,
+                        lookup_table: None,
+                    },
+                    data: IOBuffer::new(field.data[range.clone()].to_vec()),
+                }));
+            }
+        }
+
+        for FieldMeta { name, data } in self.debug_fields.iter() {
             attributes.point.push(Attribute::DataArray(DataArrayBase {
-                name: name.clone(),
+                name: format!("DEBUG::{}", name.clone()),
                 elem: ElementType::Scalars {
                     num_comp: 1,
                     lookup_table: None,
@@ -138,4 +205,16 @@ impl<'a, const N: usize> DataOut<'a, N> {
             _ => io::Error::from(io::ErrorKind::Other),
         })
     }
+}
+
+#[derive(Debug, Clone)]
+struct SystemMeta {
+    offset: usize,
+    len: usize,
+}
+
+#[derive(Debug, Clone)]
+struct FieldMeta {
+    name: String,
+    data: Vec<f64>,
 }

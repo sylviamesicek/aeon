@@ -738,61 +738,61 @@ fn write_vtk_output(
 
     log::trace!("Saving to {}.vtu", title);
 
-    let mut output = DataOut::new(mesh);
+    let mut output = Model::new(mesh.clone());
 
-    output.attrib_scalar("psi", dynamic.psi);
-    output.attrib_scalar("seed", dynamic.seed);
-    output.attrib_scalar("u", dynamic.u);
-    output.attrib_scalar("x", dynamic.x);
-    output.attrib_scalar("w", dynamic.w);
+    output.attach_debug_field("psi", dynamic.psi.to_vec());
+    output.attach_debug_field("seed", dynamic.seed.to_vec());
+    output.attach_debug_field("u", dynamic.u.to_vec());
+    output.attach_debug_field("x", dynamic.x.to_vec());
+    output.attach_debug_field("w", dynamic.w.to_vec());
 
-    output.attrib_scalar("lapse", gauge.lapse);
-    output.attrib_scalar("shiftr", gauge.shiftr);
-    output.attrib_scalar("shiftz", gauge.shiftz);
+    output.attach_debug_field("lapse", gauge.lapse.to_vec());
+    output.attach_debug_field("shiftr", gauge.shiftr.to_vec());
+    output.attach_debug_field("shiftz", gauge.shiftz.to_vec());
 
-    output.attrib_scalar("psi_deriv", derivatives.psi);
-    output.attrib_scalar("seed_deriv", derivatives.seed);
-    output.attrib_scalar("u_deriv", derivatives.u);
-    output.attrib_scalar("x_deriv", derivatives.x);
-    output.attrib_scalar("w_deriv", derivatives.w);
+    output.attach_debug_field("psi_deriv", derivatives.psi.to_vec());
+    output.attach_debug_field("seed_deriv", derivatives.seed.to_vec());
+    output.attach_debug_field("u_deriv", derivatives.u.to_vec());
+    output.attach_debug_field("x_deriv", derivatives.x.to_vec());
+    output.attach_debug_field("w_deriv", derivatives.w.to_vec());
 
-    output.attrib_scalar("lapse_residual", residuals.lapse);
-    output.attrib_scalar("shiftr_residual", residuals.shiftr);
-    output.attrib_scalar("shiftz_residual", residuals.shiftz);
+    output.attach_debug_field("lapse_residual", residuals.lapse.to_vec());
+    output.attach_debug_field("shiftr_residual", residuals.shiftr.to_vec());
+    output.attach_debug_field("shiftz_residual", residuals.shiftz.to_vec());
 
-    output.attrib_scalar("contraint", constraint);
+    output.attach_debug_field("contraint", constraint.to_vec());
 
-    output.attrib_scalar("lapse_r", &lapse_r);
-    output.attrib_scalar("lapse_z", &lapse_z);
-    output.attrib_scalar("lapse_rr", &lapse_rr);
-    output.attrib_scalar("lapse_zz", &lapse_zz);
-    output.attrib_scalar("lapse_rz", &lapse_rz);
+    output.attach_debug_field("lapse_r", lapse_r);
+    output.attach_debug_field("lapse_z", lapse_z);
+    output.attach_debug_field("lapse_rr", lapse_rr);
+    output.attach_debug_field("lapse_zz", lapse_zz);
+    output.attach_debug_field("lapse_rz", lapse_rz);
 
-    output.attrib_scalar("psi_r", &psi_r);
-    output.attrib_scalar("psi_z", &psi_z);
-    output.attrib_scalar("psi_rr", &psi_rr);
-    output.attrib_scalar("psi_zz", &psi_zz);
-    output.attrib_scalar("psi_rz", &psi_rz);
+    output.attach_debug_field("psi_r", psi_r);
+    output.attach_debug_field("psi_z", psi_z);
+    output.attach_debug_field("psi_rr", psi_rr);
+    output.attach_debug_field("psi_zz", psi_zz);
+    output.attach_debug_field("psi_rz", psi_rz);
 
-    output.attrib_scalar("seed_r", &seed_r);
-    output.attrib_scalar("seed_z", &seed_z);
-    output.attrib_scalar("seed_rr", &seed_rr);
-    output.attrib_scalar("seed_zz", &seed_zz);
+    output.attach_debug_field("seed_r", seed_r);
+    output.attach_debug_field("seed_z", seed_z);
+    output.attach_debug_field("seed_rr", seed_rr);
+    output.attach_debug_field("seed_zz", seed_zz);
 
-    output.attrib_scalar("shiftr_r", &shiftr_r);
-    output.attrib_scalar("shiftr_z", &shiftr_z);
+    output.attach_debug_field("shiftr_r", shiftr_r);
+    output.attach_debug_field("shiftr_z", shiftr_z);
 
-    output.attrib_scalar("shiftz_r", &shiftz_r);
-    output.attrib_scalar("shiftz_z", &shiftz_z);
+    output.attach_debug_field("shiftz_r", shiftz_r);
+    output.attach_debug_field("shiftz_z", shiftz_z);
 
-    output.attrib_scalar("w_r", &w_r);
-    output.attrib_scalar("w_z", &w_z);
+    output.attach_debug_field("w_r", w_r);
+    output.attach_debug_field("w_z", w_z);
 
-    output.attrib_scalar("u_r", &u_r);
-    output.attrib_scalar("u_z", &u_z);
+    output.attach_debug_field("u_r", u_r);
+    output.attach_debug_field("u_z", u_z);
 
-    output.attrib_scalar("x_r", &x_r);
-    output.attrib_scalar("x_z", &x_z);
+    output.attach_debug_field("x_r", x_r);
+    output.attach_debug_field("x_z", x_z);
 
     output.export_vtk(&title, file_path).unwrap()
 }

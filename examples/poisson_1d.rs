@@ -62,13 +62,13 @@ fn write_vtk_output<const N: usize>(
     let title = format!("poisson_1d");
     let file_path = PathBuf::from(format!("output/{title}.vtu"));
 
-    let mut output = DataOut::new(mesh);
+    let mut output = Model::new(mesh.clone());
 
-    output.attrib_scalar("exact", exact);
-    output.attrib_scalar("solution", solution);
-    output.attrib_scalar("rhs", rhs);
-    output.attrib_scalar("error", error);
-    output.attrib_scalar("residual", residual);
+    output.attach_debug_field("exact", exact.to_vec());
+    output.attach_debug_field("solution", solution.to_vec());
+    output.attach_debug_field("rhs", rhs.to_vec());
+    output.attach_debug_field("error", error.to_vec());
+    output.attach_debug_field("residual", residual.to_vec());
 
     output.export_vtk(&title, file_path).unwrap();
 }

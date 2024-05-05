@@ -211,11 +211,11 @@ fn write_vtk_output(
     let title = format!("advection{step}");
     let file_path = PathBuf::from(format!("output/{title}.vtu"));
 
-    let mut output = DataOut::new(mesh);
+    let mut output = Model::new(mesh.clone());
 
-    output.attrib_scalar("system", system);
-    output.attrib_scalar("exact", exact);
-    output.attrib_scalar("error", residual);
+    output.attach_debug_field("system", system.to_vec());
+    output.attach_debug_field("exact", exact.to_vec());
+    output.attach_debug_field("error", residual.to_vec());
 
     output.export_vtk(&title, file_path).unwrap()
 }

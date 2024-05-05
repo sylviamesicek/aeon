@@ -93,6 +93,10 @@ pub struct HyperbolicDerivs {
     theta_t: f64,
     zr_t: f64,
     zz_t: f64,
+
+    lapse_t: f64,
+    shiftr_t: f64,
+    shiftz_t: f64,
 }
 
 extern "C" {
