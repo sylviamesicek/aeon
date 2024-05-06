@@ -1,0 +1,43 @@
+[package]
+name = "aeon"
+version = "0.1.0"
+edition = "2021"
+readme = "README.md"
+
+[workspace]
+
+members = ["crates/*"]
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+aeon_macros = { path = "crates/aeon_macros" }
+aeon_axisymmetry = { path = "crates/aeon_axisymmetry" }
+
+bumpalo = "3"
+log = "0.4"
+vtkio = "0.6"
+
+[dev-dependencies]
+env_logger = "0.11"
+soa_derive = "0.13"
+
+[[example]]
+name = "evolution"
+path = "examples/evolution/main.rs"
+
+[[example]]
+name = "evolution2"
+path = "examples/evolution2/main.rs"
+
+[[example]]
+name = "advection"
+path = "examples/advection.rs"
+
+[[example]]
+name = "poisson"
+path = "examples/poisson.rs"
+
+[[example]]
+name = "poisson_1d"
+path = "examples/poisson_1d.rs"
