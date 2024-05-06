@@ -1,4 +1,4 @@
-use std::{collections::HashMap, io, mem::take, path::Path};
+use std::{collections::HashMap, io, path::Path};
 
 use super::UniformMesh;
 use crate::system::{System, SystemLabel};
@@ -10,7 +10,6 @@ use vtkio::model::*;
 pub struct Model<const N: usize> {
     mesh: UniformMesh<N>,
     systems: HashMap<String, SystemMeta>,
-    fields: Vec<FieldMeta>,
     debug_fields: Vec<FieldMeta>,
 }
 
@@ -19,7 +18,6 @@ impl<const N: usize> Model<N> {
         Self {
             mesh,
             systems: HashMap::new(),
-            fields: Vec::new(),
             debug_fields: Vec::new(),
         }
     }
@@ -31,38 +29,21 @@ impl<const N: usize> Model<N> {
     pub fn attach_system<Label: SystemLabel>(&mut self, system: System<Label>) {
         assert!(self.systems.contains_key(Label::NAME) == false);
 
-        let offset = self.fields.len();
-        self.systems.insert(
-            Label::NAME.to_string(),
-            SystemMeta {
-                offset,
-                len: Label::FIELDS,
-            },
-        );
+        let (ndofs, data) = system.to_parts();
+        let fields = Label::fields().map(|label| label.field_name()).collect();
 
-        let mut fields = system.into_untyped_fields();
+        let meta = SystemMeta {
+            ndofs,
+            data,
+            fields,
+        };
 
-        for i in (0..Label::FIELDS)
-            .into_iter()
-            .map(|idx| Label::from_index(idx))
-        {
-            self.fields.push(FieldMeta {
-                name: i.field_name(),
-                data: take(&mut fields[i.field_index()]),
-            });
-        }
+        self.systems.insert(Label::NAME.to_string(), meta);
     }
 
     pub fn read_system<Label: SystemLabel>(&self) -> Option<System<Label>> {
-        let mut fields = Vec::new();
-
-        let meta = self.systems.get(Label::NAME)?;
-
-        for i in 0..Label::FIELDS {
-            fields.push(self.fields[meta.offset + i].data.clone());
-        }
-
-        Some(System::from_untyped_fields(fields))
+        let SystemMeta { ndofs, data, .. } = self.systems.get(Label::NAME)?.clone();
+        Some(System::from_parts(ndofs, data))
     }
 
     pub fn attach_debug_field(&mut self, name: &str, data: Vec<f64>) {
@@ -154,17 +135,17 @@ impl<const N: usize> Model<N> {
         };
 
         for (name, system) in self.systems.iter() {
-            for idx in system.offset..system.offset + system.len {
-                let field = &self.fields[idx];
-                let name = format!("{}::{}", name, field.name);
+            for (idx, field) in system.fields.iter().enumerate() {
+                let start = idx * system.ndofs;
+                let end = idx * system.ndofs + system.ndofs;
 
                 attributes.point.push(Attribute::DataArray(DataArrayBase {
-                    name: name,
+                    name: format!("{}::{}", name, field),
                     elem: ElementType::Scalars {
                         num_comp: 1,
                         lookup_table: None,
                     },
-                    data: IOBuffer::new(field.data[range.clone()].to_vec()),
+                    data: IOBuffer::new(system.data[start..end].to_vec()),
                 }));
             }
         }
@@ -209,8 +190,9 @@ impl<const N: usize> Model<N> {
 
 #[derive(Debug, Clone)]
 struct SystemMeta {
-    offset: usize,
-    len: usize,
+    ndofs: usize,
+    data: Vec<f64>,
+    fields: Vec<String>,
 }
 
 #[derive(Debug, Clone)]

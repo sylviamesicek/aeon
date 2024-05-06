@@ -1,26 +1,27 @@
 # Aeon
 
-`Aeon` is a zig package for solving N-dimensional elliptic and hyperbolic PDEs using the finite difference method and block-structured Adaptive Mesh Refinement (AMR).
+`Aeon` is a rust package for solving N-dimensional elliptic and hyperbolic PDEs using the finite difference method and Adaptive Mesh Refinement (AMR).
 
 ## To Do
 
 To reach the state of minimum viable product (MVP) the following feature(s) must be completed.
 
-- [x] Adaptive Quadtree based meshes.
 - [x] Stencil application.
+- [ ] More ergonomic boundary conditions.
+- [ ] Adaptive quadtree based meshes
 - [ ] Transfer between regridding runs.
-- [x] Interior ghost node filling.
-- [x] Exterior ghost node filling.
 - [x] Restriction/Prolongation.
-- [x] BiCGStab(l) Solver.
+- [x] Linear iterative solvers.
+    - [x] BiCGStab
+    - [ ] BiCGStab(l)
 - [x] Jacobi's Method.
 - [x] Multigrid elliptic solver.
-    - [x] Adaptive solves.
     - [x] V-cycles
     - [ ] W-cycles
     - [ ] FMG cycles
-- [x] Runge Kutta 4th order method.
-- [x] Hyperbolic solver.
+- [x] ODE Integrators.
+    - [x] Forward Euler
+    - [x] RK4
 - [x] VTK Output.
 
 

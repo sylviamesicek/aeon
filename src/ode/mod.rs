@@ -1,145 +1,18 @@
-use super::system::{System, SystemLabel};
+//! Generic ode integration code, used for method of lines solvers.
 
-/// A simple ordinary differential equation.
-pub trait DiffEq<Label: SystemLabel> {
-    fn preprocess(&mut self, system: &mut System<Label>);
-    fn derivative(&mut self, system: &System<Label>, result: &mut System<Label>);
-}
+mod forward_euler;
+mod rk4;
 
-/// Global Forward Euler Integrator.
-#[derive(Clone, Debug)]
-pub struct ForwardEuler<Label: SystemLabel> {
-    pub system: System<Label>,
-    pub time: f64,
+pub use forward_euler::ForwardEuler;
+pub use rk4::Rk4;
 
-    k1: System<Label>,
-}
-
-impl<Label: SystemLabel> ForwardEuler<Label> {
-    pub fn new(len: usize) -> Self {
-        let system = System::new(len);
-        let k1 = System::new(len);
-
-        Self {
-            system,
-            time: 0.0,
-
-            k1,
-        }
-    }
-
-    pub fn step<ODE: DiffEq<Label>>(&mut self, eq: &mut ODE, h: f64) {
-        // K1
-        eq.preprocess(&mut self.system);
-        eq.derivative(&self.system, &mut self.k1);
-
-        // Compute total step
-        for field in 0..Label::FIELDS {
-            let sys = self.system.field_mut(field);
-            let k1 = self.k1.field(field);
-
-            for idx in 0..self.k1.len() {
-                sys[idx] = sys[idx] + h * k1[idx];
-            }
-        }
-
-        self.time += h;
-    }
-}
-
-/// Global RK4 Integrator.
-#[derive(Clone, Debug)]
-pub struct Rk4<Label: SystemLabel> {
-    pub system: System<Label>,
-    pub time: f64,
-
-    k1: System<Label>,
-    k2: System<Label>,
-    k3: System<Label>,
-    k4: System<Label>,
-    scr: System<Label>,
-}
-
-impl<Label: SystemLabel> Rk4<Label> {
-    pub fn new(len: usize) -> Self {
-        let system = System::new(len);
-        let k1 = System::new(len);
-        let k2 = System::new(len);
-        let k3 = System::new(len);
-        let k4 = System::new(len);
-        let scr = System::new(len);
-
-        Self {
-            system,
-            time: 0.0,
-
-            k1,
-            k2,
-            k3,
-            k4,
-            scr,
-        }
-    }
-
-    pub fn step<ODE: DiffEq<Label>>(&mut self, eq: &mut ODE, h: f64) {
-        // K1
-        eq.preprocess(&mut self.system);
-        eq.derivative(&self.system, &mut self.k1);
-
-        // K2
-        for field in 0..Label::FIELDS {
-            let sys = self.system.field(field);
-            let scr = self.scr.field_mut(field);
-            let k1 = self.k1.field(field);
-
-            for idx in 0..self.system.len() {
-                scr[idx] = sys[idx] + h / 2.0 * k1[idx];
-            }
-        }
-        eq.preprocess(&mut self.scr);
-        eq.derivative(&self.scr, &mut self.k2);
-
-        // K3
-        for field in 0..Label::FIELDS {
-            let sys = self.system.field(field);
-            let scr = self.scr.field_mut(field);
-            let k2 = self.k2.field(field);
-
-            for idx in 0..self.system.len() {
-                scr[idx] = sys[idx] + h / 2.0 * k2[idx];
-            }
-        }
-        eq.preprocess(&mut self.scr);
-        eq.derivative(&self.scr, &mut self.k3);
-
-        // K4
-        for field in 0..Label::FIELDS {
-            let sys = self.system.field(field);
-            let scr = self.scr.field_mut(field);
-            let k3 = self.k3.field(field);
-
-            for idx in 0..self.system.len() {
-                scr[idx] = sys[idx] + h * k3[idx];
-            }
-        }
-        eq.preprocess(&mut self.scr);
-        eq.derivative(&self.scr, &mut self.k4);
-
-        // Compute total step
-
-        for field in 0..Label::FIELDS {
-            let len = self.system.len();
-            let sys = self.system.field_mut(field);
-            let k1 = self.k1.field(field);
-            let k2 = self.k2.field(field);
-            let k3 = self.k3.field(field);
-            let k4 = self.k4.field(field);
-
-            for idx in 0..len {
-                sys[idx] += h / 6.0 * (k1[idx] + 2.0 * k2[idx] + 2.0 * k3[idx] + k4[idx]);
-            }
-        }
-
-        self.time += h;
-    }
+/// A vector valued ordinary differential equation.
+pub trait Ode {
+    /// Dimension of problem.
+    fn dim(&self) -> usize;
+    /// Preprocess system (for instance, setting hanging nodes
+    /// apply boundary conditions, copy ghost nodes, etc.)
+    fn preprocess(&mut self, system: &mut [f64]);
+    /// Compute temporal derivative.
+    fn derivative(&mut self, system: &[f64], result: &mut [f64]);
 }

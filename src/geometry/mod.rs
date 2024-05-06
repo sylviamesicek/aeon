@@ -1,3 +1,5 @@
+//! A module for various geometric primatives (AABBs, working with cartesian indices, etc.).
+
 mod index_space;
 
 pub use index_space::{CartesianIterator, IndexSpace};

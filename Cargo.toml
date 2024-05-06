@@ -16,6 +16,7 @@ aeon_axisymmetry = { path = "crates/aeon_axisymmetry" }
 
 bumpalo = "3"
 log = "0.4"
+serde = "1.0.200"
 vtkio = "0.6"
 
 [dev-dependencies]

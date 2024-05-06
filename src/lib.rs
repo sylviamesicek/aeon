@@ -14,7 +14,7 @@ pub mod prelude {
     };
     pub use crate::geometry::{IndexSpace, Rectangle};
     pub use crate::lac::{BiCGStabConfig, BiCGStabSolver, IdentityMap, LinearMap, LinearSolver};
-    pub use crate::ode::{DiffEq, Rk4};
+    pub use crate::ode::{Ode, Rk4};
     pub use crate::system::{System, SystemLabel};
     pub use crate::uniform::{Model, UniformMesh, UniformMultigrid, UniformMultigridConfig};
 }
