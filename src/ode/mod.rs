@@ -1,10 +1,53 @@
 use super::system::{System, SystemLabel};
 
+/// A simple ordinary differential equation.
 pub trait DiffEq<Label: SystemLabel> {
     fn preprocess(&mut self, system: &mut System<Label>);
     fn derivative(&mut self, system: &System<Label>, result: &mut System<Label>);
 }
 
+/// Global Forward Euler Integrator.
+#[derive(Clone, Debug)]
+pub struct ForwardEuler<Label: SystemLabel> {
+    pub system: System<Label>,
+    pub time: f64,
+
+    k1: System<Label>,
+}
+
+impl<Label: SystemLabel> ForwardEuler<Label> {
+    pub fn new(len: usize) -> Self {
+        let system = System::new(len);
+        let k1 = System::new(len);
+
+        Self {
+            system,
+            time: 0.0,
+
+            k1,
+        }
+    }
+
+    pub fn step<ODE: DiffEq<Label>>(&mut self, eq: &mut ODE, h: f64) {
+        // K1
+        eq.preprocess(&mut self.system);
+        eq.derivative(&self.system, &mut self.k1);
+
+        // Compute total step
+        for field in 0..Label::FIELDS {
+            let sys = self.system.field_mut(field);
+            let k1 = self.k1.field(field);
+
+            for idx in 0..self.k1.len() {
+                sys[idx] = sys[idx] + h * k1[idx];
+            }
+        }
+
+        self.time += h;
+    }
+}
+
+/// Global RK4 Integrator.
 #[derive(Clone, Debug)]
 pub struct Rk4<Label: SystemLabel> {
     pub system: System<Label>,
