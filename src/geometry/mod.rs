@@ -1,8 +1,15 @@
 //! A module for various geometric primatives (AABBs, working with cartesian indices, etc.).
 
+mod axis;
 mod index_space;
+mod region;
 
-pub use index_space::{CartesianIterator, IndexSpace};
+pub use axis::AxisMask;
+pub use index_space::{CartesianIter, IndexSpace, PlaneIterator};
+pub use region::{
+    faces, regions, Face, FaceIter, Region, RegionFaceNodeIter, RegionIter, RegionNodeIter,
+    RegionOffsetNodeIter,
+};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Rectangle<const N: usize> {

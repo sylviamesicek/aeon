@@ -61,8 +61,8 @@ impl<const N: usize> IndexSpace<N> {
         result
     }
 
-    pub fn iter(self) -> CartesianIterator<N> {
-        CartesianIterator {
+    pub fn iter(self) -> CartesianIter<N> {
+        CartesianIter {
             size: self.size,
             cursor: [0; N],
         }
@@ -82,12 +82,12 @@ impl<const N: usize> IndexSpace<N> {
 
 #[derive(Debug, Clone)]
 /// An iterator over the cartesian indices of an `IndexSpace`.
-pub struct CartesianIterator<const N: usize> {
+pub struct CartesianIter<const N: usize> {
     size: [usize; N],
     cursor: [usize; N],
 }
 
-impl<const N: usize> Iterator for CartesianIterator<N> {
+impl<const N: usize> Iterator for CartesianIter<N> {
     type Item = [usize; N];
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -124,7 +124,7 @@ impl<const N: usize> Iterator for CartesianIterator<N> {
 /// An iterator over a plane in an index space.
 #[derive(Debug, Clone)]
 pub struct PlaneIterator<const N: usize> {
-    inner: CartesianIterator<N>,
+    inner: CartesianIter<N>,
     axis: usize,
     intercept: usize,
 }

@@ -1,66 +1,83 @@
 use crate::array::Array;
 use aeon_macros::{derivative, second_derivative};
 
-/// A seperable kernal used for approximating a derivative or numerical operator
+/// A seperable kernel used for approximating a derivative or numerical operator
 /// to some order of accuracy. All kernel weights are applied negative to positive.
 pub trait Kernel {
-    type InteriorStencil: Array<f64>;
-    type BoundaryStencil: Array<f64>;
+    type InteriorWeights: Array<f64>;
+    type BoundaryWeights: Array<f64>;
 
     const POSITIVE_SUPPORT: usize;
     const NEGATIVE_SUPPORT: usize;
 
+    /// Returns the axis this kernel should be applied to.
+    fn axis(&self) -> usize;
+
     /// Stencil weights for the interior of the domain.
-    fn interior() -> Self::InteriorStencil;
+    fn interior(&self) -> Self::InteriorWeights;
 
     /// Stencil weights for the negative edge of the domain.
-    fn negative(left: usize) -> Self::BoundaryStencil;
+    fn negative(&self, left: usize) -> Self::BoundaryWeights;
 
     /// Stencil weights for the positive edge of the domain.
-    fn positive(right: usize) -> Self::BoundaryStencil;
+    fn positive(&self, right: usize) -> Self::BoundaryWeights;
 
     /// Scale factor given spacing.
-    fn scale(spacing: f64) -> f64;
+    fn scale(&self, spacing: f64) -> f64;
 }
 
-pub struct FDDerivative<const ORDER: usize>;
+pub struct FDDerivative<const ORDER: usize>(usize);
+
+impl<const ORDER: usize> FDDerivative<ORDER> {
+    pub fn new(axis: usize) -> Self {
+        Self(axis)
+    }
+}
 
 impl Kernel for FDDerivative<2> {
-    type InteriorStencil = [f64; 3];
-    type BoundaryStencil = [f64; 3];
+    type InteriorWeights = [f64; 3];
+    type BoundaryWeights = [f64; 3];
 
     const POSITIVE_SUPPORT: usize = 1;
     const NEGATIVE_SUPPORT: usize = 1;
 
-    fn interior() -> Self::InteriorStencil {
+    fn axis(&self) -> usize {
+        self.0
+    }
+
+    fn interior(&self) -> Self::InteriorWeights {
         derivative!(1, 1, 0)
     }
 
-    fn negative(_: usize) -> Self::BoundaryStencil {
+    fn negative(&self, _left: usize) -> Self::BoundaryWeights {
         derivative!(1, 1, -1)
     }
 
-    fn positive(_: usize) -> Self::BoundaryStencil {
+    fn positive(&self, _right: usize) -> Self::BoundaryWeights {
         derivative!(1, 1, 1)
     }
 
-    fn scale(spacing: f64) -> f64 {
+    fn scale(&self, spacing: f64) -> f64 {
         1.0 / spacing
     }
 }
 
 impl Kernel for FDDerivative<4> {
-    type InteriorStencil = [f64; 5];
-    type BoundaryStencil = [f64; 5];
+    type InteriorWeights = [f64; 5];
+    type BoundaryWeights = [f64; 5];
 
     const POSITIVE_SUPPORT: usize = 2;
     const NEGATIVE_SUPPORT: usize = 2;
 
-    fn interior() -> Self::InteriorStencil {
+    fn axis(&self) -> usize {
+        self.0
+    }
+
+    fn interior(&self) -> Self::InteriorWeights {
         derivative!(2, 2, 0)
     }
 
-    fn negative(left: usize) -> Self::BoundaryStencil {
+    fn negative(&self, left: usize) -> Self::BoundaryWeights {
         if left == 0 {
             derivative!(0, 4, 0)
         } else {
@@ -68,7 +85,7 @@ impl Kernel for FDDerivative<4> {
         }
     }
 
-    fn positive(right: usize) -> Self::BoundaryStencil {
+    fn positive(&self, right: usize) -> Self::BoundaryWeights {
         if right == 0 {
             derivative!(4, 0, 0)
         } else {
@@ -76,49 +93,63 @@ impl Kernel for FDDerivative<4> {
         }
     }
 
-    fn scale(spacing: f64) -> f64 {
+    fn scale(&self, spacing: f64) -> f64 {
         1.0 / spacing
     }
 }
 
-pub struct FDSecondDerivative<const ORDER: usize>;
+pub struct FDSecondDerivative<const ORDER: usize>(usize);
+
+impl<const ORDER: usize> FDSecondDerivative<ORDER> {
+    pub fn new(axis: usize) -> Self {
+        Self(axis)
+    }
+}
 
 impl Kernel for FDSecondDerivative<2> {
-    type InteriorStencil = [f64; 3];
-    type BoundaryStencil = [f64; 4];
+    type InteriorWeights = [f64; 3];
+    type BoundaryWeights = [f64; 4];
 
     const NEGATIVE_SUPPORT: usize = 1;
     const POSITIVE_SUPPORT: usize = 1;
 
-    fn interior() -> Self::InteriorStencil {
+    fn axis(&self) -> usize {
+        self.0
+    }
+
+    fn interior(&self) -> Self::InteriorWeights {
         second_derivative!(1, 1, 0)
     }
 
-    fn negative(_: usize) -> Self::BoundaryStencil {
+    fn negative(&self, _: usize) -> Self::BoundaryWeights {
         second_derivative!(0, 3, 0)
     }
 
-    fn positive(_: usize) -> Self::BoundaryStencil {
+    fn positive(&self, _: usize) -> Self::BoundaryWeights {
         second_derivative!(3, 0, 0)
     }
 
-    fn scale(spacing: f64) -> f64 {
+    fn scale(&self, spacing: f64) -> f64 {
         1.0 / (spacing * spacing)
     }
 }
 
 impl Kernel for FDSecondDerivative<4> {
-    type InteriorStencil = [f64; 5];
-    type BoundaryStencil = [f64; 6];
+    type InteriorWeights = [f64; 5];
+    type BoundaryWeights = [f64; 6];
 
     const NEGATIVE_SUPPORT: usize = 2;
     const POSITIVE_SUPPORT: usize = 2;
 
-    fn interior() -> Self::InteriorStencil {
+    fn axis(&self) -> usize {
+        self.0
+    }
+
+    fn interior(&self) -> Self::InteriorWeights {
         second_derivative!(2, 2, 0)
     }
 
-    fn negative(left: usize) -> Self::BoundaryStencil {
+    fn negative(&self, left: usize) -> Self::BoundaryWeights {
         if left == 0 {
             second_derivative!(0, 5, 0)
         } else {
@@ -126,7 +157,7 @@ impl Kernel for FDSecondDerivative<4> {
         }
     }
 
-    fn positive(right: usize) -> Self::BoundaryStencil {
+    fn positive(&self, right: usize) -> Self::BoundaryWeights {
         if right == 0 {
             second_derivative!(5, 0, 0)
         } else {
@@ -134,57 +165,71 @@ impl Kernel for FDSecondDerivative<4> {
         }
     }
 
-    fn scale(spacing: f64) -> f64 {
+    fn scale(&self, spacing: f64) -> f64 {
         1.0 / (spacing * spacing)
     }
 }
 
-pub struct FDDissipation<const ORDER: usize>;
+pub struct FDDissipation<const ORDER: usize>(usize);
+
+impl<const ORDER: usize> FDDissipation<ORDER> {
+    pub fn new(axis: usize) -> Self {
+        Self(axis)
+    }
+}
 
 impl Kernel for FDDissipation<2> {
-    type InteriorStencil = [f64; 5];
-    type BoundaryStencil = [f64; 5];
+    type InteriorWeights = [f64; 5];
+    type BoundaryWeights = [f64; 5];
 
     const NEGATIVE_SUPPORT: usize = 2;
     const POSITIVE_SUPPORT: usize = 2;
 
-    fn interior() -> Self::InteriorStencil {
+    fn axis(&self) -> usize {
+        self.0
+    }
+
+    fn interior(&self) -> Self::InteriorWeights {
         [1.0, -4.0, 6.0, -4.0, 1.0]
     }
 
-    fn negative(_: usize) -> Self::BoundaryStencil {
+    fn negative(&self, _: usize) -> Self::BoundaryWeights {
         [1.0, -4.0, 6.0, -4.0, 1.0]
     }
 
-    fn positive(_: usize) -> Self::BoundaryStencil {
+    fn positive(&self, _: usize) -> Self::BoundaryWeights {
         [1.0, -4.0, 6.0, -4.0, 1.0]
     }
 
-    fn scale(_: f64) -> f64 {
+    fn scale(&self, _: f64) -> f64 {
         -1.0 / 16.0
     }
 }
 
 impl Kernel for FDDissipation<4> {
-    type InteriorStencil = [f64; 7];
-    type BoundaryStencil = [f64; 7];
+    type InteriorWeights = [f64; 7];
+    type BoundaryWeights = [f64; 7];
 
     const NEGATIVE_SUPPORT: usize = 3;
     const POSITIVE_SUPPORT: usize = 3;
 
-    fn interior() -> Self::InteriorStencil {
+    fn axis(&self) -> usize {
+        self.0
+    }
+
+    fn interior(&self) -> Self::InteriorWeights {
         [1.0, -6.0, 15.0, -20.0, 15.0, -6.0, 1.0]
     }
 
-    fn negative(_: usize) -> Self::BoundaryStencil {
+    fn negative(&self, _left: usize) -> Self::BoundaryWeights {
         [1.0, -6.0, 15.0, -20.0, 15.0, -6.0, 1.0]
     }
 
-    fn positive(_: usize) -> Self::BoundaryStencil {
+    fn positive(&self, _right: usize) -> Self::BoundaryWeights {
         [1.0, -6.0, 15.0, -20.0, 15.0, -6.0, 1.0]
     }
 
-    fn scale(_: f64) -> f64 {
+    fn scale(&self, _spacing: f64) -> f64 {
         1.0 / 64.0
     }
 }
@@ -195,29 +240,33 @@ mod tests {
 
     #[test]
     fn fd_kernel_weights() {
-        assert_eq!(FDDerivative::<2>::negative(0), [-1.5, 2.0, -0.5]);
-        assert_eq!(FDDerivative::<2>::interior(), [-0.5, 0.0, 0.5]);
-        assert_eq!(FDDerivative::<2>::positive(0), [0.5, -2.0, 1.5]);
+        let derivative = FDDerivative::<2>::new(0);
+        assert_eq!(derivative.negative(0), [-1.5, 2.0, -0.5]);
+        assert_eq!(derivative.interior(), [-0.5, 0.0, 0.5]);
+        assert_eq!(derivative.positive(0), [0.5, -2.0, 1.5]);
 
+        let derivative = FDDerivative::<4>::new(0);
         assert_eq!(
-            FDDerivative::<4>::negative(0),
+            derivative.negative(0),
             [-25.0 / 12.0, 4.0, -3.0, 4.0 / 3.0, -1.0 / 4.0]
         );
         assert_eq!(
-            FDDerivative::<4>::interior(),
+            derivative.interior(),
             [1.0 / 12.0, -2.0 / 3.0, 0.0, 2.0 / 3.0, -1.0 / 12.0]
         );
         assert_eq!(
-            FDDerivative::<4>::positive(0),
+            derivative.positive(0),
             [1.0 / 4.0, -4.0 / 3.0, 3.0, -4.0, 25.0 / 12.0]
         );
 
-        assert_eq!(FDSecondDerivative::<2>::negative(0), [2.0, -5.0, 4.0, -1.0]);
-        assert_eq!(FDSecondDerivative::<2>::interior(), [1.0, -2.0, 1.0]);
-        assert_eq!(FDSecondDerivative::<2>::positive(0), [-1.0, 4.0, -5.0, 2.0]);
+        let second_derivative = FDSecondDerivative::<2>::new(0);
+        assert_eq!(second_derivative.negative(0), [2.0, -5.0, 4.0, -1.0]);
+        assert_eq!(second_derivative.interior(), [1.0, -2.0, 1.0]);
+        assert_eq!(second_derivative.positive(0), [-1.0, 4.0, -5.0, 2.0]);
 
+        let second_derivative = FDSecondDerivative::<4>::new(0);
         assert_eq!(
-            FDSecondDerivative::<4>::interior(),
+            second_derivative.interior(),
             [-1.0 / 12.0, 4.0 / 3.0, -5.0 / 2.0, 4.0 / 3.0, -1.0 / 12.0]
         );
     }
