@@ -1,0 +1,135 @@
+use crate::common::{Boundary, FDDerivative, FDDissipation, FDSecondDerivative, Kernel, NodeSpace};
+use crate::geometry::CartesianIter;
+use crate::system::{SystemLabel, SystemSlice, SystemSliceMut};
+use std::ops::Range;
+
+#[derive(Debug)]
+pub struct Block<const N: usize> {
+    pub(crate) space: NodeSpace<N>,
+    range: Range<usize>,
+}
+
+impl<const N: usize> Block<N> {
+    pub fn new(space: NodeSpace<N>, range: Range<usize>) -> Self {
+        assert!(range.len() == space.node_count());
+
+        Self { space, range }
+    }
+
+    pub fn aux<'a>(&self, src: &'a [f64]) -> &'a [f64] {
+        &src[self.range.clone()]
+    }
+
+    pub fn aux_mut<'a>(&self, src: &'a mut [f64]) -> &'a mut [f64] {
+        &mut src[self.range.clone()]
+    }
+
+    pub fn aux_system<'a, Label: SystemLabel>(
+        &self,
+        src: &SystemSlice<'a, Label>,
+    ) -> SystemSlice<'a, Label> {
+        src.slice(self.range.clone())
+    }
+
+    pub fn aux_system_mut<'a, Label: SystemLabel>(
+        &self,
+        src: &'a mut SystemSliceMut<'a, Label>,
+    ) -> SystemSliceMut<'a, Label> {
+        src.slice_mut(self.range.clone())
+    }
+
+    /// Iterates over the vertices in the block.
+    pub fn iter(&self) -> CartesianIter<N> {
+        self.space.vertex_space().iter()
+    }
+
+    pub fn value(&self, vertex: [usize; N], src: &[f64]) -> f64 {
+        self.space.value(NodeSpace::node_from_vertex(vertex), src)
+    }
+
+    pub fn set_value(&self, vertex: [usize; N], v: f64, dest: &mut [f64]) {
+        self.space
+            .set_value(NodeSpace::node_from_vertex(vertex), v, dest)
+    }
+
+    pub fn position(&self, vertex: [usize; N]) -> [f64; N] {
+        self.space.position(NodeSpace::node_from_vertex(vertex))
+    }
+
+    pub fn evaluate<K: Kernel, B: Boundary<N>>(
+        &self,
+        kernel: &K,
+        boundary: &B,
+        src: &[f64],
+        dest: &mut [f64],
+    ) {
+        self.space.evaluate(kernel, boundary, src, dest)
+    }
+}
+
+pub trait BlockExt<const N: usize> {
+    fn derivative<const ORDER: usize>(
+        &self,
+        axis: usize,
+        boundary: &impl Boundary<N>,
+        src: &[f64],
+        dest: &mut [f64],
+    ) where
+        FDDerivative<ORDER>: Kernel;
+
+    fn second_derivative<const ORDER: usize>(
+        &self,
+        axis: usize,
+        boundary: &impl Boundary<N>,
+        src: &[f64],
+        dest: &mut [f64],
+    ) where
+        FDSecondDerivative<ORDER>: Kernel;
+
+    fn dissipation<const ORDER: usize>(
+        &self,
+        axis: usize,
+        boundary: &impl Boundary<N>,
+        src: &[f64],
+        dest: &mut [f64],
+    ) where
+        FDDissipation<ORDER>: Kernel;
+}
+
+impl<const N: usize> BlockExt<N> for Block<N> {
+    fn derivative<const ORDER: usize>(
+        &self,
+        axis: usize,
+        boundary: &impl Boundary<N>,
+        src: &[f64],
+        dest: &mut [f64],
+    ) where
+        FDDerivative<ORDER>: Kernel,
+    {
+        self.evaluate(&FDDerivative::<ORDER>::new(axis), boundary, src, dest)
+    }
+
+    fn second_derivative<const ORDER: usize>(
+        &self,
+        axis: usize,
+        boundary: &impl Boundary<N>,
+        src: &[f64],
+        dest: &mut [f64],
+    ) where
+        FDSecondDerivative<ORDER>: Kernel,
+    {
+        self.evaluate(&FDSecondDerivative::<ORDER>::new(axis), boundary, src, dest)
+    }
+
+    fn dissipation<const ORDER: usize>(
+        &self,
+        axis: usize,
+        boundary: &impl Boundary<N>,
+        src: &[f64],
+        dest: &mut [f64],
+    ) where
+        FDDissipation<ORDER>: Kernel,
+    {
+        self.evaluate(&FDDissipation::<ORDER>::new(axis), boundary, src, dest)
+    }
+}

@@ -1,11 +1,11 @@
-use crate::array::Array;
+use crate::array::ArrayLike;
 use aeon_macros::{derivative, second_derivative};
 
 /// A seperable kernel used for approximating a derivative or numerical operator
 /// to some order of accuracy. All kernel weights are applied negative to positive.
 pub trait Kernel {
-    type InteriorWeights: Array<f64>;
-    type BoundaryWeights: Array<f64>;
+    type InteriorWeights: ArrayLike<Elem = f64>;
+    type BoundaryWeights: ArrayLike<Elem = f64>;
 
     const POSITIVE_SUPPORT: usize;
     const NEGATIVE_SUPPORT: usize;

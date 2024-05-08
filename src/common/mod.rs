@@ -19,7 +19,7 @@ pub use boundary::{Boundary, BoundaryKind};
 pub use kernel::{FDDerivative, FDDissipation, FDSecondDerivative, Kernel};
 pub use window::{NodeCartesianIter, NodePlaneIter, NodeWindow};
 
-use crate::array::Array as _;
+use crate::array::ArrayLike as _;
 use crate::geometry::{faces, Face, IndexSpace, Rectangle};
 
 /// A uniform rectangular domain of nodes to which
