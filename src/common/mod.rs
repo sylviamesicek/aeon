@@ -1,3 +1,16 @@
+//! A module for applying finite difference operators to uniformly distributed nodes. This module
+//! represents the intersection of several key abstractions.
+//!
+//! Firstly, one must differentiate between cells, vertices, and nodes. A cell is, quite simply,
+//! a cell of a uniform grid. Most dimensions are stored in terms of cells because they scale easily
+//! with refinement and coarsening (aka, a refined grid has twice the number of cells on each axis).
+//! Vertices are the points in between cells (i.e. at cell intersections). Most coordinates are stored
+//! in terms of vertex indices (a cartesian array of `usize`s) because each vertex represents
+//! a "real" degree of freedom on the mesh. Finally nodes extend vertices to include a buffer
+//! region around the grid consisting of _ghost nodes_. These ghost nodes are not actual dofs, but
+//! rather are used for transfering data between blocks and enforcing simple boundary conditions
+//! (parity, periodic, and embedded bcs). Nodes are indexed with arrays of `isizes`.
+
 mod boundary;
 mod kernel;
 mod window;
@@ -13,14 +26,16 @@ use crate::geometry::{faces, Face, IndexSpace, Rectangle};
 /// various derivative and interpolation kernels can be
 /// applied.
 #[derive(Debug, Clone)]
-pub struct NodeSpace<const N: usize, const SUPPORT: usize> {
+pub struct NodeSpace<const N: usize> {
     /// Number of cells along each axis (one less than then number of vertices).
     pub size: [usize; N],
     /// The physical bounds of the node space.
     pub bounds: Rectangle<N>,
+    /// Number of ghost vertices in each direction
+    pub ghost: usize,
 }
 
-impl<const N: usize, const SUPPORT: usize> NodeSpace<N, SUPPORT> {
+impl<const N: usize> NodeSpace<N> {
     /// Computes the total number of nodes in the space.
     pub fn node_count(&self) -> usize {
         self.index_size().iter().product()
@@ -31,12 +46,13 @@ impl<const N: usize, const SUPPORT: usize> NodeSpace<N, SUPPORT> {
         let mut result = [0; N];
 
         for i in 0..N {
-            result[i] = (node[i] + SUPPORT as isize) as usize;
+            result[i] = (node[i] + self.ghost as isize) as usize;
         }
 
         result
     }
 
+    /// Transforms a vertex into a node.
     pub fn node_from_vertex(vertex: [usize; N]) -> [isize; N] {
         let mut result = [0isize; N];
 
@@ -63,12 +79,12 @@ impl<const N: usize, const SUPPORT: usize> NodeSpace<N, SUPPORT> {
         size
     }
 
-    /// Returns the total number of indices (including ghost) along each axis.
+    /// Returns the total number of indices (including ghost indices) along each axis.
     pub fn index_size(&self) -> [usize; N] {
         let mut size = self.size;
 
         for s in size.iter_mut() {
-            *s += 1 + 2 * SUPPORT;
+            *s += 1 + 2 * self.ghost;
         }
 
         size
@@ -92,7 +108,7 @@ impl<const N: usize, const SUPPORT: usize> NodeSpace<N, SUPPORT> {
     /// Returns the window which encompasses the whole node space
     pub fn full_window(&self) -> NodeWindow<N> {
         NodeWindow {
-            origin: [-(SUPPORT as isize); N],
+            origin: [-(self.ghost as isize); N],
             size: self.index_size(),
         }
     }
@@ -115,10 +131,10 @@ impl<const N: usize, const SUPPORT: usize> NodeSpace<N, SUPPORT> {
             .filter(|&face| boundary.kind(face).is_custom())
             .for_each(|face| {
                 if face.side {
-                    size[face.axis] += SUPPORT;
+                    size[face.axis] += self.ghost;
                 } else {
-                    origin[face.axis] -= SUPPORT as isize;
-                    size[face.axis] += SUPPORT;
+                    origin[face.axis] -= self.ghost as isize;
+                    size[face.axis] += self.ghost;
                 }
             });
 
@@ -169,6 +185,7 @@ impl<const N: usize, const SUPPORT: usize> NodeSpace<N, SUPPORT> {
         Self {
             size: cells,
             bounds: self.bounds.clone(),
+            ghost: self.ghost,
         }
     }
 
@@ -184,6 +201,7 @@ impl<const N: usize, const SUPPORT: usize> NodeSpace<N, SUPPORT> {
         Self {
             size: cells,
             bounds: self.bounds.clone(),
+            ghost: self.ghost,
         }
     }
 
@@ -218,7 +236,7 @@ impl<const N: usize, const SUPPORT: usize> NodeSpace<N, SUPPORT> {
         dest: &mut [f64],
     ) {
         // Check that support fits into ghost nodes.
-        assert!(K::POSITIVE_SUPPORT <= SUPPORT && K::NEGATIVE_SUPPORT <= SUPPORT);
+        assert!(K::POSITIVE_SUPPORT <= self.ghost && K::NEGATIVE_SUPPORT <= self.ghost);
 
         let interior_support = K::InteriorWeights::LEN;
         let boundary_support = K::BoundaryWeights::LEN;
@@ -388,9 +406,10 @@ mod tests {
 
     #[test]
     fn evaluate_deriv_2d() {
-        let space: NodeSpace<2, 1> = NodeSpace {
+        let space: NodeSpace<2> = NodeSpace {
             size: [10, 10],
             bounds: Rectangle::UNIT,
+            ghost: 1,
         };
 
         let xspacing = space.spacing(0);

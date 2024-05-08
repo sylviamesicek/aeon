@@ -8,12 +8,12 @@ pub struct NodeWindow<const N: usize> {
 }
 
 impl<const N: usize> NodeWindow<N> {
-    /// Iterate over all nodes in window.
+    /// Iterate over all nodes in the window.
     pub fn iter(&self) -> NodeCartesianIter<N> {
         NodeCartesianIter::new(self.origin, self.size)
     }
 
-    /// Iterate over nodes on plane in window.
+    /// Iterate over nodes on a plane in the window.
     pub fn plane(&self, axis: usize, intercept: isize) -> NodePlaneIter<N> {
         debug_assert!(
             intercept >= self.origin[axis]
@@ -31,6 +31,7 @@ impl<const N: usize> NodeWindow<N> {
     }
 }
 
+/// A helper for iterating over a node window.
 pub struct NodeCartesianIter<const N: usize> {
     origin: [isize; N],
     inner: CartesianIter<N>,
@@ -61,6 +62,7 @@ impl<const N: usize> Iterator for NodeCartesianIter<N> {
     }
 }
 
+/// A helper for iterating over a plane in a node window.
 pub struct NodePlaneIter<const N: usize> {
     axis: usize,
     intercept: isize,

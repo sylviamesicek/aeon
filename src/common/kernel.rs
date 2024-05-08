@@ -26,6 +26,7 @@ pub trait Kernel {
     fn scale(&self, spacing: f64) -> f64;
 }
 
+/// A finite difference approximation for a derivative.
 pub struct FDDerivative<const ORDER: usize>(usize);
 
 impl<const ORDER: usize> FDDerivative<ORDER> {
@@ -98,6 +99,7 @@ impl Kernel for FDDerivative<4> {
     }
 }
 
+/// A finite difference approximation for a second derivative.
 pub struct FDSecondDerivative<const ORDER: usize>(usize);
 
 impl<const ORDER: usize> FDSecondDerivative<ORDER> {
@@ -239,7 +241,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn fd_kernel_weights() {
+    fn kernel_weights() {
         let derivative = FDDerivative::<2>::new(0);
         assert_eq!(derivative.negative(0), [-1.5, 2.0, -0.5]);
         assert_eq!(derivative.interior(), [-0.5, 0.0, 0.5]);

@@ -6,7 +6,7 @@ pub trait SystemLabel: Sized {
     /// Name of the system (used for debugging and when serializing a system).
     const NAME: &'static str;
     /// Number of component fields in this system.
-    const FIELDS: usize;
+    const FIELD_COUNT: usize;
 
     /// Constructs an individual field label from an index.
     fn from_index(idx: usize) -> Self;
@@ -19,107 +19,62 @@ pub trait SystemLabel: Sized {
 
     /// Iterates all fields in the system.
     fn fields() -> impl Iterator<Item = Self> {
-        (0..Self::FIELDS)
+        (0..Self::FIELD_COUNT)
             .into_iter()
             .map(|idx| Self::from_index(idx))
     }
 }
 
-// /// An iterator that allows enumerating system labels.
-// pub struct SystemLabelIter<Label: SystemLabel>(Option<usize>, PhantomData<Label>);
-
-// impl<Label: SystemLabel> SystemLabelIter<Label> {
-//     pub fn new() -> Self {
-//         if Label::FIELDS == 0 {
-//             Self(None, PhantomData)
-//         } else {
-//             Self(Some(0), PhantomData)
-//         }
-//     }
-// }
-
-// impl<Label: SystemLabel> Iterator for SystemLabelIter<Label> {
-//     type Item = Label;
-
-//     fn next(&mut self) -> Option<Self::Item> {
-//         let idx = self.0?;
-
-//         // Retrieved index should always be valid
-//         debug_assert!(idx < Label::FIELDS);
-
-//         // Construct label
-//         let result = Label::from_index(idx);
-
-//         // Increment index, setting cursor to null if necessary.
-//         if idx + 1 >= Label::FIELDS {
-//             self.0 = None;
-//         }
-
-//         // Return result
-//         Some(result)
-//     }
-// }
-
-/// Stores a system in memory as an structure of data vectors. This SoA approach
+/// Stores a system in memory as an structure of field vectors. This SoA approach
 /// allows us to compute derivatives faster and better utilize caching.
 #[derive(Clone, Debug)]
 pub struct System<Label: SystemLabel> {
-    /// Number of dofs per field.
-    ndofs: usize,
-    /// Backing data
-    data: Vec<f64>,
+    inner: SystemData<Vec<f64>>,
     /// Marker
     _marker: PhantomData<Label>,
 }
 
 impl<Label: SystemLabel> System<Label> {
     /// Constructs a new system with the given degrees of freedom.
-    pub fn new(ndofs: usize) -> Self {
-        let data = vec![0.0; ndofs * Label::FIELDS];
-
+    pub fn new(dof_count: usize) -> Self {
         Self {
-            ndofs,
-            data,
+            inner: SystemData {
+                dof_count,
+                field_count: Label::FIELD_COUNT,
+                data: vec![0.0; dof_count * Label::FIELD_COUNT],
+            },
             _marker: PhantomData,
         }
     }
 
-    /// Constructs a system of a certain number of dofs from a untyped data vector.
-    /// `data.len()` must equal `ndofs * Label::FIELDS`.
-    pub fn from_parts(ndofs: usize, data: Vec<f64>) -> Self {
-        assert!(ndofs * Label::FIELDS == data.len());
+    /// Casts an untyped system into a typed representation.
+    pub fn from_data(data: SystemData<Vec<f64>>) -> Self {
+        assert!(data.field_count == Label::FIELD_COUNT);
 
         Self {
-            ndofs,
-            data,
+            inner: data,
             _marker: PhantomData,
         }
     }
 
-    /// Retrieves an untyped representation of a system (for serialization).
-    pub fn to_parts(self) -> (usize, Vec<f64>) {
-        (self.ndofs, self.data)
+    /// Converts system into untyped representation.
+    pub fn into_data(self) -> SystemData<Vec<f64>> {
+        self.inner
     }
 
     /// Number of degrees of freedom per field.
-    pub fn ndofs(&self) -> usize {
-        self.ndofs
+    pub fn dof_count(&self) -> usize {
+        self.inner.dof_count
     }
 
     /// Retrieves an immutable reference to a field located at the given index.
     pub fn field(&self, idx: usize) -> &[f64] {
-        let start = idx * self.ndofs;
-        let end = idx * self.ndofs + self.ndofs;
-
-        &self.data[start..end]
+        self.inner.field(idx)
     }
 
     /// Retrieves a mutable reference to a field located at the given index.
     pub fn field_mut(&mut self, idx: usize) -> &mut [f64] {
-        let start = idx * self.ndofs;
-        let end = idx * self.ndofs + self.ndofs;
-
-        &mut self.data[start..end]
+        self.inner.field_mut(idx)
     }
 }
 
@@ -134,5 +89,34 @@ impl<Label: SystemLabel> Index<Label> for System<Label> {
 impl<Label: SystemLabel> IndexMut<Label> for System<Label> {
     fn index_mut(&mut self, index: Label) -> &mut Self::Output {
         self.field_mut(index.field_index())
+    }
+}
+
+/// Untyped representation of a system in memory (a structure of field vectorsr).
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+pub struct SystemData<T> {
+    pub dof_count: usize,
+    pub field_count: usize,
+    pub data: T,
+}
+
+impl<T> SystemData<T>
+where
+    T: AsRef<[f64]> + AsMut<[f64]>,
+{
+    /// Retrieves an immutable reference to a field located at the given index.
+    pub fn field(&self, idx: usize) -> &[f64] {
+        let start = idx * self.dof_count;
+        let end = idx * self.dof_count + self.dof_count;
+
+        &self.data.as_ref()[start..end]
+    }
+
+    /// Retrieves a mutable reference to a field located at the given index.
+    pub fn field_mut(&mut self, idx: usize) -> &mut [f64] {
+        let start = idx * self.dof_count;
+        let end = idx * self.dof_count + self.dof_count;
+
+        &mut self.data.as_mut()[start..end]
     }
 }

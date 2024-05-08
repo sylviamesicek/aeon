@@ -1,14 +1,15 @@
 //! A module for various geometric primatives (AABBs, working with cartesian indices, etc.).
 
 mod axis;
-mod index_space;
+mod face;
+mod indices;
 mod region;
 
 pub use axis::AxisMask;
-pub use index_space::{CartesianIter, IndexSpace, PlaneIterator};
+pub use face::{faces, Face, FaceIter};
+pub use indices::{CartesianIter, IndexSpace, PlaneIterator};
 pub use region::{
-    faces, regions, Face, FaceIter, Region, RegionFaceNodeIter, RegionIter, RegionNodeIter,
-    RegionOffsetNodeIter,
+    regions, Region, RegionFaceNodeIter, RegionIter, RegionNodeIter, RegionOffsetNodeIter,
 };
 
 #[derive(Debug, Clone, PartialEq)]
