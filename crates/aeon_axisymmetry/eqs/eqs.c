@@ -44,7 +44,7 @@ typedef struct HyperbolicDerivs
 /// @param rho Position along rho axis.
 /// @param z Position along z axis.
 /// @return Struct containing derivatives.
-HyperbolicDerivs hyperbolic(HyperbolicSystem vars, double rho, double z)
+HyperbolicDerivs hyperbolic_sys(HyperbolicSystem vars, double rho, double z)
 {
     VARS_SECOND(grr);
     VARS_SECOND(gzz);
@@ -93,7 +93,7 @@ HyperbolicDerivs hyperbolic(HyperbolicSystem vars, double rho, double z)
 /// @param rho Position along rho axis.
 /// @param z Position along z axis.
 /// @return Struct containing derivatives.
-HyperbolicDerivs hyperbolic_regular(HyperbolicSystem vars, double rho, double z)
+HyperbolicDerivs hyperbolic_regular_sys(HyperbolicSystem vars, double rho, double z)
 {
     VARS_SECOND(grr);
     VARS_SECOND(gzz);
@@ -151,7 +151,7 @@ typedef struct InitialDerivs
     double psi_t;
 } InitialDerivs;
 
-InitialDerivs initial(InitialSystem vars, double rho, double z)
+InitialDerivs initial_sys(InitialSystem vars, double rho, double z)
 {
     VARS_SECOND(psi);
     VARS_SECOND(s);
@@ -164,7 +164,7 @@ InitialDerivs initial(InitialSystem vars, double rho, double z)
     return derivs;
 }
 
-InitialDerivs initial_regular(InitialSystem vars, double rho, double z)
+InitialDerivs initial_regular_sys(InitialSystem vars, double rho, double z)
 {
     VARS_SECOND(psi);
     VARS_SECOND(s);

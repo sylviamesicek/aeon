@@ -38,6 +38,17 @@ impl Rk4 {
         }
     }
 
+    pub fn reinit(&mut self, dim: usize) {
+        self.time = 0.0;
+        self.dim = dim;
+        self.system.resize(dim, 0.0);
+        self.k1.resize(dim, 0.0);
+        self.k2.resize(dim, 0.0);
+        self.k3.resize(dim, 0.0);
+        self.k4.resize(dim, 0.0);
+        self.scr.resize(dim, 0.0);
+    }
+
     pub fn step<Problem: Ode>(&mut self, problem: &mut Problem, h: f64) {
         // K1
         problem.preprocess(&mut self.system);

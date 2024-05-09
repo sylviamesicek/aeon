@@ -1,4 +1,6 @@
-use crate::common::{Boundary, FDDerivative, FDDissipation, FDSecondDerivative, Kernel, NodeSpace};
+use crate::common::{
+    node_from_vertex, Boundary, FDDerivative, FDDissipation, FDSecondDerivative, Kernel, NodeSpace,
+};
 use crate::geometry::CartesianIter;
 use crate::system::{SystemLabel, SystemSlice, SystemSliceMut};
 use std::ops::Range;
@@ -14,6 +16,10 @@ impl<const N: usize> Block<N> {
         assert!(range.len() == space.node_count());
 
         Self { space, range }
+    }
+
+    pub fn node_count(&self) -> usize {
+        self.range.len()
     }
 
     pub fn aux<'a>(&self, src: &'a [f64]) -> &'a [f64] {
@@ -43,17 +49,20 @@ impl<const N: usize> Block<N> {
         self.space.vertex_space().iter()
     }
 
+    pub fn index_from_vertex(&self, vertex: [usize; N]) -> usize {
+        self.space.index_from_node(node_from_vertex(vertex))
+    }
+
     pub fn value(&self, vertex: [usize; N], src: &[f64]) -> f64 {
-        self.space.value(NodeSpace::node_from_vertex(vertex), src)
+        self.space.value(node_from_vertex(vertex), src)
     }
 
     pub fn set_value(&self, vertex: [usize; N], v: f64, dest: &mut [f64]) {
-        self.space
-            .set_value(NodeSpace::node_from_vertex(vertex), v, dest)
+        self.space.set_value(node_from_vertex(vertex), v, dest)
     }
 
     pub fn position(&self, vertex: [usize; N]) -> [f64; N] {
-        self.space.position(NodeSpace::node_from_vertex(vertex))
+        self.space.position(node_from_vertex(vertex))
     }
 
     pub fn evaluate<K: Kernel, B: Boundary<N>>(

@@ -1,7 +1,16 @@
 use bumpalo::Bump;
 
+#[derive(Default)]
 pub struct Driver {
     pub(crate) pool: MemPool,
+}
+
+impl Driver {
+    pub fn new() -> Self {
+        Self {
+            pool: MemPool::new(),
+        }
+    }
 }
 
 /// A simple arena allocator, wrapping a `bumpalo::Bump`.

@@ -1,6 +1,6 @@
 use std::{collections::HashMap, io, path::Path};
 
-use crate::common::NodeSpace;
+use crate::common::node_from_vertex;
 use crate::mesh::Mesh;
 use crate::system::{SystemLabel, SystemOwned};
 use vtkio::model::*;
@@ -124,7 +124,7 @@ impl<const N: usize> Model<N> {
         let mut vertices = Vec::new();
 
         for vertex in vertex_space.iter() {
-            let position = node_space.position(NodeSpace::node_from_vertex(vertex));
+            let position = node_space.position(node_from_vertex(vertex));
             let mut vertex = [0.0; 3];
             vertex[..N].copy_from_slice(&position);
             // Push to vertices
@@ -144,25 +144,38 @@ impl<const N: usize> Model<N> {
                 let start = idx * system.node_count;
                 let end = idx * system.node_count + system.node_count;
 
+                let mut vert_data = Vec::with_capacity(vertex_space.len());
+
+                for vertex in vertex_space.iter() {
+                    vert_data
+                        .push(node_space.value(node_from_vertex(vertex), &system.data[start..end]));
+                }
+
                 attributes.point.push(Attribute::DataArray(DataArrayBase {
                     name: format!("{}::{}", name, field),
                     elem: ElementType::Scalars {
                         num_comp: 1,
                         lookup_table: None,
                     },
-                    data: IOBuffer::new(system.data[start..end].to_vec()),
+                    data: IOBuffer::new(vert_data),
                 }));
             }
         }
 
         for FieldMeta { name, data } in self.debug_fields.iter() {
+            let mut vert_data = Vec::with_capacity(vertex_space.len());
+
+            for vertex in vertex_space.iter() {
+                vert_data.push(node_space.value(node_from_vertex(vertex), &data));
+            }
+
             attributes.point.push(Attribute::DataArray(DataArrayBase {
                 name: format!("DEBUG::{}", name.clone()),
                 elem: ElementType::Scalars {
                     num_comp: 1,
                     lookup_table: None,
                 },
-                data: IOBuffer::new(data.clone()),
+                data: IOBuffer::new(vert_data),
             }));
         }
 

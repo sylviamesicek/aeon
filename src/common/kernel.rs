@@ -51,11 +51,11 @@ impl Kernel for FDDerivative<2> {
     }
 
     fn negative(&self, _left: usize) -> Self::BoundaryWeights {
-        derivative!(1, 1, -1)
+        derivative!(0, 2, 0)
     }
 
     fn positive(&self, _right: usize) -> Self::BoundaryWeights {
-        derivative!(1, 1, 1)
+        derivative!(2, 0, 0)
     }
 
     fn scale(&self, spacing: f64) -> f64 {

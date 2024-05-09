@@ -15,12 +15,25 @@ mod boundary;
 mod kernel;
 mod window;
 
+use std::array::from_fn;
+
 pub use boundary::{Boundary, BoundaryKind};
 pub use kernel::{FDDerivative, FDDissipation, FDSecondDerivative, Kernel};
 pub use window::{NodeCartesianIter, NodePlaneIter, NodeWindow};
 
 use crate::array::ArrayLike as _;
 use crate::geometry::{faces, Face, IndexSpace, Rectangle};
+
+/// Transforms a vertex into a node.
+pub fn node_from_vertex<const N: usize>(vertex: [usize; N]) -> [isize; N] {
+    let mut result = [0isize; N];
+
+    for axis in 0..N {
+        result[axis] = vertex[axis] as isize;
+    }
+
+    result
+}
 
 /// A uniform rectangular domain of nodes to which
 /// various derivative and interpolation kernels can be
@@ -41,26 +54,10 @@ impl<const N: usize> NodeSpace<N> {
         self.index_size().iter().product()
     }
 
-    /// Converts a node into a unsigned cartesian index.
-    pub fn index_from_node(&self, node: [isize; N]) -> [usize; N] {
-        let mut result = [0; N];
-
-        for i in 0..N {
-            result[i] = (node[i] + self.ghost as isize) as usize;
-        }
-
-        result
-    }
-
-    /// Transforms a vertex into a node.
-    pub fn node_from_vertex(vertex: [usize; N]) -> [isize; N] {
-        let mut result = [0isize; N];
-
-        for axis in 0..N {
-            result[axis] = vertex[axis] as isize;
-        }
-
-        result
+    /// Converts a node into a linear index.
+    pub fn index_from_node(&self, node: [isize; N]) -> usize {
+        let cart = from_fn(|i| (node[i] + self.ghost as isize) as usize);
+        self.index_space().linear_from_cartesian(cart)
     }
 
     /// Computes the number of cells along each axis.
@@ -116,19 +113,19 @@ impl<const N: usize> NodeSpace<N> {
     /// Returns a window of just the interior and edges of the node space (no ghost nodes).
     pub fn inner_window(&self) -> NodeWindow<N> {
         NodeWindow {
-            origin: [0; N],
+            origin: [0isize; N],
             size: self.vertex_size(),
         }
     }
 
-    /// Returns a window which encompasses all interior and custom nodes,
-    /// but excluding unused ghost nodes.
-    pub fn custom_window<B: Boundary<N>>(&self, boundary: &B) -> NodeWindow<N> {
+    /// Computes the window containing active nodes. Aka all nodes that will be used
+    /// for kernel evaluation.
+    pub fn active_window<B: Boundary<N>>(&self, boundary: &B) -> NodeWindow<N> {
         let mut origin = [0isize; N];
         let mut size = self.vertex_size();
 
         faces::<N>()
-            .filter(|&face| boundary.kind(face).is_custom())
+            .filter(|&face| !matches!(boundary.kind(face), BoundaryKind::Free))
             .for_each(|face| {
                 if face.side {
                     size[face.axis] += self.ghost;
@@ -140,6 +137,26 @@ impl<const N: usize> NodeSpace<N> {
 
         NodeWindow { origin, size }
     }
+
+    // /// Returns a window which encompasses all interior and custom nodes,
+    // /// but excluding unused ghost nodes.
+    // pub fn custom_window<B: Boundary<N>>(&self, boundary: &B) -> NodeWindow<N> {
+    //     let mut origin = [0isize; N];
+    //     let mut size = self.vertex_size();
+
+    //     faces::<N>()
+    //         .filter(|&face| boundary.kind(face).is_custom())
+    //         .for_each(|face| {
+    //             if face.side {
+    //                 size[face.axis] += self.ghost;
+    //             } else {
+    //                 origin[face.axis] -= self.ghost as isize;
+    //                 size[face.axis] += self.ghost;
+    //             }
+    //         });
+
+    //     NodeWindow { origin, size }
+    // }
 
     /// Computes the position of the given vertex.
     pub fn position(&self, node: [isize; N]) -> [f64; N] {
@@ -159,18 +176,12 @@ impl<const N: usize> NodeSpace<N> {
 
     /// Returns the value of the field at the given node.
     pub fn value(&self, node: [isize; N], src: &[f64]) -> f64 {
-        let linear = self
-            .index_space()
-            .linear_from_cartesian(self.index_from_node(node));
-        src[linear]
+        src[self.index_from_node(node)]
     }
 
     /// Sets the value of the field at the given node.
     pub fn set_value(&self, node: [isize; N], v: f64, dest: &mut [f64]) {
-        let linear = self
-            .index_space()
-            .linear_from_cartesian(self.index_from_node(node));
-        dest[linear] = v;
+        dest[self.index_from_node(node)] = v;
     }
 
     /// Produces a node space with half the number of
@@ -205,18 +216,58 @@ impl<const N: usize> NodeSpace<N> {
         }
     }
 
-    /// Set strongly enforce diritchlet-type boundary conditions.
-    pub fn diritchlet<B: Boundary<N>>(&self, boundary: &B, dest: &mut [f64]) {
-        let window = self.custom_window(boundary);
+    /// Set strongly enforced boundary conditions.
+    pub fn fill_boundary<B: Boundary<N>>(&self, boundary: &B, dest: &mut [f64]) {
+        let vertex_size = self.vertex_size();
+        let active_window = self.active_window(boundary);
 
         for face in faces::<N>() {
-            let length = self.vertex_size()[face.axis];
-            let intercept = if face.side { length - 1 } else { 0 } as isize;
-            let kind = boundary.kind(face);
+            let axis = face.axis;
+            let side = face.side;
+
+            // Window of all active ghost nodes adjacent to the given face
+            let mut face_window = active_window.clone();
+
+            if side {
+                let shift = vertex_size[axis] as isize - face_window.origin[axis];
+                face_window.origin[axis] += shift;
+                face_window.size[axis] = (face_window.size[axis] as isize - shift).max(0) as usize;
+            } else {
+                face_window.size[axis] = (-face_window.origin[axis]).max(0) as usize;
+            }
+
+            // Now we fill the values of these nodes appropriately
+            for node in face_window.iter() {
+                match boundary.kind(face) {
+                    BoundaryKind::Parity(parity) => {
+                        let distance = if side {
+                            node[axis] - vertex_size[axis] as isize
+                        } else {
+                            -node[axis]
+                        };
+
+                        // Flip across axis
+                        let mut source = node;
+                        source[axis] -= 2 * distance;
+
+                        let v = self.value(source, &dest);
+
+                        if parity {
+                            self.set_value(node, v, dest);
+                        } else {
+                            self.set_value(node, -v, dest);
+                        }
+                    }
+                    BoundaryKind::Free | BoundaryKind::Custom => {}
+                }
+            }
+
+            // As well as strongly enforce any diritchlet boundary conditions on axis.
+            let intercept = if side { vertex_size[axis] - 1 } else { 0 } as isize;
 
             // Iterate over face
-            for node in window.plane(face.axis, intercept) {
-                match kind {
+            for node in active_window.plane(axis, intercept) {
+                match boundary.kind(face) {
                     BoundaryKind::Parity(false) => {
                         // For antisymmetric boundaries we set all values on axis to be 0.
                         self.set_value(node, 0.0, dest);
@@ -238,7 +289,7 @@ impl<const N: usize> NodeSpace<N> {
         // Check that support fits into ghost nodes.
         assert!(K::POSITIVE_SUPPORT <= self.ghost && K::NEGATIVE_SUPPORT <= self.ghost);
 
-        let interior_support = K::InteriorWeights::LEN;
+        // let interior_support = K::InteriorWeights::LEN;
         let boundary_support = K::BoundaryWeights::LEN;
 
         let axis = kernel.axis();
@@ -249,21 +300,22 @@ impl<const N: usize> NodeSpace<N> {
         let boundary_negative = boundary.kind(Face::negative(axis));
         let boundary_positive = boundary.kind(Face::positive(axis));
 
-        // Custom window
-        let window = self.custom_window(boundary);
+        // Window of active nodes
+        let window = self.active_window(boundary);
 
         // ****************************
         // Fill interior
 
-        let int_start = if boundary_negative.is_custom() {
-            0
-        } else {
+        let int_start = if matches!(boundary_negative, BoundaryKind::Free) {
             K::NEGATIVE_SUPPORT
-        };
-        let int_end = if boundary_positive.is_custom() {
-            length
         } else {
+            0
+        };
+
+        let int_end = if matches!(boundary_positive, BoundaryKind::Free) {
             length - K::POSITIVE_SUPPORT
+        } else {
+            length
         };
 
         for index in int_start..int_end {
@@ -287,44 +339,14 @@ impl<const N: usize> NodeSpace<N> {
         for index in 0..int_start {
             // Measures how far from left-most edge we are
             let left = index;
-            // How many exterior points would we depend on if centered.
-            let exterior = K::NEGATIVE_SUPPORT.saturating_sub(left);
 
             for mut node in window.plane(axis, 0) {
                 let mut result: f64 = 0.0;
 
-                // Apply specific boundary operators
-                match boundary_negative {
-                    BoundaryKind::Free => {
-                        // Apply increasingly one-sided stencils
-                        for (off, w) in kernel.negative(left).into_iter().enumerate() {
-                            node[axis] = off as isize;
-                            result += w * self.value(node, src);
-                        }
-                    }
-                    BoundaryKind::Parity(sign) => {
-                        // Reflect stencil appropriately
-                        let sym = if sign { 1.0 } else { -1.0 };
-                        let sym_edge = if sign == false { 0.0 } else { 1.0 };
-
-                        let weights = kernel.interior();
-
-                        for i in 0..exterior {
-                            node[axis] = (exterior - i) as isize;
-                            result += sym * weights[i] * self.value(node, src);
-                        }
-
-                        node[axis] = 0;
-                        result += sym_edge * weights[exterior] * self.value(node, src);
-
-                        for i in (exterior + 1)..interior_support {
-                            node[axis] = (i - exterior) as isize;
-                            result += weights[i] * self.value(node, src);
-                        }
-                    }
-                    BoundaryKind::Custom => {
-                        // We need not do anything, we already applied the centered stencil to every point
-                    }
+                // Apply increasingly one-sided stencils
+                for (off, w) in kernel.negative(left).into_iter().enumerate() {
+                    node[axis] = off as isize;
+                    result += w * self.value(node, src);
                 }
 
                 node[axis] = index as isize;
@@ -339,46 +361,13 @@ impl<const N: usize> NodeSpace<N> {
             // Measures how far from right-most edge we are
             let right = length - 1 - index;
 
-            // How many interior points do we depend on (centered case)
-            let interior = K::NEGATIVE_SUPPORT + right;
-
             for mut node in window.plane(axis, 0) {
                 let mut result: f64 = 0.0;
 
-                // Apply specific boundary operators
-                match boundary_positive {
-                    BoundaryKind::Free => {
-                        // Apply increasingly one-sided stencils
-                        for (off, w) in kernel.positive(right).into_iter().enumerate() {
-                            node[axis] = length as isize - boundary_support as isize + off as isize;
-                            result += w * self.value(node, src);
-                        }
-                    }
-                    BoundaryKind::Parity(sign) => {
-                        // Reflect stencil appropriately
-                        let sym = if sign { 1.0 } else { -1.0 };
-                        let sym_edge = if sign == false { 0.0 } else { 1.0 };
-
-                        let weights = kernel.interior();
-
-                        for i in 0..interior {
-                            node[axis] =
-                                length as isize - 1isize + (i as isize - interior as isize);
-                            result += weights[i] * self.value(node, src);
-                        }
-
-                        node[axis] = (length - 1) as isize;
-                        result += sym_edge * weights[interior] * self.value(node, src);
-
-                        for i in (interior + 1)..interior_support {
-                            node[axis] =
-                                length as isize - 1isize - (i as isize - interior as isize);
-                            result += sym * weights[i] * self.value(node, src);
-                        }
-                    }
-                    BoundaryKind::Custom => {
-                        // We need not do anything, we already applied the centered stencil to every point
-                    }
+                // Apply increasingly one-sided stencils
+                for (off, w) in kernel.positive(right).into_iter().enumerate() {
+                    node[axis] = length as isize - boundary_support as isize + off as isize;
+                    result += w * self.value(node, src);
                 }
 
                 node[axis] = index as isize;
@@ -390,6 +379,8 @@ impl<const N: usize> NodeSpace<N> {
 
 #[cfg(test)]
 mod tests {
+    use std::f64::consts::PI;
+
     use super::*;
 
     struct MixedBoundary;
@@ -397,7 +388,7 @@ mod tests {
     impl Boundary<2> for MixedBoundary {
         fn kind(&self, face: Face) -> BoundaryKind {
             if face.side == false {
-                BoundaryKind::Custom
+                BoundaryKind::Parity(false)
             } else {
                 BoundaryKind::Free
             }
@@ -408,7 +399,10 @@ mod tests {
     fn evaluate_deriv_2d() {
         let space: NodeSpace<2> = NodeSpace {
             size: [10, 10],
-            bounds: Rectangle::UNIT,
+            bounds: Rectangle {
+                origin: [0.0, 0.0],
+                size: [PI, PI],
+            },
             ghost: 1,
         };
 
@@ -425,11 +419,13 @@ mod tests {
             space.set_value(node, position[0].sin() * position[1].sin(), &mut source);
         }
 
+        // ? space.fill_boundary(&boundary, &mut source);
+
         // Allocate explicit vectors
         let mut explicit = vec![0.0; space.node_count()].into_boxed_slice();
         let mut evaluated = vec![0.0; space.node_count()].into_boxed_slice();
 
-        for node in space.custom_window(&boundary).iter() {
+        for node in space.active_window(&boundary).iter() {
             let xi = node[0];
             let yi = node[1];
 
@@ -457,7 +453,7 @@ mod tests {
 
         space.evaluate(&kernel, &boundary, &source, &mut evaluated);
 
-        for node in space.custom_window(&boundary).iter() {
+        for node in space.active_window(&boundary).iter() {
             if node[0] < 0 {
                 continue;
             }

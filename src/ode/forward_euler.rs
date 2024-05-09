@@ -26,6 +26,13 @@ impl ForwardEuler {
         }
     }
 
+    pub fn reinit(&mut self, dim: usize) {
+        self.time = 0.0;
+        self.dim = dim;
+        self.system.resize(dim, 0.0);
+        self.k1.resize(dim, 0.0);
+    }
+
     pub fn dim(&self) -> usize {
         self.dim
     }

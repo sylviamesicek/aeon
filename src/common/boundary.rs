@@ -20,24 +20,29 @@ pub enum BoundaryKind {
     Custom,
 }
 
+impl BoundaryKind {
+    pub const SYMMETRIC: BoundaryKind = BoundaryKind::Parity(true);
+    pub const ANTISYMMETRIC: BoundaryKind = BoundaryKind::Parity(false);
+}
+
 impl Default for BoundaryKind {
     fn default() -> Self {
         Self::Free
     }
 }
 
-impl BoundaryKind {
-    pub fn is_custom(self) -> bool {
-        match self {
-            Self::Custom => true,
-            _ => false,
-        }
-    }
+// impl BoundaryKind {
+//     pub fn is_custom(self) -> bool {
+//         match self {
+//             Self::Custom => true,
+//             _ => false,
+//         }
+//     }
 
-    pub fn is_free(self) -> bool {
-        match self {
-            Self::Free => true,
-            _ => false,
-        }
-    }
-}
+//     pub fn is_free(self) -> bool {
+//         match self {
+//             Self::Free => true,
+//             _ => false,
+//         }
+//     }
+// }

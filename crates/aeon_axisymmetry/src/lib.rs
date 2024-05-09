@@ -5,130 +5,145 @@
 #[repr(C)]
 #[derive(Clone, Debug)]
 pub struct HyperbolicSystem {
-    grr: f64,
-    grr_r: f64,
-    grr_z: f64,
-    grr_rr: f64,
-    grr_rz: f64,
-    grr_zz: f64,
+    pub grr: f64,
+    pub grr_r: f64,
+    pub grr_z: f64,
+    pub grr_rr: f64,
+    pub grr_rz: f64,
+    pub grr_zz: f64,
 
-    grz: f64,
-    grz_r: f64,
-    grz_z: f64,
-    grz_rr: f64,
-    grz_rz: f64,
-    grz_zz: f64,
+    pub grz: f64,
+    pub grz_r: f64,
+    pub grz_z: f64,
+    pub grz_rr: f64,
+    pub grz_rz: f64,
+    pub grz_zz: f64,
 
-    gzz: f64,
-    gzz_r: f64,
-    gzz_z: f64,
-    gzz_rr: f64,
-    gzz_rz: f64,
-    gzz_zz: f64,
+    pub gzz: f64,
+    pub gzz_r: f64,
+    pub gzz_z: f64,
+    pub gzz_rr: f64,
+    pub gzz_rz: f64,
+    pub gzz_zz: f64,
 
-    s: f64,
-    s_r: f64,
-    s_z: f64,
-    s_rr: f64,
-    s_rz: f64,
-    s_zz: f64,
+    pub s: f64,
+    pub s_r: f64,
+    pub s_z: f64,
+    pub s_rr: f64,
+    pub s_rz: f64,
+    pub s_zz: f64,
 
-    krr: f64,
-    krr_r: f64,
-    krr_z: f64,
+    pub krr: f64,
+    pub krr_r: f64,
+    pub krr_z: f64,
 
-    krz: f64,
-    krz_r: f64,
-    krz_z: f64,
+    pub krz: f64,
+    pub krz_r: f64,
+    pub krz_z: f64,
 
-    kzz: f64,
-    kzz_r: f64,
-    kzz_z: f64,
+    pub kzz: f64,
+    pub kzz_r: f64,
+    pub kzz_z: f64,
 
-    y: f64,
-    y_r: f64,
-    y_z: f64,
+    pub y: f64,
+    pub y_r: f64,
+    pub y_z: f64,
 
-    lapse: f64,
-    lapse_r: f64,
-    lapse_z: f64,
-    lapse_rr: f64,
-    lapse_rz: f64,
-    lapse_zz: f64,
+    pub lapse: f64,
+    pub lapse_r: f64,
+    pub lapse_z: f64,
+    pub lapse_rr: f64,
+    pub lapse_rz: f64,
+    pub lapse_zz: f64,
 
-    shiftr: f64,
-    shiftr_r: f64,
-    shiftr_z: f64,
+    pub shiftr: f64,
+    pub shiftr_r: f64,
+    pub shiftr_z: f64,
 
-    shiftz: f64,
-    shiftz_r: f64,
-    shiftz_z: f64,
+    pub shiftz: f64,
+    pub shiftz_r: f64,
+    pub shiftz_z: f64,
 
-    theta: f64,
-    theta_r: f64,
-    theta_z: f64,
+    pub theta: f64,
+    pub theta_r: f64,
+    pub theta_z: f64,
 
-    zr: f64,
-    zr_r: f64,
-    zr_z: f64,
+    pub zr: f64,
+    pub zr_r: f64,
+    pub zr_z: f64,
 
-    zz: f64,
-    zz_r: f64,
-    zz_z: f64,
+    pub zz: f64,
+    pub zz_r: f64,
+    pub zz_z: f64,
 }
 
 #[repr(C)]
 #[derive(Clone, Debug)]
 pub struct HyperbolicDerivs {
-    grr_t: f64,
-    grz_t: f64,
-    gzz_t: f64,
-    s_t: f64,
+    pub grr_t: f64,
+    pub grz_t: f64,
+    pub gzz_t: f64,
+    pub s_t: f64,
 
-    krr_t: f64,
-    krz_t: f64,
-    kzz_t: f64,
-    y_t: f64,
+    pub krr_t: f64,
+    pub krz_t: f64,
+    pub kzz_t: f64,
+    pub y_t: f64,
 
-    theta_t: f64,
-    zr_t: f64,
-    zz_t: f64,
+    pub theta_t: f64,
+    pub zr_t: f64,
+    pub zz_t: f64,
 
-    lapse_t: f64,
-    shiftr_t: f64,
-    shiftz_t: f64,
+    pub lapse_t: f64,
+    pub shiftr_t: f64,
+    pub shiftz_t: f64,
 }
 
 extern "C" {
-    pub fn hyperbolic(vars: HyperbolicSystem, rho: f64, z: f64) -> HyperbolicDerivs;
-    pub fn hyperbolic_regular(vars: HyperbolicSystem, rho: f64, z: f64) -> HyperbolicDerivs;
+    fn hyperbolic_sys(vars: HyperbolicSystem, rho: f64, z: f64) -> HyperbolicDerivs;
+    fn hyperbolic_regular_sys(vars: HyperbolicSystem, rho: f64, z: f64) -> HyperbolicDerivs;
+}
+
+pub fn hyperbolic(vars: HyperbolicSystem, rho: f64, z: f64) -> HyperbolicDerivs {
+    unsafe { hyperbolic_sys(vars, rho, z) }
+}
+pub fn hyperbolic_regular(vars: HyperbolicSystem, rho: f64, z: f64) -> HyperbolicDerivs {
+    unsafe { hyperbolic_regular_sys(vars, rho, z) }
 }
 
 #[repr(C)]
 #[derive(Clone, Debug)]
 pub struct InitialSystem {
-    psi: f64,
-    psi_r: f64,
-    psi_z: f64,
-    psi_rr: f64,
-    psi_rz: f64,
-    psi_zz: f64,
+    pub psi: f64,
+    pub psi_r: f64,
+    pub psi_z: f64,
+    pub psi_rr: f64,
+    pub psi_rz: f64,
+    pub psi_zz: f64,
 
-    s: f64,
-    s_r: f64,
-    s_z: f64,
-    s_rr: f64,
-    s_rz: f64,
-    s_zz: f64,
+    pub s: f64,
+    pub s_r: f64,
+    pub s_z: f64,
+    pub s_rr: f64,
+    pub s_rz: f64,
+    pub s_zz: f64,
 }
 
 #[repr(C)]
 #[derive(Clone, Debug)]
 pub struct InitialDerivs {
-    psi_t: f64,
+    pub psi_t: f64,
 }
 
 extern "C" {
-    pub fn initial(vars: InitialSystem, rho: f64, z: f64) -> InitialDerivs;
-    pub fn initial_regular(vars: InitialSystem, rho: f64, z: f64) -> InitialDerivs;
+    fn initial_sys(vars: InitialSystem, rho: f64, z: f64) -> InitialDerivs;
+    fn initial_regular_sys(vars: InitialSystem, rho: f64, z: f64) -> InitialDerivs;
+}
+
+pub fn initial(vars: InitialSystem, rho: f64, z: f64) -> InitialDerivs {
+    unsafe { initial_sys(vars, rho, z) }
+}
+
+pub fn initial_regular(vars: InitialSystem, rho: f64, z: f64) -> InitialDerivs {
+    unsafe { initial_regular_sys(vars, rho, z) }
 }
