@@ -13,8 +13,8 @@ pub mod prelude {
     pub use crate::geometry::{IndexSpace, Rectangle};
     pub use crate::lac::{BiCGStabConfig, BiCGStabSolver, IdentityMap, LinearMap, LinearSolver};
     pub use crate::mesh::{
-        Driver, MemPool, Mesh, SystemLabel, SystemSlice, SystemSliceMut, SystemVec,
+        Block, Driver, MemPool, Mesh, Model, Operator, Projection, SystemLabel, SystemOperator,
+        SystemProjection, SystemSlice, SystemSliceMut, SystemVec,
     };
-    pub use crate::ode::{Ode, Rk4};
-    // pub use crate::uniform::{Model, UniformMesh, UniformMultigrid, UniformMultigridConfig};
+    pub use crate::ode::{ForwardEuler, Ode, Rk4};
 }

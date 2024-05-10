@@ -503,4 +503,33 @@ mod tests {
             assert!((field[index] - rho.sin() * z.sin()).abs() <= 10e-15);
         }
     }
+
+    struct WindowBoundary;
+
+    impl Boundary<2> for WindowBoundary {
+        fn kind(&self, face: Face) -> BoundaryKind {
+            match (face.axis, face.side) {
+                (0, true) => BoundaryKind::Custom,
+                (1, false) => BoundaryKind::Parity(false),
+                _ => BoundaryKind::Free,
+            }
+        }
+    }
+
+    #[test]
+    fn node_windows() {
+        let node_space = NodeSpace {
+            bounds: Rectangle::UNIT,
+            size: [10, 10],
+            ghost: 2,
+        };
+
+        let full_window = node_space.full_window();
+        assert_eq!(full_window.origin, [-2, -2]);
+        assert_eq!(full_window.size, [15, 15]);
+
+        let active_window = node_space.active_window(&WindowBoundary);
+        assert_eq!(active_window.origin, [0, -2]);
+        assert_eq!(active_window.size, [13, 13]);
+    }
 }

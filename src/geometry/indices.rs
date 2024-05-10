@@ -103,6 +103,11 @@ impl<const N: usize> Iterator for CartesianIter<N> {
         increment[0] = true;
 
         for i in 0..N {
+            if self.size[i] == 0 {
+                // Short circuit if any of the dimensions are zero.
+                return None;
+            }
+
             if increment[i] {
                 // If we need to increment this axis, we add to the cursor value
                 self.cursor[i] += 1;
