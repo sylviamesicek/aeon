@@ -2,7 +2,7 @@ use crate::common::{
     node_from_vertex, Boundary, FDDerivative, FDDissipation, FDSecondDerivative, Kernel, NodeSpace,
 };
 use crate::geometry::CartesianIter;
-use crate::system::{SystemLabel, SystemSlice, SystemSliceMut};
+
 use std::ops::Range;
 
 #[derive(Debug)]
@@ -22,26 +22,8 @@ impl<const N: usize> Block<N> {
         self.range.len()
     }
 
-    pub fn aux<'a>(&self, src: &'a [f64]) -> &'a [f64] {
-        &src[self.range.clone()]
-    }
-
-    pub fn aux_mut<'a>(&self, src: &'a mut [f64]) -> &'a mut [f64] {
-        &mut src[self.range.clone()]
-    }
-
-    pub fn aux_system<'a, Label: SystemLabel>(
-        &self,
-        src: &SystemSlice<'a, Label>,
-    ) -> SystemSlice<'a, Label> {
-        src.slice(self.range.clone())
-    }
-
-    pub fn aux_system_mut<'a, Label: SystemLabel>(
-        &self,
-        src: &'a mut SystemSliceMut<'a, Label>,
-    ) -> SystemSliceMut<'a, Label> {
-        src.slice_mut(self.range.clone())
+    pub fn local_from_global(&self) -> Range<usize> {
+        self.range.clone()
     }
 
     /// Iterates over the vertices in the block.
@@ -49,6 +31,7 @@ impl<const N: usize> Block<N> {
         self.space.vertex_space().iter()
     }
 
+    /// Computes a linear index from a vertex.
     pub fn index_from_vertex(&self, vertex: [usize; N]) -> usize {
         self.space.index_from_node(node_from_vertex(vertex))
     }

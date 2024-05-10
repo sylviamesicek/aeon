@@ -2,9 +2,8 @@ use aeon::{
     array::Array,
     common::{Boundary, BoundaryKind},
     geometry::{Face, Rectangle},
-    mesh::{Block, BlockExt, Driver, MemPool, Mesh, Model, Operator, Projection},
-    ode::{ForwardEuler, Ode, Rk4},
-    system::{SystemLabel, SystemOwned, SystemSlice, SystemSliceMut},
+    mesh::{Block, BlockExt, Driver, MemPool, Mesh, Model, Operator, Projection, SystemLabel},
+    ode::{ForwardEuler, Ode},
 };
 use aeon_axisymmetry::InitialSystem;
 use std::path::PathBuf;
@@ -60,18 +59,9 @@ pub struct InitialDataOp<'a> {
 }
 
 impl<'a> Operator<2> for InitialDataOp<'a> {
-    type Output = InitialData;
-
-    fn apply(
-        &self,
-        block: Block<2>,
-        pool: &MemPool,
-        src: SystemSlice<'_, Self::Output>,
-        mut dest: SystemSliceMut<'_, Self::Output>,
-    ) {
+    fn apply(&self, block: Block<2>, pool: &MemPool, psi: &[f64], dest: &mut [f64]) {
         let node_count = block.node_count();
-
-        let psi = &src[InitialData];
+        let range = block.local_from_global();
 
         let psi_r = pool.alloc_scalar(node_count);
         let psi_z = pool.alloc_scalar(node_count);
@@ -85,7 +75,7 @@ impl<'a> Operator<2> for InitialDataOp<'a> {
         block.second_derivative::<4>(1, &EvenBoundary, psi_r, psi_rz);
         block.second_derivative::<4>(1, &EvenBoundary, psi, psi_zz);
 
-        let seed = block.aux(&self.seed);
+        let seed = &self.seed[range];
 
         let seed_r = pool.alloc_scalar(node_count);
         let seed_z = pool.alloc_scalar(node_count);
@@ -98,8 +88,6 @@ impl<'a> Operator<2> for InitialDataOp<'a> {
         block.second_derivative::<4>(0, &OddBoundary, seed, seed_rr);
         block.second_derivative::<4>(1, &OddBoundary, seed_r, seed_rz);
         block.second_derivative::<4>(1, &OddBoundary, seed, seed_zz);
-
-        let dest = &mut dest[InitialData];
 
         for vertex in block.iter() {
             let [rho, z] = block.position(vertex);
@@ -147,8 +135,8 @@ impl InitialDataSolver {
         }
     }
 
-    pub fn solve(&mut self, mesh: &Mesh<2>, driver: &mut Driver, seed: &[f64], psi: &mut [f64]) {
-        let spacing = mesh.minimum_spacing()[0];
+    pub fn solve(&mut self, mesh: &Mesh<2>, driver: &mut Driver, seed: &[f64], _psi: &mut [f64]) {
+        let spacing = mesh.minimum_spacing();
         let step = spacing * self.cfl;
 
         self.integrator.reinit(mesh.node_count());
@@ -162,8 +150,8 @@ impl InitialDataSolver {
 
             let mut model = Model::new(mesh.clone());
             // println!("{:?}", self.integrator.system.clone());
-            model.attach_debug_field("solution", self.integrator.system.clone());
-            model.attach_debug_field("seed", seed.to_vec());
+            model.attach_field("solution", self.integrator.system.clone());
+            model.attach_field("seed", seed.to_vec());
 
             model
                 .export_vtk(
@@ -191,16 +179,12 @@ impl<'a> Ode for RelaxationOde<'a> {
     }
 
     fn preprocess(&mut self, system: &mut [f64]) {
-        self.mesh.fill_boundary(&EvenBoundary, system);
+        self.driver.fill_boundary(self.mesh, &EvenBoundary, system);
     }
 
-    fn derivative(&mut self, system: &[f64], result: &mut [f64]) {
-        self.mesh.apply(
-            &mut self.driver,
-            &InitialDataOp { seed: &self.seed },
-            SystemSlice::from_contiguous(system),
-            SystemSliceMut::from_contiguous(result),
-        );
+    fn derivative(&mut self, source: &[f64], dest: &mut [f64]) {
+        self.driver
+            .apply(self.mesh, &InitialDataOp { seed: &self.seed }, source, dest);
     }
 }
 
@@ -227,19 +211,12 @@ impl SystemLabel for Seed {
 }
 
 impl Projection<2> for SeedProjection {
-    type Output = Seed;
-
-    fn evaluate(
-        &self,
-        block: aeon::mesh::Block<2>,
-        _pool: &MemPool,
-        mut dest: SystemSliceMut<'_, Self::Output>,
-    ) {
+    fn evaluate(&self, block: aeon::mesh::Block<2>, _pool: &MemPool, dest: &mut [f64]) {
         for vertex in block.iter() {
             let [rho, z] = block.position(vertex);
             let index = block.index_from_vertex(vertex);
 
-            dest[Seed][index] = -rho * self.amplitude * (-(rho * rho + z * z)).exp();
+            dest[index] = -rho * self.amplitude * (-(rho * rho + z * z)).exp();
         }
     }
 }
@@ -257,16 +234,12 @@ fn main() {
     );
 
     // Project seed values
-    let mut seed = SystemOwned::<Seed>::new(mesh.node_count());
+    let mut seed = vec![0.0; mesh.node_count()];
 
-    mesh.project(
-        &mut driver,
-        &SeedProjection { amplitude: 1.0 },
-        seed.as_mut_slice(),
-    );
+    driver.project(&mesh, &SeedProjection { amplitude: 1.0 }, &mut seed);
 
     let mut psi = vec![1.0; mesh.node_count()].into_boxed_slice();
 
     let mut solver = InitialDataSolver::new(10000, 0.001);
-    solver.solve(&mesh, &mut driver, seed.field(0), &mut psi);
+    solver.solve(&mesh, &mut driver, &seed, &mut psi);
 }

@@ -1,32 +1,41 @@
 use std::array::from_fn;
 
-use crate::common::{Boundary, NodeSpace};
+use crate::common::NodeSpace;
 use crate::geometry::Rectangle;
-use crate::system::{SystemLabel, SystemSlice, SystemSliceMut};
 
 mod block;
 mod driver;
 mod model;
+mod system;
 
 pub use block::{Block, BlockExt};
 pub use driver::{Driver, MemPool};
 pub use model::Model;
+pub use system::{Scalar, SystemLabel, SystemSlice, SystemSliceMut, SystemVec};
 
 pub trait Projection<const N: usize> {
-    type Output: SystemLabel;
-
-    fn evaluate(&self, block: Block<N>, pool: &MemPool, dest: SystemSliceMut<'_, Self::Output>);
+    fn evaluate(&self, block: Block<N>, pool: &MemPool, dest: &mut [f64]);
 }
 
 pub trait Operator<const N: usize> {
-    type Output: SystemLabel;
+    fn apply(&self, block: Block<N>, pool: &MemPool, src: &[f64], dest: &mut [f64]);
+}
+
+pub trait SystemProjection<const N: usize> {
+    type Label: SystemLabel;
+
+    fn evaluate(&self, block: Block<N>, pool: &MemPool, dest: SystemSliceMut<'_, Self::Label>);
+}
+
+pub trait SystemOperator<const N: usize> {
+    type Label: SystemLabel;
 
     fn apply(
         &self,
         block: Block<N>,
         pool: &MemPool,
-        src: SystemSlice<'_, Self::Output>,
-        dest: SystemSliceMut<'_, Self::Output>,
+        src: SystemSlice<'_, Self::Label>,
+        dest: SystemSliceMut<'_, Self::Label>,
     );
 }
 
@@ -50,6 +59,7 @@ impl<const N: usize> Mesh<N> {
         }
     }
 
+    /// Returns the number of nodes in the mesh.
     pub fn node_count(&self) -> usize {
         self.base_block().node_count()
     }
@@ -59,39 +69,14 @@ impl<const N: usize> Mesh<N> {
         self.bounds.clone()
     }
 
-    pub fn fill_boundary<B: Boundary<N>>(&self, boundary: &B, dest: &mut [f64]) {
-        let block = self.base_block();
-        block.space.fill_boundary(boundary, dest);
+    pub fn minimum_spacing(&self) -> f64 {
+        from_fn::<_, N, _>(|axis| self.base_block().space.spacing_axis(axis))
+            .into_iter()
+            .min_by(f64::total_cmp)
+            .unwrap_or(0.0)
     }
 
-    pub fn project<P: Projection<N>>(
-        &self,
-        driver: &mut Driver,
-        projection: &P,
-        dest: SystemSliceMut<'_, P::Output>,
-    ) {
-        let block = self.base_block();
-        projection.evaluate(block, &driver.pool, dest);
-        driver.pool.reset();
-    }
-
-    pub fn apply<O: Operator<N>>(
-        &self,
-        driver: &mut Driver,
-        operator: &O,
-        src: SystemSlice<'_, O::Output>,
-        dest: SystemSliceMut<'_, O::Output>,
-    ) {
-        let block = self.base_block();
-        operator.apply(block, &driver.pool, src, dest);
-        driver.pool.reset();
-    }
-
-    pub fn minimum_spacing(&self) -> [f64; N] {
-        from_fn(|axis| self.base_block().space.spacing(axis))
-    }
-
-    fn base_block(&self) -> Block<N> {
+    pub fn base_block(&self) -> Block<N> {
         let space = NodeSpace {
             bounds: self.bounds.clone(),
             size: self.size,

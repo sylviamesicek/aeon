@@ -1,7 +1,7 @@
 use crate::array::{Array, ArrayLike};
 
 use std::fmt::Debug;
-use std::ops::{Bound, Index, IndexMut, RangeBounds};
+use std::ops::{Bound, RangeBounds};
 use std::slice::{self, SliceIndex};
 
 /// This trait is used to define systems of fields.
@@ -20,33 +20,45 @@ pub trait SystemLabel: Sized {
 
     /// Retrieves the name of an individual field.
     fn field_name(&self) -> String;
-
-    // /// Constructs an individual field label from an index.
-    // fn from_index(idx: usize) -> Self;
-
-    // /// Iterates all fields in the system.
-    // fn fields() -> impl Iterator<Item = Self> {
-    //     (0..Self::FIELD_COUNT)
-    //         .into_iter()
-    //         .map(|idx| Self::from_index(idx))
-    // }
 }
 
 pub type FieldArray<Label, T> = Array<<Label as SystemLabel>::FieldLike<T>>;
 
+/// Number of fields in a given system label.
 pub const fn field_count<Label: SystemLabel>() -> usize {
     Label::FieldLike::<()>::LEN
+}
+
+/// A default system representing one scalar field.
+pub struct Scalar;
+
+impl SystemLabel for Scalar {
+    const NAME: &'static str = "Default";
+
+    type FieldLike<T> = [T; 1];
+
+    fn fields() -> Array<Self::FieldLike<Self>> {
+        [Scalar].into()
+    }
+
+    fn field_index(&self) -> usize {
+        0
+    }
+
+    fn field_name(&self) -> String {
+        "scalar".to_string()
+    }
 }
 
 /// Stores a system in memory as an structure of field vectors. This SoA approach
 /// allows us to compute derivatives faster and better utilize caching.
 #[derive(Clone, Debug)]
-pub struct SystemOwned<Label: SystemLabel> {
+pub struct SystemVec<Label: SystemLabel> {
     node_count: usize,
     fields: FieldArray<Label, Vec<f64>>,
 }
 
-impl<Label: SystemLabel> SystemOwned<Label> {
+impl<Label: SystemLabel> SystemVec<Label> {
     /// Constructs a new system with the given degrees of freedom.
     pub fn new(node_count: usize) -> Self {
         Self {
@@ -57,7 +69,7 @@ impl<Label: SystemLabel> SystemOwned<Label> {
 
     pub fn from_contigious(data: &[f64]) -> Self {
         let slice = SystemSlice::<'_, Label>::from_contiguous(data);
-        let fields = Label::FieldLike::<_>::from_fn(|i| slice.field(i).to_vec());
+        let fields = Label::FieldLike::<_>::from_fn(|i| slice.fields[i].to_vec());
 
         Self {
             node_count: slice.node_count(),
@@ -70,34 +82,19 @@ impl<Label: SystemLabel> SystemOwned<Label> {
         self.fields.clone().into_iter().flatten().collect()
     }
 
-    // /// Casts an untyped system into a typed representation.
-    // pub fn from_data(data: SystemData) -> Self {
-    //     assert!(data.field_count == field_count::<Label>());
-
-    //     Self {
-    //         inner: data,
-    //         _marker: PhantomData,
-    //     }
-    // }
-
-    // /// Converts system into untyped representation.
-    // pub fn into_data(self) -> SystemData {
-    //     self.inner
-    // }
-
     /// Number of degrees of freedom per field.
     pub fn node_count(&self) -> usize {
         self.node_count
     }
 
     /// Retrieves an immutable reference to a field located at the given index.
-    pub fn field(&self, idx: usize) -> &[f64] {
-        &self.fields[idx]
+    pub fn field(&self, label: Label) -> &[f64] {
+        &self.fields[label.field_index()]
     }
 
     /// Retrieves a mutable reference to a field located at the given index.
-    pub fn field_mut(&mut self, idx: usize) -> &mut [f64] {
-        &mut self.fields[idx]
+    pub fn field_mut(&mut self, label: Label) -> &mut [f64] {
+        &mut self.fields[label.field_index()]
     }
 
     pub fn as_slice<'a>(&'a self) -> SystemSlice<'a, Label> {
@@ -123,19 +120,19 @@ impl<Label: SystemLabel> SystemOwned<Label> {
     }
 }
 
-impl<Label: SystemLabel> Index<Label> for SystemOwned<Label> {
-    type Output = [f64];
+// impl<Label: SystemLabel> Index<Label> for SystemVec<Label> {
+//     type Output = [f64];
 
-    fn index(&self, index: Label) -> &Self::Output {
-        self.field(index.field_index())
-    }
-}
+//     fn index(&self, index: Label) -> &Self::Output {
+//         self.field(index.field_index())
+//     }
+// }
 
-impl<Label: SystemLabel> IndexMut<Label> for SystemOwned<Label> {
-    fn index_mut(&mut self, index: Label) -> &mut Self::Output {
-        self.field_mut(index.field_index())
-    }
-}
+// impl<Label: SystemLabel> IndexMut<Label> for SystemVec<Label> {
+//     fn index_mut(&mut self, index: Label) -> &mut Self::Output {
+//         self.field_mut(index.field_index())
+//     }
+// }
 
 #[derive(Clone, Debug)]
 pub struct SystemSlice<'a, Label: SystemLabel> {
@@ -169,8 +166,8 @@ impl<'a, Label: SystemLabel> SystemSlice<'a, Label> {
     }
 
     /// Retrieves an immutable reference to a field located at the given index.
-    pub fn field(&self, idx: usize) -> &[f64] {
-        self.fields[idx]
+    pub fn field(&self, label: Label) -> &[f64] {
+        self.fields[label.field_index()]
     }
 
     pub fn slice<R>(&self, range: R) -> Self
@@ -197,13 +194,13 @@ impl<'a, Label: SystemLabel> SystemSlice<'a, Label> {
     }
 }
 
-impl<Label: SystemLabel> Index<Label> for SystemSlice<'_, Label> {
-    type Output = [f64];
+// impl<Label: SystemLabel> Index<Label> for SystemSlice<'_, Label> {
+//     type Output = [f64];
 
-    fn index(&self, index: Label) -> &Self::Output {
-        self.field(index.field_index())
-    }
-}
+//     fn index(&self, index: Label) -> &Self::Output {
+//         self.field(index.field_index())
+//     }
+// }
 
 #[derive(Debug)]
 pub struct SystemSliceMut<'a, Label: SystemLabel> {
@@ -236,12 +233,12 @@ impl<'a, Label: SystemLabel> SystemSliceMut<'a, Label> {
     }
 
     /// Retrieves an immutable reference to a field located at the given index.
-    pub fn field(&self, idx: usize) -> &[f64] {
-        self.fields[idx]
+    pub fn field(&self, label: Label) -> &[f64] {
+        self.fields[label.field_index()]
     }
 
-    pub fn field_mut(&mut self, idx: usize) -> &mut [f64] {
-        self.fields[idx]
+    pub fn field_mut(&mut self, label: Label) -> &mut [f64] {
+        self.fields[label.field_index()]
     }
 
     pub fn slice<R>(&self, range: R) -> SystemSlice<'a, Label>
@@ -301,19 +298,19 @@ impl<'a, Label: SystemLabel> SystemSliceMut<'a, Label> {
     }
 }
 
-impl<Label: SystemLabel> Index<Label> for SystemSliceMut<'_, Label> {
-    type Output = [f64];
+// impl<Label: SystemLabel> Index<Label> for SystemSliceMut<'_, Label> {
+//     type Output = [f64];
 
-    fn index(&self, index: Label) -> &Self::Output {
-        self.field(index.field_index())
-    }
-}
+//     fn index(&self, index: Label) -> &Self::Output {
+//         self.field(index.field_index())
+//     }
+// }
 
-impl<Label: SystemLabel> IndexMut<Label> for SystemSliceMut<'_, Label> {
-    fn index_mut(&mut self, index: Label) -> &mut Self::Output {
-        self.field_mut(index.field_index())
-    }
-}
+// impl<Label: SystemLabel> IndexMut<Label> for SystemSliceMut<'_, Label> {
+//     fn index_mut(&mut self, index: Label) -> &mut Self::Output {
+//         self.field_mut(index.field_index())
+//     }
+// }
 
 #[cfg(test)]
 mod tests {
@@ -354,7 +351,28 @@ mod tests {
 
     #[test]
     fn systems() {
-        let _owned = SystemOwned::<MySystem>::new(100);
+        let data = vec![0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0];
+        let owned = SystemVec::<MySystem>::from_contigious(data.as_ref());
+
+        assert_eq!(owned.node_count(), 3);
+        assert_eq!(owned.field(MySystem::First), &[0.0, 1.0, 2.0]);
+        assert_eq!(owned.field(MySystem::Second), &[3.0, 4.0, 5.0]);
+        assert_eq!(owned.field(MySystem::Third), &[6.0, 7.0, 8.0]);
+
+        let slice = owned.as_slice();
+        let slice_cast = SystemSlice::<MySystem>::from_contiguous(&data);
+        assert_eq!(
+            slice.field(MySystem::First),
+            slice_cast.field(MySystem::First)
+        );
+        assert_eq!(
+            slice.field(MySystem::Second),
+            slice_cast.field(MySystem::Second)
+        );
+        assert_eq!(
+            slice.field(MySystem::Third),
+            slice_cast.field(MySystem::Third)
+        );
     }
 }
 

@@ -163,14 +163,19 @@ impl<const N: usize> NodeSpace<N> {
         let mut result = [0.0; N];
 
         for i in 0..N {
-            result[i] = self.bounds.origin[i] + self.spacing(i) * node[i] as f64;
+            result[i] = self.bounds.origin[i] + self.spacing_axis(i) * node[i] as f64;
         }
 
         result
     }
 
+    /// Returns the spacing along each axis of the node space.
+    pub fn spacing(&self) -> [f64; N] {
+        from_fn(|axis| self.spacing_axis(axis))
+    }
+
     /// Returns the spacing along a given axis.
-    pub fn spacing(&self, axis: usize) -> f64 {
+    pub fn spacing_axis(&self, axis: usize) -> f64 {
         self.bounds.size[axis] / self.size[axis] as f64
     }
 
@@ -241,16 +246,16 @@ impl<const N: usize> NodeSpace<N> {
                 match boundary.kind(face) {
                     BoundaryKind::Parity(parity) => {
                         let distance = if side {
-                            node[axis] - vertex_size[axis] as isize
+                            node[axis] - vertex_size[axis] as isize + 1
                         } else {
-                            -node[axis]
+                            node[axis]
                         };
 
                         // Flip across axis
                         let mut source = node;
                         source[axis] -= 2 * distance;
 
-                        let v = self.value(source, &dest);
+                        let v = self.value(source, dest);
 
                         if parity {
                             self.set_value(node, v, dest);
@@ -293,7 +298,7 @@ impl<const N: usize> NodeSpace<N> {
         let boundary_support = K::BoundaryWeights::LEN;
 
         let axis = kernel.axis();
-        let spacing = self.spacing(axis);
+        let spacing = self.spacing_axis(axis);
         let scale = kernel.scale(spacing);
         let length = self.vertex_size()[axis];
 
@@ -379,9 +384,9 @@ impl<const N: usize> NodeSpace<N> {
 
 #[cfg(test)]
 mod tests {
-    use std::f64::consts::PI;
-
     use super::*;
+
+    use std::f64::consts::PI;
 
     struct MixedBoundary;
 
@@ -406,7 +411,7 @@ mod tests {
             ghost: 1,
         };
 
-        let xspacing = space.spacing(0);
+        let xspacing = space.spacing_axis(0);
 
         let kernel = FDDerivative::<2>::new(0);
         let boundary = MixedBoundary;
@@ -460,6 +465,42 @@ mod tests {
 
             let diff = space.value(node, &explicit) - space.value(node, &evaluated);
             assert!(diff.abs() <= 10e-10);
+        }
+    }
+
+    struct ParityBoundary;
+
+    impl Boundary<2> for ParityBoundary {
+        fn kind(&self, face: Face) -> BoundaryKind {
+            BoundaryKind::Parity(face.side)
+        }
+    }
+
+    #[test]
+    fn boundary_filling_parity() {
+        let space: NodeSpace<2> = NodeSpace {
+            size: [4, 4],
+            bounds: Rectangle {
+                origin: [0.0, 0.0],
+                size: [PI / 2.0, PI / 2.0],
+            },
+            ghost: 2,
+        };
+
+        // Create a source vector.
+        let mut field = vec![0.0; space.node_count()].into_boxed_slice();
+
+        for node in space.full_window().iter() {
+            let [rho, z] = space.position(node);
+            space.set_value(node, rho.sin() * z.sin(), &mut field);
+        }
+
+        space.fill_boundary(&ParityBoundary, &mut field);
+
+        for node in space.full_window().iter() {
+            let [rho, z] = space.position(node);
+            let index = space.index_from_node(node);
+            assert!((field[index] - rho.sin() * z.sin()).abs() <= 10e-15);
         }
     }
 }

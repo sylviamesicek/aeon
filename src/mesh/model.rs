@@ -1,8 +1,7 @@
 use std::{collections::HashMap, io, path::Path};
 
 use crate::common::node_from_vertex;
-use crate::mesh::Mesh;
-use crate::system::{SystemLabel, SystemOwned};
+use crate::mesh::{Mesh, SystemLabel, SystemVec};
 use vtkio::model::*;
 
 /// A model of numerical data which can be serialized and deserialized from the disk,
@@ -11,23 +10,26 @@ use vtkio::model::*;
 pub struct Model<const N: usize> {
     mesh: Mesh<N>,
     systems: HashMap<String, SystemMeta>,
-    debug_fields: Vec<FieldMeta>,
+    fields: HashMap<String, Vec<f64>>,
 }
 
 impl<const N: usize> Model<N> {
+    /// Constructs a new empty model of the mesh, to which systems and fields can be attached.
     pub fn new(mesh: Mesh<N>) -> Self {
         Self {
             mesh,
             systems: HashMap::new(),
-            debug_fields: Vec::new(),
+            fields: HashMap::new(),
         }
     }
 
+    /// Retrieves the mesh that this struct models.
     pub fn mesh(&self) -> &Mesh<N> {
         &self.mesh
     }
 
-    pub fn attach_system<Label: SystemLabel>(&mut self, system: &SystemOwned<Label>) {
+    /// Attaches system to model.
+    pub fn attach_system<Label: SystemLabel>(&mut self, system: &SystemVec<Label>) {
         assert!(self.systems.contains_key(Label::NAME) == false);
 
         let node_count = system.node_count();
@@ -47,15 +49,25 @@ impl<const N: usize> Model<N> {
         self.systems.insert(Label::NAME.to_string(), meta);
     }
 
-    pub fn read_system<Label: SystemLabel>(&self) -> Option<SystemOwned<Label>> {
+    pub fn read_system<Label: SystemLabel>(&self) -> Option<SystemVec<Label>> {
         let meta = self.systems.get(Label::NAME)?;
-        Some(SystemOwned::from_contigious(&meta.data))
+        Some(SystemVec::from_contigious(&meta.data))
     }
 
-    pub fn attach_debug_field(&mut self, name: &str, data: Vec<f64>) {
-        self.debug_fields.push(FieldMeta {
-            name: name.to_string(),
-            data,
+    pub fn attach_field(&mut self, name: &str, data: Vec<f64>) {
+        assert!(self.fields.contains_key(name) == false);
+        self.fields.insert(name.to_string(), data);
+    }
+
+    pub fn read_field(&self, name: &str) -> Option<Vec<f64>> {
+        self.fields.get(name).cloned()
+    }
+
+    pub fn export_vtk(&self, title: &str, path: impl AsRef<Path>) -> Result<(), io::Error> {
+        let model = self.vtk_model(title);
+        model.export(path).map_err(|i| match i {
+            vtkio::Error::IO(io) => io,
+            _ => io::Error::from(io::ErrorKind::Other),
         })
     }
 
@@ -162,7 +174,7 @@ impl<const N: usize> Model<N> {
             }
         }
 
-        for FieldMeta { name, data } in self.debug_fields.iter() {
+        for (name, data) in self.fields.iter() {
             let mut vert_data = Vec::with_capacity(vertex_space.len());
 
             for vertex in vertex_space.iter() {
@@ -170,7 +182,7 @@ impl<const N: usize> Model<N> {
             }
 
             attributes.point.push(Attribute::DataArray(DataArrayBase {
-                name: format!("DEBUG::{}", name.clone()),
+                name: format!("Field::{}", name.clone()),
                 elem: ElementType::Scalars {
                     num_comp: 1,
                     lookup_table: None,
@@ -196,14 +208,6 @@ impl<const N: usize> Model<N> {
             file_path: None,
         }
     }
-
-    pub fn export_vtk(&self, title: &str, path: impl AsRef<Path>) -> Result<(), io::Error> {
-        let model = self.vtk_model(title);
-        model.export(path).map_err(|i| match i {
-            vtkio::Error::IO(io) => io,
-            _ => io::Error::from(io::ErrorKind::Other),
-        })
-    }
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -211,10 +215,4 @@ struct SystemMeta {
     node_count: usize,
     data: Vec<f64>,
     fields: Vec<String>,
-}
-
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-struct FieldMeta {
-    name: String,
-    data: Vec<f64>,
 }
