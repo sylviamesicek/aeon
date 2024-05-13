@@ -5,8 +5,10 @@ use aeon::{
     mesh::{Block, BlockExt, Driver, MemPool, Mesh, Model, Operator, Projection, SystemLabel},
     ode::{ForwardEuler, Ode},
 };
-use aeon_axisymmetry::InitialSystem;
+// use aeon_axisymmetry::InitialSystem;
 use std::path::PathBuf;
+
+const RADIUS: f64 = 10.0;
 
 pub struct InitialData;
 
@@ -68,7 +70,6 @@ impl<'a> Projection<2> for InitialDataProjection<'a> {
         let psi_r = pool.alloc_scalar(node_count);
         let psi_z = pool.alloc_scalar(node_count);
         let psi_rr = pool.alloc_scalar(node_count);
-        let psi_rz = pool.alloc_scalar(node_count);
         let psi_zz = pool.alloc_scalar(node_count);
 
         block.derivative::<4>(0, &EvenBoundary, psi, psi_r);
@@ -76,49 +77,37 @@ impl<'a> Projection<2> for InitialDataProjection<'a> {
         block.second_derivative::<4>(0, &EvenBoundary, psi, psi_rr);
         block.second_derivative::<4>(1, &EvenBoundary, psi, psi_zz);
 
-        block.derivative::<4>(1, &EvenBoundary, psi_r, psi_rz);
-
         let seed = &self.seed[range.clone()];
         let seed_r = pool.alloc_scalar(node_count);
-        let seed_z = pool.alloc_scalar(node_count);
         let seed_rr = pool.alloc_scalar(node_count);
-        let seed_rz = pool.alloc_scalar(node_count);
         let seed_zz = pool.alloc_scalar(node_count);
 
         block.derivative::<4>(0, &OddBoundary, seed, seed_r);
-        block.derivative::<4>(1, &OddBoundary, seed, seed_z);
         block.second_derivative::<4>(0, &OddBoundary, seed, seed_rr);
         block.second_derivative::<4>(1, &OddBoundary, seed, seed_zz);
-
-        block.derivative::<4>(1, &OddBoundary, seed_r, seed_rz);
 
         for vertex in block.iter() {
             let [rho, z] = block.position(vertex);
             let index = block.index_from_vertex(vertex);
 
-            let vars = InitialSystem {
-                psi: psi[index],
-                psi_r: psi_r[index],
-                psi_z: psi_z[index],
-                psi_rr: psi_rr[index],
-                psi_rz: psi_rz[index],
-                psi_zz: psi_zz[index],
+            if (rho - RADIUS).abs() <= 10e-10 || (z - RADIUS).abs() <= 10e-10 {
+                let r = (rho * rho + z * z).sqrt();
 
-                s: seed[index],
-                s_r: seed_r[index],
-                s_z: seed_z[index],
-                s_rr: seed_rr[index],
-                s_rz: seed_rz[index],
-                s_zz: seed_zz[index],
-            };
+                let adv = (psi[index] - 1.0) + rho * psi_r[index] + z * psi_z[index];
+                dest[index] = -adv / r;
 
-            let derivs = if rho.abs() <= 10e-10 {
-                aeon_axisymmetry::initial_regular(vars, rho, z)
+                continue;
+            }
+
+            let laplacian = if rho.abs() <= 10e-10 {
+                2.0 * psi_rr[index] + psi_zz[index]
             } else {
-                aeon_axisymmetry::initial(vars, rho, z)
+                psi_rr[index] + psi_r[index] / rho + psi_zz[index]
             };
 
-            dest[index] = derivs.psi_t;
+            dest[index] = laplacian
+                + psi[index] / 4.0
+                    * (rho * seed_rr[index] + 2.0 * seed_r[index] + rho * seed_zz[index]);
         }
     }
 }
@@ -135,7 +124,6 @@ impl<'a> Operator<2> for InitialDataOp<'a> {
         let psi_r = pool.alloc_scalar(node_count);
         let psi_z = pool.alloc_scalar(node_count);
         let psi_rr = pool.alloc_scalar(node_count);
-        let psi_rz = pool.alloc_scalar(node_count);
         let psi_zz = pool.alloc_scalar(node_count);
 
         block.derivative::<4>(0, &EvenBoundary, psi, psi_r);
@@ -143,51 +131,37 @@ impl<'a> Operator<2> for InitialDataOp<'a> {
         block.second_derivative::<4>(0, &EvenBoundary, psi, psi_rr);
         block.second_derivative::<4>(1, &EvenBoundary, psi, psi_zz);
 
-        block.derivative::<4>(1, &EvenBoundary, psi_r, psi_rz);
-
         let seed = &self.seed[range];
         let seed_r = pool.alloc_scalar(node_count);
-        let seed_z = pool.alloc_scalar(node_count);
         let seed_rr = pool.alloc_scalar(node_count);
-        let seed_rz = pool.alloc_scalar(node_count);
         let seed_zz = pool.alloc_scalar(node_count);
 
         block.derivative::<4>(0, &OddBoundary, seed, seed_r);
-        block.derivative::<4>(1, &OddBoundary, seed, seed_z);
         block.second_derivative::<4>(0, &OddBoundary, seed, seed_rr);
         block.second_derivative::<4>(1, &OddBoundary, seed, seed_zz);
-
-        block.derivative::<4>(1, &OddBoundary, seed_r, seed_rz);
 
         for vertex in block.iter() {
             let [rho, z] = block.position(vertex);
             let index = block.index_from_vertex(vertex);
 
-            let vars = InitialSystem {
-                psi: psi[index],
-                psi_r: psi_r[index],
-                psi_z: psi_z[index],
-                psi_rr: psi_rr[index],
-                psi_rz: psi_rz[index],
-                psi_zz: psi_zz[index],
+            if (rho - RADIUS).abs() <= 10e-10 || (z - RADIUS).abs() <= 10e-10 {
+                let r = (rho * rho + z * z).sqrt();
 
-                s: seed[index],
-                s_r: seed_r[index],
-                s_z: seed_z[index],
-                s_rr: seed_rr[index],
-                s_rz: seed_rz[index],
-                s_zz: seed_zz[index],
-            };
+                let adv = (psi[index] - 1.0) + rho * psi_r[index] + z * psi_z[index];
+                dest[index] = -adv / r;
 
-            let derivs = if rho.abs() <= 10e-10 {
-                aeon_axisymmetry::initial_regular(vars, rho, z)
+                continue;
+            }
+
+            let laplacian = if rho.abs() <= 10e-10 {
+                2.0 * psi_rr[index] + psi_zz[index]
             } else {
-                aeon_axisymmetry::initial(vars, rho, z)
+                psi_rr[index] + psi_r[index] / rho + psi_zz[index]
             };
 
-            dest[index] = derivs.psi_t;
-
-            // dest[index] = psi_rr[index] + psi_zz[index];
+            dest[index] = laplacian
+                + psi[index] / 4.0
+                    * (rho * seed_rr[index] + 2.0 * seed_r[index] + rho * seed_zz[index]);
         }
     }
 }
@@ -213,9 +187,7 @@ impl<'a> Ode for Relax<'a> {
     }
 }
 
-pub struct SeedProjection {
-    amplitude: f64,
-}
+pub struct SeedProjection(f64);
 
 impl Projection<2> for SeedProjection {
     fn evaluate(&self, block: aeon::mesh::Block<2>, _pool: &MemPool, dest: &mut [f64]) {
@@ -223,14 +195,12 @@ impl Projection<2> for SeedProjection {
             let [rho, z] = block.position(vertex);
             let index = block.index_from_vertex(vertex);
 
-            dest[index] = -rho * self.amplitude * (-(rho * rho + z * z)).exp();
+            dest[index] = rho * self.0 * (-(rho * rho + z * z)).exp();
         }
     }
 }
 
-pub struct Gaussian {
-    amplitude: f64,
-}
+pub struct Gaussian(f64);
 
 impl Projection<2> for Gaussian {
     fn evaluate(&self, block: aeon::mesh::Block<2>, _pool: &MemPool, dest: &mut [f64]) {
@@ -238,15 +208,15 @@ impl Projection<2> for Gaussian {
             let [rho, z] = block.position(vertex);
             let index = block.index_from_vertex(vertex);
 
-            dest[index] = self.amplitude * (-(rho * rho + z * z)).exp();
+            dest[index] = self.0 * (-(rho * rho + z * z)).exp();
         }
     }
 }
 
 fn main() {
-    const STEPS: usize = 1000;
+    const STEPS: usize = 10000;
     const CFL: f64 = 0.001;
-    const SKIP_OUT: usize = 1;
+    const SKIP_OUT: usize = 10;
 
     println!("Allocating Driver and Building Mesh");
 
@@ -254,7 +224,7 @@ fn main() {
 
     let mesh = Mesh::new(
         Rectangle {
-            size: [10.0, 10.0],
+            size: [RADIUS, RADIUS],
             origin: [0.0, 0.0],
         },
         [40, 40],
@@ -267,7 +237,7 @@ fn main() {
 
     // Compute seed values.
     let mut seed = vec![0.0; mesh.node_count()].into_boxed_slice();
-    driver.project(&mesh, &SeedProjection { amplitude: 1.0 }, &mut seed);
+    driver.project(&mesh, &SeedProjection(1.0), &mut seed);
     driver.fill_boundary(&mesh, &OddBoundary, &mut seed);
 
     println!("Integrating Psi Values");
@@ -279,9 +249,9 @@ fn main() {
     // driver.project(&mesh, &Gaussian { amplitude: 1.0 }, &mut integrator.system);
     // driver.fill_boundary(&mesh, &EvenBoundary, &mut integrator.system);
 
-    {
-        let mut derivs = vec![0.0; mesh.node_count()].into_boxed_slice();
+    let mut derivs = vec![0.0; mesh.node_count()].into_boxed_slice();
 
+    {
         driver.project(
             &mesh,
             &InitialDataProjection {
@@ -312,7 +282,6 @@ fn main() {
             let si = i / SKIP_OUT;
 
             let mut model = Model::new(mesh.clone());
-            // println!("{:?}", self.integrator.system.clone());
             model.attach_field("solution", integrator.system.clone());
             model.attach_field("seed", seed.to_vec());
 
@@ -323,6 +292,19 @@ fn main() {
                 )
                 .unwrap();
         }
+
+        driver.project(
+            &mesh,
+            &InitialDataProjection {
+                seed: &seed,
+                psi: &integrator.system,
+            },
+            &mut derivs,
+        );
+        driver.fill_boundary(&mesh, &EvenBoundary, &mut derivs);
+
+        let norm = derivs.iter().map(|f| f * f).sum::<f64>().sqrt();
+        println!("Norm of Derivative: {norm}");
 
         integrator.step(
             &mut Relax {

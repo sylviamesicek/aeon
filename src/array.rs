@@ -1,8 +1,27 @@
+//! This modules contains several "hacky" utilities to work around the current lack of generic_const_exprs in
+//! Rust. In several parts of the codebase (`System`s, `Kernel`s, etc.) we have to creates arrays whose
+//! length is determined by an associated constant of a trait. Seeing as this is currently impossible, we instead
+//! use the following pattern:
+//!
+//! ```rust
+//! trait MyTrait {
+//!     type Weights: ArrayLike
+//! }
+//!
+//! struct MyStruct;
+//!
+//! impl MyTrait for MyStruct {
+//!     type Weights = [f64; 10];
+//! }
+//! ```
+
+use serde::de::{Deserialize, Error as _, Visitor};
+use serde::ser::{Serialize, SerializeSeq};
+use std::marker::PhantomData;
 use std::{
     fmt::{Debug, Write},
     ops::{Index, IndexMut},
 };
-
 /// A helper trait for array types which can be indexed and iterated, with
 /// compile time known length. Use of this trait can be removed if generic_const_exprs
 /// is every stabilized.
@@ -31,7 +50,16 @@ impl<T, const N: usize> ArrayLike for [T; N] {
     }
 }
 
+/// A wrapper around an `ArrayLike` which implements several common traits depending on the elements of `I`.
+/// This includes `Default`, `Clone`, `From`, and serialization assuming the element type also satisfies those traits.
 pub struct Array<I: ArrayLike>(I);
+
+impl<I: ArrayLike> Array<I> {
+    /// Unwraps the array, returning the inner type.
+    pub fn inner(self) -> I {
+        self.0
+    }
+}
 
 impl<I: ArrayLike> From<I> for Array<I> {
     fn from(value: I) -> Self {
@@ -97,5 +125,65 @@ where
         f.write_char(']')?;
 
         Ok(())
+    }
+}
+
+impl<I: ArrayLike> Serialize for Array<I>
+where
+    I::Elem: Serialize,
+{
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        let mut seq = serializer.serialize_seq(Some(I::LEN))?;
+
+        for i in 0..I::LEN {
+            seq.serialize_element(&self[i])?;
+        }
+
+        seq.end()
+    }
+}
+
+struct ArrayVisitor<I: ArrayLike>(PhantomData<I>);
+
+impl<'de, I: ArrayLike> Visitor<'de> for ArrayVisitor<I>
+where
+    I::Elem: Deserialize<'de> + Default,
+{
+    type Value = Array<I>;
+
+    fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+        formatter.write_fmt(format_args!("Array of Length {}", I::LEN))
+    }
+
+    fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
+    where
+        A: serde::de::SeqAccess<'de>,
+    {
+        let mut result = Array::<I>::default();
+
+        for i in 0..I::LEN {
+            result[i] = seq.next_element::<I::Elem>()?.ok_or_else(|| {
+                A::Error::custom::<String>(String::from(
+                    "Sequence length does not match array length",
+                ))
+            })?;
+        }
+
+        Ok(result)
+    }
+}
+
+impl<'de, I: ArrayLike> Deserialize<'de> for Array<I>
+where
+    I::Elem: Deserialize<'de> + Default,
+{
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        deserializer.deserialize_seq(ArrayVisitor::<I>(PhantomData))
     }
 }

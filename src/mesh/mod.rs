@@ -1,5 +1,7 @@
+use serde::{Deserialize, Serialize};
 use std::array::from_fn;
 
+use crate::array::Array;
 use crate::common::NodeSpace;
 use crate::geometry::Rectangle;
 
@@ -87,4 +89,43 @@ impl<const N: usize> Mesh<N> {
 
         Block::new(space, 0..node_count)
     }
+}
+
+impl<const N: usize> Serialize for Mesh<N> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        MeshSerde {
+            bounds: self.bounds.clone(),
+            size: self.size.clone().into(),
+            ghost: self.ghost,
+        }
+        .serialize(serializer)
+    }
+}
+
+impl<'de, const N: usize> Deserialize<'de> for Mesh<N> {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let mesh = MeshSerde::deserialize(deserializer)?;
+
+        Ok(Self {
+            bounds: mesh.bounds,
+            size: mesh.size.inner(),
+            ghost: mesh.ghost,
+        })
+    }
+}
+
+#[derive(Serialize, Deserialize)]
+struct MeshSerde<const N: usize> {
+    /// Uniform bounds for mesh
+    bounds: Rectangle<N>,
+    /// Number of cells on base block
+    size: Array<[usize; N]>,
+    /// Number of ghost cells.
+    ghost: usize,
 }

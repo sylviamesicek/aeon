@@ -24,8 +24,12 @@ env_logger = "0.11"
 soa_derive = "0.13"
 
 [[example]]
-name = "idbrill"
-path = "examples/idbrill.rs"
+name = "idbrill_parabolic"
+path = "examples/idbrill_parabolic.rs"
+
+[[example]]
+name = "idbrill_hyperbolic"
+path = "examples/idbrill_hyperbolic.rs"
 
 # [[example]]
 # name = "evolution2"
