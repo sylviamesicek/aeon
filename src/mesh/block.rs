@@ -5,6 +5,10 @@ use crate::geometry::CartesianIter;
 
 use std::ops::Range;
 
+/// An interface for interacting with blocks of an octtree `Mesh`.
+///
+/// This allows for operators (specifically `Projection`s) to operator on each block concurrently,
+/// which in turn opens of the potential for better parallelization.
 #[derive(Debug)]
 pub struct Block<const N: usize> {
     pub(crate) space: NodeSpace<N>,
@@ -12,16 +16,19 @@ pub struct Block<const N: usize> {
 }
 
 impl<const N: usize> Block<N> {
+    /// Creates a new block from a nodespace and range (usually only called internally).
     pub fn new(space: NodeSpace<N>, range: Range<usize>) -> Self {
         assert!(range.len() == space.node_count());
 
         Self { space, range }
     }
 
+    /// Number of nodes in this block
     pub fn node_count(&self) -> usize {
         self.range.len()
     }
 
+    /// A map from global degrees of freedom to local nodes.
     pub fn local_from_global(&self) -> Range<usize> {
         self.range.clone()
     }
@@ -36,18 +43,22 @@ impl<const N: usize> Block<N> {
         self.space.index_from_node(node_from_vertex(vertex))
     }
 
+    /// Computes the value of the local field at the vertex.
     pub fn value(&self, vertex: [usize; N], src: &[f64]) -> f64 {
         self.space.value(node_from_vertex(vertex), src)
     }
 
+    /// Sets the value of a local field at the vertex.
     pub fn set_value(&self, vertex: [usize; N], v: f64, dest: &mut [f64]) {
         self.space.set_value(node_from_vertex(vertex), v, dest)
     }
 
+    /// Computes the position of a vertex.
     pub fn position(&self, vertex: [usize; N]) -> [f64; N] {
         self.space.position(node_from_vertex(vertex))
     }
 
+    /// Evaluates the operation of a kernel working on a field with the specified boundary conditions.
     pub fn evaluate<K: Kernel, B: Boundary<N>>(
         &self,
         kernel: &K,
@@ -60,6 +71,7 @@ impl<const N: usize> Block<N> {
 }
 
 pub trait BlockExt<const N: usize> {
+    /// Aproximates a derivative to the given order of accuracy.
     fn derivative<const ORDER: usize>(
         &self,
         axis: usize,
@@ -69,6 +81,7 @@ pub trait BlockExt<const N: usize> {
     ) where
         FDDerivative<ORDER>: Kernel;
 
+    /// Aproximates a second derivative to the given order of accuracy.
     fn second_derivative<const ORDER: usize>(
         &self,
         axis: usize,
@@ -78,6 +91,7 @@ pub trait BlockExt<const N: usize> {
     ) where
         FDSecondDerivative<ORDER>: Kernel;
 
+    /// Computes a Kriess-Oliger dissipation of the given order of accuracy.
     fn dissipation<const ORDER: usize>(
         &self,
         axis: usize,

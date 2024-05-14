@@ -1,3 +1,5 @@
+//! Meshes and adaptive mesh refinement.
+
 use serde::{Deserialize, Serialize};
 use std::array::from_fn;
 

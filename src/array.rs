@@ -1,5 +1,7 @@
 //! This modules contains several "hacky" utilities to work around the current lack of generic_const_exprs in
-//! Rust. In several parts of the codebase (`System`s, `Kernel`s, etc.) we have to creates arrays whose
+//! Rust.
+//!
+//! In several parts of the codebase (`System`s, `Kernel`s, etc.) we have to creates arrays whose
 //! length is determined by an associated constant of a trait. Seeing as this is currently impossible, we instead
 //! use the following pattern:
 //!
@@ -24,7 +26,7 @@ use std::{
 };
 /// A helper trait for array types which can be indexed and iterated, with
 /// compile time known length. Use of this trait can be removed if generic_const_exprs
-/// is every stabilized.
+/// is ever stabilized.
 pub trait ArrayLike:
     Index<usize, Output = Self::Elem>
     + IndexMut<usize, Output = Self::Elem>

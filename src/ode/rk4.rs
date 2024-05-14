@@ -1,6 +1,6 @@
 use super::Ode;
 
-/// Global RK4 Integrator.
+/// RK4 Integrator.
 #[derive(Clone, Debug)]
 pub struct Rk4 {
     pub system: Vec<f64>,

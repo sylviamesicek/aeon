@@ -1,6 +1,6 @@
 use super::Ode;
 
-/// Global Forward Euler Integrator.
+/// Standard forward Euler Integrator.
 #[derive(Clone, Debug)]
 pub struct ForwardEuler {
     pub system: Vec<f64>,

@@ -1,11 +1,11 @@
 //! A module for various geometric primatives (AABBs, working with cartesian indices, etc.).
 
-mod axis;
+// mod axis;
 mod face;
 mod indices;
 mod region;
 
-pub use axis::AxisMask;
+// pub use axis::AxisMask;
 pub use face::{faces, Face, FaceIter};
 pub use indices::{CartesianIter, IndexSpace, PlaneIterator};
 pub use region::{
@@ -31,7 +31,7 @@ impl<const N: usize> Rectangle<N> {
         origin: [0.0; N],
     };
 
-    /// Computes center of rectangle.
+    /// Computes the center of the rectangle.
     pub fn center(&self) -> [f64; N] {
         from_fn(|i| self.origin[i] + self.size[i] / 2.0)
     }

@@ -1,5 +1,5 @@
 /// A face of a rectangular prism.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Face {
     pub axis: usize,
     pub side: bool,
@@ -14,6 +14,19 @@ impl Face {
     /// Face on positive side of axis.
     pub fn positive(axis: usize) -> Self {
         Self { axis, side: true }
+    }
+
+    /// Transforms a face into a linear index.
+    pub fn to_linear(self) -> usize {
+        2 * self.axis + self.side as usize
+    }
+
+    /// Constructs a face from a linear index.
+    pub fn from_linear(linear: usize) -> Self {
+        Self {
+            axis: linear / 2,
+            side: linear % 2 == 1,
+        }
     }
 }
 
@@ -65,5 +78,9 @@ mod tests {
         assert_eq!(list.next(), Some(Face::negative(2)));
         assert_eq!(list.next(), Some(Face::positive(2)));
         assert_eq!(list.next(), None);
+
+        assert_eq!(Face::negative(1).to_linear(), 2);
+        assert_eq!(Face::positive(3).to_linear(), 7);
+        assert_eq!(Face::positive(3), Face::from_linear(7));
     }
 }

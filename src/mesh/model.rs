@@ -6,7 +6,7 @@ use vtkio::model::*;
 
 /// A model of numerical data which can be serialized and deserialized from the disk,
 /// as well as converted to other visualization formats (such as VTK).
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Model<const N: usize> {
     mesh: Mesh<N>,
     systems: HashMap<String, SystemMeta>,
@@ -63,6 +63,7 @@ impl<const N: usize> Model<N> {
         self.fields.get(name).cloned()
     }
 
+    /// Saves the model as a vtk file on disk for visualization in an external program.
     pub fn export_vtk(&self, title: &str, path: impl AsRef<Path>) -> Result<(), io::Error> {
         let model = self.vtk_model(title);
         model.export(path).map_err(|i| match i {

@@ -1,4 +1,6 @@
-//! Generic ode integration code, used for method of lines solvers.
+//! Generic integration methods for vector valued ODEs.
+//!
+//! This is used by the Method of Lines hyperbolic solver, and the Hyperbolic Relaxation elliptic solver.
 
 mod forward_euler;
 mod rk4;

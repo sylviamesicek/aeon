@@ -1,3 +1,5 @@
+//! Iterative solvers for solving elliptic problems.
+
 mod bicgstab;
 
 use std::fmt::Debug;

@@ -1,5 +1,6 @@
 use crate::array::{Array, ArrayLike};
 
+use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
 use std::ops::{Bound, RangeBounds};
 use std::slice::{self, SliceIndex};
@@ -50,9 +51,8 @@ impl SystemLabel for Scalar {
     }
 }
 
-/// Stores a system in memory as an structure of field vectors. This SoA approach
-/// allows us to compute derivatives faster and better utilize caching.
-#[derive(Clone, Debug)]
+/// Stores a system in memory as an structure of field vectors.
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SystemVec<Label: SystemLabel> {
     node_count: usize,
     fields: FieldArray<Label, Vec<f64>>,
@@ -67,6 +67,7 @@ impl<Label: SystemLabel> SystemVec<Label> {
         }
     }
 
+    /// Copies the data for a system from a contigious slice of values.
     pub fn from_contigious(data: &[f64]) -> Self {
         let slice = SystemSlice::<'_, Label>::from_contiguous(data);
         let fields = Label::FieldLike::<_>::from_fn(|i| slice.fields[i].to_vec());
@@ -77,6 +78,7 @@ impl<Label: SystemLabel> SystemVec<Label> {
         }
     }
 
+    /// Transforms a system into an owned array of values.
     pub fn into_contigious(&self) -> Vec<f64> {
         // Damn, iterator chaining is powerful
         self.fields.clone().into_iter().flatten().collect()

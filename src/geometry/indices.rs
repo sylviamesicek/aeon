@@ -14,6 +14,7 @@ impl<const N: usize> IndexSpace<N> {
         Self { size }
     }
 
+    /// Returns the number of indices in the index space.
     pub fn len(&self) -> usize {
         let mut result = 1;
 
@@ -24,6 +25,7 @@ impl<const N: usize> IndexSpace<N> {
         result
     }
 
+    /// A predicate for whether the index space contains any indices.
     pub fn is_empty(&self) -> bool {
         self.len() == 0
     }
@@ -61,6 +63,7 @@ impl<const N: usize> IndexSpace<N> {
         result
     }
 
+    /// Iterates all cartesian indices in the index space.
     pub fn iter(self) -> CartesianIter<N> {
         CartesianIter {
             size: self.size,
@@ -68,6 +71,7 @@ impl<const N: usize> IndexSpace<N> {
         }
     }
 
+    /// Iterates all cartesian indices which lie on a plane in the index space.
     pub fn plane(self, axis: usize, intercept: usize) -> PlaneIterator<N> {
         let mut plane_size = self.size;
         plane_size[axis] = 1;
@@ -159,6 +163,11 @@ mod tests {
         assert_eq!(indices.next(), Some([0, 1]));
         assert_eq!(indices.next(), Some([1, 1]));
         assert_eq!(indices.next(), Some([2, 1]));
+        assert_eq!(indices.next(), None);
+
+        let space = IndexSpace::new([0, 10]);
+        let mut indices = space.iter();
+
         assert_eq!(indices.next(), None);
 
         let space = IndexSpace::new([2, 3, 10]);
