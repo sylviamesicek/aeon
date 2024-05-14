@@ -22,7 +22,7 @@ To reach the state of minimum viable product (MVP) the following feature(s) must
 - [x] ODE Integrators.
     - [x] Forward Euler
     - [x] RK4
-- [ ] VTK Output.
+- [x] VTK Output.
 
 
 <!-- [![Build Status](https://github.com/lukazmm/Aeon.jl/actions/workflows/CI.yml/badge.svg?branch=main)](https://github.com/lukazmm/Aeon.jl/actions/workflows/CI.yml?query=branch%3Amain)

@@ -1,12 +1,11 @@
-// pub mod arena;
 pub mod array;
 pub mod common;
 pub mod geometry;
 pub mod lac;
 pub mod mesh;
 pub mod ode;
-// pub mod uniform;
 
+/// Provides common types used for most `aeon` applications.
 pub mod prelude {
     // pub use crate::arena::Arena;
     pub use crate::common::{Boundary, Kernel};

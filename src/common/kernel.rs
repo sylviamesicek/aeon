@@ -4,7 +4,9 @@ use aeon_macros::{derivative, second_derivative};
 /// A seperable kernel used for approximating a derivative or numerical operator
 /// to some order of accuracy. All kernel weights are applied negative to positive.
 pub trait Kernel {
+    /// Weights on interior of domain. Length should equal `POSITIVE_SUPPORT + NEGATIVE_SUPPORT + 1`.
     type InteriorWeights: ArrayLike<Elem = f64>;
+    /// Weights on edge of domain (for free boundaries).
     type BoundaryWeights: ArrayLike<Elem = f64>;
 
     const POSITIVE_SUPPORT: usize;
@@ -172,6 +174,7 @@ impl Kernel for FDSecondDerivative<4> {
     }
 }
 
+/// Kriess-Oliger dissipation kernel.
 pub struct FDDissipation<const ORDER: usize>(usize);
 
 impl<const ORDER: usize> FDDissipation<ORDER> {

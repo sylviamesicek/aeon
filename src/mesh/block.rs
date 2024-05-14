@@ -70,6 +70,7 @@ impl<const N: usize> Block<N> {
     }
 }
 
+/// Extension methods for `Block`s.
 pub trait BlockExt<const N: usize> {
     /// Aproximates a derivative to the given order of accuracy.
     fn derivative<const ORDER: usize>(

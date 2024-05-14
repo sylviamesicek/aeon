@@ -138,26 +138,6 @@ impl<const N: usize> NodeSpace<N> {
         NodeWindow { origin, size }
     }
 
-    // /// Returns a window which encompasses all interior and custom nodes,
-    // /// but excluding unused ghost nodes.
-    // pub fn custom_window<B: Boundary<N>>(&self, boundary: &B) -> NodeWindow<N> {
-    //     let mut origin = [0isize; N];
-    //     let mut size = self.vertex_size();
-
-    //     faces::<N>()
-    //         .filter(|&face| boundary.kind(face).is_custom())
-    //         .for_each(|face| {
-    //             if face.side {
-    //                 size[face.axis] += self.ghost;
-    //             } else {
-    //                 origin[face.axis] -= self.ghost as isize;
-    //                 size[face.axis] += self.ghost;
-    //             }
-    //         });
-
-    //     NodeWindow { origin, size }
-    // }
-
     /// Computes the position of the given vertex.
     pub fn position(&self, node: [isize; N]) -> [f64; N] {
         let mut result = [0.0; N];
@@ -531,5 +511,9 @@ mod tests {
         let active_window = node_space.active_window(&WindowBoundary);
         assert_eq!(active_window.origin, [0, -2]);
         assert_eq!(active_window.size, [13, 13]);
+
+        let inner_window = node_space.inner_window();
+        assert_eq!(inner_window.origin, [0, 0]);
+        assert_eq!(inner_window.size, [11, 11]);
     }
 }
