@@ -1,13 +1,13 @@
-use crate::common::Boundary;
-use crate::mesh::{
-    Mesh, Operator, Projection, SystemOperator, SystemProjection, SystemSlice, SystemSliceMut,
+use crate::{
+    common::GhostBoundary,
+    mesh::{Boundary, Mesh, Operator, Projection, SystemLabel, SystemSlice, SystemSliceMut},
 };
 
 use bumpalo::Bump;
 
 #[derive(Debug, Default)]
 pub struct Driver {
-    pool: MemPool,
+    pub(crate) pool: MemPool,
 }
 
 impl Driver {
@@ -17,40 +17,35 @@ impl Driver {
         }
     }
 
-    pub fn fill_boundary<const N: usize, B: Boundary<N>>(
+    pub fn fill_boundary<const N: usize, B: Boundary>(
+        &mut self,
+        mesh: &Mesh<N>,
+        boundary: &B,
+        mut dest: SystemSliceMut<'_, B::Label>,
+    ) {
+        let block = mesh.base_block();
+        let range = block.local_from_global();
+
+        for field in B::Label::fields() {
+            block.space.fill_boundary(
+                &boundary.boundary(field.clone()),
+                &mut dest.field_mut(field.clone())[range.clone()],
+            );
+        }
+    }
+
+    pub fn fill_boundary_scalar<const N: usize, B: GhostBoundary>(
         &mut self,
         mesh: &Mesh<N>,
         boundary: &B,
         dest: &mut [f64],
     ) {
         let block = mesh.base_block();
-        block.space.fill_boundary(boundary, dest);
+        let range = block.local_from_global();
+        block.space.fill_boundary(boundary, &mut dest[range]);
     }
 
     pub fn project<const N: usize, P: Projection<N>>(
-        &mut self,
-        mesh: &Mesh<N>,
-        projection: &P,
-        dest: &mut [f64],
-    ) {
-        let block = mesh.base_block();
-        projection.evaluate(block, &self.pool, dest);
-        self.pool.reset();
-    }
-
-    pub fn apply<const N: usize, O: Operator<N>>(
-        &mut self,
-        mesh: &Mesh<N>,
-        operator: &O,
-        src: &[f64],
-        dest: &mut [f64],
-    ) {
-        let block = mesh.base_block();
-        operator.apply(block, &self.pool, src, dest);
-        self.pool.reset();
-    }
-
-    pub fn project_system<const N: usize, P: SystemProjection<N>>(
         &mut self,
         mesh: &Mesh<N>,
         projection: &P,
@@ -61,7 +56,7 @@ impl Driver {
         self.pool.reset();
     }
 
-    pub fn apply_system<const N: usize, O: SystemOperator<N>>(
+    pub fn apply<const N: usize, O: Operator<N>>(
         &mut self,
         mesh: &Mesh<N>,
         operator: &O,

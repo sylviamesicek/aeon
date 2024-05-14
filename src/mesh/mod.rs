@@ -3,9 +3,9 @@
 use serde::{Deserialize, Serialize};
 use std::array::from_fn;
 
-use crate::array::Array;
 use crate::common::NodeSpace;
 use crate::geometry::Rectangle;
+use crate::{array::Array, common::GhostBoundary};
 
 mod block;
 mod driver;
@@ -15,23 +15,15 @@ mod system;
 pub use block::{Block, BlockExt};
 pub use driver::{Driver, MemPool};
 pub use model::Model;
-pub use system::{Scalar, SystemLabel, SystemSlice, SystemSliceMut, SystemVec};
+pub use system::{field_count, Scalar, SystemLabel, SystemSlice, SystemSliceMut, SystemVec};
 
 pub trait Projection<const N: usize> {
-    fn evaluate(&self, block: Block<N>, pool: &MemPool, dest: &mut [f64]);
-}
-
-pub trait Operator<const N: usize> {
-    fn apply(&self, block: Block<N>, pool: &MemPool, src: &[f64], dest: &mut [f64]);
-}
-
-pub trait SystemProjection<const N: usize> {
     type Label: SystemLabel;
 
     fn evaluate(&self, block: Block<N>, pool: &MemPool, dest: SystemSliceMut<'_, Self::Label>);
 }
 
-pub trait SystemOperator<const N: usize> {
+pub trait Operator<const N: usize> {
     type Label: SystemLabel;
 
     fn apply(
@@ -41,6 +33,13 @@ pub trait SystemOperator<const N: usize> {
         src: SystemSlice<'_, Self::Label>,
         dest: SystemSliceMut<'_, Self::Label>,
     );
+}
+
+pub trait Boundary {
+    type Label: SystemLabel;
+    type Ghost: GhostBoundary;
+
+    fn boundary(&self, field: Self::Label) -> Self::Ghost;
 }
 
 #[derive(Debug, Clone)]

@@ -17,7 +17,7 @@ mod window;
 
 use std::array::from_fn;
 
-pub use boundary::{Boundary, BoundaryKind};
+pub use boundary::{GhostBoundary, GhostCondition};
 pub use kernel::{FDDerivative, FDDissipation, FDSecondDerivative, Kernel};
 pub use window::{NodeCartesianIter, NodePlaneIter, NodeWindow};
 
@@ -120,12 +120,12 @@ impl<const N: usize> NodeSpace<N> {
 
     /// Computes the window containing active nodes. Aka all nodes that will be used
     /// for kernel evaluation.
-    pub fn active_window<B: Boundary<N>>(&self, boundary: &B) -> NodeWindow<N> {
+    pub fn active_window<B: GhostBoundary>(&self, boundary: &B) -> NodeWindow<N> {
         let mut origin = [0isize; N];
         let mut size = self.vertex_size();
 
         faces::<N>()
-            .filter(|&face| !matches!(boundary.kind(face), BoundaryKind::Free))
+            .filter(|&face| !matches!(boundary.condition(face), GhostCondition::Free))
             .for_each(|face| {
                 if face.side {
                     size[face.axis] += self.ghost;
@@ -202,7 +202,7 @@ impl<const N: usize> NodeSpace<N> {
     }
 
     /// Set strongly enforced boundary conditions.
-    pub fn fill_boundary<B: Boundary<N>>(&self, boundary: &B, dest: &mut [f64]) {
+    pub fn fill_boundary<B: GhostBoundary>(&self, boundary: &B, dest: &mut [f64]) {
         let vertex_size = self.vertex_size();
         let active_window = self.active_window(boundary);
 
@@ -223,8 +223,8 @@ impl<const N: usize> NodeSpace<N> {
 
             // Now we fill the values of these nodes appropriately
             for node in face_window.iter() {
-                match boundary.kind(face) {
-                    BoundaryKind::Parity(parity) => {
+                match boundary.condition(face) {
+                    GhostCondition::Parity(parity) => {
                         let distance = if side {
                             node[axis] - vertex_size[axis] as isize + 1
                         } else {
@@ -243,7 +243,7 @@ impl<const N: usize> NodeSpace<N> {
                             self.set_value(node, -v, dest);
                         }
                     }
-                    BoundaryKind::Free | BoundaryKind::Custom => {}
+                    GhostCondition::Free | GhostCondition::Custom => {}
                 }
             }
 
@@ -252,19 +252,21 @@ impl<const N: usize> NodeSpace<N> {
 
             // Iterate over face
             for node in active_window.plane(axis, intercept) {
-                match boundary.kind(face) {
-                    BoundaryKind::Parity(false) => {
+                match boundary.condition(face) {
+                    GhostCondition::Parity(false) => {
                         // For antisymmetric boundaries we set all values on axis to be 0.
                         self.set_value(node, 0.0, dest);
                     }
-                    BoundaryKind::Custom | BoundaryKind::Free | BoundaryKind::Parity(true) => {}
+                    GhostCondition::Custom
+                    | GhostCondition::Free
+                    | GhostCondition::Parity(true) => {}
                 }
             }
         }
     }
 
     /// Evaluate a kernel acting on a node space with the given boundary conditions.
-    pub fn evaluate<K: Kernel, B: Boundary<N>>(
+    pub fn evaluate<K: Kernel, B: GhostBoundary>(
         &self,
         kernel: &K,
         boundary: &B,
@@ -282,8 +284,8 @@ impl<const N: usize> NodeSpace<N> {
         let scale = kernel.scale(spacing);
         let length = self.vertex_size()[axis];
 
-        let boundary_negative = boundary.kind(Face::negative(axis));
-        let boundary_positive = boundary.kind(Face::positive(axis));
+        let boundary_negative = boundary.condition(Face::negative(axis));
+        let boundary_positive = boundary.condition(Face::positive(axis));
 
         // Window of active nodes
         let window = self.active_window(boundary);
@@ -291,13 +293,13 @@ impl<const N: usize> NodeSpace<N> {
         // ****************************
         // Fill interior
 
-        let int_start = if matches!(boundary_negative, BoundaryKind::Free) {
+        let int_start = if matches!(boundary_negative, GhostCondition::Free) {
             K::NEGATIVE_SUPPORT
         } else {
             0
         };
 
-        let int_end = if matches!(boundary_positive, BoundaryKind::Free) {
+        let int_end = if matches!(boundary_positive, GhostCondition::Free) {
             length - K::POSITIVE_SUPPORT
         } else {
             length
@@ -370,12 +372,12 @@ mod tests {
 
     struct MixedBoundary;
 
-    impl Boundary<2> for MixedBoundary {
-        fn kind(&self, face: Face) -> BoundaryKind {
+    impl GhostBoundary for MixedBoundary {
+        fn condition(&self, face: Face) -> GhostCondition {
             if face.side == false {
-                BoundaryKind::Parity(false)
+                GhostCondition::Parity(false)
             } else {
-                BoundaryKind::Free
+                GhostCondition::Free
             }
         }
     }
@@ -403,8 +405,6 @@ mod tests {
             let position = space.position(node);
             space.set_value(node, position[0].sin() * position[1].sin(), &mut source);
         }
-
-        // ? space.fill_boundary(&boundary, &mut source);
 
         // Allocate explicit vectors
         let mut explicit = vec![0.0; space.node_count()].into_boxed_slice();
@@ -448,11 +448,60 @@ mod tests {
         }
     }
 
+    #[test]
+    fn deriv_lte_2d() {
+        fn convergence(nx: usize, ny: usize) -> f64 {
+            let space: NodeSpace<2> = NodeSpace {
+                size: [nx, ny],
+                bounds: Rectangle {
+                    origin: [0.0, 0.0],
+                    size: [PI, PI],
+                },
+                ghost: 1,
+            };
+
+            let kernel = FDDerivative::<2>::new(0);
+            let boundary = MixedBoundary;
+
+            // Create a source vector.
+            let mut source = vec![0.0; space.node_count()].into_boxed_slice();
+
+            for node in space.full_window().iter() {
+                let position = space.position(node);
+                space.set_value(node, position[0].sin() * position[1].sin(), &mut source);
+            }
+
+            // Allocate explicit vectors
+            let mut evaluated = vec![0.0; space.node_count()].into_boxed_slice();
+            space.evaluate(&kernel, &boundary, &source, &mut evaluated);
+
+            let mut error = 0.0;
+
+            for node in space.inner_window().iter() {
+                let position = space.position(node);
+                let diff = space.value(node, &evaluated) - position[0].cos() * position[1].sin();
+
+                error += diff * diff;
+            }
+
+            error.sqrt() * space.spacing_axis(0).sqrt() * space.spacing_axis(1).sqrt()
+        }
+
+        let f1 = convergence(50, 50);
+        let f2 = convergence(100, 100);
+        let f3 = convergence(200, 200);
+        let f4 = convergence(400, 400);
+
+        assert!(f1 / f2 >= 4.0);
+        assert!(f2 / f3 >= 4.0);
+        assert!(f3 / f4 >= 4.0);
+    }
+
     struct ParityBoundary;
 
-    impl Boundary<2> for ParityBoundary {
-        fn kind(&self, face: Face) -> BoundaryKind {
-            BoundaryKind::Parity(face.side)
+    impl GhostBoundary for ParityBoundary {
+        fn condition(&self, face: Face) -> GhostCondition {
+            GhostCondition::Parity(face.side)
         }
     }
 
@@ -486,12 +535,12 @@ mod tests {
 
     struct WindowBoundary;
 
-    impl Boundary<2> for WindowBoundary {
-        fn kind(&self, face: Face) -> BoundaryKind {
+    impl GhostBoundary for WindowBoundary {
+        fn condition(&self, face: Face) -> GhostCondition {
             match (face.axis, face.side) {
-                (0, true) => BoundaryKind::Custom,
-                (1, false) => BoundaryKind::Parity(false),
-                _ => BoundaryKind::Free,
+                (0, true) => GhostCondition::Custom,
+                (1, false) => GhostCondition::Parity(false),
+                _ => GhostCondition::Free,
             }
         }
     }

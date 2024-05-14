@@ -2,12 +2,13 @@
 //! Rust.
 //!
 //! In several parts of the codebase (`System`s, `Kernel`s, etc.) we have to creates arrays whose
-//! length is determined by an associated constant of a trait. Seeing as this is currently impossible, we instead
+//! length is determined by an associated constant of a trait. Seeing as this is impossible in stable Rust, we instead
 //! use the following pattern:
 //!
 //! ```rust
+//! # use aeon::array::ArrayLike;
 //! trait MyTrait {
-//!     type Weights: ArrayLike
+//!     type Weights: ArrayLike<Elem = f64>;
 //! }
 //!
 //! struct MyStruct;
@@ -25,7 +26,7 @@ use std::{
     ops::{Index, IndexMut},
 };
 /// A helper trait for array types which can be indexed and iterated, with
-/// compile time known length. Use of this trait can be removed if generic_const_exprs
+/// compile time known length. Use of this trait can be removed if `generic_const_exprs`
 /// is ever stabilized.
 pub trait ArrayLike:
     Index<usize, Output = Self::Elem>

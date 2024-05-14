@@ -1,13 +1,13 @@
 use crate::geometry::Face;
 
 /// Used to strongly enforce boundary conditions along faces.
-pub trait Boundary<const N: usize> {
-    fn kind(&self, face: Face) -> BoundaryKind;
+pub trait GhostBoundary {
+    fn condition(&self, face: Face) -> GhostCondition;
 }
 
 /// Represents a strongly enforced boundary condition.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum BoundaryKind {
+pub enum GhostCondition {
     /// The default boundary procedure: use increasingly one-sided stencils in boundary region.
     Free,
     /// A (anti)symmetric boundary condition. True indicates an even function
@@ -20,29 +20,13 @@ pub enum BoundaryKind {
     Custom,
 }
 
-impl BoundaryKind {
-    pub const SYMMETRIC: BoundaryKind = BoundaryKind::Parity(true);
-    pub const ANTISYMMETRIC: BoundaryKind = BoundaryKind::Parity(false);
+impl GhostCondition {
+    pub const SYMMETRIC: GhostCondition = GhostCondition::Parity(true);
+    pub const ANTISYMMETRIC: GhostCondition = GhostCondition::Parity(false);
 }
 
-impl Default for BoundaryKind {
+impl Default for GhostCondition {
     fn default() -> Self {
         Self::Free
     }
 }
-
-// impl BoundaryKind {
-//     pub fn is_custom(self) -> bool {
-//         match self {
-//             Self::Custom => true,
-//             _ => false,
-//         }
-//     }
-
-//     pub fn is_free(self) -> bool {
-//         match self {
-//             Self::Free => true,
-//             _ => false,
-//         }
-//     }
-// }

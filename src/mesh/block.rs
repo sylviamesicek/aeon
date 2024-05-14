@@ -1,7 +1,8 @@
 use crate::common::{
-    node_from_vertex, Boundary, FDDerivative, FDDissipation, FDSecondDerivative, Kernel, NodeSpace,
+    node_from_vertex, FDDerivative, FDDissipation, FDSecondDerivative, GhostBoundary, Kernel,
+    NodeSpace,
 };
-use crate::geometry::CartesianIter;
+use crate::geometry::{CartesianIter, Face, PlaneIterator};
 
 use std::ops::Range;
 
@@ -9,7 +10,7 @@ use std::ops::Range;
 ///
 /// This allows for operators (specifically `Projection`s) to operator on each block concurrently,
 /// which in turn opens of the potential for better parallelization.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Block<const N: usize> {
     pub(crate) space: NodeSpace<N>,
     range: Range<usize>,
@@ -38,6 +39,21 @@ impl<const N: usize> Block<N> {
         self.space.vertex_space().iter()
     }
 
+    /// Iterates over the vertices on a plane in the block.
+    pub fn plane(&self, axis: usize, intercept: usize) -> PlaneIterator<N> {
+        self.space.vertex_space().plane(axis, intercept)
+    }
+
+    /// Iterates over the vertices on a face in the block
+    pub fn face_plane(&self, face: Face) -> PlaneIterator<N> {
+        let intercept = if face.side {
+            self.space.vertex_size()[face.axis] - 1
+        } else {
+            0
+        };
+        self.plane(face.axis, intercept)
+    }
+
     /// Computes a linear index from a vertex.
     pub fn index_from_vertex(&self, vertex: [usize; N]) -> usize {
         self.space.index_from_node(node_from_vertex(vertex))
@@ -59,7 +75,7 @@ impl<const N: usize> Block<N> {
     }
 
     /// Evaluates the operation of a kernel working on a field with the specified boundary conditions.
-    pub fn evaluate<K: Kernel, B: Boundary<N>>(
+    pub fn evaluate<K: Kernel, B: GhostBoundary>(
         &self,
         kernel: &K,
         boundary: &B,
@@ -76,7 +92,7 @@ pub trait BlockExt<const N: usize> {
     fn derivative<const ORDER: usize>(
         &self,
         axis: usize,
-        boundary: &impl Boundary<N>,
+        boundary: &impl GhostBoundary,
         src: &[f64],
         dest: &mut [f64],
     ) where
@@ -86,7 +102,7 @@ pub trait BlockExt<const N: usize> {
     fn second_derivative<const ORDER: usize>(
         &self,
         axis: usize,
-        boundary: &impl Boundary<N>,
+        boundary: &impl GhostBoundary,
         src: &[f64],
         dest: &mut [f64],
     ) where
@@ -96,7 +112,7 @@ pub trait BlockExt<const N: usize> {
     fn dissipation<const ORDER: usize>(
         &self,
         axis: usize,
-        boundary: &impl Boundary<N>,
+        boundary: &impl GhostBoundary,
         src: &[f64],
         dest: &mut [f64],
     ) where
@@ -107,7 +123,7 @@ impl<const N: usize> BlockExt<N> for Block<N> {
     fn derivative<const ORDER: usize>(
         &self,
         axis: usize,
-        boundary: &impl Boundary<N>,
+        boundary: &impl GhostBoundary,
         src: &[f64],
         dest: &mut [f64],
     ) where
@@ -119,7 +135,7 @@ impl<const N: usize> BlockExt<N> for Block<N> {
     fn second_derivative<const ORDER: usize>(
         &self,
         axis: usize,
-        boundary: &impl Boundary<N>,
+        boundary: &impl GhostBoundary,
         src: &[f64],
         dest: &mut [f64],
     ) where
@@ -131,7 +147,7 @@ impl<const N: usize> BlockExt<N> for Block<N> {
     fn dissipation<const ORDER: usize>(
         &self,
         axis: usize,
-        boundary: &impl Boundary<N>,
+        boundary: &impl GhostBoundary,
         src: &[f64],
         dest: &mut [f64],
     ) where

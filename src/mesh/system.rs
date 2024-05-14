@@ -6,7 +6,7 @@ use std::ops::{Bound, RangeBounds};
 use std::slice::{self, SliceIndex};
 
 /// This trait is used to define systems of fields.
-pub trait SystemLabel: Sized {
+pub trait SystemLabel: Sized + Clone {
     /// Name of the system (used for debugging and when serializing a system).
     const NAME: &'static str;
 
@@ -31,6 +31,7 @@ pub const fn field_count<Label: SystemLabel>() -> usize {
 }
 
 /// A default system representing one scalar field.
+#[derive(Clone)]
 pub struct Scalar;
 
 impl SystemLabel for Scalar {
@@ -120,21 +121,21 @@ impl<Label: SystemLabel> SystemVec<Label> {
             fields: fields.into(),
         }
     }
+
+    pub fn slice<R>(&self, range: R) -> SystemSlice<'_, Label>
+    where
+        R: RangeBounds<usize> + SliceIndex<[f64], Output = [f64]> + Clone,
+    {
+        self.as_slice().slice(range)
+    }
+
+    pub fn slice_mut<R>(&mut self, range: R) -> SystemSliceMut<'_, Label>
+    where
+        R: RangeBounds<usize> + SliceIndex<[f64], Output = [f64]> + Clone,
+    {
+        self.as_mut_slice().slice_mut(range)
+    }
 }
-
-// impl<Label: SystemLabel> Index<Label> for SystemVec<Label> {
-//     type Output = [f64];
-
-//     fn index(&self, index: Label) -> &Self::Output {
-//         self.field(index.field_index())
-//     }
-// }
-
-// impl<Label: SystemLabel> IndexMut<Label> for SystemVec<Label> {
-//     fn index_mut(&mut self, index: Label) -> &mut Self::Output {
-//         self.field_mut(index.field_index())
-//     }
-// }
 
 #[derive(Clone, Debug)]
 pub struct SystemSlice<'a, Label: SystemLabel> {
@@ -195,14 +196,6 @@ impl<'a, Label: SystemLabel> SystemSlice<'a, Label> {
         }
     }
 }
-
-// impl<Label: SystemLabel> Index<Label> for SystemSlice<'_, Label> {
-//     type Output = [f64];
-
-//     fn index(&self, index: Label) -> &Self::Output {
-//         self.field(index.field_index())
-//     }
-// }
 
 #[derive(Debug)]
 pub struct SystemSliceMut<'a, Label: SystemLabel> {
@@ -300,24 +293,11 @@ impl<'a, Label: SystemLabel> SystemSliceMut<'a, Label> {
     }
 }
 
-// impl<Label: SystemLabel> Index<Label> for SystemSliceMut<'_, Label> {
-//     type Output = [f64];
-
-//     fn index(&self, index: Label) -> &Self::Output {
-//         self.field(index.field_index())
-//     }
-// }
-
-// impl<Label: SystemLabel> IndexMut<Label> for SystemSliceMut<'_, Label> {
-//     fn index_mut(&mut self, index: Label) -> &mut Self::Output {
-//         self.field_mut(index.field_index())
-//     }
-// }
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    #[derive(Clone)]
     pub enum MySystem {
         First,
         Second,
@@ -377,38 +357,3 @@ mod tests {
         );
     }
 }
-
-// fn test() {
-//     let mut v = [0; 10];
-//     let rv = &mut v[..];
-//     let bg = &mut rv[..];
-
-//     rv[0] += 1;
-//     bg[0] += 1;
-// }
-
-// /// Untyped representation of a system in memory (a structure of field vectors).
-// #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
-// pub struct SystemData {
-//     pub node_count: usize,
-//     pub field_count: usize,
-//     pub data: Vec<f64>,
-// }
-
-// impl SystemData {
-//     /// Retrieves an immutable reference to a field located at the given index.
-//     pub fn field(&self, idx: usize) -> &[f64] {
-//         let start = idx * self.node_count;
-//         let end = idx * self.node_count + self.node_count;
-
-//         &self.data[start..end]
-//     }
-
-//     /// Retrieves a mutable reference to a field located at the given index.
-//     pub fn field_mut(&mut self, idx: usize) -> &mut [f64] {
-//         let start = idx * self.node_count;
-//         let end = idx * self.node_count + self.node_count;
-
-//         &mut self.data[start..end]
-//     }
-// }
