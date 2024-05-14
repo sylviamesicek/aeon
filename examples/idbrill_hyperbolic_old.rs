@@ -1,10 +1,10 @@
 use aeon::{
     array::Array,
-    common::{GhostBoundary, GhostCondition},
+    common::{Boundary, BoundaryCondition},
     geometry::{Face, Rectangle},
     mesh::{
         Block, BlockExt, Driver, MemPool, Mesh, Model, Projection, Scalar, SystemLabel,
-        SystemSliceMut,
+        SystemProjection, SystemSliceMut,
     },
     ode::{Ode, Rk4},
 };
@@ -36,28 +36,28 @@ impl SystemLabel for InitialData {
 
 pub struct OddBoundary;
 
-impl GhostBoundary for OddBoundary {
-    fn condition(&self, face: Face) -> GhostCondition {
+impl Boundary for OddBoundary {
+    fn face(&self, face: Face) -> BoundaryCondition {
         if face.axis == 0 && face.side == false {
-            GhostCondition::Parity(false)
+            BoundaryCondition::Parity(false)
         } else if face.axis == 1 && face.side == false {
-            GhostCondition::Parity(true)
+            BoundaryCondition::Parity(true)
         } else {
-            GhostCondition::Free
+            BoundaryCondition::Free
         }
     }
 }
 
 pub struct EvenBoundary;
 
-impl GhostBoundary for EvenBoundary {
-    fn condition(&self, face: Face) -> GhostCondition {
+impl Boundary for EvenBoundary {
+    fn face(&self, face: Face) -> BoundaryCondition {
         if face.axis == 0 && face.side == false {
-            GhostCondition::Parity(true)
+            BoundaryCondition::Parity(true)
         } else if face.axis == 1 && face.side == false {
-            GhostCondition::Parity(true)
+            BoundaryCondition::Parity(true)
         } else {
-            GhostCondition::Free
+            BoundaryCondition::Free
         }
     }
 }
@@ -68,13 +68,9 @@ pub struct UProjection<'a> {
 }
 
 impl<'a> Projection<2> for UProjection<'a> {
-    type Label = Scalar;
-
-    fn evaluate(&self, block: Block<2>, pool: &MemPool, mut dest: SystemSliceMut<'_, Scalar>) {
+    fn evaluate(&self, block: Block<2>, pool: &MemPool, dest: &mut [f64]) {
         let range = block.local_from_global();
         let node_count = block.node_count();
-
-        let dest = dest.field_mut(Scalar);
 
         let psi = &self.u[range.clone()];
         let inert = &self.v[range.clone()];
@@ -86,20 +82,20 @@ impl<'a> Projection<2> for UProjection<'a> {
         block.derivative::<4>(1, &EvenBoundary, psi, psi_z);
 
         for vertex in block.iter() {
+            let index = block.index_from_vertex(vertex);
+            dest[index] = inert[index] - MU * psi[index];
+        }
+
+        for vertex in block
+            .face_plane(Face::positive(0))
+            .chain(block.face_plane(Face::positive(1)))
+        {
             let [rho, z] = block.position(vertex);
             let index = block.index_from_vertex(vertex);
 
-            if (rho - RADIUS).abs() <= 10e-10 || (z - RADIUS).abs() <= 10e-10 {
-                // dest[index] = 0.0;
-
-                let r = (rho * rho + z * z).sqrt();
-                let adv = (psi[index] - 1.0) + rho * psi_r[index] + z * psi_z[index];
-                dest[index] = -adv / r;
-
-                continue;
-            }
-
-            dest[index] = inert[index] - MU * psi[index];
+            let r = (rho * rho + z * z).sqrt();
+            let adv = (psi[index] - 1.0) + rho * psi_r[index] + z * psi_z[index];
+            dest[index] = -adv / r;
         }
     }
 }
@@ -111,13 +107,9 @@ pub struct VProjection<'a> {
 }
 
 impl<'a> Projection<2> for VProjection<'a> {
-    type Label = Scalar;
-
-    fn evaluate(&self, block: Block<2>, pool: &MemPool, mut dest: SystemSliceMut<'_, Scalar>) {
+    fn evaluate(&self, block: Block<2>, pool: &MemPool, dest: &mut [f64]) {
         let node_count = block.node_count();
         let range = block.local_from_global();
-
-        let dest = dest.field_mut(Scalar);
 
         let psi = &self.psi[range.clone()];
         let psi_r = pool.alloc_scalar(node_count);
@@ -147,18 +139,8 @@ impl<'a> Projection<2> for VProjection<'a> {
         block.derivative::<4>(1, &EvenBoundary, v, v_z);
 
         for vertex in block.iter() {
-            let [rho, z] = block.position(vertex);
+            let [rho, _z] = block.position(vertex);
             let index = block.index_from_vertex(vertex);
-
-            if (rho - RADIUS).abs() <= 10e-10 || (z - RADIUS).abs() <= 10e-10 {
-                // dest[index] = 0.0;
-
-                let r = (rho * rho + z * z).sqrt();
-                let adv = (v[index] - MU) + rho * v_r[index] + z * v_z[index];
-                dest[index] = -adv / r;
-
-                continue;
-            }
 
             let laplacian = if rho.abs() <= 10e-10 {
                 2.0 * psi_rr[index] + psi_zz[index]
@@ -169,6 +151,18 @@ impl<'a> Projection<2> for VProjection<'a> {
             dest[index] = laplacian
                 + psi[index] / 4.0
                     * (rho * seed_rr[index] + 2.0 * seed_r[index] + rho * seed_zz[index]);
+        }
+
+        for vertex in block
+            .face_plane(Face::positive(0))
+            .chain(block.face_plane(Face::positive(1)))
+        {
+            let [rho, z] = block.position(vertex);
+            let index = block.index_from_vertex(vertex);
+
+            let r = (rho * rho + z * z).sqrt();
+            let adv = (v[index] - MU) + rho * v_r[index] + z * v_z[index];
+            dest[index] = -adv / r;
         }
     }
 }
@@ -188,24 +182,16 @@ impl<'a> Ode for Relax<'a> {
         let (u, v) = system.split_at_mut(self.mesh.node_count());
 
         // Currently the time derivative commutes with our boundary conditions, so this is allowed.
-        self.driver
-            .fill_boundary_scalar(self.mesh, &EvenBoundary, u);
-        self.driver
-            .fill_boundary_scalar(self.mesh, &EvenBoundary, v);
-
-        // Fill v outer boundary conditions
-        // self.driver.project(self.mesh, &VOuterBoundary { u }, v);
+        self.driver.fill_boundary(self.mesh, &EvenBoundary, u);
+        self.driver.fill_boundary(self.mesh, &EvenBoundary, v);
     }
 
     fn derivative(&mut self, source: &[f64], dest: &mut [f64]) {
         let (usrc, vsrc) = source.split_at(self.mesh.node_count());
         let (udest, vdest) = dest.split_at_mut(self.mesh.node_count());
 
-        self.driver.project(
-            self.mesh,
-            &UProjection { u: usrc, v: vsrc },
-            SystemSliceMut::from_contiguous(udest),
-        );
+        self.driver
+            .project(self.mesh, &UProjection { u: usrc, v: vsrc }, udest);
         self.driver.project(
             self.mesh,
             &VProjection {
@@ -213,14 +199,14 @@ impl<'a> Ode for Relax<'a> {
                 seed: self.seed,
                 v: vsrc,
             },
-            SystemSliceMut::from_contiguous(vdest),
+            vdest,
         );
     }
 }
 
 pub struct SeedProjection(f64);
 
-impl Projection<2> for SeedProjection {
+impl SystemProjection<2> for SeedProjection {
     type Label = Scalar;
     fn evaluate(
         &self,
@@ -240,7 +226,7 @@ impl Projection<2> for SeedProjection {
 }
 
 fn main() {
-    const STEPS: usize = 10000;
+    const STEPS: usize = 1000;
     const SKIP_OUT: usize = 10;
 
     println!("Allocating Driver and Building Mesh");
@@ -262,12 +248,12 @@ fn main() {
 
     // Compute seed values.
     let mut seed = vec![0.0; mesh.node_count()].into_boxed_slice();
-    driver.project(
+    driver.project_system(
         &mesh,
         &SeedProjection(1.0),
         SystemSliceMut::from_contiguous(&mut seed),
     );
-    driver.fill_boundary_scalar(&mesh, &OddBoundary, &mut seed);
+    driver.fill_boundary(&mesh, &OddBoundary, &mut seed);
 
     println!("Integrating Psi Values");
 
@@ -287,12 +273,12 @@ fn main() {
             &mesh,
             &VProjection {
                 seed: &seed,
-                psi: &integrator.system[0..mesh.node_count()],
+                psi: &integrator.system[..mesh.node_count()],
                 v: &integrator.system[mesh.node_count()..],
             },
-            SystemSliceMut::from_contiguous(&mut derivs),
+            &mut derivs,
         );
-        driver.fill_boundary_scalar(&mesh, &EvenBoundary, &mut derivs);
+        driver.fill_boundary(&mesh, &EvenBoundary, &mut derivs);
 
         let norm = derivs.iter().map(|f| f * f).sum::<f64>().sqrt();
         println!("Step {i} / {STEPS} Norm: {norm}");

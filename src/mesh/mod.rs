@@ -3,9 +3,9 @@
 use serde::{Deserialize, Serialize};
 use std::array::from_fn;
 
-use crate::common::NodeSpace;
+use crate::array::Array;
+use crate::common::{Boundary, NodeSpace};
 use crate::geometry::Rectangle;
-use crate::{array::Array, common::GhostBoundary};
 
 mod block;
 mod driver;
@@ -18,12 +18,20 @@ pub use model::Model;
 pub use system::{field_count, Scalar, SystemLabel, SystemSlice, SystemSliceMut, SystemVec};
 
 pub trait Projection<const N: usize> {
+    fn evaluate(&self, block: Block<N>, pool: &MemPool, dest: &mut [f64]);
+}
+
+pub trait Operator<const N: usize> {
+    fn apply(&self, block: Block<N>, pool: &MemPool, src: &[f64], dest: &mut [f64]);
+}
+
+pub trait SystemProjection<const N: usize> {
     type Label: SystemLabel;
 
     fn evaluate(&self, block: Block<N>, pool: &MemPool, dest: SystemSliceMut<'_, Self::Label>);
 }
 
-pub trait Operator<const N: usize> {
+pub trait SystemOperator<const N: usize> {
     type Label: SystemLabel;
 
     fn apply(
@@ -35,11 +43,11 @@ pub trait Operator<const N: usize> {
     );
 }
 
-pub trait Boundary {
+pub trait SystemBoundary {
     type Label: SystemLabel;
-    type Ghost: GhostBoundary;
+    type Boundary: Boundary;
 
-    fn boundary(&self, field: Self::Label) -> Self::Ghost;
+    fn field(&self, label: Self::Label) -> Self::Boundary;
 }
 
 #[derive(Debug, Clone)]

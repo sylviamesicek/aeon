@@ -1,13 +1,6 @@
-use aeon::{
-    array::Array,
-    common::{GhostBoundary, GhostCondition},
-    elliptic::{HyperRelaxSolver, OutgoingOrder, OutgoingWave},
-    geometry::{Face, Rectangle},
-    mesh::{
-        Block, BlockExt, Boundary, Driver, MemPool, Mesh, Model, Operator, Projection, Scalar,
-        SystemLabel, SystemSlice, SystemSliceMut, SystemVec,
-    },
-};
+use aeon::array::Array;
+use aeon::elliptic::{HyperRelaxSolver, OutgoingOrder, OutgoingWave};
+use aeon::prelude::*;
 // use aeon_axisymmetry::InitialSystem;
 use std::path::PathBuf;
 
@@ -34,39 +27,39 @@ impl SystemLabel for InitialData {
 
 pub struct OddBoundary;
 
-impl GhostBoundary for OddBoundary {
-    fn condition(&self, face: Face) -> GhostCondition {
+impl Boundary for OddBoundary {
+    fn face(&self, face: Face) -> BoundaryCondition {
         if face.axis == 0 && face.side == false {
-            GhostCondition::Parity(false)
+            BoundaryCondition::Parity(false)
         } else if face.axis == 1 && face.side == false {
-            GhostCondition::Parity(true)
+            BoundaryCondition::Parity(true)
         } else {
-            GhostCondition::Free
+            BoundaryCondition::Free
         }
     }
 }
 
 pub struct EvenBoundary;
 
-impl GhostBoundary for EvenBoundary {
-    fn condition(&self, face: Face) -> GhostCondition {
+impl Boundary for EvenBoundary {
+    fn face(&self, face: Face) -> BoundaryCondition {
         if face.axis == 0 && face.side == false {
-            GhostCondition::Parity(true)
+            BoundaryCondition::Parity(true)
         } else if face.axis == 1 && face.side == false {
-            GhostCondition::Parity(true)
+            BoundaryCondition::Parity(true)
         } else {
-            GhostCondition::Free
+            BoundaryCondition::Free
         }
     }
 }
 
 pub struct PsiBoundary;
 
-impl Boundary for PsiBoundary {
+impl SystemBoundary for PsiBoundary {
     type Label = Scalar;
-    type Ghost = EvenBoundary;
+    type Boundary = EvenBoundary;
 
-    fn boundary(&self, _: Self::Label) -> Self::Ghost {
+    fn field(&self, _: Self::Label) -> Self::Boundary {
         EvenBoundary
     }
 }
@@ -75,7 +68,7 @@ pub struct PsiOperator<'a> {
     pub seed: &'a [f64],
 }
 
-impl<'a> Operator<2> for PsiOperator<'a> {
+impl<'a> SystemOperator<2> for PsiOperator<'a> {
     type Label = Scalar;
 
     fn apply(
@@ -129,16 +122,7 @@ impl<'a> Operator<2> for PsiOperator<'a> {
 pub struct SeedProjection(f64);
 
 impl Projection<2> for SeedProjection {
-    type Label = Scalar;
-
-    fn evaluate(
-        &self,
-        block: aeon::mesh::Block<2>,
-        _pool: &MemPool,
-        mut dest: SystemSliceMut<'_, Scalar>,
-    ) {
-        let dest = dest.field_mut(Scalar);
-
+    fn evaluate(&self, block: aeon::mesh::Block<2>, _pool: &MemPool, dest: &mut [f64]) {
         for vertex in block.iter() {
             let [rho, z] = block.position(vertex);
             let index = block.index_from_vertex(vertex);
@@ -166,12 +150,8 @@ fn main() {
 
     // Compute seed values.
     let mut seed = vec![0.0; mesh.node_count()].into_boxed_slice();
-    driver.project(
-        &mesh,
-        &SeedProjection(1.0),
-        SystemSliceMut::from_contiguous(&mut seed),
-    );
-    driver.fill_boundary_scalar(&mesh, &OddBoundary, &mut seed);
+    driver.project(&mesh, &SeedProjection(1.0), &mut seed);
+    driver.fill_boundary(&mesh, &OddBoundary, &mut seed);
 
     println!("Integrating Psi Values");
 
@@ -183,7 +163,7 @@ fn main() {
     solver.cfl = 0.1;
     solver.outgoing = OutgoingWave::Sommerfeld(1.0);
     solver.outgoing_order = OutgoingOrder::Fourth;
-    solver.dampening = 0.0;
+    solver.dampening = 1.0;
 
     solver.solve(
         &mut driver,

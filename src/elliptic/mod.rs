@@ -1,11 +1,11 @@
-use std::{array::from_fn, marker::PhantomData, path::PathBuf};
+use std::{array::from_fn, marker::PhantomData};
 
 use crate::{
-    common::{GhostBoundary, GhostCondition},
+    common::{Boundary, BoundaryCondition},
     geometry::faces,
     mesh::{
-        field_count, BlockExt, Boundary, Driver, Mesh, Model, Operator, SystemLabel, SystemSlice,
-        SystemSliceMut,
+        field_count, BlockExt, Driver, Mesh, SystemBoundary, SystemLabel, SystemOperator,
+        SystemSlice, SystemSliceMut,
     },
     ode::{Ode, Rk4},
 };
@@ -48,7 +48,11 @@ impl<Label: SystemLabel> HyperRelaxSolver<Label> {
         }
     }
 
-    pub fn solve<const N: usize, O: Operator<N, Label = Label>, B: Boundary<Label = Label>>(
+    pub fn solve<
+        const N: usize,
+        O: SystemOperator<N, Label = Label>,
+        B: SystemBoundary<Label = Label>,
+    >(
         &mut self,
         driver: &mut Driver,
         mesh: &Mesh<N>,
@@ -90,35 +94,22 @@ impl<Label: SystemLabel> HyperRelaxSolver<Label> {
             let u = &self.integrator.system[0..dimension];
             let usystem = SystemSlice::from_contiguous(u);
 
-            driver.apply(mesh, operator, usystem, system.slice_mut(..));
+            driver.apply_system(mesh, operator, usystem, system.slice_mut(..));
 
-            let mut norm = 0.0;
-
-            for field in Label::fields() {
-                let fnorm: f64 = system
-                    .field(field)
-                    .into_iter()
-                    .map(|f| f * f)
-                    .sum::<f64>()
-                    .sqrt();
-
-                if fnorm >= norm {
-                    norm = fnorm;
-                }
-            }
+            let norm = driver.norm_system(mesh, system.slice(..));
 
             println!("Step {}/{} Norm {}", index, self.max_steps, norm);
 
-            let mut model = Model::new(mesh.clone());
-            model.attach_field("psi", u.to_vec());
-            model.attach_field("deriv", system.field(Label::fields()[0].clone()).to_vec());
+            // let mut model = Model::new(mesh.clone());
+            // model.attach_field("psi", u.to_vec());
+            // model.attach_field("deriv", system.field(Label::fields()[0].clone()).to_vec());
 
-            model
-                .export_vtk(
-                    format!("hyperrelax").as_str(),
-                    PathBuf::from(format!("output/hyperrelax{index}.vtu")),
-                )
-                .unwrap();
+            // model
+            //     .export_vtk(
+            //         format!("hyperrelax").as_str(),
+            //         PathBuf::from(format!("output/hyperrelax{index}.vtu")),
+            //     )
+            //     .unwrap();
 
             let mut ode = FictitiousOde {
                 driver,
@@ -162,8 +153,8 @@ struct FictitiousOde<'a, const N: usize, O, B> {
 
 impl<'a, const N: usize, O, B> Ode for FictitiousOde<'a, N, O, B>
 where
-    O: Operator<N>,
-    B: Boundary<Label = O::Label>,
+    O: SystemOperator<N>,
+    B: SystemBoundary<Label = O::Label>,
 {
     fn dim(&self) -> usize {
         2 * self.dimension
@@ -173,12 +164,14 @@ where
         let (u, v) = system.split_at_mut(self.dimension);
 
         let usystem = SystemSliceMut::from_contiguous(u);
-        self.driver.fill_boundary(self.mesh, self.boundary, usystem);
+        self.driver
+            .fill_boundary_system(self.mesh, self.boundary, usystem);
 
         // All the strong boundary conditions commute with the time operator and only set u to 0, so
         // this is valid.
         let vsystem = SystemSliceMut::from_contiguous(v);
-        self.driver.fill_boundary(self.mesh, self.boundary, vsystem);
+        self.driver
+            .fill_boundary_system(self.mesh, self.boundary, vsystem);
     }
 
     fn derivative(&mut self, system: &[f64], result: &mut [f64]) {
@@ -220,7 +213,7 @@ where
         // Apply outgoing wave conditions
         if let OutgoingWave::Sommerfeld(value) = self.outgoing {
             for field in O::Label::fields() {
-                let boundary = self.boundary.boundary(field.clone());
+                let boundary = self.boundary.field(field.clone());
 
                 let vfsource = &vsource.field(field.clone())[range.clone()];
                 let ufsource = &usource.field(field.clone())[range.clone()];
@@ -247,7 +240,7 @@ where
                 }
 
                 for face in faces::<N>() {
-                    if boundary.condition(face) == GhostCondition::Free {
+                    if boundary.face(face) == BoundaryCondition::Free {
                         for vertex in block.face_plane(face) {
                             let index = block.index_from_vertex(vertex);
                             let position = block.position(vertex);
