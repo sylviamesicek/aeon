@@ -4,6 +4,8 @@ use crate::common::node_from_vertex;
 use crate::mesh::{Mesh, SystemLabel, SystemVec};
 use vtkio::model::*;
 
+use super::SystemSlice;
+
 /// A model of numerical data which can be serialized and deserialized from the disk,
 /// as well as converted to other visualization formats (such as VTK).
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -29,7 +31,7 @@ impl<const N: usize> Model<N> {
     }
 
     /// Attaches system to model.
-    pub fn attach_system<Label: SystemLabel>(&mut self, system: &SystemVec<Label>) {
+    pub fn attach_system<Label: SystemLabel>(&mut self, system: SystemSlice<'_, Label>) {
         assert!(self.systems.contains_key(Label::NAME) == false);
 
         let node_count = system.node_count();

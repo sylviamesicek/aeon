@@ -43,7 +43,7 @@ impl<Label: SystemLabel> HyperRelaxSolver<Label> {
             outgoing_order: OutgoingOrder::Second,
             dampening: 1.0,
             cfl: 0.1,
-            integrator: Rk4::new(0),
+            integrator: Rk4::new(),
             _marker: PhantomData,
         }
     }
@@ -62,12 +62,14 @@ impl<Label: SystemLabel> HyperRelaxSolver<Label> {
     ) {
         // Total number of degrees of freedom in the whole system.
         let dimension = field_count::<Label>() * system.node_count();
-        // We reserve space for both u and v vectors.
-        self.integrator.reinit(2 * dimension);
+
+        // Allocate storage
+        let mut data = vec![0.0; 2 * dimension].into_boxed_slice();
+        let mut update = vec![0.0; 2 * dimension].into_boxed_slice();
 
         // Fill initial guess
         {
-            let (u, v) = self.integrator.system.split_at_mut(dimension);
+            let (u, v) = data.split_at_mut(dimension);
             let mut usys = SystemSliceMut::from_contiguous(u);
             let mut vsys = SystemSliceMut::from_contiguous(v);
 
@@ -91,10 +93,17 @@ impl<Label: SystemLabel> HyperRelaxSolver<Label> {
         let step = self.cfl * spacing;
 
         for index in 0..self.max_steps {
-            let u = &self.integrator.system[0..dimension];
-            let usystem = SystemSlice::from_contiguous(u);
+            {
+                let u = &mut data[..dimension];
 
-            driver.apply_system(mesh, operator, usystem, system.slice_mut(..));
+                driver.fill_boundary_system(mesh, boundary, SystemSliceMut::from_contiguous(u));
+                driver.apply_system(
+                    mesh,
+                    operator,
+                    SystemSlice::from_contiguous(u),
+                    system.slice_mut(..),
+                );
+            }
 
             let norm = driver.norm_system(mesh, system.slice(..));
 
@@ -123,12 +132,16 @@ impl<Label: SystemLabel> HyperRelaxSolver<Label> {
             };
 
             // Take step
-            self.integrator.step(&mut ode, step);
+            self.integrator.step(step, &mut ode, &data, &mut update);
+
+            for i in 0..data.len() {
+                data[i] += update[i];
+            }
         }
 
         // Copy solution back to system vector
         {
-            let (u, _v) = self.integrator.system.split_at_mut(dimension);
+            let (u, _v) = data.split_at_mut(dimension);
             let usys = SystemSlice::from_contiguous(u);
 
             for field in Label::fields() {

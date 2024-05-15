@@ -1,27 +1,68 @@
 use aeon::array::Array;
 use aeon::elliptic::{HyperRelaxSolver, OutgoingOrder, OutgoingWave};
 use aeon::prelude::*;
+use std::fs::File;
+use std::io::Write;
 // use aeon_axisymmetry::InitialSystem;
 use std::path::PathBuf;
 
 const RADIUS: f64 = 10.0;
 
 #[derive(Clone)]
-pub struct InitialData;
+pub enum InitialData {
+    Conformal,
+    Seed,
+}
 
 impl SystemLabel for InitialData {
     const NAME: &'static str = "InitialData";
-    type FieldLike<T> = [T; 1];
+    type FieldLike<T> = [T; 2];
     fn fields() -> Array<Self::FieldLike<Self>> {
-        [InitialData].into()
+        [InitialData::Conformal, InitialData::Seed].into()
     }
 
     fn field_index(&self) -> usize {
-        0
+        match self {
+            InitialData::Conformal => 0,
+            InitialData::Seed => 1,
+        }
     }
 
     fn field_name(&self) -> String {
-        "psi".to_string()
+        match self {
+            InitialData::Conformal => "Conformal".to_string(),
+            InitialData::Seed => "Seed".to_string(),
+        }
+    }
+}
+
+pub struct InitialDataProjection<'a> {
+    seed: &'a [f64],
+    psi: &'a [f64],
+}
+
+impl<'a> SystemProjection<2> for InitialDataProjection<'a> {
+    type Label = InitialData;
+
+    fn evaluate(
+        &self,
+        block: Block<2>,
+        _pool: &MemPool,
+        mut dest: SystemSliceMut<'_, Self::Label>,
+    ) {
+        let range = block.local_from_global();
+
+        let psi = &self.psi[range.clone()];
+        let seed = &self.seed[range.clone()];
+
+        for vertex in block.iter() {
+            let [rho, _z] = block.position(vertex);
+            let index = block.index_from_vertex(vertex);
+
+            dest.field_mut(InitialData::Conformal)[index] =
+                psi[index].powi(4) * (2.0 * rho * seed[index]).exp();
+            dest.field_mut(InitialData::Seed)[index] = -seed[index];
+        }
     }
 }
 
@@ -132,7 +173,7 @@ impl Projection<2> for SeedProjection {
     }
 }
 
-fn main() {
+fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Allocating Driver and Building Mesh");
 
     let mut driver = Driver::new();
@@ -143,7 +184,7 @@ fn main() {
             origin: [0.0, 0.0],
         },
         [40, 40],
-        2,
+        3,
     );
 
     println!("Filling Seed Function");
@@ -173,6 +214,20 @@ fn main() {
         psi.as_mut_slice(),
     );
 
+    // VTK visualizaton
+    {
+        let mut model = Model::new(mesh.clone());
+        model.attach_field("psi", psi.field(Scalar).iter().map(|&p| p - 1.0).collect());
+        model.attach_field("seed", seed.to_vec());
+
+        model
+            .export_vtk(
+                format!("idbrill").as_str(),
+                PathBuf::from(format!("output/idbrill.vtu")),
+            )
+            .unwrap();
+    }
+
     let mut model = Model::new(mesh.clone());
     model.attach_field("psi", psi.field(Scalar).iter().map(|&p| p - 1.0).collect());
     model.attach_field("seed", seed.to_vec());
@@ -183,4 +238,26 @@ fn main() {
             PathBuf::from(format!("output/idbrill.vtu")),
         )
         .unwrap();
+
+    // Write model data to file
+    {
+        let mut system = SystemVec::new(mesh.node_count());
+
+        driver.project_system(
+            &mesh,
+            &InitialDataProjection {
+                psi: psi.field(Scalar),
+                seed: &seed,
+            },
+            system.as_mut_slice(),
+        );
+
+        let mut model = Model::new(mesh.clone());
+        model.attach_system(system.as_slice());
+
+        let mut file = File::create("output/idbrill.dat")?;
+        file.write_all(ron::to_string(&model)?.as_bytes())?;
+    }
+
+    Ok(())
 }

@@ -163,6 +163,18 @@ impl<'a, Label: SystemLabel> SystemSlice<'a, Label> {
         }
     }
 
+    /// Transforms a system into an owned array of values.
+    pub fn into_contigious(&self) -> Vec<f64> {
+        // Damn, iterator chaining is powerful
+        self.fields
+            .clone()
+            .into_iter()
+            .map(|slice| slice.iter())
+            .flatten()
+            .cloned()
+            .collect()
+    }
+
     /// Number of degrees of freedom per field.
     pub fn node_count(&self) -> usize {
         self.node_count

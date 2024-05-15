@@ -258,10 +258,12 @@ fn main() {
     println!("Integrating Psi Values");
 
     // Compute initial psi values
-    let mut integrator = Rk4::new(2 * mesh.node_count());
+    let mut integrator = Rk4::new();
+    let mut data = vec![0.0; 2 * mesh.node_count()].into_boxed_slice();
+    let mut update = vec![0.0; 2 * mesh.node_count()].into_boxed_slice();
 
     {
-        let (u, v) = integrator.system.split_at_mut(mesh.node_count());
+        let (u, v) = data.split_at_mut(mesh.node_count());
         u.fill(1.0);
         v.fill(MU);
     }
@@ -273,8 +275,8 @@ fn main() {
             &mesh,
             &VProjection {
                 seed: &seed,
-                psi: &integrator.system[..mesh.node_count()],
-                v: &integrator.system[mesh.node_count()..],
+                psi: &data[..mesh.node_count()],
+                v: &data[mesh.node_count()..],
             },
             &mut derivs,
         );
@@ -286,7 +288,7 @@ fn main() {
         if i % SKIP_OUT == 0 {
             let si = i / SKIP_OUT;
 
-            let (u, v) = integrator.system.split_at(mesh.node_count());
+            let (u, v) = data.split_at(mesh.node_count());
 
             let mut model = Model::new(mesh.clone());
             model.attach_field("psi", u.iter().map(|&p| p - 1.0).collect());
@@ -303,12 +305,18 @@ fn main() {
         }
 
         integrator.step(
+            h,
             &mut Relax {
                 seed: &seed,
                 mesh: &mesh,
                 driver: &mut driver,
             },
-            h,
+            &data,
+            &mut update,
         );
+
+        for i in 0..data.len() {
+            data[i] += update[i];
+        }
     }
 }

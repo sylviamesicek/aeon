@@ -257,9 +257,7 @@ impl<const N: usize> NodeSpace<N> {
                         // For antisymmetric boundaries we set all values on axis to be 0.
                         self.set_value(node, 0.0, dest);
                     }
-                    BoundaryCondition::Custom
-                    | BoundaryCondition::Free
-                    | BoundaryCondition::Parity(true) => {}
+                    _ => {}
                 }
             }
         }
