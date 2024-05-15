@@ -169,6 +169,23 @@ impl SystemOperator<2> for DynamicDerivs {
     ) {
         let node_count = block.node_count();
 
+        // macro_rules! second_derivatives {
+        //     ($field:ident, $value:ident, $dr:ident, $dz:ident, $drr:ident, $drz:ident, $dzz:ident) => {
+        //         let $value = src.field(Dynamic::$field);
+        //         let $dr = pool.alloc_scalar(node_count);
+        //         let $dz = pool.alloc_scalar(node_count);
+        //         let $drr = pool.alloc_scalar(node_count);
+        //         let $drz = pool.alloc_scalar(node_count);
+        //         let $dzz = pool.alloc_scalar(node_count);
+
+        //         block.derivative::<4>(0, &DynamicBoundary.field(Dynamic::$field), $value, $dr);
+        //         block.derivative::<4>(1, &DynamicBoundary.field(Dynamic::$field), $value, $dz);
+        //         block.second_derivative::<4>(0, &DynamicBoundary.field(Dynamic::$field), $value, $drr);
+        //         block.derivative::<4>(1, &DynamicBoundary.field(Dynamic::$field), $dr, $drz);
+        //         block.second_derivative::<4>(1, &DynamicBoundary.field(Dynamic::$field), $value, $dzz);
+        //     };
+        // }
+
         // Metric
         let grr = src.field(Dynamic::Grr);
         let grr_r = pool.alloc_scalar(node_count);
@@ -391,6 +408,7 @@ impl SystemOperator<2> for DynamicDerivs {
             let on_axis = vertex[0] == 0;
 
             let derivs = if on_axis {
+                assert!(rho.abs() <= 10e-10);
                 hyperbolic_regular(system, rho, z)
             } else {
                 assert!(rho.abs() >= 10e-10);
@@ -523,6 +541,8 @@ impl SystemOperator<2> for DynamicDissipation {
         compute_dissipation!(Zr, zr, zr_dr, zr_dz);
         compute_dissipation!(Zz, zz, zz_dr, zz_dz);
 
+        // let vertex_size = block.vertex_size();
+
         for vertex in block.iter() {
             let index = block.index_from_vertex(vertex);
 
@@ -531,6 +551,14 @@ impl SystemOperator<2> for DynamicDissipation {
                     dest.field_mut(Dynamic::$field)[index] = $dissr[index] + $dissz[index];
                 };
             }
+
+            // if vertex[0] >= vertex_size[0] - 3 || vertex[1] >= vertex_size[1] - 3 {
+            //     for field in Dynamic::fields() {
+            //         dest.field_mut(field)[index] = 0.0;
+            //     }
+
+            //     continue;
+            // }
 
             dissipation!(Grr, grr, grr_dr, grr_dz);
             dissipation!(Grz, grz, grz_dr, grz_dz);
@@ -604,7 +632,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     driver.fill_boundary_system(&mesh, &DynamicBoundary, dynamic.as_mut_slice());
 
     // Begin integration
-    const STEPS: usize = 1000;
+    const STEPS: usize = 200;
     const CFL: f64 = 0.1;
 
     let h = CFL * mesh.minimum_spacing();
@@ -653,7 +681,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         // Add everything together
         for i in 0..data.len() {
-            data[i] += update[i] + dissipation[i];
+            data[i] += update[i] + 0.7 * dissipation[i];
         }
     }
 

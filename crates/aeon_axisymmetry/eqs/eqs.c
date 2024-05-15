@@ -1,8 +1,18 @@
 #include "stdint.h"
 #include "math.h"
 
-#define FIELD_FIRST(NAME) double NAME, NAME##_r, NAME##_z
-#define FIELD_SECOND(NAME) double NAME, NAME##_r, NAME##_z, NAME##_rr, NAME##_rz, NAME##_zz
+#define FIELD_FIRST(NAME) \
+    double NAME;          \
+    double NAME##_r;      \
+    double NAME##_z;
+
+#define FIELD_SECOND(NAME) \
+    double NAME;           \
+    double NAME##_r;       \
+    double NAME##_z;       \
+    double NAME##_rr;      \
+    double NAME##_rz;      \
+    double NAME##_zz;
 
 /// @brief System of fields that evolve according to the z4 axisymmetric EFEs.
 typedef struct HyperbolicSystem
@@ -30,8 +40,8 @@ typedef struct HyperbolicDerivs
 {
     double grr_t, grz_t, gzz_t, s_t;
     double krr_t, krz_t, kzz_t, y_t;
-    double theta_t, zr_t, zz_t;
     double lapse_t, shiftr_t, shiftz_t;
+    double theta_t, zr_t, zz_t;
 } HyperbolicDerivs;
 
 #define VARS_FIRST(NAME) double NAME = vars.NAME, NAME##_r = vars.NAME##_r, NAME##_z = vars.NAME##_z
@@ -136,113 +146,3 @@ HyperbolicDerivs hyperbolic_regular_sys(HyperbolicSystem vars, double rho, doubl
 
     return derivs;
 }
-
-/// @brief Steady state system solved for initial data.
-typedef struct InitialSystem
-{
-    FIELD_SECOND(psi);
-    FIELD_SECOND(s);
-
-} InitialSystem;
-
-/// @brief Derivatives for initial data solver.
-typedef struct InitialDerivs
-{
-    double psi_t;
-} InitialDerivs;
-
-InitialDerivs initial_sys(InitialSystem vars, double rho, double z)
-{
-    VARS_SECOND(psi);
-    VARS_SECOND(s);
-
-#include "initial.h"
-
-    InitialDerivs derivs;
-    derivs.psi_t = op;
-
-    return derivs;
-}
-
-InitialDerivs initial_regular_sys(InitialSystem vars, double rho, double z)
-{
-    VARS_SECOND(psi);
-    VARS_SECOND(s);
-
-#include "initial.h"
-
-    InitialDerivs derivs;
-    derivs.psi_t = op;
-
-    return derivs;
-}
-
-// typedef struct Constraints
-// {
-//     double hamiltonian;
-//     double momentum_r, momentum_z;
-// } Constraints;
-
-// Constraints constraints(System vars, double rho, double z)
-// {
-//     VARS_SECOND(grr);
-//     VARS_SECOND(gzz);
-//     VARS_SECOND(grz);
-//     VARS_SECOND(s);
-
-//     VARS_FIRST(krr);
-//     VARS_FIRST(kzz);
-//     VARS_FIRST(krz);
-//     VARS_FIRST(y);
-
-//     VARS_SECOND(lapse);
-//     VARS_FIRST(shiftr);
-//     VARS_FIRST(shiftz);
-
-//     VARS_FIRST(theta);
-//     VARS_FIRST(zr);
-//     VARS_FIRST(zz);
-
-// // Include generated code.
-// #include "constraints.h"
-
-//     Constraints cons;
-
-//     cons.hamiltonian = hamiltonian;
-//     cons.momentum_r = momentum_r;
-//     cons.momentum_z = momentum_z;
-
-//     return cons;
-// }
-
-// Constraints constraints_regular(System vars, double rho, double z)
-// {
-//     VARS_SECOND(grr);
-//     VARS_SECOND(gzz);
-//     VARS_SECOND(grz);
-//     VARS_SECOND(s);
-
-//     VARS_FIRST(krr);
-//     VARS_FIRST(kzz);
-//     VARS_FIRST(krz);
-//     VARS_FIRST(y);
-
-//     VARS_SECOND(lapse);
-//     VARS_FIRST(shiftr);
-//     VARS_FIRST(shiftz);
-
-//     VARS_FIRST(theta);
-//     VARS_FIRST(zr);
-//     VARS_FIRST(zz);
-
-// // Include generated code.
-// #include "constraints_regular.h"
-
-//     Constraints cons;
-
-//     cons.hamiltonian = hamiltonian;
-//     cons.momentum_r = momentum_r;
-//     cons.momentum_z = momentum_z;
-
-//     return cons;
-// }
