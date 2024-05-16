@@ -435,40 +435,40 @@ impl SystemOperator<2> for DynamicDerivs {
             dest.field_mut(Dynamic::Zz)[index] = derivs.zz_t;
         }
 
-        // for vertex in block
-        //     .face_plane(Face::positive(0))
-        //     .chain(block.face_plane(Face::positive(1)))
-        // {
-        //     let [rho, z] = block.position(vertex);
-        //     let r = (rho * rho + z * z).sqrt();
+        for vertex in block
+            .face_plane(Face::positive(0))
+            .chain(block.face_plane(Face::positive(1)))
+        {
+            let [rho, z] = block.position(vertex);
+            let r = (rho * rho + z * z).sqrt();
 
-        //     let index = block.index_from_vertex(vertex);
+            let index = block.index_from_vertex(vertex);
 
-        //     macro_rules! advection {
-        //         ($field:ident, $value:ident, $dr:ident, $dz:ident, $target:literal) => {
-        //             let adv = ($value[index] - $target) + rho * $dr[index] + z * $dz[index];
-        //             dest.field_mut(Dynamic::$field)[index] = -adv / r;
-        //         };
-        //     }
+            macro_rules! advection {
+                ($field:ident, $value:ident, $dr:ident, $dz:ident, $target:literal) => {
+                    let adv = ($value[index] - $target) + rho * $dr[index] + z * $dz[index];
+                    dest.field_mut(Dynamic::$field)[index] = -adv / r;
+                };
+            }
 
-        //     advection!(Grr, grr, grr_r, grr_z, 1.0);
-        //     advection!(Gzz, gzz, gzz_r, gzz_z, 1.0);
-        //     advection!(Grz, grz, grz_r, grz_z, 0.0);
-        //     advection!(S, s, s_r, s_z, 0.0);
+            advection!(Grr, grr, grr_r, grr_z, 1.0);
+            advection!(Gzz, gzz, gzz_r, gzz_z, 1.0);
+            advection!(Grz, grz, grz_r, grz_z, 0.0);
+            advection!(S, s, s_r, s_z, 0.0);
 
-        //     advection!(Krr, krr, krr_r, krr_z, 0.0);
-        //     advection!(Kzz, kzz, kzz_r, kzz_z, 0.0);
-        //     advection!(Krz, krz, krz_r, krz_z, 0.0);
-        //     advection!(Y, y, y_r, y_z, 0.0);
+            advection!(Krr, krr, krr_r, krr_z, 0.0);
+            advection!(Kzz, kzz, kzz_r, kzz_z, 0.0);
+            advection!(Krz, krz, krz_r, krz_z, 0.0);
+            advection!(Y, y, y_r, y_z, 0.0);
 
-        //     advection!(Lapse, lapse, lapse_r, lapse_z, 1.0);
-        //     advection!(Shiftr, shiftr, shiftr_r, shiftr_z, 0.0);
-        //     advection!(Shiftz, shiftz, shiftz_r, shiftz_z, 0.0);
+            advection!(Lapse, lapse, lapse_r, lapse_z, 1.0);
+            advection!(Shiftr, shiftr, shiftr_r, shiftr_z, 0.0);
+            advection!(Shiftz, shiftz, shiftz_r, shiftz_z, 0.0);
 
-        //     advection!(Theta, theta, theta_r, theta_z, 0.0);
-        //     advection!(Zr, zr, zr_r, zr_z, 0.0);
-        //     advection!(Zz, zz, zz_r, zz_z, 0.0);
-        // }
+            advection!(Theta, theta, theta_r, theta_z, 0.0);
+            advection!(Zr, zr, zr_r, zr_z, 0.0);
+            advection!(Zz, zz, zz_r, zz_z, 0.0);
+        }
     }
 }
 
@@ -633,7 +633,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     driver.fill_boundary_system(&mesh, &DynamicBoundary, dynamic.as_mut_slice());
 
     // Begin integration
-    const STEPS: usize = 200;
+    const STEPS: usize = 400;
     const CFL: f64 = 0.1;
 
     let h = CFL * mesh.minimum_spacing();
@@ -653,7 +653,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         model.attach_system::<Dynamic>(SystemSlice::from_contiguous(&data));
         model.export_vtk(
             format!("evbrill").as_str(),
-            PathBuf::from(format!("output/evbrill{i}.vtu")),
+            PathBuf::from(format!("output/evbrill_bcs_diss{i}.vtu")),
         )?;
 
         // Fill ghost nodes of system

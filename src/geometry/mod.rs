@@ -1,11 +1,11 @@
 //! A module for various geometric primatives (AABBs, working with cartesian indices, etc.).
 
-// mod axis;
+mod axis;
 mod face;
 mod indices;
 mod region;
 
-// pub use axis::AxisMask;
+pub use axis::AxisMask;
 pub use face::{faces, Face, FaceIter};
 pub use indices::{CartesianIter, IndexSpace, PlaneIterator};
 pub use region::{

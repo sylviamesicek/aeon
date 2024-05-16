@@ -12,12 +12,12 @@ impl<const N: usize> AxisMask<N> {
         Self(u64::MAX)
     }
 
-    pub fn new(linear: usize) -> Self {
+    pub fn from_linear(linear: usize) -> Self {
         Self(linear as u64)
     }
 
-    pub fn linear(self) -> usize {
-        self.0 as usize
+    pub fn into_linear(self) -> usize {
+        (self.0 as usize).min(Self::COUNT - 1)
     }
 
     pub fn unpack(self) -> [bool; N] {
@@ -30,11 +30,34 @@ impl<const N: usize> AxisMask<N> {
         result
     }
 
-    pub fn is_set(self, axis: usize) -> bool {
-        (self.0 & (1 << axis) as u64) != 0
+    pub fn pack(bits: [bool; N]) -> Self {
+        let mut result = Self::empty();
+
+        for (i, bit) in bits.into_iter().enumerate() {
+            result.set_to(i, bit);
+        }
+
+        result
     }
 
     pub fn set(&mut self, axis: usize) {
         self.0 |= (1 << axis) as u64
+    }
+
+    pub fn clear(&mut self, axis: usize) {
+        self.0 &= !((1 << axis) as u64)
+    }
+
+    pub fn set_to(&mut self, axis: usize, value: bool) {
+        self.0 &= !((1 << axis) as u64);
+        self.0 |= ((value as usize) << axis) as u64;
+    }
+
+    pub fn toggle(&mut self, axis: usize) {
+        self.0 ^= (1 << axis) as u64
+    }
+
+    pub fn is_set(self, axis: usize) -> bool {
+        (self.0 & (1 << axis) as u64) != 0
     }
 }

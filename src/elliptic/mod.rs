@@ -107,7 +107,12 @@ impl<Label: SystemLabel> HyperRelaxSolver<Label> {
 
             let norm = driver.norm_system(mesh, system.slice(..));
 
-            println!("Step {}/{} Norm {}", index, self.max_steps, norm);
+            println!(
+                "Time {:.5}/{:.5} Norm {:.5e}",
+                index as f64 * step,
+                self.max_steps as f64 * step,
+                norm
+            );
 
             // let mut model = Model::new(mesh.clone());
             // model.attach_field("psi", u.to_vec());

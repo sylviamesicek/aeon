@@ -6,7 +6,7 @@ use std::io::Write;
 // use aeon_axisymmetry::InitialSystem;
 use std::path::PathBuf;
 
-const RADIUS: f64 = 10.0;
+const RADIUS: f64 = 20.0;
 
 #[derive(Clone)]
 pub enum InitialData {
@@ -183,7 +183,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             size: [RADIUS, RADIUS],
             origin: [0.0, 0.0],
         },
-        [40, 40],
+        [100, 100],
         3,
     );
 
@@ -255,7 +255,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let mut model = Model::new(mesh.clone());
         model.attach_system(system.as_slice());
 
-        let mut file = File::create("output/idbrill.dat")?;
+        let mut file = File::create("output/idbrill_extended.dat")?;
         file.write_all(ron::to_string(&model)?.as_bytes())?;
     }
 
