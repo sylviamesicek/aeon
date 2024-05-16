@@ -115,14 +115,14 @@ impl SystemLabel for Dynamic {
     }
 }
 
-pub struct ParityBoundary(bool);
+pub struct ParityBoundary(bool, bool);
 
 impl Boundary for ParityBoundary {
     fn face(&self, face: Face) -> BoundaryCondition {
         if face.axis == 0 && face.side == false {
             BoundaryCondition::Parity(self.0)
         } else if face.axis == 1 && face.side == false {
-            BoundaryCondition::Parity(true)
+            BoundaryCondition::Parity(self.1)
         } else {
             BoundaryCondition::Free
         }
@@ -136,22 +136,23 @@ impl SystemBoundary for DynamicBoundary {
     type Label = Dynamic;
 
     fn field(&self, label: Self::Label) -> Self::Boundary {
-        ParityBoundary(match label {
-            Dynamic::Grr => true,
-            Dynamic::Grz => false,
-            Dynamic::Gzz => true,
-            Dynamic::S => false,
-            Dynamic::Krr => true,
-            Dynamic::Krz => false,
-            Dynamic::Kzz => true,
-            Dynamic::Y => false,
-            Dynamic::Theta => true,
-            Dynamic::Zr => false,
-            Dynamic::Zz => true,
-            Dynamic::Lapse => true,
-            Dynamic::Shiftr => false,
-            Dynamic::Shiftz => true,
-        })
+        let (rho, z) = match label {
+            Dynamic::Grr => (true, true),
+            Dynamic::Grz => (false, false),
+            Dynamic::Gzz => (true, true),
+            Dynamic::S => (false, true),
+            Dynamic::Krr => (true, true),
+            Dynamic::Krz => (false, false),
+            Dynamic::Kzz => (true, true),
+            Dynamic::Y => (false, true),
+            Dynamic::Theta => (true, true),
+            Dynamic::Zr => (false, true),
+            Dynamic::Zz => (true, false),
+            Dynamic::Lapse => (true, true),
+            Dynamic::Shiftr => (false, true),
+            Dynamic::Shiftz => (true, false),
+        };
+        ParityBoundary(rho, z)
     }
 }
 
@@ -434,40 +435,40 @@ impl SystemOperator<2> for DynamicDerivs {
             dest.field_mut(Dynamic::Zz)[index] = derivs.zz_t;
         }
 
-        for vertex in block
-            .face_plane(Face::positive(0))
-            .chain(block.face_plane(Face::positive(1)))
-        {
-            let [rho, z] = block.position(vertex);
-            let r = (rho * rho + z * z).sqrt();
+        // for vertex in block
+        //     .face_plane(Face::positive(0))
+        //     .chain(block.face_plane(Face::positive(1)))
+        // {
+        //     let [rho, z] = block.position(vertex);
+        //     let r = (rho * rho + z * z).sqrt();
 
-            let index = block.index_from_vertex(vertex);
+        //     let index = block.index_from_vertex(vertex);
 
-            macro_rules! advection {
-                ($field:ident, $value:ident, $dr:ident, $dz:ident, $target:literal) => {
-                    let adv = ($value[index] - $target) + rho * $dr[index] + z * $dz[index];
-                    dest.field_mut(Dynamic::$field)[index] = -adv / r;
-                };
-            }
+        //     macro_rules! advection {
+        //         ($field:ident, $value:ident, $dr:ident, $dz:ident, $target:literal) => {
+        //             let adv = ($value[index] - $target) + rho * $dr[index] + z * $dz[index];
+        //             dest.field_mut(Dynamic::$field)[index] = -adv / r;
+        //         };
+        //     }
 
-            advection!(Grr, grr, grr_r, grr_z, 1.0);
-            advection!(Gzz, gzz, gzz_r, gzz_z, 1.0);
-            advection!(Grz, grz, grz_r, grz_z, 0.0);
-            advection!(S, s, s_r, s_z, 0.0);
+        //     advection!(Grr, grr, grr_r, grr_z, 1.0);
+        //     advection!(Gzz, gzz, gzz_r, gzz_z, 1.0);
+        //     advection!(Grz, grz, grz_r, grz_z, 0.0);
+        //     advection!(S, s, s_r, s_z, 0.0);
 
-            advection!(Krr, krr, krr_r, krr_z, 0.0);
-            advection!(Kzz, kzz, kzz_r, kzz_z, 0.0);
-            advection!(Krz, krz, krz_r, krz_z, 0.0);
-            advection!(Y, y, y_r, y_z, 0.0);
+        //     advection!(Krr, krr, krr_r, krr_z, 0.0);
+        //     advection!(Kzz, kzz, kzz_r, kzz_z, 0.0);
+        //     advection!(Krz, krz, krz_r, krz_z, 0.0);
+        //     advection!(Y, y, y_r, y_z, 0.0);
 
-            advection!(Lapse, lapse, lapse_r, lapse_z, 1.0);
-            advection!(Shiftr, shiftr, shiftr_r, shiftr_z, 0.0);
-            advection!(Shiftz, shiftz, shiftz_r, shiftz_z, 0.0);
+        //     advection!(Lapse, lapse, lapse_r, lapse_z, 1.0);
+        //     advection!(Shiftr, shiftr, shiftr_r, shiftr_z, 0.0);
+        //     advection!(Shiftz, shiftz, shiftz_r, shiftz_z, 0.0);
 
-            advection!(Theta, theta, theta_r, theta_z, 0.0);
-            advection!(Zr, zr, zr_r, zr_z, 0.0);
-            advection!(Zz, zz, zz_r, zz_z, 0.0);
-        }
+        //     advection!(Theta, theta, theta_r, theta_z, 0.0);
+        //     advection!(Zr, zr, zr_r, zr_z, 0.0);
+        //     advection!(Zz, zz, zz_r, zz_z, 0.0);
+        // }
     }
 }
 
@@ -636,6 +637,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     const CFL: f64 = 0.1;
 
     let h = CFL * mesh.minimum_spacing();
+    println!("Spacing {}", mesh.minimum_spacing());
+    println!("Step Size {}", h);
 
     let mut data = dynamic.into_contigious().into_boxed_slice();
     let mut update = vec![0.0; data.len()].into_boxed_slice();
@@ -644,7 +647,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut integrator = Rk4::new();
 
     for i in 0..STEPS {
-        println!("Step {i}");
+        println!("Step {i}, Time {:.5}", i as f64 * h);
         // Output current system to disk
         let mut model = Model::new(mesh.clone());
         model.attach_system::<Dynamic>(SystemSlice::from_contiguous(&data));
