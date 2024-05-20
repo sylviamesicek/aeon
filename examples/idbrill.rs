@@ -183,7 +183,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             size: [RADIUS, RADIUS],
             origin: [0.0, 0.0],
         },
-        [100, 100],
+        [80, 80],
         3,
     );
 
