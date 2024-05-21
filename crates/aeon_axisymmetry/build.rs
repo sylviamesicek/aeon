@@ -12,8 +12,6 @@ fn main() {
     println!("cargo::rerun-if-changed=eqs/hyperbolic.h");
     println!("cargo::rerun-if-changed=eqs/hyperbolic_regular.h");
 
-    println!("cargo:warning=Recompiling Eqs");
-
     let manifest_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
     let eqs_dir = manifest_dir.join("eqs");
 

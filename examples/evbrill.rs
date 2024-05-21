@@ -7,9 +7,8 @@ use aeon::prelude::*;
 use aeon::{array::Array, mesh::field_count};
 use aeon_axisymmetry::{hyperbolic, hyperbolic_regular, HyperbolicSystem};
 
-const STEPS: usize = 400;
+const STEPS: usize = 800;
 const CFL: f64 = 0.1;
-const RINNE: bool = true;
 
 #[derive(Clone)]
 pub enum InitialData {
@@ -176,172 +175,69 @@ impl SystemOperator<2> for DynamicDerivs {
     ) {
         let node_count = block.node_count();
 
-        // macro_rules! second_derivatives {
-        //     ($field:ident, $value:ident, $dr:ident, $dz:ident, $drr:ident, $drz:ident, $dzz:ident) => {
-        //         let $value = src.field(Dynamic::$field);
-        //         let $dr = pool.alloc_scalar(node_count);
-        //         let $dz = pool.alloc_scalar(node_count);
-        //         let $drr = pool.alloc_scalar(node_count);
-        //         let $drz = pool.alloc_scalar(node_count);
-        //         let $dzz = pool.alloc_scalar(node_count);
+        macro_rules! derivatives {
+            ($field:ident, $value:ident, $dr:ident, $dz:ident) => {
+                let $value = src.field(Dynamic::$field);
+                let $dr = pool.alloc_scalar(node_count);
+                let $dz = pool.alloc_scalar(node_count);
 
-        //         block.derivative::<4>(0, &DynamicBoundary.field(Dynamic::$field), $value, $dr);
-        //         block.derivative::<4>(1, &DynamicBoundary.field(Dynamic::$field), $value, $dz);
-        //         block.second_derivative::<4>(0, &DynamicBoundary.field(Dynamic::$field), $value, $drr);
-        //         block.derivative::<4>(1, &DynamicBoundary.field(Dynamic::$field), $dr, $drz);
-        //         block.second_derivative::<4>(1, &DynamicBoundary.field(Dynamic::$field), $value, $dzz);
-        //     };
-        // }
+                block.derivative::<4>(0, &DynamicBoundary.field(Dynamic::$field), $value, $dr);
+                block.derivative::<4>(1, &DynamicBoundary.field(Dynamic::$field), $value, $dz);
+            };
+        }
+
+        macro_rules! second_derivatives {
+            ($field:ident, $value:ident, $dr:ident, $dz:ident, $drr:ident, $drz:ident, $dzz:ident) => {
+                let $value = src.field(Dynamic::$field);
+                let $dr = pool.alloc_scalar(node_count);
+                let $dz = pool.alloc_scalar(node_count);
+                let $drr = pool.alloc_scalar(node_count);
+                let $drz = pool.alloc_scalar(node_count);
+                let $dzz = pool.alloc_scalar(node_count);
+
+                block.derivative::<4>(0, &DynamicBoundary.field(Dynamic::$field), $value, $dr);
+                block.derivative::<4>(1, &DynamicBoundary.field(Dynamic::$field), $value, $dz);
+                block.second_derivative::<4>(
+                    0,
+                    &DynamicBoundary.field(Dynamic::$field),
+                    $value,
+                    $drr,
+                );
+                block.derivative::<4>(1, &DynamicBoundary.field(Dynamic::$field), $dr, $drz);
+                block.second_derivative::<4>(
+                    1,
+                    &DynamicBoundary.field(Dynamic::$field),
+                    $value,
+                    $dzz,
+                );
+            };
+        }
 
         // Metric
-        let grr = src.field(Dynamic::Grr);
-        let grr_r = pool.alloc_scalar(node_count);
-        let grr_z = pool.alloc_scalar(node_count);
-        let grr_rr = pool.alloc_scalar(node_count);
-        let grr_rz = pool.alloc_scalar(node_count);
-        let grr_zz = pool.alloc_scalar(node_count);
-        let grr_boundary = DynamicBoundary.field(Dynamic::Grr);
-
-        block.derivative::<4>(0, &grr_boundary, grr, grr_r);
-        block.derivative::<4>(1, &grr_boundary, grr, grr_z);
-        block.second_derivative::<4>(0, &grr_boundary, grr, grr_rr);
-        block.second_derivative::<4>(1, &grr_boundary, grr, grr_zz);
-        block.derivative::<4>(1, &grr_boundary, grr_r, grr_rz);
-
-        let gzz = src.field(Dynamic::Gzz);
-        let gzz_r = pool.alloc_scalar(node_count);
-        let gzz_z = pool.alloc_scalar(node_count);
-        let gzz_rr = pool.alloc_scalar(node_count);
-        let gzz_rz = pool.alloc_scalar(node_count);
-        let gzz_zz = pool.alloc_scalar(node_count);
-        let gzz_boundary = DynamicBoundary.field(Dynamic::Gzz);
-
-        block.derivative::<4>(0, &gzz_boundary, gzz, gzz_r);
-        block.derivative::<4>(1, &gzz_boundary, gzz, gzz_z);
-        block.second_derivative::<4>(0, &gzz_boundary, gzz, gzz_rr);
-        block.second_derivative::<4>(1, &gzz_boundary, gzz, gzz_zz);
-        block.derivative::<4>(1, &gzz_boundary, gzz_r, gzz_rz);
-
-        let grz = src.field(Dynamic::Grz);
-        let grz_r = pool.alloc_scalar(node_count);
-        let grz_z = pool.alloc_scalar(node_count);
-        let grz_rr = pool.alloc_scalar(node_count);
-        let grz_rz = pool.alloc_scalar(node_count);
-        let grz_zz = pool.alloc_scalar(node_count);
-        let grz_boundary = DynamicBoundary.field(Dynamic::Grz);
-
-        block.derivative::<4>(0, &grz_boundary, grz, grz_r);
-        block.derivative::<4>(1, &grz_boundary, grz, grz_z);
-        block.second_derivative::<4>(0, &grz_boundary, grz, grz_rr);
-        block.second_derivative::<4>(1, &grz_boundary, grz, grz_zz);
-        block.derivative::<4>(1, &grz_boundary, grz_r, grz_rz);
+        second_derivatives!(Grr, grr, grr_r, grr_z, grr_rr, grr_rz, grr_zz);
+        second_derivatives!(Gzz, gzz, gzz_r, gzz_z, gzz_rr, gzz_rz, gzz_zz);
+        second_derivatives!(Grz, grz, grz_r, grz_z, grz_rr, grz_rz, grz_zz);
 
         // S
-        let s = src.field(Dynamic::S);
-        let s_r = pool.alloc_scalar(node_count);
-        let s_z = pool.alloc_scalar(node_count);
-        let s_rr = pool.alloc_scalar(node_count);
-        let s_rz = pool.alloc_scalar(node_count);
-        let s_zz = pool.alloc_scalar(node_count);
-        let s_boundary = DynamicBoundary.field(Dynamic::S);
-
-        block.derivative::<4>(0, &s_boundary, s, s_r);
-        block.derivative::<4>(1, &s_boundary, s, s_z);
-        block.second_derivative::<4>(0, &s_boundary, s, s_rr);
-        block.second_derivative::<4>(1, &s_boundary, s, s_zz);
-        block.derivative::<4>(1, &s_boundary, s_r, s_rz);
+        second_derivatives!(S, s, s_r, s_z, s_rr, s_rz, s_zz);
 
         // K
-        let krr = src.field(Dynamic::Krr);
-        let krr_r = pool.alloc_scalar(node_count);
-        let krr_z = pool.alloc_scalar(node_count);
-        let krr_boundary = DynamicBoundary.field(Dynamic::Krr);
-
-        block.derivative::<4>(0, &krr_boundary, krr, krr_r);
-        block.derivative::<4>(1, &krr_boundary, krr, krr_z);
-
-        let kzz = src.field(Dynamic::Kzz);
-        let kzz_r = pool.alloc_scalar(node_count);
-        let kzz_z = pool.alloc_scalar(node_count);
-        let kzz_boundary = DynamicBoundary.field(Dynamic::Kzz);
-
-        block.derivative::<4>(0, &kzz_boundary, kzz, kzz_r);
-        block.derivative::<4>(1, &kzz_boundary, kzz, kzz_z);
-
-        let krz = src.field(Dynamic::Krz);
-        let krz_r = pool.alloc_scalar(node_count);
-        let krz_z = pool.alloc_scalar(node_count);
-        let krz_boundary = DynamicBoundary.field(Dynamic::Krz);
-
-        block.derivative::<4>(0, &krz_boundary, krz, krz_r);
-        block.derivative::<4>(1, &krz_boundary, krz, krz_z);
+        derivatives!(Krr, krr, krr_r, krr_z);
+        derivatives!(Kzz, kzz, kzz_r, kzz_z);
+        derivatives!(Krz, krz, krz_r, krz_z);
 
         // Y
-        let y = src.field(Dynamic::Krz);
-        let y_r = pool.alloc_scalar(node_count);
-        let y_z = pool.alloc_scalar(node_count);
-        let y_boundary = DynamicBoundary.field(Dynamic::Y);
+        derivatives!(Y, y, y_r, y_z);
 
-        block.derivative::<4>(0, &y_boundary, y, y_r);
-        block.derivative::<4>(1, &y_boundary, y, y_z);
+        // Gauge
+        second_derivatives!(Lapse, lapse, lapse_r, lapse_z, lapse_rr, lapse_rz, lapse_zz);
+        derivatives!(Shiftr, shiftr, shiftr_r, shiftr_z);
+        derivatives!(Shiftz, shiftz, shiftz_r, shiftz_z);
 
-        // Lapse
-        let lapse = src.field(Dynamic::Lapse);
-        let lapse_r = pool.alloc_scalar(node_count);
-        let lapse_z = pool.alloc_scalar(node_count);
-        let lapse_rr = pool.alloc_scalar(node_count);
-        let lapse_rz = pool.alloc_scalar(node_count);
-        let lapse_zz = pool.alloc_scalar(node_count);
-        let lapse_boundary = DynamicBoundary.field(Dynamic::Lapse);
-
-        block.derivative::<4>(0, &lapse_boundary, lapse, lapse_r);
-        block.derivative::<4>(1, &lapse_boundary, lapse, lapse_z);
-        block.second_derivative::<4>(0, &lapse_boundary, lapse, lapse_rr);
-        block.second_derivative::<4>(1, &lapse_boundary, lapse, lapse_zz);
-        block.derivative::<4>(1, &lapse_boundary, lapse_r, lapse_rz);
-
-        // Shift
-        let shiftr = src.field(Dynamic::Shiftr);
-        let shiftr_r = pool.alloc_scalar(node_count);
-        let shiftr_z = pool.alloc_scalar(node_count);
-        let shiftr_boundary = DynamicBoundary.field(Dynamic::Shiftr);
-
-        block.derivative::<4>(0, &shiftr_boundary, shiftr, shiftr_r);
-        block.derivative::<4>(1, &shiftr_boundary, shiftr, shiftr_z);
-
-        let shiftz = src.field(Dynamic::Shiftz);
-        let shiftz_r = pool.alloc_scalar(node_count);
-        let shiftz_z = pool.alloc_scalar(node_count);
-        let shiftz_boundary = DynamicBoundary.field(Dynamic::Shiftz);
-
-        block.derivative::<4>(0, &shiftz_boundary, shiftz, shiftz_r);
-        block.derivative::<4>(1, &shiftz_boundary, shiftz, shiftz_z);
-
-        // Theta
-        let theta = src.field(Dynamic::Theta);
-        let theta_r = pool.alloc_scalar(node_count);
-        let theta_z = pool.alloc_scalar(node_count);
-        let theta_boundary = DynamicBoundary.field(Dynamic::Theta);
-
-        block.derivative::<4>(0, &theta_boundary, theta, theta_r);
-        block.derivative::<4>(1, &theta_boundary, theta, theta_z);
-
-        // Z
-        let zr = src.field(Dynamic::Zr);
-        let zr_r = pool.alloc_scalar(node_count);
-        let zr_z = pool.alloc_scalar(node_count);
-        let zr_boundary = DynamicBoundary.field(Dynamic::Zr);
-
-        block.derivative::<4>(0, &zr_boundary, zr, zr_r);
-        block.derivative::<4>(1, &zr_boundary, zr, zr_z);
-
-        let zz = src.field(Dynamic::Zz);
-        let zz_r = pool.alloc_scalar(node_count);
-        let zz_z = pool.alloc_scalar(node_count);
-        let zz_boundary = DynamicBoundary.field(Dynamic::Zz);
-
-        block.derivative::<4>(0, &zz_boundary, zz, zz_r);
-        block.derivative::<4>(1, &zz_boundary, zz, zz_z);
+        // Constraints
+        derivatives!(Theta, theta, theta_r, theta_z);
+        derivatives!(Zr, zr, zr_r, zr_z);
+        derivatives!(Zz, zz, zz_r, zz_z);
 
         // Now invoke generated equations
 
@@ -441,190 +337,94 @@ impl SystemOperator<2> for DynamicDerivs {
             dest.field_mut(Dynamic::Zz)[index] = derivs.zz_t;
         }
 
-        if RINNE {
-            let vertex_size = block.vertex_size();
+        let vertex_size = block.vertex_size();
 
-            // println!("Vertex Size {vertex_size:?}");
+        for vertex in block
+            .face_plane(Face::positive(0))
+            .chain(block.face_plane(Face::positive(1)))
+        {
+            let rho_axis = vertex[0] == vertex_size[0] - 1;
+            let z_axis = vertex[1] == vertex_size[1] - 1;
 
-            for vertex in block
-                .face_plane(Face::positive(0))
-                .chain(block.face_plane(Face::positive(1)))
-            {
-                // Computer inner point for approximating higher order r dependence
-                let mut inner = vertex;
+            assert!(rho_axis || z_axis);
 
-                if vertex[0] == vertex_size[0] - 1 {
-                    inner[0] = vertex_size[0] - 2;
-                }
+            // Computer inner point for approximating higher order r dependence
+            let mut inner = vertex;
 
-                if vertex[1] == vertex_size[1] - 1 {
-                    inner[1] = vertex_size[1] - 2;
-                }
-
-                // println!("Vertex {vertex:?}, Inner {inner:?}");
-
-                let [inner_rho, inner_z] = block.position(inner);
-                let inner_r = (inner_rho * inner_rho + inner_z * inner_z).sqrt();
-
-                let inner_index = block.index_from_vertex(inner);
-
-                macro_rules! inner_advection {
-                    ($field:ident, $value:ident, $dr:ident, $dz:ident, $target:literal, $k:ident) => {
-                        let adv = ($value[inner_index] - $target)
-                            + inner_rho * $dr[inner_index]
-                            + inner_z * $dz[inner_index];
-                        let adv_full = -adv / inner_r;
-                        let $k = inner_r
-                            * inner_r
-                            * inner_r
-                            * (dest.field(Dynamic::$field)[inner_index] - adv_full);
-                    };
-                }
-
-                inner_advection!(Grr, grr, grr_r, grr_z, 1.0, grr_k);
-                inner_advection!(Gzz, gzz, gzz_r, gzz_z, 1.0, gzz_k);
-                inner_advection!(Grz, grz, grz_r, grz_z, 0.0, grz_k);
-                inner_advection!(S, s, s_r, s_z, 0.0, s_k);
-
-                inner_advection!(Krr, krr, krr_r, krr_z, 0.0, krr_k);
-                inner_advection!(Kzz, kzz, kzz_r, kzz_z, 0.0, kzz_k);
-                inner_advection!(Krz, krz, krz_r, krz_z, 0.0, krz_k);
-                inner_advection!(Y, y, y_r, y_z, 0.0, y_k);
-
-                inner_advection!(Lapse, lapse, lapse_r, lapse_z, 1.0, lapse_k);
-                inner_advection!(Shiftr, shiftr, shiftr_r, shiftr_z, 0.0, shiftr_k);
-                inner_advection!(Shiftz, shiftz, shiftz_r, shiftz_z, 0.0, shiftz_k);
-
-                inner_advection!(Theta, theta, theta_r, theta_z, 0.0, theta_k);
-                inner_advection!(Zr, zr, zr_r, zr_z, 0.0, zr_k);
-                inner_advection!(Zz, zz, zz_r, zz_z, 0.0, zz_k);
-
-                let [rho, z] = block.position(vertex);
-                let r = (rho * rho + z * z).sqrt();
-
-                // println!("Vertex Position rho: {}, z: {}", rho, z);
-
-                let index = block.index_from_vertex(vertex);
-
-                macro_rules! advection {
-                    ($field:ident, $value:ident, $dr:ident, $dz:ident, $target:literal, $k:ident) => {
-                        let adv = ($value[index] - $target) + rho * $dr[index] + z * $dz[index];
-                        let adv_full = -adv / r;
-                        dest.field_mut(Dynamic::$field)[index] = adv_full + $k / (r * r * r);
-                    };
-                }
-
-                advection!(Grr, grr, grr_r, grr_z, 1.0, grr_k);
-                advection!(Gzz, gzz, gzz_r, gzz_z, 1.0, gzz_k);
-                advection!(Grz, grz, grz_r, grz_z, 0.0, grz_k);
-                advection!(S, s, s_r, s_z, 0.0, s_k);
-
-                advection!(Krr, krr, krr_r, krr_z, 0.0, krr_k);
-                advection!(Kzz, kzz, kzz_r, kzz_z, 0.0, kzz_k);
-                advection!(Krz, krz, krz_r, krz_z, 0.0, krz_k);
-                advection!(Y, y, y_r, y_z, 0.0, y_k);
-
-                advection!(Lapse, lapse, lapse_r, lapse_z, 1.0, lapse_k);
-                advection!(Shiftr, shiftr, shiftr_r, shiftr_z, 0.0, shiftr_k);
-                advection!(Shiftz, shiftz, shiftz_r, shiftz_z, 0.0, shiftz_k);
-
-                advection!(Theta, theta, theta_r, theta_z, 0.0, theta_k);
-                advection!(Zr, zr, zr_r, zr_z, 0.0, zr_k);
-                advection!(Zz, zz, zz_r, zz_z, 0.0, zz_k);
+            if rho_axis {
+                inner[0] = vertex_size[0] - 2;
             }
-        } else {
-            const SIGN: f64 = -1.0;
-            let vertex_size = block.vertex_size();
 
-            for vertex in block
-                .face_plane(Face::positive(0))
-                .chain(block.face_plane(Face::positive(1)))
-            {
-                // Computer inner point for approximating higher order r dependence
-                let mut inner = vertex;
-                let mut axis = 0;
-
-                if vertex[0] == vertex_size[0] - 1 {
-                    inner[0] = vertex_size[0] - 2;
-                    axis = 0;
-                }
-
-                if vertex[1] == vertex_size[1] - 1 {
-                    inner[1] = vertex_size[1] - 2;
-                    axis = 1;
-                }
-
-                let inner_pos = block.position(inner);
-                let inner_r = (inner_pos[0] * inner_pos[0] + inner_pos[1] * inner_pos[1]).sqrt();
-
-                let inner_index = block.index_from_vertex(inner);
-
-                macro_rules! inner_advection {
-                    ($field:ident, $value:ident, $dr:ident, $dz:ident, $target:literal, $k:ident) => {
-                        let deriv = if axis == 0 {
-                            $dr[inner_index]
-                        } else {
-                            $dz[inner_index]
-                        };
-                        let adv = SIGN * ($value[inner_index] - $target) / inner_r
-                            - inner_r / inner_pos[axis] * deriv;
-
-                        let $k = inner_r
-                            * inner_r
-                            * inner_r
-                            * (dest.field(Dynamic::$field)[inner_index] - adv);
-                    };
-                }
-
-                inner_advection!(Grr, grr, grr_r, grr_z, 1.0, grr_k);
-                inner_advection!(Gzz, gzz, gzz_r, gzz_z, 1.0, gzz_k);
-                inner_advection!(Grz, grz, grz_r, grz_z, 0.0, grz_k);
-                inner_advection!(S, s, s_r, s_z, 0.0, s_k);
-
-                inner_advection!(Krr, krr, krr_r, krr_z, 0.0, krr_k);
-                inner_advection!(Kzz, kzz, kzz_r, kzz_z, 0.0, kzz_k);
-                inner_advection!(Krz, krz, krz_r, krz_z, 0.0, krz_k);
-                inner_advection!(Y, y, y_r, y_z, 0.0, y_k);
-
-                inner_advection!(Lapse, lapse, lapse_r, lapse_z, 1.0, lapse_k);
-                inner_advection!(Shiftr, shiftr, shiftr_r, shiftr_z, 0.0, shiftr_k);
-                inner_advection!(Shiftz, shiftz, shiftz_r, shiftz_z, 0.0, shiftz_k);
-
-                inner_advection!(Theta, theta, theta_r, theta_z, 0.0, theta_k);
-                inner_advection!(Zr, zr, zr_r, zr_z, 0.0, zr_k);
-                inner_advection!(Zz, zz, zz_r, zz_z, 0.0, zz_k);
-
-                let pos = block.position(vertex);
-                let r = (pos[0] * pos[0] + pos[1] * pos[1]).sqrt();
-
-                let index = block.index_from_vertex(vertex);
-
-                macro_rules! advection {
-                    ($field:ident, $value:ident, $dr:ident, $dz:ident, $target:literal, $k:ident) => {
-                        let deriv = if axis == 0 { $dr[index] } else { $dz[index] };
-                        let adv = SIGN * ($value[index] - $target) / r - r / pos[axis] * deriv;
-                        dest.field_mut(Dynamic::$field)[index] = adv + $k / (r * r * r);
-                    };
-                }
-
-                advection!(Grr, grr, grr_r, grr_z, 1.0, grr_k);
-                advection!(Gzz, gzz, gzz_r, gzz_z, 1.0, gzz_k);
-                advection!(Grz, grz, grz_r, grz_z, 0.0, grz_k);
-                advection!(S, s, s_r, s_z, 0.0, s_k);
-
-                advection!(Krr, krr, krr_r, krr_z, 0.0, krr_k);
-                advection!(Kzz, kzz, kzz_r, kzz_z, 0.0, kzz_k);
-                advection!(Krz, krz, krz_r, krz_z, 0.0, krz_k);
-                advection!(Y, y, y_r, y_z, 0.0, y_k);
-
-                advection!(Lapse, lapse, lapse_r, lapse_z, 1.0, lapse_k);
-                advection!(Shiftr, shiftr, shiftr_r, shiftr_z, 0.0, shiftr_k);
-                advection!(Shiftz, shiftz, shiftz_r, shiftz_z, 0.0, shiftz_k);
-
-                advection!(Theta, theta, theta_r, theta_z, 0.0, theta_k);
-                advection!(Zr, zr, zr_r, zr_z, 0.0, zr_k);
-                advection!(Zz, zz, zz_r, zz_z, 0.0, zz_k);
+            if z_axis {
+                inner[1] = vertex_size[1] - 2;
             }
+
+            let [inner_rho, inner_z] = block.position(inner);
+            let inner_r = (inner_rho * inner_rho + inner_z * inner_z).sqrt();
+
+            let inner_index = block.index_from_vertex(inner);
+
+            macro_rules! inner_advection {
+                ($field:ident, $value:ident, $dr:ident, $dz:ident, $target:literal, $k:ident) => {
+                    let adv = ($value[inner_index] - $target)
+                        + inner_rho * $dr[inner_index]
+                        + inner_z * $dz[inner_index];
+                    let adv_full = -adv / inner_r;
+                    let $k = inner_r
+                        * inner_r
+                        * inner_r
+                        * (dest.field(Dynamic::$field)[inner_index] - adv_full);
+                };
+            }
+
+            inner_advection!(Grr, grr, grr_r, grr_z, 1.0, grr_k);
+            inner_advection!(Gzz, gzz, gzz_r, gzz_z, 1.0, gzz_k);
+            inner_advection!(Grz, grz, grz_r, grz_z, 0.0, grz_k);
+            inner_advection!(S, s, s_r, s_z, 0.0, s_k);
+
+            inner_advection!(Krr, krr, krr_r, krr_z, 0.0, krr_k);
+            inner_advection!(Kzz, kzz, kzz_r, kzz_z, 0.0, kzz_k);
+            inner_advection!(Krz, krz, krz_r, krz_z, 0.0, krz_k);
+            inner_advection!(Y, y, y_r, y_z, 0.0, y_k);
+
+            inner_advection!(Lapse, lapse, lapse_r, lapse_z, 1.0, lapse_k);
+            inner_advection!(Shiftr, shiftr, shiftr_r, shiftr_z, 0.0, shiftr_k);
+            inner_advection!(Shiftz, shiftz, shiftz_r, shiftz_z, 0.0, shiftz_k);
+
+            inner_advection!(Theta, theta, theta_r, theta_z, 0.0, theta_k);
+            inner_advection!(Zr, zr, zr_r, zr_z, 0.0, zr_k);
+            inner_advection!(Zz, zz, zz_r, zz_z, 0.0, zz_k);
+
+            let [rho, z] = block.position(vertex);
+            let r = (rho * rho + z * z).sqrt();
+
+            let index = block.index_from_vertex(vertex);
+
+            macro_rules! advection {
+                ($field:ident, $value:ident, $dr:ident, $dz:ident, $target:literal, $k:ident) => {
+                    let adv = ($value[index] - $target) + rho * $dr[index] + z * $dz[index];
+                    let adv_full = -adv / r;
+                    dest.field_mut(Dynamic::$field)[index] = adv_full + $k / (r * r * r);
+                };
+            }
+
+            advection!(Grr, grr, grr_r, grr_z, 1.0, grr_k);
+            advection!(Gzz, gzz, gzz_r, gzz_z, 1.0, gzz_k);
+            advection!(Grz, grz, grz_r, grz_z, 0.0, grz_k);
+            advection!(S, s, s_r, s_z, 0.0, s_k);
+
+            advection!(Krr, krr, krr_r, krr_z, 0.0, krr_k);
+            advection!(Kzz, kzz, kzz_r, kzz_z, 0.0, kzz_k);
+            advection!(Krz, krz, krz_r, krz_z, 0.0, krz_k);
+            advection!(Y, y, y_r, y_z, 0.0, y_k);
+
+            advection!(Lapse, lapse, lapse_r, lapse_z, 1.0, lapse_k);
+            advection!(Shiftr, shiftr, shiftr_r, shiftr_z, 0.0, shiftr_k);
+            advection!(Shiftz, shiftz, shiftz_r, shiftz_z, 0.0, shiftz_k);
+
+            advection!(Theta, theta, theta_r, theta_z, 0.0, theta_k);
+            advection!(Zr, zr, zr_r, zr_z, 0.0, zr_k);
+            advection!(Zz, zz, zz_r, zz_z, 0.0, zz_k);
         }
     }
 }
@@ -732,7 +532,7 @@ impl SystemOperator<2> for DynamicDissipation {
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let model: Model<2> = {
         let mut contents = String::new();
-        let mut file = File::open("output/idbrill_extended.dat")?;
+        let mut file = File::open("output/idbrill.dat")?;
         file.read_to_string(&mut contents)?;
 
         ron::from_str(&contents)?
@@ -792,13 +592,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut integrator = Rk4::new();
 
     for i in 0..STEPS {
-        println!("Step {i}, Time {:.5}", i as f64 * h);
+        let norm = driver.norm_system::<2, Dynamic>(&mesh, SystemSlice::from_contiguous(&data));
+        println!("Step {i}, Time {:.5} Norm {:.5e}", i as f64 * h, norm);
         // Output current system to disk
         let mut model = Model::new(mesh.clone());
         model.attach_system::<Dynamic>(SystemSlice::from_contiguous(&data));
         model.export_vtk(
             format!("evbrill").as_str(),
-            PathBuf::from(format!("output/evbrill_more_diss_bcs{i}.vtu")),
+            PathBuf::from(format!("output/evbrill{i}.vtu")),
         )?;
 
         // Fill ghost nodes of system
@@ -829,7 +630,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         // Add everything together
         for i in 0..data.len() {
-            data[i] += update[i] + 0.7 * dissipation[i];
+            data[i] += update[i] + 0.05 * dissipation[i];
         }
     }
 

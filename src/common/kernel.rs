@@ -19,10 +19,10 @@ pub trait Kernel {
     fn interior(&self) -> Self::InteriorWeights;
 
     /// Stencil weights for the negative edge of the domain.
-    fn negative(&self, left: usize) -> Self::BoundaryWeights;
+    fn negative(&self, right: usize) -> Self::BoundaryWeights;
 
     /// Stencil weights for the positive edge of the domain.
-    fn positive(&self, right: usize) -> Self::BoundaryWeights;
+    fn positive(&self, left: usize) -> Self::BoundaryWeights;
 
     /// Scale factor given spacing.
     fn scale(&self, spacing: f64) -> f64;
@@ -52,11 +52,11 @@ impl Kernel for FDDerivative<2> {
         derivative!(1, 1, 0)
     }
 
-    fn negative(&self, _left: usize) -> Self::BoundaryWeights {
+    fn negative(&self, _right: usize) -> Self::BoundaryWeights {
         derivative!(0, 2, 0)
     }
 
-    fn positive(&self, _right: usize) -> Self::BoundaryWeights {
+    fn positive(&self, _left: usize) -> Self::BoundaryWeights {
         derivative!(2, 0, 0)
     }
 
@@ -80,16 +80,16 @@ impl Kernel for FDDerivative<4> {
         derivative!(2, 2, 0)
     }
 
-    fn negative(&self, left: usize) -> Self::BoundaryWeights {
-        if left == 0 {
+    fn negative(&self, right: usize) -> Self::BoundaryWeights {
+        if right == 0 {
             derivative!(0, 4, 0)
         } else {
             derivative!(0, 4, 1)
         }
     }
 
-    fn positive(&self, right: usize) -> Self::BoundaryWeights {
-        if right == 0 {
+    fn positive(&self, left: usize) -> Self::BoundaryWeights {
+        if left == 0 {
             derivative!(4, 0, 0)
         } else {
             derivative!(4, 0, -1)
@@ -153,16 +153,16 @@ impl Kernel for FDSecondDerivative<4> {
         second_derivative!(2, 2, 0)
     }
 
-    fn negative(&self, left: usize) -> Self::BoundaryWeights {
-        if left == 0 {
+    fn negative(&self, right: usize) -> Self::BoundaryWeights {
+        if right == 0 {
             second_derivative!(0, 5, 0)
         } else {
             second_derivative!(0, 5, 1)
         }
     }
 
-    fn positive(&self, right: usize) -> Self::BoundaryWeights {
-        if right == 0 {
+    fn positive(&self, left: usize) -> Self::BoundaryWeights {
+        if left == 0 {
             second_derivative!(5, 0, 0)
         } else {
             second_derivative!(5, 0, -1)
@@ -185,7 +185,7 @@ impl<const ORDER: usize> FDDissipation<ORDER> {
 
 impl Kernel for FDDissipation<2> {
     type InteriorWeights = [f64; 5];
-    type BoundaryWeights = [f64; 5];
+    type BoundaryWeights = [f64; 6];
 
     const NEGATIVE_SUPPORT: usize = 2;
     const POSITIVE_SUPPORT: usize = 2;
@@ -198,12 +198,18 @@ impl Kernel for FDDissipation<2> {
         [1.0, -4.0, 6.0, -4.0, 1.0]
     }
 
-    fn negative(&self, _: usize) -> Self::BoundaryWeights {
-        [1.0, -4.0, 6.0, -4.0, 1.0]
+    fn negative(&self, right: usize) -> Self::BoundaryWeights {
+        match right {
+            0 => [3.0, -14.0, 26.0, -24.0, 11.0, -2.0],
+            _ => [2.0, -9.0, 16.0, -14.0, 6.0, -1.0],
+        }
     }
 
-    fn positive(&self, _: usize) -> Self::BoundaryWeights {
-        [1.0, -4.0, 6.0, -4.0, 1.0]
+    fn positive(&self, left: usize) -> Self::BoundaryWeights {
+        match left {
+            0 => [-2.0, 11.0, -24.0, 26.0, -14.0, 3.0],
+            _ => [-1.0, 6.0, -14.0, 16.0, -9.0, 2.0],
+        }
     }
 
     fn scale(&self, _: f64) -> f64 {
@@ -226,20 +232,20 @@ impl Kernel for FDDissipation<4> {
         [1.0, -6.0, 15.0, -20.0, 15.0, -6.0, 1.0]
     }
 
-    fn negative(&self, left: usize) -> Self::BoundaryWeights {
-        if left == 0 {
+    fn negative(&self, right: usize) -> Self::BoundaryWeights {
+        if right == 0 {
             [4.0, -27.0, 78.0, -125.0, 120.0, -69.0, 22.0, -3.0]
-        } else if left == 1 {
+        } else if right == 1 {
             [3.0, -20.0, 57.0, -90.0, 85.0, -48.0, 15.0, -2.0]
         } else {
-            [2.0, -13.0, 36.0, -55.0, 50.0, 27.0, 8.0, -1.0]
+            [2.0, -13.0, 36.0, -55.0, 50.0, -27.0, 8.0, -1.0]
         }
     }
 
-    fn positive(&self, right: usize) -> Self::BoundaryWeights {
-        if right == 0 {
+    fn positive(&self, left: usize) -> Self::BoundaryWeights {
+        if left == 0 {
             [-3.0, 22.0, -69.0, 120.0, -125.0, 78.0, -27.0, 4.0]
-        } else if right == 1 {
+        } else if left == 1 {
             [-2.0, 15.0, -48.0, 85.0, -90.0, 57.0, -20.0, 3.0]
         } else {
             [-1.0, 8.0, -27.0, 50.0, -55.0, 36.0, -13.0, 2.0]

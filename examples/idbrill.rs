@@ -6,7 +6,7 @@ use std::io::Write;
 // use aeon_axisymmetry::InitialSystem;
 use std::path::PathBuf;
 
-const RADIUS: f64 = 20.0;
+const RADIUS: f64 = 10.0;
 
 #[derive(Clone)]
 pub enum InitialData {
@@ -160,6 +160,54 @@ impl<'a> SystemOperator<2> for PsiOperator<'a> {
         }
     }
 }
+
+pub struct Hamiltonian<'a> {
+    pub psi: &'a [f64],
+    pub seed: &'a [f64],
+}
+
+impl<'a> Projection<2> for Hamiltonian<'a> {
+    fn evaluate(&self, block: Block<2>, pool: &MemPool, dest: &mut [f64]) {
+        let node_count = block.node_count();
+        let range = block.local_from_global();
+
+        let psi = &self.psi[range.clone()];
+        let psi_r = pool.alloc_scalar(node_count);
+        let psi_z = pool.alloc_scalar(node_count);
+        let psi_rr = pool.alloc_scalar(node_count);
+        let psi_zz = pool.alloc_scalar(node_count);
+
+        block.derivative::<4>(0, &EvenBoundary, psi, psi_r);
+        block.derivative::<4>(1, &EvenBoundary, psi, psi_z);
+        block.second_derivative::<4>(0, &EvenBoundary, psi, psi_rr);
+        block.second_derivative::<4>(1, &EvenBoundary, psi, psi_zz);
+
+        let seed = &self.seed[range.clone()];
+        let seed_r = pool.alloc_scalar(node_count);
+        let seed_rr = pool.alloc_scalar(node_count);
+        let seed_zz = pool.alloc_scalar(node_count);
+
+        block.derivative::<4>(0, &OddBoundary, seed, seed_r);
+        block.second_derivative::<4>(0, &OddBoundary, seed, seed_rr);
+        block.second_derivative::<4>(1, &OddBoundary, seed, seed_zz);
+
+        for vertex in block.iter() {
+            let [rho, _z] = block.position(vertex);
+            let index = block.index_from_vertex(vertex);
+
+            let laplacian = if rho.abs() <= 10e-10 {
+                2.0 * psi_rr[index] + psi_zz[index]
+            } else {
+                psi_rr[index] + psi_r[index] / rho + psi_zz[index]
+            };
+
+            dest[index] = laplacian
+                + psi[index] / 4.0
+                    * (rho * seed_rr[index] + 2.0 * seed_r[index] + rho * seed_zz[index]);
+        }
+    }
+}
+
 pub struct SeedProjection(f64);
 
 impl Projection<2> for SeedProjection {
@@ -213,24 +261,23 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         &PsiBoundary,
         psi.as_mut_slice(),
     );
+    driver.fill_boundary_system(&mesh, &PsiBoundary, psi.as_mut_slice());
 
-    // VTK visualizaton
-    {
-        let mut model = Model::new(mesh.clone());
-        model.attach_field("psi", psi.field(Scalar).iter().map(|&p| p - 1.0).collect());
-        model.attach_field("seed", seed.to_vec());
+    let mut hamiltonian = vec![0.0; mesh.node_count()].into_boxed_slice();
 
-        model
-            .export_vtk(
-                format!("idbrill").as_str(),
-                PathBuf::from(format!("output/idbrill.vtu")),
-            )
-            .unwrap();
-    }
+    driver.project(
+        &mesh,
+        &Hamiltonian {
+            seed: &seed,
+            psi: psi.field(Scalar),
+        },
+        &mut hamiltonian,
+    );
 
     let mut model = Model::new(mesh.clone());
     model.attach_field("psi", psi.field(Scalar).iter().map(|&p| p - 1.0).collect());
     model.attach_field("seed", seed.to_vec());
+    model.attach_field("hamiltonian", hamiltonian.to_vec());
 
     model
         .export_vtk(
@@ -255,7 +302,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let mut model = Model::new(mesh.clone());
         model.attach_system(system.as_slice());
 
-        let mut file = File::create("output/idbrill_extended.dat")?;
+        let mut file = File::create("output/idbrill_res.dat")?;
         file.write_all(ron::to_string(&model)?.as_bytes())?;
     }
 
