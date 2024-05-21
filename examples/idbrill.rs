@@ -6,7 +6,7 @@ use std::io::Write;
 // use aeon_axisymmetry::InitialSystem;
 use std::path::PathBuf;
 
-const RADIUS: f64 = 10.0;
+const RADIUS: f64 = 20.0;
 
 #[derive(Clone)]
 pub enum InitialData {
@@ -248,11 +248,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     psi.field_mut(Scalar).fill(1.0);
 
     let mut solver = HyperRelaxSolver::new();
-    solver.max_steps = 10000;
+    solver.max_steps = 50000;
     solver.cfl = 0.1;
     solver.outgoing = OutgoingWave::Sommerfeld(1.0);
     solver.outgoing_order = OutgoingOrder::Fourth;
-    solver.dampening = 1.0;
+    solver.dampening = 0.4;
 
     solver.solve(
         &mut driver,
@@ -302,7 +302,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let mut model = Model::new(mesh.clone());
         model.attach_system(system.as_slice());
 
-        let mut file = File::create("output/idbrill_res.dat")?;
+        let mut file = File::create("output/idbrill_extended.dat")?;
         file.write_all(ron::to_string(&model)?.as_bytes())?;
     }
 

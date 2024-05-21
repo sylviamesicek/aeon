@@ -7,7 +7,7 @@ use aeon::prelude::*;
 use aeon::{array::Array, mesh::field_count};
 use aeon_axisymmetry::{hyperbolic, hyperbolic_regular, HyperbolicSystem};
 
-const STEPS: usize = 800;
+const STEPS: usize = 1000;
 const CFL: f64 = 0.1;
 
 #[derive(Clone)]
@@ -532,7 +532,7 @@ impl SystemOperator<2> for DynamicDissipation {
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let model: Model<2> = {
         let mut contents = String::new();
-        let mut file = File::open("output/idbrill.dat")?;
+        let mut file = File::open("output/idbrill_extended.dat")?;
         file.read_to_string(&mut contents)?;
 
         ron::from_str(&contents)?
@@ -599,7 +599,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         model.attach_system::<Dynamic>(SystemSlice::from_contiguous(&data));
         model.export_vtk(
             format!("evbrill").as_str(),
-            PathBuf::from(format!("output/evbrill{i}.vtu")),
+            PathBuf::from(format!("output/evbrill_more_diss{i}.vtu")),
         )?;
 
         // Fill ghost nodes of system
@@ -630,7 +630,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         // Add everything together
         for i in 0..data.len() {
-            data[i] += update[i] + 0.05 * dissipation[i];
+            data[i] += update[i] + 0.5 * dissipation[i];
         }
     }
 
