@@ -24,7 +24,7 @@ pub use window::{NodeCartesianIter, NodePlaneIter, NodeWindow};
 use crate::array::ArrayLike as _;
 use crate::geometry::{faces, Face, IndexSpace, Rectangle};
 
-/// Transforms a vertex into a node.
+/// Transforms a vertex into a node (just casts an array of `usize` -> `isize`).
 pub fn node_from_vertex<const N: usize>(vertex: [usize; N]) -> [isize; N] {
     let mut result = [0isize; N];
 
@@ -206,18 +206,22 @@ impl<const N: usize> NodeSpace<N> {
         let vertex_size = self.vertex_size();
         let active_window = self.active_window(boundary);
 
+        // Loop over faces
         for face in faces::<N>() {
             let axis = face.axis;
             let side = face.side;
 
-            // Window of all active ghost nodes adjacent to the given face
+            // Window of all active ghost nodes adjacent to the given face.
             let mut face_window = active_window.clone();
 
             if side {
+                // If on the right side we have to offset the origin such that it is equal to `vertex_size[axis]`
                 let shift = vertex_size[axis] as isize - face_window.origin[axis];
                 face_window.origin[axis] += shift;
+                // Similarly we have to shrink the size, clamping the minimum to be 0.
                 face_window.size[axis] = (face_window.size[axis] as isize - shift).max(0) as usize;
             } else {
+                // If on the left side we shrink the size of the window to only include that face.
                 face_window.size[axis] = (-face_window.origin[axis]).max(0) as usize;
             }
 
@@ -225,16 +229,19 @@ impl<const N: usize> NodeSpace<N> {
             for node in face_window.iter() {
                 match boundary.face(face) {
                     BoundaryCondition::Parity(parity) => {
-                        let distance = if side {
-                            node[axis] - vertex_size[axis] as isize + 1
+                        // Compute offset from nearest vertex
+                        let offset = if side {
+                            node[axis] - (vertex_size[axis] as isize - 1)
                         } else {
                             node[axis]
                         };
 
                         // Flip across axis
                         let mut source = node;
-                        source[axis] -= 2 * distance;
+                        source[axis] -= 2 * offset;
 
+                        // Get value at this inner node and set current node to the (anti)symmetric reflection
+                        // of that value.
                         let v = self.value(source, dest);
 
                         if parity {
@@ -243,7 +250,9 @@ impl<const N: usize> NodeSpace<N> {
                             self.set_value(node, -v, dest);
                         }
                     }
-                    BoundaryCondition::Free | BoundaryCondition::Custom => {}
+                    BoundaryCondition::Free | BoundaryCondition::Custom => {
+                        // Do nothing for free or custom boundary conditions.
+                    }
                 }
             }
 
@@ -277,12 +286,15 @@ impl<const N: usize> NodeSpace<N> {
         // let interior_support = K::InteriorWeights::LEN;
         let boundary_support = K::BoundaryWeights::LEN;
 
+        // Alias some commonly used values
         let axis = kernel.axis();
         let spacing = self.spacing_axis(axis);
         let scale = kernel.scale(spacing);
         let length = self.vertex_size()[axis];
 
+        // Boundary condition on negative face.
         let boundary_negative = boundary.face(Face::negative(axis));
+        // Boundary condition on positive face.
         let boundary_positive = boundary.face(Face::positive(axis));
 
         // Window of active nodes

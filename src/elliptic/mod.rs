@@ -118,7 +118,7 @@ impl<Label: SystemLabel> HyperRelaxSolver<Label> {
             println!(
                 "Time {:.5}/{:.5} Norm {:.5e}",
                 index as f64 * step,
-                self.max_steps as f64 * step as f64,
+                self.max_steps as f64 * step,
                 norm
             );
 
