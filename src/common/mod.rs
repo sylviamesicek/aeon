@@ -381,7 +381,7 @@ mod tests {
     }
 
     #[test]
-    fn evaluate_deriv_2d() {
+    fn compare_evaluate_to_explicit() {
         let space: NodeSpace<2> = NodeSpace {
             size: [10, 10],
             bounds: Rectangle {
@@ -458,9 +458,6 @@ mod tests {
                 ghost: 1,
             };
 
-            let kernel = FDDerivative::<2>::new(0);
-            let boundary = MixedBoundary;
-
             // Create a source vector.
             let mut source = vec![0.0; space.node_count()].into_boxed_slice();
 
@@ -471,13 +468,31 @@ mod tests {
 
             // Allocate explicit vectors
             let mut evaluated = vec![0.0; space.node_count()].into_boxed_slice();
-            space.evaluate(&kernel, &boundary, &source, &mut evaluated);
+            space.evaluate(
+                &FDDerivative::<2>::new(0),
+                &MixedBoundary,
+                &source,
+                &mut evaluated,
+            );
+
+            let mut mixed = vec![0.0; space.node_count()].into_boxed_slice();
+            space.evaluate(
+                &FDDerivative::<2>::new(1),
+                &MixedBoundary,
+                &evaluated,
+                &mut mixed,
+            );
 
             let mut error = 0.0;
 
             for node in space.inner_window().iter() {
                 let position = space.position(node);
-                let diff = space.value(node, &evaluated) - position[0].cos() * position[1].sin();
+                let term1 = space.value(node, &evaluated);
+                let term2 = space.value(node, &mixed);
+
+                let diff = term1 + term2
+                    - position[0].cos() * position[1].sin()
+                    - position[0].cos() * position[1].cos();
 
                 error += diff * diff;
             }
