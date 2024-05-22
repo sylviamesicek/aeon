@@ -1,9 +1,9 @@
 use aeon::array::Array;
 use aeon::elliptic::{HyperRelaxSolver, OutgoingOrder, OutgoingWave};
 use aeon::prelude::*;
+
 use std::fs::File;
 use std::io::Write;
-// use aeon_axisymmetry::InitialSystem;
 use std::path::PathBuf;
 
 #[derive(Clone)]
@@ -227,7 +227,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .author("Lukas Mesicek, lukas.m.mesicek@gmail.com")
         .version("v0.0.1")
         .arg(
-            Arg::new("spatial")
+            Arg::new("points")
                 .num_args(1)
                 .short('s')
                 .long("spatial")
@@ -246,14 +246,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         )
         .get_matches();
 
-    let points = matches.get_one::<usize>("spatial").cloned().unwrap_or(80);
-    let radius = matches.get_one::<f64>("radius").cloned().unwrap_or(20.0);
+    let points = matches
+        .get_one::<String>("spatial")
+        .map(|s| s.parse().unwrap())
+        .unwrap_or(80);
+    let radius = matches
+        .get_one::<String>("radius")
+        .map(|s| s.parse().unwrap())
+        .unwrap_or(20.0);
 
     env_logger::builder()
         .filter_level(log::LevelFilter::Trace)
-        .build();
+        .init();
 
-    log::info!("Allocating Driver and Building Mesh with {points} grid points");
+    log::info!("Allocating Driver and Building Mesh");
 
     let mut driver = Driver::new();
 
