@@ -40,7 +40,7 @@ pub struct NodeCartesianIter<const N: usize> {
 impl<const N: usize> NodeCartesianIter<N> {
     pub fn new(origin: [isize; N], size: [usize; N]) -> Self {
         Self {
-            origin: origin,
+            origin,
             inner: IndexSpace::new(size).iter(),
         }
     }

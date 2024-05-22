@@ -1,4 +1,4 @@
-/// A face of a rectangular prism.
+/// A face of a rectangular prism in `N` dimensional space.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Face {
     pub axis: usize,
@@ -31,6 +31,7 @@ impl Face {
 }
 
 /// Iterator over all faces in a given number of dimensions.
+#[derive(Debug)]
 pub struct FaceIter<const N: usize> {
     axis: usize,
     side: bool,
@@ -53,6 +54,16 @@ impl<const N: usize> Iterator for FaceIter<N> {
         self.side = !self.side;
 
         Some(result)
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        (2 * N, Some(2 * N))
+    }
+}
+
+impl<const N: usize> ExactSizeIterator for FaceIter<N> {
+    fn len(&self) -> usize {
+        2 * N
     }
 }
 

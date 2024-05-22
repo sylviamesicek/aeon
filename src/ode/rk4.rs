@@ -1,7 +1,7 @@
 use super::Ode;
 
 /// RK4 Integrator.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct Rk4 {
     k1: Vec<f64>,
     k2: Vec<f64>,
@@ -11,12 +11,7 @@ pub struct Rk4 {
 
 impl Rk4 {
     pub fn new() -> Self {
-        Self {
-            k1: Vec::new(),
-            k2: Vec::new(),
-            k3: Vec::new(),
-            k4: Vec::new(),
-        }
+        Self::default()
     }
 
     pub fn step<Problem: Ode>(
@@ -36,9 +31,7 @@ impl Rk4 {
         self.k4.resize(dim, 0.0);
 
         // K1
-        for i in 0..dim {
-            update[i] = system[i];
-        }
+        update.copy_from_slice(system);
         derivs.preprocess(update);
         derivs.derivative(update, &mut self.k1);
 

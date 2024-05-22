@@ -128,6 +128,17 @@ impl<const N: usize> Iterator for CartesianIter<N> {
 
         Some(result)
     }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let count = self.len();
+        (count, Some(count))
+    }
+}
+
+impl<const N: usize> ExactSizeIterator for CartesianIter<N> {
+    fn len(&self) -> usize {
+        IndexSpace::new(self.size).len()
+    }
 }
 
 /// An iterator over a plane in an index space.
@@ -145,6 +156,16 @@ impl<const N: usize> Iterator for PlaneIterator<N> {
         let mut index = self.inner.next()?;
         index[self.axis] = self.intercept;
         Some(index)
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.inner.size_hint()
+    }
+}
+
+impl<const N: usize> ExactSizeIterator for PlaneIterator<N> {
+    fn len(&self) -> usize {
+        self.inner.len()
     }
 }
 

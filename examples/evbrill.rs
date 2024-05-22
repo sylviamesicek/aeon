@@ -585,7 +585,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Spacing {}", mesh.minimum_spacing());
     println!("Step Size {}", h);
 
-    let mut data = dynamic.into_contigious().into_boxed_slice();
+    let mut data = dynamic.as_slice().to_contigious().into_boxed_slice();
     let mut update = vec![0.0; data.len()].into_boxed_slice();
     let mut dissipation = vec![0.0; data.len()].into_boxed_slice();
 

@@ -32,10 +32,10 @@ impl<const N: usize> Model<N> {
 
     /// Attaches system to model.
     pub fn attach_system<Label: SystemLabel>(&mut self, system: SystemSlice<'_, Label>) {
-        assert!(self.systems.contains_key(Label::NAME) == false);
+        assert!(!self.systems.contains_key(Label::NAME));
 
         let node_count = system.node_count();
-        let data = system.into_contigious();
+        let data = system.to_contigious();
 
         let fields = Label::fields()
             .into_iter()
@@ -53,11 +53,11 @@ impl<const N: usize> Model<N> {
 
     pub fn read_system<Label: SystemLabel>(&self) -> Option<SystemVec<Label>> {
         let meta = self.systems.get(Label::NAME)?;
-        Some(SystemVec::from_contigious(&meta.data))
+        Some(SystemSlice::from_contiguous(&meta.data).to_vec())
     }
 
     pub fn attach_field(&mut self, name: &str, data: Vec<f64>) {
-        assert!(self.fields.contains_key(name) == false);
+        assert!(!self.fields.contains_key(name));
         self.fields.insert(name.to_string(), data);
     }
 
@@ -181,7 +181,7 @@ impl<const N: usize> Model<N> {
             let mut vert_data = Vec::with_capacity(vertex_space.len());
 
             for vertex in vertex_space.iter() {
-                vert_data.push(node_space.value(node_from_vertex(vertex), &data));
+                vert_data.push(node_space.value(node_from_vertex(vertex), data));
             }
 
             attributes.point.push(Attribute::DataArray(DataArrayBase {

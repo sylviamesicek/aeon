@@ -32,6 +32,7 @@ pub trait Kernel {
 pub struct FDDerivative<const ORDER: usize>(usize);
 
 impl<const ORDER: usize> FDDerivative<ORDER> {
+    /// Constructs a kernal which approximates a derivative along a given axis.
     pub fn new(axis: usize) -> Self {
         Self(axis)
     }
@@ -105,6 +106,7 @@ impl Kernel for FDDerivative<4> {
 pub struct FDSecondDerivative<const ORDER: usize>(usize);
 
 impl<const ORDER: usize> FDSecondDerivative<ORDER> {
+    /// Constructs a kernal which approximates a second derivative along a given axis.
     pub fn new(axis: usize) -> Self {
         Self(axis)
     }
@@ -178,6 +180,7 @@ impl Kernel for FDSecondDerivative<4> {
 pub struct FDDissipation<const ORDER: usize>(usize);
 
 impl<const ORDER: usize> FDDissipation<ORDER> {
+    /// Constructs a kernal which computes Kriess-Oliger dissipation for a given axis.
     pub fn new(axis: usize) -> Self {
         Self(axis)
     }

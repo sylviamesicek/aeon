@@ -1,14 +1,14 @@
 use super::Ode;
 
 /// Standard forward Euler Integrator.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct ForwardEuler {
     k1: Vec<f64>,
 }
 
 impl ForwardEuler {
     pub fn new() -> Self {
-        Self { k1: Vec::new() }
+        Self::default()
     }
 
     pub fn step<Problem: Ode>(
@@ -21,12 +21,9 @@ impl ForwardEuler {
         assert!(system.len() == update.len());
 
         let dim = system.len();
-
         self.k1.resize(dim, 0.0);
         // K1
-        for i in 0..dim {
-            update[i] = system[i];
-        }
+        update.copy_from_slice(system);
         derivs.preprocess(update);
         derivs.derivative(update, &mut self.k1);
 

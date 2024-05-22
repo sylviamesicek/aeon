@@ -2,7 +2,7 @@ use crate::array::{Array, ArrayLike};
 
 use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
-use std::ops::{Bound, RangeBounds};
+use std::ops::{Bound, Range, RangeBounds};
 use std::slice::{self, SliceIndex};
 
 /// This trait is used to define systems of fields.
@@ -66,23 +66,6 @@ impl<Label: SystemLabel> SystemVec<Label> {
             node_count,
             fields: Label::FieldLike::<Vec<f64>>::from_fn(|_| vec![0.0; node_count]).into(),
         }
-    }
-
-    /// Copies the data for a system from a contigious slice of values.
-    pub fn from_contigious(data: &[f64]) -> Self {
-        let slice = SystemSlice::<'_, Label>::from_contiguous(data);
-        let fields = Label::FieldLike::<_>::from_fn(|i| slice.fields[i].to_vec());
-
-        Self {
-            node_count: slice.node_count(),
-            fields: fields.into(),
-        }
-    }
-
-    /// Transforms a system into an owned array of values.
-    pub fn into_contigious(&self) -> Vec<f64> {
-        // Damn, iterator chaining is powerful
-        self.fields.clone().into_iter().flatten().collect()
     }
 
     /// Number of degrees of freedom per field.
@@ -154,7 +137,7 @@ impl<'a, Label: SystemLabel> SystemSlice<'a, Label> {
         // I am sure there is a safe way to do this, but this works and is quick.
         let ptr = data.as_ptr();
         let fields = Label::FieldLike::from_fn(|i| unsafe {
-            slice::from_raw_parts::<'a, _>(ptr.offset((node_count * i) as isize), node_count)
+            slice::from_raw_parts::<'a, _>(ptr.add(node_count * i), node_count)
         });
 
         Self {
@@ -164,15 +147,19 @@ impl<'a, Label: SystemLabel> SystemSlice<'a, Label> {
     }
 
     /// Transforms a system into an owned array of values.
-    pub fn into_contigious(&self) -> Vec<f64> {
+    pub fn to_contigious(&self) -> Vec<f64> {
         // Damn, iterator chaining is powerful
-        self.fields
-            .clone()
-            .into_iter()
-            .map(|slice| slice.iter())
-            .flatten()
-            .cloned()
-            .collect()
+        self.fields.clone().into_iter().flatten().cloned().collect()
+    }
+
+    /// Converts a system slice into an owned vector.
+    pub fn to_vec(&self) -> SystemVec<Label> {
+        let fields = Label::FieldLike::from_fn(|i| self.fields[i].to_vec());
+
+        SystemVec {
+            node_count: self.node_count,
+            fields: fields.into(),
+        }
     }
 
     /// Number of degrees of freedom per field.
@@ -189,6 +176,19 @@ impl<'a, Label: SystemLabel> SystemSlice<'a, Label> {
     where
         R: RangeBounds<usize> + SliceIndex<[f64], Output = [f64]> + Clone,
     {
+        let range = self.bounds_to_range(range);
+
+        Self {
+            node_count: range.end - range.start,
+            fields: Label::FieldLike::<&'a [f64]>::from_fn(|i| &self.fields[i][range.clone()])
+                .into(),
+        }
+    }
+
+    fn bounds_to_range<R>(&self, range: R) -> Range<usize>
+    where
+        R: RangeBounds<usize>,
+    {
         let start_inc = match range.start_bound() {
             Bound::Included(&i) => i,
             Bound::Excluded(&i) => i + 1,
@@ -201,11 +201,7 @@ impl<'a, Label: SystemLabel> SystemSlice<'a, Label> {
             Bound::Unbounded => self.node_count,
         };
 
-        Self {
-            node_count: end_exc - start_inc,
-            fields: Label::FieldLike::<&'a [f64]>::from_fn(|i| &self.fields[i][range.clone()])
-                .into(),
-        }
+        start_inc..end_exc
     }
 }
 
@@ -220,18 +216,26 @@ impl<'a, Label: SystemLabel> SystemSliceMut<'a, Label> {
     /// data.len() must be equal to node_count * field_count.
     pub fn from_contiguous(data: &'a mut [f64]) -> Self {
         assert!(data.len() % field_count::<Label>() == 0);
+
         let node_count = data.len() / field_count::<Label>();
 
-        // I am sure there is a safe way to do this, but this works and is quick.
-        let ptr = data.as_mut_ptr();
+        let ptr: *mut f64 = data.as_mut_ptr();
         let fields = Label::FieldLike::from_fn(|i| unsafe {
-            slice::from_raw_parts_mut::<'a, _>(ptr.offset((node_count * i) as isize), node_count)
+            slice::from_raw_parts_mut::<'a, _>(ptr.add(node_count * i), node_count)
         });
 
         Self {
             node_count,
             fields: fields.into(),
         }
+    }
+
+    pub fn to_contigious(&self) -> Vec<f64> {
+        self.slice(..).to_contigious()
+    }
+
+    pub fn to_vec(&self) -> SystemVec<Label> {
+        self.slice(..).to_vec()
     }
 
     /// Number of degrees of freedom per field.
@@ -244,6 +248,7 @@ impl<'a, Label: SystemLabel> SystemSliceMut<'a, Label> {
         self.fields[label.field_index()]
     }
 
+    /// Retrieves a mutable reference to a field located at the given index.
     pub fn field_mut(&mut self, label: Label) -> &mut [f64] {
         self.fields[label.field_index()]
     }
@@ -252,22 +257,18 @@ impl<'a, Label: SystemLabel> SystemSliceMut<'a, Label> {
     where
         R: RangeBounds<usize> + SliceIndex<[f64], Output = [f64]> + Clone,
     {
-        let start_inc = match range.start_bound() {
-            Bound::Included(&i) => i,
-            Bound::Excluded(&i) => i + 1,
-            Bound::Unbounded => 0,
-        };
-
-        let end_exc = match range.end_bound() {
-            Bound::Included(&i) => i + 1,
-            Bound::Excluded(&i) => i,
-            Bound::Unbounded => self.node_count,
-        };
-
-        let node_count = end_exc - start_inc;
+        let range = self.bounds_to_range(range);
+        // Check range.
+        assert!(
+            range.start <= self.node_count
+                && range.end <= self.node_count
+                && range.start <= range.end
+        );
+        let node_count = range.end - range.start;
 
         let fields = Label::FieldLike::<&[f64]>::from_fn(|i| unsafe {
-            slice::from_raw_parts(self.fields[i].as_ptr(), node_count)
+            let data = self.fields[i].as_ptr().add(range.start);
+            slice::from_raw_parts(data, node_count)
         });
 
         SystemSlice {
@@ -280,6 +281,30 @@ impl<'a, Label: SystemLabel> SystemSliceMut<'a, Label> {
     where
         R: RangeBounds<usize> + SliceIndex<[f64], Output = [f64]> + Clone,
     {
+        let range = self.bounds_to_range(range);
+        // Check range.
+        assert!(
+            range.start <= self.node_count
+                && range.end <= self.node_count
+                && range.start <= range.end
+        );
+        let node_count = range.end - range.start;
+
+        let fields = Label::FieldLike::<&mut [f64]>::from_fn(|i| unsafe {
+            let data = self.fields[i].as_mut_ptr().add(range.start);
+            slice::from_raw_parts_mut(data, node_count)
+        });
+
+        Self {
+            node_count,
+            fields: fields.into(),
+        }
+    }
+
+    fn bounds_to_range<R>(&self, range: R) -> Range<usize>
+    where
+        R: RangeBounds<usize>,
+    {
         let start_inc = match range.start_bound() {
             Bound::Included(&i) => i,
             Bound::Excluded(&i) => i + 1,
@@ -292,16 +317,7 @@ impl<'a, Label: SystemLabel> SystemSliceMut<'a, Label> {
             Bound::Unbounded => self.node_count,
         };
 
-        let node_count = end_exc - start_inc;
-
-        let fields = Label::FieldLike::<&'a mut [f64]>::from_fn(|i| unsafe {
-            slice::from_raw_parts_mut(self.fields[i].as_mut_ptr(), node_count)
-        });
-
-        Self {
-            node_count,
-            fields: fields.into(),
-        }
+        start_inc..end_exc
     }
 }
 
@@ -346,26 +362,26 @@ mod tests {
     #[test]
     fn systems() {
         let data = vec![0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0];
-        let owned = SystemVec::<MySystem>::from_contigious(data.as_ref());
+        let owned = SystemSlice::<MySystem>::from_contiguous(data.as_ref()).to_vec();
 
         assert_eq!(owned.node_count(), 3);
         assert_eq!(owned.field(MySystem::First), &[0.0, 1.0, 2.0]);
         assert_eq!(owned.field(MySystem::Second), &[3.0, 4.0, 5.0]);
         assert_eq!(owned.field(MySystem::Third), &[6.0, 7.0, 8.0]);
 
-        let slice = owned.as_slice();
+        let slice = owned.slice(1..3);
         let slice_cast = SystemSlice::<MySystem>::from_contiguous(&data);
         assert_eq!(
             slice.field(MySystem::First),
-            slice_cast.field(MySystem::First)
+            &slice_cast.field(MySystem::First)[1..3]
         );
         assert_eq!(
             slice.field(MySystem::Second),
-            slice_cast.field(MySystem::Second)
+            &slice_cast.field(MySystem::Second)[1..3]
         );
         assert_eq!(
             slice.field(MySystem::Third),
-            slice_cast.field(MySystem::Third)
+            &slice_cast.field(MySystem::Third)[1..3]
         );
     }
 }

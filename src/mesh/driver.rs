@@ -94,6 +94,7 @@ impl Driver {
         self.pool.reset();
     }
 
+    /// Computes the approximate l^2 functional norm of the scalar field.
     pub fn norm<const N: usize>(&mut self, mesh: &Mesh<N>, src: &[f64]) -> f64 {
         let block = mesh.base_block();
         let src = &src[block.local_from_global()];
@@ -106,9 +107,16 @@ impl Driver {
             result += src[index] * src[index];
         }
 
-        return result.sqrt();
+        // Scale by spacing in each direction to approximate
+        // functional norm.
+        for spacing in block.space.spacing() {
+            result *= spacing;
+        }
+
+        result.sqrt()
     }
 
+    /// Returns the maximum norm of any of the constituent scalar fields.
     pub fn norm_system<const N: usize, Label: SystemLabel>(
         &mut self,
         mesh: &Mesh<N>,

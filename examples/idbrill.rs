@@ -6,8 +6,6 @@ use std::io::Write;
 // use aeon_axisymmetry::InitialSystem;
 use std::path::PathBuf;
 
-const RADIUS: f64 = 20.0;
-
 #[derive(Clone)]
 pub enum InitialData {
     Conformal,
@@ -221,28 +219,61 @@ impl Projection<2> for SeedProjection {
     }
 }
 
+use clap::{Arg, Command};
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    println!("Allocating Driver and Building Mesh");
+    let matches = Command::new("idbrill")
+        .about("A program for generating brill initial data using hyperbolic relaxation.")
+        .author("Lukas Mesicek, lukas.m.mesicek@gmail.com")
+        .version("v0.0.1")
+        .arg(
+            Arg::new("spatial")
+                .num_args(1)
+                .short('s')
+                .long("spatial")
+                .help("Number of grid points along each axis")
+                .value_name("POINTS")
+                .default_value("80"),
+        )
+        .arg(
+            Arg::new("radius")
+                .num_args(1)
+                .short('r')
+                .long("radius")
+                .help("Size of grid along each axis")
+                .value_name("RADIUS")
+                .default_value("20.0"),
+        )
+        .get_matches();
+
+    let points = matches.get_one::<usize>("spatial").cloned().unwrap_or(80);
+    let radius = matches.get_one::<f64>("radius").cloned().unwrap_or(20.0);
+
+    env_logger::builder()
+        .filter_level(log::LevelFilter::Trace)
+        .build();
+
+    log::info!("Allocating Driver and Building Mesh with {points} grid points");
 
     let mut driver = Driver::new();
 
     let mesh = Mesh::new(
         Rectangle {
-            size: [RADIUS, RADIUS],
+            size: [radius, radius],
             origin: [0.0, 0.0],
         },
-        [80, 80],
+        [points, points],
         3,
     );
 
-    println!("Filling Seed Function");
+    log::info!("Filling Seed Function");
 
     // Compute seed values.
     let mut seed = vec![0.0; mesh.node_count()].into_boxed_slice();
     driver.project(&mesh, &SeedProjection(1.0), &mut seed);
     driver.fill_boundary(&mesh, &OddBoundary, &mut seed);
 
-    println!("Integrating Psi Values");
+    log::info!("Running Hyperbolic Relaxation");
 
     let mut psi = SystemVec::new(mesh.node_count());
     psi.field_mut(Scalar).fill(1.0);
@@ -302,7 +333,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let mut model = Model::new(mesh.clone());
         model.attach_system(system.as_slice());
 
-        let mut file = File::create("output/idbrill_extended.dat")?;
+        let mut file = File::create("output/idbrill.dat")?;
         file.write_all(ron::to_string(&model)?.as_bytes())?;
     }
 

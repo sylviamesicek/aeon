@@ -169,37 +169,37 @@ impl<const N: usize> NodeSpace<N> {
         dest[self.index_from_node(node)] = v;
     }
 
-    /// Produces a node space with half the number of
-    /// nodes along each direction.
-    pub fn coarsened(&self) -> Self {
-        let mut cells: [usize; N] = self.size;
+    // /// Produces a node space with half the number of
+    // /// nodes along each direction.
+    // pub fn coarsened(&self) -> Self {
+    //     let mut cells: [usize; N] = self.size;
 
-        for c in cells.iter_mut() {
-            *c /= 2;
-        }
+    //     for c in cells.iter_mut() {
+    //         *c /= 2;
+    //     }
 
-        Self {
-            size: cells,
-            bounds: self.bounds.clone(),
-            ghost: self.ghost,
-        }
-    }
+    //     Self {
+    //         size: cells,
+    //         bounds: self.bounds.clone(),
+    //         ghost: self.ghost,
+    //     }
+    // }
 
-    /// Produces a node space with double the number of nodes
-    /// along each direction.
-    pub fn refined(&self) -> Self {
-        let mut cells: [usize; N] = self.size;
+    // /// Produces a node space with double the number of nodes
+    // /// along each direction.
+    // pub fn refined(&self) -> Self {
+    //     let mut cells: [usize; N] = self.size;
 
-        for c in cells.iter_mut() {
-            *c *= 2;
-        }
+    //     for c in cells.iter_mut() {
+    //         *c *= 2;
+    //     }
 
-        Self {
-            size: cells,
-            bounds: self.bounds.clone(),
-            ghost: self.ghost,
-        }
-    }
+    //     Self {
+    //         size: cells,
+    //         bounds: self.bounds.clone(),
+    //         ghost: self.ghost,
+    //     }
+    // }
 
     /// Set strongly enforced boundary conditions.
     pub fn fill_boundary<B: Boundary>(&self, boundary: &B, dest: &mut [f64]) {
@@ -261,12 +261,9 @@ impl<const N: usize> NodeSpace<N> {
 
             // Iterate over face
             for node in active_window.plane(axis, intercept) {
-                match boundary.face(face) {
-                    BoundaryCondition::Parity(false) => {
-                        // For antisymmetric boundaries we set all values on axis to be 0.
-                        self.set_value(node, 0.0, dest);
-                    }
-                    _ => {}
+                if let BoundaryCondition::Parity(false) = boundary.face(face) {
+                    // For antisymmetric boundaries we set all values on axis to be 0.
+                    self.set_value(node, 0.0, dest);
                 }
             }
         }

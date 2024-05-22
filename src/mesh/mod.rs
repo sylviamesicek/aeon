@@ -21,6 +21,20 @@ pub trait Projection<const N: usize> {
     fn evaluate(&self, block: Block<N>, pool: &MemPool, dest: &mut [f64]);
 }
 
+pub struct Gaussian(f64);
+
+impl<const N: usize> Projection<N> for Gaussian {
+    fn evaluate(&self, block: Block<N>, _pool: &MemPool, dest: &mut [f64]) {
+        for vertex in block.iter() {
+            let pos = block.position(vertex);
+            let mag = pos.iter().map(|f| f * f).sum::<f64>();
+            let index = block.index_from_vertex(vertex);
+
+            dest[index] = self.0 * (-mag).exp();
+        }
+    }
+}
+
 pub trait Operator<const N: usize> {
     fn apply(&self, block: Block<N>, pool: &MemPool, src: &[f64], dest: &mut [f64]);
 }
@@ -107,7 +121,7 @@ impl<const N: usize> Serialize for Mesh<N> {
     {
         MeshSerde {
             bounds: self.bounds.clone(),
-            size: self.size.clone().into(),
+            size: self.size.into(),
             ghost: self.ghost,
         }
         .serialize(serializer)

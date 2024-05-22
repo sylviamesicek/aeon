@@ -2,6 +2,7 @@
 name = "aeon"
 version = "0.1.0"
 edition = "2021"
+exclude = ["crates/"]
 readme = "README.md"
 
 [workspace]
@@ -20,6 +21,7 @@ serde = "1.0.200"
 vtkio = "0.6"
 
 [dev-dependencies]
+clap = "4.5.4"
 env_logger = "0.11"
 ron = "0.8"
 
@@ -31,19 +33,3 @@ path = "examples/idbrill.rs"
 [[example]]
 name = "evbrill"
 path = "examples/evbrill.rs"
-
-# [[example]]
-# name = "evolution2"
-# path = "examples/evolution2/main.rs"
-
-# [[example]]
-# name = "advection"
-# path = "examples/advection.rs"
-
-# [[example]]
-# name = "poisson"
-# path = "examples/poisson.rs"
-
-# [[example]]
-# name = "poisson_1d"
-# path = "examples/poisson_1d.rs"

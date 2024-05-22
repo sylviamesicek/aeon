@@ -1,5 +1,7 @@
 //! A module for various geometric primatives (AABBs, working with cartesian indices, etc.).
 
+#![allow(clippy::needless_range_loop)]
+
 mod axis;
 mod face;
 mod indices;
@@ -43,8 +45,8 @@ impl<const N: usize> Serialize for Rectangle<N> {
         S: serde::Serializer,
     {
         RectangleSerde {
-            size: self.size.clone().into(),
-            origin: self.origin.clone().into(),
+            size: self.size.into(),
+            origin: self.origin.into(),
         }
         .serialize(serializer)
     }

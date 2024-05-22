@@ -2,6 +2,8 @@
 //!
 //! This is used by the Method of Lines hyperbolic solver, and the Hyperbolic Relaxation elliptic solver.
 
+#![allow(clippy::needless_range_loop)]
+
 mod forward_euler;
 mod rk4;
 

@@ -85,7 +85,7 @@ impl<Label: SystemLabel> HyperRelaxSolver<Label> {
 
                 vsys.field_mut(field.clone())
                     .iter_mut()
-                    .for_each(|f| *f = self.dampening * *f);
+                    .for_each(|f| *f *= self.dampening);
             }
         }
 
@@ -105,33 +105,14 @@ impl<Label: SystemLabel> HyperRelaxSolver<Label> {
                 );
             }
 
-            let base_block = mesh.base_block();
+            let norm = driver.norm_system(mesh, system.slice(..));
 
-            let norm = driver.norm_system(mesh, system.slice(..))
-                * base_block
-                    .space
-                    .spacing()
-                    .iter()
-                    .map(|f| f.sqrt())
-                    .product::<f64>();
-
-            println!(
+            log::trace!(
                 "Time {:.5}/{:.5} Norm {:.5e}",
                 index as f64 * step,
                 self.max_steps as f64 * step,
                 norm
             );
-
-            // let mut model = Model::new(mesh.clone());
-            // model.attach_field("psi", u.to_vec());
-            // model.attach_field("deriv", system.field(Label::fields()[0].clone()).to_vec());
-
-            // model
-            //     .export_vtk(
-            //         format!("hyperrelax").as_str(),
-            //         PathBuf::from(format!("output/hyperrelax{index}.vtu")),
-            //     )
-            //     .unwrap();
 
             let mut ode = FictitiousOde {
                 driver,
@@ -163,6 +144,12 @@ impl<Label: SystemLabel> HyperRelaxSolver<Label> {
                     .clone_from_slice(usys.field(field.clone()))
             }
         }
+    }
+}
+
+impl<Label: SystemLabel> Default for HyperRelaxSolver<Label> {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
