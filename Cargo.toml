@@ -3,10 +3,12 @@ members = ["crates/*", "tools/idbrill", "tools/evbrill"]
 resolver = "2"
 
 [workspace.dependencies]
+cc = "1.0"
 clap = "4.5.4"
 env_logger = "0.11"
 log = "0.4"
 ron = "0.8"
+
 
 [package]
 name = "aeon"
@@ -19,7 +21,6 @@ readme = "README.md"
 
 [dependencies]
 aeon_macros = { path = "crates/aeon_macros" }
-aeon_axisymmetry = { path = "crates/aeon_axisymmetry" }
 
 log.workspace = true
 

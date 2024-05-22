@@ -248,7 +248,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let points = matches
         .get_one::<String>("spatial")
-        .map(|s| s.parse().unwrap())
+        .map(|s| s.parse::<usize>().unwrap())
         .unwrap_or(80);
     let radius = matches
         .get_one::<String>("radius")
@@ -259,7 +259,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .filter_level(log::LevelFilter::Trace)
         .init();
 
-    log::info!("Allocating Driver and Building Mesh");
+    log::info!("Allocating Driver and Building Mesh Grid Size {points} Radius {radius}");
 
     let mut driver = Driver::new();
 
@@ -285,7 +285,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     psi.field_mut(Scalar).fill(1.0);
 
     let mut solver = HyperRelaxSolver::new();
-    solver.max_steps = 50000;
+    solver.tolerance = 1e-9;
+    solver.max_steps = 100000;
     solver.cfl = 0.1;
     solver.outgoing = OutgoingWave::Sommerfeld(1.0);
     solver.outgoing_order = OutgoingOrder::Fourth;
@@ -319,7 +320,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     model
         .export_vtk(
             format!("idbrill").as_str(),
-            PathBuf::from(format!("output/idbrill.vtu")),
+            PathBuf::from(format!("output/idbrill_res.vtu")),
         )
         .unwrap();
 
@@ -339,7 +340,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let mut model = Model::new(mesh.clone());
         model.attach_system(system.as_slice());
 
-        let mut file = File::create("output/idbrill.dat")?;
+        let mut file = File::create("output/idbrill_res.dat")?;
         file.write_all(ron::to_string(&model)?.as_bytes())?;
     }
 

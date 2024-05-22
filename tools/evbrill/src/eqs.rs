@@ -1,7 +1,3 @@
-//! This crate provides equations for evolution in axisymmetric
-//! numerical relativity. This mainly exists because build scripts
-//! must be attached to crates, rather than simple binaries.
-
 #[repr(C)]
 #[derive(Clone, Debug)]
 pub struct HyperbolicSystem {

@@ -5,9 +5,11 @@ edition = "2021"
 
 [dependencies]
 aeon = { path = "../.." }
-aeon_axisymmetry = { path = "../../crates/aeon_axisymmetry" }
 
 clap.workspace = true
 env_logger.workspace = true
 log.workspace = true
 ron.workspace = true
+
+[build-dependencies]
+cc.workspace = true

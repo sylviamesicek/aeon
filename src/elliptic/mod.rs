@@ -114,6 +114,14 @@ impl<Label: SystemLabel> HyperRelaxSolver<Label> {
                 norm
             );
 
+            if norm <= self.tolerance {
+                log::trace!(
+                    "Hyperbolic Relaxation converged with error {:.5e}",
+                    self.tolerance
+                );
+                break;
+            }
+
             let mut ode = FictitiousOde {
                 driver,
                 mesh,

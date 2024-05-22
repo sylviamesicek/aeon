@@ -1,13 +1,15 @@
 #![allow(unused_assignments)]
 
+use aeon::prelude::*;
+use aeon::{array::Array, mesh::field_count};
 use std::path::PathBuf;
 use std::{fs::File, io::Read};
 
-use aeon::prelude::*;
-use aeon::{array::Array, mesh::field_count};
-use aeon_axisymmetry::{hyperbolic, hyperbolic_regular, HyperbolicSystem};
+mod eqs;
 
-const STEPS: usize = 1000;
+use eqs::{hyperbolic, hyperbolic_regular, HyperbolicSystem};
+
+const STEPS: usize = 2000;
 const CFL: f64 = 0.1;
 
 #[derive(Clone)]
@@ -142,20 +144,14 @@ impl SystemBoundary for DynamicBoundary {
 
     fn field(&self, label: Self::Label) -> Self::Boundary {
         let (rho, z) = match label {
-            Dynamic::Grr => (true, true),
-            Dynamic::Grz => (false, false),
-            Dynamic::Gzz => (true, true),
-            Dynamic::S => (false, true),
-            Dynamic::Krr => (true, true),
-            Dynamic::Krz => (false, false),
-            Dynamic::Kzz => (true, true),
-            Dynamic::Y => (false, true),
-            Dynamic::Theta => (true, true),
-            Dynamic::Zr => (false, true),
-            Dynamic::Zz => (true, false),
-            Dynamic::Lapse => (true, true),
-            Dynamic::Shiftr => (false, true),
-            Dynamic::Shiftz => (true, false),
+            Dynamic::Grr | Dynamic::Krr => (true, true),
+            Dynamic::Grz | Dynamic::Krz => (false, false),
+            Dynamic::Gzz | Dynamic::Kzz => (true, true),
+            Dynamic::S | Dynamic::Y => (false, true),
+
+            Dynamic::Theta | Dynamic::Lapse => (true, true),
+            Dynamic::Zr | Dynamic::Shiftr => (false, true),
+            Dynamic::Zz | Dynamic::Shiftz => (true, false),
         };
         ParityBoundary(rho, z)
     }
@@ -532,7 +528,7 @@ impl SystemOperator<2> for DynamicDissipation {
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let model: Model<2> = {
         let mut contents = String::new();
-        let mut file = File::open("output/idbrill.dat")?;
+        let mut file = File::open("output/idbrill_res.dat")?;
         file.read_to_string(&mut contents)?;
 
         ron::from_str(&contents)?
@@ -599,7 +595,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         model.attach_system::<Dynamic>(SystemSlice::from_contiguous(&data));
         model.export_vtk(
             format!("evbrill").as_str(),
-            PathBuf::from(format!("output/evbrill{i}.vtu")),
+            PathBuf::from(format!("output/evbrill_res{i}.vtu")),
         )?;
 
         // Fill ghost nodes of system

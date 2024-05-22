@@ -20,5 +20,5 @@ fn main() {
         .opt_level(3)
         .include(&eqs_dir)
         .file(&eqs_dir.join("eqs.c"))
-        .compile("axisymmetric_eqs");
+        .compile("hyperbolic_eqs");
 }
