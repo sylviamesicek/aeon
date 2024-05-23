@@ -35,7 +35,7 @@ pub const fn field_count<Label: SystemLabel>() -> usize {
 pub struct Scalar;
 
 impl SystemLabel for Scalar {
-    const NAME: &'static str = "Default";
+    const NAME: &'static str = "Scalar";
 
     type FieldLike<T> = [T; 1];
 
