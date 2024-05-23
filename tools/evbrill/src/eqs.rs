@@ -1,3 +1,5 @@
+//! Rust bindings to automatiically generated C code.
+
 #[repr(C)]
 #[derive(Clone, Debug)]
 pub struct HyperbolicSystem {

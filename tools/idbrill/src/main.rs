@@ -6,32 +6,10 @@ use std::fs::File;
 use std::io::Write;
 use std::path::PathBuf;
 
-#[derive(Clone)]
+#[derive(Clone, SystemLabel)]
 pub enum InitialData {
     Conformal,
     Seed,
-}
-
-impl SystemLabel for InitialData {
-    const NAME: &'static str = "InitialData";
-    type FieldLike<T> = [T; 2];
-    fn fields() -> Array<Self::FieldLike<Self>> {
-        [InitialData::Conformal, InitialData::Seed].into()
-    }
-
-    fn field_index(&self) -> usize {
-        match self {
-            InitialData::Conformal => 0,
-            InitialData::Seed => 1,
-        }
-    }
-
-    fn field_name(&self) -> String {
-        match self {
-            InitialData::Conformal => "Conformal".to_string(),
-            InitialData::Seed => "Seed".to_string(),
-        }
-    }
 }
 
 pub struct InitialDataProjection<'a> {
@@ -229,8 +207,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .arg(
             Arg::new("points")
                 .num_args(1)
-                .short('s')
-                .long("spatial")
+                .short('p')
+                .long("points")
                 .help("Number of grid points along each axis")
                 .value_name("POINTS")
                 .default_value("80"),
@@ -247,7 +225,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .get_matches();
 
     let points = matches
-        .get_one::<String>("spatial")
+        .get_one::<String>("points")
         .map(|s| s.parse::<usize>().unwrap())
         .unwrap_or(80);
     let radius = matches

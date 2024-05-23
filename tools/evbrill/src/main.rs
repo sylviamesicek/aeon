@@ -12,35 +12,13 @@ use eqs::{hyperbolic, hyperbolic_regular, HyperbolicSystem};
 const STEPS: usize = 2000;
 const CFL: f64 = 0.1;
 
-#[derive(Clone)]
+#[derive(Clone, SystemLabel)]
 pub enum InitialData {
     Conformal,
     Seed,
 }
 
-impl SystemLabel for InitialData {
-    const NAME: &'static str = "InitialData";
-    type FieldLike<T> = [T; 2];
-    fn fields() -> Array<Self::FieldLike<Self>> {
-        [InitialData::Conformal, InitialData::Seed].into()
-    }
-
-    fn field_index(&self) -> usize {
-        match self {
-            InitialData::Conformal => 0,
-            InitialData::Seed => 1,
-        }
-    }
-
-    fn field_name(&self) -> String {
-        match self {
-            InitialData::Conformal => "Conformal".to_string(),
-            InitialData::Seed => "Seed".to_string(),
-        }
-    }
-}
-
-#[derive(Clone)]
+#[derive(Clone, SystemLabel)]
 pub enum Dynamic {
     Grr,
     Grz,
@@ -56,70 +34,6 @@ pub enum Dynamic {
     Lapse,
     Shiftr,
     Shiftz,
-}
-
-impl SystemLabel for Dynamic {
-    const NAME: &'static str = "Dynamic";
-    type FieldLike<T> = [T; 14];
-
-    fn fields() -> Array<Self::FieldLike<Self>> {
-        [
-            Dynamic::Grr,
-            Dynamic::Grz,
-            Dynamic::Gzz,
-            Dynamic::S,
-            Dynamic::Krr,
-            Dynamic::Krz,
-            Dynamic::Kzz,
-            Dynamic::Y,
-            Dynamic::Theta,
-            Dynamic::Zr,
-            Dynamic::Zz,
-            Dynamic::Lapse,
-            Dynamic::Shiftr,
-            Dynamic::Shiftz,
-        ]
-        .into()
-    }
-
-    fn field_index(&self) -> usize {
-        match self {
-            Dynamic::Grr => 0,
-            Dynamic::Grz => 1,
-            Dynamic::Gzz => 2,
-            Dynamic::S => 3,
-            Dynamic::Krr => 4,
-            Dynamic::Krz => 5,
-            Dynamic::Kzz => 6,
-            Dynamic::Y => 7,
-            Dynamic::Theta => 8,
-            Dynamic::Zr => 9,
-            Dynamic::Zz => 10,
-            Dynamic::Lapse => 11,
-            Dynamic::Shiftr => 12,
-            Dynamic::Shiftz => 13,
-        }
-    }
-
-    fn field_name(&self) -> String {
-        match self {
-            Dynamic::Grr => "Grr",
-            Dynamic::Grz => "Grz",
-            Dynamic::Gzz => "Gzz",
-            Dynamic::S => "S",
-            Dynamic::Krr => "Krr",
-            Dynamic::Krz => "Krz",
-            Dynamic::Kzz => "Kzz",
-            Dynamic::Y => "Y",
-            Dynamic::Theta => "Theta",
-            Dynamic::Zr => "Zr",
-            Dynamic::Zz => "Zz",
-            Dynamic::Lapse => "Lapse",
-            Dynamic::Shiftr => "Shiftr",
-            Dynamic::Shiftz => "Shiftz",
-        }
-        .to_string()
-    }
 }
 
 pub struct ParityBoundary(bool, bool);

@@ -7,21 +7,20 @@
 To reach the state of minimum viable product (MVP) the following feature(s) must be completed.
 
 - [x] Stencil application.
-- [x] More ergonomic boundary conditions.
+- [x] Strong boundary condition API.
+- [ ] Weakly enforced (i.e. outgoing) boundary condition API.
 - [ ] Adaptive quadtree based meshes
 - [ ] Transfer between regridding runs.
 - [ ] Restriction/Prolongation.
 - [x] Linear iterative solvers.
     - [x] BiCGStab
     - [ ] BiCGStab(l)
-- [x] Jacobi's Method.
-- [x] Multigrid elliptic solver.
-    - [x] V-cycles
-    - [ ] W-cycles
-    - [ ] FMG cycles
 - [x] ODE Integrators.
     - [x] Forward Euler
     - [x] RK4
+- [x] Hyperbolic Relaxation solver for elliptic equations.
+    - [ ] Adaptive CFL scaling for faster convergence.
+- [x] Method of Lines solver for hyperbolic equations.
 - [x] VTK Output.
 
 

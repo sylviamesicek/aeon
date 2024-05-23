@@ -5,6 +5,9 @@ use std::fmt::Debug;
 use std::ops::{Bound, Range, RangeBounds};
 use std::slice::{self, SliceIndex};
 
+/// Custom derive macro for the `SystemLabel` trait.
+pub use aeon_macros::SystemLabel;
+
 /// This trait is used to define systems of fields.
 pub trait SystemLabel: Sized + Clone {
     /// Name of the system (used for debugging and when serializing a system).
@@ -325,42 +328,27 @@ impl<'a, Label: SystemLabel> SystemSliceMut<'a, Label> {
 mod tests {
     use super::*;
 
-    #[derive(Clone)]
+    #[derive(Clone, PartialEq, Eq, Debug, SystemLabel)]
     pub enum MySystem {
         First,
         Second,
         Third,
     }
 
-    impl SystemLabel for MySystem {
-        const NAME: &'static str = "MySystem";
-
-        type FieldLike<T> = [T; 3];
-
-        fn fields() -> Array<Self::FieldLike<Self>> {
-            [MySystem::First, MySystem::Second, MySystem::Third].into()
-        }
-
-        fn field_index(&self) -> usize {
-            match self {
-                Self::First => 0,
-                Self::Second => 1,
-                Self::Third => 2,
-            }
-        }
-
-        fn field_name(&self) -> String {
-            match self {
-                Self::First => "First",
-                Self::Second => "Second",
-                Self::Third => "Third",
-            }
-            .to_string()
-        }
-    }
-
     #[test]
     fn systems() {
+        assert_eq!(MySystem::NAME, "MySystem");
+        assert_eq!(
+            MySystem::fields().inner(),
+            [MySystem::First, MySystem::Second, MySystem::Third],
+        );
+        assert_eq!(MySystem::First.field_index(), 0);
+        assert_eq!(MySystem::Second.field_index(), 1);
+        assert_eq!(MySystem::Third.field_index(), 2);
+        assert_eq!(MySystem::First.field_name(), "First");
+        assert_eq!(MySystem::Second.field_name(), "Second");
+        assert_eq!(MySystem::Third.field_name(), "Third");
+
         let data = vec![0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0];
         let owned = SystemSlice::<MySystem>::from_contiguous(data.as_ref()).to_vec();
 
