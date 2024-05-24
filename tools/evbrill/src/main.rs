@@ -9,7 +9,7 @@ mod eqs;
 
 use eqs::{hyperbolic, hyperbolic_regular, HyperbolicSystem};
 
-const STEPS: usize = 2000;
+const STEPS: usize = 1000;
 const CFL: f64 = 0.1;
 
 #[derive(Clone, SystemLabel)]
@@ -442,7 +442,7 @@ impl SystemOperator<2> for DynamicDissipation {
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let model: Model<2> = {
         let mut contents = String::new();
-        let mut file = File::open("output/idbrill_res.dat")?;
+        let mut file = File::open("output/idbrill.dat")?;
         file.read_to_string(&mut contents)?;
 
         ron::from_str(&contents)?
@@ -509,7 +509,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         model.attach_system::<Dynamic>(SystemSlice::from_contiguous(&data));
         model.export_vtk(
             format!("evbrill").as_str(),
-            PathBuf::from(format!("output/evbrill_res{i}.vtu")),
+            PathBuf::from(format!("output/evbrill{i}.vtu")),
         )?;
 
         // Fill ghost nodes of system
