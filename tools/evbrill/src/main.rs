@@ -5,10 +5,10 @@ use aeon::{array::Array, mesh::field_count};
 use std::path::PathBuf;
 use std::{fs::File, io::Read};
 
-mod eqs;
+// mod eqs;
 pub mod equations;
 
-use eqs::{hyperbolic, hyperbolic_regular, HyperbolicSystem};
+use equations::HyperbolicSystem;
 
 const STEPS: usize = 1000;
 const CFL: f64 = 0.1;
@@ -219,15 +219,17 @@ impl SystemOperator<2> for DynamicDerivs {
                 zz_z: zz_z[index],
             };
 
-            let on_axis = vertex[0] == 0;
+            // let on_axis = vertex[0] == 0;
 
-            let derivs = if on_axis {
-                assert!(rho.abs() <= 10e-10);
-                hyperbolic_regular(system, rho, z)
-            } else {
-                assert!(rho.abs() >= 10e-10);
-                hyperbolic(system, rho, z)
-            };
+            // let derivs = if on_axis {
+            //     assert!(rho.abs() <= 10e-10);
+            //     hyperbolic_regular(system, rho, z)
+            // } else {
+            //     assert!(rho.abs() >= 10e-10);
+            //     hyperbolic(system, rho, z)
+            // };
+
+            let derivs = equations::hyperbolic(system, [rho, z]);
 
             dest.field_mut(Dynamic::Grr)[index] = derivs.grr_t;
             dest.field_mut(Dynamic::Grz)[index] = derivs.grz_t;

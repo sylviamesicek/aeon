@@ -1,8 +1,10 @@
+#![allow(unused_assignments)]
+
 // A very useful function
 use std::array::from_fn;
 
 // *********************************
-// Tensor utils ********************
+// Tensor Utils ********************
 // *********************************
 
 type Rank1 = [f64; 2];
@@ -37,7 +39,17 @@ pub fn sum1(mut f: impl FnMut(usize) -> f64) -> f64 {
 
 #[inline]
 pub fn sum2(mut f: impl FnMut(usize, usize) -> f64) -> f64 {
-    f(0, 0) + f(0, 1) + f(1, 0) + f(1, 1)
+    sum1(|i| sum1(|j| f(i, j)))
+}
+
+#[inline]
+pub fn sum3(mut f: impl FnMut(usize, usize, usize) -> f64) -> f64 {
+    sum1(|i| sum1(|j| sum1(|k| f(i, j, k))))
+}
+
+#[inline]
+pub fn sum4(mut f: impl FnMut(usize, usize, usize, usize) -> f64) -> f64 {
+    sum1(|i| sum1(|j| sum1(|k| sum1(|l| f(i, j, k, l)))))
 }
 
 #[inline]
@@ -76,6 +88,31 @@ pub fn lie2(t: Rank2, tpar: Rank3, v: Rank1, vpar: Rank2) -> Rank2 {
             let term2 = vpar[m][i] * t[m][j] + vpar[m][j] * t[i][m];
             term1 + term2
         })
+    })
+}
+
+pub fn christoffel(g_inv: Rank2, g_par: Rank3) -> Rank3 {
+    tensor3(|i, j, k| {
+        sum1(|l| 0.5 * g_inv[i][l] * (g_par[l][j][k] + g_par[k][l][j] - g_par[j][k][l]))
+    })
+}
+
+pub fn chirstofel_par(g_inv: Rank2, g_inv_par: Rank3, g_par: Rank3, g_par2: Rank4) -> Rank4 {
+    tensor4(|i, j, k, l| {
+        let term1 =
+            sum1(|m| 0.5 * g_inv_par[i][m][l] * (g_par[m][j][k] + g_par[k][m][j] - g_par[j][k][m]));
+        let term2 = sum1(|m| {
+            0.5 * g_inv[i][m] * (g_par2[m][j][k][l] + g_par2[k][m][j][l] - g_par2[j][k][m][l])
+        });
+        term1 + term2
+    })
+}
+
+pub fn ricci(gamma: Rank3, gamma_par: Rank4) -> Rank2 {
+    tensor2(|j, k| {
+        let term1 = sum1(|i| gamma_par[i][j][k][i] - gamma_par[i][k][i][j]);
+        let term2 = sum2(|i, p| gamma[i][i][p] * gamma[p][j][k] - gamma[i][j][p] * gamma[p][i][k]);
+        term1 + term2
     })
 }
 
@@ -153,8 +190,30 @@ pub struct HyperbolicSystem {
     pub zz_z: f64,
 }
 
-#[allow(non_snake_case)]
-pub fn hyperbolic(sys: HyperbolicSystem, pos: [f64; 2]) {
+#[derive(Clone, Debug)]
+pub struct HyperbolicDerivs {
+    pub grr_t: f64,
+    pub grz_t: f64,
+    pub gzz_t: f64,
+    pub s_t: f64,
+
+    pub krr_t: f64,
+    pub krz_t: f64,
+    pub kzz_t: f64,
+    pub y_t: f64,
+
+    pub lapse_t: f64,
+    pub shiftr_t: f64,
+    pub shiftz_t: f64,
+
+    pub theta_t: f64,
+    pub zr_t: f64,
+    pub zz_t: f64,
+}
+
+pub fn hyperbolic(sys: HyperbolicSystem, pos: [f64; 2]) -> HyperbolicDerivs {
+    let on_axis = pos[0].abs() <= 10e-10;
+
     // ******************************
     // Unpack variables
     // ******************************
@@ -184,26 +243,6 @@ pub fn hyperbolic(sys: HyperbolicSystem, pos: [f64; 2]) {
 
     let lam = pos[0] * (pos[0] * s).exp() * g[0][0].sqrt();
 
-    // Logrithmic derivatives of lambda
-    let lam_lpar = {
-        let lam_r = pos[0].powi(-1) + s + pos[0] * s_par[0] + 0.5 * g_par[0][0][0] / g[0][0];
-        let lam_z = pos[0] * s_par[1] + 0.5 * g_par[0][0][1] / g[0][0];
-        [lam_r, lam_z]
-    };
-
-    let lam_lpar2 = {
-        let mut result = tensor2(|i, j| {
-            lam_lpar[i] * lam_lpar[j] + pos[0] * s_par2[i][j] + 0.5 * g_par2[0][0][i][j] / g[0][0]
-                - 0.5 * g_par[0][0][i] * g_par[0][0][j] / g[0][0].powi(2)
-        });
-
-        result[0][0] += -pos[0].powi(-2) + 2.0 * s_par[0];
-        result[0][1] += s_par[1];
-        result[1][0] += s_par[1];
-
-        result
-    };
-
     // Extrinsic curvature
     let k: [[f64; 2]; 2] = [[sys.krr, sys.krz], [sys.krz, sys.kzz]];
     let k_par = {
@@ -218,10 +257,16 @@ pub fn hyperbolic(sys: HyperbolicSystem, pos: [f64; 2]) {
     let y_par = [sys.y_r, sys.y_z];
 
     let l = pos[0] * y + k[0][0] / g[0][0];
-    let mut l_par = tensor1(|i| {
-        pos[0] * y_par[i] + k_par[0][0][i] / g[0][0] - k[0][0] / g[0][0].powi(2) * g_par[0][0][i]
-    });
-    l_par[0] += y;
+    let l_par = {
+        // Apply product rule to definition of l.
+        let mut result = tensor1(|i| {
+            pos[0] * y_par[i] + k_par[0][0][i] / g[0][0]
+                - k[0][0] / g[0][0].powi(2) * g_par[0][0][i]
+        });
+        // Extra term from ρ * y
+        result[0] += y;
+        result
+    };
 
     // Constraints
     let theta = sys.theta;
@@ -263,24 +308,11 @@ pub fn hyperbolic(sys: HyperbolicSystem, pos: [f64; 2]) {
     };
 
     // Next compute Christoffel symbols
-    let gamma = tensor3(|i, j, k| {
-        sum1(|l| 0.5 * g_inv[i][l] * (g_par[l][j][k] + g_par[k][l][j] - g_par[j][k][l]))
-    });
-    let gamma_par = tensor4(|i, j, k, l| {
-        let term1 =
-            sum1(|m| 0.5 * g_inv_par[i][m][l] * (g_par[m][j][k] + g_par[k][m][j] - g_par[j][k][m]));
-        let term2 = sum1(|m| {
-            0.5 * g_inv[i][m] * (g_par2[m][j][k][l] + g_par2[k][m][j][l] - g_par2[j][k][m][l])
-        });
-        term1 + term2
-    });
+    let gamma = christoffel(g_inv, g_par);
+    let gamma_par = chirstofel_par(g_inv, g_inv_par, g_par, g_par2);
 
     // And now the Ricci tensor
-    let ricci = tensor2(|j, k| {
-        let term1 = sum1(|i| gamma_par[i][j][k][i] - gamma_par[i][k][i][j]);
-        let term2 = sum2(|i, p| gamma[i][i][p] * gamma[p][j][k] - gamma[i][j][p] * gamma[p][i][k]);
-        term1 + term2
-    });
+    let ricci = ricci(gamma, gamma_par);
     // As well as the Ricci scalar
     let ricci_trace = sum2(|i, j| ricci[i][j] * g_inv[i][j]);
 
@@ -288,8 +320,72 @@ pub fn hyperbolic(sys: HyperbolicSystem, pos: [f64; 2]) {
     // Contractions and Derivatives ****
     // *********************************
 
-    let lam_lgrad = lam_lpar;
-    let lam_lhess = hess0(lam_lpar, lam_lpar2, gamma);
+    // Logrithmic derivatives of lambda
+
+    // Λ is 𝓞(1/r) on axis, so we split into a regular part and a 1/r part in the r component.
+    // Off axis, this is the full gradient of lambda, including that 1/r term, but on axis this
+    // term is set to zero, and one must apply lhopital's rule on a case by case basis.
+    let mut lam_lgrad = [0.0; 2];
+    // The logrithmic hessian has no such issues, and is regular everywhere
+    let mut lam_lhess = [[0.0; 2]; 2];
+
+    {
+        let g_par_term = tensor1(|i| g_par[0][0][i] / g[0][0]);
+        let g_par2_term = tensor2(|i, j| {
+            g_par2[0][0][i][j] / g[0][0] - g_par[0][0][i] * g_par[0][0][j] / (g[0][0] * g[0][0])
+        });
+
+        // Decompose lam_r into a regular part and a Order(r^-1) part.
+        let lam_r_regular = s + pos[0] * s_par[0] + 0.5 * g_par_term[0];
+        let lam_z = pos[0] * s_par[1] + 0.5 * g_par_term[1];
+
+        lam_lgrad[0] = lam_r_regular;
+        if !on_axis {
+            lam_lgrad[0] += 1.0 / pos[0];
+        }
+        lam_lgrad[1] = lam_z;
+
+        let mut gamma_regular = tensor2(|i, j| sum1(|m| gamma[m][i][j] * lam_lgrad[m]));
+        if on_axis {
+            gamma_regular[0][0] += 0.5 * (g_par2[0][0][0][0]) / g[0][0];
+            // gamma_regular[0][1] += <irregular term>
+            gamma_regular[1][1] += 0.5 * (g_par2[1][1][0][0]) / g[0][0];
+        }
+
+        // The only irregular term is a 0.5 * g_rr,z / (r * g_rr) term in gamma_regular[0][1] which percisely cancels
+        // an irregular term in lam_rz
+
+        let lam_rr = {
+            let term1 = 2.0 * s_par[0] + pos[0] * s_par2[0][0] + 0.5 * g_par2_term[0][0];
+            let term2 = lam_r_regular * lam_r_regular;
+            let term3 = if on_axis {
+                // Use lhopital's rule to compute on axis lam_r / r and lam_z / r.
+                2.0 * s_par[0] + 0.5 * g_par2[0][0][0][0] / g[0][0]
+            } else {
+                2.0 / pos[0] * lam_r_regular
+            };
+
+            term1 + term2 + term3
+        };
+
+        let lam_rz = {
+            let term1 = s_par[1] + pos[0] * s_par2[0][1] + 0.5 * g_par2_term[0][1];
+            let term2 = lam_r_regular * lam_z;
+            let term3 = if on_axis {
+                s_par[1] // plus an irregular term that gets canceled by gamma_regular
+            } else {
+                lam_z / pos[0]
+            };
+            term1 + term2 + term3
+        };
+
+        let lam_zz = pos[0] * s_par2[1][1] + 0.5 * g_par2_term[1][1] + lam_z * lam_z;
+
+        lam_lhess[0][0] = lam_rr + gamma_regular[0][0];
+        lam_lhess[0][1] = lam_rz + gamma_regular[0][1];
+        lam_lhess[1][0] = lam_rz + gamma_regular[1][0];
+        lam_lhess[1][1] = lam_zz + gamma_regular[1][1];
+    }
 
     let k_grad = grad2(k, k_par, gamma);
 
@@ -304,7 +400,6 @@ pub fn hyperbolic(sys: HyperbolicSystem, pos: [f64; 2]) {
 
     let theta_grad = theta_par;
 
-    let z_con = tensor1(|i| sum1(|j| z[j] * g_inv[i][j]));
     let z_grad = grad1(z, z_par, gamma);
 
     let lapse_grad = lapse_par;
@@ -327,10 +422,17 @@ pub fn hyperbolic(sys: HyperbolicSystem, pos: [f64; 2]) {
     // **********************************
 
     let momentum = tensor1(|i| {
-        let term1 = -k_trace_grad[i] - l_grad[i] - lam_lgrad[i] * l;
-        let term2 = sum1(|m| lam_lgrad[m] * k_mat[m][i]);
-        let term3 = sum2(|m, n| k_grad[i][m][n] * g_inv[m][n]);
-        term1 + term2 + term3
+        let term1 = -k_trace_grad[i] - l_grad[i];
+        let term2 = sum2(|m, n| k_grad[i][m][n] * g_inv[m][n]);
+
+        let mut regular = sum1(|m| lam_lgrad[m] * k_mat[m][i]) - lam_lgrad[i] * l;
+        if on_axis && i == 0 {
+            regular += -y
+        } else if on_axis && i == 1 {
+            regular += k_par[0][1][0] / g[0][0]
+        }
+
+        term1 + term2 + regular
     });
 
     // ***********************************
@@ -342,7 +444,11 @@ pub fn hyperbolic(sys: HyperbolicSystem, pos: [f64; 2]) {
         let term2 = lie2(g, g_par, shift, shift_par);
         tensor2(|i, j| term1[i][j] + term2[i][j])
     };
-    let lam_t = -lapse * lam * l + sum1(|i| lam * lam_lpar[i] * shift[i]);
+
+    let mut lam_t = -lapse * lam * l + sum1(|i| lam * lam_lgrad[i] * shift[i]);
+    if on_axis {
+        lam_t += lam * shift_par[0][0];
+    }
 
     // ***********************************
     // Extrinsic curvature ***************
@@ -352,18 +458,23 @@ pub fn hyperbolic(sys: HyperbolicSystem, pos: [f64; 2]) {
     let k_t = tensor2(|i, j| {
         let term1 = lapse * ricci[i][j] - lapse * lam_lhess[i][j] - lapse_hess[i][j];
         let term2 = lapse * (k_trace + l) * k[i][j];
-        let term3 = lapse * sum1(|m| -2.0 * k[i][m] * k_mat[m][j]);
+        let term3 = -2.0 * lapse * sum1(|m| k[i][m] * k_mat[m][j]);
         let term4 = lapse * (z_grad[i][j] + z_grad[j][i] - 2.0 * k[i][j] * theta);
         term1 + term2 + term3 + term4 + k_lie_shift[i][j]
     });
 
     let l_t = {
-        let term1 = lapse * sum2(|i, j| lam_lhess[i][j] * g_inv[i][j]);
-        let term2 = sum2(|i, j| lam_lgrad[i] * lapse_grad[j]);
-        let term3 = lapse * l * (k_trace + l);
-        let term4 = lapse * (sum1(|i| 2.0 * lam_lgrad[i] * z_con[i]) - 2.0 * l * theta);
-        let term5 = sum1(|i| l_par[i] * shift[i]);
-        term1 + term2 + term3 + term4 + term5
+        let term1 = lapse * l * (k_trace + l - 2.0 * theta);
+        let term2 = -lapse * sum2(|i, j| lam_lhess[i][j] * g_inv[i][j]);
+        let term3 = sum1(|i| l_par[i] * shift[i]);
+
+        let mut regular =
+            sum2(|i, j| lam_lgrad[i] * g_inv[i][j] * (2.0 * lapse * z[j] - lapse_grad[j]));
+        if on_axis {
+            regular += g_inv[0][0] * (2.0 * lapse * z_par[0][0] - lapse_par2[0][0]);
+        }
+
+        term1 + term2 + term3 + regular
     };
 
     // ************************************
@@ -371,19 +482,81 @@ pub fn hyperbolic(sys: HyperbolicSystem, pos: [f64; 2]) {
     // ************************************
 
     let theta_t = {
-        let term1 = lapse * hamiltonian;
-        let term2 = sum1(|i| (lapse * lam_lgrad[i] - lapse_grad[i]) * z_con[i]);
-        let term3 = sum2(|i, j| lapse * z_grad[i][j] * g_inv[i][j]);
-        let term4 = -lapse * (k_trace + l) * theta;
-        let term5 = sum1(|i| theta_par[i] * shift[i]);
-        term1 + term2 + term3 + term4 + term5
+        let term1 = lapse * hamiltonian - lapse * (k_trace + l) * theta;
+        let term2 =
+            lapse * sum2(|i, j| z_grad[i][j] * g_inv[i][j] - lapse_grad[i] * g_inv[i][j] * z[j]);
+
+        let term3 = sum1(|i| theta_par[i] * shift[i]);
+
+        let mut regular = lapse * sum2(|i, j| lam_lgrad[i] * g_inv[i][j] * z[j]);
+        if on_axis {
+            regular += lapse * g_inv[0][0] * z_par[0][0];
+        }
+
+        term1 + term2 + term3 + regular
     };
 
     let z_lie_shift = lie1(z, z_par, shift, shift_par);
     let z_t = tensor1(|i| {
         let term1 = lapse * momentum[i];
-        let term2 = -2.0 * lapse * sum1(|m| k[i][m] * z_con[m]);
-        let term3 = -lapse_grad[i] * theta + lapse * theta_grad[i];
+        let term2 = -2.0 * lapse * sum2(|m, n| k[i][m] * g_inv[m][n] * z[n]);
+        let term3 = lapse * theta_grad[i] - lapse_grad[i] * theta;
         term1 + term2 + term3 + z_lie_shift[i]
     });
+
+    const F: f64 = 1.0;
+    const A: f64 = 1.0;
+    const MU: f64 = 1.0;
+    const D: f64 = 1.0;
+    const M: f64 = 2.0;
+
+    let lapse_t = {
+        let term1 = -lapse * lapse * F * (k_trace + l - M * theta);
+        let term2 = sum1(|i| shift[i] * lapse_par[i]);
+        term1 + term2
+    };
+
+    let shift_t = tensor1(|i| {
+        let lamg_term = sum1(|m| g_inv[i][m] * (lam_lgrad[m] + 0.5 * g_det_par[m] / g_det));
+        let g_inv_term = sum1(|m| g_inv_par[i][m][m]);
+
+        let term1 = -lapse * lapse * MU * g_inv_term;
+        let term2 = lapse * lapse * 2.0 * MU * sum1(|m| g_inv[i][m] * z[m]);
+        let term3 = -lapse * A * sum1(|m| g_inv[i][m] * lapse_par[m]);
+
+        let mut regular = -lapse * lapse * (2.0 * MU + D) * lamg_term;
+        if !on_axis {
+            regular += lapse * lapse * (2.0 * MU + D) * g_inv[0][0] / pos[0];
+        }
+
+        term1 + term2 + term3 + regular
+    });
+
+    let mut y_t = 0.0;
+    let mut s_t = 0.0;
+
+    if !on_axis {
+        y_t = (l_t - k_t[0][0] / g[0][0] + k[0][0] / g[0][0].powi(2) * g_t[0][0]) / pos[0];
+        s_t = (lam_t / lam - 0.5 * g_t[0][0] / g[0][0]) / pos[0];
+    }
+
+    HyperbolicDerivs {
+        grr_t: g_t[0][0],
+        grz_t: g_t[0][1],
+        gzz_t: g_t[1][1],
+        s_t,
+
+        krr_t: k_t[0][0],
+        krz_t: k_t[0][1],
+        kzz_t: k_t[1][1],
+        y_t,
+
+        theta_t,
+        zr_t: z_t[0],
+        zz_t: z_t[1],
+
+        lapse_t,
+        shiftr_t: shift_t[0],
+        shiftz_t: shift_t[1],
+    }
 }
