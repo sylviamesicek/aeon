@@ -1,4 +1,4 @@
-#![allow(unused_assignments)]
+#![allow(mixed_script_confusables)]
 
 use aeon::prelude::*;
 use aeon::{array::Array, mesh::field_count};
@@ -6,6 +6,7 @@ use std::path::PathBuf;
 use std::{fs::File, io::Read};
 
 mod eqs;
+pub mod equations;
 
 use eqs::{hyperbolic, hyperbolic_regular, HyperbolicSystem};
 

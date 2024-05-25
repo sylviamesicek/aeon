@@ -1,6 +1,8 @@
 using Symbolics
 using TensorOperations
 using LinearAlgebra
+using LaTeXStrings
+using Latexify
 
 ###############################
 ## Types of Derivatives #######
@@ -182,7 +184,7 @@ function main()
 
     for i in 1:2, j in 1:2
         Hamiltonian -= 1 // 2 * K[i, j] * Kcon[i, j]
-        Hamiltonian -= λhess[i, j] * Ginv[i, j]
+        Hamiltonian -= λhess[i, j] / λ * Ginv[i, j]
     end
 
     ##############################
@@ -190,7 +192,7 @@ function main()
     ##############################
 
     Mterm1 = -∇(Ktrace + L, coords, Γ) - λgrad / λ * L
-    Mterm2 = [sum(λgrad[j] * Kmat[j, i] for j in 1:2) for i in 1:2]
+    Mterm2 = [sum(λgrad[j] / λ * Kmat[j, i] for j in 1:2) for i in 1:2]
     Mterm3 = [sum(Kgrad[i, j, k] * Ginv[j, k] for j in 1:2, k in 1:2) for i in 1:2]
 
     Momentum::Vector{Num} = Mterm1 + Mterm2 + Mterm3
@@ -270,21 +272,18 @@ end
 
 # main()
 
-@variables x, tvar, tvard
 
-tfunc(x) = missing
-tfuncd(x) = missing
 
-@register_symbolic tfunc(x)
-@register_symbolic tfuncd(x)
+function lambda()
+    @variables ρ, z, s(ρ, z), g(ρ, z)
+    λ = ρ * exp(ρ * s) * sqrt(g)
 
-Symbolics.derivative(::typeof(tfunc), args::NTuple{1,Any}, ::Val{1}) = tfuncd(args[1])
+    λdρ = Symbolics.derivative(λ, ρ)
+    λdz = Symbolics.derivative(λ, z)
 
-function test()
-    expr = tfunc(x) + Symbolics.derivative(tfunc(x), x)
-    expr = substitute(expr, Dict([tfunc(x) => tvar, tfuncd(x) => tvard]))
+    λdρρ = Symbolics.derivative(λdρ, ρ)
 
-    return simplify(expr)
+    return simplify(λdρρ)
 end
 
-test()
+lambda()
