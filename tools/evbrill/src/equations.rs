@@ -529,13 +529,14 @@ pub fn hyperbolic(sys: HyperbolicSystem, pos: [f64; 2]) -> HyperbolicDerivs {
         let term1 = -lapse * lapse * MU * g_inv_term;
         let term2 = lapse * lapse * 2.0 * MU * sum1(|m| g_inv[i][m] * z[m]);
         let term3 = -lapse * A * sum1(|m| g_inv[i][m] * lapse_par[m]);
+        let term4 = sum1(|m| shift[m] * shift_par[i][m]);
 
         let mut regular = -lapse * lapse * (2.0 * MU - D) * lamg_term;
         if !on_axis && i == 0 {
             regular += lapse * lapse * (2.0 * MU - D) * g_inv[0][0] / pos[0];
         }
 
-        term1 + term2 + term3 + regular
+        term1 + term2 + term3 + term4 + regular
     });
 
     let mut y_t = 0.0;
@@ -569,7 +570,8 @@ pub fn hyperbolic(sys: HyperbolicSystem, pos: [f64; 2]) -> HyperbolicDerivs {
 
 #[cfg(test)]
 mod tests {
-    use super::tensor3;
+    use super::{hyperbolic, tensor3, HyperbolicSystem};
+    use aeon::{common::NodeSpace, geometry::Rectangle};
 
     #[test]
     fn tensor_utils() {
@@ -580,5 +582,111 @@ mod tests {
         let tensor = tensor3(|_, j, _| j as f64);
         assert_eq!(tensor[0][1][0], 1.0);
         assert_eq!(tensor[1][1][1], 1.0);
+    }
+
+    #[test]
+    fn minkowski() {
+        let space = NodeSpace {
+            bounds: Rectangle {
+                origin: [0.0, 0.0],
+                size: [10.0, 10.0],
+            },
+            size: [100, 100],
+            ghost: 2,
+        };
+
+        for node in space.inner_window().iter() {
+            let position = space.position(node);
+
+            let system = HyperbolicSystem {
+                grr: 1.0,
+                grr_r: 0.0,
+                grr_z: 0.0,
+                grr_rr: 0.0,
+                grr_rz: 0.0,
+                grr_zz: 0.0,
+
+                grz: 0.0,
+                grz_r: 0.0,
+                grz_z: 0.0,
+                grz_rr: 0.0,
+                grz_rz: 0.0,
+                grz_zz: 0.0,
+
+                gzz: 1.0,
+                gzz_r: 0.0,
+                gzz_z: 0.0,
+                gzz_rr: 0.0,
+                gzz_rz: 0.0,
+                gzz_zz: 0.0,
+
+                s: 0.0,
+                s_r: 0.0,
+                s_z: 0.0,
+                s_rr: 0.0,
+                s_rz: 0.0,
+                s_zz: 0.0,
+
+                krr: 0.0,
+                krr_r: 0.0,
+                krr_z: 0.0,
+                krz: 0.0,
+                krz_r: 0.0,
+                krz_z: 0.0,
+                kzz: 0.0,
+                kzz_r: 0.0,
+                kzz_z: 0.0,
+                y: 0.0,
+                y_r: 0.0,
+                y_z: 0.0,
+
+                theta: 0.0,
+                theta_r: 0.0,
+                theta_z: 0.0,
+
+                zr: 0.0,
+                zr_r: 0.0,
+                zr_z: 0.0,
+
+                zz: 0.0,
+                zz_r: 0.0,
+                zz_z: 0.0,
+
+                lapse: 1.0,
+                lapse_r: 0.0,
+                lapse_z: 0.0,
+                lapse_rr: 0.0,
+                lapse_rz: 0.0,
+                lapse_zz: 0.0,
+
+                shiftr: 0.0,
+                shiftr_r: 0.0,
+                shiftr_z: 0.0,
+
+                shiftz: 0.0,
+                shiftz_r: 0.0,
+                shiftz_z: 0.0,
+            };
+
+            let derivs = hyperbolic(system, position);
+
+            assert_eq!(derivs.grr_t, 0.0);
+            assert_eq!(derivs.grz_t, 0.0);
+            assert_eq!(derivs.gzz_t, 0.0);
+            assert_eq!(derivs.s_t, 0.0);
+
+            assert_eq!(derivs.krr_t, 0.0);
+            assert_eq!(derivs.krz_t, 0.0);
+            assert_eq!(derivs.kzz_t, 0.0);
+            assert_eq!(derivs.y_t, 0.0);
+
+            assert_eq!(derivs.lapse_t, 0.0);
+            assert_eq!(derivs.shiftr_t, 0.0);
+            assert_eq!(derivs.shiftz_t, 0.0);
+
+            assert_eq!(derivs.theta_t, 0.0);
+            assert_eq!(derivs.zr_t, 0.0);
+            assert_eq!(derivs.zz_t, 0.0);
+        }
     }
 }

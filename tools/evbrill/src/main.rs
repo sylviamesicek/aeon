@@ -195,6 +195,16 @@ impl SystemOperator<2> for DynamicDerivs {
                 y_r: y_r[index],
                 y_z: y_z[index],
 
+                theta: theta[index],
+                theta_r: theta_r[index],
+                theta_z: theta_z[index],
+                zr: zr[index],
+                zr_r: zr_r[index],
+                zr_z: zr_z[index],
+                zz: zz[index],
+                zz_r: zz_r[index],
+                zz_z: zz_z[index],
+
                 lapse: lapse[index],
                 lapse_r: lapse_r[index],
                 lapse_z: lapse_z[index],
@@ -207,16 +217,6 @@ impl SystemOperator<2> for DynamicDerivs {
                 shiftz: shiftz[index],
                 shiftz_r: shiftz_r[index],
                 shiftz_z: shiftz_z[index],
-
-                theta: theta[index],
-                theta_r: theta_r[index],
-                theta_z: theta_z[index],
-                zr: zr[index],
-                zr_r: zr_r[index],
-                zr_z: zr_z[index],
-                zz: zz[index],
-                zz_r: zz_r[index],
-                zz_z: zz_z[index],
             };
 
             // let on_axis = vertex[0] == 0;
@@ -241,13 +241,13 @@ impl SystemOperator<2> for DynamicDerivs {
             dest.field_mut(Dynamic::Kzz)[index] = derivs.kzz_t;
             dest.field_mut(Dynamic::Y)[index] = derivs.y_t;
 
-            dest.field_mut(Dynamic::Lapse)[index] = derivs.lapse_t;
-            dest.field_mut(Dynamic::Shiftr)[index] = derivs.shiftr_t;
-            dest.field_mut(Dynamic::Shiftz)[index] = derivs.shiftz_t;
-
             dest.field_mut(Dynamic::Theta)[index] = derivs.theta_t;
             dest.field_mut(Dynamic::Zr)[index] = derivs.zr_t;
             dest.field_mut(Dynamic::Zz)[index] = derivs.zz_t;
+
+            dest.field_mut(Dynamic::Lapse)[index] = derivs.lapse_t;
+            dest.field_mut(Dynamic::Shiftr)[index] = derivs.shiftr_t;
+            dest.field_mut(Dynamic::Shiftz)[index] = derivs.shiftz_t;
         }
 
         let vertex_size = block.vertex_size();
@@ -470,10 +470,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .field_mut(Dynamic::Gzz)
         .copy_from_slice(initial.field(InitialData::Conformal));
     dynamic.field_mut(Dynamic::Grz).fill(0.0);
+
+    // dynamic.field_mut(Dynamic::Grr).fill(1.0);
+    // dynamic.field_mut(Dynamic::Gzz).fill(1.0);
     // S
     dynamic
         .field_mut(Dynamic::S)
         .copy_from_slice(initial.field(InitialData::Seed));
+    // dynamic.field_mut(Dynamic::S).fill(0.0);
     // Extrinsic Curvature
     dynamic.field_mut(Dynamic::Krr).fill(0.0);
     dynamic.field_mut(Dynamic::Kzz).fill(0.0);

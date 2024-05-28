@@ -451,7 +451,7 @@ mod tests {
             }
 
             let diff = space.value(node, &explicit) - space.value(node, &evaluated);
-            assert!(diff.abs() <= 10e-10);
+            assert!(diff.abs() <= 10e-14);
         }
     }
 
@@ -464,7 +464,7 @@ mod tests {
                     origin: [0.0, 0.0],
                     size: [PI, PI],
                 },
-                ghost: 1,
+                ghost: 2,
             };
 
             // Create a source vector.
@@ -478,7 +478,7 @@ mod tests {
             // Allocate explicit vectors
             let mut evaluated = vec![0.0; space.node_count()].into_boxed_slice();
             space.evaluate(
-                &FDDerivative::<2>::new(0),
+                &FDDerivative::<4>::new(0),
                 &MixedBoundary,
                 &source,
                 &mut evaluated,
@@ -486,7 +486,7 @@ mod tests {
 
             let mut mixed = vec![0.0; space.node_count()].into_boxed_slice();
             space.evaluate(
-                &FDDerivative::<2>::new(1),
+                &FDDerivative::<4>::new(1),
                 &MixedBoundary,
                 &evaluated,
                 &mut mixed,
@@ -514,9 +514,9 @@ mod tests {
         let f3 = convergence(200, 200);
         let f4 = convergence(400, 400);
 
-        assert!(f1 / f2 >= 4.0);
-        assert!(f2 / f3 >= 4.0);
-        assert!(f3 / f4 >= 4.0);
+        assert!(f1 / f2 >= 16.0);
+        assert!(f2 / f3 >= 16.0);
+        assert!(f3 / f4 >= 16.0);
     }
 
     struct ParityBoundary;
