@@ -35,6 +35,8 @@ pub enum Dynamic {
     Lapse,
     Shiftr,
     Shiftz,
+    Debug1,
+    Debug2,
 }
 
 pub struct ParityBoundary(bool, bool);
@@ -67,6 +69,8 @@ impl SystemBoundary for DynamicBoundary {
             Dynamic::Theta | Dynamic::Lapse => (true, true),
             Dynamic::Zr | Dynamic::Shiftr => (false, true),
             Dynamic::Zz | Dynamic::Shiftz => (true, false),
+
+            Dynamic::Debug1 | Dynamic::Debug2 => (true, true),
         };
         ParityBoundary(rho, z)
     }
@@ -248,14 +252,18 @@ impl SystemOperator<2> for DynamicDerivs {
             dest.field_mut(Dynamic::Lapse)[index] = derivs.lapse_t;
             dest.field_mut(Dynamic::Shiftr)[index] = derivs.shiftr_t;
             dest.field_mut(Dynamic::Shiftz)[index] = derivs.shiftz_t;
+
+            dest.field_mut(Dynamic::Debug1)[index] = derivs.debug1;
+            dest.field_mut(Dynamic::Debug2)[index] = derivs.debug2;
         }
 
         let vertex_size = block.vertex_size();
 
-        for vertex in block
+        let border = block
             .face_plane(Face::positive(0))
-            .chain(block.face_plane(Face::positive(1)))
-        {
+            .chain(block.face_plane(Face::positive(1)));
+
+        for vertex in border {
             let rho_axis = vertex[0] == vertex_size[0] - 1;
             let z_axis = vertex[1] == vertex_size[1] - 1;
 
@@ -506,25 +514,43 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut update = vec![0.0; data.len()].into_boxed_slice();
     let mut dissipation = vec![0.0; data.len()].into_boxed_slice();
 
+    // Vector for derivatives
+    let mut derivs = SystemVec::new(mesh.node_count());
+
     let mut integrator = Rk4::new();
 
     for i in 0..STEPS {
-        let norm = driver.norm_system::<2, Dynamic>(&mesh, SystemSlice::from_contiguous(&data));
-        println!("Step {i}, Time {:.5} Norm {:.5e}", i as f64 * h, norm);
-        // Output current system to disk
-        let mut model = Model::new(mesh.clone());
-        model.attach_system::<Dynamic>(SystemSlice::from_contiguous(&data));
-        model.export_vtk(
-            format!("evbrill").as_str(),
-            PathBuf::from(format!("output/evbrill{i}.vtu")),
-        )?;
-
         // Fill ghost nodes of system
         driver.fill_boundary_system(
             &mesh,
             &DynamicBoundary,
             SystemSliceMut::from_contiguous(&mut data),
         );
+
+        driver.apply_system(
+            &mesh,
+            &DynamicDerivs,
+            SystemSlice::from_contiguous(&data),
+            derivs.as_mut_slice(),
+        );
+
+        // Output debugging data
+
+        let norm = driver.norm_system::<2, Dynamic>(&mesh, SystemSlice::from_contiguous(&data));
+        println!("Step {i}, Time {:.5} Norm {:.5e}", i as f64 * h, norm);
+        // Output current system to disk
+        let mut model = Model::new(mesh.clone());
+        model.attach_system::<Dynamic>(SystemSlice::from_contiguous(&data));
+
+        for field in Dynamic::fields() {
+            let name = format!("{}_dt", field.field_name());
+            model.attach_field(&name, derivs.field(field).to_vec());
+        }
+
+        model.export_vtk(
+            format!("evbrill").as_str(),
+            PathBuf::from(format!("output/evbrill{i}.vtu")),
+        )?;
 
         // Compute step
         integrator.step(

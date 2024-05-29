@@ -82,7 +82,7 @@ impl<const N: usize> Model<N> {
         let cell_space = node_space.cell_space();
         let vertex_space = node_space.vertex_space();
 
-        let cell_total = node_space.cell_space().len();
+        let cell_total = node_space.cell_space().index_count();
 
         // Generate Cells
 
@@ -159,7 +159,7 @@ impl<const N: usize> Model<N> {
                 let start = idx * system.node_count;
                 let end = idx * system.node_count + system.node_count;
 
-                let mut vert_data = Vec::with_capacity(vertex_space.len());
+                let mut vert_data = Vec::with_capacity(vertex_space.index_count());
 
                 for vertex in vertex_space.iter() {
                     vert_data
@@ -178,7 +178,7 @@ impl<const N: usize> Model<N> {
         }
 
         for (name, data) in self.fields.iter() {
-            let mut vert_data = Vec::with_capacity(vertex_space.len());
+            let mut vert_data = Vec::with_capacity(vertex_space.index_count());
 
             for vertex in vertex_space.iter() {
                 vert_data.push(node_space.value(node_from_vertex(vertex), data));

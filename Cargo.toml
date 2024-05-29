@@ -11,6 +11,9 @@ itertools = "0.13.0"
 log = "0.4"
 ron = "0.8"
 
+aeon_macros = { path = "crates/aeon_macros" }
+aeon_tensor = { path = "crates/aeon_tensor" }
+
 
 # Main package (`aeon`) configuration.
 [package]
@@ -21,7 +24,7 @@ exclude = ["crates/", "tools/"]
 readme = "README.md"
 
 [dependencies]
-aeon_macros = { path = "crates/aeon_macros" }
+aeon_macros.workspace = true
 
 log.workspace = true
 

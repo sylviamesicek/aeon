@@ -12,32 +12,34 @@ type Rank2 = [[f64; 2]; 2];
 type Rank3 = [[[f64; 2]; 2]; 2];
 type Rank4 = [[[[f64; 2]; 2]; 2]; 2];
 
-#[inline]
 pub fn tensor1(f: impl FnMut(usize) -> f64) -> Rank1 {
     from_fn(f)
 }
 
-#[inline]
 pub fn tensor2(mut f: impl FnMut(usize, usize) -> f64) -> Rank2 {
     from_fn(|i| from_fn(|j| f(i, j)))
 }
 
-#[inline]
+pub fn sym_tensor2(mut f: impl FnMut(usize, usize) -> f64) -> Rank2 {
+    let rr = f(0, 0);
+    let rz = f(0, 1);
+    let zz = f(1, 1);
+
+    [[rr, rz], [rz, zz]]
+}
+
 pub fn tensor3(mut f: impl FnMut(usize, usize, usize) -> f64) -> Rank3 {
     from_fn(|i| from_fn(|j| from_fn(|k| f(i, j, k))))
 }
 
-#[inline]
 pub fn tensor4(mut f: impl FnMut(usize, usize, usize, usize) -> f64) -> Rank4 {
     from_fn(|i| from_fn(|j| from_fn(|k| from_fn(|l| f(i, j, k, l)))))
 }
 
-#[inline]
 pub fn sum1(mut f: impl FnMut(usize) -> f64) -> f64 {
     f(0) + f(1)
 }
 
-#[inline]
 pub fn sum2(mut f: impl FnMut(usize, usize) -> f64) -> f64 {
     sum1(|i| sum1(|j| f(i, j)))
 }
@@ -209,6 +211,9 @@ pub struct HyperbolicDerivs {
     pub theta_t: f64,
     pub zr_t: f64,
     pub zz_t: f64,
+
+    pub debug1: f64,
+    pub debug2: f64,
 }
 
 pub fn hyperbolic(sys: HyperbolicSystem, pos: [f64; 2]) -> HyperbolicDerivs {
@@ -473,7 +478,7 @@ pub fn hyperbolic(sys: HyperbolicSystem, pos: [f64; 2]) -> HyperbolicDerivs {
     let l_t = {
         let term1 = lapse * l * (k_trace + l - 2.0 * theta);
         let term2 = -lapse * sum2(|i, j| lam_lhess[i][j] * g_inv[i][j]);
-        let term3 = sum1(|i| l_par[i] * shift[i]);
+        let term3 = sum1(|i| shift[i] * l_par[i]);
 
         let mut regular =
             sum2(|i, j| lam_lgrad[i] * g_inv[i][j] * (2.0 * lapse * z[j] - lapse_grad[j]));
@@ -547,6 +552,12 @@ pub fn hyperbolic(sys: HyperbolicSystem, pos: [f64; 2]) -> HyperbolicDerivs {
         s_t = (lam_t / lam - 0.5 * g_t[0][0] / g[0][0]) / pos[0];
     }
 
+    let mut lregular =
+        sum2(|i, j| lam_lgrad[i] * g_inv[i][j] * (2.0 * lapse * z[j] - lapse_grad[j]));
+    if on_axis {
+        lregular += g_inv[0][0] * (2.0 * lapse * z_par[0][0] - lapse_par2[0][0]);
+    }
+
     HyperbolicDerivs {
         grr_t: g_t[0][0],
         grz_t: g_t[0][1],
@@ -565,6 +576,9 @@ pub fn hyperbolic(sys: HyperbolicSystem, pos: [f64; 2]) -> HyperbolicDerivs {
         lapse_t,
         shiftr_t: shift_t[0],
         shiftz_t: shift_t[1],
+
+        debug1: -k_t[0][0] / g[0][0] + k[0][0] / g[0][0].powi(2) * g_t[0][0],
+        debug2: l_t,
     }
 }
 

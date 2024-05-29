@@ -15,7 +15,7 @@ impl<const N: usize> IndexSpace<N> {
     }
 
     /// Returns the number of indices in the index space.
-    pub fn len(&self) -> usize {
+    pub fn index_count(&self) -> usize {
         let mut result = 1;
 
         for i in 0..N {
@@ -23,11 +23,6 @@ impl<const N: usize> IndexSpace<N> {
         }
 
         result
-    }
-
-    /// A predicate for whether the index space contains any indices.
-    pub fn is_empty(&self) -> bool {
-        self.len() == 0
     }
 
     /// Returns the dimensions of the index space along each axis.
@@ -137,7 +132,7 @@ impl<const N: usize> Iterator for CartesianIter<N> {
 
 impl<const N: usize> ExactSizeIterator for CartesianIter<N> {
     fn len(&self) -> usize {
-        IndexSpace::new(self.size).len()
+        IndexSpace::new(self.size).index_count()
     }
 }
 

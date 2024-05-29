@@ -6,6 +6,8 @@ use std::fs::File;
 use std::io::Write;
 use std::path::PathBuf;
 
+const FULL_DOMAIN: bool = true;
+
 #[derive(Clone, SystemLabel)]
 pub enum InitialData {
     Conformal,
@@ -46,12 +48,20 @@ pub struct OddBoundary;
 
 impl Boundary for OddBoundary {
     fn face(&self, face: Face) -> BoundaryCondition {
-        if face.axis == 0 && face.side == false {
-            BoundaryCondition::Parity(false)
-        } else if face.axis == 1 && face.side == false {
-            BoundaryCondition::Parity(true)
+        if FULL_DOMAIN {
+            if face.axis == 0 && face.side == false {
+                BoundaryCondition::Parity(false)
+            } else {
+                BoundaryCondition::Free
+            }
         } else {
-            BoundaryCondition::Free
+            if face.axis == 0 && face.side == false {
+                BoundaryCondition::Parity(false)
+            } else if face.axis == 1 && face.side == false {
+                BoundaryCondition::Parity(true)
+            } else {
+                BoundaryCondition::Free
+            }
         }
     }
 }
@@ -60,12 +70,20 @@ pub struct EvenBoundary;
 
 impl Boundary for EvenBoundary {
     fn face(&self, face: Face) -> BoundaryCondition {
-        if face.axis == 0 && face.side == false {
-            BoundaryCondition::Parity(true)
-        } else if face.axis == 1 && face.side == false {
-            BoundaryCondition::Parity(true)
+        if FULL_DOMAIN {
+            if face.axis == 0 && face.side == false {
+                BoundaryCondition::Parity(true)
+            } else {
+                BoundaryCondition::Free
+            }
         } else {
-            BoundaryCondition::Free
+            if face.axis == 0 && face.side == false {
+                BoundaryCondition::Parity(true)
+            } else if face.axis == 1 && face.side == false {
+                BoundaryCondition::Parity(true)
+            } else {
+                BoundaryCondition::Free
+            }
         }
     }
 }
@@ -241,14 +259,25 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut driver = Driver::new();
 
-    let mesh = Mesh::new(
+    let bounds = if FULL_DOMAIN {
+        Rectangle {
+            size: [radius, 2.0 * radius],
+            origin: [0.0, -radius],
+        }
+    } else {
         Rectangle {
             size: [radius, radius],
             origin: [0.0, 0.0],
-        },
-        [points, points],
-        3,
-    );
+        }
+    };
+
+    let size = if FULL_DOMAIN {
+        [points, 2 * points]
+    } else {
+        [points, points]
+    };
+
+    let mesh = Mesh::new(bounds, size, 3);
 
     log::info!("Filling Seed Function");
 
@@ -298,7 +327,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     model
         .export_vtk(
             format!("idbrill").as_str(),
-            PathBuf::from(format!("output/idbrill_res.vtu")),
+            PathBuf::from(format!("output/idbrill_full.vtu")),
         )
         .unwrap();
 
@@ -318,7 +347,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let mut model = Model::new(mesh.clone());
         model.attach_system(system.as_slice());
 
-        let mut file = File::create("output/idbrill_res.dat")?;
+        let mut file = File::create("output/idbrill_full.dat")?;
         file.write_all(ron::to_string(&model)?.as_bytes())?;
     }
 
