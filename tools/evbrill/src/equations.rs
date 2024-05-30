@@ -340,13 +340,9 @@ pub fn hyperbolic(sys: HyperbolicSystem, pos: [f64; 2]) -> HyperbolicDerivs {
             g_par2[0][0][i][j] / g[0][0] - g_par[0][0][i] * g_par[0][0][j] / (g[0][0] * g[0][0])
         });
 
-        // Decompose lam_r into a regular part and a Order(1/r) part.
-        let lam_r = s + pos[0] * s_par[0] + 0.5 * g_par_term[0];
+        // Decompose lam_r into a regular part and an Order(1/r) part.
+        let lam_r = s + pos[0] * s_par[0] + 0.5 * g_par_term[0]; // + 1.0 / pos[0]
         let lam_z = pos[0] * s_par[1] + 0.5 * g_par_term[1];
-
-        // Use lhopital's rule to compute on axis lam_r / r and lam_z / r on axis.
-        let lam_r_lhopital = 2.0 * s_par[0] + 0.5 * g_par2[0][0][0][0] / g[0][0];
-        let lam_z_lhopital = s_par[1]; // plus an irregular term that gets canceled by gamma_regular
 
         lam_lgrad[0] = lam_r;
         lam_lgrad[1] = lam_z;
@@ -358,18 +354,17 @@ pub fn hyperbolic(sys: HyperbolicSystem, pos: [f64; 2]) -> HyperbolicDerivs {
         let mut gamma_regular = tensor2(|i, j| sum1(|m| gamma[m][i][j] * lam_lgrad[m]));
         if on_axis {
             gamma_regular[0][0] += 0.5 * g_par2[0][0][0][0] / g[0][0];
-            // gamma_regular[0][1] += <irregular term>
-            gamma_regular[1][1] += -0.5 * g_par2[1][1][0][0] / g[0][0];
+            gamma_regular[0][1] += 0.0; // + 0.5 * g_par[0][0][1] / (g[0][0] * pos[0]);
+            gamma_regular[1][1] += 0.5 / g[0][0] * (2.0 * g_par2[0][1][0][1] - g_par2[1][1][0][0]);
         }
-
-        // The only irregular term is a 0.5 * g_rr,z / (r * g_rr) term in gamma_regular[0][1] which percisely cancels
-        // an irregular term in lam_rz
 
         let lam_rr = {
             // Plus a -1/r^2 term that gets cancelled by lam_r * lam_r
-            let term1 = 2.0 * s_par[0] + pos[0] * s_par2[0][0] + 0.5 * g_par2_term[0][0];
-            let term2 = lam_r * lam_r;
+            let term1 = 2.0 * s_par[0] + pos[0] * s_par2[0][0] + 0.5 * g_par2_term[0][0]; // -1.0 / pos[0].powi(2)
+            let term2 = lam_r * lam_r; // + 1.0 / pos[0].powi(2)
             let term3 = if on_axis {
+                // Use lhopital's rule to compute on axis lam_r / r and lam_z / r on axis.
+                let lam_r_lhopital = 2.0 * s_par[0] + 0.5 * g_par2[0][0][0][0] / g[0][0];
                 2.0 * lam_r_lhopital
             } else {
                 2.0 * lam_r / pos[0]
@@ -382,7 +377,7 @@ pub fn hyperbolic(sys: HyperbolicSystem, pos: [f64; 2]) -> HyperbolicDerivs {
             let term1 = s_par[1] + pos[0] * s_par2[0][1] + 0.5 * g_par2_term[0][1];
             let term2 = lam_r * lam_z;
             let term3 = if on_axis {
-                lam_z_lhopital
+                s_par[1] // + 0.5 * g_par[0][0][1] / (g[0][0] * pos[0]);
             } else {
                 lam_z / pos[0]
             };
@@ -577,8 +572,8 @@ pub fn hyperbolic(sys: HyperbolicSystem, pos: [f64; 2]) -> HyperbolicDerivs {
         shiftr_t: shift_t[0],
         shiftz_t: shift_t[1],
 
-        debug1: -k_t[0][0] / g[0][0] + k[0][0] / g[0][0].powi(2) * g_t[0][0],
-        debug2: l_t,
+        debug1: lam_t / lam - 0.5 * g_t[0][0] / g[0][0],
+        debug2: l_t - k_t[0][0] / g[0][0] + k[0][0] / g[0][0].powi(2) * g_t[0][0],
     }
 }
 
