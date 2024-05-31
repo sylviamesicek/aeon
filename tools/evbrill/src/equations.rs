@@ -94,9 +94,12 @@ pub fn lie2(t: Rank2, tpar: Rank3, v: Rank1, vpar: Rank2) -> Rank2 {
 }
 
 pub fn christoffel(g_inv: Rank2, g_par: Rank3) -> Rank3 {
-    tensor3(|i, j, k| {
-        sum1(|l| 0.5 * g_inv[i][l] * (g_par[l][j][k] + g_par[k][l][j] - g_par[j][k][l]))
-    })
+    let first_kind = christoffel_1st_kind(g_par);
+    tensor3(|i, j, k| sum1(|l| g_inv[i][l] * first_kind[l][j][k]))
+}
+
+pub fn christoffel_1st_kind(g_par: Rank3) -> Rank3 {
+    tensor3(|i, j, k| 0.5 * (g_par[i][j][k] + g_par[k][i][j] - g_par[j][k][i]))
 }
 
 pub fn chirstofel_par(g_inv: Rank2, g_inv_par: Rank3, g_par: Rank3, g_par2: Rank4) -> Rank4 {
@@ -111,9 +114,9 @@ pub fn chirstofel_par(g_inv: Rank2, g_inv_par: Rank3, g_par: Rank3, g_par2: Rank
 }
 
 pub fn ricci(gamma: Rank3, gamma_par: Rank4) -> Rank2 {
-    tensor2(|j, k| {
-        let term1 = sum1(|i| gamma_par[i][j][k][i] - gamma_par[i][k][i][j]);
-        let term2 = sum2(|i, p| gamma[i][i][p] * gamma[p][j][k] - gamma[i][j][p] * gamma[p][i][k]);
+    tensor2(|i, j| {
+        let term1 = sum1(|m| gamma_par[m][i][j][m] - gamma_par[m][m][i][j]);
+        let term2 = sum2(|m, n| gamma[m][m][n] * gamma[n][i][j] - gamma[m][i][n] * gamma[n][m][j]);
         term1 + term2
     })
 }
@@ -219,6 +222,44 @@ pub struct HyperbolicDerivs {
 pub fn hyperbolic(sys: HyperbolicSystem, pos: [f64; 2]) -> HyperbolicDerivs {
     let on_axis = pos[0].abs() <= 10e-10;
 
+    // if on_axis {
+    //     macro_rules! checkzero {
+    //         ($field:ident) => {
+    //             if (sys.$field.abs() >= 10e-13) {
+    //                 println!("Field {} is non zero {}", stringify!($field), sys.$field);
+    //             }
+    //         };
+    //     }
+
+    //     checkzero!(grr_r);
+    //     checkzero!(grr_rz);
+    //     checkzero!(grz);
+    //     checkzero!(grz_z);
+    //     checkzero!(grz_zz);
+    //     checkzero!(gzz_r);
+    //     checkzero!(gzz_rz);
+    //     checkzero!(s);
+    //     checkzero!(s_z);
+    //     checkzero!(s_zz);
+
+    //     checkzero!(krr_r);
+    //     checkzero!(krz);
+    //     checkzero!(krz_z);
+    //     checkzero!(kzz_r);
+    //     checkzero!(y);
+
+    //     checkzero!(theta_r);
+    //     checkzero!(zr);
+    //     checkzero!(zr_z);
+    //     checkzero!(zz_r);
+
+    //     checkzero!(lapse_r);
+    //     checkzero!(lapse_rz);
+    //     checkzero!(shiftr);
+    //     checkzero!(shiftr_z);
+    //     checkzero!(shiftz_r);
+    // }
+
     // ******************************
     // Unpack variables
     // ******************************
@@ -246,7 +287,7 @@ pub fn hyperbolic(sys: HyperbolicSystem, pos: [f64; 2]) -> HyperbolicDerivs {
     let s_par = [sys.s_r, sys.s_z];
     let s_par2 = [[sys.s_rr, sys.s_rz], [sys.s_rz, sys.s_zz]];
 
-    let lam = pos[0] * (pos[0] * s).exp() * g[0][0].sqrt();
+    // let lam = pos[0] * (pos[0] * s).exp() * g[0][0].sqrt();
 
     // Extrinsic curvature
     let k: [[f64; 2]; 2] = [[sys.krr, sys.krz], [sys.krz, sys.kzz]];
@@ -314,6 +355,7 @@ pub fn hyperbolic(sys: HyperbolicSystem, pos: [f64; 2]) -> HyperbolicDerivs {
 
     // Next compute Christoffel symbols
     let gamma = christoffel(g_inv, g_par);
+    let gamma_1st_kind = christoffel_1st_kind(g_par);
     let gamma_par = chirstofel_par(g_inv, g_inv_par, g_par, g_par2);
 
     // And now the Ricci tensor
@@ -327,12 +369,16 @@ pub fn hyperbolic(sys: HyperbolicSystem, pos: [f64; 2]) -> HyperbolicDerivs {
 
     // Logrithmic derivatives of lambda
 
-    // Λ is 𝓞(1/r) on axis, so we split into a regular part and a 1/r part in the r component.
+    // Λ is Order(1/r) on axis, so we split into a regular part and a 1/r part in the r component.
     // Off axis, this is the full gradient of lambda, including that 1/r term, but on axis this
     // term is set to zero, and one must apply lhopital's rule on a case by case basis.
-    let mut lam_lgrad = [0.0; 2];
-    // The logrithmic hessian has no such issues, and is regular everywhere
-    let mut lam_lhess = [[0.0; 2]; 2];
+
+    // Plus 1/r on axis for r component
+    let mut lam_reg_co = [0.0; 2];
+    // Plus 1/(r * grr) on axis for r component
+    let mut lam_reg_con = [0.0; 2];
+    // Fully regular
+    let mut lam_hess = [[0.0; 2]; 2];
 
     {
         let g_par_term = tensor1(|i| g_par[0][0][i] / g[0][0]);
@@ -344,18 +390,27 @@ pub fn hyperbolic(sys: HyperbolicSystem, pos: [f64; 2]) -> HyperbolicDerivs {
         let lam_r = s + pos[0] * s_par[0] + 0.5 * g_par_term[0]; // + 1.0 / pos[0]
         let lam_z = pos[0] * s_par[1] + 0.5 * g_par_term[1];
 
-        lam_lgrad[0] = lam_r;
-        lam_lgrad[1] = lam_z;
+        lam_reg_co[0] = lam_r;
+        lam_reg_co[1] = lam_z;
+
+        lam_reg_con[0] = g_inv[0][0] * lam_r + g_inv[0][1] * lam_z;
+        lam_reg_con[1] = g_inv[1][0] * lam_r + g_inv[1][1] * lam_z;
 
         if !on_axis {
-            lam_lgrad[0] += 1.0 / pos[0];
+            lam_reg_co[0] += 1.0 / pos[0];
+
+            lam_reg_con[0] += g_inv[0][0] / pos[0];
+            lam_reg_con[1] += g_inv[1][0] / pos[0];
+        } else {
+            lam_reg_con[1] += -g_par[0][1][0] / g_det;
         }
 
-        let mut gamma_regular = tensor2(|i, j| sum1(|m| gamma[m][i][j] * lam_lgrad[m]));
+        let mut gamma_regular = tensor2(|i, j| sum1(|m| lam_reg_con[m] * gamma_1st_kind[m][i][j]));
+
         if on_axis {
             gamma_regular[0][0] += 0.5 * g_par2[0][0][0][0] / g[0][0];
-            gamma_regular[0][1] += 0.0; // + 0.5 * g_par[0][0][1] / (g[0][0] * pos[0]);
-            gamma_regular[1][1] += 0.5 / g[0][0] * (2.0 * g_par2[0][1][0][1] - g_par2[1][1][0][0]);
+            gamma_regular[0][1] += 0.0; // + 0.5 * g_par[0][0][1] / (pos[0] * g[0][0])
+            gamma_regular[1][1] += 0.5 * (2.0 * g_par2[0][1][0][1] - g_par2[1][1][0][0]) / g[0][0];
         }
 
         let lam_rr = {
@@ -387,10 +442,10 @@ pub fn hyperbolic(sys: HyperbolicSystem, pos: [f64; 2]) -> HyperbolicDerivs {
         let lam_zz =
             pos[0] * s_par2[1][1] + 0.5 * g_par2_term[1][1] + lam_z * lam_z - gamma_regular[1][1];
 
-        lam_lhess[0][0] = lam_rr;
-        lam_lhess[0][1] = lam_rz;
-        lam_lhess[1][0] = lam_rz;
-        lam_lhess[1][1] = lam_zz;
+        lam_hess[0][0] = lam_rr;
+        lam_hess[0][1] = lam_rz;
+        lam_hess[1][0] = lam_rz;
+        lam_hess[1][1] = lam_zz;
     }
 
     let k_grad = grad2(k, k_par, gamma);
@@ -399,7 +454,6 @@ pub fn hyperbolic(sys: HyperbolicSystem, pos: [f64; 2]) -> HyperbolicDerivs {
     let k_trace_grad =
         tensor1(|i| sum2(|m, n| k_par[m][n][i] * g_inv[m][n] + k[m][n] * g_inv_par[m][n][i]));
 
-    let k_mat = tensor2(|i, j| sum1(|m| g_inv[i][m] * k[m][j]));
     let k_con = tensor2(|i, j| sum2(|m, n| g_inv[i][m] * g_inv[j][n] * k[m][n]));
 
     let l_grad = l_par;
@@ -418,7 +472,7 @@ pub fn hyperbolic(sys: HyperbolicSystem, pos: [f64; 2]) -> HyperbolicDerivs {
     let hamiltonian = {
         let term1 = 0.5 * (ricci_trace + k_trace * k_trace) + k_trace * l;
         let term2 = -0.5 * sum2(|i, j| k[i][j] * k_con[i][j]);
-        let term3 = -sum2(|i, j| lam_lhess[i][j] * g_inv[i][j]);
+        let term3 = -sum2(|i, j| lam_hess[i][j] * g_inv[i][j]);
 
         term1 + term2 + term3
     };
@@ -431,11 +485,12 @@ pub fn hyperbolic(sys: HyperbolicSystem, pos: [f64; 2]) -> HyperbolicDerivs {
         let term1 = -k_trace_grad[i] - l_grad[i];
         let term2 = sum2(|m, n| k_grad[i][m][n] * g_inv[m][n]);
 
-        let mut regular = sum1(|m| lam_lgrad[m] * k_mat[m][i]) - lam_lgrad[i] * l;
+        let mut regular = sum1(|m| lam_reg_con[m] * k[m][i]) - lam_reg_co[i] * l;
+
         if on_axis && i == 0 {
-            regular -= y
+            regular += -y;
         } else if on_axis && i == 1 {
-            regular += k_par[0][1][0] / g[0][0]
+            regular += k_par[0][1][0] / g[0][0];
         }
 
         term1 + term2 + regular
@@ -451,9 +506,9 @@ pub fn hyperbolic(sys: HyperbolicSystem, pos: [f64; 2]) -> HyperbolicDerivs {
         tensor2(|i, j| term1[i][j] + term2[i][j])
     };
 
-    let mut lam_t = -lapse * lam * l + sum1(|i| lam * lam_lgrad[i] * shift[i]);
+    let mut lam_lt = -lapse * l + sum1(|i| lam_reg_co[i] * shift[i]);
     if on_axis {
-        lam_t += lam * shift_par[0][0];
+        lam_lt += shift_par[0][0];
     }
 
     // ***********************************
@@ -462,9 +517,9 @@ pub fn hyperbolic(sys: HyperbolicSystem, pos: [f64; 2]) -> HyperbolicDerivs {
 
     let k_lie_shift = lie2(k, k_par, shift, shift_par);
     let k_t = tensor2(|i, j| {
-        let term1 = lapse * ricci[i][j] - lapse * lam_lhess[i][j] - lapse_hess[i][j];
+        let term1 = lapse * ricci[i][j] - lapse * lam_hess[i][j] - lapse_hess[i][j];
         let term2 = lapse * (k_trace + l) * k[i][j];
-        let term3 = -2.0 * lapse * sum1(|m| k[i][m] * k_mat[m][j]);
+        let term3 = -2.0 * lapse * sum2(|m, n| k[i][m] * g_inv[m][n] * k[n][j]);
         let term4 = lapse * (z_grad[i][j] + z_grad[j][i] - 2.0 * k[i][j] * theta);
 
         term1 + term2 + term3 + term4 + k_lie_shift[i][j]
@@ -472,13 +527,12 @@ pub fn hyperbolic(sys: HyperbolicSystem, pos: [f64; 2]) -> HyperbolicDerivs {
 
     let l_t = {
         let term1 = lapse * l * (k_trace + l - 2.0 * theta);
-        let term2 = -lapse * sum2(|i, j| lam_lhess[i][j] * g_inv[i][j]);
+        let term2 = -lapse * sum2(|i, j| lam_hess[i][j] * g_inv[i][j]);
         let term3 = sum1(|i| shift[i] * l_par[i]);
 
-        let mut regular =
-            sum2(|i, j| lam_lgrad[i] * g_inv[i][j] * (2.0 * lapse * z[j] - lapse_grad[j]));
+        let mut regular = sum1(|m| lam_reg_con[m] * (2.0 * lapse * z[m] - lapse_grad[m]));
         if on_axis {
-            regular += g_inv[0][0] * (2.0 * lapse * z_par[0][0] - lapse_par2[0][0]);
+            regular += (2.0 * lapse * z_par[0][0] - lapse_par2[0][0]) / g[0][0];
         }
 
         term1 + term2 + term3 + regular
@@ -494,7 +548,7 @@ pub fn hyperbolic(sys: HyperbolicSystem, pos: [f64; 2]) -> HyperbolicDerivs {
             lapse * sum2(|i, j| z_grad[i][j] * g_inv[i][j] - lapse_grad[i] * g_inv[i][j] * z[j]);
         let term3 = sum1(|i| theta_par[i] * shift[i]);
 
-        let mut regular = lapse * sum2(|i, j| lam_lgrad[i] * g_inv[i][j] * z[j]);
+        let mut regular = lapse * sum1(|m| lam_reg_con[m] * z[m]);
         if on_axis {
             regular += lapse * z_par[0][0] / g[0][0];
         }
@@ -523,7 +577,8 @@ pub fn hyperbolic(sys: HyperbolicSystem, pos: [f64; 2]) -> HyperbolicDerivs {
     };
 
     let shift_t = tensor1(|i| {
-        let lamg_term = sum1(|m| g_inv[i][m] * (lam_lgrad[m] + 0.5 * g_det_par[m] / g_det));
+        let lamg_term = 0.5 / g_det * sum1(|m| g_inv[i][m] * g_det_par[m]) + lam_reg_con[i];
+
         let g_inv_term = sum1(|m| g_inv_par[i][m][m]);
 
         let term1 = -lapse * lapse * MU * g_inv_term;
@@ -544,13 +599,7 @@ pub fn hyperbolic(sys: HyperbolicSystem, pos: [f64; 2]) -> HyperbolicDerivs {
 
     if !on_axis {
         y_t = (l_t - k_t[0][0] / g[0][0] + k[0][0] / g[0][0].powi(2) * g_t[0][0]) / pos[0];
-        s_t = (lam_t / lam - 0.5 * g_t[0][0] / g[0][0]) / pos[0];
-    }
-
-    let mut lregular =
-        sum2(|i, j| lam_lgrad[i] * g_inv[i][j] * (2.0 * lapse * z[j] - lapse_grad[j]));
-    if on_axis {
-        lregular += g_inv[0][0] * (2.0 * lapse * z_par[0][0] - lapse_par2[0][0]);
+        s_t = (lam_lt - 0.5 * g_t[0][0] / g[0][0]) / pos[0];
     }
 
     HyperbolicDerivs {
@@ -572,8 +621,8 @@ pub fn hyperbolic(sys: HyperbolicSystem, pos: [f64; 2]) -> HyperbolicDerivs {
         shiftr_t: shift_t[0],
         shiftz_t: shift_t[1],
 
-        debug1: lam_t / lam - 0.5 * g_t[0][0] / g[0][0],
-        debug2: l_t - k_t[0][0] / g[0][0] + k[0][0] / g[0][0].powi(2) * g_t[0][0],
+        debug1: lam_hess[1][1],
+        debug2: lam_hess[0][0],
     }
 }
 
