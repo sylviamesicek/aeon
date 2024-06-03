@@ -6,7 +6,7 @@ use std::fs::File;
 use std::io::Write;
 use std::path::PathBuf;
 
-const FULL_DOMAIN: bool = true;
+const FULL_DOMAIN: bool = false;
 
 #[derive(Clone, SystemLabel)]
 pub enum InitialData {

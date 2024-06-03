@@ -535,9 +535,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         );
 
         // Output debugging data
-
         let norm = driver.norm_system::<2, Dynamic>(&mesh, SystemSlice::from_contiguous(&data));
         println!("Step {i}, Time {:.5} Norm {:.5e}", i as f64 * h, norm);
+
         // Output current system to disk
         let mut model = Model::new(mesh.clone());
         model.attach_system::<Dynamic>(SystemSlice::from_contiguous(&data));
@@ -549,7 +549,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         model.export_vtk(
             format!("evbrill").as_str(),
-            PathBuf::from(format!("output/evbrill{i}.vtu")),
+            PathBuf::from(format!("output/evbrill{}.vtu", i)),
         )?;
 
         // Compute step

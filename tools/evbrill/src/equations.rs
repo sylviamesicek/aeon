@@ -44,31 +44,83 @@ pub fn sum2(mut f: impl FnMut(usize, usize) -> f64) -> f64 {
     sum1(|i| sum1(|j| f(i, j)))
 }
 
-#[inline]
 pub fn sum3(mut f: impl FnMut(usize, usize, usize) -> f64) -> f64 {
     sum1(|i| sum1(|j| sum1(|k| f(i, j, k))))
 }
 
-#[inline]
 pub fn sum4(mut f: impl FnMut(usize, usize, usize, usize) -> f64) -> f64 {
     sum1(|i| sum1(|j| sum1(|k| sum1(|l| f(i, j, k, l)))))
 }
 
-#[inline]
-pub fn grad1(value: Rank1, pars: Rank2, connect: Rank3) -> Rank2 {
-    tensor2(|i, j| pars[i][j] - sum1(|k| connect[k][i][j] * value[k]))
+pub fn det2(tensor: Rank2) -> f64 {
+    tensor[0][0] * tensor[1][1] - tensor[0][1] * tensor[1][0]
 }
 
-#[inline]
-pub fn grad2(value: Rank2, pars: Rank3, connect: Rank3) -> Rank3 {
-    tensor3(|i, j, k| {
-        pars[i][j][k] - sum1(|l| connect[l][i][k] * value[l][j] + connect[l][j][k] * value[i][l])
+pub fn det_par2(tensor: Rank2, par: Rank3) -> Rank1 {
+    tensor1(|i| {
+        tensor[0][0] * par[1][1][i] + par[0][0][i] * tensor[1][1]
+            - tensor[0][1] * par[1][0][i]
+            - par[0][1][i] * tensor[1][0]
+    })
+}
+
+pub fn raise3(tensor: Rank3, g_inv: Rank2) -> Rank3 {
+    tensor3(|i, j, k| sum1(|m| g_inv[i][m] * tensor[m][j][k]))
+}
+
+// ***********************
+// Geometry **************
+// ***********************
+
+pub fn christoffel(g_par: Rank3) -> Rank3 {
+    tensor3(|i, j, k| 0.5 * (g_par[i][j][k] + g_par[k][i][j] - g_par[j][k][i]))
+}
+
+pub fn christoffel_par(g_par2: Rank4) -> Rank4 {
+    tensor4(|i, j, k, l| 0.5 * (g_par2[i][j][k][l] + g_par2[k][i][j][l] - g_par2[j][k][i][l]))
+}
+
+pub fn christoffel_2nd(gamma: Rank3, g_inv: Rank2) -> Rank3 {
+    raise3(gamma, g_inv)
+}
+
+pub fn christoffel_2nd_par(
+    gamma: Rank3,
+    gamma_par: Rank4,
+    g_inv: Rank2,
+    g_inv_par: Rank3,
+) -> Rank4 {
+    tensor4(|i, j, k, l| {
+        sum1(|m| g_inv[i][m] * gamma_par[m][j][k][l] + g_inv_par[i][m][l] * gamma[m][j][k])
+    })
+}
+
+pub fn ricci(gamma_2nd: Rank3, gamma_2nd_par: Rank4) -> Rank2 {
+    tensor2(|i, j| {
+        let term1 = sum1(|m| gamma_2nd_par[m][i][j][m] - gamma_2nd_par[m][m][i][j]);
+        let term2 = sum2(|m, n| {
+            gamma_2nd[m][m][n] * gamma_2nd[n][i][j] - gamma_2nd[m][i][n] * gamma_2nd[n][m][j]
+        });
+        term1 + term2
     })
 }
 
 #[inline]
-pub fn hess0(pars: Rank1, pars2: Rank2, connect: Rank3) -> Rank2 {
-    tensor2(|i, j| pars2[i][j] - sum1(|k| connect[k][i][j] * pars[k]))
+pub fn grad1(value: Rank1, pars: Rank2, gamma_2nd: Rank3) -> Rank2 {
+    tensor2(|i, j| pars[i][j] - sum1(|k| gamma_2nd[k][i][j] * value[k]))
+}
+
+#[inline]
+pub fn grad2(value: Rank2, pars: Rank3, gamma_2nd: Rank3) -> Rank3 {
+    tensor3(|i, j, k| {
+        pars[i][j][k]
+            - sum1(|l| gamma_2nd[l][i][k] * value[l][j] + gamma_2nd[l][j][k] * value[i][l])
+    })
+}
+
+#[inline]
+pub fn hess0(pars: Rank1, pars2: Rank2, gamma_2nd: Rank3) -> Rank2 {
+    tensor2(|i, j| pars2[i][j] - sum1(|k| gamma_2nd[k][i][j] * pars[k]))
 }
 
 #[inline]
@@ -90,34 +142,6 @@ pub fn lie2(t: Rank2, tpar: Rank3, v: Rank1, vpar: Rank2) -> Rank2 {
             let term2 = vpar[m][i] * t[m][j] + vpar[m][j] * t[i][m];
             term1 + term2
         })
-    })
-}
-
-pub fn christoffel(g_inv: Rank2, g_par: Rank3) -> Rank3 {
-    let first_kind = christoffel_1st_kind(g_par);
-    tensor3(|i, j, k| sum1(|l| g_inv[i][l] * first_kind[l][j][k]))
-}
-
-pub fn christoffel_1st_kind(g_par: Rank3) -> Rank3 {
-    tensor3(|i, j, k| 0.5 * (g_par[i][j][k] + g_par[k][i][j] - g_par[j][k][i]))
-}
-
-pub fn chirstofel_par(g_inv: Rank2, g_inv_par: Rank3, g_par: Rank3, g_par2: Rank4) -> Rank4 {
-    tensor4(|i, j, k, l| {
-        let term1 =
-            sum1(|m| 0.5 * g_inv_par[i][m][l] * (g_par[m][j][k] + g_par[k][m][j] - g_par[j][k][m]));
-        let term2 = sum1(|m| {
-            0.5 * g_inv[i][m] * (g_par2[m][j][k][l] + g_par2[k][m][j][l] - g_par2[j][k][m][l])
-        });
-        term1 + term2
-    })
-}
-
-pub fn ricci(gamma: Rank3, gamma_par: Rank4) -> Rank2 {
-    tensor2(|i, j| {
-        let term1 = sum1(|m| gamma_par[m][i][j][m] - gamma_par[m][m][i][j]);
-        let term2 = sum2(|m, n| gamma[m][m][n] * gamma[n][i][j] - gamma[m][i][n] * gamma[n][m][j]);
-        term1 + term2
     })
 }
 
@@ -195,6 +219,52 @@ pub struct HyperbolicSystem {
     pub zz_z: f64,
 }
 
+impl HyperbolicSystem {
+    pub fn metric(&self) -> Rank2 {
+        [[self.grr, self.grz], [self.grz, self.gzz]]
+    }
+
+    pub fn metric_par(&self) -> Rank3 {
+        let grr_par = [self.grr_r, self.grr_z];
+        let grz_par = [self.grz_r, self.grz_z];
+        let gzz_par = [self.gzz_r, self.gzz_z];
+
+        [[grr_par, grz_par], [grz_par, gzz_par]]
+    }
+
+    pub fn metric_par2(&self) -> Rank4 {
+        let grr_par2 = [[self.grr_rr, self.grr_rz], [self.grr_rz, self.grr_zz]];
+        let grz_par2 = [[self.grz_rr, self.grz_rz], [self.grz_rz, self.grz_zz]];
+        let gzz_par2 = [[self.gzz_rr, self.gzz_rz], [self.gzz_rz, self.gzz_zz]];
+
+        [[grr_par2, grz_par2], [grz_par2, gzz_par2]]
+    }
+
+    pub fn seed(&self) -> f64 {
+        self.s
+    }
+
+    pub fn seed_par(&self) -> Rank1 {
+        [self.s_r, self.s_z]
+    }
+
+    pub fn seed_par2(&self) -> Rank2 {
+        [[self.s_rr, self.s_rz], [self.s_rz, self.s_zz]]
+    }
+
+    pub fn extrinsic(&self) -> Rank2 {
+        [[self.krr, self.krz], [self.krz, self.kzz]]
+    }
+
+    pub fn extrinsic_par(&self) -> Rank3 {
+        let krr_par = [self.krr_r, self.krr_z];
+        let krz_par = [self.krz_r, self.krz_z];
+        let kzz_par = [self.kzz_r, self.kzz_z];
+
+        [[krr_par, krz_par], [krz_par, kzz_par]]
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct HyperbolicDerivs {
     pub grr_t: f64,
@@ -222,82 +292,22 @@ pub struct HyperbolicDerivs {
 pub fn hyperbolic(sys: HyperbolicSystem, pos: [f64; 2]) -> HyperbolicDerivs {
     let on_axis = pos[0].abs() <= 10e-10;
 
-    // if on_axis {
-    //     macro_rules! checkzero {
-    //         ($field:ident) => {
-    //             if (sys.$field.abs() >= 10e-13) {
-    //                 println!("Field {} is non zero {}", stringify!($field), sys.$field);
-    //             }
-    //         };
-    //     }
-
-    //     checkzero!(grr_r);
-    //     checkzero!(grr_rz);
-    //     checkzero!(grz);
-    //     checkzero!(grz_z);
-    //     checkzero!(grz_zz);
-    //     checkzero!(gzz_r);
-    //     checkzero!(gzz_rz);
-    //     checkzero!(s);
-    //     checkzero!(s_z);
-    //     checkzero!(s_zz);
-
-    //     checkzero!(krr_r);
-    //     checkzero!(krz);
-    //     checkzero!(krz_z);
-    //     checkzero!(kzz_r);
-    //     checkzero!(y);
-
-    //     checkzero!(theta_r);
-    //     checkzero!(zr);
-    //     checkzero!(zr_z);
-    //     checkzero!(zz_r);
-
-    //     checkzero!(lapse_r);
-    //     checkzero!(lapse_rz);
-    //     checkzero!(shiftr);
-    //     checkzero!(shiftr_z);
-    //     checkzero!(shiftz_r);
-    // }
-
     // ******************************
     // Unpack variables
     // ******************************
 
     // Metric
-    let g: [[f64; 2]; 2] = [[sys.grr, sys.grz], [sys.grz, sys.gzz]];
+    let g = sys.metric();
+    let g_par = sys.metric_par();
+    let g_par2 = sys.metric_par2();
 
-    let g_par = {
-        let grr_par = [sys.grr_r, sys.grr_z];
-        let grz_par = [sys.grz_r, sys.grz_z];
-        let gzz_par = [sys.gzz_r, sys.gzz_z];
-
-        [[grr_par, grz_par], [grz_par, gzz_par]]
-    };
-
-    let g_par2 = {
-        let grr_par2 = [[sys.grr_rr, sys.grr_rz], [sys.grr_rz, sys.grr_zz]];
-        let grz_par2 = [[sys.grz_rr, sys.grz_rz], [sys.grz_rz, sys.grz_zz]];
-        let gzz_par2 = [[sys.gzz_rr, sys.gzz_rz], [sys.gzz_rz, sys.gzz_zz]];
-
-        [[grr_par2, grz_par2], [grz_par2, gzz_par2]]
-    };
-
-    let s = sys.s;
-    let s_par = [sys.s_r, sys.s_z];
-    let s_par2 = [[sys.s_rr, sys.s_rz], [sys.s_rz, sys.s_zz]];
-
-    // let lam = pos[0] * (pos[0] * s).exp() * g[0][0].sqrt();
+    let s = sys.seed();
+    let s_par = sys.seed_par();
+    let s_par2 = sys.seed_par2();
 
     // Extrinsic curvature
-    let k: [[f64; 2]; 2] = [[sys.krr, sys.krz], [sys.krz, sys.kzz]];
-    let k_par = {
-        let krr_par = [sys.krr_r, sys.krr_z];
-        let krz_par = [sys.krz_r, sys.krz_z];
-        let kzz_par = [sys.kzz_r, sys.kzz_z];
-
-        [[krr_par, krz_par], [krz_par, kzz_par]]
-    };
+    let k = sys.extrinsic();
+    let k_par = sys.extrinsic_par();
 
     let y = sys.y;
     let y_par = [sys.y_r, sys.y_z];
@@ -307,7 +317,7 @@ pub fn hyperbolic(sys: HyperbolicSystem, pos: [f64; 2]) -> HyperbolicDerivs {
         // Apply product rule to definition of l.
         let mut result = tensor1(|i| {
             pos[0] * y_par[i] + k_par[0][0][i] / g[0][0]
-                - k[0][0] / g[0][0].powi(2) * g_par[0][0][i]
+                - k[0][0] / g[0][0] * g_par[0][0][i] / g[0][0]
         });
         // Extra term from ρ * y
         result[0] += y;
@@ -333,10 +343,8 @@ pub fn hyperbolic(sys: HyperbolicSystem, pos: [f64; 2]) -> HyperbolicDerivs {
     // Geometry *****************************
     // **************************************
 
-    let g_det = g[0][0] * g[1][1] - g[0][1] * g[0][1];
-    let g_det_par = tensor1(|i| {
-        g_par[0][0][i] * g[1][1] + g[0][0] * g_par[1][1][i] - 2.0 * g[0][1] * g_par[0][1][i]
-    });
+    let g_det = det2(g);
+    let g_det_par = det_par2(g, g_par);
 
     let g_inv = [
         [sys.gzz / g_det, -sys.grz / g_det],
@@ -354,12 +362,14 @@ pub fn hyperbolic(sys: HyperbolicSystem, pos: [f64; 2]) -> HyperbolicDerivs {
     };
 
     // Next compute Christoffel symbols
-    let gamma = christoffel(g_inv, g_par);
-    let gamma_1st_kind = christoffel_1st_kind(g_par);
-    let gamma_par = chirstofel_par(g_inv, g_inv_par, g_par, g_par2);
+    let gamma = christoffel(g_par);
+    let gamma_par = christoffel_par(g_par2);
+
+    let gamma_2nd = christoffel_2nd(gamma, g_inv);
+    let gamma_2nd_par = christoffel_2nd_par(gamma, gamma_par, g_inv, g_inv_par);
 
     // And now the Ricci tensor
-    let ricci = ricci(gamma, gamma_par);
+    let ricci = ricci(gamma_2nd, gamma_2nd_par);
     // As well as the Ricci scalar
     let ricci_trace = sum2(|i, j| ricci[i][j] * g_inv[i][j]);
 
@@ -405,7 +415,7 @@ pub fn hyperbolic(sys: HyperbolicSystem, pos: [f64; 2]) -> HyperbolicDerivs {
             lam_reg_con[1] += -g_par[0][1][0] / g_det;
         }
 
-        let mut gamma_regular = tensor2(|i, j| sum1(|m| lam_reg_con[m] * gamma_1st_kind[m][i][j]));
+        let mut gamma_regular = tensor2(|i, j| sum1(|m| lam_reg_con[m] * gamma[m][i][j]));
 
         if on_axis {
             gamma_regular[0][0] += 0.5 * g_par2[0][0][0][0] / g[0][0];
@@ -448,7 +458,7 @@ pub fn hyperbolic(sys: HyperbolicSystem, pos: [f64; 2]) -> HyperbolicDerivs {
         lam_hess[1][1] = lam_zz;
     }
 
-    let k_grad = grad2(k, k_par, gamma);
+    let k_grad = grad2(k, k_par, gamma_2nd);
 
     let k_trace = sum2(|i, j| k[i][j] * g_inv[i][j]);
     let k_trace_grad =
@@ -460,10 +470,10 @@ pub fn hyperbolic(sys: HyperbolicSystem, pos: [f64; 2]) -> HyperbolicDerivs {
 
     let theta_grad = theta_par;
 
-    let z_grad = grad1(z, z_par, gamma);
+    let z_grad = grad1(z, z_par, gamma_2nd);
 
     let lapse_grad = lapse_par;
-    let lapse_hess = hess0(lapse_par, lapse_par2, gamma);
+    let lapse_hess = hess0(lapse_par, lapse_par2, gamma_2nd);
 
     // *********************************
     // Hamiltonian *********************
@@ -579,7 +589,7 @@ pub fn hyperbolic(sys: HyperbolicSystem, pos: [f64; 2]) -> HyperbolicDerivs {
     let shift_t = tensor1(|i| {
         let lamg_term = 0.5 / g_det * sum1(|m| g_inv[i][m] * g_det_par[m]) + lam_reg_con[i];
 
-        let g_inv_term = sum1(|m| g_inv_par[i][m][m]);
+        let g_inv_term: f64 = sum1(|m| g_inv_par[i][m][m]);
 
         let term1 = -lapse * lapse * MU * g_inv_term;
         let term2 = lapse * lapse * 2.0 * MU * sum1(|m| g_inv[i][m] * z[m]);
@@ -745,6 +755,135 @@ mod tests {
             assert_eq!(derivs.theta_t, 0.0);
             assert_eq!(derivs.zr_t, 0.0);
             assert_eq!(derivs.zz_t, 0.0);
+        }
+    }
+
+    #[test]
+    fn kasner() {
+        let space = NodeSpace {
+            bounds: Rectangle {
+                origin: [0.0, 1.0],
+                size: [10.0, 10.0],
+            },
+            size: [100, 100],
+            ghost: 2,
+        };
+
+        for node in space.inner_window().iter() {
+            let [rho, z] = space.position(node);
+
+            let conformal = z.powi(4);
+            let conformal_r = 0.0;
+            let conformal_rr = 0.0;
+            let conformal_z = 4.0 * z.powi(3);
+            let conformal_zz = 12.0 * z.powi(2);
+            let conformal_rz = 0.0;
+
+            let lapse = z.powi(-1);
+            let lapse_r = 0.0;
+            let lapse_rr = 0.0;
+            let lapse_z = -z.powi(-2);
+            let lapse_zz = 2.0 * z.powi(-3);
+            let lapse_rz = 0.0;
+
+            let system = HyperbolicSystem {
+                grr: conformal,
+                grr_r: conformal_r,
+                grr_z: conformal_z,
+                grr_rr: conformal_rr,
+                grr_rz: conformal_rz,
+                grr_zz: conformal_zz,
+
+                grz: 0.0,
+                grz_r: 0.0,
+                grz_z: 0.0,
+                grz_rr: 0.0,
+                grz_rz: 0.0,
+                grz_zz: 0.0,
+
+                gzz: conformal,
+                gzz_r: conformal_r,
+                gzz_z: conformal_z,
+                gzz_rr: conformal_rr,
+                gzz_rz: conformal_rz,
+                gzz_zz: conformal_zz,
+
+                s: 0.0,
+                s_r: 0.0,
+                s_z: 0.0,
+                s_rr: 0.0,
+                s_rz: 0.0,
+                s_zz: 0.0,
+
+                krr: 0.0,
+                krr_r: 0.0,
+                krr_z: 0.0,
+                krz: 0.0,
+                krz_r: 0.0,
+                krz_z: 0.0,
+                kzz: 0.0,
+                kzz_r: 0.0,
+                kzz_z: 0.0,
+                y: 0.0,
+                y_r: 0.0,
+                y_z: 0.0,
+
+                theta: 0.0,
+                theta_r: 0.0,
+                theta_z: 0.0,
+
+                zr: 0.0,
+                zr_r: 0.0,
+                zr_z: 0.0,
+
+                zz: 0.0,
+                zz_r: 0.0,
+                zz_z: 0.0,
+
+                lapse,
+                lapse_r,
+                lapse_z,
+                lapse_rr,
+                lapse_rz,
+                lapse_zz,
+
+                shiftr: 0.0,
+                shiftr_r: 0.0,
+                shiftr_z: 0.0,
+
+                shiftz: 0.0,
+                shiftz_r: 0.0,
+                shiftz_z: 0.0,
+            };
+
+            let derivs = hyperbolic(system, [rho, z]);
+            // println!("{derivs:?}");
+
+            // break;
+
+            macro_rules! assert_almost_eq {
+                ($val:expr, $target:expr) => {
+                    assert!(($val.abs() - $target) <= 10e-15)
+                };
+            }
+
+            assert_almost_eq!(derivs.grr_t, 0.0);
+            assert_almost_eq!(derivs.grz_t, 0.0);
+            assert_almost_eq!(derivs.gzz_t, 0.0);
+            assert_almost_eq!(derivs.s_t, 0.0);
+
+            assert_almost_eq!(derivs.krr_t, 0.0);
+            assert_almost_eq!(derivs.krz_t, 0.0);
+            assert_almost_eq!(derivs.kzz_t, 0.0);
+            assert_almost_eq!(derivs.y_t, 0.0);
+
+            assert_almost_eq!(derivs.lapse_t, 0.0);
+            assert_almost_eq!(derivs.shiftr_t, 0.0);
+            // assert_eq!(derivs.shiftz_t, -1.0);
+
+            assert_almost_eq!(derivs.theta_t, 0.0);
+            assert_almost_eq!(derivs.zr_t, 0.0);
+            assert_almost_eq!(derivs.zz_t, 0.0);
         }
     }
 }
