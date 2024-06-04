@@ -1,19 +1,25 @@
+use std::ops::Index;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub struct AxisMask<const N: usize>(u64);
+pub struct AxisMask<const N: usize>(usize);
 
 impl<const N: usize> AxisMask<N> {
     pub const COUNT: usize = 2usize.pow(N as u32);
+
+    pub const fn enumerate() -> AxisMaskIter<N> {
+        AxisMaskIter { cursor: 0 }
+    }
 
     pub fn empty() -> Self {
         Self(0)
     }
 
     pub fn full() -> Self {
-        Self(u64::MAX)
+        Self(usize::MAX)
     }
 
     pub fn from_linear(linear: usize) -> Self {
-        Self(linear as u64)
+        Self(linear)
     }
 
     pub fn into_linear(self) -> usize {
@@ -41,23 +47,41 @@ impl<const N: usize> AxisMask<N> {
     }
 
     pub fn set(&mut self, axis: usize) {
-        self.0 |= (1 << axis) as u64
+        self.0 |= 1 << axis
     }
 
     pub fn clear(&mut self, axis: usize) {
-        self.0 &= !((1 << axis) as u64)
+        self.0 &= !(1 << axis)
     }
 
     pub fn set_to(&mut self, axis: usize, value: bool) {
-        self.0 &= !((1 << axis) as u64);
-        self.0 |= ((value as usize) << axis) as u64;
+        self.0 &= !(1 << axis);
+        self.0 |= (value as usize) << axis;
     }
 
     pub fn toggle(&mut self, axis: usize) {
-        self.0 ^= (1 << axis) as u64
+        self.0 ^= 1 << axis
     }
 
     pub fn is_set(self, axis: usize) -> bool {
-        (self.0 & (1 << axis) as u64) != 0
+        (self.0 & (1 << axis)) != 0
+    }
+}
+
+pub struct AxisMaskIter<const N: usize> {
+    cursor: usize,
+}
+
+impl<const N: usize> Iterator for AxisMaskIter<N> {
+    type Item = AxisMask<N>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.cursor >= AxisMask::<N>::COUNT {
+            return None;
+        }
+
+        let result = self.cursor;
+        self.cursor += 1;
+        Some(AxisMask::from_linear(result))
     }
 }

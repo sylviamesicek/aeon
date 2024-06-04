@@ -8,6 +8,7 @@ pub mod geometry;
 pub mod lac;
 pub mod mesh;
 pub mod ode;
+pub mod tree;
 
 /// Provides common types used for most `aeon` applications.
 pub mod prelude {

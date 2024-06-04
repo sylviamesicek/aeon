@@ -631,8 +631,8 @@ pub fn hyperbolic(sys: HyperbolicSystem, pos: [f64; 2]) -> HyperbolicDerivs {
         shiftr_t: shift_t[0],
         shiftz_t: shift_t[1],
 
-        debug1: lam_hess[1][1],
-        debug2: lam_hess[0][0],
+        debug1: lapse.powi(2) - sum2(|i, j| g[i][j] * shift[i] * shift[j]),
+        debug2: sum2(|i, j| g[i][j] * shift[i] * shift[j]),
     }
 }
 
