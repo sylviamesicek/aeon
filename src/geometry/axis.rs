@@ -63,16 +63,29 @@ impl<const N: usize> AxisMask<N> {
         self.0 ^= 1 << axis
     }
 
+    pub fn toggled(mut self, axis: usize) -> Self {
+        self.0 ^= 1 << axis;
+        self
+    }
+
     pub fn is_set(self, axis: usize) -> bool {
         (self.0 & (1 << axis)) != 0
     }
 
+    pub fn is_inner_face(self, face: Face) -> bool {
+        self.is_set(face.axis) != face.side
+    }
+
+    pub fn is_outer_face(self, face: Face) -> bool {
+        self.is_set(face.axis) == face.side
+    }
+
     pub fn inner_faces(self) -> impl Iterator<Item = Face> {
-        faces::<N>().filter(move |face| self.is_set(face.axis) == face.side)
+        faces::<N>().filter(move |&face| self.is_inner_face(face))
     }
 
     pub fn outer_faces(self) -> impl Iterator<Item = Face> {
-        faces::<N>().filter(move |face| self.is_set(face.axis) == face.side)
+        faces::<N>().filter(move |&face| self.is_outer_face(face))
     }
 }
 
