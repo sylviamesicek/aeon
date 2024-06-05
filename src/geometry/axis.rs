@@ -1,4 +1,4 @@
-use std::ops::Index;
+use crate::geometry::{faces, Face};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct AxisMask<const N: usize>(usize);
@@ -65,6 +65,14 @@ impl<const N: usize> AxisMask<N> {
 
     pub fn is_set(self, axis: usize) -> bool {
         (self.0 & (1 << axis)) != 0
+    }
+
+    pub fn inner_faces(self) -> impl Iterator<Item = Face> {
+        faces::<N>().filter(move |face| self.is_set(face.axis) == face.side)
+    }
+
+    pub fn outer_faces(self) -> impl Iterator<Item = Face> {
+        faces::<N>().filter(move |face| self.is_set(face.axis) == face.side)
     }
 }
 

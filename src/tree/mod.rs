@@ -1,4 +1,4 @@
-use std::array::from_fn;
+use std::{array::from_fn, iter::repeat};
 
 use crate::geometry::{faces, AxisMask, Face, Rectangle};
 use bitvec::prelude::*;
@@ -6,36 +6,25 @@ use bitvec::prelude::*;
 pub const BOUNDARY: usize = usize::MAX;
 
 pub struct Tree<const N: usize> {
-    bounds: Rectangle<N>,
-
+    /// Bounds of each block in tree
+    bounds: Vec<Rectangle<N>>,
     /// Stores neighbors along each face
     neighbors: Vec<usize>,
     /// Index within z-filling curve
-    indices: Vec<[u64; N]>,
-    /// Level of each block
-    levels: Vec<usize>,
+    indices: [BitVec<usize, Lsb0>; N],
+    /// Offsets into indices,
+    offsets: Vec<usize>,
 }
 
 impl<const N: usize> Tree<N> {
     /// Constructs a new tree with a single root node.
     pub fn new(bounds: Rectangle<N>) -> Self {
         Self {
-            bounds,
-
+            bounds: vec![bounds],
             neighbors: vec![BOUNDARY; 2 * N],
-            indices: vec![[0; N]],
-            levels: vec![0],
+            indices: from_fn(|_| BitVec::new()),
+            offsets: vec![0, 0],
         }
-    }
-
-    /// Retrieves the physical bounds of the tree
-    pub fn bounds(&self) -> Rectangle<N> {
-        self.bounds.clone()
-    }
-
-    /// Retrieves the neighbor on the given face of the block.
-    pub fn neighbor(&self, block: usize, face: Face) -> usize {
-        self.neighbors[block * 2 * N + face.to_linear()]
     }
 
     /// Returns neighbors for each face of the block.
@@ -45,22 +34,19 @@ impl<const N: usize> Tree<N> {
 
     /// Computes the level of the block.
     pub fn level(&self, block: usize) -> usize {
-        self.levels[block]
+        self.offsets[block + 1] - self.offsets[block]
     }
 
-    pub fn spacing(&self, level: usize) -> [f64; N] {
-        from_fn(|i| self.bounds.size[i] / 2usize.pow(level as u32) as f64)
-    }
-
-    pub fn position(&self, block: usize) -> [f64; N] {
-        let spacing = self.spacing(self.level(block));
-        let index = self.indices[block];
-
-        from_fn(|i| self.bounds.origin[i] + spacing[i] * index[i] as f64)
+    pub fn bounds(&self, block: usize) -> Rectangle<N> {
+        self.bounds[block].clone()
     }
 
     pub fn num_blocks(&self) -> usize {
-        self.levels.len()
+        self.bounds.len()
+    }
+
+    pub fn index_slice(&self, block: usize, axis: usize) -> &BitSlice<usize, Lsb0> {
+        &self.indices[axis][self.offsets[block]..self.offsets[block + 1]]
     }
 
     pub fn refine(&mut self, flags: &[bool]) {
@@ -69,31 +55,85 @@ impl<const N: usize> Tree<N> {
         let num_flags = flags.iter().filter(|&&p| p).count();
         let total_blocks = self.num_blocks() + (AxisMask::<N>::COUNT - 1) * num_flags;
 
-        let mut neighbors = Vec::with_capacity(total_blocks * 2 * N);
-        let mut indices = Vec::with_capacity(total_blocks);
-        let mut levels = Vec::with_capacity(total_blocks);
+        let mut bounds = Vec::with_capacity(total_blocks);
+        let mut indices = from_fn(|_| BitVec::with_capacity(total_blocks));
+        let mut offsets = Vec::with_capacity(total_blocks + 1);
+        offsets.push(0);
+
+        // Accumulate map from old to new indices.
+        let mut old_to_new = Vec::with_capacity(self.num_blocks());
 
         for block in 0..self.num_blocks() {
-            let level = self.level(block);
-            let index = self.indices[block];
+            old_to_new.push(offsets.len() - 1);
 
             if flags[block] {
                 for mask in AxisMask::<N>::enumerate() {
-                    let mut nindex = [0; N];
+                    // Set physical bounds of block
+                    bounds.push(self.bounds(block).split(mask));
+                    // Compute index
                     for axis in 0..N {
                         // Multiply current index by 2 and set least significant bit
-                        nindex[axis] = index[axis] << 1 | mask.is_set(axis) as u64;
+                        indices[axis].push(mask.is_set(axis));
+                        indices[axis].extend_from_bitslice(self.index_slice(block, axis));
                     }
-                    indices.push(nindex);
-                    levels.push(level + 1);
+                    let previous = offsets.len();
+                    offsets.push(previous + self.level(block) + 1);
                 }
             } else {
-                indices.push(index);
-                levels.push(level);
+                // Set physical bounds of block
+                bounds.push(self.bounds(block));
+
+                for axis in 0..N {
+                    indices[axis].extend_from_bitslice(self.index_slice(block, axis));
+                }
+
+                let previous = offsets.len();
+                offsets.push(previous + self.level(block) + 1);
+            }
+        }
+
+        // Compute neighborhood
+        let mut neighbors = vec![0; total_blocks * 2 * N];
+
+        let mut cursor = 0;
+
+        for block in 0..self.num_blocks() {
+            if flags[block] {
+                for mask in AxisMask::<N>::enumerate() {
+                    let coffset = cursor + mask.into_linear();
+                    // Update inner indices
+                    for face in mask.inner_faces() {
+                        let mut nmask = mask.clone();
+                        nmask.toggle(face.axis);
+                        neighbors[2 * N * coffset + face.to_linear()] =
+                            cursor + nmask.into_linear();
+                    }
+
+                    // Update outer indices
+                    for face in mask.outer_faces() {
+                        // Old outer neighbor
+                        let oneighbor = self.neighbors(block)[face.to_linear()];
+                        // Propogate boundary information
+                        if oneighbor == BOUNDARY {
+                            neighbors[2 * N * coffset + face.to_linear()] = BOUNDARY;
+                            continue;
+                        }
+
+                        let nneighbor = old_to_new[oneighbor];
+                    }
+                }
+
+                cursor += AxisMask::<N>::COUNT;
+            } else {
+                for face in faces::<N>() {}
+
+                neighbors.extend_from_slice(self.neighbors(block));
+                cursor += 1;
             }
         }
 
         self.neighbors = neighbors;
         self.indices = indices;
+        self.offsets = offsets;
     }
 }

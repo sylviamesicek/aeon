@@ -37,6 +37,19 @@ impl<const N: usize> Rectangle<N> {
     pub fn center(&self) -> [f64; N] {
         from_fn(|i| self.origin[i] + self.size[i] / 2.0)
     }
+
+    pub fn split(&self, mask: AxisMask<N>) -> Self {
+        let size = from_fn(|i| self.size[i] / 2.0);
+        let origin = from_fn(|i| {
+            if mask.is_set(i) {
+                self.origin[i] + size[i]
+            } else {
+                self.origin[i]
+            }
+        });
+
+        Self { size, origin }
+    }
 }
 
 impl<const N: usize> Serialize for Rectangle<N> {
