@@ -1,7 +1,7 @@
 use crate::common::{
     node_from_vertex, Boundary, FDDerivative, FDDissipation, FDSecondDerivative, Kernel, NodeSpace,
 };
-use crate::geometry::{CartesianIter, Face, PlaneIterator};
+use crate::geometry::{CartesianIter, CartesianWindowIter, Face};
 
 use std::ops::Range;
 
@@ -43,12 +43,12 @@ impl<const N: usize> Block<N> {
     }
 
     /// Iterates over the vertices on a plane in the block.
-    pub fn plane(&self, axis: usize, intercept: usize) -> PlaneIterator<N> {
-        self.space.vertex_space().plane(axis, intercept)
+    pub fn plane(&self, axis: usize, intercept: usize) -> CartesianWindowIter<N> {
+        self.space.vertex_space().plane(axis, intercept).iter()
     }
 
     /// Iterates over the vertices on a face in the block
-    pub fn face_plane(&self, face: Face) -> PlaneIterator<N> {
+    pub fn face_plane(&self, face: Face) -> CartesianWindowIter<N> {
         let intercept = if face.side {
             self.space.vertex_size()[face.axis] - 1
         } else {

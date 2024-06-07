@@ -9,7 +9,7 @@ mod region;
 
 pub use axis::AxisMask;
 pub use face::{faces, Face, FaceIter};
-pub use indices::{CartesianIter, IndexSpace, PlaneIterator};
+pub use indices::{CartesianIter, CartesianWindowIter, IndexSpace, IndexWindow};
 pub use region::{
     regions, Region, RegionFaceNodeIter, RegionIter, RegionNodeIter, RegionOffsetNodeIter,
 };
