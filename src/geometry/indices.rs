@@ -1,5 +1,7 @@
 #![allow(clippy::needless_range_loop)]
 
+use std::array::from_fn;
+
 /// Describes an abstract index space. Allows for iteration of indices
 /// in N dimensions, and transformations between cartesian and linear
 /// indices.
@@ -66,15 +68,46 @@ impl<const N: usize> IndexSpace<N> {
         }
     }
 
-    /// Iterates all cartesian indices which lie on a plane in the index space.
-    pub fn plane(self, axis: usize, intercept: usize) -> PlaneIterator<N> {
-        let mut plane_size = self.size;
-        plane_size[axis] = 1;
+    /// Returns the window containing all points along a plane in the index space.
+    pub fn plane(self, axis: usize, intercept: usize) -> IndexWindow<N> {
+        let mut origin = [0; N];
+        origin[axis] = intercept;
 
-        PlaneIterator {
-            inner: Self::new(plane_size).iter(),
-            axis,
-            intercept,
+        let mut size = self.size;
+        size[axis] = 1;
+
+        IndexWindow::new(origin, size)
+    }
+}
+
+/// Represents a subset of an index space, and provides utilities for iterating over this window.
+#[derive(Debug, Clone)]
+pub struct IndexWindow<const N: usize> {
+    origin: [usize; N],
+    size: [usize; N],
+}
+
+impl<const N: usize> IndexWindow<N> {
+    /// Constructs a new index window.
+    pub fn new(origin: [usize; N], size: [usize; N]) -> Self {
+        Self { origin, size }
+    }
+
+    /// Origin of the index window.
+    pub fn origin(&self) -> [usize; N] {
+        self.origin
+    }
+
+    /// Size of the index window.
+    pub fn size(&self) -> [usize; N] {
+        self.size
+    }
+
+    /// Iterates over indices in the index window.
+    pub fn iter(&self) -> CartesianWindowIter<N> {
+        CartesianWindowIter {
+            origin: self.origin,
+            inner: IndexSpace::new(self.size).iter(),
         }
     }
 }
@@ -136,29 +169,28 @@ impl<const N: usize> ExactSizeIterator for CartesianIter<N> {
     }
 }
 
-/// An iterator over a plane in an index space.
 #[derive(Debug, Clone)]
-pub struct PlaneIterator<const N: usize> {
+/// An iterator over the cartesian indices of an `IndexSpace`.
+pub struct CartesianWindowIter<const N: usize> {
+    origin: [usize; N],
     inner: CartesianIter<N>,
-    axis: usize,
-    intercept: usize,
 }
 
-impl<const N: usize> Iterator for PlaneIterator<N> {
+impl<const N: usize> Iterator for CartesianWindowIter<N> {
     type Item = [usize; N];
 
     fn next(&mut self) -> Option<Self::Item> {
-        let mut index = self.inner.next()?;
-        index[self.axis] = self.intercept;
-        Some(index)
+        let offset = self.inner.next()?;
+        Some(from_fn(|i| self.origin[i] + offset[i]))
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
-        self.inner.size_hint()
+        let count = self.len();
+        (count, Some(count))
     }
 }
 
-impl<const N: usize> ExactSizeIterator for PlaneIterator<N> {
+impl<const N: usize> ExactSizeIterator for CartesianWindowIter<N> {
     fn len(&self) -> usize {
         self.inner.len()
     }
@@ -187,7 +219,7 @@ mod tests {
         assert_eq!(indices.next(), None);
 
         let space = IndexSpace::new([2, 3, 10]);
-        let mut plane = space.plane(2, 5);
+        let mut plane = space.plane(2, 5).iter();
 
         assert_eq!(plane.next(), Some([0, 0, 5]));
         assert_eq!(plane.next(), Some([1, 0, 5]));
