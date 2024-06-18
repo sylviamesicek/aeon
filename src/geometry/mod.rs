@@ -11,7 +11,7 @@ mod tree;
 
 pub use axis::AxisMask;
 pub use face::{faces, Face, FaceIter};
-pub use indices::{CartesianIter, IndexSpace, PlaneIterator};
+pub use indices::{CartesianIter, CartesianWindowIter, IndexSpace};
 pub use rectangle::Rectangle;
 pub use region::{
     regions, Region, RegionFaceNodeIter, RegionIter, RegionNodeIter, RegionOffsetNodeIter,
