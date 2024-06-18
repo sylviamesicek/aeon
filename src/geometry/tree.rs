@@ -70,8 +70,8 @@ impl<const N: usize> SpatialTree<N> {
     }
 
     /// Returns neighbors for each face of the cell.
-    pub fn neighbors(&self, block: usize) -> &[usize] {
-        &self.neighbors[block * 2 * N..(block + 1) * 2 * N]
+    pub fn neighbors(&self, cell: usize) -> &[usize] {
+        &self.neighbors[cell * 2 * N..(cell + 1) * 2 * N]
     }
 
     /// Computes the level of a cell.

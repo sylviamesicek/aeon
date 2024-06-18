@@ -4,6 +4,7 @@ extern crate self as aeon;
 pub mod array;
 pub mod common;
 pub mod elliptic;
+pub mod fd;
 pub mod geometry;
 pub mod lac;
 pub mod mesh;

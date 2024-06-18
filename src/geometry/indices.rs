@@ -2,6 +2,8 @@
 
 use std::array::from_fn;
 
+use super::Face;
+
 /// Describes an abstract index space. Allows for iteration of indices
 /// in N dimensions, and transformations between cartesian and linear
 /// indices.
@@ -77,6 +79,16 @@ impl<const N: usize> IndexSpace<N> {
         size[axis] = 1;
 
         IndexWindow::new(origin, size)
+    }
+
+    /// Returns the window containing all points along a face in index space.
+    pub fn face(self, face: Face) -> IndexWindow<N> {
+        let intercept = if face.side {
+            self.size[face.axis] - 1
+        } else {
+            0
+        };
+        self.plane(face.axis, intercept)
     }
 }
 
