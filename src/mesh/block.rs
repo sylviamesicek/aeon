@@ -1,5 +1,5 @@
 use crate::common::{
-    node_from_vertex, Boundary, FDDerivative, FDDissipation, FDSecondDerivative, Kernel, NodeSpace,
+    node_from_vertex, Boundary, Derivative, Dissipation, SecondDerivative, Kernel, NodeSpace,
 };
 use crate::geometry::{CartesianIter, Face, PlaneIterator};
 
@@ -99,7 +99,7 @@ pub trait BlockExt<const N: usize> {
         src: &[f64],
         dest: &mut [f64],
     ) where
-        FDDerivative<ORDER>: Kernel;
+        Derivative<ORDER>: Kernel;
 
     /// Aproximates a second derivative to the given order of accuracy.
     fn second_derivative<const ORDER: usize>(
@@ -109,7 +109,7 @@ pub trait BlockExt<const N: usize> {
         src: &[f64],
         dest: &mut [f64],
     ) where
-        FDSecondDerivative<ORDER>: Kernel;
+        SecondDerivative<ORDER>: Kernel;
 
     /// Computes a Kriess-Oliger dissipation of the given order of accuracy.
     fn dissipation<const ORDER: usize>(
@@ -119,7 +119,7 @@ pub trait BlockExt<const N: usize> {
         src: &[f64],
         dest: &mut [f64],
     ) where
-        FDDissipation<ORDER>: Kernel;
+        Dissipation<ORDER>: Kernel;
 }
 
 impl<const N: usize> BlockExt<N> for Block<N> {
@@ -130,9 +130,9 @@ impl<const N: usize> BlockExt<N> for Block<N> {
         src: &[f64],
         dest: &mut [f64],
     ) where
-        FDDerivative<ORDER>: Kernel,
+        Derivative<ORDER>: Kernel,
     {
-        self.evaluate(&FDDerivative::<ORDER>::new(axis), boundary, src, dest)
+        self.evaluate(&Derivative::<ORDER>::new(axis), boundary, src, dest)
     }
 
     fn second_derivative<const ORDER: usize>(
@@ -142,9 +142,9 @@ impl<const N: usize> BlockExt<N> for Block<N> {
         src: &[f64],
         dest: &mut [f64],
     ) where
-        FDSecondDerivative<ORDER>: Kernel,
+        SecondDerivative<ORDER>: Kernel,
     {
-        self.evaluate(&FDSecondDerivative::<ORDER>::new(axis), boundary, src, dest)
+        self.evaluate(&SecondDerivative::<ORDER>::new(axis), boundary, src, dest)
     }
 
     fn dissipation<const ORDER: usize>(
@@ -154,8 +154,8 @@ impl<const N: usize> BlockExt<N> for Block<N> {
         src: &[f64],
         dest: &mut [f64],
     ) where
-        FDDissipation<ORDER>: Kernel,
+        Dissipation<ORDER>: Kernel,
     {
-        self.evaluate(&FDDissipation::<ORDER>::new(axis), boundary, src, dest)
+        self.evaluate(&Dissipation::<ORDER>::new(axis), boundary, src, dest)
     }
 }

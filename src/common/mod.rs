@@ -18,7 +18,7 @@ mod window;
 use std::array::from_fn;
 
 pub use boundary::{Boundary, BoundaryCondition};
-pub use kernel::{FDDerivative, FDDissipation, FDSecondDerivative, Kernel};
+pub use kernel::{Derivative, Dissipation, Kernel, SecondDerivative};
 pub use window::{NodeCartesianIter, NodePlaneIter, NodeWindow};
 
 use crate::array::ArrayLike as _;
@@ -402,7 +402,7 @@ mod tests {
 
         let xspacing = space.spacing_axis(0);
 
-        let kernel = FDDerivative::<2>::new(0);
+        let kernel = Derivative::<2>::new(0);
         let boundary = MixedBoundary;
 
         // Create a source vector.
@@ -478,7 +478,7 @@ mod tests {
             // Allocate explicit vectors
             let mut evaluated = vec![0.0; space.node_count()].into_boxed_slice();
             space.evaluate(
-                &FDDerivative::<4>::new(0),
+                &Derivative::<4>::new(0),
                 &MixedBoundary,
                 &source,
                 &mut evaluated,
@@ -486,7 +486,7 @@ mod tests {
 
             let mut mixed = vec![0.0; space.node_count()].into_boxed_slice();
             space.evaluate(
-                &FDDerivative::<4>::new(1),
+                &Derivative::<4>::new(1),
                 &MixedBoundary,
                 &evaluated,
                 &mut mixed,

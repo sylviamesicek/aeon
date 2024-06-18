@@ -4,7 +4,7 @@ members = ["crates/*", "tools/idbrill", "tools/evbrill"]
 resolver = "2"
 
 [workspace.dependencies]
-bitvec = "1.0.1"
+bitvec = { version = "1.0.1", features = ["serde"] }
 cc = "1.0"
 clap = "4.5.4"
 env_logger = "0.11"

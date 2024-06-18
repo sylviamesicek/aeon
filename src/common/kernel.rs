@@ -29,16 +29,16 @@ pub trait Kernel {
 }
 
 /// A finite difference approximation for a derivative.
-pub struct FDDerivative<const ORDER: usize>(usize);
+pub struct Derivative<const ORDER: usize>(usize);
 
-impl<const ORDER: usize> FDDerivative<ORDER> {
+impl<const ORDER: usize> Derivative<ORDER> {
     /// Constructs a kernal which approximates a derivative along a given axis.
     pub fn new(axis: usize) -> Self {
         Self(axis)
     }
 }
 
-impl Kernel for FDDerivative<2> {
+impl Kernel for Derivative<2> {
     type InteriorWeights = [f64; 3];
     type BoundaryWeights = [f64; 3];
 
@@ -66,7 +66,7 @@ impl Kernel for FDDerivative<2> {
     }
 }
 
-impl Kernel for FDDerivative<4> {
+impl Kernel for Derivative<4> {
     type InteriorWeights = [f64; 5];
     type BoundaryWeights = [f64; 5];
 
@@ -103,16 +103,16 @@ impl Kernel for FDDerivative<4> {
 }
 
 /// A finite difference approximation for a second derivative.
-pub struct FDSecondDerivative<const ORDER: usize>(usize);
+pub struct SecondDerivative<const ORDER: usize>(usize);
 
-impl<const ORDER: usize> FDSecondDerivative<ORDER> {
+impl<const ORDER: usize> SecondDerivative<ORDER> {
     /// Constructs a kernal which approximates a second derivative along a given axis.
     pub fn new(axis: usize) -> Self {
         Self(axis)
     }
 }
 
-impl Kernel for FDSecondDerivative<2> {
+impl Kernel for SecondDerivative<2> {
     type InteriorWeights = [f64; 3];
     type BoundaryWeights = [f64; 4];
 
@@ -140,7 +140,7 @@ impl Kernel for FDSecondDerivative<2> {
     }
 }
 
-impl Kernel for FDSecondDerivative<4> {
+impl Kernel for SecondDerivative<4> {
     type InteriorWeights = [f64; 5];
     type BoundaryWeights = [f64; 6];
 
@@ -177,16 +177,16 @@ impl Kernel for FDSecondDerivative<4> {
 }
 
 /// Kriess-Oliger dissipation kernel.
-pub struct FDDissipation<const ORDER: usize>(usize);
+pub struct Dissipation<const ORDER: usize>(usize);
 
-impl<const ORDER: usize> FDDissipation<ORDER> {
+impl<const ORDER: usize> Dissipation<ORDER> {
     /// Constructs a kernal which computes Kriess-Oliger dissipation for a given axis.
     pub fn new(axis: usize) -> Self {
         Self(axis)
     }
 }
 
-impl Kernel for FDDissipation<2> {
+impl Kernel for Dissipation<2> {
     type InteriorWeights = [f64; 5];
     type BoundaryWeights = [f64; 6];
 
@@ -220,7 +220,7 @@ impl Kernel for FDDissipation<2> {
     }
 }
 
-impl Kernel for FDDissipation<4> {
+impl Kernel for Dissipation<4> {
     type InteriorWeights = [f64; 7];
     type BoundaryWeights = [f64; 8];
 
@@ -266,12 +266,12 @@ mod tests {
 
     #[test]
     fn kernel_weights() {
-        let derivative = FDDerivative::<2>::new(0);
+        let derivative = Derivative::<2>::new(0);
         assert_eq!(derivative.negative(0), [-1.5, 2.0, -0.5]);
         assert_eq!(derivative.interior(), [-0.5, 0.0, 0.5]);
         assert_eq!(derivative.positive(0), [0.5, -2.0, 1.5]);
 
-        let derivative = FDDerivative::<4>::new(0);
+        let derivative = Derivative::<4>::new(0);
         assert_eq!(
             derivative.negative(0),
             [-25.0 / 12.0, 4.0, -3.0, 4.0 / 3.0, -1.0 / 4.0]
@@ -285,12 +285,12 @@ mod tests {
             [1.0 / 4.0, -4.0 / 3.0, 3.0, -4.0, 25.0 / 12.0]
         );
 
-        let second_derivative = FDSecondDerivative::<2>::new(0);
+        let second_derivative = SecondDerivative::<2>::new(0);
         assert_eq!(second_derivative.negative(0), [2.0, -5.0, 4.0, -1.0]);
         assert_eq!(second_derivative.interior(), [1.0, -2.0, 1.0]);
         assert_eq!(second_derivative.positive(0), [-1.0, 4.0, -5.0, 2.0]);
 
-        let second_derivative = FDSecondDerivative::<4>::new(0);
+        let second_derivative = SecondDerivative::<4>::new(0);
         assert_eq!(
             second_derivative.interior(),
             [-1.0 / 12.0, 4.0 / 3.0, -5.0 / 2.0, 4.0 / 3.0, -1.0 / 12.0]
