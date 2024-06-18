@@ -21,7 +21,7 @@ pub fn system_label_impl(input: DeriveInput) -> TokenStream {
 
             quote! {
                 #[automatically_derived]
-                impl ::aeon::mesh::SystemLabel for #ident {
+                impl ::aeon::system::SystemLabel for #ident {
                     const NAME: &'static str = stringify!(#ident);
 
                     type FieldLike<T> = [T; 1];
@@ -68,7 +68,7 @@ pub fn system_label_impl(input: DeriveInput) -> TokenStream {
 
             quote! {
                 #[automatically_derived]
-                impl ::aeon::mesh::SystemLabel for #ident {
+                impl ::aeon::system::SystemLabel for #ident {
                     const NAME: &'static str = stringify!(#ident);
 
                     type FieldLike<T> = [T; #variant_count];

@@ -1,7 +1,7 @@
 #![allow(mixed_script_confusables)]
 
 use aeon::prelude::*;
-use aeon::{array::Array, mesh::field_count};
+use aeon::{array::Array, system::field_count};
 use std::path::PathBuf;
 use std::{fs::File, io::Read};
 

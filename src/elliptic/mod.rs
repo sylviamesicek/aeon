@@ -3,11 +3,9 @@ use std::{array::from_fn, marker::PhantomData};
 use crate::{
     common::{Boundary, BoundaryCondition},
     geometry::faces,
-    mesh::{
-        field_count, BlockExt, Driver, Mesh, SystemBoundary, SystemLabel, SystemOperator,
-        SystemSlice, SystemSliceMut,
-    },
+    mesh::{BlockExt, Driver, Mesh, SystemBoundary, SystemOperator},
     ode::{Ode, Rk4},
+    system::{field_count, SystemLabel, SystemSlice, SystemSliceMut},
 };
 
 #[derive(Debug, Clone)]

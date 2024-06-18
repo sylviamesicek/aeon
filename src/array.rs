@@ -20,6 +20,7 @@
 
 use serde::de::{Deserialize, Error as _, Visitor};
 use serde::ser::{Serialize, SerializeSeq};
+use std::borrow::{Borrow, BorrowMut};
 use std::marker::PhantomData;
 use std::{
     fmt::{Debug, Write},
@@ -32,6 +33,8 @@ pub trait ArrayLike:
     Index<usize, Output = Self::Elem>
     + IndexMut<usize, Output = Self::Elem>
     + IntoIterator<Item = Self::Elem>
+    + Borrow<[Self::Elem]>
+    + BorrowMut<[Self::Elem]>
 {
     /// Length of array, known at compile time.
     const LEN: usize;

@@ -30,8 +30,8 @@ pub fn derivative(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
     let tokens = weights.iter().map(|ratio| {
         let numerator = *ratio.numer() as f64;
         let denomenator = *ratio.denom() as f64;
-
-        quote!(#numerator / #denomenator)
+        let weight = numerator / denomenator;
+        quote!(#weight)
     });
 
     quote! { [ #(#tokens),* ] }.into()
@@ -58,8 +58,8 @@ pub fn second_derivative(input: proc_macro::TokenStream) -> proc_macro::TokenStr
     let tokens = weights.iter().map(|ratio| {
         let numerator = *ratio.numer() as f64;
         let denomenator = *ratio.denom() as f64;
-
-        quote!(#numerator / #denomenator)
+        let weight = numerator / denomenator;
+        quote!(#weight)
     });
 
     quote! { [ #(#tokens),* ] }.into()

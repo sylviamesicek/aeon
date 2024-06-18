@@ -1,7 +1,8 @@
 use std::{collections::HashMap, io, path::Path};
 
 use crate::common::node_from_vertex;
-use crate::mesh::{Mesh, SystemLabel, SystemVec};
+use crate::mesh::Mesh;
+use crate::system::{SystemLabel, SystemVec};
 use vtkio::model::*;
 
 use super::SystemSlice;

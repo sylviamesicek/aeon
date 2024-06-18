@@ -6,16 +6,15 @@ use std::array::from_fn;
 use crate::array::Array;
 use crate::common::{Boundary, NodeSpace};
 use crate::geometry::Rectangle;
+use crate::system::{SystemLabel, SystemSlice, SystemSliceMut};
 
 mod block;
 mod driver;
 mod model;
-mod system;
 
 pub use block::{Block, BlockExt};
 pub use driver::{Driver, MemPool};
 pub use model::Model;
-pub use system::{field_count, Scalar, SystemLabel, SystemSlice, SystemSliceMut, SystemVec};
 
 pub trait Projection<const N: usize> {
     fn evaluate(&self, block: Block<N>, pool: &MemPool, dest: &mut [f64]);
