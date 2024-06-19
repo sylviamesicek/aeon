@@ -1,83 +1,133 @@
-use std::{array::from_fn, borrow::Borrow};
-
-use crate::{array::ArrayLike, prelude::IndexSpace};
 use aeon_macros::{derivative, second_derivative};
 
 #[derive(Debug, Clone, Copy)]
-pub enum Domain {
+pub enum Support {
+    /// The point has the necessary support on both sides.
     Interior,
+    /// The point lies near a negative boundary, and must use a boundary support.
     Negative(usize),
+    /// The point lies near a positive boundary, and must use a boundary support.
     Positive(usize),
 }
 
+#[derive(Debug, Clone, Copy)]
+pub enum Order {
+    /// Second order accurate kernels.
+    Second,
+    /// Fourth order accurate kernels.
+    Fourth,
+}
+
+impl Order {
+    pub const fn from_value(val: usize) -> Self {
+        match val {
+            2 => Order::Second,
+            4 => Order::Fourth,
+            _ => panic!("Unknown Order"),
+        }
+    }
+}
+
 #[derive(Clone, Debug, Copy)]
-pub enum Kernel {
+pub enum Operator {
+    /// Identity operator.
     Value,
+    /// Approximation of derivative.
     Derivative,
+    /// Approximation of second derivative.
     SecondDerivative,
 }
 
-impl Kernel {
-    pub const fn support<const ORDER: usize>(self) -> usize {
-        match (ORDER, self) {
-            (2, Self::Value) => 0,
-            (2, Self::Derivative) => 1,
-            (2, Self::SecondDerivative) => 1,
+impl Operator {
+    /// The number of points on either side of the interior stencil's support.
+    pub const fn border(self, order: Order) -> usize {
+        match (self, order) {
+            (Self::Value, Order::Second) => 0,
+            (Self::Derivative, Order::Second) => 1,
+            (Self::SecondDerivative, Order::Second) => 1,
 
-            (4, Self::Value) => 0,
-            (4, Self::Derivative) => 2,
-            (4, Self::SecondDerivative) => 2,
-
-            _ => panic!("Order unsupport"),
+            (Self::Value, Order::Fourth) => 0,
+            (Self::Derivative, Order::Fourth) => 2,
+            (Self::SecondDerivative, Order::Fourth) => 2,
         }
     }
 
-    pub const fn interior<const ORDER: usize>(self) -> &'static [f64] {
-        match (ORDER, self) {
-            (2, Self::Value) => &[1.0],
-            (2, Self::Derivative) => &derivative!(1, 1, 0),
-            (2, Self::SecondDerivative) => &second_derivative!(1, 1, 0),
+    pub const fn weights(self, order: Order, support: Support) -> &'static [f64] {
+        match (self, order) {
+            (Self::Value, Order::Second) => &[1.0],
+            (Self::Derivative, Order::Second) => match support {
+                Support::Interior => &derivative!(1, 1, 0),
+                Support::Negative(_) => &derivative!(0, 2, 0),
+                Support::Positive(_) => &derivative!(2, 0, 0),
+            },
+            (Self::SecondDerivative, Order::Second) => match support {
+                Support::Interior => &second_derivative!(1, 1, 0),
+                Support::Negative(_) => &second_derivative!(0, 3, 0),
+                Support::Positive(_) => &second_derivative!(3, 0, 0),
+            },
 
-            (4, Self::Value) => &[1.0],
-            (4, Self::Derivative) => &derivative!(2, 2, 0),
-            (4, Self::SecondDerivative) => &second_derivative!(2, 2, 0),
-
-            _ => panic!("Order Unsupported"),
+            (Self::Value, Order::Fourth) => &[1.0],
+            (Self::Derivative, Order::Fourth) => match support {
+                Support::Interior => &derivative!(2, 2, 0),
+                Support::Negative(0) => &derivative!(0, 4, 0),
+                Support::Negative(_) => &derivative!(0, 4, 1),
+                Support::Positive(0) => &derivative!(4, 0, 0),
+                Support::Positive(_) => &derivative!(4, 0, -1),
+            },
+            (Self::SecondDerivative, Order::Fourth) => match support {
+                Support::Interior => &second_derivative!(2, 2, 0),
+                Support::Negative(0) => &second_derivative!(0, 5, 0),
+                Support::Negative(_) => &second_derivative!(0, 5, 1),
+                Support::Positive(0) => &second_derivative!(5, 0, 0),
+                Support::Positive(_) => &second_derivative!(5, 0, -1),
+            },
         }
     }
 
-    pub const fn negative<const ORDER: usize>(self, left: usize) -> &'static [f64] {
-        match (ORDER, left, self) {
-            (2, _, Self::Value) => &[],
-            (2, 0, Self::Derivative) => &derivative!(0, 2, 0),
-            (2, 0, Self::SecondDerivative) => &second_derivative!(0, 3, 0),
-
-            (4, _, Self::Value) => &[],
-            (4, 0, Self::Derivative) => &derivative!(0, 4, 0),
-            (4, 1, Self::Derivative) => &derivative!(0, 4, 1),
-            (4, 0, Self::SecondDerivative) => &second_derivative!(0, 5, 0),
-            (4, 1, Self::SecondDerivative) => &second_derivative!(0, 5, 1),
-
-            _ => panic!("Order Unsupported"),
-        }
-    }
-
-    pub const fn positive<const ORDER: usize>(self, right: usize) -> &'static [f64] {
-        match (ORDER, right, self) {
-            (2, _, Self::Value) => &[],
-            (2, 0, Self::Derivative) => &derivative!(2, 0, 0),
-            (2, 0, Self::SecondDerivative) => &second_derivative!(3, 0, 0),
-
-            (4, _, Self::Value) => &[],
-            (4, 0, Self::Derivative) => &derivative!(4, 0, 0),
-            (4, 1, Self::Derivative) => &derivative!(4, 0, 1),
-            (4, 0, Self::SecondDerivative) => &second_derivative!(5, 0, 0),
-            (4, 1, Self::SecondDerivative) => &second_derivative!(5, 0, 1),
-
-            _ => panic!("Order Unsupported"),
+    pub fn scale(self, spacing: f64) -> f64 {
+        match self {
+            Self::Value => 1.0,
+            Self::Derivative => 1.0 / spacing,
+            Self::SecondDerivative => 1.0 / (spacing * spacing),
         }
     }
 }
+
+// A tensor product of several kernels (for instance, for evaluating mixed partials).
+// #[derive(Debug, Clone, Copy)]
+// pub struct KernelProduct<const N: usize>(pub [Kernel; N]);
+
+// impl<const N: usize> KernelProduct<N> {
+//     pub fn weights(
+//         self,
+//         order: usize,
+//         support: [Support; N],
+//         mut func: impl FnMut([usize; N], f64),
+//     ) {
+//         let weights: [_; N] = from_fn(|axis| self.0[axis].weights(order, support[axis]));
+//         let size: [_; N] = from_fn(|axis| weights[axis].len());
+
+//         for index in IndexSpace::new(size).iter() {
+//             let mut weight = 1.0;
+//             for axis in 0..N {
+//                 weight *= weights[axis][index[axis]];
+//             }
+
+//             func(index, weight)
+//         }
+//     }
+
+//     /// Computes the overall scale of the kernel product.
+//     pub fn scale(self, spacing: [f64; N]) -> f64 {
+//         let mut result = 1.0;
+
+//         for axis in 0..N {
+//             result *= self.0[axis].scale(spacing[axis])
+//         }
+
+//         result
+//     }
+// }
 
 // /// A seperable kernel used for approximating a derivative or numerical operator
 // /// to some order of accuracy. All kernel weights are applied negative to positive.
@@ -284,40 +334,56 @@ impl Kernel {
 //     }
 // }
 
-// #[cfg(test)]
-// mod tests {
-//     use super::*;
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-//     #[test]
-//     fn kernel_weights() {
-//         let derivative = Derivative::<2>;
-//         assert_eq!(derivative.negative(0), [-1.5, 2.0, -0.5]);
-//         assert_eq!(derivative.interior(), [-0.5, 0.0, 0.5]);
-//         assert_eq!(derivative.positive(0), [0.5, -2.0, 1.5]);
+    #[test]
+    fn kernel_weights() {
+        let derivative = Operator::Derivative;
+        assert_eq!(
+            derivative.weights(Order::Second, Support::Negative(0)),
+            [-1.5, 2.0, -0.5]
+        );
+        assert_eq!(
+            derivative.weights(Order::Second, Support::Interior),
+            [-0.5, 0.0, 0.5]
+        );
+        assert_eq!(
+            derivative.weights(Order::Second, Support::Positive(0)),
+            [0.5, -2.0, 1.5]
+        );
 
-//         let derivative = Derivative::<4>;
-//         assert_eq!(
-//             derivative.negative(0),
-//             [-25.0 / 12.0, 4.0, -3.0, 4.0 / 3.0, -1.0 / 4.0]
-//         );
-//         assert_eq!(
-//             derivative.interior(),
-//             [1.0 / 12.0, -2.0 / 3.0, 0.0, 2.0 / 3.0, -1.0 / 12.0]
-//         );
-//         assert_eq!(
-//             derivative.positive(0),
-//             [1.0 / 4.0, -4.0 / 3.0, 3.0, -4.0, 25.0 / 12.0]
-//         );
+        assert_eq!(
+            derivative.weights(Order::Fourth, Support::Negative(0)),
+            [-25.0 / 12.0, 4.0, -3.0, 4.0 / 3.0, -1.0 / 4.0]
+        );
+        assert_eq!(
+            derivative.weights(Order::Fourth, Support::Interior),
+            [1.0 / 12.0, -2.0 / 3.0, 0.0, 2.0 / 3.0, -1.0 / 12.0]
+        );
+        assert_eq!(
+            derivative.weights(Order::Fourth, Support::Positive(0)),
+            [1.0 / 4.0, -4.0 / 3.0, 3.0, -4.0, 25.0 / 12.0]
+        );
 
-//         let second_derivative = SecondDerivative::<2>;
-//         assert_eq!(second_derivative.negative(0), [2.0, -5.0, 4.0, -1.0]);
-//         assert_eq!(second_derivative.interior(), [1.0, -2.0, 1.0]);
-//         assert_eq!(second_derivative.positive(0), [-1.0, 4.0, -5.0, 2.0]);
+        let second_derivative = Operator::SecondDerivative;
+        assert_eq!(
+            second_derivative.weights(Order::Second, Support::Negative(0)),
+            [2.0, -5.0, 4.0, -1.0]
+        );
+        assert_eq!(
+            second_derivative.weights(Order::Second, Support::Interior),
+            [1.0, -2.0, 1.0]
+        );
+        assert_eq!(
+            second_derivative.weights(Order::Second, Support::Positive(0)),
+            [-1.0, 4.0, -5.0, 2.0]
+        );
 
-//         let second_derivative = SecondDerivative::<4>;
-//         assert_eq!(
-//             second_derivative.interior(),
-//             [-1.0 / 12.0, 4.0 / 3.0, -5.0 / 2.0, 4.0 / 3.0, -1.0 / 12.0]
-//         );
-//     }
-// }
+        assert_eq!(
+            second_derivative.weights(Order::Fourth, Support::Interior),
+            [-1.0 / 12.0, 4.0 / 3.0, -5.0 / 2.0, 4.0 / 3.0, -1.0 / 12.0]
+        );
+    }
+}

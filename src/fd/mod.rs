@@ -5,7 +5,13 @@ use crate::{
     prelude::{Face, IndexSpace},
 };
 
+mod engine;
 mod kernel;
+mod node;
+
+pub use engine::{Engine, FdEngine};
+pub use kernel::{Operator, Order, Support};
+pub use node::{node_from_vertex, NodeSpace};
 
 // pub use kernel::{Derivative, Dissipation, Kernel, SecondDerivative};
 
