@@ -14,7 +14,7 @@ pub struct IndexSpace<const N: usize> {
 
 impl<const N: usize> IndexSpace<N> {
     /// Constructs a new index space.
-    pub fn new(size: [usize; N]) -> Self {
+    pub const fn new(size: [usize; N]) -> Self {
         Self { size }
     }
 
@@ -63,7 +63,7 @@ impl<const N: usize> IndexSpace<N> {
     }
 
     /// Iterates all cartesian indices in the index space.
-    pub fn iter(self) -> CartesianIter<N> {
+    pub const fn iter(self) -> CartesianIter<N> {
         CartesianIter {
             size: self.size,
             cursor: [0; N],

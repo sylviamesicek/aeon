@@ -14,6 +14,6 @@ pub use face::{faces, Face, FaceIter};
 pub use indices::{CartesianIter, CartesianWindowIter, IndexSpace};
 pub use rectangle::Rectangle;
 pub use region::{
-    regions, Region, RegionFaceNodeIter, RegionIter, RegionNodeIter, RegionOffsetNodeIter,
+    regions, Region, RegionFaceVertexIter, RegionIter, RegionNodeIter, RegionOffsetNodeIter,
 };
 pub use tree::{SpatialTree, SPATIAL_BOUNDARY};

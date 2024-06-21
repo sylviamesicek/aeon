@@ -93,6 +93,42 @@ impl Operator {
     }
 }
 
+/// Represents an interpolation operator.
+pub struct Interpolation;
+
+impl Interpolation {
+    pub const fn border(order: Order) -> usize {
+        match order {
+            Order::Second => 2,
+            Order::Fourth => 3,
+        }
+    }
+
+    pub const fn weights(order: Order, support: Support) -> &'static [f64] {
+        match order {
+            Order::Second => match support {
+                Support::Interior => &[-1.0, 9.0, 9.0, -1.0],
+                Support::Negative(_) => &[5.0, 15.0, -5.0, 1.0],
+                Support::Positive(_) => &[1.0, -5.0, 15.0, 5.0],
+            },
+            Order::Fourth => match support {
+                Support::Interior => &[3.0, -25.0, 150.0, 150.0, -25.0, 3.0],
+                Support::Negative(1) => &[63.0, 315.0, -210.0, 126.0, -45.0, 7.0],
+                Support::Negative(_) => &[-7.0, 105.0, 210.0, -70.0, 21.0, -3.0],
+                Support::Positive(1) => &[7.0, -45.0, 126.0, -210.0, 315.0, 63.0],
+                Support::Positive(_) => &[-3.0, 21.0, -70.0, 210.0, 105.0, -7.0],
+            },
+        }
+    }
+
+    pub fn scale(order: Order) -> f64 {
+        match order {
+            Order::Second => 1.0 / 16.0,
+            Order::Fourth => 1.0 / 256.0,
+        }
+    }
+}
+
 // A tensor product of several kernels (for instance, for evaluating mixed partials).
 // #[derive(Debug, Clone, Copy)]
 // pub struct KernelProduct<const N: usize>(pub [Kernel; N]);

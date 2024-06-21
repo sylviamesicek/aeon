@@ -1,4 +1,7 @@
-use crate::fd::{node_from_vertex, NodeSpace, Operator};
+use crate::{
+    fd::{node_from_vertex, Boundary, NodeSpace, Operator},
+    geometry::Rectangle,
+};
 use std::array::{self, from_fn};
 
 use super::Order;
@@ -11,14 +14,16 @@ pub trait Engine<const N: usize> {
     fn hessian(&self, field: &[f64]) -> [[f64; N]; N];
 }
 
-pub struct FdEngine<const N: usize, const ORDER: usize> {
-    pub(crate) space: NodeSpace<N>,
+pub struct FdEngine<const N: usize, const ORDER: usize, B> {
+    pub(crate) space: NodeSpace<N, B>,
+    pub(crate) bounds: Rectangle<N>,
     pub(crate) vertex: [usize; N],
 }
 
-impl<const N: usize, const ORDER: usize> Engine<N> for FdEngine<N, ORDER> {
+impl<const N: usize, const ORDER: usize, B: Boundary> Engine<N> for FdEngine<N, ORDER, B> {
     fn position(&self) -> [f64; N] {
-        self.space.position(node_from_vertex(self.vertex))
+        self.space
+            .position(self.bounds.clone(), node_from_vertex(self.vertex))
     }
 
     fn vertex(&self) -> [usize; N] {
@@ -31,32 +36,33 @@ impl<const N: usize, const ORDER: usize> Engine<N> for FdEngine<N, ORDER> {
     }
 
     fn gradient(&self, field: &[f64]) -> [f64; N] {
+        let spacing = self.space.spacing(self.bounds.clone());
         array::from_fn(|axis| {
-            self.space
-                .evaluate_axis::<ORDER>(self.vertex, Operator::Derivative, axis, field)
+            let mut operators = [Operator::Value; N];
+            operators[axis] = Operator::Derivative;
+            self.space.evaluate::<ORDER>(self.vertex, operators, field) / spacing[axis]
         })
     }
 
     fn hessian(&self, field: &[f64]) -> [[f64; N]; N] {
+        let spacing = self.space.spacing(self.bounds.clone());
+
         let mut result = [[0.0; N]; N];
 
         for i in 0..N {
             for j in i..N {
-                if i == j {
-                    result[i][j] = self.space.evaluate_axis::<ORDER>(
-                        self.vertex,
-                        Operator::SecondDerivative,
-                        i,
-                        field,
-                    );
-                } else {
-                    let mut operator = [Operator::Value; N];
-                    operator[i] = Operator::Derivative;
-                    operator[j] = Operator::Derivative;
+                let mut operator = [Operator::Value; N];
+                operator[i] = Operator::Derivative;
+                operator[j] = Operator::Derivative;
 
-                    result[i][j] = self.space.evaluate::<ORDER>(self.vertex, operator, field);
-                    result[j][i] = result[i][j]
+                if i == j {
+                    operator[i] = Operator::SecondDerivative;
                 }
+
+                result[i][j] = self.space.evaluate::<ORDER>(self.vertex, operator, field);
+                result[i][j] /= spacing[i] * spacing[j];
+
+                result[j][i] = result[i][j]
             }
         }
 
@@ -64,9 +70,9 @@ impl<const N: usize, const ORDER: usize> Engine<N> for FdEngine<N, ORDER> {
     }
 }
 
-pub struct FdIntEngine<const N: usize, const ORDER: usize>(pub(crate) FdEngine<N, ORDER>);
+pub struct FdIntEngine<const N: usize, const ORDER: usize, B>(pub(crate) FdEngine<N, ORDER, B>);
 
-impl<const N: usize, const ORDER: usize> Engine<N> for FdIntEngine<N, ORDER> {
+impl<const N: usize, const ORDER: usize, B: Boundary> Engine<N> for FdIntEngine<N, ORDER, B> {
     fn vertex(&self) -> [usize; N] {
         self.0.vertex()
     }
@@ -80,7 +86,7 @@ impl<const N: usize, const ORDER: usize> Engine<N> for FdIntEngine<N, ORDER> {
     }
 
     fn gradient(&self, field: &[f64]) -> [f64; N] {
-        let spacing = self.0.space.spacing();
+        let spacing = self.0.space.spacing(self.0.bounds.clone());
         let (weights, border) = const {
             let order = Order::from_value(ORDER);
             let weights = Operator::Derivative.weights(order, super::Support::Interior);
@@ -98,7 +104,7 @@ impl<const N: usize, const ORDER: usize> Engine<N> for FdIntEngine<N, ORDER> {
     }
 
     fn hessian(&self, field: &[f64]) -> [[f64; N]; N] {
-        let spacing = self.0.space.spacing();
+        let spacing = self.0.space.spacing(self.0.bounds.clone());
 
         let (dweights, dborder) = const {
             let order = Order::from_value(ORDER);

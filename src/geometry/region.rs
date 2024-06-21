@@ -1,4 +1,4 @@
-use super::{CartesianIter, Face, IndexSpace};
+use super::{AxisMask, CartesianIter, Face, IndexSpace};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Side {
@@ -26,7 +26,9 @@ impl<const N: usize> Region<N> {
     /// Number of different regions in a given number of dimensions.
     pub const COUNT: usize = 3usize.pow(N as u32);
 
-    pub fn new(sides: [Side; N]) -> Self {
+    pub const CENTRAL: Self = Self::new([Side::Middle; N]);
+
+    pub const fn new(sides: [Side; N]) -> Self {
         Self { sides }
     }
 
@@ -58,6 +60,7 @@ impl<const N: usize> Region<N> {
         }
     }
 
+    /// Returns an index space with the same size as the region.
     pub fn index_space(&self, support: usize, block: [usize; N]) -> IndexSpace<N> {
         let mut size = [0; N];
 
@@ -82,7 +85,7 @@ impl<const N: usize> Region<N> {
         }
     }
 
-    pub fn face_nodes(&self, block: [usize; N]) -> RegionFaceNodeIter<N> {
+    pub fn face_vertices(&self, block: [usize; N]) -> RegionFaceVertexIter<N> {
         let mut size = [0; N];
 
         for axis in 0..N {
@@ -92,7 +95,7 @@ impl<const N: usize> Region<N> {
             }
         }
 
-        RegionFaceNodeIter {
+        RegionFaceVertexIter {
             inner: IndexSpace::new(size).iter(),
             block,
             sides: self.sides,
@@ -117,6 +120,43 @@ impl<const N: usize> Region<N> {
             Side::Right => 1,
             Side::Middle => 0,
         })
+    }
+
+    /// Returns a mask for which a given axis is set if and only if self.sides[axis] != Middle.
+    pub fn to_mask(&self) -> AxisMask<N> {
+        let mut result = AxisMask::empty();
+
+        for axis in 0..N {
+            result.set_to(axis, self.sides[axis] != Side::Middle);
+        }
+
+        result
+    }
+
+    pub fn masked(&self, mask: AxisMask<N>) -> Self {
+        let mut sides = self.sides;
+
+        for i in 0..N {
+            if !mask.is_set(i) {
+                sides[i] = Side::Middle;
+            }
+        }
+
+        Self::new(sides)
+    }
+
+    pub fn masked_by_split(&self, split: AxisMask<N>) -> Self {
+        let mut mask = AxisMask::empty();
+
+        for axis in 0..N {
+            match self.sides[axis] {
+                Side::Left => mask.set_to(axis, split.is_set(axis) == false),
+                Side::Middle => mask.clear(axis),
+                Side::Right => mask.set_to(axis, split.is_set(axis)),
+            }
+        }
+
+        self.masked(mask)
     }
 }
 
@@ -146,25 +186,25 @@ impl<const N: usize> Iterator for RegionNodeIter<N> {
     }
 }
 
-pub struct RegionFaceNodeIter<const N: usize> {
+pub struct RegionFaceVertexIter<const N: usize> {
     inner: CartesianIter<N>,
     block: [usize; N],
     sides: [Side; N],
 }
 
-impl<const N: usize> Iterator for RegionFaceNodeIter<N> {
-    type Item = [isize; N];
+impl<const N: usize> Iterator for RegionFaceVertexIter<N> {
+    type Item = [usize; N];
 
     fn next(&mut self) -> Option<Self::Item> {
         let cart = self.inner.next()?;
 
-        let mut result = [0isize; N];
+        let mut result = [0; N];
 
         for axis in 0..N {
             result[axis] = match self.sides[axis] {
                 Side::Left => 0,
-                Side::Right => (self.block[axis] - 1) as isize,
-                Side::Middle => cart[axis] as isize,
+                Side::Right => self.block[axis] - 1,
+                Side::Middle => cart[axis],
             }
         }
 
