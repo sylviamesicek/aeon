@@ -22,7 +22,7 @@ impl<const N: usize> AxisMask<N> {
         Self(linear)
     }
 
-    pub fn into_linear(self) -> usize {
+    pub fn to_linear(self) -> usize {
         self.0.min(Self::COUNT - 1)
     }
 

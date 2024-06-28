@@ -61,6 +61,8 @@ impl<const N: usize> TreeBlocks<N> {
         }
     }
 
+    /// Rebuilds the tree block structure from existing geometric information. Performs greedy meshing
+    /// to group cells into blocks.
     pub fn build(&mut self, tree: &SpatialTree<N>, cell_width: [usize; N], ghost_nodes: usize) {
         self.build_blocks(tree);
         self.build_node_offsets(cell_width, ghost_nodes);
@@ -72,6 +74,7 @@ impl<const N: usize> TreeBlocks<N> {
         self.block_sizes.len()
     }
 
+    /// Returns true if the mesh contains no blocks.
     pub fn is_empty(&self) -> bool {
         self.len() == 0
     }
@@ -262,6 +265,8 @@ pub struct TreeMesh<const N: usize> {
 }
 
 impl<const N: usize> TreeMesh<N> {
+    /// Constructs a new tree mesh, covering the given physical domain. Each cell has the given number of subdivisions
+    /// per axis, and each block extends out an extra `ghost_nodes` distance to facilitate inter-cell communication.
     pub fn new(bounds: Rectangle<N>, cell_width: [usize; N], ghost_nodes: usize) -> Self {
         for axis in 0..N {
             assert!(cell_width[axis] % 2 == 0);
@@ -281,6 +286,7 @@ impl<const N: usize> TreeMesh<N> {
         result
     }
 
+    /// Checks if the given refinement flags are 2:1 balanced.
     pub fn is_balanced(&self, flags: &[bool]) -> bool {
         self.tree.is_balanced(flags)
     }
@@ -295,6 +301,7 @@ impl<const N: usize> TreeMesh<N> {
         self.build();
     }
 
+    /// Reconstructs interal structure of the TreeMesh, automatically called during refinement.
     pub fn build(&mut self) {
         self.blocks
             .build(&self.tree, self.cell_width, self.ghost_nodes);
@@ -329,9 +336,9 @@ impl<const N: usize> TreeMesh<N> {
                     // Snap origin to be adjacent to face
                     if neighbor_fine {
                         let mut neighbor_split = self.tree.split(neighbor);
-                        let neighbor_origin = neighbor - neighbor_split.into_linear();
+                        let neighbor_origin = neighbor - neighbor_split.to_linear();
                         neighbor_split.set_to(face.axis, face.side);
-                        neighbor = neighbor_origin + neighbor_split.into_linear();
+                        neighbor = neighbor_origin + neighbor_split.to_linear();
                     }
 
                     // Get neighbor of current cell
@@ -349,10 +356,12 @@ impl<const N: usize> TreeMesh<N> {
                     match nlevel.cmp(&level) {
                         Ordering::Less => {
                             debug_assert!(nlevel == level - 1);
+                            debug_assert!(!neighbor_fine);
                             neighbor_coarse = true;
                         }
                         Ordering::Greater => {
                             debug_assert!(nlevel == level + 1);
+                            debug_assert!(!neighbor_coarse);
                             neighbor_fine = true;
                         }
                         _ => {}
@@ -413,6 +422,8 @@ impl<const N: usize> TreeMesh<N> {
         self.cell_neighbors(cell)[region.to_linear()]
     }
 
+    /// Fills ghost nodes on the mesh. This includes applying physical boundary conditions, as well
+    /// as handling interior boundaries (same level, coarse-fine, or fine-coarse).
     pub fn fill_boundary<const ORDER: usize>(&self, physical: &impl Boundary, field: &mut [f64]) {
         self.fill_direct(physical, field);
         self.fill_prolong::<ORDER>(physical, field);
@@ -470,7 +481,7 @@ impl<const N: usize> TreeMesh<N> {
                                 }
                             }
 
-                            let neighbor = neighbor + nmask.into_linear();
+                            let neighbor = neighbor + nmask.to_linear();
                             let neighbor_index = self.blocks.cell_index(neighbor);
                             let neighbor_block = self.blocks.cell_block(neighbor);
                             let neighbor_origin = self.cell_node_origin(neighbor_index);
@@ -618,7 +629,7 @@ mod tests {
 
     #[test]
     fn greedy_meshing() {
-        let mut mesh = TreeMesh::new(Rectangle::UNIT, [7; 2], 3);
+        let mut mesh = TreeMesh::new(Rectangle::UNIT, [8; 2], 3);
         mesh.refine(&[true, false, false, false]);
 
         assert_eq!(mesh.num_blocks(), 3);

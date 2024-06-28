@@ -6,6 +6,7 @@ use std::array::{self, from_fn};
 
 use super::Order;
 
+/// An interface for computing values, gradients, and hessians of fields.
 pub trait Engine<const N: usize> {
     fn position(&self) -> [f64; N];
     fn vertex(&self) -> [usize; N];
@@ -14,6 +15,7 @@ pub trait Engine<const N: usize> {
     fn hessian(&self, field: &[f64]) -> [[f64; N]; N];
 }
 
+/// A finite difference engine of a given order, but potentially bordering a free boundary.
 pub struct FdEngine<const N: usize, const ORDER: usize, B> {
     pub(crate) space: NodeSpace<N, B>,
     pub(crate) bounds: Rectangle<N>,
@@ -70,6 +72,7 @@ impl<const N: usize, const ORDER: usize, B: Boundary> Engine<N> for FdEngine<N, 
     }
 }
 
+/// A finite difference engine that only every relies on interior support (and can thus use better optimized stencils).
 pub struct FdIntEngine<const N: usize, const ORDER: usize, B>(pub(crate) FdEngine<N, ORDER, B>);
 
 impl<const N: usize, const ORDER: usize, B: Boundary> Engine<N> for FdIntEngine<N, ORDER, B> {

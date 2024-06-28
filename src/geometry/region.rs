@@ -3,6 +3,7 @@ use std::array::from_fn;
 use super::{index::IndexWindow, AxisMask, CartesianIter, Face, IndexSpace};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
 pub enum Side {
     Left = 0,
     Middle = 1,
@@ -16,6 +17,13 @@ impl Side {
             Self::Right => Self::Left,
             Self::Middle => Self::Middle,
         }
+    }
+
+    pub fn from_value(val: u8) -> Self {
+        assert!(val < 3);
+        // Saftey. We have specified the memory representation of the
+        // enum and checked the value, so this should be safe.
+        unsafe { std::mem::transmute(val) }
     }
 }
 
@@ -191,13 +199,22 @@ impl<const N: usize> Region<N> {
         self.masked(mask)
     }
 
+    /// Converts the region into an integer value.
     pub fn to_linear(&self) -> usize {
         let space = IndexSpace::new([3; N]);
         let index = from_fn(|axis| self.side(axis) as usize);
         space.linear_from_cartesian(index)
     }
+
+    /// Converts an integer value into a region.
+    pub fn from_linear(val: usize) -> Self {
+        let space = IndexSpace::new([3; N]);
+        let index = space.cartesian_from_linear(val);
+        Self::new(from_fn(|axis| Side::from_value(index[axis] as u8)))
+    }
 }
 
+/// Allows iterating the nodes in a region.
 pub struct RegionNodeIter<const N: usize> {
     inner: CartesianIter<N>,
     block: [usize; N],
@@ -224,6 +241,7 @@ impl<const N: usize> Iterator for RegionNodeIter<N> {
     }
 }
 
+/// Allows iterating the vertices on the face of a region.
 pub struct RegionFaceVertexIter<const N: usize> {
     inner: CartesianIter<N>,
     block: [usize; N],

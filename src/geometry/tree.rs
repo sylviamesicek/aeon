@@ -37,7 +37,7 @@ impl<const N: usize> SpatialTree<N> {
             .flat_map(|mask| {
                 faces::<N>().map(move |face| {
                     if mask.is_inner_face(face) {
-                        mask.toggled(face.axis).into_linear()
+                        mask.toggled(face.axis).to_linear()
                     } else {
                         SPATIAL_BOUNDARY
                     }
@@ -89,7 +89,7 @@ impl<const N: usize> SpatialTree<N> {
     }
 
     pub fn origin(&self, cell: usize) -> usize {
-        let split = self.split(cell).into_linear();
+        let split = self.split(cell).to_linear();
         cell - split
     }
 
@@ -182,7 +182,7 @@ impl<const N: usize> SpatialTree<N> {
                     for face in faces::<N>() {
                         if mask.is_inner_face(face) {
                             // We can just reflect across axis within this particular group
-                            let neighbor = parent + mask.toggled(face.axis).into_linear();
+                            let neighbor = parent + mask.toggled(face.axis).to_linear();
                             neighbors.push(neighbor);
                         } else {
                             let neighbor = self.neighbors(block)[face.to_linear()];
@@ -199,16 +199,16 @@ impl<const N: usize> SpatialTree<N> {
                                 match (flags[neighbor], level as isize - neighbor_level as isize) {
                                     (true, -1) => {
                                         // We refine both and the neighbor started finer
-                                        update_map[neighbor + mask.toggled(face.axis).into_linear()]
+                                        update_map[neighbor + mask.toggled(face.axis).to_linear()]
                                     }
                                     (false, -1) => {
                                         // Neighbor was more refined, but now they are on the same level
-                                        update_map[neighbor + mask.toggled(face.axis).into_linear()]
+                                        update_map[neighbor + mask.toggled(face.axis).to_linear()]
                                     }
                                     (true, 0) => {
                                         // If we refine both and they started on the same level. simply flip
                                         // along axis.
-                                        update_map[neighbor] + mask.toggled(face.axis).into_linear()
+                                        update_map[neighbor] + mask.toggled(face.axis).to_linear()
                                     }
                                     (false, 0) => {
                                         // Started on same level, but neighbor was not refined
@@ -217,7 +217,7 @@ impl<const N: usize> SpatialTree<N> {
                                     (true, 1) => {
                                         // We refine both and this block starts finer than neighbor
                                         update_map[neighbor]
-                                            + self.split(block).toggled(face.axis).into_linear()
+                                            + self.split(block).toggled(face.axis).to_linear()
                                     }
 
                                     _ => panic!("Unbalanced quadtree."),

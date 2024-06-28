@@ -21,9 +21,12 @@ pub enum BoundaryCondition {
 }
 
 impl BoundaryCondition {
+    /// A symmetric boundary condition.
     pub const SYMMETRIC: BoundaryCondition = BoundaryCondition::Parity(true);
+    /// An antisymmetric boundary condition.
     pub const ANTISYMMETRIC: BoundaryCondition = BoundaryCondition::Parity(false);
 
+    /// Are ghost nodes used to enforce a boundary condition?
     pub fn is_free(self) -> bool {
         matches!(self, Self::Free)
     }
