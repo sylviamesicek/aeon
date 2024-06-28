@@ -34,7 +34,7 @@ impl<const N: usize> SpatialTree<N> {
             .map(|mask| bounds.split(mask))
             .collect();
         let neighbors = AxisMask::<N>::enumerate()
-            .map(|mask| {
+            .flat_map(|mask| {
                 faces::<N>().map(move |face| {
                     if mask.is_inner_face(face) {
                         mask.toggled(face.axis).into_linear()
@@ -43,7 +43,6 @@ impl<const N: usize> SpatialTree<N> {
                     }
                 })
             })
-            .flatten()
             .collect();
 
         let mut indices = from_fn(|_| BitVec::new());
@@ -54,7 +53,7 @@ impl<const N: usize> SpatialTree<N> {
             }
         }
 
-        let offsets = (0..=AxisMask::<N>::COUNT).into_iter().collect();
+        let offsets = (0..=AxisMask::<N>::COUNT).collect();
 
         Self {
             bounds,
@@ -84,9 +83,14 @@ impl<const N: usize> SpatialTree<N> {
         self.bounds[cell].clone()
     }
 
-    /// If block is not root, returns it most recent subdivision.
-    pub fn subdivision(&self, block: usize) -> AxisMask<N> {
-        AxisMask::pack(from_fn(|axis| self.indices[axis][self.offsets[block]]))
+    /// If cell is not root, returns it most recent subdivision.
+    pub fn split(&self, cell: usize) -> AxisMask<N> {
+        AxisMask::pack(from_fn(|axis| self.indices[axis][self.offsets[cell]]))
+    }
+
+    pub fn origin(&self, cell: usize) -> usize {
+        let split = self.split(cell).into_linear();
+        cell - split
     }
 
     /// Checks whether the given refinement flags are balanced.
@@ -213,10 +217,7 @@ impl<const N: usize> SpatialTree<N> {
                                     (true, 1) => {
                                         // We refine both and this block starts finer than neighbor
                                         update_map[neighbor]
-                                            + self
-                                                .subdivision(block)
-                                                .toggled(face.axis)
-                                                .into_linear()
+                                            + self.split(block).toggled(face.axis).into_linear()
                                     }
 
                                     _ => panic!("Unbalanced quadtree."),
@@ -267,7 +268,7 @@ impl<const N: usize> SpatialTree<N> {
 
     /// Returns all coarse blocks that neighbor the given block.
     fn coarse_neighborhood(&self, block: usize) -> impl Iterator<Item = usize> + '_ {
-        let subdivision = self.subdivision(block);
+        let subdivision = self.split(block);
 
         // Loop over possible directions
         AxisMask::<N>::enumerate()
@@ -376,10 +377,10 @@ mod tests {
         let mut tree = SpatialTree::new(Rectangle::<2>::UNIT);
 
         assert_eq!(tree.num_cells(), 4);
-        assert_eq!(tree.subdivision(0).unpack(), [false, false]);
-        assert_eq!(tree.subdivision(1).unpack(), [true, false]);
-        assert_eq!(tree.subdivision(2).unpack(), [false, true]);
-        assert_eq!(tree.subdivision(3).unpack(), [true, true]);
+        assert_eq!(tree.split(0).unpack(), [false, false]);
+        assert_eq!(tree.split(1).unpack(), [true, false]);
+        assert_eq!(tree.split(2).unpack(), [false, true]);
+        assert_eq!(tree.split(3).unpack(), [true, true]);
 
         tree.refine(&[false, false, false, true]);
 

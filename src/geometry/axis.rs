@@ -87,6 +87,10 @@ impl<const N: usize> AxisMask<N> {
     pub fn outer_faces(self) -> impl Iterator<Item = Face> {
         faces::<N>().filter(move |&face| self.is_outer_face(face))
     }
+
+    pub fn is_compatible_with_face(self, face: Face) -> bool {
+        self.is_set(face.axis) == face.side
+    }
 }
 
 pub struct AxisMaskIter<const N: usize> {

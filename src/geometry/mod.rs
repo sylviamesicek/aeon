@@ -4,16 +4,16 @@
 
 mod axis;
 mod face;
-mod indices;
+mod index;
 mod rectangle;
 mod region;
 mod tree;
 
 pub use axis::AxisMask;
 pub use face::{faces, Face, FaceIter};
-pub use indices::{CartesianIter, CartesianWindowIter, IndexSpace};
+pub use index::{CartesianIter, CartesianWindowIter, IndexSpace};
 pub use rectangle::Rectangle;
 pub use region::{
-    regions, Region, RegionFaceVertexIter, RegionIter, RegionNodeIter, RegionOffsetNodeIter,
+    regions, Region, RegionFaceVertexIter, RegionIter, RegionNodeIter, RegionOffsetNodeIter, Side,
 };
 pub use tree::{SpatialTree, SPATIAL_BOUNDARY};

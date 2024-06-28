@@ -1,4 +1,6 @@
-use super::{AxisMask, CartesianIter, Face, IndexSpace};
+use std::array::from_fn;
+
+use super::{index::IndexWindow, AxisMask, CartesianIter, Face, IndexSpace};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Side {
@@ -36,6 +38,10 @@ impl<const N: usize> Region<N> {
         self.sides
     }
 
+    pub fn side(&self, axis: usize) -> Side {
+        self.sides[axis]
+    }
+
     pub fn reverse(&self) -> Self {
         let mut result = [Side::Left; N];
 
@@ -51,6 +57,32 @@ impl<const N: usize> Region<N> {
             .into_iter()
             .filter(|&s| s != Side::Middle)
             .count()
+    }
+
+    /// Iterates over all faces one would have to move over to get to the region.
+    pub fn adjacent_faces(&self) -> impl Iterator<Item = Face> + '_ {
+        (0..N)
+            .filter(|&axis| self.side(axis) != Side::Middle)
+            .map(|axis| Face {
+                axis,
+                side: self.side(axis) == Side::Right,
+            })
+    }
+
+    pub fn adjacent_splits(&self) -> impl Iterator<Item = AxisMask<N>> + '_ {
+        let origin: [_; N] = from_fn(|axis| match self.side(axis) {
+            Side::Left | Side::Middle => 0,
+            Side::Right => 1,
+        });
+
+        let size: [_; N] = from_fn(|axis| match self.side(axis) {
+            Side::Middle => 2,
+            _ => 1,
+        });
+
+        IndexWindow::new(origin, size)
+            .iter()
+            .map(|index| AxisMask::pack(from_fn(|axis| index[axis] != 0)))
     }
 
     pub fn face_from_axis(&self, axis: usize) -> Face {
@@ -150,13 +182,19 @@ impl<const N: usize> Region<N> {
 
         for axis in 0..N {
             match self.sides[axis] {
-                Side::Left => mask.set_to(axis, split.is_set(axis) == false),
+                Side::Left => mask.set_to(axis, !split.is_set(axis)),
                 Side::Middle => mask.clear(axis),
                 Side::Right => mask.set_to(axis, split.is_set(axis)),
             }
         }
 
         self.masked(mask)
+    }
+
+    pub fn to_linear(&self) -> usize {
+        let space = IndexSpace::new([3; N]);
+        let index = from_fn(|axis| self.side(axis) as usize);
+        space.linear_from_cartesian(index)
     }
 }
 
