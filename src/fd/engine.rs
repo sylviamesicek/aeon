@@ -1,5 +1,5 @@
 use crate::{
-    fd::{node_from_vertex, Boundary, NodeSpace, Operator},
+    fd::{node_from_vertex, BasisOperator, BoundaryConditions, NodeSpace},
     geometry::Rectangle,
 };
 use std::array::{self, from_fn};
@@ -22,7 +22,7 @@ pub struct FdEngine<const N: usize, const ORDER: usize, B> {
     pub(crate) vertex: [usize; N],
 }
 
-impl<const N: usize, const ORDER: usize, B: Boundary> Engine<N> for FdEngine<N, ORDER, B> {
+impl<const N: usize, const ORDER: usize, B: BoundaryConditions> Engine<N> for FdEngine<N, ORDER, B> {
     fn position(&self) -> [f64; N] {
         self.space
             .position(self.bounds.clone(), node_from_vertex(self.vertex))
@@ -40,8 +40,8 @@ impl<const N: usize, const ORDER: usize, B: Boundary> Engine<N> for FdEngine<N, 
     fn gradient(&self, field: &[f64]) -> [f64; N] {
         let spacing = self.space.spacing(self.bounds.clone());
         array::from_fn(|axis| {
-            let mut operators = [Operator::Value; N];
-            operators[axis] = Operator::Derivative;
+            let mut operators = [BasisOperator::Value; N];
+            operators[axis] = BasisOperator::Derivative;
             self.space.evaluate::<ORDER>(self.vertex, operators, field) / spacing[axis]
         })
     }
@@ -53,12 +53,12 @@ impl<const N: usize, const ORDER: usize, B: Boundary> Engine<N> for FdEngine<N, 
 
         for i in 0..N {
             for j in i..N {
-                let mut operator = [Operator::Value; N];
-                operator[i] = Operator::Derivative;
-                operator[j] = Operator::Derivative;
+                let mut operator = [BasisOperator::Value; N];
+                operator[i] = BasisOperator::Derivative;
+                operator[j] = BasisOperator::Derivative;
 
                 if i == j {
-                    operator[i] = Operator::SecondDerivative;
+                    operator[i] = BasisOperator::SecondDerivative;
                 }
 
                 result[i][j] = self.space.evaluate::<ORDER>(self.vertex, operator, field);
@@ -75,7 +75,7 @@ impl<const N: usize, const ORDER: usize, B: Boundary> Engine<N> for FdEngine<N, 
 /// A finite difference engine that only every relies on interior support (and can thus use better optimized stencils).
 pub struct FdIntEngine<const N: usize, const ORDER: usize, B>(pub(crate) FdEngine<N, ORDER, B>);
 
-impl<const N: usize, const ORDER: usize, B: Boundary> Engine<N> for FdIntEngine<N, ORDER, B> {
+impl<const N: usize, const ORDER: usize, B: BoundaryConditions> Engine<N> for FdIntEngine<N, ORDER, B> {
     fn vertex(&self) -> [usize; N] {
         self.0.vertex()
     }
@@ -92,8 +92,8 @@ impl<const N: usize, const ORDER: usize, B: Boundary> Engine<N> for FdIntEngine<
         let spacing = self.0.space.spacing(self.0.bounds.clone());
         let (weights, border) = const {
             let order = Order::from_value(ORDER);
-            let weights = Operator::Derivative.weights(order, super::Support::Interior);
-            let border = Operator::Derivative.border(order);
+            let weights = BasisOperator::Derivative.weights(order, super::Support::Interior);
+            let border = BasisOperator::Derivative.border(order);
 
             (weights, border)
         };
@@ -111,16 +111,16 @@ impl<const N: usize, const ORDER: usize, B: Boundary> Engine<N> for FdIntEngine<
 
         let (dweights, dborder) = const {
             let order = Order::from_value(ORDER);
-            let weights = Operator::Derivative.weights(order, super::Support::Interior);
-            let border = Operator::Derivative.border(order);
+            let weights = BasisOperator::Derivative.weights(order, super::Support::Interior);
+            let border = BasisOperator::Derivative.border(order);
 
             (weights, border)
         };
 
         let (ddweights, ddborder) = const {
             let order = Order::from_value(ORDER);
-            let weights = Operator::SecondDerivative.weights(order, super::Support::Interior);
-            let border = Operator::SecondDerivative.border(order);
+            let weights = BasisOperator::SecondDerivative.weights(order, super::Support::Interior);
+            let border = BasisOperator::SecondDerivative.border(order);
 
             (weights, border)
         };

@@ -18,5 +18,7 @@ pub mod prelude {
     //     SystemOperator, SystemProjection,
     // };
     pub use crate::ode::{ForwardEuler, Ode, Rk4};
-    pub use crate::system::{Scalar, SystemLabel, SystemSlice, SystemSliceMut, SystemVec};
+    pub use crate::system::{
+        Scalar, SystemLabel, SystemSlice, SystemSliceMut, SystemVal, SystemVec,
+    };
 }

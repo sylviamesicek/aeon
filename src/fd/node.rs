@@ -1,4 +1,6 @@
-use crate::fd::{Boundary, BoundaryCondition, Interpolation, Operator, Order, Support};
+use crate::fd::{
+    BasisOperator, BoundaryCondition, BoundaryConditions, Interpolation, Order, Support,
+};
 use crate::geometry::{faces, CartesianIter, IndexSpace, Rectangle};
 use crate::prelude::Face;
 use std::array::from_fn;
@@ -27,7 +29,16 @@ pub struct NodeSpace<const N: usize, B> {
     pub boundary: B,
 }
 
-impl<const N: usize, B: Boundary> NodeSpace<N, B> {
+impl<const N: usize, B: BoundaryConditions> NodeSpace<N, B> {
+    /// Attachs a different boundary to the node space.
+    pub fn with_boundary<B2: BoundaryConditions>(&self, boundary: B2) -> NodeSpace<N, B2> {
+        NodeSpace {
+            size: self.size,
+            ghost: self.ghost,
+            boundary,
+        }
+    }
+
     /// Computes the total number of nodes in the space.
     pub fn node_count(&self) -> usize {
         self.node_size().iter().product()
@@ -150,7 +161,7 @@ impl<const N: usize, B: Boundary> NodeSpace<N, B> {
     }
 
     /// Returns the covariant scaling that must be applied to the given operator.
-    pub fn scale(&self, bounds: Rectangle<N>, operator: [Operator; N]) -> f64 {
+    pub fn scale(&self, bounds: Rectangle<N>, operator: [BasisOperator; N]) -> f64 {
         let spacing = self.spacing(bounds);
 
         let mut result = 1.0;
@@ -163,7 +174,7 @@ impl<const N: usize, B: Boundary> NodeSpace<N, B> {
     }
 }
 
-impl<const N: usize, B: Boundary> NodeSpace<N, B> {
+impl<const N: usize, B: BoundaryConditions> NodeSpace<N, B> {
     /// Computes the window containing active nodes. Aka all nodes that will be used
     /// for kernel evaluation.
     pub fn active_window(&self) -> NodeWindow<N> {
@@ -282,7 +293,7 @@ impl<const N: usize, B: Boundary> NodeSpace<N, B> {
     pub fn evaluate<const ORDER: usize>(
         &self,
         vertex: [usize; N],
-        operator: [Operator; N],
+        operator: [BasisOperator; N],
         field: &[f64],
     ) -> f64 {
         let order = const { Order::from_value(ORDER) };

@@ -32,7 +32,7 @@ impl Order {
 
 /// The specific operation to be approximated.
 #[derive(Clone, Debug, Copy)]
-pub enum Operator {
+pub enum BasisOperator {
     /// Identity operator.
     Value,
     /// Approximation of derivative.
@@ -41,7 +41,7 @@ pub enum Operator {
     SecondDerivative,
 }
 
-impl Operator {
+impl BasisOperator {
     /// The number of points on either side of the interior stencil's support.
     pub const fn border(self, order: Order) -> usize {
         match (self, order) {
@@ -141,7 +141,7 @@ mod tests {
 
     #[test]
     fn kernel_weights() {
-        let derivative = Operator::Derivative;
+        let derivative = BasisOperator::Derivative;
         assert_eq!(
             derivative.weights(Order::Second, Support::Negative(0)),
             [-1.5, 2.0, -0.5]
@@ -168,7 +168,7 @@ mod tests {
             [1.0 / 4.0, -4.0 / 3.0, 3.0, -4.0, 25.0 / 12.0]
         );
 
-        let second_derivative = Operator::SecondDerivative;
+        let second_derivative = BasisOperator::SecondDerivative;
         assert_eq!(
             second_derivative.weights(Order::Second, Support::Negative(0)),
             [2.0, -5.0, 4.0, -1.0]

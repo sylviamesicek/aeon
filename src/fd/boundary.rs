@@ -1,8 +1,20 @@
 use crate::geometry::Face;
 
 /// Used to strongly enforce boundary conditions along faces.
-pub trait Boundary {
+pub trait BoundaryConditions {
     fn face(&self, face: Face) -> BoundaryCondition;
+}
+
+impl<T: Fn(Face) -> BoundaryCondition> BoundaryConditions for T {
+    fn face(&self, face: Face) -> BoundaryCondition {
+        self(face)
+    }
+}
+
+impl BoundaryConditions for () {
+    fn face(&self, _face: Face) -> BoundaryCondition {
+        BoundaryCondition::Custom
+    }
 }
 
 /// Represents a strongly enforced boundary condition.

@@ -33,6 +33,24 @@ pub const fn field_count<Label: SystemLabel>() -> usize {
     Label::FieldLike::<()>::LEN
 }
 
+impl SystemLabel for () {
+    const NAME: &'static str = "Unit";
+
+    type FieldLike<T> = [T; 0];
+
+    fn fields() -> Array<Self::FieldLike<Self>> {
+        [].into()
+    }
+
+    fn field_index(&self) -> usize {
+        panic!()
+    }
+
+    fn field_name(&self) -> String {
+        panic!()
+    }
+}
+
 /// A default system representing one scalar field.
 #[derive(Clone)]
 pub struct Scalar;
@@ -120,6 +138,19 @@ impl<Label: SystemLabel> SystemVec<Label> {
         R: RangeBounds<usize> + SliceIndex<[f64], Output = [f64]> + Clone,
     {
         self.as_mut_slice().slice_mut(range)
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct SystemVal<Label: SystemLabel>(FieldArray<Label, f64>);
+
+impl<Label: SystemLabel> SystemVal<Label> {
+    pub fn new(values: Label::FieldLike<f64>) -> Self {
+        Self(values.into())
+    }
+
+    pub fn field(&self, label: Label) -> f64 {
+        self.0[label.field_index()]
     }
 }
 

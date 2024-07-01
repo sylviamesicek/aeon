@@ -22,10 +22,12 @@ use serde::de::{Deserialize, Error as _, Visitor};
 use serde::ser::{Serialize, SerializeSeq};
 use std::borrow::{Borrow, BorrowMut};
 use std::marker::PhantomData;
+use std::mem::ManuallyDrop;
 use std::{
     fmt::{Debug, Write},
     ops::{Index, IndexMut},
 };
+
 /// A helper trait for array types which can be indexed and iterated, with
 /// compile time known length. Use of this trait can be removed if `generic_const_exprs`
 /// is ever stabilized.
@@ -58,6 +60,7 @@ impl<T, const N: usize> ArrayLike for [T; N] {
 
 /// A wrapper around an `ArrayLike` which implements several common traits depending on the elements of `I`.
 /// This includes `Default`, `Clone`, `From`, and serialization assuming the element type also satisfies those traits.
+#[repr(transparent)]
 pub struct Array<I: ArrayLike>(I);
 
 impl<I: ArrayLike> Array<I> {
@@ -191,5 +194,21 @@ where
         D: serde::Deserializer<'de>,
     {
         deserializer.deserialize_seq(ArrayVisitor::<I>(PhantomData))
+    }
+}
+
+/// Converts a vector of arraylike values to a vector of those values wrapped in the newtype
+pub fn wrap_vec_of_arrays<I: ArrayLike>(vec: Vec<I>) -> Vec<Array<I>> {
+    unsafe {
+        let mut v = ManuallyDrop::new(vec);
+        Vec::from_raw_parts(v.as_mut_ptr() as *mut Array<I>, v.len(), v.capacity())
+    }
+}
+
+/// Converts a vector of wrapped arrays into a vector of their underlying arraylike values.
+pub fn unwrap_vec_of_arrays<I: ArrayLike>(vec: Vec<Array<I>>) -> Vec<I> {
+    unsafe {
+        let mut v = ManuallyDrop::new(vec);
+        Vec::from_raw_parts(v.as_mut_ptr() as *mut I, v.len(), v.capacity())
     }
 }
