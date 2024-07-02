@@ -159,18 +159,24 @@ impl<const N: usize> Mesh<N> {
         self.blocks.cells(block)
     }
 
+    /// Computes the physical bounds of a block.
     pub fn block_bounds(&self, block: usize) -> Rectangle<N> {
         self.blocks.bounds(block)
     }
 
+    /// The range of nodes that the block owns.
     pub fn block_nodes(&self, block: usize) -> Range<usize> {
         self.blocks.nodes(block)
     }
 
+    /// Computes flags indicating whether a particular face of a block borders a physical
+    /// boundary.
     pub fn block_boundary_flags(&self, block: usize) -> FaceMask<N> {
         self.blocks.boundary_flags(block)
     }
 
+    /// Produces a block boundary which correctly accounts for
+    /// interior interfaces.
     pub fn block_boundary<B: Boundary>(&self, block: usize, boundary: B) -> BlockBoundary<N, B> {
         BlockBoundary {
             mask: self.block_boundary_flags(block),
@@ -199,14 +205,17 @@ impl<const N: usize> Mesh<N> {
         self.cell_neighbors(cell)[region.to_linear()]
     }
 
+    /// The level of the mesh the cell resides on.
     pub fn cell_level(&self, cell: usize) -> usize {
         self.tree.level(cell)
     }
 
+    /// Most recent subdivision that the cell underwent.
     pub fn cell_split(&self, cell: usize) -> AxisMask<N> {
         self.tree.split(cell)
     }
 
+    /// Retrieves which block the cell belongs to.
     pub fn cell_block(&self, cell: usize) -> usize {
         self.blocks.cell_block(cell)
     }

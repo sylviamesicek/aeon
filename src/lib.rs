@@ -2,6 +2,7 @@
 extern crate self as aeon;
 
 pub mod array;
+pub mod elliptic;
 pub mod fd;
 pub mod geometry;
 pub mod lac;

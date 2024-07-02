@@ -40,6 +40,10 @@ impl<const N: usize> NodeSpace<N> {
         IndexSpace::new(self.node_size()).linear_from_cartesian(cart)
     }
 
+    pub fn index_from_vertex(&self, vertex: [usize; N]) -> usize {
+        self.index_from_node(node_from_vertex(vertex))
+    }
+
     /// Computes the number of cells along each axis.
     pub fn cell_size(&self) -> [usize; N] {
         self.size
@@ -298,6 +302,7 @@ impl<const N: usize> NodeSpace<N> {
     pub fn evaluate<const ORDER: usize>(
         &self,
         boundary: &impl Boundary,
+        bounds: Rectangle<N>,
         vertex: [usize; N],
         operator: [BasisOperator; N],
         field: &[f64],
@@ -321,7 +326,7 @@ impl<const N: usize> NodeSpace<N> {
             };
         }
 
-        self.weights(corner, weights, field)
+        self.weights(corner, weights, field) * self.scale(bounds, operator)
     }
 
     /// Computes the interpolation of the underlying data to one increased level of refinement.

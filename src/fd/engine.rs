@@ -8,6 +8,7 @@ use crate::fd::{Boundary, Order};
 
 /// An interface for computing values, gradients, and hessians of fields.
 pub trait Engine<const N: usize> {
+    fn index(&self) -> usize;
     fn position(&self) -> [f64; N];
     fn vertex(&self) -> [usize; N];
     fn value(&self, field: &[f64]) -> f64;
@@ -24,6 +25,10 @@ pub struct FdEngine<const N: usize, const ORDER: usize, B> {
 }
 
 impl<const N: usize, const ORDER: usize, B: Boundary> Engine<N> for FdEngine<N, ORDER, B> {
+    fn index(&self) -> usize {
+        self.space.index_from_vertex(self.vertex)
+    }
+
     fn position(&self) -> [f64; N] {
         self.space
             .position(self.bounds.clone(), node_from_vertex(self.vertex))
@@ -39,19 +44,20 @@ impl<const N: usize, const ORDER: usize, B: Boundary> Engine<N> for FdEngine<N, 
     }
 
     fn gradient(&self, field: &[f64]) -> [f64; N] {
-        let spacing = self.space.spacing(self.bounds.clone());
         array::from_fn(|axis| {
             let mut operators = [BasisOperator::Value; N];
             operators[axis] = BasisOperator::Derivative;
-            self.space
-                .evaluate::<ORDER>(&self.boundary, self.vertex, operators, field)
-                / spacing[axis]
+            self.space.evaluate::<ORDER>(
+                &self.boundary,
+                self.bounds.clone(),
+                self.vertex,
+                operators,
+                field,
+            )
         })
     }
 
     fn hessian(&self, field: &[f64]) -> [[f64; N]; N] {
-        let spacing = self.space.spacing(self.bounds.clone());
-
         let mut result = [[0.0; N]; N];
 
         for i in 0..N {
@@ -64,10 +70,13 @@ impl<const N: usize, const ORDER: usize, B: Boundary> Engine<N> for FdEngine<N, 
                     operator[i] = BasisOperator::SecondDerivative;
                 }
 
-                result[i][j] =
-                    self.space
-                        .evaluate::<ORDER>(&self.boundary, self.vertex, operator, field);
-                result[i][j] /= spacing[i] * spacing[j];
+                result[i][j] = self.space.evaluate::<ORDER>(
+                    &self.boundary,
+                    self.bounds.clone(),
+                    self.vertex,
+                    operator,
+                    field,
+                );
 
                 result[j][i] = result[i][j]
             }
@@ -85,6 +94,10 @@ pub struct FdIntEngine<const N: usize, const ORDER: usize> {
 }
 
 impl<const N: usize, const ORDER: usize> Engine<N> for FdIntEngine<N, ORDER> {
+    fn index(&self) -> usize {
+        self.space.index_from_vertex(self.vertex)
+    }
+
     fn position(&self) -> [f64; N] {
         self.space
             .position(self.bounds.clone(), node_from_vertex(self.vertex))

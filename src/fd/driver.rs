@@ -7,20 +7,22 @@ use crate::{
 use std::array::from_fn;
 use std::marker::PhantomData;
 
-use super::{boundary::Conditions, engine::FdIntEngine, FdEngine, Projection};
+use super::{boundary::Conditions, engine::FdIntEngine, FdEngine, Operator, Projection};
 
+/// Caches various data structured used to launch jobs (such as threadpools, memory pools, GPU interface, etc.).
 pub struct Driver<const N: usize> {
     _marker: PhantomData<[usize; N]>,
 }
 
 impl<const N: usize> Driver<N> {
+    /// Constructs a default and empty driver.
     pub fn new() -> Self {
         Self {
             _marker: PhantomData,
         }
     }
 
-    /// Fills ghost nodes on the mesh. This includes applying physical boundary conditions, as well
+    /// Enforces strong boundary conditions. This includes strong physical boundary conditions, as well
     /// as handling interior boundaries (same level, coarse-fine, or fine-coarse).
     pub fn fill_boundary<const ORDER: usize, B: Boundary, C: Conditions<N>>(
         &mut self,
@@ -277,6 +279,7 @@ impl<const N: usize> Driver<N> {
         }
     }
 
+    /// Applies the projection to `source`, and stores the result in `dest`.
     pub fn project<const ORDER: usize, P: Projection<N>>(
         &self,
         mesh: &Mesh<N>,
@@ -327,6 +330,106 @@ impl<const N: usize> Driver<N> {
         }
     }
 
+    /// Applies the given operator to `source`, storing the result in `dest`, and utilizing `context` to store
+    /// extra fields.
+    pub fn apply<const ORDER: usize, O: Operator<N>>(
+        &self,
+        mesh: &Mesh<N>,
+        boundary: &impl Boundary,
+        operator: &O,
+        source: SystemSlice<'_, O::System>,
+        context: SystemSlice<'_, O::Context>,
+        mut dest: SystemSliceMut<'_, O::System>,
+    ) {
+        for block in 0..mesh.num_blocks() {
+            let nodes = mesh.block_nodes(block);
+
+            let input = source.slice(nodes.clone());
+            let context = context.slice(nodes.clone());
+            let mut output = dest.slice_mut(nodes.clone());
+
+            let space = mesh.block_space(block);
+            let boundary = mesh.block_boundary(block, boundary.clone());
+            let bounds = mesh.block_bounds(block);
+            let vertex_size = space.vertex_size();
+
+            for vertex in IndexSpace::new(vertex_size).iter() {
+                let is_interior = Self::is_interior::<ORDER>(&boundary, vertex_size, vertex);
+
+                let result = if is_interior {
+                    let engine = FdIntEngine::<N, ORDER> {
+                        space: space.clone(),
+                        bounds: bounds.clone(),
+                        vertex,
+                    };
+
+                    operator.evaluate(&engine, input.clone(), context.clone())
+                } else {
+                    let engine = FdEngine::<N, ORDER, _> {
+                        space: space.clone(),
+                        bounds: bounds.clone(),
+                        boundary: boundary.clone(),
+                        vertex,
+                    };
+
+                    operator.evaluate(&engine, input.clone(), context.clone())
+                };
+
+                let index = space.index_from_node(node_from_vertex(vertex));
+
+                for field in O::System::fields() {
+                    output.field_mut(field.clone())[index] = result.field(field.clone());
+                }
+            }
+        }
+    }
+
+    /// Computes the maximum l2 norm of all fields in the system.
+    pub fn norm<S: SystemLabel>(&mut self, mesh: &Mesh<N>, source: SystemSlice<'_, S>) -> f64 {
+        S::fields()
+            .into_iter()
+            .map(|label| self.norm_scalar(mesh, source.field(label)))
+            .max_by(|a, b| a.total_cmp(b))
+            .unwrap()
+    }
+
+    fn norm_scalar(&mut self, mesh: &Mesh<N>, src: &[f64]) -> f64 {
+        let mut result = 0.0;
+
+        for block in 0..mesh.num_blocks() {
+            let space = mesh.block_space(block);
+            let bounds = mesh.block_bounds(block);
+            let vertex_size = space.vertex_size();
+
+            let data = &src[mesh.block_nodes(block)];
+
+            let mut block_result = 0.0;
+
+            for vertex in IndexSpace::new(vertex_size).iter() {
+                let index = space.index_from_vertex(vertex);
+
+                let mut value = data[index] * data[index];
+
+                for axis in 0..N {
+                    if vertex[axis] == 0 || vertex[axis] == vertex_size[axis] - 1 {
+                        value *= 0.5;
+                    }
+                }
+
+                block_result += value;
+            }
+
+            for spacing in space.spacing(bounds) {
+                block_result *= spacing;
+            }
+
+            result += block_result;
+        }
+
+        result.sqrt()
+    }
+
+    /// Determines if a vertex is not within `ORDER` of any weakly enforced boundary.
     fn is_interior<const ORDER: usize>(
         boundary: &impl Boundary,
         vertex_size: [usize; N],

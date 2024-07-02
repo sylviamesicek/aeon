@@ -53,7 +53,7 @@ pub trait Operator<const N: usize> {
     fn evaluate(
         &self,
         engine: &impl Engine<N>,
-        context: SystemSlice<'_, Self::Context>,
         input: SystemSlice<'_, Self::System>,
+        context: SystemSlice<'_, Self::Context>,
     ) -> SystemVal<Self::System>;
 }

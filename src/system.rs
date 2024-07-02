@@ -141,6 +141,7 @@ impl<Label: SystemLabel> SystemVec<Label> {
     }
 }
 
+/// Represents the values of a coupled system at a single point.
 #[derive(Debug, Clone)]
 pub struct SystemVal<Label: SystemLabel>(FieldArray<Label, f64>);
 
@@ -149,8 +150,25 @@ impl<Label: SystemLabel> SystemVal<Label> {
         Self(values.into())
     }
 
+    /// Constructs the SystemVal by calling a function for each field
+    pub fn from_fn<F: FnMut(Label) -> f64>(mut f: F) -> Self {
+        let mut values = Array::default();
+
+        for field in Label::fields() {
+            values[field.field_index()] = f(field.clone())
+        }
+
+        Self(values)
+    }
+
+    /// Retrieves the value of the given field
     pub fn field(&self, label: Label) -> f64 {
         self.0[label.field_index()]
+    }
+
+    /// Sets the value of the given field.
+    pub fn set_field(&mut self, label: Label, v: f64) {
+        self.0[label.field_index()] = v
     }
 }
 
@@ -204,6 +222,11 @@ impl<'a, Label: SystemLabel> SystemSlice<'a, Label> {
     /// Retrieves an immutable reference to a field located at the given index.
     pub fn field(&self, label: Label) -> &[f64] {
         self.fields[label.field_index()]
+    }
+
+    /// Retrieves an immutable reference to a field located at the given index.
+    pub fn field_from_index(&self, field: usize) -> &[f64] {
+        self.fields[field]
     }
 
     pub fn slice<R>(&self, range: R) -> Self
@@ -285,6 +308,15 @@ impl<'a, Label: SystemLabel> SystemSliceMut<'a, Label> {
     /// Retrieves a mutable reference to a field located at the given index.
     pub fn field_mut(&mut self, label: Label) -> &mut [f64] {
         self.fields[label.field_index()]
+    }
+
+    pub fn field_from_index(&self, field: usize) -> &[f64] {
+        self.fields[field]
+    }
+
+    /// Retrieves an immutable reference to a field located at the given index.
+    pub fn field_mut_from_index(&mut self, field: usize) -> &mut [f64] {
+        self.fields[field]
     }
 
     pub fn slice<R>(&self, range: R) -> SystemSlice<'a, Label>

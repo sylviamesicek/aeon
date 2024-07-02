@@ -9,11 +9,11 @@ To reach the state of minimum viable product (MVP) the following feature(s) must
 - [x] Stencil application.
 - [x] Strong boundary condition API.
 - [ ] Weakly enforced (i.e. outgoing) boundary condition API.
-- [ ] Reborrowing API for system slices.
+- [ ] SystemSlices and values API with a convient interface for uncoupled systems.
 - [ ] Regridding API
-- [ ] Ghost node filling
-    - [ ] Copying and injection
-    - [ ] Prolongation
+- [x] Ghost node filling
+    - [x] Copying and injection
+    - [x] Prolongation
 - [ ] Transfer between regridding runs.
 - [x] Linear iterative solvers.
     - [x] BiCGStab

@@ -53,16 +53,19 @@ impl<const N: usize> Model<N> {
         self.systems.insert(Label::NAME.to_string(), meta);
     }
 
+    /// Reads a system from the model.
     pub fn read_system<Label: SystemLabel>(&self) -> Option<SystemVec<Label>> {
         let meta = self.systems.get(Label::NAME)?;
         Some(SystemSlice::from_contiguous(&meta.data).to_vec())
     }
 
+    /// Attaches a field for serialization in the model.
     pub fn attach_field(&mut self, name: &str, data: Vec<f64>) {
         assert!(!self.fields.contains_key(name));
         self.fields.insert(name.to_string(), data);
     }
 
+    /// Reads a field from the model.
     pub fn read_field(&self, name: &str) -> Option<Vec<f64>> {
         self.fields.get(name).cloned()
     }
