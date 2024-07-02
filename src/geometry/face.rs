@@ -75,6 +75,39 @@ pub fn faces<const N: usize>() -> FaceIter<N> {
     }
 }
 
+#[derive(Clone, Copy, Debug)]
+pub struct FaceMask<const N: usize>([[bool; 2]; N]);
+
+impl<const N: usize> FaceMask<N> {
+    pub fn pack(bits: [[bool; 2]; N]) -> Self {
+        Self(bits)
+    }
+
+    pub fn empty() -> Self {
+        Self([[false; 2]; N])
+    }
+
+    pub fn full() -> Self {
+        Self([[true; 2]; N])
+    }
+
+    pub fn is_set(&self, face: Face) -> bool {
+        self.0[face.axis][face.side as usize]
+    }
+
+    pub fn set(&mut self, face: Face) {
+        self.0[face.axis][face.side as usize] = true;
+    }
+
+    pub fn clear(&mut self, face: Face) {
+        self.0[face.axis][face.side as usize] = false;
+    }
+
+    pub fn set_to(&mut self, face: Face, val: bool) {
+        self.0[face.axis][face.side as usize] = val;
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

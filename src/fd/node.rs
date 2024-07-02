@@ -1,9 +1,10 @@
-use crate::fd::{
-    BasisOperator, BoundaryCondition, BoundaryConditions, Interpolation, Order, Support,
-};
+use crate::fd::{BasisOperator, Interpolation, Order, Support};
 use crate::geometry::{faces, CartesianIter, IndexSpace, Rectangle};
 use crate::prelude::Face;
 use std::array::from_fn;
+
+use super::boundary::{Boundary, Condition};
+use super::BoundaryKind;
 
 /// Transforms a vertex into a node (just casts an array of `usize` -> `isize`).
 pub fn node_from_vertex<const N: usize>(vertex: [usize; N]) -> [isize; N] {
@@ -20,25 +21,14 @@ pub fn node_from_vertex<const N: usize>(vertex: [usize; N]) -> [isize; N] {
 /// various derivative and interpolation kernels can be
 /// applied.
 #[derive(Debug, Clone)]
-pub struct NodeSpace<const N: usize, B> {
+pub struct NodeSpace<const N: usize> {
     /// Number of cells along each axis (one less than then number of vertices).
     pub size: [usize; N],
     /// Number of ghost vertices in each direction.
     pub ghost: usize,
-    /// Boundary of domain.
-    pub boundary: B,
 }
 
-impl<const N: usize, B: BoundaryConditions> NodeSpace<N, B> {
-    /// Attachs a different boundary to the node space.
-    pub fn with_boundary<B2: BoundaryConditions>(&self, boundary: B2) -> NodeSpace<N, B2> {
-        NodeSpace {
-            size: self.size,
-            ghost: self.ghost,
-            boundary,
-        }
-    }
-
+impl<const N: usize> NodeSpace<N> {
     /// Computes the total number of nodes in the space.
     pub fn node_count(&self) -> usize {
         self.node_size().iter().product()
@@ -172,17 +162,15 @@ impl<const N: usize, B: BoundaryConditions> NodeSpace<N, B> {
 
         result
     }
-}
 
-impl<const N: usize, B: BoundaryConditions> NodeSpace<N, B> {
     /// Computes the window containing active nodes. Aka all nodes that will be used
     /// for kernel evaluation.
-    pub fn active_window(&self) -> NodeWindow<N> {
+    pub fn active_window(&self, boundary: &impl Boundary) -> NodeWindow<N> {
         let mut origin = [0isize; N];
         let mut size = self.vertex_size();
 
         faces::<N>()
-            .filter(|&face| !matches!(self.boundary.face(face), BoundaryCondition::Free))
+            .filter(|&face| !boundary.kind(face).is_weak())
             .for_each(|face| {
                 if face.side {
                     size[face.axis] += self.ghost;
@@ -196,9 +184,14 @@ impl<const N: usize, B: BoundaryConditions> NodeSpace<N, B> {
     }
 
     /// Set strongly enforced boundary conditions.
-    pub fn fill_boundary(&self, dest: &mut [f64]) {
+    pub fn fill_boundary(
+        &self,
+        boundary: &impl Boundary,
+        condition: &impl Condition<N>,
+        dest: &mut [f64],
+    ) {
         let vertex_size = self.vertex_size();
-        let active_window = self.active_window();
+        let active_window = self.active_window(boundary);
 
         // Loop over faces
         for face in faces::<N>() {
@@ -221,8 +214,9 @@ impl<const N: usize, B: BoundaryConditions> NodeSpace<N, B> {
 
             // Now we fill the values of these nodes appropriately
             for node in face_window.iter() {
-                match self.boundary.face(face) {
-                    BoundaryCondition::Parity(parity) => {
+                match boundary.kind(face) {
+                    BoundaryKind::Parity => {
+                        let parity = condition.parity(face);
                         // Compute offset from nearest vertex
                         let offset = if side {
                             node[axis] - (vertex_size[axis] as isize - 1)
@@ -244,8 +238,8 @@ impl<const N: usize, B: BoundaryConditions> NodeSpace<N, B> {
                             self.set_value(node, -v, dest);
                         }
                     }
-                    BoundaryCondition::Free | BoundaryCondition::Custom => {
-                        // Do nothing for free or custom boundary conditions.
+                    BoundaryKind::Custom | BoundaryKind::Radiative | BoundaryKind::Free => {
+                        // Do nothing for custom boundary conditions.
                     }
                 }
             }
@@ -255,7 +249,7 @@ impl<const N: usize, B: BoundaryConditions> NodeSpace<N, B> {
 
             // Iterate over face
             for node in active_window.plane(axis, intercept) {
-                if let BoundaryCondition::Parity(false) = self.boundary.face(face) {
+                if boundary.kind(face) == BoundaryKind::Parity && condition.parity(face) == false {
                     // For antisymmetric boundaries we set all values on axis to be 0.
                     self.set_value(node, 0.0, dest);
                 }
@@ -263,11 +257,17 @@ impl<const N: usize, B: BoundaryConditions> NodeSpace<N, B> {
         }
     }
 
-    fn support_vertex(&self, vertex: [usize; N], border: usize, axis: usize) -> Support {
-        if vertex[axis] < border && self.boundary.face(Face::negative(axis)).is_free() {
+    fn support_vertex(
+        &self,
+        boundary: &impl Boundary,
+        vertex: [usize; N],
+        border: usize,
+        axis: usize,
+    ) -> Support {
+        if vertex[axis] < border && boundary.kind(Face::negative(axis)).is_weak() {
             Support::Negative(vertex[axis])
         } else if vertex[axis] > self.size[axis] - border
-            && self.boundary.face(Face::positive(axis)).is_free()
+            && boundary.kind(Face::positive(axis)).is_weak()
         {
             Support::Positive(self.size[axis] - vertex[axis])
         } else {
@@ -275,13 +275,18 @@ impl<const N: usize, B: BoundaryConditions> NodeSpace<N, B> {
         }
     }
 
-    fn support_cell(&self, vertex: [usize; N], border: usize, axis: usize) -> Support {
-        if vertex[axis] < border.saturating_sub(1)
-            && self.boundary.face(Face::negative(axis)).is_free()
+    fn support_cell(
+        &self,
+        boundary: &impl Boundary,
+        vertex: [usize; N],
+        border: usize,
+        axis: usize,
+    ) -> Support {
+        if vertex[axis] < border.saturating_sub(1) && boundary.kind(Face::negative(axis)).is_weak()
         {
             Support::Negative(vertex[axis] + 1)
         } else if vertex[axis] > self.size[axis] - border
-            && self.boundary.face(Face::positive(axis)).is_free()
+            && boundary.kind(Face::positive(axis)).is_weak()
         {
             Support::Positive(self.size[axis] - vertex[axis])
         } else {
@@ -292,6 +297,7 @@ impl<const N: usize, B: BoundaryConditions> NodeSpace<N, B> {
     /// Evaluates the tensor product of the given operators at the vertex.
     pub fn evaluate<const ORDER: usize>(
         &self,
+        boundary: &impl Boundary,
         vertex: [usize; N],
         operator: [BasisOperator; N],
         field: &[f64],
@@ -305,7 +311,7 @@ impl<const N: usize, B: BoundaryConditions> NodeSpace<N, B> {
 
         for axis in 0..N {
             let border = operator[axis].border(order);
-            let support = self.support_vertex(vertex, border, axis);
+            let support = self.support_vertex(boundary, vertex, border, axis);
 
             weights[axis] = operator[axis].weights(order, support);
             corner[axis] = match support {
@@ -319,7 +325,12 @@ impl<const N: usize, B: BoundaryConditions> NodeSpace<N, B> {
     }
 
     /// Computes the interpolation of the underlying data to one increased level of refinement.
-    pub fn prolong<const ORDER: usize>(&self, subvertex: [usize; N], field: &[f64]) -> f64 {
+    pub fn prolong<const ORDER: usize>(
+        &self,
+        boundary: &impl Boundary,
+        subvertex: [usize; N],
+        field: &[f64],
+    ) -> f64 {
         let order = const { Order::from_value(ORDER) };
         let vertex: [usize; N] = from_fn(|axis| subvertex[axis] / 2);
         let node = node_from_vertex(vertex);
@@ -331,7 +342,7 @@ impl<const N: usize, B: BoundaryConditions> NodeSpace<N, B> {
         for axis in 0..N {
             if subvertex[axis] % 2 == 1 {
                 let border = Interpolation::border(order);
-                let support = self.support_cell(vertex, border, axis);
+                let support = self.support_cell(boundary, vertex, border, axis);
 
                 weights[axis] = Interpolation::weights(order, support);
                 corner[axis] = match support {

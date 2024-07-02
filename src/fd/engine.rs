@@ -1,10 +1,10 @@
 use crate::{
-    fd::{node_from_vertex, BasisOperator, BoundaryConditions, NodeSpace},
+    fd::{node_from_vertex, BasisOperator, NodeSpace},
     geometry::Rectangle,
 };
 use std::array::{self, from_fn};
 
-use super::Order;
+use crate::fd::{Boundary, Order};
 
 /// An interface for computing values, gradients, and hessians of fields.
 pub trait Engine<const N: usize> {
@@ -17,12 +17,13 @@ pub trait Engine<const N: usize> {
 
 /// A finite difference engine of a given order, but potentially bordering a free boundary.
 pub struct FdEngine<const N: usize, const ORDER: usize, B> {
-    pub(crate) space: NodeSpace<N, B>,
+    pub(crate) space: NodeSpace<N>,
     pub(crate) bounds: Rectangle<N>,
     pub(crate) vertex: [usize; N],
+    pub(crate) boundary: B,
 }
 
-impl<const N: usize, const ORDER: usize, B: BoundaryConditions> Engine<N> for FdEngine<N, ORDER, B> {
+impl<const N: usize, const ORDER: usize, B: Boundary> Engine<N> for FdEngine<N, ORDER, B> {
     fn position(&self) -> [f64; N] {
         self.space
             .position(self.bounds.clone(), node_from_vertex(self.vertex))
@@ -42,7 +43,9 @@ impl<const N: usize, const ORDER: usize, B: BoundaryConditions> Engine<N> for Fd
         array::from_fn(|axis| {
             let mut operators = [BasisOperator::Value; N];
             operators[axis] = BasisOperator::Derivative;
-            self.space.evaluate::<ORDER>(self.vertex, operators, field) / spacing[axis]
+            self.space
+                .evaluate::<ORDER>(&self.boundary, self.vertex, operators, field)
+                / spacing[axis]
         })
     }
 
@@ -61,7 +64,9 @@ impl<const N: usize, const ORDER: usize, B: BoundaryConditions> Engine<N> for Fd
                     operator[i] = BasisOperator::SecondDerivative;
                 }
 
-                result[i][j] = self.space.evaluate::<ORDER>(self.vertex, operator, field);
+                result[i][j] =
+                    self.space
+                        .evaluate::<ORDER>(&self.boundary, self.vertex, operator, field);
                 result[i][j] /= spacing[i] * spacing[j];
 
                 result[j][i] = result[i][j]
@@ -73,23 +78,29 @@ impl<const N: usize, const ORDER: usize, B: BoundaryConditions> Engine<N> for Fd
 }
 
 /// A finite difference engine that only every relies on interior support (and can thus use better optimized stencils).
-pub struct FdIntEngine<const N: usize, const ORDER: usize, B>(pub(crate) FdEngine<N, ORDER, B>);
+pub struct FdIntEngine<const N: usize, const ORDER: usize> {
+    pub(crate) space: NodeSpace<N>,
+    pub(crate) bounds: Rectangle<N>,
+    pub(crate) vertex: [usize; N],
+}
 
-impl<const N: usize, const ORDER: usize, B: BoundaryConditions> Engine<N> for FdIntEngine<N, ORDER, B> {
-    fn vertex(&self) -> [usize; N] {
-        self.0.vertex()
+impl<const N: usize, const ORDER: usize> Engine<N> for FdIntEngine<N, ORDER> {
+    fn position(&self) -> [f64; N] {
+        self.space
+            .position(self.bounds.clone(), node_from_vertex(self.vertex))
     }
 
-    fn position(&self) -> [f64; N] {
-        self.0.position()
+    fn vertex(&self) -> [usize; N] {
+        self.vertex
     }
 
     fn value(&self, field: &[f64]) -> f64 {
-        self.0.value(field)
+        let linear = self.space.index_from_node(node_from_vertex(self.vertex));
+        field[linear]
     }
 
     fn gradient(&self, field: &[f64]) -> [f64; N] {
-        let spacing = self.0.space.spacing(self.0.bounds.clone());
+        let spacing = self.space.spacing(self.bounds.clone());
         let (weights, border) = const {
             let order = Order::from_value(ORDER);
             let weights = BasisOperator::Derivative.weights(order, super::Support::Interior);
@@ -99,15 +110,15 @@ impl<const N: usize, const ORDER: usize, B: BoundaryConditions> Engine<N> for Fd
         };
 
         from_fn(|axis| {
-            let mut corner = node_from_vertex(self.0.vertex);
+            let mut corner = node_from_vertex(self.vertex);
             corner[axis] -= border as isize;
 
-            self.0.space.weights_axis(corner, weights, axis, field) / spacing[axis]
+            self.space.weights_axis(corner, weights, axis, field) / spacing[axis]
         })
     }
 
     fn hessian(&self, field: &[f64]) -> [[f64; N]; N] {
-        let spacing = self.0.space.spacing(self.0.bounds.clone());
+        let spacing = self.space.spacing(self.bounds.clone());
 
         let (dweights, dborder) = const {
             let order = Order::from_value(ORDER);
@@ -130,12 +141,12 @@ impl<const N: usize, const ORDER: usize, B: BoundaryConditions> Engine<N> for Fd
         for i in 0..N {
             for j in i..N {
                 if i == j {
-                    let mut corner = node_from_vertex(self.0.vertex);
+                    let mut corner = node_from_vertex(self.vertex);
                     corner[i] -= ddborder as isize;
-                    result[i][j] = self.0.space.weights_axis(corner, ddweights, i, field);
+                    result[i][j] = self.space.weights_axis(corner, ddweights, i, field);
                     result[i][j] /= spacing[i] * spacing[i];
                 } else {
-                    let mut corner = node_from_vertex(self.0.vertex);
+                    let mut corner = node_from_vertex(self.vertex);
                     corner[i] -= dborder as isize;
                     corner[j] -= dborder as isize;
 
@@ -143,7 +154,7 @@ impl<const N: usize, const ORDER: usize, B: BoundaryConditions> Engine<N> for Fd
                     weights[i] = dweights;
                     weights[j] = dweights;
 
-                    result[i][j] = self.0.space.weights(corner, weights, field);
+                    result[i][j] = self.space.weights(corner, weights, field);
                     result[i][j] /= spacing[i] * spacing[j];
                     result[j][i] = result[i][j]
                 }

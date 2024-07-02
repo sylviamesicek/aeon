@@ -1,13 +1,13 @@
 use crate::{
     fd::{node_from_vertex, Boundary, Mesh},
-    geometry::{regions, IndexSpace, Side, SPATIAL_BOUNDARY},
-    prelude::SystemSlice,
+    geometry::{regions, IndexSpace, Side, NULL},
+    prelude::{Face, SystemSlice},
     system::{SystemLabel, SystemSliceMut},
 };
 use std::array::from_fn;
 use std::marker::PhantomData;
 
-use super::Projection;
+use super::{boundary::Conditions, engine::FdIntEngine, FdEngine, Projection};
 
 pub struct Driver<const N: usize> {
     _marker: PhantomData<[usize; N]>,
@@ -22,33 +22,36 @@ impl<const N: usize> Driver<N> {
 
     /// Fills ghost nodes on the mesh. This includes applying physical boundary conditions, as well
     /// as handling interior boundaries (same level, coarse-fine, or fine-coarse).
-    pub fn fill_boundary<const ORDER: usize, B: Boundary>(
+    pub fn fill_boundary<const ORDER: usize, B: Boundary, C: Conditions<N>>(
         &mut self,
         mesh: &Mesh<N>,
-        physical: &B,
-        mut system: SystemSliceMut<'_, B::System>,
+        boundary: &B,
+        conditions: &C,
+        mut system: SystemSliceMut<'_, C::System>,
     ) {
-        self.fill_physical(mesh, physical, &mut system);
+        self.fill_physical(mesh, boundary, conditions, &mut system);
         self.fill_direct(mesh, &mut system);
-        self.fill_prolong::<ORDER, _>(mesh, physical, &mut system);
+        self.fill_prolong::<ORDER, _, _>(mesh, boundary, &mut system);
     }
 
-    fn fill_physical<B: Boundary>(
+    fn fill_physical<B: Boundary, C: Conditions<N>>(
         &self,
         mesh: &Mesh<N>,
-        physical: &B,
-        system: &mut SystemSliceMut<'_, B::System>,
+        boundary: &B,
+        conditions: &C,
+        system: &mut SystemSliceMut<'_, C::System>,
     ) {
         for block in 0..mesh.num_blocks() {
             // Fill Physical Boundary conditions
             let space = mesh.block_space(block);
             let nodes = mesh.block_nodes(block);
 
-            for field in B::System::fields() {
-                let physical = physical.boundary(field.clone());
-                let boundary = mesh.block_boundary(block).with_boundary(physical);
+            let boundary = mesh.block_boundary(block, boundary.clone());
+
+            for field in C::System::fields() {
+                let condition = conditions.field(field.clone());
                 let data = &mut system.field_mut(field)[nodes.clone()];
-                space.with_boundary(boundary).fill_boundary(data);
+                space.fill_boundary(&boundary, &condition, data);
             }
         }
     }
@@ -88,7 +91,7 @@ impl<const N: usize> Driver<N> {
                     let neighbor = mesh.cell_neighbor(cell, region.clone());
 
                     // If physical boundary we skip
-                    if neighbor == SPATIAL_BOUNDARY {
+                    if neighbor == NULL {
                         continue;
                     }
 
@@ -184,16 +187,16 @@ impl<const N: usize> Driver<N> {
         }
     }
 
-    fn fill_prolong<const ORDER: usize, B: Boundary>(
+    fn fill_prolong<const ORDER: usize, B: Boundary, System: SystemLabel>(
         &mut self,
         mesh: &Mesh<N>,
-        physical: &B,
-        system: &mut SystemSliceMut<'_, B::System>,
+        boundary: &B,
+        system: &mut SystemSliceMut<'_, System>,
     ) {
         for block in 0..mesh.num_blocks() {
             // Cache node space
             let space = mesh.block_space(block);
-            let boundary = mesh.block_boundary(block);
+            let domain = mesh.block_boundary(block, boundary.clone());
             let nodes = mesh.block_nodes(block);
             // Fill Injection boundary conditions
             let size = mesh.block_size(block);
@@ -219,7 +222,7 @@ impl<const N: usize> Driver<N> {
                     let neighbor = mesh.cell_neighbor(cell, region.clone());
 
                     // If physical boundary we skip
-                    if neighbor == SPATIAL_BOUNDARY {
+                    if neighbor == NULL {
                         continue;
                     }
 
@@ -256,12 +259,9 @@ impl<const N: usize> Driver<N> {
                             from_fn(|axis| (2 * neighbor_offset[axis] + node[axis]) as usize);
                         let dest = from_fn(|axis| cell_origin[axis] + node[axis]);
 
-                        for field in B::System::fields() {
-                            let space = space.with_boundary(
-                                boundary.with_boundary(physical.boundary(field.clone())),
-                            );
-
+                        for field in System::fields() {
                             let v = space.prolong::<ORDER>(
+                                &domain,
                                 source,
                                 &system.field(field.clone())[neighbor_nodes.clone()],
                             );
@@ -277,27 +277,69 @@ impl<const N: usize> Driver<N> {
         }
     }
 
-    pub fn project<const ORDER: usize, B, P>(
+    pub fn project<const ORDER: usize, P: Projection<N>>(
         &self,
         mesh: &Mesh<N>,
+        boundary: &impl Boundary,
         projection: &P,
-        physical: &B,
         source: SystemSlice<'_, P::Input>,
         mut dest: SystemSliceMut<'_, P::Output>,
-    ) where
-        P: Projection<N>,
-        B: Boundary<System = P::Input>,
-    {
+    ) {
         for block in 0..mesh.num_blocks() {
             let nodes = mesh.block_nodes(block);
 
             let input = source.slice(nodes.clone());
-            let output = dest.slice_mut(nodes.clone());
+            let mut output = dest.slice_mut(nodes.clone());
 
             let space = mesh.block_space(block);
-            let boundary = mesh.block_boundary(block);
+            let boundary = mesh.block_boundary(block, boundary.clone());
+            let bounds = mesh.block_bounds(block);
+            let vertex_size = space.vertex_size();
 
-            for vertex in IndexSpace::new(space.vertex_size()).iter() {}
+            for vertex in IndexSpace::new(vertex_size).iter() {
+                let is_interior = Self::is_interior::<ORDER>(&boundary, vertex_size, vertex);
+
+                let result = if is_interior {
+                    let engine = FdIntEngine::<N, ORDER> {
+                        space: space.clone(),
+                        bounds: bounds.clone(),
+                        vertex,
+                    };
+
+                    projection.project(&engine, input.clone())
+                } else {
+                    let engine = FdEngine::<N, ORDER, _> {
+                        space: space.clone(),
+                        bounds: bounds.clone(),
+                        boundary: boundary.clone(),
+                        vertex,
+                    };
+
+                    projection.project(&engine, input.clone())
+                };
+
+                let index = space.index_from_node(node_from_vertex(vertex));
+
+                for field in P::Output::fields() {
+                    output.field_mut(field.clone())[index] = result.field(field.clone());
+                }
+            }
         }
+    }
+
+    fn is_interior<const ORDER: usize>(
+        boundary: &impl Boundary,
+        vertex_size: [usize; N],
+        vertex: [usize; N],
+    ) -> bool {
+        let mut result = true;
+
+        for axis in 0..N {
+            result &= !(boundary.kind(Face::negative(axis)).is_weak() && vertex[axis] < ORDER);
+            result &= !(boundary.kind(Face::positive(axis)).is_weak()
+                && vertex[axis] >= vertex_size[axis] - ORDER);
+        }
+
+        result
     }
 }

@@ -1,51 +1,42 @@
-use crate::geometry::Face;
+use crate::{geometry::Face, prelude::SystemLabel};
 
-/// Used to strongly enforce boundary conditions along faces.
-pub trait BoundaryConditions {
-    fn face(&self, face: Face) -> BoundaryCondition;
-}
-
-impl<T: Fn(Face) -> BoundaryCondition> BoundaryConditions for T {
-    fn face(&self, face: Face) -> BoundaryCondition {
-        self(face)
-    }
-}
-
-impl BoundaryConditions for () {
-    fn face(&self, _face: Face) -> BoundaryCondition {
-        BoundaryCondition::Custom
-    }
-}
-
-/// Represents a strongly enforced boundary condition.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum BoundaryCondition {
-    /// The default boundary procedure: use increasingly one-sided stencils in boundary region.
-    Free,
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BoundaryKind {
     /// A (anti)symmetric boundary condition. True indicates an even function
     /// (so function values are reflected across the axis with the same sign)
     /// and false indicates an odd function.
-    Parity(bool),
+    Parity,
     /// This boundary condition indicates that the ghost nodes have been filled manually via some external
     /// process. This can be used to implement custom boundary conditions, and is primarily used to
     /// fill inter-grid boundaries in the adaptive mesh refinement driver.
     Custom,
+    Radiative,
+    Free,
 }
 
-impl BoundaryCondition {
-    /// A symmetric boundary condition.
-    pub const SYMMETRIC: BoundaryCondition = BoundaryCondition::Parity(true);
-    /// An antisymmetric boundary condition.
-    pub const ANTISYMMETRIC: BoundaryCondition = BoundaryCondition::Parity(false);
-
-    /// Are ghost nodes used to enforce a boundary condition?
-    pub fn is_free(self) -> bool {
-        matches!(self, Self::Free)
+impl BoundaryKind {
+    pub fn is_weak(self) -> bool {
+        matches!(self, Self::Radiative | Self::Free)
     }
 }
 
-impl Default for BoundaryCondition {
-    fn default() -> Self {
-        Self::Free
+pub trait Boundary: Clone {
+    fn kind(&self, face: Face) -> BoundaryKind;
+}
+
+pub trait Condition<const N: usize> {
+    fn parity(&self, _face: Face) -> bool {
+        false
     }
+
+    fn radiative(&self, _position: [f64; N]) -> f64 {
+        0.0
+    }
+}
+
+pub trait Conditions<const N: usize> {
+    type System: SystemLabel;
+    type Condition: Condition<N>;
+
+    fn field(&self, label: Self::System) -> Self::Condition;
 }

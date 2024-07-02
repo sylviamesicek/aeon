@@ -28,6 +28,13 @@ impl Order {
             _ => panic!("Unknown Order"),
         }
     }
+
+    pub const fn support(self) -> usize {
+        match self {
+            Self::Second => 1,
+            Self::Fourth => 2,
+        }
+    }
 }
 
 /// The specific operation to be approximated.

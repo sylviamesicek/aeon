@@ -6,7 +6,7 @@ use bitvec::prelude::*;
 use std::array::from_fn;
 
 /// Denotes that the cell neighbors the physical boundary of a spatial domain.
-pub const SPATIAL_BOUNDARY: usize = usize::MAX;
+pub const NULL: usize = usize::MAX;
 
 /// An implementation of a spatial quadtree in any number of dimensions.
 /// Only leaves are stored by this tree, and its hierarchical structure is implied.
@@ -39,7 +39,7 @@ impl<const N: usize> SpatialTree<N> {
                     if mask.is_inner_face(face) {
                         mask.toggled(face.axis).to_linear()
                     } else {
-                        SPATIAL_BOUNDARY
+                        NULL
                     }
                 })
             })
@@ -186,9 +186,9 @@ impl<const N: usize> SpatialTree<N> {
                             neighbors.push(neighbor);
                         } else {
                             let neighbor = self.neighbors(block)[face.to_linear()];
-                            if neighbor == SPATIAL_BOUNDARY {
+                            if neighbor == NULL {
                                 // Propagate boundary information
-                                neighbors.push(SPATIAL_BOUNDARY);
+                                neighbors.push(NULL);
                                 continue;
                             }
 
@@ -243,8 +243,8 @@ impl<const N: usize> SpatialTree<N> {
                 // Update neighbors
                 for face in faces::<N>() {
                     let neighbor = self.neighbors(block)[face.to_linear()];
-                    if neighbor == SPATIAL_BOUNDARY {
-                        neighbors.push(SPATIAL_BOUNDARY);
+                    if neighbor == NULL {
+                        neighbors.push(NULL);
                         continue;
                     }
 
@@ -287,10 +287,10 @@ impl<const N: usize> SpatialTree<N> {
                     // Get neighbor
                     let traverse = self.neighbors(neighbor)[face.to_linear()];
 
-                    if traverse == SPATIAL_BOUNDARY {
+                    if traverse == NULL {
                         // No Update necessary if face is on boundary
                         neighbor_coarse = false;
-                        neighbor = SPATIAL_BOUNDARY;
+                        neighbor = NULL;
                         break;
                     }
 
@@ -305,10 +305,10 @@ impl<const N: usize> SpatialTree<N> {
                 if neighbor_coarse {
                     neighbor
                 } else {
-                    SPATIAL_BOUNDARY
+                    NULL
                 }
             })
-            .filter(|&neighbor| neighbor != SPATIAL_BOUNDARY)
+            .filter(|&neighbor| neighbor != NULL)
     }
 
     /// Returns the z index for
@@ -396,12 +396,9 @@ mod tests {
         tree.refine(&[false, false, true, false, false, true, false]);
 
         assert_eq!(tree.num_cells(), 13);
-        assert_eq!(
-            tree.neighbors(0),
-            &[SPATIAL_BOUNDARY, 1, SPATIAL_BOUNDARY, 2]
-        );
-        assert_eq!(tree.neighbors(2), &[SPATIAL_BOUNDARY, 3, 0, 4]);
-        assert_eq!(tree.neighbors(5), &[4, 8, 3, SPATIAL_BOUNDARY]);
-        assert_eq!(tree.neighbors(10), &[5, 11, 8, SPATIAL_BOUNDARY]);
+        assert_eq!(tree.neighbors(0), &[NULL, 1, NULL, 2]);
+        assert_eq!(tree.neighbors(2), &[NULL, 3, 0, 4]);
+        assert_eq!(tree.neighbors(5), &[4, 8, 3, NULL]);
+        assert_eq!(tree.neighbors(10), &[5, 11, 8, NULL]);
     }
 }

@@ -5,9 +5,9 @@ use std::cmp::Ordering;
 use std::{array::from_fn, ops::Range};
 
 use crate::array::{unwrap_vec_of_arrays, wrap_vec_of_arrays, Array};
-use crate::fd::{BoundaryCondition, BoundaryConditions, NodeSpace};
+use crate::fd::{Boundary, BoundaryKind, NodeSpace};
 use crate::geometry::{
-    faces, regions, AxisMask, Face, IndexSpace, Rectangle, Region, SpatialTree, SPATIAL_BOUNDARY,
+    faces, regions, AxisMask, Face, FaceMask, IndexSpace, Rectangle, Region, SpatialTree, NULL,
 };
 
 /// Implementation of an axis aligned tree mesh using standard finite difference operators.
@@ -109,8 +109,8 @@ impl<const N: usize> Mesh<N> {
                     let nneighbor = self.tree.neighbors(neighbor)[face.to_linear()];
 
                     // Short circut if we have encountered a boundary
-                    if nneighbor == SPATIAL_BOUNDARY {
-                        self.neighbors.push(SPATIAL_BOUNDARY);
+                    if nneighbor == NULL {
+                        self.neighbors.push(NULL);
                         continue 'regions;
                     }
 
@@ -134,7 +134,7 @@ impl<const N: usize> Mesh<N> {
                     neighbor = nneighbor;
                 }
 
-                self.neighbors.push(cell);
+                self.neighbors.push(neighbor);
             }
         }
     }
@@ -167,19 +167,25 @@ impl<const N: usize> Mesh<N> {
         self.blocks.nodes(block)
     }
 
-    pub fn block_boundary(&self, block: usize) -> BlockBoundaryConditions<N, ()> {
-        self.blocks.boundary(block)
+    pub fn block_boundary_flags(&self, block: usize) -> FaceMask<N> {
+        self.blocks.boundary_flags(block)
+    }
+
+    pub fn block_boundary<B: Boundary>(&self, block: usize, boundary: B) -> BlockBoundary<N, B> {
+        BlockBoundary {
+            mask: self.block_boundary_flags(block),
+            inner: boundary,
+        }
     }
 
     /// Computes the nodespace corresponding to a block.
-    pub fn block_space(&self, block: usize) -> NodeSpace<N, ()> {
+    pub fn block_space(&self, block: usize) -> NodeSpace<N> {
         let size = self.blocks.size(block);
         let cell_size = from_fn(|axis| size[axis] * self.cell_width[axis]);
 
         NodeSpace {
             size: cell_size,
             ghost: self.ghost_nodes,
-            boundary: (),
         }
     }
 
@@ -253,29 +259,18 @@ impl<const N: usize> From<MeshSerde<N>> for Mesh<N> {
 // Blocks ***********************
 // ******************************
 
-pub struct BlockBoundaryConditions<const N: usize, B> {
+#[derive(Debug, Clone)]
+pub struct BlockBoundary<const N: usize, B> {
     inner: B,
-    flags: [[bool; 2]; N],
+    mask: FaceMask<N>,
 }
 
-impl<const N: usize, B> BlockBoundaryConditions<N, B> {
-    pub fn with_boundary<B2: BoundaryConditions>(
-        &self,
-        boundary: B2,
-    ) -> BlockBoundaryConditions<N, B2> {
-        BlockBoundaryConditions {
-            inner: boundary,
-            flags: self.flags,
-        }
-    }
-}
-
-impl<const N: usize, B: BoundaryConditions> BoundaryConditions for BlockBoundaryConditions<N, B> {
-    fn face(&self, face: Face) -> BoundaryCondition {
-        if self.flags[face.axis][face.side as usize] {
-            self.inner.face(face)
+impl<const N: usize, B: Boundary> Boundary for BlockBoundary<N, B> {
+    fn kind(&self, face: Face) -> BoundaryKind {
+        if self.mask.is_set(face) {
+            self.inner.kind(face)
         } else {
-            BoundaryCondition::Custom
+            BoundaryKind::Custom
         }
     }
 }
@@ -361,9 +356,7 @@ impl<const N: usize> Blocks<N> {
         self.block_bounds[block].clone()
     }
 
-    /// Computes the boundary condition that should be applied to a block, given the
-    /// physical boundary conditions.
-    pub fn boundary(&self, block: usize) -> BlockBoundaryConditions<N, ()> {
+    pub fn boundary_flags(&self, block: usize) -> FaceMask<N> {
         let mut flags = [[false; 2]; N];
 
         for face in faces::<N>() {
@@ -371,7 +364,7 @@ impl<const N: usize> Blocks<N> {
                 self.boundaries[block * 2 * N + face.to_linear()];
         }
 
-        BlockBoundaryConditions { inner: (), flags }
+        FaceMask::pack(flags)
     }
 
     pub fn cell_index(&self, cell: usize) -> [usize; N] {
@@ -436,7 +429,7 @@ impl<const N: usize> Blocks<N> {
                         // 1. This is not a physical boundary
                         // 2. The neighbor is the same level of refinement
                         // 3. The neighbor does not already belong to another block.
-                        let is_suitable = neighbor != SPATIAL_BOUNDARY
+                        let is_suitable = neighbor != NULL
                             && level == tree.level(neighbor)
                             && self.cell_to_block[neighbor] == usize::MAX;
 
@@ -518,7 +511,7 @@ impl<const N: usize> Blocks<N> {
                     self.cells(block)[a]
                 };
                 let neighbor = tree.neighbors(cell)[face.to_linear()];
-                self.boundaries.push(neighbor == SPATIAL_BOUNDARY);
+                self.boundaries.push(neighbor == NULL);
             }
         }
     }
@@ -572,7 +565,6 @@ impl<const N: usize> From<BlocksSerde<N>> for Blocks<N> {
 
 #[cfg(test)]
 mod tests {
-
     use super::*;
 
     #[test]
@@ -597,5 +589,45 @@ mod tests {
 
         assert_eq!(mesh.block_cells(0), [0, 1, 4, 5, 2, 3, 6, 7]);
         assert_eq!(mesh.block_cells(1), [8, 9]);
+    }
+
+    #[test]
+    fn neighbors() {
+        let mut mesh = Mesh::new(Rectangle::UNIT, [8; 2], 3);
+        mesh.refine(&[true, false, false, false]);
+
+        assert_eq!(mesh.num_cells(), 7);
+
+        assert_eq!(
+            mesh.cell_neighbors(0),
+            [NULL, NULL, NULL, NULL, 0, 1, NULL, 2, 3]
+        );
+        assert_eq!(mesh.cell_neighbors(1), [NULL, NULL, NULL, 0, 1, 4, 2, 3, 4]);
+        assert_eq!(mesh.cell_neighbors(2), [NULL, 0, 1, NULL, 2, 3, NULL, 5, 5]);
+        assert_eq!(mesh.cell_neighbors(3), [0, 1, 4, 2, 3, 4, 5, 5, 6]);
+        assert_eq!(
+            mesh.cell_neighbors(4),
+            [NULL, NULL, NULL, 0, 4, NULL, 5, 6, NULL]
+        );
+        assert_eq!(
+            mesh.cell_neighbors(5),
+            [NULL, 0, 4, NULL, 5, 6, NULL, NULL, NULL]
+        );
+        assert_eq!(
+            mesh.cell_neighbors(6),
+            [0, 4, NULL, 5, 6, NULL, NULL, NULL, NULL]
+        );
+    }
+
+    #[test]
+    fn node_offsets() {
+        let mut mesh = Mesh::new(Rectangle::UNIT, [8; 2], 3);
+        mesh.refine(&[true, false, false, false]);
+
+        assert_eq!(mesh.num_blocks(), 3);
+
+        assert_eq!(mesh.block_nodes(0), 0..529);
+        assert_eq!(mesh.block_nodes(1), 529..874);
+        assert_eq!(mesh.block_nodes(2), 874..1099);
     }
 }

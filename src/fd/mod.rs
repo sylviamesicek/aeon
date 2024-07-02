@@ -8,34 +8,15 @@ mod mesh;
 mod model;
 mod node;
 
-pub use boundary::{BoundaryCondition, BoundaryConditions};
+pub use boundary::{Boundary, BoundaryKind, Condition, Conditions};
 pub use driver::Driver;
 pub use engine::{Engine, FdEngine};
 pub use kernel::{BasisOperator, Interpolation, Order, Support};
-pub use mesh::{BlockBoundaryConditions, Mesh};
+pub use mesh::{BlockBoundary, Mesh};
 pub use model::Model;
 pub use node::{node_from_vertex, NodeSpace};
 
-use crate::{
-    prelude::Scalar,
-    system::{SystemLabel, SystemSlice, SystemVal},
-};
-
-pub trait Boundary {
-    type System: SystemLabel;
-    type Conditions: BoundaryConditions;
-
-    fn boundary(&self, label: Self::System) -> Self::Conditions;
-}
-
-impl<T: BoundaryConditions + Clone> Boundary for T {
-    type System = Scalar;
-    type Conditions = T;
-
-    fn boundary(&self, _label: Self::System) -> Self::Conditions {
-        self.clone()
-    }
-}
+use crate::system::{SystemLabel, SystemSlice, SystemVal};
 
 pub trait Projection<const N: usize> {
     type Input: SystemLabel;
