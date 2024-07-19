@@ -261,7 +261,7 @@ impl<const N: usize> NodeSpace<N> {
         }
     }
 
-    fn support_vertex(
+    fn support_vertex_axis(
         &self,
         boundary: &impl Boundary,
         vertex: [usize; N],
@@ -279,7 +279,7 @@ impl<const N: usize> NodeSpace<N> {
         }
     }
 
-    fn support_cell(
+    fn support_cell_axis(
         &self,
         boundary: &impl Boundary,
         vertex: [usize; N],
@@ -316,7 +316,7 @@ impl<const N: usize> NodeSpace<N> {
 
         for axis in 0..N {
             let border = operator[axis].border(order);
-            let support = self.support_vertex(boundary, vertex, border, axis);
+            let support = self.support_vertex_axis(boundary, vertex, border, axis);
 
             weights[axis] = operator[axis].weights(order, support);
             corner[axis] = match support {
@@ -347,7 +347,7 @@ impl<const N: usize> NodeSpace<N> {
         for axis in 0..N {
             if subvertex[axis] % 2 == 1 {
                 let border = Interpolation::border(order);
-                let support = self.support_cell(boundary, vertex, border, axis);
+                let support = self.support_cell_axis(boundary, vertex, border, axis);
 
                 weights[axis] = Interpolation::weights(order, support);
                 corner[axis] = match support {
@@ -444,5 +444,51 @@ impl<const N: usize> Iterator for NodePlaneIter<N> {
         let mut index = self.inner.next()?;
         index[self.axis] = self.intercept;
         Some(index)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[derive(Clone)]
+    struct Quadrant;
+
+    impl Boundary for Quadrant {
+        fn kind(&self, face: Face) -> BoundaryKind {
+            match (face.axis, face.side) {
+                (_, false) => BoundaryKind::Parity,
+                (_, true) => BoundaryKind::Radiative,
+            }
+        }
+    }
+
+    #[test]
+    fn vertex_support() {
+        let space = NodeSpace {
+            size: [8],
+            ghost: 2,
+        };
+
+        const BORDER: usize = 2;
+
+        let supports = [
+            Support::Interior,
+            Support::Interior,
+            Support::Interior,
+            Support::Interior,
+            Support::Interior,
+            Support::Interior,
+            Support::Interior,
+            Support::Positive(1),
+            Support::Positive(0),
+        ];
+
+        for i in 0..9 {
+            assert_eq!(
+                space.support_vertex_axis(&Quadrant, [i], BORDER, 0),
+                supports[i]
+            );
+        }
     }
 }

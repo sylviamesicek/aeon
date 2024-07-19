@@ -1,9 +1,14 @@
 #![allow(clippy::needless_range_loop)]
 
-use crate::array::Array;
+use crate::array::{Array, ArrayLike};
 use crate::geometry::{faces, AxisMask, Rectangle};
 use bitvec::prelude::*;
 use std::array::from_fn;
+use std::cmp::Ordering;
+use std::mem::ManuallyDrop;
+use std::ops::Range;
+
+use super::{regions, Face, FaceMask, IndexSpace, Region};
 
 /// Denotes that the cell neighbors the physical boundary of a spatial domain.
 pub const NULL: usize = usize::MAX;
@@ -13,9 +18,11 @@ pub const NULL: usize = usize::MAX;
 /// To enable various optimisations, and avoid certain checks, the tree always contains
 /// at least one level of refinement.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-#[serde(from = "SpatialTreeSerde<N>")]
-#[serde(into = "SpatialTreeSerde<N>")]
-pub struct SpatialTree<const N: usize> {
+#[serde(from = "TreeSerde<N>")]
+#[serde(into = "TreeSerde<N>")]
+pub struct Tree<const N: usize> {
+    /// Domain of the full tree
+    domain: Rectangle<N>,
     /// Bounds of each cell in tree
     bounds: Vec<Rectangle<N>>,
     /// Stores neighbors along each face
@@ -26,12 +33,12 @@ pub struct SpatialTree<const N: usize> {
     offsets: Vec<usize>,
 }
 
-impl<const N: usize> SpatialTree<N> {
+impl<const N: usize> Tree<N> {
     /// Constructs a new tree consisting of a single root cell that has been
     /// subdivided once.
-    pub fn new(bounds: Rectangle<N>) -> Self {
+    pub fn new(domain: Rectangle<N>) -> Self {
         let bounds = AxisMask::enumerate()
-            .map(|mask| bounds.split(mask))
+            .map(|mask| domain.split(mask))
             .collect();
         let neighbors = AxisMask::<N>::enumerate()
             .flat_map(|mask| {
@@ -56,6 +63,7 @@ impl<const N: usize> SpatialTree<N> {
         let offsets = (0..=AxisMask::<N>::COUNT).collect();
 
         Self {
+            domain,
             bounds,
             neighbors,
             indices,
@@ -78,6 +86,10 @@ impl<const N: usize> SpatialTree<N> {
         self.offsets[cell + 1] - self.offsets[cell]
     }
 
+    pub fn domain(&self) -> Rectangle<N> {
+        self.domain.clone()
+    }
+
     /// Returns the bounds of a cell
     pub fn bounds(&self, cell: usize) -> Rectangle<N> {
         self.bounds[cell].clone()
@@ -88,13 +100,8 @@ impl<const N: usize> SpatialTree<N> {
         AxisMask::pack(from_fn(|axis| self.indices[axis][self.offsets[cell]]))
     }
 
-    pub fn origin(&self, cell: usize) -> usize {
-        let split = self.split(cell).to_linear();
-        cell - split
-    }
-
     /// Checks whether the given refinement flags are balanced.
-    pub fn is_balanced(&self, flags: &[bool]) -> bool {
+    pub fn check_refine_flags(&self, flags: &[bool]) -> bool {
         assert!(flags.len() == self.num_cells());
 
         for block in 0..self.num_cells() {
@@ -115,18 +122,18 @@ impl<const N: usize> SpatialTree<N> {
     /// Balances the given refinement flags, flagging additional cells
     /// for refinement to preserve the 2:1 fine coarse ratio between every
     /// two neighbors.
-    pub fn balance(&self, flags: &mut [bool]) {
+    pub fn balance_refine_flags(&self, flags: &mut [bool]) {
         assert!(flags.len() == self.num_cells());
 
         loop {
             let mut is_balanced = true;
 
-            for block in 0..self.num_cells() {
-                if !flags[block] {
+            for cell in 0..self.num_cells() {
+                if !flags[cell] {
                     continue;
                 }
 
-                for coarse in self.coarse_neighborhood(block) {
+                for coarse in self.coarse_neighborhood(cell) {
                     if !flags[coarse] {
                         is_balanced = false;
                         flags[coarse] = true;
@@ -140,10 +147,29 @@ impl<const N: usize> SpatialTree<N> {
         }
     }
 
+    /// Fills the map with updated indices after refinement is performed.
+    /// If a cell is refined, this will point to the base cell in that new subdivision.
+    pub fn cell_map_after_refine(&self, flags: &[bool], map: &mut [usize]) {
+        assert!(flags.len() == self.num_cells());
+        assert!(map.len() == self.num_cells());
+
+        let mut cursor = 0;
+
+        for cell in 0..self.num_cells() {
+            map[cell] = cursor;
+
+            if flags[cell] {
+                cursor += AxisMask::<N>::COUNT;
+            } else {
+                cursor += 1;
+            }
+        }
+    }
+
     /// Refines the mesh using the given flags (temporary API).
     pub fn refine(&mut self, flags: &[bool]) {
         assert!(self.num_cells() == flags.len());
-        assert!(self.is_balanced(flags));
+        assert!(self.check_refine_flags(flags));
 
         let num_flags = flags.iter().filter(|&&p| p).count();
         let total_blocks = self.num_cells() + (AxisMask::<N>::COUNT - 1) * num_flags;
@@ -171,13 +197,13 @@ impl<const N: usize> SpatialTree<N> {
         let mut offsets = Vec::with_capacity(total_blocks + 1);
         offsets.push(0);
 
-        for block in 0..self.num_cells() {
-            if flags[block] {
+        for cell in 0..self.num_cells() {
+            if flags[cell] {
                 let parent = bounds.len();
                 // Loop over subdivisions
                 for mask in AxisMask::<N>::enumerate() {
                     // Set physical bounds of block
-                    bounds.push(self.bounds(block).split(mask));
+                    bounds.push(self.bounds(cell).split(mask));
                     // Update neighbors
                     for face in faces::<N>() {
                         if mask.is_inner_face(face) {
@@ -185,14 +211,14 @@ impl<const N: usize> SpatialTree<N> {
                             let neighbor = parent + mask.toggled(face.axis).to_linear();
                             neighbors.push(neighbor);
                         } else {
-                            let neighbor = self.neighbors(block)[face.to_linear()];
+                            let neighbor = self.neighbors(cell)[face.to_linear()];
                             if neighbor == NULL {
                                 // Propagate boundary information
                                 neighbors.push(NULL);
                                 continue;
                             }
 
-                            let level = self.level(block);
+                            let level = self.level(cell);
                             let neighbor_level = self.level(neighbor);
 
                             let neighbor =
@@ -217,7 +243,7 @@ impl<const N: usize> SpatialTree<N> {
                                     (true, 1) => {
                                         // We refine both and this block starts finer than neighbor
                                         update_map[neighbor]
-                                            + self.split(block).toggled(face.axis).to_linear()
+                                            + self.split(cell).toggled(face.axis).to_linear()
                                     }
 
                                     _ => panic!("Unbalanced quadtree."),
@@ -231,18 +257,18 @@ impl<const N: usize> SpatialTree<N> {
                     for axis in 0..N {
                         // Multiply current index by 2 and set least significant bit
                         indices[axis].push(mask.is_set(axis));
-                        indices[axis].extend_from_bitslice(self.index_slice(block, axis));
+                        indices[axis].extend_from_bitslice(self.index_slice(cell, axis));
                     }
                     let previous = offsets[offsets.len() - 1];
-                    offsets.push(previous + self.level(block) + 1);
+                    offsets.push(previous + self.level(cell) + 1);
                 }
             } else {
                 // Set physical bounds of block
-                bounds.push(self.bounds(block));
+                bounds.push(self.bounds(cell));
 
                 // Update neighbors
                 for face in faces::<N>() {
-                    let neighbor = self.neighbors(block)[face.to_linear()];
+                    let neighbor = self.neighbors(cell)[face.to_linear()];
                     if neighbor == NULL {
                         neighbors.push(NULL);
                         continue;
@@ -252,11 +278,11 @@ impl<const N: usize> SpatialTree<N> {
                 }
 
                 for axis in 0..N {
-                    indices[axis].extend_from_bitslice(self.index_slice(block, axis));
+                    indices[axis].extend_from_bitslice(self.index_slice(cell, axis));
                 }
 
                 let previous = offsets[offsets.len() - 1];
-                offsets.push(previous + self.level(block));
+                offsets.push(previous + self.level(cell));
             }
         }
 
@@ -267,15 +293,15 @@ impl<const N: usize> SpatialTree<N> {
     }
 
     /// Returns all coarse blocks that neighbor the given block.
-    fn coarse_neighborhood(&self, block: usize) -> impl Iterator<Item = usize> + '_ {
-        let subdivision = self.split(block);
+    fn coarse_neighborhood(&self, cell: usize) -> impl Iterator<Item = usize> + '_ {
+        let subdivision = self.split(cell);
 
         // Loop over possible directions
         AxisMask::<N>::enumerate()
             .skip(1)
             .map(move |dir| {
                 // Get neighboring node
-                let mut neighbor = block;
+                let mut neighbor = cell;
                 // Is this neighbor coarser than this node?
                 let mut neighbor_coarse = false;
                 // Loop over axes which can potentially be coarse
@@ -294,7 +320,7 @@ impl<const N: usize> SpatialTree<N> {
                         break;
                     }
 
-                    if self.level(traverse) < self.level(block) {
+                    if self.level(traverse) < self.level(cell) {
                         neighbor_coarse = true;
                     }
 
@@ -318,7 +344,8 @@ impl<const N: usize> SpatialTree<N> {
 }
 
 #[derive(serde::Serialize, serde::Deserialize)]
-struct SpatialTreeSerde<const N: usize> {
+struct TreeSerde<const N: usize> {
+    domain: Rectangle<N>,
     /// Bounds of each cell in tree
     bounds: Vec<Rectangle<N>>,
     /// Stores neighbors along each face
@@ -329,9 +356,10 @@ struct SpatialTreeSerde<const N: usize> {
     offsets: Vec<usize>,
 }
 
-impl<const N: usize> From<SpatialTree<N>> for SpatialTreeSerde<N> {
-    fn from(value: SpatialTree<N>) -> Self {
+impl<const N: usize> From<Tree<N>> for TreeSerde<N> {
+    fn from(value: Tree<N>) -> Self {
         Self {
+            domain: value.domain,
             bounds: value.bounds,
             neighbors: value.neighbors,
             indices: value.indices.into(),
@@ -340,9 +368,10 @@ impl<const N: usize> From<SpatialTree<N>> for SpatialTreeSerde<N> {
     }
 }
 
-impl<const N: usize> From<SpatialTreeSerde<N>> for SpatialTree<N> {
-    fn from(value: SpatialTreeSerde<N>) -> Self {
+impl<const N: usize> From<TreeSerde<N>> for Tree<N> {
+    fn from(value: TreeSerde<N>) -> Self {
         Self {
+            domain: value.domain,
             bounds: value.bounds,
             neighbors: value.neighbors,
             indices: value.indices.inner(),
@@ -351,30 +380,503 @@ impl<const N: usize> From<SpatialTreeSerde<N>> for SpatialTree<N> {
     }
 }
 
+// ******************************
+// Blocks ***********************
+// ******************************
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(from = "TreeBlocksSerde<N>")]
+#[serde(into = "TreeBlocksSerde<N>")]
+pub struct TreeBlocks<const N: usize> {
+    /// Stores each cell's position within its parent's block.
+    cell_indices: Vec<[usize; N]>,
+    /// Maps cell to the block that contains it.
+    cell_to_block: Vec<usize>,
+    /// Stores the size of each block.
+    block_sizes: Vec<[usize; N]>,
+    block_cell_indices: Vec<usize>,
+    block_cell_offsets: Vec<usize>,
+    /// The physical bounds of each block.
+    block_bounds: Vec<Rectangle<N>>,
+    /// Stores whether block face is on physical boundary.
+    boundaries: BitVec,
+}
+
+impl<const N: usize> Default for TreeBlocks<N> {
+    fn default() -> Self {
+        Self {
+            cell_indices: Vec::new(),
+            cell_to_block: Vec::new(),
+
+            block_sizes: Vec::new(),
+            block_cell_indices: Vec::new(),
+            block_cell_offsets: Vec::new(),
+
+            block_bounds: Vec::new(),
+
+            boundaries: BitVec::new(),
+        }
+    }
+}
+
+impl<const N: usize> TreeBlocks<N> {
+    /// Rebuilds the tree block structure from existing geometric information. Performs greedy meshing
+    /// to group cells into blocks.
+    pub fn build(&mut self, tree: &Tree<N>) {
+        self.build_blocks(tree);
+        self.build_bounds(tree);
+        self.build_boundaries(tree);
+    }
+
+    // Number of blocks in the mesh.
+    pub fn num_blocks(&self) -> usize {
+        self.block_sizes.len()
+    }
+
+    /// Size of a given block, measured in cells.
+    pub fn block_size(&self, block: usize) -> [usize; N] {
+        self.block_sizes[block]
+    }
+
+    /// Map from cartesian indices within block to cell at the given positions
+    pub fn block_cells(&self, block: usize) -> &[usize] {
+        &self.block_cell_indices[self.block_cell_offsets[block]..self.block_cell_offsets[block + 1]]
+    }
+
+    pub fn block_bounds(&self, block: usize) -> Rectangle<N> {
+        self.block_bounds[block].clone()
+    }
+
+    pub fn block_boundary_flags(&self, block: usize) -> FaceMask<N> {
+        let mut flags = [[false; 2]; N];
+
+        for face in faces::<N>() {
+            flags[face.axis][face.side as usize] =
+                self.boundaries[block * 2 * N + face.to_linear()];
+        }
+
+        FaceMask::pack(flags)
+    }
+
+    pub fn cell_index(&self, cell: usize) -> [usize; N] {
+        self.cell_indices[cell]
+    }
+
+    pub fn cell_block(&self, cell: usize) -> usize {
+        self.cell_to_block[cell]
+    }
+
+    fn build_blocks(&mut self, tree: &Tree<N>) {
+        let num_cells = tree.num_cells();
+
+        // Resize/reset various maps
+        self.cell_indices.resize(num_cells, [0; N]);
+        self.cell_indices.fill([0; N]);
+
+        self.cell_to_block.resize(num_cells, usize::MAX);
+        self.cell_to_block.fill(usize::MAX);
+
+        self.block_sizes.clear();
+        self.block_cell_indices.clear();
+        self.block_cell_offsets.clear();
+
+        // Loop over each cell in the tree
+        for cell in 0..num_cells {
+            if self.cell_to_block[cell] != usize::MAX {
+                // This cell already belongs to a block, continue.
+                continue;
+            }
+
+            // Get index of next block
+            let block = self.block_sizes.len();
+
+            self.cell_indices[cell] = [0; N];
+            self.cell_to_block[cell] = block;
+
+            self.block_sizes.push([1; N]);
+            let block_cell_offset = self.block_cell_indices.len();
+
+            self.block_cell_offsets.push(block_cell_offset);
+            self.block_cell_indices.push(cell);
+
+            // Try expanding the block along each axis.
+            for axis in 0..N {
+                // Perform greedy meshing.
+                'expand: loop {
+                    let face = Face::positive(axis);
+
+                    let size = self.block_sizes[block];
+                    let space = IndexSpace::new(size);
+
+                    // Make sure every cell on face is suitable for expansion.
+                    for index in space.face(Face::positive(axis)).iter() {
+                        // Retrieves the cell on this face
+                        let cell = self.block_cell_indices
+                            [block_cell_offset + space.linear_from_cartesian(index)];
+                        let level = tree.level(cell);
+                        let neighbor = tree.neighbors(cell)[face.to_linear()];
+
+                        // We can only expand if
+                        // 1. This is not a physical boundary
+                        // 2. The neighbor is the same level of refinement
+                        // 3. The neighbor does not already belong to another block.
+                        let is_suitable = neighbor != NULL
+                            && level == tree.level(neighbor)
+                            && self.cell_to_block[neighbor] == usize::MAX;
+
+                        if !is_suitable {
+                            break 'expand;
+                        }
+                    }
+
+                    // We may now expand along this axis
+                    for index in space.face(Face::positive(axis)).iter() {
+                        let cell = self.block_cell_indices
+                            [block_cell_offset + space.linear_from_cartesian(index)];
+                        let neighbor = tree.neighbors(cell)[face.to_linear()];
+
+                        self.cell_indices[neighbor] = index;
+                        self.cell_indices[neighbor][axis] += 1;
+                        self.cell_to_block[neighbor] = block;
+
+                        self.block_cell_indices.push(neighbor);
+                    }
+
+                    self.block_sizes[block][axis] += 1;
+                }
+            }
+        }
+
+        self.block_cell_offsets.push(self.block_cell_indices.len());
+    }
+
+    fn build_bounds(&mut self, tree: &Tree<N>) {
+        self.block_bounds.clear();
+
+        for block in 0..self.num_blocks() {
+            let size = self.block_sizes[block];
+            let a = self.block_cells(block).first().unwrap().clone();
+
+            let cell_bounds = tree.bounds(a);
+
+            self.block_bounds.push(Rectangle {
+                origin: cell_bounds.origin,
+                size: from_fn(|axis| cell_bounds.size[axis] * size[axis] as f64),
+            })
+        }
+    }
+
+    fn build_boundaries(&mut self, tree: &Tree<N>) {
+        self.boundaries.clear();
+
+        for block in 0..self.num_blocks() {
+            let a = 0;
+            let b: usize = self.block_cells(block).len() - 1;
+
+            for face in faces::<N>() {
+                let cell = if face.side {
+                    self.block_cells(block)[b]
+                } else {
+                    self.block_cells(block)[a]
+                };
+                let neighbor = tree.neighbors(cell)[face.to_linear()];
+                self.boundaries.push(neighbor == NULL);
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct TreeBlocksSerde<const N: usize> {
+    cell_indices: Vec<Array<[usize; N]>>,
+    cell_to_block: Vec<usize>,
+    block_sizes: Vec<Array<[usize; N]>>,
+    block_cell_indices: Vec<usize>,
+    block_cell_offsets: Vec<usize>,
+    block_bounds: Vec<Rectangle<N>>,
+    boundaries: BitVec,
+}
+
+impl<const N: usize> From<TreeBlocks<N>> for TreeBlocksSerde<N> {
+    fn from(value: TreeBlocks<N>) -> Self {
+        Self {
+            cell_indices: wrap_vec_of_arrays(value.cell_indices),
+            cell_to_block: value.cell_to_block,
+            block_sizes: wrap_vec_of_arrays(value.block_sizes),
+            block_cell_indices: value.block_cell_indices,
+            block_cell_offsets: value.block_cell_offsets,
+            block_bounds: value.block_bounds,
+            boundaries: value.boundaries,
+        }
+    }
+}
+
+impl<const N: usize> From<TreeBlocksSerde<N>> for TreeBlocks<N> {
+    fn from(value: TreeBlocksSerde<N>) -> Self {
+        Self {
+            cell_indices: unwrap_vec_of_arrays(value.cell_indices),
+            cell_to_block: value.cell_to_block,
+            block_sizes: unwrap_vec_of_arrays(value.block_sizes),
+            block_cell_indices: value.block_cell_indices,
+            block_cell_offsets: value.block_cell_offsets,
+            block_bounds: value.block_bounds,
+            boundaries: value.boundaries,
+        }
+    }
+}
+
+// ************************
+// Neighbors **************
+// ************************
+
+/// Caches information about every neighbor touching each cell (including non-adjacent neighbors).
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+pub struct TreeNeighbors<const N: usize> {
+    neighbors: Vec<usize>,
+}
+
+impl<const N: usize> TreeNeighbors<N> {
+    /// Rebuilds the set of tree neighbors.
+    pub fn build(&mut self, tree: &Tree<N>) {
+        // Reset and reserve
+        self.neighbors.clear();
+        self.neighbors
+            .reserve(tree.num_cells() * Region::<N>::COUNT);
+
+        // Loop through every cell
+        for cell in 0..tree.num_cells() {
+            let split = tree.split(cell);
+            let level = tree.level(cell);
+
+            'regions: for region in regions::<N>() {
+                // Start with self
+                let mut neighbor = cell;
+
+                let mut neighbor_fine: bool = false;
+                let mut neighbor_coarse: bool = false;
+
+                // Iterate over faces
+                for face in region.adjacent_faces() {
+                    // Make sure face is compatible with split.
+                    if neighbor_coarse && split.is_set(face.axis) != face.side {
+                        continue;
+                    }
+
+                    // Snap origin to be adjacent to face
+                    if neighbor_fine {
+                        let mut neighbor_split = tree.split(neighbor);
+                        let neighbor_origin = neighbor - neighbor_split.to_linear();
+                        neighbor_split.set_to(face.axis, face.side);
+                        neighbor = neighbor_origin + neighbor_split.to_linear();
+                    }
+
+                    // Get neighbor of current cell
+                    let nneighbor = tree.neighbors(neighbor)[face.to_linear()];
+
+                    // Short circut if we have encountered a boundary
+                    if nneighbor == NULL {
+                        self.neighbors.push(NULL);
+                        continue 'regions;
+                    }
+
+                    // Get level of neighbor
+                    let nlevel = tree.level(nneighbor);
+
+                    match nlevel.cmp(&level) {
+                        Ordering::Less => {
+                            debug_assert!(nlevel == level - 1);
+                            debug_assert!(!neighbor_fine);
+                            neighbor_coarse = true;
+                        }
+                        Ordering::Greater => {
+                            debug_assert!(nlevel == level + 1);
+                            debug_assert!(!neighbor_coarse);
+                            neighbor_fine = true;
+                        }
+                        _ => {}
+                    }
+
+                    neighbor = nneighbor;
+                }
+
+                self.neighbors.push(neighbor);
+            }
+        }
+    }
+
+    pub fn num_cells(&self) -> usize {
+        self.neighbors.len() / Region::<N>::COUNT
+    }
+
+    /// Retrieves the neighbors of the given cell for each region.
+    pub fn cell_neighbors(&self, cell: usize) -> &[usize] {
+        &self.neighbors[cell * Region::<N>::COUNT..(cell + 1) * Region::<N>::COUNT]
+    }
+
+    /// Retrieves the neighbors of the given cell for each region.
+    pub fn cell_neighbor(&self, cell: usize, region: Region<N>) -> usize {
+        self.cell_neighbors(cell)[region.to_linear()]
+    }
+}
+
+// ************************
+// Nodes ******************
+// ************************
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(from = "TreeNodesSerde<N>")]
+#[serde(into = "TreeNodesSerde<N>")]
+pub struct TreeNodes<const N: usize> {
+    pub cell_width: [usize; N],
+    pub ghost_nodes: usize,
+    node_offsets: Vec<usize>,
+}
+
+impl<const N: usize> TreeNodes<N> {
+    pub fn new(cell_width: [usize; N], ghost_nodes: usize) -> Self {
+        Self {
+            cell_width,
+            ghost_nodes,
+            node_offsets: Vec::new(),
+        }
+    }
+
+    /// Rebuilds the set of tree nodes.
+    pub fn build(&mut self, blocks: &TreeBlocks<N>) {
+        for axis in 0..N {
+            assert!(self.cell_width[axis] % 2 == 0);
+        }
+
+        // Reset map
+        self.node_offsets.clear();
+        self.node_offsets.reserve(blocks.num_blocks() + 1);
+
+        // Start cursor at 0.
+        let mut cursor = 0;
+        self.node_offsets.push(cursor);
+
+        for block in 0..blocks.num_blocks() {
+            let size = blocks.block_size(block);
+            // Width of block in nodes.
+            let block_width: [usize; N] =
+                from_fn(|axis| self.cell_width[axis] * size[axis] + 1 + 2 * self.ghost_nodes);
+
+            cursor += block_width.iter().product::<usize>();
+            self.node_offsets.push(cursor);
+        }
+    }
+
+    /// Returns the total number of nodes in the tree.
+    pub fn num_nodes(&self) -> usize {
+        self.node_offsets.last().unwrap().clone()
+    }
+
+    /// The range of nodes associated with the given block.
+    pub fn block_nodes(&self, block: usize) -> Range<usize> {
+        self.node_offsets[block]..self.node_offsets[block + 1]
+    }
+}
+
+impl<const N: usize> Default for TreeNodes<N> {
+    fn default() -> Self {
+        Self {
+            cell_width: [2; N],
+            ghost_nodes: 0,
+            node_offsets: Default::default(),
+        }
+    }
+}
+
+#[derive(serde::Serialize, serde::Deserialize)]
+struct TreeNodesSerde<const N: usize> {
+    cell_width: Array<[usize; N]>,
+    ghost_nodes: usize,
+    node_offsets: Vec<usize>,
+}
+
+impl<const N: usize> From<TreeNodes<N>> for TreeNodesSerde<N> {
+    fn from(value: TreeNodes<N>) -> Self {
+        Self {
+            cell_width: value.cell_width.into(),
+            ghost_nodes: value.ghost_nodes,
+            node_offsets: value.node_offsets,
+        }
+    }
+}
+
+impl<const N: usize> From<TreeNodesSerde<N>> for TreeNodes<N> {
+    fn from(value: TreeNodesSerde<N>) -> Self {
+        Self {
+            cell_width: value.cell_width.inner(),
+            ghost_nodes: value.ghost_nodes,
+            node_offsets: value.node_offsets,
+        }
+    }
+}
+
+/// Converts a vector of arraylike values to a vector of those values wrapped in the newtype
+pub fn wrap_vec_of_arrays<I: ArrayLike>(vec: Vec<I>) -> Vec<Array<I>> {
+    unsafe {
+        let mut v = ManuallyDrop::new(vec);
+        Vec::from_raw_parts(v.as_mut_ptr() as *mut Array<I>, v.len(), v.capacity())
+    }
+}
+
+/// Converts a vector of wrapped arrays into a vector of their underlying arraylike values.
+pub fn unwrap_vec_of_arrays<I: ArrayLike>(vec: Vec<Array<I>>) -> Vec<I> {
+    unsafe {
+        let mut v = ManuallyDrop::new(vec);
+        Vec::from_raw_parts(v.as_mut_ptr() as *mut I, v.len(), v.capacity())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
+    fn default() {
+        let tree = Tree::new(Rectangle::<2>::UNIT);
+
+        assert_eq!(tree.num_cells(), 4);
+        assert_eq!(tree.neighbors(0), &[NULL, 1, NULL, 2]);
+        assert_eq!(tree.neighbors(1), &[0, NULL, NULL, 3]);
+        assert_eq!(tree.neighbors(2), &[NULL, 3, 0, NULL]);
+        assert_eq!(tree.neighbors(3), &[2, NULL, 1, NULL]);
+
+        let mut blocks = TreeBlocks::default();
+        blocks.build(&tree);
+
+        assert_eq!(blocks.num_blocks(), 1);
+        assert_eq!(blocks.block_size(0), [2, 2]);
+        assert_eq!(blocks.block_cells(0), &[0, 1, 2, 3]);
+
+        assert_eq!(
+            blocks.block_boundary_flags(0),
+            FaceMask::pack([[true; 2]; 2])
+        );
+    }
+
+    #[test]
     fn balancing() {
-        let mut tree = SpatialTree::new(Rectangle::<2>::UNIT);
+        let mut tree = Tree::new(Rectangle::<2>::UNIT);
 
         tree.refine(&[true, false, false, false]);
 
         // Produce unbalanced flags
         let mut flags = vec![false, false, false, true, false, false, false];
-        assert!(!tree.is_balanced(&flags));
+        assert!(!tree.check_refine_flags(&flags));
 
         // Perform rebalancing
-        tree.balance(&mut flags);
+        tree.balance_refine_flags(&mut flags);
         assert_eq!(flags, &[false, false, false, true, true, true, true]);
 
-        assert!(tree.is_balanced(&flags));
+        assert!(tree.check_refine_flags(&flags));
     }
 
     #[test]
     fn refinement() {
-        let mut tree = SpatialTree::new(Rectangle::<2>::UNIT);
+        let mut tree = Tree::new(Rectangle::<2>::UNIT);
 
         assert_eq!(tree.num_cells(), 4);
         assert_eq!(tree.split(0).unpack(), [false, false]);
@@ -400,5 +902,87 @@ mod tests {
         assert_eq!(tree.neighbors(2), &[NULL, 3, 0, 4]);
         assert_eq!(tree.neighbors(5), &[4, 8, 3, NULL]);
         assert_eq!(tree.neighbors(10), &[5, 11, 8, NULL]);
+    }
+
+    #[test]
+    fn greedy_meshing() {
+        let mut tree = Tree::new(Rectangle::UNIT);
+        tree.refine(&[true, false, false, false]);
+
+        let mut blocks = TreeBlocks::default();
+        blocks.build(&tree);
+
+        assert_eq!(blocks.num_blocks(), 3);
+        assert_eq!(blocks.block_size(0), [2, 2]);
+        assert_eq!(blocks.block_size(1), [1, 2]);
+        assert_eq!(blocks.block_size(2), [1, 1]);
+
+        assert_eq!(blocks.block_cells(0), [0, 1, 2, 3]);
+        assert_eq!(blocks.block_cells(1), [4, 6]);
+        assert_eq!(blocks.block_cells(2), [5]);
+
+        tree.refine(&[false, false, false, false, true, false, false]);
+        blocks.build(&tree);
+
+        assert_eq!(blocks.num_blocks(), 2);
+        assert_eq!(blocks.block_size(0), [4, 2]);
+        assert_eq!(blocks.block_size(1), [2, 1]);
+
+        assert_eq!(blocks.block_cells(0), [0, 1, 4, 5, 2, 3, 6, 7]);
+        assert_eq!(blocks.block_cells(1), [8, 9]);
+    }
+
+    #[test]
+    fn neighbors() {
+        let mut tree = Tree::new(Rectangle::<2>::UNIT);
+        let mut neighbors = TreeNeighbors::default();
+
+        tree.refine(&[true, false, false, false]);
+        neighbors.build(&tree);
+
+        assert_eq!(tree.num_cells(), 7);
+
+        assert_eq!(
+            neighbors.cell_neighbors(0),
+            [NULL, NULL, NULL, NULL, 0, 1, NULL, 2, 3]
+        );
+        assert_eq!(
+            neighbors.cell_neighbors(1),
+            [NULL, NULL, NULL, 0, 1, 4, 2, 3, 4]
+        );
+        assert_eq!(
+            neighbors.cell_neighbors(2),
+            [NULL, 0, 1, NULL, 2, 3, NULL, 5, 5]
+        );
+        assert_eq!(neighbors.cell_neighbors(3), [0, 1, 4, 2, 3, 4, 5, 5, 6]);
+        assert_eq!(
+            neighbors.cell_neighbors(4),
+            [NULL, NULL, NULL, 0, 4, NULL, 5, 6, NULL]
+        );
+        assert_eq!(
+            neighbors.cell_neighbors(5),
+            [NULL, 0, 4, NULL, 5, 6, NULL, NULL, NULL]
+        );
+        assert_eq!(
+            neighbors.cell_neighbors(6),
+            [0, 4, NULL, 5, 6, NULL, NULL, NULL, NULL]
+        );
+    }
+
+    #[test]
+    fn node_offsets() {
+        let mut tree = Tree::new(Rectangle::<2>::UNIT);
+        let mut blocks = TreeBlocks::default();
+        let mut nodes = TreeNodes::new([8; 2], 3);
+
+        tree.refine(&[true, false, false, false]);
+        blocks.build(&tree);
+        nodes.build(&blocks);
+
+        assert_eq!(blocks.num_blocks(), 3);
+
+        assert_eq!(nodes.block_nodes(0), 0..529);
+        assert_eq!(nodes.block_nodes(1), 529..874);
+        assert_eq!(nodes.block_nodes(2), 874..1099);
     }
 }

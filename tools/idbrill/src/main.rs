@@ -1,217 +1,209 @@
 use aeon::array::Array;
-use aeon::elliptic::{HyperRelaxSolver, OutgoingOrder, OutgoingWave};
+use aeon::elliptic::HyperRelaxSolver;
+use aeon::fd::{Boundary, BoundaryKind, Condition, Conditions, Engine, Projection};
 use aeon::prelude::*;
+use aeon::system::SystemFields;
 
+use reborrow::Reborrow;
 use std::fs::File;
 use std::io::Write;
 use std::path::PathBuf;
 
-const FULL_DOMAIN: bool = false;
+/// Initial data is Garfinkle's variables.
+#[derive(Clone, SystemLabel)]
+pub enum Garfinkle {
+    Psi,
+    Seed,
+}
 
 #[derive(Clone, SystemLabel)]
-pub enum InitialData {
+pub struct Psi;
+
+#[derive(Clone, SystemLabel)]
+pub struct Seed;
+
+/// Initial data in Rinne's hyperbolic variables.
+#[derive(Clone, SystemLabel)]
+pub enum Rinne {
     Conformal,
     Seed,
 }
 
-pub struct InitialDataProjection<'a> {
-    seed: &'a [f64],
-    psi: &'a [f64],
+pub struct RinneFromGarfinkle;
+
+impl Projection<2> for RinneFromGarfinkle {
+    type Input = Garfinkle;
+    type Output = Rinne;
+
+    fn project(
+        &self,
+        engine: &impl Engine<2>,
+        input: SystemFields<'_, Self::Input>,
+    ) -> SystemValue<Self::Output> {
+        let [rho, _z] = engine.position();
+        let index = engine.index();
+
+        let psi = input.field(Garfinkle::Psi)[index];
+        let seed = input.field(Garfinkle::Seed)[index];
+
+        let mut result: SystemValue<_> = SystemValue::default();
+        result.set_field(Rinne::Conformal, psi.powi(4) * (2.0 * rho * seed).exp());
+        result.set_field(Rinne::Seed, -seed);
+        result
+    }
 }
 
-impl<'a> SystemProjection<2> for InitialDataProjection<'a> {
-    type Label = InitialData;
+/// Boundary for quadrant of domain.
+#[derive(Clone)]
+pub struct Quadrant;
+
+impl Boundary for Quadrant {
+    fn kind(&self, face: Face) -> aeon::fd::BoundaryKind {
+        if face.side == false {
+            BoundaryKind::Parity
+        } else {
+            BoundaryKind::Radiative
+        }
+    }
+}
+
+/// Boundary Conditions for Garfinkle variables.
+pub struct GarfinkleConditions;
+
+impl Conditions<2> for GarfinkleConditions {
+    type Condition = GarfinkleCondition;
+    type System = Garfinkle;
+
+    fn field(&self, label: Self::System) -> Self::Condition {
+        match label {
+            Garfinkle::Psi => GarfinkleCondition([true, true], 1.0),
+            Garfinkle::Seed => GarfinkleCondition([false, true], 0.0),
+        }
+    }
+}
+
+pub struct GarfinkleCondition([bool; 2], f64);
+
+impl Condition<2> for GarfinkleCondition {
+    fn parity(&self, face: Face) -> bool {
+        self.0[face.axis]
+    }
+
+    fn radiative(&self, _position: [f64; 2]) -> f64 {
+        self.1
+    }
+}
+
+pub struct PsiConditions;
+
+impl Conditions<2> for PsiConditions {
+    type System = Psi;
+    type Condition = GarfinkleCondition;
+
+    fn field(&self, _label: Self::System) -> Self::Condition {
+        GarfinkleConditions.field(Garfinkle::Psi)
+    }
+}
+
+pub struct SeedConditions;
+
+impl Conditions<2> for SeedConditions {
+    type System = Seed;
+    type Condition = GarfinkleCondition;
+
+    fn field(&self, _label: Self::System) -> Self::Condition {
+        GarfinkleConditions.field(Garfinkle::Seed)
+    }
+}
+
+pub struct PsiOperator;
+
+impl Operator<2> for PsiOperator {
+    type System = Psi;
+    type Context = Seed;
 
     fn evaluate(
         &self,
-        block: Block<2>,
-        _pool: &MemPool,
-        mut dest: SystemSliceMut<'_, Self::Label>,
-    ) {
-        let range = block.local_from_global();
+        engine: &impl Engine<2>,
+        psi: SystemFields<'_, Self::System>,
+        seed: SystemFields<'_, Self::Context>,
+    ) -> SystemValue<Self::System> {
+        let psi = psi.field(Psi);
+        let seed = seed.field(Seed);
 
-        let psi = &self.psi[range.clone()];
-        let seed = &self.seed[range.clone()];
+        let [rho, _z] = engine.position();
+        let index = engine.index();
 
-        for vertex in block.iter() {
-            let [rho, _z] = block.position(vertex);
-            let index = block.index_from_vertex(vertex);
+        let psi_val = psi[index];
+        let psi_grad = engine.gradient(psi);
+        let psi_hess = engine.hessian(psi);
 
-            dest.field_mut(InitialData::Conformal)[index] =
-                psi[index].powi(4) * (2.0 * rho * seed[index]).exp();
-            dest.field_mut(InitialData::Seed)[index] = -seed[index];
-        }
-    }
-}
+        let seed_grad = engine.gradient(seed);
+        let seed_hess = engine.hessian(seed);
 
-pub struct OddBoundary;
-
-impl Boundary for OddBoundary {
-    fn face(&self, face: Face) -> BoundaryCondition {
-        if FULL_DOMAIN {
-            if face.axis == 0 && face.side == false {
-                BoundaryCondition::Parity(false)
-            } else {
-                BoundaryCondition::Free
-            }
+        let laplacian = if rho.abs() <= 10e-10 {
+            2.0 * psi_hess[0][0] + psi_hess[1][1]
         } else {
-            if face.axis == 0 && face.side == false {
-                BoundaryCondition::Parity(false)
-            } else if face.axis == 1 && face.side == false {
-                BoundaryCondition::Parity(true)
-            } else {
-                BoundaryCondition::Free
-            }
-        }
+            psi_hess[0][0] + psi_grad[0] / rho + psi_hess[1][1]
+        };
+
+        let result = laplacian
+            + psi_val / 4.0 * (rho * seed_hess[0][0] + 2.0 * seed_grad[0] + rho * seed_hess[1][1]);
+
+        SystemValue::new([result])
     }
 }
 
-pub struct EvenBoundary;
+pub struct Hamiltonian;
 
-impl Boundary for EvenBoundary {
-    fn face(&self, face: Face) -> BoundaryCondition {
-        if FULL_DOMAIN {
-            if face.axis == 0 && face.side == false {
-                BoundaryCondition::Parity(true)
-            } else {
-                BoundaryCondition::Free
-            }
-        } else {
-            if face.axis == 0 && face.side == false {
-                BoundaryCondition::Parity(true)
-            } else if face.axis == 1 && face.side == false {
-                BoundaryCondition::Parity(true)
-            } else {
-                BoundaryCondition::Free
-            }
-        }
-    }
-}
+impl Projection<2> for Hamiltonian {
+    type Input = Garfinkle;
+    type Output = Scalar;
 
-pub struct PsiBoundary;
-
-impl SystemBoundary for PsiBoundary {
-    type Label = Scalar;
-    type Boundary = EvenBoundary;
-
-    fn field(&self, _: Self::Label) -> Self::Boundary {
-        EvenBoundary
-    }
-}
-
-pub struct PsiOperator<'a> {
-    pub seed: &'a [f64],
-}
-
-impl<'a> SystemOperator<2> for PsiOperator<'a> {
-    type Label = Scalar;
-
-    fn apply(
+    fn project(
         &self,
-        block: Block<2>,
-        pool: &MemPool,
-        src: SystemSlice<'_, Self::Label>,
-        mut dest: SystemSliceMut<'_, Self::Label>,
-    ) {
-        let node_count = block.node_count();
-        let range = block.local_from_global();
+        engine: &impl Engine<2>,
+        input: SystemFields<'_, Self::Input>,
+    ) -> SystemValue<Self::Output> {
+        let psi = input.field(Garfinkle::Psi);
+        let seed = input.field(Garfinkle::Seed);
 
-        let psi = src.field(Scalar);
-        let psi_r = pool.alloc_scalar(node_count);
-        let psi_z = pool.alloc_scalar(node_count);
-        let psi_rr = pool.alloc_scalar(node_count);
-        let psi_zz = pool.alloc_scalar(node_count);
+        let [rho, _z] = engine.position();
+        let index = engine.index();
 
-        block.derivative::<4>(0, &EvenBoundary, psi, psi_r);
-        block.derivative::<4>(1, &EvenBoundary, psi, psi_z);
-        block.second_derivative::<4>(0, &EvenBoundary, psi, psi_rr);
-        block.second_derivative::<4>(1, &EvenBoundary, psi, psi_zz);
+        let psi_val = psi[index];
+        let psi_grad = engine.gradient(psi);
+        let psi_hess = engine.hessian(psi);
 
-        let dest = dest.field_mut(Scalar);
+        let seed_grad = engine.gradient(seed);
+        let seed_hess = engine.hessian(seed);
 
-        let seed = &self.seed[range.clone()];
-        let seed_r = pool.alloc_scalar(node_count);
-        let seed_rr = pool.alloc_scalar(node_count);
-        let seed_zz = pool.alloc_scalar(node_count);
+        let laplacian = if rho.abs() <= 10e-10 {
+            2.0 * psi_hess[0][0] + psi_hess[1][1]
+        } else {
+            psi_hess[0][0] + psi_grad[0] / rho + psi_hess[1][1]
+        };
 
-        block.derivative::<4>(0, &OddBoundary, seed, seed_r);
-        block.second_derivative::<4>(0, &OddBoundary, seed, seed_rr);
-        block.second_derivative::<4>(1, &OddBoundary, seed, seed_zz);
+        let result = laplacian
+            + psi_val / 4.0 * (rho * seed_hess[0][0] + 2.0 * seed_grad[0] + rho * seed_hess[1][1]);
 
-        for vertex in block.iter() {
-            let [rho, _z] = block.position(vertex);
-            let index = block.index_from_vertex(vertex);
-
-            let laplacian = if rho.abs() <= 10e-10 {
-                2.0 * psi_rr[index] + psi_zz[index]
-            } else {
-                psi_rr[index] + psi_r[index] / rho + psi_zz[index]
-            };
-
-            dest[index] = laplacian
-                + psi[index] / 4.0
-                    * (rho * seed_rr[index] + 2.0 * seed_r[index] + rho * seed_zz[index]);
-        }
-    }
-}
-
-pub struct Hamiltonian<'a> {
-    pub psi: &'a [f64],
-    pub seed: &'a [f64],
-}
-
-impl<'a> Projection<2> for Hamiltonian<'a> {
-    fn evaluate(&self, block: Block<2>, pool: &MemPool, dest: &mut [f64]) {
-        let node_count = block.node_count();
-        let range = block.local_from_global();
-
-        let psi = &self.psi[range.clone()];
-        let psi_r = pool.alloc_scalar(node_count);
-        let psi_z = pool.alloc_scalar(node_count);
-        let psi_rr = pool.alloc_scalar(node_count);
-        let psi_zz = pool.alloc_scalar(node_count);
-
-        block.derivative::<4>(0, &EvenBoundary, psi, psi_r);
-        block.derivative::<4>(1, &EvenBoundary, psi, psi_z);
-        block.second_derivative::<4>(0, &EvenBoundary, psi, psi_rr);
-        block.second_derivative::<4>(1, &EvenBoundary, psi, psi_zz);
-
-        let seed = &self.seed[range.clone()];
-        let seed_r = pool.alloc_scalar(node_count);
-        let seed_rr = pool.alloc_scalar(node_count);
-        let seed_zz = pool.alloc_scalar(node_count);
-
-        block.derivative::<4>(0, &OddBoundary, seed, seed_r);
-        block.second_derivative::<4>(0, &OddBoundary, seed, seed_rr);
-        block.second_derivative::<4>(1, &OddBoundary, seed, seed_zz);
-
-        for vertex in block.iter() {
-            let [rho, _z] = block.position(vertex);
-            let index = block.index_from_vertex(vertex);
-
-            let laplacian = if rho.abs() <= 10e-10 {
-                2.0 * psi_rr[index] + psi_zz[index]
-            } else {
-                psi_rr[index] + psi_r[index] / rho + psi_zz[index]
-            };
-
-            dest[index] = laplacian
-                + psi[index] / 4.0
-                    * (rho * seed_rr[index] + 2.0 * seed_r[index] + rho * seed_zz[index]);
-        }
+        SystemValue::new([result])
     }
 }
 
 pub struct SeedProjection(f64);
 
 impl Projection<2> for SeedProjection {
-    fn evaluate(&self, block: aeon::mesh::Block<2>, _pool: &MemPool, dest: &mut [f64]) {
-        for vertex in block.iter() {
-            let [rho, z] = block.position(vertex);
-            let index = block.index_from_vertex(vertex);
+    type Input = Scalar;
+    type Output = Scalar;
 
-            dest[index] = rho * self.0 * (-(rho * rho + z * z)).exp();
-        }
+    fn project(
+        &self,
+        engine: &impl Engine<2>,
+        _input: SystemFields<'_, Self::Input>,
+    ) -> SystemValue<Self::Output> {
+        let [rho, z] = engine.position();
+        SystemValue::new([rho * self.0 * (-(rho * rho + z * z)).exp()])
     }
 }
 
@@ -257,97 +249,106 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     log::info!("Allocating Driver and Building Mesh Grid Size {points} Radius {radius}");
 
-    let mut driver = Driver::new();
-
-    let bounds = if FULL_DOMAIN {
-        Rectangle {
-            size: [radius, 2.0 * radius],
-            origin: [0.0, -radius],
-        }
-    } else {
-        Rectangle {
-            size: [radius, radius],
-            origin: [0.0, 0.0],
-        }
+    let bounds = Rectangle {
+        size: [radius, radius],
+        origin: [0.0, 0.0],
     };
 
-    let size = if FULL_DOMAIN {
-        [points, 2 * points]
-    } else {
-        [points, points]
-    };
+    let size = [points, points];
 
-    let mesh = Mesh::new(bounds, size, 3);
+    let mut mesh = Mesh::new(bounds, size, 3);
+    // mesh.refine(&[true, false, false, false]);
 
     log::info!("Filling Seed Function");
 
+    let num_nodes = mesh.num_nodes();
+
+    let mut data = vec![0.0; num_nodes * 2];
+    let (psi, seed) = data.split_at_mut(num_nodes);
+
     // Compute seed values.
-    let mut seed = vec![0.0; mesh.node_count()].into_boxed_slice();
-    driver.project(&mesh, &SeedProjection(1.0), &mut seed);
-    driver.fill_boundary(&mesh, &OddBoundary, &mut seed);
+    mesh.order::<4>().project(
+        &Quadrant,
+        &SeedProjection(1.0),
+        SystemSlice::from_contiguous(&[]),
+        SystemSliceMut::from_contiguous(seed),
+    );
+    mesh.order::<4>().fill_boundary(
+        &Quadrant,
+        &SeedConditions,
+        SystemSliceMut::from_contiguous(seed),
+    );
+
+    // Initial Guess for Psi
+    psi.fill(1.0);
 
     log::info!("Running Hyperbolic Relaxation");
 
-    let mut psi = SystemVec::new(mesh.node_count());
-    psi.field_mut(Scalar).fill(1.0);
-
     let mut solver = HyperRelaxSolver::new();
     solver.tolerance = 1e-9;
-    solver.max_steps = 100000;
+    solver.max_steps = 10000;
     solver.cfl = 0.1;
-    solver.outgoing = OutgoingWave::Sommerfeld(1.0);
-    solver.outgoing_order = OutgoingOrder::Fourth;
     solver.dampening = 0.4;
 
-    solver.solve(
-        &mut driver,
-        &mesh,
-        &PsiOperator { seed: &seed },
-        &PsiBoundary,
-        psi.as_mut_slice(),
+    solver.solve::<2, 4, _>(
+        &mut mesh,
+        &Quadrant,
+        &PsiConditions,
+        &PsiOperator,
+        SystemSlice::from_contiguous(seed),
+        SystemSliceMut::from_contiguous(psi),
     );
-    driver.fill_boundary_system(&mesh, &PsiBoundary, psi.as_mut_slice());
-
-    let mut hamiltonian = vec![0.0; mesh.node_count()].into_boxed_slice();
-
-    driver.project(
-        &mesh,
-        &Hamiltonian {
-            seed: &seed,
-            psi: psi.field(Scalar),
-        },
-        &mut hamiltonian,
+    mesh.order::<4>().fill_boundary(
+        &Quadrant,
+        &PsiConditions,
+        SystemSliceMut::from_contiguous(psi),
     );
 
-    let mut model = Model::new(mesh.clone());
-    model.attach_field("psi", psi.field(Scalar).iter().map(|&p| p - 1.0).collect());
-    model.attach_field("seed", seed.to_vec());
+    let system = SystemSlice::from_contiguous(&data);
+
+    let mut hamiltonian = vec![0.0; mesh.num_nodes()].into_boxed_slice();
+
+    mesh.order::<4>().project(
+        &Quadrant,
+        &Hamiltonian,
+        system.rb(),
+        SystemSliceMut::from_contiguous(&mut hamiltonian),
+    );
+
+    let mut model = Model::from_mesh(&mesh);
+    model.attach_field(
+        "psi",
+        system
+            .field(Garfinkle::Psi)
+            .iter()
+            .map(|&p| p - 1.0)
+            .collect(),
+    );
+    model.attach_field("seed", system.field(Garfinkle::Seed).to_vec());
     model.attach_field("hamiltonian", hamiltonian.to_vec());
 
     model
         .export_vtk(
             format!("idbrill").as_str(),
-            PathBuf::from(format!("output/idbrill_full.vtu")),
+            PathBuf::from(format!("output/idbrill.vtu")),
         )
         .unwrap();
 
     // Write model data to file
     {
-        let mut system = SystemVec::new(mesh.node_count());
+        let mut rinne = SystemVec::with_length(mesh.num_nodes());
 
-        driver.project_system(
-            &mesh,
-            &InitialDataProjection {
-                psi: psi.field(Scalar),
-                seed: &seed,
-            },
-            system.as_mut_slice(),
+        mesh.order::<4>().project(
+            &Quadrant,
+            &RinneFromGarfinkle,
+            system.rb(),
+            rinne.as_mut_slice(),
         );
 
-        let mut model = Model::new(mesh.clone());
-        model.attach_system(system.as_slice());
+        let mut model = Model::from_mesh(&mesh);
+        model.attach_system(SystemSlice::<Garfinkle>::from_contiguous(&data));
 
-        let mut file = File::create("output/idbrill_full.dat")?;
+        let mut file = File::create("output/idbrill.dat")?;
         file.write_all(ron::to_string(&model)?.as_bytes())?;
     }
 

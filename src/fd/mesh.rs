@@ -1,48 +1,36 @@
 #![allow(dead_code)]
 
-use bitvec::prelude::BitVec;
-use std::cmp::Ordering;
+use reborrow::ReborrowMut;
 use std::{array::from_fn, ops::Range};
 
-use crate::array::{unwrap_vec_of_arrays, wrap_vec_of_arrays, Array};
-use crate::fd::{Boundary, BoundaryKind, NodeSpace};
-use crate::geometry::{
-    faces, regions, AxisMask, Face, FaceMask, IndexSpace, Rectangle, Region, SpatialTree, NULL,
+use crate::fd::{
+    node_from_vertex, Boundary, BoundaryKind, Condition, Conditions, Engine, FdEngine, FdIntEngine,
+    NodeSpace, Operator, Projection,
 };
+use crate::geometry::{
+    faces, regions, AxisMask, Face, FaceMask, IndexSpace, Rectangle, Region, Side, Tree,
+    TreeBlocks, TreeNeighbors, TreeNodes, NULL,
+};
+use crate::system::{SystemFields, SystemFieldsMut, SystemLabel, SystemSlice, SystemSliceMut};
 
 /// Implementation of an axis aligned tree mesh using standard finite difference operators.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-#[serde(from = "MeshSerde<N>")]
-#[serde(into = "MeshSerde<N>")]
 pub struct Mesh<const N: usize> {
-    /// Tree of leaf cells.
-    tree: SpatialTree<N>,
-    /// Number of additional ghost nodes on each face.
-    pub(crate) ghost_nodes: usize,
-    /// Number of dof cells per mesh cell (along each axis).
-    pub(crate) cell_width: [usize; N],
-    /// Information about blocks on the tree mesh.
-    pub(crate) blocks: Blocks<N>,
-    /// Stores the neighboring cell for each valid region (rather than face, as is stored
-    /// in the geometric tree).
-    neighbors: Vec<usize>,
+    tree: Tree<N>,
+    blocks: TreeBlocks<N>,
+    neighbors: TreeNeighbors<N>,
+    nodes: TreeNodes<N>,
 }
 
 impl<const N: usize> Mesh<N> {
     /// Constructs a new tree mesh, covering the given physical domain. Each cell has the given number of subdivisions
     /// per axis, and each block extends out an extra `ghost_nodes` distance to facilitate inter-cell communication.
     pub fn new(bounds: Rectangle<N>, cell_width: [usize; N], ghost_nodes: usize) -> Self {
-        for axis in 0..N {
-            assert!(cell_width[axis] % 2 == 0);
-        }
-
         let mut result = Self {
-            tree: SpatialTree::new(bounds),
-            ghost_nodes,
-            cell_width,
-
-            blocks: Blocks::new(),
-            neighbors: Vec::new(),
+            tree: Tree::new(bounds),
+            blocks: TreeBlocks::default(),
+            neighbors: TreeNeighbors::default(),
+            nodes: TreeNodes::new(cell_width, ghost_nodes),
         };
 
         result.build();
@@ -52,12 +40,12 @@ impl<const N: usize> Mesh<N> {
 
     /// Checks if the given refinement flags are 2:1 balanced.
     pub fn is_balanced(&self, flags: &[bool]) -> bool {
-        self.tree.is_balanced(flags)
+        self.tree.check_refine_flags(flags)
     }
 
     /// Balances the given refinement flags.
     pub fn balance(&self, flags: &mut [bool]) {
-        self.tree.balance(flags)
+        self.tree.balance_refine_flags(flags)
     }
 
     pub fn refine(&mut self, flags: &[bool]) {
@@ -67,76 +55,9 @@ impl<const N: usize> Mesh<N> {
 
     /// Reconstructs interal structure of the TreeMesh, automatically called during refinement.
     pub fn build(&mut self) {
-        self.blocks
-            .build(&self.tree, self.cell_width, self.ghost_nodes);
-        self.build_neighbors();
-    }
-
-    fn build_neighbors(&mut self) {
-        // Reset and reserve
-        self.neighbors.clear();
-        self.neighbors
-            .reserve(self.num_cells() * Region::<N>::COUNT);
-
-        // Loop through every cell
-        for cell in 0..self.num_cells() {
-            let split = self.tree.split(cell);
-            let level = self.tree.level(cell);
-
-            'regions: for region in regions::<N>() {
-                // Start with self
-                let mut neighbor = cell;
-
-                let mut neighbor_fine: bool = false;
-                let mut neighbor_coarse: bool = false;
-
-                // Iterate over faces
-                for face in region.adjacent_faces() {
-                    // Make sure face is compatible with split.
-                    if neighbor_coarse && split.is_set(face.axis) != face.side {
-                        continue;
-                    }
-
-                    // Snap origin to be adjacent to face
-                    if neighbor_fine {
-                        let mut neighbor_split = self.tree.split(neighbor);
-                        let neighbor_origin = neighbor - neighbor_split.to_linear();
-                        neighbor_split.set_to(face.axis, face.side);
-                        neighbor = neighbor_origin + neighbor_split.to_linear();
-                    }
-
-                    // Get neighbor of current cell
-                    let nneighbor = self.tree.neighbors(neighbor)[face.to_linear()];
-
-                    // Short circut if we have encountered a boundary
-                    if nneighbor == NULL {
-                        self.neighbors.push(NULL);
-                        continue 'regions;
-                    }
-
-                    // Get level of neighbor
-                    let nlevel = self.tree.level(nneighbor);
-
-                    match nlevel.cmp(&level) {
-                        Ordering::Less => {
-                            debug_assert!(nlevel == level - 1);
-                            debug_assert!(!neighbor_fine);
-                            neighbor_coarse = true;
-                        }
-                        Ordering::Greater => {
-                            debug_assert!(nlevel == level + 1);
-                            debug_assert!(!neighbor_coarse);
-                            neighbor_fine = true;
-                        }
-                        _ => {}
-                    }
-
-                    neighbor = nneighbor;
-                }
-
-                self.neighbors.push(neighbor);
-            }
-        }
+        self.blocks.build(&self.tree);
+        self.neighbors.build(&self.tree);
+        self.nodes.build(&self.blocks);
     }
 
     /// Number of cells in the mesh.
@@ -146,33 +67,38 @@ impl<const N: usize> Mesh<N> {
 
     /// Number of blocks in the block.
     pub fn num_blocks(&self) -> usize {
-        self.blocks.len()
+        self.blocks.num_blocks()
+    }
+
+    // Number of nodes in mesh.
+    pub fn num_nodes(&self) -> usize {
+        self.nodes.num_nodes()
     }
 
     /// Size of a given block, measured in cells.
     pub fn block_size(&self, block: usize) -> [usize; N] {
-        self.blocks.size(block)
+        self.blocks.block_size(block)
     }
 
     /// Map from cartesian indices within block to cell at the given positions
     pub fn block_cells(&self, block: usize) -> &[usize] {
-        self.blocks.cells(block)
+        self.blocks.block_cells(block)
     }
 
     /// Computes the physical bounds of a block.
     pub fn block_bounds(&self, block: usize) -> Rectangle<N> {
-        self.blocks.bounds(block)
+        self.blocks.block_bounds(block)
     }
 
     /// The range of nodes that the block owns.
     pub fn block_nodes(&self, block: usize) -> Range<usize> {
-        self.blocks.nodes(block)
+        self.nodes.block_nodes(block)
     }
 
     /// Computes flags indicating whether a particular face of a block borders a physical
     /// boundary.
     pub fn block_boundary_flags(&self, block: usize) -> FaceMask<N> {
-        self.blocks.boundary_flags(block)
+        self.blocks.block_boundary_flags(block)
     }
 
     /// Produces a block boundary which correctly accounts for
@@ -186,23 +112,41 @@ impl<const N: usize> Mesh<N> {
 
     /// Computes the nodespace corresponding to a block.
     pub fn block_space(&self, block: usize) -> NodeSpace<N> {
-        let size = self.blocks.size(block);
-        let cell_size = from_fn(|axis| size[axis] * self.cell_width[axis]);
+        let size = self.blocks.block_size(block);
+        let cell_size = from_fn(|axis| size[axis] * self.nodes.cell_width[axis]);
 
         NodeSpace {
             size: cell_size,
-            ghost: self.ghost_nodes,
+            ghost: self.nodes.ghost_nodes,
         }
     }
 
+    // pub fn block_fields<'a, Label: SystemLabel>(
+    //     &self,
+    //     block: usize,
+    //     system: &'a SystemSlice<Label>,
+    // ) -> SystemFields<'a, Label> {
+    //     let nodes = self.block_nodes(block);
+    //     system.slice(nodes).fields()
+    // }
+
+    // pub fn block_fields_mut<'a, Label: SystemLabel>(
+    //     &self,
+    //     block: usize,
+    //     system: &'a mut SystemSliceMut<Label>,
+    // ) -> SystemFieldsMut<'a, Label> {
+    //     let nodes = self.block_nodes(block);
+    //     system.slice_mut(nodes).fields_mut()
+    // }
+
     /// Retrieves the neighbors of the given cell for each region.
     pub fn cell_neighbors(&self, cell: usize) -> &[usize] {
-        &self.neighbors[cell * Region::<N>::COUNT..(cell + 1) * Region::<N>::COUNT]
+        self.neighbors.cell_neighbors(cell)
     }
 
     /// Retrieves the neighbors of the given cell for each region.
     pub fn cell_neighbor(&self, cell: usize, region: Region<N>) -> usize {
-        self.cell_neighbors(cell)[region.to_linear()]
+        self.neighbors.cell_neighbor(cell, region)
     }
 
     /// The level of the mesh the cell resides on.
@@ -220,47 +164,41 @@ impl<const N: usize> Mesh<N> {
         self.blocks.cell_block(cell)
     }
 
+    pub fn order<const ORDER: usize>(&mut self) -> MeshOrder<N, ORDER> {
+        const {
+            assert!(ORDER % 2 == 0);
+        }
+        MeshOrder(self)
+    }
+
+    pub fn max_level(&self) -> usize {
+        let mut level = 1;
+
+        for block in 0..self.num_blocks() {
+            let cell = self.block_cells(block)[0];
+            level = level.max(self.cell_level(cell))
+        }
+
+        level
+    }
+
+    pub fn min_spacing(&self) -> f64 {
+        let max_level = self.max_level();
+        let domain = self.tree.domain();
+
+        from_fn::<_, N, _>(|axis| {
+            domain.size[axis]
+                / (self.nodes.cell_width[axis] + 1) as f64
+                / 2_f64.powi(max_level as i32)
+        })
+        .iter()
+        .min_by(|a, b| f64::total_cmp(a, b))
+        .cloned()
+        .unwrap_or(1.0)
+    }
+
     pub(crate) fn cell_node_origin(&self, index: [usize; N]) -> [isize; N] {
-        from_fn(|axis| (index[axis] * self.cell_width[axis]) as isize)
-    }
-}
-
-#[derive(serde::Serialize, serde::Deserialize)]
-pub struct MeshSerde<const N: usize> {
-    /// Tree of leaf cells.
-    tree: SpatialTree<N>,
-    /// Number of additional ghost nodes on each face.
-    ghost_nodes: usize,
-    /// Number of dof cells per mesh cell (along each axis).
-    cell_width: Array<[usize; N]>,
-    /// Information about blocks on the tree mesh.
-    blocks: Blocks<N>,
-    /// Stores the neighboring cell for each valid region (rather than face, as is stored
-    /// in the geometric tree).
-    neighbors: Vec<usize>,
-}
-
-impl<const N: usize> From<Mesh<N>> for MeshSerde<N> {
-    fn from(value: Mesh<N>) -> Self {
-        Self {
-            tree: value.tree,
-            ghost_nodes: value.ghost_nodes,
-            cell_width: value.cell_width.into(),
-            blocks: value.blocks,
-            neighbors: value.neighbors,
-        }
-    }
-}
-
-impl<const N: usize> From<MeshSerde<N>> for Mesh<N> {
-    fn from(value: MeshSerde<N>) -> Self {
-        Self {
-            tree: value.tree,
-            ghost_nodes: value.ghost_nodes,
-            cell_width: value.cell_width.inner(),
-            blocks: value.blocks,
-            neighbors: value.neighbors,
-        }
+        from_fn(|axis| (index[axis] * self.nodes.cell_width[axis]) as isize)
     }
 }
 
@@ -284,359 +222,499 @@ impl<const N: usize, B: Boundary> Boundary for BlockBoundary<N, B> {
     }
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-#[serde(from = "BlocksSerde<N>")]
-#[serde(into = "BlocksSerde<N>")]
-pub(crate) struct Blocks<const N: usize> {
-    /// Stores each cell's position within its parent's block.
-    cell_indices: Vec<[usize; N]>,
-    /// Maps cell to the block that contains it.
-    cell_to_block: Vec<usize>,
-    /// Stores the size of each block.
-    block_sizes: Vec<[usize; N]>,
-    block_cell_indices: Vec<usize>,
-    block_cell_offsets: Vec<usize>,
-    /// Maps each block to the nodes it owns.
-    block_node_offsets: Vec<usize>,
-    /// The physical bounds of each block.
-    block_bounds: Vec<Rectangle<N>>,
-    /// Stores whether block face is on physical boundary.
-    boundaries: BitVec,
-}
+// *****************************
+// Node Routines ***************
+// *****************************
 
-impl<const N: usize> Default for Blocks<N> {
-    fn default() -> Self {
-        Self::new()
-    }
-}
+pub struct MeshOrder<'a, const N: usize, const ORDER: usize>(&'a mut Mesh<N>);
 
-impl<const N: usize> Blocks<N> {
-    pub fn new() -> Self {
-        Self {
-            cell_indices: Vec::new(),
-            cell_to_block: Vec::new(),
-
-            block_sizes: Vec::new(),
-            block_cell_indices: Vec::new(),
-            block_cell_offsets: Vec::new(),
-            block_node_offsets: Vec::new(),
-
-            block_bounds: Vec::new(),
-
-            boundaries: BitVec::new(),
-        }
+impl<'a, const N: usize, const ORDER: usize> MeshOrder<'a, N, ORDER> {
+    /// Enforces strong boundary conditions. This includes strong physical boundary conditions, as well
+    /// as handling interior boundaries (same level, coarse-fine, or fine-coarse).
+    pub fn fill_boundary<B: Boundary, C: Conditions<N>>(
+        mut self,
+        boundary: &B,
+        conditions: &C,
+        mut system: SystemSliceMut<'_, C::System>,
+    ) {
+        self.fill_physical(boundary, conditions, &mut system);
+        self.fill_direct(&mut system);
+        self.fill_prolong(boundary, &mut system);
     }
 
-    /// Rebuilds the tree block structure from existing geometric information. Performs greedy meshing
-    /// to group cells into blocks.
-    pub fn build(&mut self, tree: &SpatialTree<N>, cell_width: [usize; N], ghost_nodes: usize) {
-        self.build_blocks(tree);
-        self.build_bounds(tree);
-        self.build_node_offsets(cell_width, ghost_nodes);
-        self.build_boundaries(tree);
-    }
+    fn fill_physical<B: Boundary, C: Conditions<N>>(
+        &mut self,
+        boundary: &B,
+        conditions: &C,
+        system: &mut SystemSliceMut<'_, C::System>,
+    ) {
+        let mesh = self.0.rb_mut();
 
-    // Number of blocks in the mesh.
-    pub fn len(&self) -> usize {
-        self.block_sizes.len()
-    }
+        for block in 0..mesh.num_blocks() {
+            // Fill Physical Boundary conditions
+            let space = mesh.block_space(block);
+            let nodes = mesh.block_nodes(block);
 
-    /// Returns true if the mesh contains no blocks.
-    pub fn is_empty(&self) -> bool {
-        self.len() == 0
-    }
+            let boundary = mesh.block_boundary(block, boundary.clone());
 
-    /// Size of a given block, measured in cells.
-    pub fn size(&self, block: usize) -> [usize; N] {
-        self.block_sizes[block]
-    }
+            // println!("Filling Strong Boundary Conditions for {block}");
 
-    /// Map from cartesian indices within block to cell at the given positions
-    pub fn cells(&self, block: usize) -> &[usize] {
-        &self.block_cell_indices[self.block_cell_offsets[block]..self.block_cell_offsets[block + 1]]
-    }
+            // Take slice of system and
+            let mut block_fields = system.slice_mut(nodes.clone()).fields_mut();
 
-    /// Returns the range of nodes that this block owns.
-    pub fn nodes(&self, block: usize) -> Range<usize> {
-        self.block_node_offsets[block]..self.block_node_offsets[block + 1]
-    }
-
-    pub fn bounds(&self, block: usize) -> Rectangle<N> {
-        self.block_bounds[block].clone()
-    }
-
-    pub fn boundary_flags(&self, block: usize) -> FaceMask<N> {
-        let mut flags = [[false; 2]; N];
-
-        for face in faces::<N>() {
-            flags[face.axis][face.side as usize] =
-                self.boundaries[block * 2 * N + face.to_linear()];
-        }
-
-        FaceMask::pack(flags)
-    }
-
-    pub fn cell_index(&self, cell: usize) -> [usize; N] {
-        self.cell_indices[cell]
-    }
-
-    pub fn cell_block(&self, cell: usize) -> usize {
-        self.cell_to_block[cell]
-    }
-
-    fn build_blocks(&mut self, tree: &SpatialTree<N>) {
-        let num_cells = tree.num_cells();
-
-        // Resize/reset various maps
-        self.cell_indices.resize(num_cells, [0; N]);
-        self.cell_indices.fill([0; N]);
-
-        self.cell_to_block.resize(num_cells, usize::MAX);
-        self.cell_to_block.fill(usize::MAX);
-
-        self.block_sizes.clear();
-        self.block_cell_indices.clear();
-        self.block_cell_offsets.clear();
-
-        // Loop over each cell in the tree
-        for cell in 0..num_cells {
-            if self.cell_to_block[cell] != usize::MAX {
-                // This cell already belongs to a block, continue.
-                continue;
+            for field in C::System::fields() {
+                let condition = conditions.field(field.clone());
+                space.fill_boundary(&boundary, &condition, block_fields.field_mut(field));
             }
+        }
+    }
 
-            // Get index of next block
-            let block = self.block_sizes.len();
+    fn fill_direct<System: SystemLabel>(&mut self, system: &mut SystemSliceMut<'_, System>) {
+        let mesh = self.0.rb_mut();
 
-            self.cell_indices[cell] = [0; N];
-            self.cell_to_block[cell] = block;
+        for block in 0..mesh.num_blocks() {
+            // Fill Physical Boundary conditions
+            let space = mesh.block_space(block);
+            let nodes = mesh.block_nodes(block);
 
-            self.block_sizes.push([1; N]);
-            let block_cell_offset = self.block_cell_indices.len();
+            // Fill Injection boundary conditions
+            let size = mesh.block_size(block);
+            let cells = mesh.block_cells(block);
+            let cell_space = IndexSpace::new(size);
 
-            self.block_cell_offsets.push(block_cell_offset);
-            self.block_cell_indices.push(cell);
+            for region in regions::<N>() {
+                let offset_dir = region.offset_dir();
 
-            // Try expanding the block along each axis.
-            for axis in 0..N {
-                // Perform greedy meshing.
-                'expand: loop {
-                    let face = Face::positive(axis);
+                let mut region_size: [_; N] = from_fn(|axis| mesh.nodes.cell_width[axis]);
+                let mut coarse_region_size: [_; N] =
+                    from_fn(|axis| mesh.nodes.cell_width[axis] / 2);
 
-                    let size = self.block_sizes[block];
-                    let space = IndexSpace::new(size);
+                for axis in 0..N {
+                    if region.side(axis) == Side::Right {
+                        region_size[axis] += 1;
+                        coarse_region_size[axis] += 1;
+                    }
+                }
 
-                    // Make sure every cell on face is suitable for expansion.
-                    for index in space.face(Face::positive(axis)).iter() {
-                        // Retrieves the cell on this face
-                        let cell = self.block_cell_indices
-                            [block_cell_offset + space.linear_from_cartesian(index)];
-                        let level = tree.level(cell);
-                        let neighbor = tree.neighbors(cell)[face.to_linear()];
+                for cell_index in region.face_vertices(size) {
+                    let cell = cells[cell_space.linear_from_cartesian(cell_index)];
+                    let cell_origin: [isize; N] = mesh.cell_node_origin(cell_index);
 
-                        // We can only expand if
-                        // 1. This is not a physical boundary
-                        // 2. The neighbor is the same level of refinement
-                        // 3. The neighbor does not already belong to another block.
-                        let is_suitable = neighbor != NULL
-                            && level == tree.level(neighbor)
-                            && self.cell_to_block[neighbor] == usize::MAX;
+                    let neighbor = mesh.cell_neighbor(cell, region.clone());
 
-                        if !is_suitable {
-                            break 'expand;
+                    // If physical boundary we skip
+                    if neighbor == NULL {
+                        continue;
+                    }
+
+                    // If neighbor is coarser we skip
+                    if mesh.cell_level(neighbor) < mesh.cell_level(cell) {
+                        continue;
+                    }
+
+                    // If neighbor is more refined we use injection
+                    if mesh.cell_level(neighbor) > mesh.cell_level(cell) {
+                        for mask in region.adjacent_splits() {
+                            let mut nmask = mask;
+
+                            for axis in 0..N {
+                                if region.side(axis) != Side::Middle {
+                                    nmask.toggle(axis);
+                                }
+                            }
+
+                            let neighbor = neighbor + nmask.to_linear();
+                            let neighbor_index = mesh.blocks.cell_index(neighbor);
+                            let neighbor_block = mesh.cell_block(neighbor);
+                            let neighbor_origin = mesh.cell_node_origin(neighbor_index);
+
+                            let neighbor_nodes = mesh.block_nodes(neighbor_block);
+
+                            let neighbor_offset: [isize; N] = from_fn(|axis| {
+                                neighbor_origin[axis]
+                                    - offset_dir[axis] * mesh.nodes.cell_width[axis] as isize
+                            });
+
+                            let mut origin = cell_origin;
+
+                            for axis in 0..N {
+                                if mask.is_set(axis) {
+                                    origin[axis] += (mesh.nodes.cell_width[axis] / 2) as isize;
+                                }
+                            }
+
+                            for node in region
+                                .nodes(mesh.nodes.ghost_nodes, coarse_region_size)
+                                .chain(
+                                    region
+                                        .face_vertices(coarse_region_size)
+                                        .map(node_from_vertex),
+                                )
+                            {
+                                let source = from_fn(|axis| neighbor_offset[axis] + 2 * node[axis]);
+                                let dest = from_fn(|axis| origin[axis] + node[axis]);
+
+                                for field in System::fields() {
+                                    let v = space.value(
+                                        source,
+                                        &system.field(field.clone())[neighbor_nodes.clone()],
+                                    );
+                                    space.set_value(
+                                        dest,
+                                        v,
+                                        &mut system.field_mut(field)[nodes.clone()],
+                                    )
+                                }
+                            }
+                        }
+
+                        continue;
+                    }
+
+                    // Store various information about neighbor
+                    let neighbor_index = mesh.blocks.cell_index(neighbor);
+                    let neighbor_block = mesh.blocks.cell_block(neighbor);
+                    let neighbor_origin: [isize; N] = mesh.cell_node_origin(neighbor_index);
+
+                    let neighbor_nodes = mesh.block_nodes(neighbor_block);
+
+                    let neighbor_offset: [isize; N] = from_fn(|axis| {
+                        neighbor_origin[axis]
+                            - offset_dir[axis] * mesh.nodes.cell_width[axis] as isize
+                    });
+
+                    for node in region
+                        .nodes(mesh.nodes.ghost_nodes, region_size)
+                        .chain(region.face_vertices(region_size).map(node_from_vertex))
+                    {
+                        let source = from_fn(|axis| neighbor_offset[axis] + node[axis]);
+                        let dest = from_fn(|axis| cell_origin[axis] + node[axis]);
+
+                        for field in System::fields() {
+                            let v = space.value(
+                                source,
+                                &system.field(field.clone())[neighbor_nodes.clone()],
+                            );
+                            space.set_value(dest, v, &mut system.field_mut(field)[nodes.clone()])
                         }
                     }
-
-                    // We may now expand along this axis
-                    for index in space.face(Face::positive(axis)).iter() {
-                        let cell = self.block_cell_indices
-                            [block_cell_offset + space.linear_from_cartesian(index)];
-                        let neighbor = tree.neighbors(cell)[face.to_linear()];
-
-                        self.cell_indices[neighbor] = index;
-                        self.cell_indices[neighbor][axis] += 1;
-                        self.cell_to_block[neighbor] = block;
-
-                        self.block_cell_indices.push(neighbor);
-                    }
-
-                    self.block_sizes[block][axis] += 1;
                 }
             }
         }
-
-        self.block_cell_offsets.push(self.block_cell_indices.len());
     }
 
-    fn build_bounds(&mut self, tree: &SpatialTree<N>) {
-        self.block_bounds.clear();
+    fn fill_prolong<B: Boundary, System: SystemLabel>(
+        &mut self,
+        boundary: &B,
+        system: &mut SystemSliceMut<'_, System>,
+    ) {
+        let mesh = self.0.rb_mut();
 
-        for block in 0..self.len() {
-            let size = self.block_sizes[block];
-            let a = self.cells(block).first().unwrap().clone();
+        for block in 0..mesh.num_blocks() {
+            // Cache node space
+            let space = mesh.block_space(block);
+            let domain = mesh.block_boundary(block, boundary.clone());
+            let nodes = mesh.block_nodes(block);
+            // Fill Injection boundary conditions
+            let size = mesh.block_size(block);
+            let cells = mesh.block_cells(block);
+            let cell_space = IndexSpace::new(size);
 
-            let cell_bounds = tree.bounds(a);
+            for region in regions::<N>() {
+                let offset_dir = region.offset_dir();
 
-            self.block_bounds.push(Rectangle {
-                origin: cell_bounds.origin,
-                size: from_fn(|axis| cell_bounds.size[axis] * size[axis] as f64),
-            })
-        }
-    }
+                let mut region_size: [_; N] = from_fn(|axis| mesh.nodes.cell_width[axis]);
 
-    fn build_node_offsets(&mut self, cell_width: [usize; N], ghost_nodes: usize) {
-        // Reset map
-        self.block_node_offsets.clear();
-        self.block_node_offsets.reserve(self.block_sizes.len() + 1);
+                for axis in 0..N {
+                    if region.side(axis) == Side::Right {
+                        region_size[axis] += 1;
+                    }
+                }
 
-        // Start cursor at 0.
-        let mut cursor = 0;
-        self.block_node_offsets.push(cursor);
+                for cell_index in region.face_vertices(size) {
+                    let cell = cells[cell_space.linear_from_cartesian(cell_index)];
+                    let cell_origin = mesh.cell_node_origin(cell_index);
+                    let cell_split = mesh.cell_split(cell);
 
-        for block in self.block_sizes.iter() {
-            // Width of block in nodes.
-            let block_width: [usize; N] =
-                from_fn(|i| block[i] * cell_width[i] + 1 + 2 * ghost_nodes);
+                    let neighbor = mesh.cell_neighbor(cell, region.clone());
 
-            cursor += block_width.iter().product::<usize>();
-            self.block_node_offsets.push(cursor);
-        }
-    }
+                    // If physical boundary we skip
+                    if neighbor == NULL {
+                        continue;
+                    }
 
-    fn build_boundaries(&mut self, tree: &SpatialTree<N>) {
-        self.boundaries.clear();
+                    // We only consider this neighbor if it is coarser
+                    if mesh.cell_level(neighbor) >= mesh.cell_level(cell) {
+                        continue;
+                    }
 
-        for block in 0..self.len() {
-            let size = self.size(block);
-            let space = IndexSpace::new(size);
+                    let neighbor_index = mesh.blocks.cell_index(neighbor);
+                    let neighbor_block = mesh.blocks.cell_block(neighbor);
+                    let neighbor_nodes = mesh.block_nodes(neighbor_block);
 
-            let a = 0;
-            let b: usize = space.size().map(|size| size - 1).iter().product();
+                    let mut neighbor_split = cell_split;
+                    for axis in 0..N {
+                        if region.side(axis) != Side::Middle {
+                            neighbor_split.toggle(axis);
+                        }
+                    }
 
-            for face in faces::<N>() {
-                let cell = if face.side {
-                    self.cells(block)[b]
-                } else {
-                    self.cells(block)[a]
-                };
-                let neighbor = tree.neighbors(cell)[face.to_linear()];
-                self.boundaries.push(neighbor == NULL);
+                    let mut neighbor_origin: [isize; N] = mesh.cell_node_origin(neighbor_index);
+                    for axis in 0..N {
+                        if neighbor_split.is_set(axis) {
+                            neighbor_origin[axis] += mesh.nodes.cell_width[axis] as isize / 2;
+                        }
+                    }
+
+                    let neighbor_offset: [isize; N] = from_fn(|axis| {
+                        neighbor_origin[axis]
+                            - offset_dir[axis] * mesh.nodes.cell_width[axis] as isize / 2
+                    });
+
+                    for node in region.nodes(mesh.nodes.ghost_nodes, region_size) {
+                        let source =
+                            from_fn(|axis| (2 * neighbor_offset[axis] + node[axis]) as usize);
+                        let dest = from_fn(|axis| cell_origin[axis] + node[axis]);
+
+                        for field in System::fields() {
+                            let v = space.prolong::<ORDER>(
+                                &domain,
+                                source,
+                                &system.field(field.clone())[neighbor_nodes.clone()],
+                            );
+                            space.set_value(
+                                dest,
+                                v,
+                                &mut system.field_mut(field.clone())[nodes.clone()],
+                            );
+                        }
+                    }
+                }
             }
         }
     }
-}
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct BlocksSerde<const N: usize> {
-    cell_indices: Vec<Array<[usize; N]>>,
-    cell_to_block: Vec<usize>,
-    block_sizes: Vec<Array<[usize; N]>>,
-    block_cell_indices: Vec<usize>,
-    block_cell_offsets: Vec<usize>,
-    block_node_offsets: Vec<usize>,
-    block_bounds: Vec<Rectangle<N>>,
-    boundaries: BitVec,
-}
+    pub fn weak_boundary<B: Boundary, C: Conditions<N>>(
+        self,
+        boundary: &B,
+        conditions: &C,
+        field: SystemSlice<'_, C::System>,
+        mut deriv: SystemSliceMut<'_, C::System>,
+    ) {
+        let mesh = self.0;
 
-impl<const N: usize> From<Blocks<N>> for BlocksSerde<N> {
-    fn from(value: Blocks<N>) -> Self {
-        Self {
-            cell_indices: wrap_vec_of_arrays(value.cell_indices),
-            cell_to_block: value.cell_to_block,
-            block_sizes: wrap_vec_of_arrays(value.block_sizes),
-            block_cell_indices: value.block_cell_indices,
-            block_cell_offsets: value.block_cell_offsets,
-            block_node_offsets: value.block_node_offsets,
-            block_bounds: value.block_bounds,
-            boundaries: value.boundaries,
+        for block in 0..mesh.num_blocks() {
+            let boundary = mesh.block_boundary(block, boundary.clone());
+            let space = mesh.block_space(block);
+            let bounds = mesh.block_bounds(block);
+            let nodes = mesh.block_nodes(block);
+            let vertex_size = space.vertex_size();
+
+            let block_fields = field.slice(nodes.clone()).fields();
+            let mut block_deriv_fields = deriv.slice_mut(nodes.clone()).fields_mut();
+
+            for face in faces::<N>() {
+                if boundary.kind(face) != BoundaryKind::Radiative {
+                    continue;
+                }
+
+                // Sommerfeld radiative boundary conditions.
+                for vertex in IndexSpace::new(vertex_size).face(face).iter() {
+                    let engine = FdEngine::<N, ORDER, _> {
+                        space: space.clone(),
+                        bounds: bounds.clone(),
+                        boundary: boundary.clone(),
+                        vertex,
+                    };
+                    let index = engine.index();
+                    let position: [f64; N] = engine.position();
+                    let r = position.iter().map(|&v| v * v).sum::<f64>().sqrt();
+
+                    for label in C::System::fields() {
+                        let f = block_fields.field(label.clone());
+                        let dfdt = block_deriv_fields.field_mut(label.clone());
+
+                        let target = conditions.field(label.clone()).radiative(position);
+                        let gradient = engine.gradient(f);
+                        let mut advection = f[index] - target;
+
+                        for axis in 0..N {
+                            advection += position[axis] * gradient[axis];
+                        }
+
+                        dfdt[index] = -advection / r;
+                    }
+                }
+            }
         }
     }
-}
 
-impl<const N: usize> From<BlocksSerde<N>> for Blocks<N> {
-    fn from(value: BlocksSerde<N>) -> Self {
-        Self {
-            cell_indices: unwrap_vec_of_arrays(value.cell_indices),
-            cell_to_block: value.cell_to_block,
-            block_sizes: unwrap_vec_of_arrays(value.block_sizes),
-            block_cell_indices: value.block_cell_indices,
-            block_cell_offsets: value.block_cell_offsets,
-            block_node_offsets: value.block_node_offsets,
-            block_bounds: value.block_bounds,
-            boundaries: value.boundaries,
+    /// Applies the projection to `source`, and stores the result in `dest`.
+    pub fn project<P: Projection<N>>(
+        self,
+        boundary: &impl Boundary,
+        projection: &P,
+        source: SystemSlice<'_, P::Input>,
+        mut dest: SystemSliceMut<'_, P::Output>,
+    ) {
+        let mesh = self.0;
+
+        for block in 0..mesh.num_blocks() {
+            let nodes = mesh.block_nodes(block);
+
+            let input = source.slice(nodes.clone()).fields();
+            let mut output = dest.slice_mut(nodes.clone()).fields_mut();
+
+            let space = mesh.block_space(block);
+            let boundary = mesh.block_boundary(block, boundary.clone());
+            let bounds = mesh.block_bounds(block);
+            let vertex_size = space.vertex_size();
+
+            for vertex in IndexSpace::new(vertex_size).iter() {
+                let is_interior = Self::is_interior(&boundary, vertex_size, vertex);
+
+                let result = if is_interior {
+                    let engine = FdIntEngine::<N, ORDER> {
+                        space: space.clone(),
+                        bounds: bounds.clone(),
+                        vertex,
+                    };
+
+                    projection.project(&engine, input.as_fields())
+                } else {
+                    let engine = FdEngine::<N, ORDER, _> {
+                        space: space.clone(),
+                        bounds: bounds.clone(),
+                        boundary: boundary.clone(),
+                        vertex,
+                    };
+
+                    projection.project(&engine, input.as_fields())
+                };
+
+                let index = space.index_from_vertex(vertex);
+
+                for field in P::Output::fields() {
+                    output.field_mut(field.clone())[index] = result.field(field.clone());
+                }
+            }
         }
     }
+
+    /// Applies the given operator to `source`, storing the result in `dest`, and utilizing `context` to store
+    /// extra fields.
+    pub fn apply<O: Operator<N>>(
+        self,
+        boundary: &impl Boundary,
+        operator: &O,
+        source: SystemSlice<'_, O::System>,
+        context: SystemSlice<'_, O::Context>,
+        mut dest: SystemSliceMut<'_, O::System>,
+    ) {
+        let mesh = self.0;
+
+        for block in 0..mesh.num_blocks() {
+            let nodes = mesh.block_nodes(block);
+
+            let input = source.slice(nodes.clone()).fields();
+            let context = context.slice(nodes.clone()).fields();
+            let mut output = dest.slice_mut(nodes.clone());
+
+            let space = mesh.block_space(block);
+            let boundary = mesh.block_boundary(block, boundary.clone());
+            let bounds = mesh.block_bounds(block);
+            let vertex_size = space.vertex_size();
+
+            for vertex in IndexSpace::new(vertex_size).iter() {
+                let is_interior = Self::is_interior(&boundary, vertex_size, vertex);
+
+                let result = if is_interior {
+                    let engine = FdIntEngine::<N, ORDER> {
+                        space: space.clone(),
+                        bounds: bounds.clone(),
+                        vertex,
+                    };
+
+                    operator.evaluate(&engine, input.as_fields(), context.as_fields())
+                } else {
+                    let engine = FdEngine::<N, ORDER, _> {
+                        space: space.clone(),
+                        bounds: bounds.clone(),
+                        boundary: boundary.clone(),
+                        vertex,
+                    };
+
+                    operator.evaluate(&engine, input.as_fields(), context.as_fields())
+                };
+
+                let index = space.index_from_node(node_from_vertex(vertex));
+
+                for field in O::System::fields() {
+                    output.field_mut(field.clone())[index] = result.field(field.clone());
+                }
+            }
+        }
+    }
+
+    /// Determines if a vertex is not within `ORDER` of any weakly enforced boundary.
+    fn is_interior(boundary: &impl Boundary, vertex_size: [usize; N], vertex: [usize; N]) -> bool {
+        // let mut result = true;
+
+        // for axis in 0..N {
+        //     result &= !(boundary.kind(Face::negative(axis)).is_weak() && vertex[axis] < ORDER / 2);
+        //     result &= !(boundary.kind(Face::positive(axis)).is_weak()
+        //         && vertex[axis] >= vertex_size[axis] - ORDER / 2);
+        // }
+
+        // result
+
+        false
+    }
 }
 
-// ****************************************
-// Tests **********************************
-// ****************************************
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn greedy_meshing() {
-        let mut mesh = Mesh::new(Rectangle::UNIT, [8; 2], 3);
-        mesh.refine(&[true, false, false, false]);
-
-        assert_eq!(mesh.num_blocks(), 3);
-        assert_eq!(mesh.block_size(0), [2, 2]);
-        assert_eq!(mesh.block_size(1), [1, 2]);
-        assert_eq!(mesh.block_size(2), [1, 1]);
-
-        assert_eq!(mesh.block_cells(0), [0, 1, 2, 3]);
-        assert_eq!(mesh.block_cells(1), [4, 6]);
-        assert_eq!(mesh.block_cells(2), [5]);
-
-        mesh.refine(&[false, false, false, false, true, false, false]);
-
-        assert_eq!(mesh.num_blocks(), 2);
-        assert_eq!(mesh.block_size(0), [4, 2]);
-        assert_eq!(mesh.block_size(1), [2, 1]);
-
-        assert_eq!(mesh.block_cells(0), [0, 1, 4, 5, 2, 3, 6, 7]);
-        assert_eq!(mesh.block_cells(1), [8, 9]);
+impl<const N: usize> Mesh<N> {
+    /// Computes the maximum l2 norm of all fields in the system.
+    pub fn norm<S: SystemLabel>(&mut self, source: SystemSlice<'_, S>) -> f64 {
+        S::fields()
+            .into_iter()
+            .map(|label| self.norm_scalar(source.field(label)))
+            .max_by(|a, b| a.total_cmp(b))
+            .unwrap()
     }
 
-    #[test]
-    fn neighbors() {
-        let mut mesh = Mesh::new(Rectangle::UNIT, [8; 2], 3);
-        mesh.refine(&[true, false, false, false]);
+    fn norm_scalar(&mut self, src: &[f64]) -> f64 {
+        let mut result = 0.0;
 
-        assert_eq!(mesh.num_cells(), 7);
+        for block in 0..self.num_blocks() {
+            let space = self.block_space(block);
+            let bounds = self.block_bounds(block);
+            let vertex_size = space.vertex_size();
 
-        assert_eq!(
-            mesh.cell_neighbors(0),
-            [NULL, NULL, NULL, NULL, 0, 1, NULL, 2, 3]
-        );
-        assert_eq!(mesh.cell_neighbors(1), [NULL, NULL, NULL, 0, 1, 4, 2, 3, 4]);
-        assert_eq!(mesh.cell_neighbors(2), [NULL, 0, 1, NULL, 2, 3, NULL, 5, 5]);
-        assert_eq!(mesh.cell_neighbors(3), [0, 1, 4, 2, 3, 4, 5, 5, 6]);
-        assert_eq!(
-            mesh.cell_neighbors(4),
-            [NULL, NULL, NULL, 0, 4, NULL, 5, 6, NULL]
-        );
-        assert_eq!(
-            mesh.cell_neighbors(5),
-            [NULL, 0, 4, NULL, 5, 6, NULL, NULL, NULL]
-        );
-        assert_eq!(
-            mesh.cell_neighbors(6),
-            [0, 4, NULL, 5, 6, NULL, NULL, NULL, NULL]
-        );
-    }
+            let data = &src[self.block_nodes(block)];
 
-    #[test]
-    fn node_offsets() {
-        let mut mesh = Mesh::new(Rectangle::UNIT, [8; 2], 3);
-        mesh.refine(&[true, false, false, false]);
+            let mut block_result = 0.0;
 
-        assert_eq!(mesh.num_blocks(), 3);
+            for vertex in IndexSpace::new(vertex_size).iter() {
+                let index = space.index_from_vertex(vertex);
 
-        assert_eq!(mesh.block_nodes(0), 0..529);
-        assert_eq!(mesh.block_nodes(1), 529..874);
-        assert_eq!(mesh.block_nodes(2), 874..1099);
+                let mut value = data[index] * data[index];
+
+                for axis in 0..N {
+                    if vertex[axis] == 0 || vertex[axis] == vertex_size[axis] - 1 {
+                        value *= 0.5;
+                    }
+                }
+
+                block_result += value;
+            }
+
+            for spacing in space.spacing(bounds) {
+                block_result *= spacing;
+            }
+
+            result += block_result;
+        }
+
+        result.sqrt()
     }
 }

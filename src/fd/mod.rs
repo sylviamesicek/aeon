@@ -1,7 +1,6 @@
 #![allow(clippy::needless_range_loop)]
 
 mod boundary;
-mod driver;
 mod engine;
 mod kernel;
 mod mesh;
@@ -9,14 +8,13 @@ mod model;
 mod node;
 
 pub use boundary::{Boundary, BoundaryKind, Condition, Conditions};
-pub use driver::Driver;
-pub use engine::{Engine, FdEngine};
+pub use engine::{Engine, FdEngine, FdIntEngine};
 pub use kernel::{BasisOperator, Interpolation, Order, Support};
 pub use mesh::{BlockBoundary, Mesh};
 pub use model::Model;
 pub use node::{node_from_vertex, NodeSpace};
 
-use crate::system::{SystemLabel, SystemSlice, SystemVal};
+use crate::system::{Empty, SystemFields, SystemLabel, SystemValue};
 
 pub trait Projection<const N: usize> {
     type Input: SystemLabel;
@@ -25,23 +23,23 @@ pub trait Projection<const N: usize> {
     fn project(
         &self,
         engine: &impl Engine<N>,
-        input: SystemSlice<'_, Self::Input>,
-    ) -> SystemVal<Self::Output>;
+        input: SystemFields<'_, Self::Input>,
+    ) -> SystemValue<Self::Output>;
 }
 
 impl<const N: usize, Output, T> Projection<N> for T
 where
     Output: SystemLabel,
-    T: Fn([f64; N]) -> SystemVal<Output>,
+    T: Fn([f64; N]) -> SystemValue<Output>,
 {
-    type Input = ();
+    type Input = Empty;
     type Output = Output;
 
     fn project(
         &self,
         engine: &impl Engine<N>,
-        _input: SystemSlice<'_, Self::Input>,
-    ) -> SystemVal<Self::Output> {
+        _input: SystemFields<'_, Self::Input>,
+    ) -> SystemValue<Self::Output> {
         self(engine.position())
     }
 }
@@ -53,7 +51,7 @@ pub trait Operator<const N: usize> {
     fn evaluate(
         &self,
         engine: &impl Engine<N>,
-        input: SystemSlice<'_, Self::System>,
-        context: SystemSlice<'_, Self::Context>,
-    ) -> SystemVal<Self::System>;
+        input: SystemFields<'_, Self::System>,
+        context: SystemFields<'_, Self::Context>,
+    ) -> SystemValue<Self::System>;
 }

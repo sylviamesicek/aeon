@@ -9,7 +9,9 @@ use crate::geometry::AxisMask;
 #[serde(from = "RectangleSerde<N>")]
 #[serde(into = "RectangleSerde<N>")]
 pub struct Rectangle<const N: usize> {
+    /// Size of the rectangle along each axis.
     pub size: [f64; N],
+    /// Origin of the rectangle (located at the bottom-left corner).
     pub origin: [f64; N],
 }
 

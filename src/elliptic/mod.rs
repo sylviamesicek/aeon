@@ -1,9 +1,11 @@
-use std::marker::PhantomData;
+use std::{marker::PhantomData, path::PathBuf};
+
+use reborrow::{Reborrow, ReborrowMut};
 
 use crate::{
-    fd::{Boundary, Condition, Conditions, Driver, Engine, Mesh, Operator},
+    fd::{Boundary, Condition, Conditions, Engine, Mesh, Model, Operator},
     ode::{Ode, Rk4},
-    system::{field_count, SystemLabel, SystemSlice, SystemSliceMut, SystemVal},
+    system::{field_count, SystemFields, SystemLabel, SystemSlice, SystemSliceMut, SystemValue},
 };
 
 pub struct HyperRelaxSolver<Label: SystemLabel> {
@@ -29,8 +31,7 @@ impl<Label: SystemLabel> HyperRelaxSolver<Label> {
 
     pub fn solve<const N: usize, const ORDER: usize, O: Operator<N, System = Label>>(
         &mut self,
-        driver: &mut Driver<N>,
-        mesh: &Mesh<N>,
+        mesh: &mut Mesh<N>,
         boundary: &impl Boundary,
         conditions: &impl Conditions<N, System = Label>,
         operator: &O,
@@ -38,7 +39,7 @@ impl<Label: SystemLabel> HyperRelaxSolver<Label> {
         mut system: SystemSliceMut<'_, Label>,
     ) {
         // Total number of degreees of freedom in the whole system
-        let dimension = field_count::<Label>() * system.node_count();
+        let dimension = field_count::<Label>() * system.len();
 
         // Allocate storage
         let mut data = vec![0.0; 2 * dimension].into_boxed_slice();
@@ -66,21 +67,19 @@ impl<Label: SystemLabel> HyperRelaxSolver<Label> {
             }
         }
 
-        // let spacing = 0.1;
-        // let step = 0.1;
+        let spacing: f64 = mesh.min_spacing();
+        let step = self.cfl * spacing;
 
         for index in 0..self.max_steps {
             {
                 let u = &mut data[..dimension];
 
-                driver.fill_boundary::<ORDER, _, _>(
-                    mesh,
+                mesh.order::<ORDER>().fill_boundary(
                     boundary,
                     conditions,
                     SystemSliceMut::from_contiguous(u),
                 );
-                driver.apply::<ORDER, _>(
-                    mesh,
+                mesh.order::<ORDER>().apply(
                     boundary,
                     operator,
                     SystemSlice::from_contiguous(u),
@@ -89,14 +88,27 @@ impl<Label: SystemLabel> HyperRelaxSolver<Label> {
                 );
             }
 
-            let norm = driver.norm(mesh, system.slice(..));
+            {
+                let mut model = Model::from_mesh(mesh);
+                model.attach_field("u", data[..dimension].to_vec());
+                model.attach_field("v", data[dimension..].to_vec());
 
-            // log::trace!(
-            //     "Time {:.5}/{:.5} Norm {:.5e}",
-            //     index as f64 * step,
-            //     self.max_steps as f64 * step,
-            //     norm
-            // );
+                model
+                    .export_vtk(
+                        format!("idbrill").as_str(),
+                        PathBuf::from(format!("output/idbrill{index}.vtu")),
+                    )
+                    .unwrap();
+            }
+
+            let norm = mesh.norm(system.slice(..));
+
+            log::trace!(
+                "Time {:.5}/{:.5} Norm {:.5e}",
+                index as f64 * step,
+                self.max_steps as f64 * step,
+                norm
+            );
 
             if norm <= self.tolerance {
                 log::trace!(
@@ -104,6 +116,24 @@ impl<Label: SystemLabel> HyperRelaxSolver<Label> {
                     self.tolerance
                 );
                 break;
+            }
+
+            let mut ode = FictitiousOde {
+                mesh,
+                dimension,
+                dampening: self.dampening,
+                boundary,
+                conditions,
+                operator,
+                context: context.slice(..),
+                _marker: PhantomData::<[usize; ORDER]>,
+            };
+
+            // Take step
+            self.integrator.step(step, &mut ode, &data, &mut update);
+
+            for i in 0..data.len() {
+                data[i] += update[i];
             }
         }
 
@@ -134,10 +164,10 @@ impl<'a, const N: usize, System: SystemLabel> Operator<N> for UOperator<N, Syste
     fn evaluate(
         &self,
         engine: &impl Engine<N>,
-        input: SystemSlice<'_, System>,
-        context: SystemSlice<'_, System>,
-    ) -> SystemVal<System> {
-        SystemVal::from_fn(|field: System| {
+        input: SystemFields<'_, System>,
+        context: SystemFields<'_, System>,
+    ) -> SystemValue<System> {
+        SystemValue::from_fn(|field: System| {
             let u = engine.value(input.field(field.clone()));
             let v = engine.value(context.field(field.clone()));
 
@@ -186,8 +216,7 @@ impl<'a, const N: usize, C: Conditions<N>> Condition<N> for VCondition<'a, N, C>
 }
 
 struct FictitiousOde<'a, const N: usize, const ORDER: usize, B, C: Conditions<N>, O: Operator<N>> {
-    driver: &'a mut Driver<N>,
-    mesh: &'a Mesh<N>,
+    mesh: &'a mut Mesh<N>,
     dimension: usize,
     dampening: f64,
 
@@ -196,6 +225,8 @@ struct FictitiousOde<'a, const N: usize, const ORDER: usize, B, C: Conditions<N>
     operator: &'a O,
 
     context: SystemSlice<'a, O::Context>,
+
+    _marker: PhantomData<[usize; ORDER]>,
 }
 
 impl<'a, const N: usize, const ORDER: usize, B, C, O> Ode for FictitiousOde<'a, N, ORDER, B, C, O>
@@ -211,115 +242,70 @@ where
     fn preprocess(&mut self, system: &mut [f64]) {
         let (u, v) = system.split_at_mut(self.dimension);
 
-        let usystem = SystemSliceMut::from_contiguous(u);
-        self.driver.fill_boundary::<ORDER, _, _>(
-            self.mesh,
+        self.mesh.order::<ORDER>().fill_boundary(
             self.boundary,
             self.conditions,
-            usystem,
+            SystemSliceMut::from_contiguous(u),
         );
 
-        let vsystem = SystemSliceMut::from_contiguous(v);
-        self.driver.fill_boundary::<ORDER, _, _>(
-            self.mesh,
+        self.mesh.order::<ORDER>().fill_boundary(
             self.boundary,
-            self.conditions,
-            vsystem,
+            &VConditions {
+                conditions: self.conditions,
+                dampening: self.dampening,
+            },
+            SystemSliceMut::from_contiguous(v),
         );
     }
 
     fn derivative(&mut self, system: &[f64], result: &mut [f64]) {
-        let (u, v) = system.split_at(self.dimension);
+        let (udata, vdata) = system.split_at(self.dimension);
 
-        let usource = SystemSlice::from_contiguous(u);
-        let vsource = SystemSlice::from_contiguous(v);
+        let u = SystemSlice::from_contiguous(udata);
+        let v = SystemSlice::from_contiguous(vdata);
 
-        let (u, v) = result.split_at_mut(self.dimension);
+        let (udata, vdata) = result.split_at_mut(self.dimension);
 
-        let udest = SystemSliceMut::from_contiguous(u);
-        let vdest = SystemSliceMut::from_contiguous(v);
+        let mut dudt = SystemSliceMut::from_contiguous(udata);
+        let mut dvdt = SystemSliceMut::from_contiguous(vdata);
 
         // Compute derivatives
 
-        // dv/dt = Lu
-        self.driver.apply::<ORDER, _>(
-            self.mesh,
-            self.boundary,
-            self.operator,
-            usource.clone(),
-            self.context.clone(),
-            vdest,
-        );
-
         // Find du/dt from the definition v = du/dt + η u
-        self.driver.apply::<ORDER, _>(
-            self.mesh,
+        self.mesh.order::<ORDER>().apply(
             self.boundary,
             &UOperator {
                 dampening: self.dampening,
                 _marker: PhantomData,
             },
-            usource.clone(),
-            vsource,
-            udest,
+            u.rb(),
+            v.rb(),
+            dudt.rb_mut(),
         );
 
-        // TODO apply weak boundary conditions
+        // dv/dt = Lu
+        self.mesh.order::<ORDER>().apply(
+            self.boundary,
+            self.operator,
+            u.rb(),
+            self.context.rb(),
+            dvdt.rb_mut(),
+        );
 
-        todo!("Weak boundary conditions")
+        // Apply Outer boundary conditions
 
-        // // Apply outgoing wave conditions
-        // if let OutgoingWave::Sommerfeld(value) = self.outgoing {
-        //     for field in O::Label::fields() {
-        //         let boundary = self.boundary.field(field.clone());
+        self.mesh
+            .order::<ORDER>()
+            .weak_boundary(self.boundary, self.conditions, u, dudt);
 
-        //         let vfsource = &vsource.field(field.clone())[range.clone()];
-        //         let ufsource = &usource.field(field.clone())[range.clone()];
-        //         let vfdest = &mut vdest.field_mut(field.clone())[range.clone()];
-        //         let ufdest = &mut udest.field_mut(field.clone())[range.clone()];
-
-        //         let vf_grad: [&mut [f64]; N] =
-        //             from_fn(|_| self.driver.pool.alloc_scalar(node_count));
-
-        //         let uf_grad: [&mut [f64]; N] =
-        //             from_fn(|_| self.driver.pool.alloc_scalar(node_count));
-
-        //         for axis in 0..N {
-        //             match self.outgoing_order {
-        //                 OutgoingOrder::Second => {
-        //                     block.derivative::<2>(axis, &boundary, vfsource, vf_grad[axis]);
-        //                     block.derivative::<2>(axis, &boundary, ufsource, uf_grad[axis]);
-        //                 }
-        //                 OutgoingOrder::Fourth => {
-        //                     block.derivative::<4>(axis, &boundary, vfsource, vf_grad[axis]);
-        //                     block.derivative::<4>(axis, &boundary, ufsource, uf_grad[axis]);
-        //                 }
-        //             }
-        //         }
-
-        //         for face in faces::<N>() {
-        //             if boundary.face(face) == BoundaryCondition::Free {
-        //                 for vertex in block.face_plane(face) {
-        //                     let index = block.index_from_vertex(vertex);
-        //                     let position = block.position(vertex);
-        //                     let r = position.iter().map(|&f| f * f).sum::<f64>().sqrt();
-
-        //                     let mut vadv = vfsource[index] - self.dampening * value;
-        //                     let mut uadv = ufsource[index] - value;
-
-        //                     for axis in 0..N {
-        //                         vadv += position[axis] * vf_grad[axis][index];
-        //                         uadv += position[axis] * uf_grad[axis][index];
-        //                     }
-
-        //                     vfdest[index] = -vadv / r;
-        //                     ufdest[index] = -uadv / r;
-        //                 }
-        //             }
-        //         }
-
-        //         self.driver.pool.reset();
-        //     }
-        // }
+        self.mesh.order::<ORDER>().weak_boundary(
+            self.boundary,
+            &VConditions {
+                dampening: self.dampening,
+                conditions: self.conditions,
+            },
+            v,
+            dvdt,
+        );
     }
 }

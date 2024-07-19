@@ -19,9 +19,9 @@ pub struct Model<const N: usize> {
 
 impl<const N: usize> Model<N> {
     /// Constructs a new empty model of the mesh, to which systems and fields can be attached.
-    pub fn new(mesh: Mesh<N>) -> Self {
+    pub fn from_mesh(mesh: &Mesh<N>) -> Self {
         Self {
-            mesh,
+            mesh: mesh.clone(),
             systems: HashMap::new(),
             fields: HashMap::new(),
         }
@@ -36,8 +36,8 @@ impl<const N: usize> Model<N> {
     pub fn attach_system<Label: SystemLabel>(&mut self, system: SystemSlice<'_, Label>) {
         assert!(!self.systems.contains_key(Label::NAME));
 
-        let node_count = system.node_count();
-        let data = system.to_contigious();
+        let node_count = system.len();
+        let data = system.to_vec().to_contiguous();
 
         let fields = Label::fields()
             .into_iter()

@@ -1,7 +1,7 @@
 use aeon_macros::{derivative, second_derivative};
 
 /// The support along an axis for a given point in node space.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Support {
     /// The point has the necessary support on both sides.
     Interior,

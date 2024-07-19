@@ -1,6 +1,6 @@
 # Workspace configuration
 [workspace]
-members = ["crates/*"]
+members = ["crates/*", "tools/idbrill"]
 resolver = "2"
 
 [workspace.dependencies]
@@ -10,6 +10,7 @@ clap = "4.5.4"
 env_logger = "0.11"
 itertools = "0.13.0"
 log = "0.4"
+reborrow = "0.5.5"
 ron = "0.8"
 
 aeon_macros = { path = "crates/aeon_macros" }
@@ -29,6 +30,7 @@ aeon_macros.workspace = true
 
 bitvec.workspace = true
 log.workspace = true
+reborrow.workspace = true
 
 bumpalo = "3"
 serde = "1.0.200"

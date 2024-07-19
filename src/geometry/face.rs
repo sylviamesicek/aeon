@@ -75,7 +75,7 @@ pub fn faces<const N: usize>() -> FaceIter<N> {
     }
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct FaceMask<const N: usize>([[bool; 2]; N]);
 
 impl<const N: usize> FaceMask<N> {

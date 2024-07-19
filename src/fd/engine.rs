@@ -157,7 +157,7 @@ impl<const N: usize, const ORDER: usize> Engine<N> for FdIntEngine<N, ORDER> {
                     let mut corner = node_from_vertex(self.vertex);
                     corner[i] -= ddborder as isize;
                     result[i][j] = self.space.weights_axis(corner, ddweights, i, field);
-                    result[i][j] /= spacing[i] * spacing[i];
+                    result[i][j] /= spacing[i] * spacing[j];
                 } else {
                     let mut corner = node_from_vertex(self.vertex);
                     corner[i] -= dborder as isize;
