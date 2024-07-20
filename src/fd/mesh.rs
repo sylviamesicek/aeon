@@ -658,17 +658,17 @@ impl<'a, const N: usize, const ORDER: usize> MeshOrder<'a, N, ORDER> {
 
     /// Determines if a vertex is not within `ORDER` of any weakly enforced boundary.
     fn is_interior(boundary: &impl Boundary, vertex_size: [usize; N], vertex: [usize; N]) -> bool {
-        // let mut result = true;
+        let mut result = true;
 
-        // for axis in 0..N {
-        //     result &= !(boundary.kind(Face::negative(axis)).is_weak() && vertex[axis] < ORDER / 2);
-        //     result &= !(boundary.kind(Face::positive(axis)).is_weak()
-        //         && vertex[axis] >= vertex_size[axis] - ORDER / 2);
-        // }
+        for axis in 0..N {
+            result &= !(boundary.kind(Face::negative(axis)).is_weak() && vertex[axis] < ORDER / 2);
+            result &= !(boundary.kind(Face::positive(axis)).is_weak()
+                && vertex[axis] >= vertex_size[axis] - ORDER / 2);
+        }
 
-        // result
+        result
 
-        false
+        // false
     }
 }
 

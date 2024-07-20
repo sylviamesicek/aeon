@@ -88,7 +88,7 @@ impl<Label: SystemLabel> HyperRelaxSolver<Label> {
                 );
             }
 
-            {
+            if index % 10 == 0 {
                 let mut model = Model::from_mesh(mesh);
                 model.attach_field("u", data[..dimension].to_vec());
                 model.attach_field("v", data[dimension..].to_vec());
@@ -96,7 +96,7 @@ impl<Label: SystemLabel> HyperRelaxSolver<Label> {
                 model
                     .export_vtk(
                         format!("idbrill").as_str(),
-                        PathBuf::from(format!("output/idbrill{index}.vtu")),
+                        PathBuf::from(format!("output/idbrill{}.vtu", { index / 10 })),
                     )
                     .unwrap();
             }

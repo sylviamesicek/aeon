@@ -320,7 +320,7 @@ impl<const N: usize> NodeSpace<N> {
 
             weights[axis] = operator[axis].weights(order, support);
             corner[axis] = match support {
-                Support::Interior => node[axis],
+                Support::Interior => node[axis] - border as isize,
                 Support::Negative(_) => 0,
                 Support::Positive(_) => (self.size[axis] + 1 - weights[axis].len()) as isize,
             };
@@ -458,13 +458,13 @@ mod tests {
         fn kind(&self, face: Face) -> BoundaryKind {
             match (face.axis, face.side) {
                 (_, false) => BoundaryKind::Parity,
-                (_, true) => BoundaryKind::Radiative,
+                (_, true) => BoundaryKind::Free,
             }
         }
     }
 
     #[test]
-    fn vertex_support() {
+    fn support_vertex() {
         let space = NodeSpace {
             size: [8],
             ghost: 2,
@@ -490,5 +490,47 @@ mod tests {
                 supports[i]
             );
         }
+    }
+
+    fn convergence(size: [usize; 2]) -> f64 {
+        let bounds = Rectangle::UNIT;
+        let space = NodeSpace { size, ghost: 2 };
+
+        let mut field = vec![0.0; space.node_count()];
+
+        for node in space.full_window().iter() {
+            let index = space.index_from_node(node);
+            let [x, y] = space.position(bounds.clone(), node);
+            field[index] = x.sin() * y.sin();
+        }
+
+        let mut result: f64 = 0.0;
+
+        for node in space.inner_window().iter() {
+            let vertex = [node[0] as usize, node[1] as usize];
+            let [x, y] = space.position(bounds.clone(), node);
+            let numerical = space.evaluate::<4>(
+                &Quadrant,
+                bounds.clone(),
+                vertex,
+                [BasisOperator::Derivative, BasisOperator::Derivative],
+                &field,
+            );
+            let analytical = x.cos() * y.cos();
+            let error: f64 = (numerical - analytical).abs();
+            result = result.max(error);
+        }
+
+        result
+    }
+
+    #[test]
+    fn evaluate() {
+        let error16 = convergence([16, 16]);
+        let error32 = convergence([32, 32]);
+        let error64 = convergence([64, 64]);
+
+        assert!(error16 / error32 >= 16.0);
+        assert!(error32 / error64 >= 16.0);
     }
 }
