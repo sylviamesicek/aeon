@@ -207,6 +207,23 @@ impl Projection<2> for SeedProjection {
     }
 }
 
+pub struct SeedDRhoProjection(f64);
+
+impl Projection<2> for SeedDRhoProjection {
+    type Input = Scalar;
+    type Output = Scalar;
+
+    fn project(
+        &self,
+        engine: &impl Engine<2>,
+        _input: SystemFields<'_, Self::Input>,
+    ) -> SystemValue<Self::Output> {
+        let [rho, z] = engine.position();
+        SystemValue::new([self.0 * (-(rho * rho + z * z)).exp()
+            + rho * self.0 * (-(rho * rho + z * z)).exp() * (-2.0 * rho)])
+    }
+}
+
 use clap::{Arg, Command};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -221,7 +238,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .long("points")
                 .help("Number of grid points along each axis")
                 .value_name("POINTS")
-                .default_value("80"),
+                .default_value("40"),
         )
         .arg(
             Arg::new("radius")
@@ -237,7 +254,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let points = matches
         .get_one::<String>("points")
         .map(|s| s.parse::<usize>().unwrap())
-        .unwrap_or(80);
+        .unwrap_or(10);
     let radius = matches
         .get_one::<String>("radius")
         .map(|s| s.parse().unwrap())
@@ -254,10 +271,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         origin: [0.0, 0.0],
     };
 
-    let size = [points, points];
+    let size = [40, 40];
 
-    let mut mesh = Mesh::new(bounds, size, 3);
-    // mesh.refine(&[true, false, false, false]);
+    let mut mesh = Mesh::new(bounds, size, 2);
+    mesh.refine(&[true, false, false, false]);
+
+    println!("Num Blocks: {}", mesh.num_blocks());
+    println!("Num Cells: {}", mesh.num_cells());
 
     log::info!("Filling Seed Function");
 
@@ -286,7 +306,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut solver = HyperRelaxSolver::new();
     solver.tolerance = 1e-9;
-    solver.max_steps = 10000;
+    solver.max_steps = 1000;
     solver.cfl = 0.1;
     solver.dampening = 0.4;
 

@@ -835,7 +835,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn default() {
+    fn uniform() {
         let tree = Tree::new(Rectangle::<2>::UNIT);
 
         assert_eq!(tree.num_cells(), 4);
@@ -843,6 +843,38 @@ mod tests {
         assert_eq!(tree.neighbors(1), &[0, NULL, NULL, 3]);
         assert_eq!(tree.neighbors(2), &[NULL, 3, 0, NULL]);
         assert_eq!(tree.neighbors(3), &[2, NULL, 1, NULL]);
+
+        assert_eq!(
+            tree.bounds(0),
+            Rectangle {
+                origin: [0.0, 0.0],
+                size: [0.5, 0.5]
+            }
+        );
+
+        assert_eq!(
+            tree.bounds(1),
+            Rectangle {
+                origin: [0.5, 0.0],
+                size: [0.5, 0.5]
+            }
+        );
+
+        assert_eq!(
+            tree.bounds(2),
+            Rectangle {
+                origin: [0.0, 0.5],
+                size: [0.5, 0.5]
+            }
+        );
+
+        assert_eq!(
+            tree.bounds(3),
+            Rectangle {
+                origin: [0.5, 0.5],
+                size: [0.5, 0.5]
+            }
+        );
 
         let mut blocks = TreeBlocks::default();
         blocks.build(&tree);

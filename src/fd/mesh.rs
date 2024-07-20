@@ -11,7 +11,7 @@ use crate::geometry::{
     faces, regions, AxisMask, Face, FaceMask, IndexSpace, Rectangle, Region, Side, Tree,
     TreeBlocks, TreeNeighbors, TreeNodes, NULL,
 };
-use crate::system::{SystemFields, SystemFieldsMut, SystemLabel, SystemSlice, SystemSliceMut};
+use crate::system::{SystemLabel, SystemSlice, SystemSliceMut};
 
 /// Implementation of an axis aligned tree mesh using standard finite difference operators.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -257,8 +257,6 @@ impl<'a, const N: usize, const ORDER: usize> MeshOrder<'a, N, ORDER> {
 
             let boundary = mesh.block_boundary(block, boundary.clone());
 
-            // println!("Filling Strong Boundary Conditions for {block}");
-
             // Take slice of system and
             let mut block_fields = system.slice_mut(nodes.clone()).fields_mut();
 
@@ -273,7 +271,6 @@ impl<'a, const N: usize, const ORDER: usize> MeshOrder<'a, N, ORDER> {
         let mesh = self.0.rb_mut();
 
         for block in 0..mesh.num_blocks() {
-            // Fill Physical Boundary conditions
             let space = mesh.block_space(block);
             let nodes = mesh.block_nodes(block);
 
@@ -282,6 +279,7 @@ impl<'a, const N: usize, const ORDER: usize> MeshOrder<'a, N, ORDER> {
             let cells = mesh.block_cells(block);
             let cell_space = IndexSpace::new(size);
 
+            // For each neighboring region
             for region in regions::<N>() {
                 let offset_dir = region.offset_dir();
 
@@ -296,10 +294,12 @@ impl<'a, const N: usize, const ORDER: usize> MeshOrder<'a, N, ORDER> {
                     }
                 }
 
+                // Loop over all cells on the border of the block which touch this region.
                 for cell_index in region.face_vertices(size) {
                     let cell = cells[cell_space.linear_from_cartesian(cell_index)];
                     let cell_origin: [isize; N] = mesh.cell_node_origin(cell_index);
 
+                    // Retrieve appropriate neighbor.
                     let neighbor = mesh.cell_neighbor(cell, region.clone());
 
                     // If physical boundary we skip
@@ -327,7 +327,7 @@ impl<'a, const N: usize, const ORDER: usize> MeshOrder<'a, N, ORDER> {
                             let neighbor_index = mesh.blocks.cell_index(neighbor);
                             let neighbor_block = mesh.cell_block(neighbor);
                             let neighbor_origin = mesh.cell_node_origin(neighbor_index);
-
+                            let neighbor_space = mesh.block_space(neighbor_block);
                             let neighbor_nodes = mesh.block_nodes(neighbor_block);
 
                             let neighbor_offset: [isize; N] = from_fn(|axis| {
@@ -355,7 +355,7 @@ impl<'a, const N: usize, const ORDER: usize> MeshOrder<'a, N, ORDER> {
                                 let dest = from_fn(|axis| origin[axis] + node[axis]);
 
                                 for field in System::fields() {
-                                    let v = space.value(
+                                    let v = neighbor_space.value(
                                         source,
                                         &system.field(field.clone())[neighbor_nodes.clone()],
                                     );
@@ -375,7 +375,7 @@ impl<'a, const N: usize, const ORDER: usize> MeshOrder<'a, N, ORDER> {
                     let neighbor_index = mesh.blocks.cell_index(neighbor);
                     let neighbor_block = mesh.blocks.cell_block(neighbor);
                     let neighbor_origin: [isize; N] = mesh.cell_node_origin(neighbor_index);
-
+                    let neighbor_space = mesh.block_space(neighbor_block);
                     let neighbor_nodes = mesh.block_nodes(neighbor_block);
 
                     let neighbor_offset: [isize; N] = from_fn(|axis| {
@@ -391,7 +391,7 @@ impl<'a, const N: usize, const ORDER: usize> MeshOrder<'a, N, ORDER> {
                         let dest = from_fn(|axis| cell_origin[axis] + node[axis]);
 
                         for field in System::fields() {
-                            let v = space.value(
+                            let v = neighbor_space.value(
                                 source,
                                 &system.field(field.clone())[neighbor_nodes.clone()],
                             );
@@ -451,6 +451,7 @@ impl<'a, const N: usize, const ORDER: usize> MeshOrder<'a, N, ORDER> {
                     let neighbor_index = mesh.blocks.cell_index(neighbor);
                     let neighbor_block = mesh.blocks.cell_block(neighbor);
                     let neighbor_nodes = mesh.block_nodes(neighbor_block);
+                    let neighbor_space = mesh.block_space(neighbor_block);
 
                     let mut neighbor_split = cell_split;
                     for axis in 0..N {
@@ -477,7 +478,7 @@ impl<'a, const N: usize, const ORDER: usize> MeshOrder<'a, N, ORDER> {
                         let dest = from_fn(|axis| cell_origin[axis] + node[axis]);
 
                         for field in System::fields() {
-                            let v = space.prolong::<ORDER>(
+                            let v = neighbor_space.prolong::<ORDER>(
                                 &domain,
                                 source,
                                 &system.field(field.clone())[neighbor_nodes.clone()],

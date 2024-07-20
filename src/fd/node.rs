@@ -148,6 +148,7 @@ impl<const N: usize> NodeSpace<N> {
             }
 
             let node = from_fn(|axis| corner[axis] + index[axis] as isize);
+            // log::warn!("Node {node:?} Weight {weight}");
             result += self.value(node, field) * weight;
         }
 
@@ -492,7 +493,7 @@ mod tests {
         }
     }
 
-    fn convergence(size: [usize; 2]) -> f64 {
+    fn eval_convergence(size: [usize; 2]) -> f64 {
         let bounds = Rectangle::UNIT;
         let space = NodeSpace { size, ghost: 2 };
 
@@ -526,11 +527,51 @@ mod tests {
 
     #[test]
     fn evaluate() {
-        let error16 = convergence([16, 16]);
-        let error32 = convergence([32, 32]);
-        let error64 = convergence([64, 64]);
+        let error16 = eval_convergence([16, 16]);
+        let error32 = eval_convergence([32, 32]);
+        let error64 = eval_convergence([64, 64]);
 
         assert!(error16 / error32 >= 16.0);
         assert!(error32 / error64 >= 16.0);
+    }
+
+    fn prolong_convergence(size: [usize; 2]) -> f64 {
+        let bounds = Rectangle::UNIT;
+        let space = NodeSpace { size, ghost: 2 };
+        let rspace = NodeSpace {
+            size: size.map(|v| v * 2),
+            ghost: 2,
+        };
+
+        let mut field = vec![0.0; space.node_count()];
+
+        for node in space.full_window().iter() {
+            let index = space.index_from_node(node);
+            let [x, y] = space.position(bounds.clone(), node);
+            field[index] = x.sin() * y.sin();
+        }
+
+        let mut result: f64 = 0.0;
+
+        for node in rspace.inner_window().iter() {
+            let vertex = [node[0] as usize, node[1] as usize];
+            let [x, y] = rspace.position(bounds.clone(), node);
+            let numerical = space.prolong::<4>(&Quadrant, vertex, &field);
+            let analytical = x.sin() * y.sin();
+            let error: f64 = (numerical - analytical).abs();
+            result = result.max(error);
+        }
+
+        result
+    }
+
+    #[test]
+    fn prolong() {
+        let error16 = prolong_convergence([16, 16]);
+        let error32 = prolong_convergence([32, 32]);
+        let error64 = prolong_convergence([64, 64]);
+
+        assert!(error16 / error32 >= 32.0);
+        assert!(error32 / error64 >= 32.0);
     }
 }

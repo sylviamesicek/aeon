@@ -84,21 +84,15 @@ impl<const N: usize> Model<N> {
             assert!(N > 0 && N <= 2, "Vtk Output only supported for 0 < N ≤ 2");
         }
 
+        // Generate Cells
+        let mut connectivity = Vec::new();
+        let mut offsets = Vec::new();
+
+        let mut vertex_total = 0;
         let mut cell_total = 0;
 
         for block in 0..self.mesh.num_blocks() {
             let space = self.mesh.block_space(block);
-            cell_total += space.cell_size().iter().product::<usize>();
-        }
-
-        // Generate Cells
-
-        let mut connectivity = Vec::new();
-        let mut offsets = Vec::new();
-
-        for block in 0..self.mesh.num_blocks() {
-            let space = self.mesh.block_space(block);
-
             let cell_space = IndexSpace::new(space.cell_size());
             let vertex_space = IndexSpace::new(space.vertex_size());
 
@@ -111,8 +105,8 @@ impl<const N: usize> Model<N> {
                     vertex[0] = cell[0] + 1;
                     let v2 = vertex_space.linear_from_cartesian(vertex);
 
-                    connectivity.push(v1 as u64);
-                    connectivity.push(v2 as u64);
+                    connectivity.push(vertex_total + v1 as u64);
+                    connectivity.push(vertex_total + v2 as u64);
                 } else if N == 2 {
                     vertex[0] = cell[0];
                     vertex[1] = cell[1];
@@ -127,26 +121,25 @@ impl<const N: usize> Model<N> {
                     vertex[1] = cell[1];
                     let v4 = vertex_space.linear_from_cartesian(vertex);
 
-                    connectivity.push(v1 as u64);
-                    connectivity.push(v2 as u64);
-                    connectivity.push(v3 as u64);
-                    connectivity.push(v4 as u64);
+                    connectivity.push(vertex_total + v1 as u64);
+                    connectivity.push(vertex_total + v2 as u64);
+                    connectivity.push(vertex_total + v3 as u64);
+                    connectivity.push(vertex_total + v4 as u64);
                 }
 
                 offsets.push(connectivity.len() as u64);
             }
+
+            cell_total += space.cell_size().iter().product::<usize>();
+            vertex_total += space.vertex_size().iter().product::<usize>() as u64;
         }
 
-        let cell_verts = VertexNumbers::XML {
-            connectivity,
-            offsets,
-        };
-
-        let cell_types = vec![CellType::Quad; cell_total];
-
         let cells = Cells {
-            cell_verts,
-            types: cell_types,
+            cell_verts: VertexNumbers::XML {
+                connectivity,
+                offsets,
+            },
+            types: vec![CellType::Quad; cell_total],
         };
 
         // Generate point data

@@ -32,7 +32,7 @@ impl<const N: usize> Rectangle<N> {
         let size = from_fn(|i| self.size[i] / 2.0);
         let origin = from_fn(|i| {
             if mask.is_set(i) {
-                self.origin[i] + size[i] / 2.0
+                self.origin[i] + self.size[i] / 2.0
             } else {
                 self.origin[i]
             }
