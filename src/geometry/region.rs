@@ -27,7 +27,7 @@ impl Side {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Region<const N: usize> {
     sides: [Side; N],
 }
@@ -35,21 +35,23 @@ pub struct Region<const N: usize> {
 impl<const N: usize> Region<N> {
     /// Number of different regions in a given number of dimensions.
     pub const COUNT: usize = 3usize.pow(N as u32);
-
+    /// The default "central" region.
     pub const CENTRAL: Self = Self::new([Side::Middle; N]);
 
+    // Builds a new region from the given sides.
     pub const fn new(sides: [Side; N]) -> Self {
         Self { sides }
     }
 
-    pub fn sides(&self) -> [Side; N] {
+    pub const fn sides(&self) -> [Side; N] {
         self.sides
     }
 
-    pub fn side(&self, axis: usize) -> Side {
+    pub const fn side(&self, axis: usize) -> Side {
         self.sides[axis]
     }
 
+    /// Reverse every side in the region.
     pub fn reverse(&self) -> Self {
         let mut result = [Side::Left; N];
 
@@ -60,6 +62,7 @@ impl<const N: usize> Region<N> {
         Self::new(result)
     }
 
+    /// Returns number of axes that are not `Side::Middle`.
     pub fn adjacency(&self) -> usize {
         self.sides
             .into_iter()
@@ -91,6 +94,14 @@ impl<const N: usize> Region<N> {
         IndexWindow::new(origin, size)
             .iter()
             .map(|index| AxisMask::pack(from_fn(|axis| index[axis] != 0)))
+    }
+
+    pub fn adjacent_split(&self) -> AxisMask<N> {
+        let mut result = AxisMask::empty();
+        for axis in 0..N {
+            result.set_to(axis, self.side(axis) == Side::Right)
+        }
+        result
     }
 
     pub fn face_from_axis(&self, axis: usize) -> Face {

@@ -2,7 +2,7 @@
 
 use std::array::from_fn;
 
-use super::Face;
+use super::{Face, Region, Side};
 
 /// Describes an abstract index space. Allows for iteration of indices
 /// in N dimensions, and transformations between cartesian and linear
@@ -90,6 +90,21 @@ impl<const N: usize> IndexSpace<N> {
         };
         self.plane(face.axis, intercept)
     }
+
+    /// The window of all indices that border the given region.
+    pub fn adjacent(self, region: Region<N>) -> IndexWindow<N> {
+        let origin = from_fn(|axis| match region.side(axis) {
+            Side::Left | Side::Middle => 0,
+            Side::Right => self.size[axis] - 1,
+        });
+
+        let size = from_fn(|axis| match region.side(axis) {
+            Side::Left | Side::Right => 1,
+            Side::Middle => self.size[axis],
+        });
+
+        IndexWindow { origin, size }
+    }
 }
 
 /// Represents a subset of an index space, and provides utilities for iterating over this window.
@@ -121,6 +136,15 @@ impl<const N: usize> IndexWindow<N> {
             origin: self.origin,
             inner: IndexSpace::new(self.size).iter(),
         }
+    }
+}
+
+impl<const N: usize> IntoIterator for IndexWindow<N> {
+    type IntoIter = CartesianWindowIter<N>;
+    type Item = [usize; N];
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter()
     }
 }
 

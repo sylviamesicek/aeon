@@ -149,6 +149,28 @@ impl<const N: usize> Mesh<N> {
         self.neighbors.cell_neighbor(cell, region)
     }
 
+    pub fn cell_neighbor_after_refinement(
+        &self,
+        cell: usize,
+        split: AxisMask<N>,
+        region: Region<N>,
+    ) -> usize {
+        let neighbor = self.neighbors.cell_neighbor(cell, region);
+
+        if neighbor == NULL || self.cell_level(neighbor) <= self.cell_level(cell) {
+            return neighbor;
+        }
+
+        let mut target = [Side::Middle; N];
+        for axis in 0..N {
+            if region.side(axis) == Side::Middle && split.is_set(axis) {
+                target[axis] = Side::Right;
+            }
+        }
+
+        self.cell_neighbor(neighbor, Region::new(target))
+    }
+
     /// The level of the mesh the cell resides on.
     pub fn cell_level(&self, cell: usize) -> usize {
         self.tree.level(cell)
@@ -275,28 +297,27 @@ impl<'a, const N: usize, const ORDER: usize> MeshOrder<'a, N, ORDER> {
             let nodes = mesh.block_nodes(block);
 
             // Fill Injection boundary conditions
-            let size = mesh.block_size(block);
-            let cells = mesh.block_cells(block);
-            let cell_space = IndexSpace::new(size);
+            let block_size = mesh.block_size(block);
+            let block_space = IndexSpace::new(block_size);
+            let block_cells = mesh.block_cells(block);
 
             // For each neighboring region
             for region in regions::<N>() {
                 let offset_dir = region.offset_dir();
 
-                let mut region_size: [_; N] = from_fn(|axis| mesh.nodes.cell_width[axis]);
-                let mut coarse_region_size: [_; N] =
-                    from_fn(|axis| mesh.nodes.cell_width[axis] / 2);
+                let mut cell_size: [_; N] = from_fn(|axis| mesh.nodes.cell_width[axis]);
+                let mut subcell_size: [_; N] = from_fn(|axis| mesh.nodes.cell_width[axis] / 2);
 
                 for axis in 0..N {
                     if region.side(axis) == Side::Right {
-                        region_size[axis] += 1;
-                        coarse_region_size[axis] += 1;
+                        cell_size[axis] += 1;
+                        subcell_size[axis] += 1;
                     }
                 }
 
                 // Loop over all cells on the border of the block which touch this region.
-                for cell_index in region.face_vertices(size) {
-                    let cell = cells[cell_space.linear_from_cartesian(cell_index)];
+                for cell_index in block_space.adjacent(region) {
+                    let cell = block_cells[block_space.linear_from_cartesian(cell_index)];
                     let cell_origin: [isize; N] = mesh.cell_node_origin(cell_index);
 
                     // Retrieve appropriate neighbor.
@@ -314,45 +335,36 @@ impl<'a, const N: usize, const ORDER: usize> MeshOrder<'a, N, ORDER> {
 
                     // If neighbor is more refined we use injection
                     if mesh.cell_level(neighbor) > mesh.cell_level(cell) {
-                        for mask in region.adjacent_splits() {
-                            let mut nmask = mask;
-
-                            for axis in 0..N {
-                                if region.side(axis) != Side::Middle {
-                                    nmask.toggle(axis);
+                        // Loop over every subdivision of this cell that touches the given region.
+                        for split in region.adjacent_splits() {
+                            // Offset from origin of block to subcell.
+                            let cell_offset: [isize; N] = from_fn(|axis| {
+                                if split.is_set(axis) {
+                                    cell_origin[axis] + (mesh.nodes.cell_width[axis] / 2) as isize
+                                } else {
+                                    cell_origin[axis]
                                 }
-                            }
+                            });
 
-                            let neighbor = neighbor + nmask.to_linear();
+                            // Compute neighbor
+                            let neighbor = mesh.cell_neighbor_after_refinement(cell, split, region);
                             let neighbor_index = mesh.blocks.cell_index(neighbor);
                             let neighbor_block = mesh.cell_block(neighbor);
                             let neighbor_origin = mesh.cell_node_origin(neighbor_index);
                             let neighbor_space = mesh.block_space(neighbor_block);
                             let neighbor_nodes = mesh.block_nodes(neighbor_block);
 
+                            // Offset from origin of neighbor block to neighbor cell
                             let neighbor_offset: [isize; N] = from_fn(|axis| {
                                 neighbor_origin[axis]
                                     - offset_dir[axis] * mesh.nodes.cell_width[axis] as isize
                             });
 
-                            let mut origin = cell_origin;
-
-                            for axis in 0..N {
-                                if mask.is_set(axis) {
-                                    origin[axis] += (mesh.nodes.cell_width[axis] / 2) as isize;
-                                }
-                            }
-
-                            for node in region
-                                .nodes(mesh.nodes.ghost_nodes, coarse_region_size)
-                                .chain(
-                                    region
-                                        .face_vertices(coarse_region_size)
-                                        .map(node_from_vertex),
-                                )
+                            for node in NodeSpace::new(subcell_size, mesh.nodes.ghost_nodes)
+                                .region_inclusive_window(region)
                             {
                                 let source = from_fn(|axis| neighbor_offset[axis] + 2 * node[axis]);
-                                let dest = from_fn(|axis| origin[axis] + node[axis]);
+                                let dest = from_fn(|axis| cell_offset[axis] + node[axis]);
 
                                 for field in System::fields() {
                                     let v = neighbor_space.value(
@@ -362,7 +374,7 @@ impl<'a, const N: usize, const ORDER: usize> MeshOrder<'a, N, ORDER> {
                                     space.set_value(
                                         dest,
                                         v,
-                                        &mut system.field_mut(field)[nodes.clone()],
+                                        &mut system.field_mut(field.clone())[nodes.clone()],
                                     )
                                 }
                             }
@@ -383,9 +395,8 @@ impl<'a, const N: usize, const ORDER: usize> MeshOrder<'a, N, ORDER> {
                             - offset_dir[axis] * mesh.nodes.cell_width[axis] as isize
                     });
 
-                    for node in region
-                        .nodes(mesh.nodes.ghost_nodes, region_size)
-                        .chain(region.face_vertices(region_size).map(node_from_vertex))
+                    for node in NodeSpace::new(cell_size, mesh.nodes.ghost_nodes)
+                        .region_inclusive_window(region)
                     {
                         let source = from_fn(|axis| neighbor_offset[axis] + node[axis]);
                         let dest = from_fn(|axis| cell_origin[axis] + node[axis]);
@@ -433,7 +444,7 @@ impl<'a, const N: usize, const ORDER: usize> MeshOrder<'a, N, ORDER> {
 
                 for cell_index in region.face_vertices(size) {
                     let cell = cells[cell_space.linear_from_cartesian(cell_index)];
-                    let cell_origin = mesh.cell_node_origin(cell_index);
+                    let cell_offset = mesh.cell_node_origin(cell_index);
                     let cell_split = mesh.cell_split(cell);
 
                     let neighbor = mesh.cell_neighbor(cell, region.clone());
@@ -453,6 +464,7 @@ impl<'a, const N: usize, const ORDER: usize> MeshOrder<'a, N, ORDER> {
                     let neighbor_nodes = mesh.block_nodes(neighbor_block);
                     let neighbor_space = mesh.block_space(neighbor_block);
 
+                    // Compute which subcell of the neighbor we are accessing
                     let mut neighbor_split = cell_split;
                     for axis in 0..N {
                         if region.side(axis) != Side::Middle {
@@ -475,7 +487,7 @@ impl<'a, const N: usize, const ORDER: usize> MeshOrder<'a, N, ORDER> {
                     for node in region.nodes(mesh.nodes.ghost_nodes, region_size) {
                         let source =
                             from_fn(|axis| (2 * neighbor_offset[axis] + node[axis]) as usize);
-                        let dest = from_fn(|axis| cell_origin[axis] + node[axis]);
+                        let dest = from_fn(|axis| cell_offset[axis] + node[axis]);
 
                         for field in System::fields() {
                             let v = neighbor_space.prolong::<ORDER>(

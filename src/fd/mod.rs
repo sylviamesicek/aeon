@@ -12,7 +12,7 @@ pub use engine::{Engine, FdEngine, FdIntEngine};
 pub use kernel::{BasisOperator, Interpolation, Order, Support};
 pub use mesh::{BlockBoundary, Mesh};
 pub use model::Model;
-pub use node::{node_from_vertex, NodeSpace};
+pub use node::{node_from_vertex, NodeSpace, NodeWindow};
 
 use crate::system::{Empty, SystemFields, SystemLabel, SystemValue};
 

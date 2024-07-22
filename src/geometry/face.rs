@@ -1,3 +1,5 @@
+use super::AxisMask;
+
 /// A face of a rectangular prism in `N` dimensional space.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Face {
@@ -16,6 +18,13 @@ impl Face {
         Self { axis, side: true }
     }
 
+    pub fn reversed(self) -> Self {
+        Self {
+            axis: self.axis,
+            side: !self.side,
+        }
+    }
+
     /// Transforms a face into a linear index.
     pub fn to_linear(self) -> usize {
         2 * self.axis + self.side as usize
@@ -27,6 +36,12 @@ impl Face {
             axis: linear / 2,
             side: linear % 2 == 1,
         }
+    }
+
+    pub fn adjacent_split<const N: usize>(self) -> AxisMask<N> {
+        let mut result = AxisMask::empty();
+        result.set_to(self.axis, self.side);
+        result
     }
 }
 

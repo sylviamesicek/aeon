@@ -1,5 +1,5 @@
 use crate::fd::{BasisOperator, Interpolation, Order, Support};
-use crate::geometry::{faces, CartesianIter, IndexSpace, Rectangle};
+use crate::geometry::{faces, CartesianIter, IndexSpace, Rectangle, Region, Side};
 use crate::prelude::Face;
 use std::array::from_fn;
 
@@ -29,6 +29,10 @@ pub struct NodeSpace<const N: usize> {
 }
 
 impl<const N: usize> NodeSpace<N> {
+    pub fn new(size: [usize; N], ghost: usize) -> Self {
+        Self { size, ghost }
+    }
+
     /// Computes the total number of nodes in the space.
     pub fn node_count(&self) -> usize {
         self.node_size().iter().product()
@@ -112,6 +116,52 @@ impl<const N: usize> NodeSpace<N> {
             origin: [0isize; N],
             size: self.vertex_size(),
         }
+    }
+
+    /// Returns the window of all nodes which fall in the given region.
+    pub fn region_window(&self, region: Region<N>) -> NodeWindow<N> {
+        let origin = from_fn(|axis| match region.side(axis) {
+            Side::Left => -(self.ghost as isize),
+            Side::Middle => 0,
+            Side::Right => (self.size[axis] + 1) as isize,
+        });
+
+        let size = from_fn(|axis| match region.side(axis) {
+            Side::Left | Side::Right => self.ghost,
+            Side::Middle => self.size[axis] + 1,
+        });
+
+        NodeWindow { origin, size }
+    }
+
+    /// Returns the window of all vertices which border the given region.
+    pub fn adjacent_window(&self, region: Region<N>) -> NodeWindow<N> {
+        let origin = from_fn(|axis| match region.side(axis) {
+            Side::Left | Side::Middle => 0,
+            Side::Right => self.size[axis] as isize,
+        });
+
+        let size = from_fn(|axis| match region.side(axis) {
+            Side::Left | Side::Right => 1,
+            Side::Middle => self.size[axis] + 1,
+        });
+
+        NodeWindow { origin, size }
+    }
+
+    pub fn region_inclusive_window(&self, region: Region<N>) -> NodeWindow<N> {
+        let origin = from_fn(|axis| match region.side(axis) {
+            Side::Left => -(self.ghost as isize),
+            Side::Middle => 0,
+            Side::Right => self.size[axis] as isize,
+        });
+
+        let size = from_fn(|axis| match region.side(axis) {
+            Side::Left | Side::Right => self.ghost + 1,
+            Side::Middle => self.size[axis] + 1,
+        });
+
+        NodeWindow { origin, size }
     }
 
     /// An optimized version of `weights()` for use when only one stencil needs to be applied along one axis.
@@ -397,6 +447,15 @@ impl<const N: usize> NodeWindow<N> {
             intercept,
             inner: NodeCartesianIter::new(self.origin, size),
         }
+    }
+}
+
+impl<const N: usize> IntoIterator for NodeWindow<N> {
+    type IntoIter = NodeCartesianIter<N>;
+    type Item = [isize; N];
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter()
     }
 }
 

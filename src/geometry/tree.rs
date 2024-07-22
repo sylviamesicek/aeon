@@ -81,11 +81,38 @@ impl<const N: usize> Tree<N> {
         &self.neighbors[cell * 2 * N..(cell + 1) * 2 * N]
     }
 
+    pub fn neighbor(&self, cell: usize, face: Face) -> usize {
+        self.neighbors[cell * 2 * N + face.to_linear()]
+    }
+
+    /// Finds the outer neighbor along the face of the given subcell.
+    pub fn neighbor_after_refinement(&self, cell: usize, split: AxisMask<N>, face: Face) -> usize {
+        let mut result = self.neighbor(cell, face);
+
+        if result == NULL {
+            return NULL;
+        }
+
+        if self.level(result) <= self.level(cell) {
+            return result;
+        }
+
+        (0..N)
+            .into_iter()
+            .filter(|&i| i != face.axis && split.is_set(i))
+            .for_each(|i| {
+                result = self.neighbor(result, Face::positive(i));
+            });
+
+        result
+    }
+
     /// Computes the level of a cell.
     pub fn level(&self, cell: usize) -> usize {
         self.offsets[cell + 1] - self.offsets[cell]
     }
 
+    /// Returns the domain of the full quadtree.
     pub fn domain(&self) -> Rectangle<N> {
         self.domain.clone()
     }
@@ -177,6 +204,8 @@ impl<const N: usize> Tree<N> {
         // ****************************************
         // Prepass to deteremine updated indices **
 
+        // Maps current cell indices to new cell indices. If a cell is refined, this will point
+        // to
         let mut update_map = Vec::with_capacity(self.num_cells());
 
         let mut cursor = 0;
@@ -201,17 +230,20 @@ impl<const N: usize> Tree<N> {
             if flags[cell] {
                 let parent = bounds.len();
                 // Loop over subdivisions
-                for mask in AxisMask::<N>::enumerate() {
+                for split in AxisMask::<N>::enumerate() {
                     // Set physical bounds of block
-                    bounds.push(self.bounds(cell).split(mask));
+                    bounds.push(self.bounds(cell).split(split));
                     // Update neighbors
                     for face in faces::<N>() {
-                        if mask.is_inner_face(face) {
+                        if split.is_inner_face(face) {
                             // We can just reflect across axis within this particular group
-                            let neighbor = parent + mask.toggled(face.axis).to_linear();
+                            // because we are uniformly refining this cell.
+                            let neighbor = parent + split.toggled(face.axis).to_linear();
                             neighbors.push(neighbor);
                         } else {
-                            let neighbor = self.neighbors(cell)[face.to_linear()];
+                            // Gets the neighbor across this face, after any refinement is performed
+                            let neighbor = self.neighbor_after_refinement(cell, split, face);
+
                             if neighbor == NULL {
                                 // Propagate boundary information
                                 neighbors.push(NULL);
@@ -225,16 +257,18 @@ impl<const N: usize> Tree<N> {
                                 match (flags[neighbor], level as isize - neighbor_level as isize) {
                                     (true, -1) => {
                                         // We refine both and the neighbor started finer
-                                        update_map[neighbor + mask.toggled(face.axis).to_linear()]
+                                        update_map[neighbor]
+                                            + face.reversed().adjacent_split::<N>().to_linear()
+                                        // update_map[neighbor + mask.toggled(face.axis).to_linear()]
                                     }
                                     (false, -1) => {
                                         // Neighbor was more refined, but now they are on the same level
-                                        update_map[neighbor + mask.toggled(face.axis).to_linear()]
+                                        update_map[neighbor]
                                     }
                                     (true, 0) => {
                                         // If we refine both and they started on the same level. simply flip
                                         // along axis.
-                                        update_map[neighbor] + mask.toggled(face.axis).to_linear()
+                                        update_map[neighbor] + split.toggled(face.axis).to_linear()
                                     }
                                     (false, 0) => {
                                         // Started on same level, but neighbor was not refined
@@ -256,7 +290,7 @@ impl<const N: usize> Tree<N> {
                     // Compute index
                     for axis in 0..N {
                         // Multiply current index by 2 and set least significant bit
-                        indices[axis].push(mask.is_set(axis));
+                        indices[axis].push(split.is_set(axis));
                         indices[axis].extend_from_bitslice(self.index_slice(cell, axis));
                     }
                     let previous = offsets[offsets.len() - 1];
@@ -274,7 +308,16 @@ impl<const N: usize> Tree<N> {
                         continue;
                     }
 
-                    neighbors.push(update_map[neighbor])
+                    // Is the neighbor along this face being refined?
+                    if flags[neighbor] {
+                        // Find an adjacent split across face.
+                        neighbors.push(
+                            update_map[neighbor]
+                                + face.reversed().adjacent_split::<N>().to_linear(),
+                        );
+                    } else {
+                        neighbors.push(update_map[neighbor])
+                    }
                 }
 
                 for axis in 0..N {
@@ -292,7 +335,7 @@ impl<const N: usize> Tree<N> {
         self.offsets = offsets;
     }
 
-    /// Returns all coarse blocks that neighbor the given block.
+    /// Returns all coarse cells that neighbor the given cells.
     fn coarse_neighborhood(&self, cell: usize) -> impl Iterator<Item = usize> + '_ {
         let subdivision = self.split(cell);
 
@@ -655,23 +698,26 @@ impl<const N: usize> TreeNeighbors<N> {
                 let mut neighbor_fine: bool = false;
                 let mut neighbor_coarse: bool = false;
 
+                let mut rsplit = region.adjacent_split();
+
                 // Iterate over faces
                 for face in region.adjacent_faces() {
                     // Make sure face is compatible with split.
-                    if neighbor_coarse && split.is_set(face.axis) != face.side {
+                    if neighbor_coarse && split.is_inner_face(face) {
                         continue;
                     }
 
                     // Snap origin to be adjacent to face
                     if neighbor_fine {
-                        let mut neighbor_split = tree.split(neighbor);
-                        let neighbor_origin = neighbor - neighbor_split.to_linear();
-                        neighbor_split.set_to(face.axis, face.side);
-                        neighbor = neighbor_origin + neighbor_split.to_linear();
+                        if tree.split(neighbor).is_inner_face(face) {
+                            neighbor = tree.neighbor(neighbor, face);
+                        }
+                        debug_assert!(tree.split(neighbor).is_outer_face(face));
                     }
 
                     // Get neighbor of current cell
-                    let nneighbor = tree.neighbors(neighbor)[face.to_linear()];
+                    let nneighbor = tree.neighbor_after_refinement(neighbor, rsplit, face);
+                    rsplit.toggle(face.axis);
 
                     // Short circut if we have encountered a boundary
                     if nneighbor == NULL {
@@ -989,15 +1035,30 @@ mod tests {
         assert_eq!(neighbors.cell_neighbors(3), [0, 1, 4, 2, 3, 4, 5, 5, 6]);
         assert_eq!(
             neighbors.cell_neighbors(4),
-            [NULL, NULL, NULL, 0, 4, NULL, 5, 6, NULL]
+            [NULL, NULL, NULL, 1, 4, NULL, 5, 6, NULL]
         );
         assert_eq!(
             neighbors.cell_neighbors(5),
-            [NULL, 0, 4, NULL, 5, 6, NULL, NULL, NULL]
+            [NULL, 2, 4, NULL, 5, 6, NULL, NULL, NULL]
         );
         assert_eq!(
             neighbors.cell_neighbors(6),
-            [0, 4, NULL, 5, 6, NULL, NULL, NULL, NULL]
+            [3, 4, NULL, 5, 6, NULL, NULL, NULL, NULL]
+        );
+
+        assert_eq!(
+            tree.neighbor_after_refinement(4, AxisMask::pack([true, true]), Face::negative(0)),
+            3
+        );
+
+        assert_eq!(
+            tree.neighbor_after_refinement(5, AxisMask::pack([true, false]), Face::negative(1)),
+            3
+        );
+
+        assert_eq!(
+            tree.neighbor_after_refinement(6, AxisMask::pack([false, false]), Face::negative(0)),
+            5
         );
     }
 
