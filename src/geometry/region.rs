@@ -1,4 +1,4 @@
-use std::array::from_fn;
+use std::{array::from_fn, cmp::Ordering};
 
 use super::{index::IndexWindow, AxisMask, CartesianIter, Face, IndexSpace};
 
@@ -21,7 +21,7 @@ impl Side {
 
     pub fn from_value(val: u8) -> Self {
         assert!(val < 3);
-        // Saftey. We have specified the memory representation of the
+        // Safety. We have specified the memory representation of the
         // enum and checked the value, so this should be safe.
         unsafe { std::mem::transmute(val) }
     }
@@ -222,6 +222,24 @@ impl<const N: usize> Region<N> {
         let space = IndexSpace::new([3; N]);
         let index = space.cartesian_from_linear(val);
         Self::new(from_fn(|axis| Side::from_value(index[axis] as u8)))
+    }
+}
+
+impl<const N: usize> Ord for Region<N> {
+    fn cmp(&self, other: &Self) -> Ordering {
+        let space = IndexSpace::new([3; N]);
+        let index = from_fn(|axis| self.side(axis) as usize);
+        let oindex = from_fn(|axis| other.side(axis) as usize);
+
+        space
+            .linear_from_cartesian(index)
+            .cmp(&space.linear_from_cartesian(oindex))
+    }
+}
+
+impl<const N: usize> PartialOrd for Region<N> {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
     }
 }
 

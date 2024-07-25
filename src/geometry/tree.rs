@@ -1,12 +1,13 @@
 #![allow(clippy::needless_range_loop)]
 
 use crate::array::{Array, ArrayLike};
-use crate::geometry::{faces, AxisMask, Rectangle};
+use crate::geometry::{faces, AxisMask, Rectangle, Side};
 use bitvec::prelude::*;
 use std::array::from_fn;
 use std::cmp::Ordering;
 use std::mem::ManuallyDrop;
 use std::ops::Range;
+use std::slice;
 
 use super::{regions, Face, FaceMask, IndexSpace, Region};
 
@@ -81,8 +82,69 @@ impl<const N: usize> Tree<N> {
         &self.neighbors[cell * 2 * N..(cell + 1) * 2 * N]
     }
 
+    /// Returns the neighbor of the cell along the given face.
     pub fn neighbor(&self, cell: usize, face: Face) -> usize {
         self.neighbors[cell * 2 * N + face.to_linear()]
+    }
+
+    /// Returns the neighbor of the cell in the given region.
+    pub fn neighbor_region(&self, cell: usize, region: Region<N>) -> usize {
+        let split = self.split(cell);
+        let level = self.level(cell);
+
+        // Start with self
+        let mut neighbor = cell;
+
+        let mut neighbor_fine: bool = false;
+        let mut neighbor_coarse: bool = false;
+
+        let mut rsplit = region.adjacent_split();
+
+        // Iterate over faces
+        for face in region.adjacent_faces() {
+            // Make sure face is compatible with split.
+            if neighbor_coarse && split.is_inner_face(face) {
+                continue;
+            }
+
+            // Snap origin to be adjacent to face
+            if neighbor_fine {
+                if self.split(neighbor).is_inner_face(face) {
+                    neighbor = self.neighbor(neighbor, face);
+                }
+                debug_assert!(self.split(neighbor).is_outer_face(face));
+            }
+
+            // Get neighbor of current cell
+            let nneighbor = self.neighbor_after_refinement(neighbor, rsplit, face);
+            rsplit.toggle(face.axis);
+
+            // Short circut if we have encountered a boundary
+            if nneighbor == NULL {
+                return NULL;
+            }
+
+            // Get level of neighbor
+            let nlevel = self.level(nneighbor);
+
+            match nlevel.cmp(&level) {
+                Ordering::Less => {
+                    debug_assert!(nlevel == level - 1);
+                    debug_assert!(!neighbor_fine);
+                    neighbor_coarse = true;
+                }
+                Ordering::Greater => {
+                    debug_assert!(nlevel == level + 1);
+                    debug_assert!(!neighbor_coarse);
+                    neighbor_fine = true;
+                }
+                _ => {}
+            }
+
+            neighbor = nneighbor;
+        }
+
+        neighbor
     }
 
     /// Finds the outer neighbor along the face of the given subcell.
@@ -672,6 +734,301 @@ impl<const N: usize> From<TreeBlocksSerde<N>> for TreeBlocks<N> {
 // Neighbors **************
 // ************************
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum InterfaceKind {
+    Coarse,
+    Direct,
+    Fine,
+}
+
+impl InterfaceKind {
+    pub fn from_levels(level: usize, neighbor: usize) -> Self {
+        match level as isize - neighbor as isize {
+            1 => InterfaceKind::Coarse,
+            0 => InterfaceKind::Direct,
+            -1 => InterfaceKind::Fine,
+            _ => panic!("Unbalanced levels"),
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct BlockInterface<const N: usize> {
+    block: usize,
+    neighbor: usize,
+    interface: InterfaceKind,
+    source: [isize; N],
+    dest: [isize; N],
+    size: [usize; N],
+}
+
+#[derive(Clone, Copy)]
+struct CellNeighbor<const N: usize> {
+    cell: usize,
+    neighbor: usize,
+    region: Region<N>,
+}
+
+#[derive(Default, Clone)]
+pub struct TreeInterfaces<const N: usize> {
+    neighbors: Vec<BlockInterface<N>>,
+}
+
+impl<const N: usize> TreeInterfaces<N> {
+    pub fn iter(&self) -> slice::Iter<'_, BlockInterface<N>> {
+        self.neighbors.iter()
+    }
+
+    pub fn build(&mut self, tree: &Tree<N>, blocks: &TreeBlocks<N>, nodes: &TreeNodes<N>) {
+        let mut neighbors = Vec::new();
+
+        for block in 0..blocks.num_blocks() {
+            neighbors.clear();
+
+            let block_size = blocks.block_size(block);
+            let block_cells = blocks.block_cells(block);
+
+            for region in regions::<N>() {
+                if region == Region::CENTRAL {
+                    continue;
+                }
+
+                let block_space = IndexSpace::new(block_size);
+
+                // Find all cells adjacent to the given region.
+                for index in block_space.adjacent(region) {
+                    let cell = block_cells[block_space.linear_from_cartesian(index)];
+                    let neighbor = tree.neighbor_region(cell, region);
+
+                    if neighbor == NULL {
+                        continue;
+                    }
+
+                    neighbors.push(CellNeighbor {
+                        cell,
+                        neighbor,
+                        region: region.clone(),
+                    })
+                }
+            }
+
+            neighbors.sort_unstable_by(|left, right| {
+                let lblock = blocks.cell_block(left.neighbor);
+                let rblock = blocks.cell_block(right.neighbor);
+
+                lblock
+                    .cmp(&rblock)
+                    .then(left.neighbor.cmp(&right.neighbor))
+                    .then(left.cell.cmp(&right.cell))
+                    .then(left.region.cmp(&right.region))
+            });
+
+            self.build_block(tree, blocks, nodes, block, &mut neighbors);
+        }
+    }
+
+    fn build_block(
+        &mut self,
+        tree: &Tree<N>,
+        blocks: &TreeBlocks<N>,
+        nodes: &TreeNodes<N>,
+        block: usize,
+        neighbors: &mut [CellNeighbor<N>],
+    ) {
+        let block_size = blocks.block_size(block);
+
+        let mut neighbors = neighbors.iter().map(|n| n.clone()).peekable();
+
+        while let Some(a) = neighbors.next() {
+            let neighbor = blocks.cell_block(a.neighbor);
+
+            // Next we walk through the iterator until we find the last neighbor that is still in this block.
+            let mut b = a.clone();
+
+            loop {
+                if let Some(next) = neighbors.peek() {
+                    if neighbor == blocks.cell_block(next.neighbor) {
+                        b = neighbors.next().unwrap();
+                        continue;
+                    }
+                }
+
+                break;
+            }
+
+            let (anode, bnode) = Self::block_ghost_aabb(blocks, nodes, a, b);
+            let mut source = Self::neighbor_origin(tree, blocks, nodes, a);
+            let (mut dest, mut size) = Self::space_from_aabb(anode, bnode);
+
+            // Avoid overlaps between aabbs on this block
+            let aorigin = blocks.cell_index(a.cell);
+            let borigin = blocks.cell_index(b.cell);
+            let flags = blocks.block_boundary_flags(block);
+
+            for axis in 0..N {
+                let right_boundary = flags.is_set(Face::positive(axis));
+                let left_boundary = flags.is_set(Face::negative(axis));
+
+                // If the right edge doesn't extend all the way to the right,
+                // shrink by one.
+                if b.region.side(axis) == Side::Middle
+                    && !(borigin[axis] == block_size[axis] - 1 && right_boundary)
+                {
+                    size[axis] -= 1;
+                }
+
+                // If we do not extend further left, don't include
+                if a.region.side(axis) == Side::Middle && aorigin[axis] == 0 && !left_boundary {
+                    source[axis] += 1;
+                    dest[axis] += 1;
+                    size[axis] -= 1;
+                }
+            }
+
+            // Compute this boundary interface.
+            let interface = InterfaceKind::from_levels(tree.level(a.cell), tree.level(a.neighbor));
+
+            self.neighbors.push(BlockInterface {
+                block,
+                neighbor,
+                interface,
+                source,
+                dest,
+                size,
+            })
+        }
+    }
+
+    /// Computes the nodes that ghost nodes adjacent to the AABB of cells
+    /// defined by A and B.
+    fn block_ghost_aabb(
+        blocks: &TreeBlocks<N>,
+        nodes: &TreeNodes<N>,
+        a: CellNeighbor<N>,
+        b: CellNeighbor<N>,
+    ) -> ([isize; N], [isize; N]) {
+        // Find ghost region that must be filled
+        let aindex = blocks.cell_index(a.cell);
+        let bindex = blocks.cell_index(b.cell);
+
+        // Compute bottom right corner of A cell.
+        let mut anode: [_; N] = from_fn(|axis| (aindex[axis] * nodes.cell_width[axis]) as isize);
+
+        // Offset by appropriate ghost nodes/width
+        for axis in 0..N {
+            match a.region.side(axis) {
+                Side::Left => {
+                    anode[axis] -= nodes.ghost_nodes as isize;
+                }
+                Side::Right => {
+                    anode[axis] += nodes.cell_width[axis] as isize;
+                }
+                Side::Middle => {}
+            }
+        }
+
+        // Compute top left corner of B cell
+        let mut bnode: [_; N] =
+            from_fn(|axis| ((bindex[axis] + 1) * nodes.cell_width[axis]) as isize);
+
+        // Offset by appropriate ghost nodes/width
+        for axis in 0..N {
+            match b.region.side(axis) {
+                Side::Right => {
+                    bnode[axis] += nodes.ghost_nodes as isize;
+                }
+                Side::Left => {
+                    bnode[axis] -= nodes.cell_width[axis] as isize;
+                }
+                Side::Middle => {}
+            }
+        }
+
+        (anode, bnode)
+    }
+
+    fn space_from_aabb(a: [isize; N], b: [isize; N]) -> ([isize; N], [usize; N]) {
+        // Origin is just the bottom left corner of A.
+        let dest = a;
+        // Size is inclusive.
+        let size = from_fn(|axis| (b[axis] - a[axis] + 1) as usize);
+
+        (dest, size)
+    }
+
+    fn neighbor_origin(
+        tree: &Tree<N>,
+        blocks: &TreeBlocks<N>,
+        nodes: &TreeNodes<N>,
+        a: CellNeighbor<N>,
+    ) -> [isize; N] {
+        // I think it works?
+
+        // Compute this boundary interface.
+        let interface = InterfaceKind::from_levels(tree.level(a.cell), tree.level(a.neighbor));
+
+        // Find source node
+        let index = blocks.cell_index(a.neighbor);
+        let mut source: [isize; N] =
+            from_fn(|axis| (index[axis] * nodes.cell_width[axis]) as isize);
+
+        match interface {
+            InterfaceKind::Direct => {
+                for axis in 0..N {
+                    if a.region.side(axis) == Side::Left {
+                        source[axis] += (nodes.cell_width[axis] - nodes.ghost_nodes) as isize;
+                    }
+                }
+            }
+            InterfaceKind::Coarse => {
+                // Source is stored in subnodes
+                for axis in 0..N {
+                    source[axis] *= 2;
+                }
+
+                let split = tree.split(a.cell);
+
+                for axis in 0..N {
+                    if split.is_set(axis) {
+                        match a.region.side(axis) {
+                            Side::Left => {
+                                source[axis] +=
+                                    nodes.cell_width[axis] as isize - nodes.ghost_nodes as isize
+                            }
+                            Side::Middle => source[axis] += nodes.cell_width[axis] as isize,
+                            Side::Right => {}
+                        }
+                    } else {
+                        match a.region.side(axis) {
+                            Side::Left => {
+                                source[axis] +=
+                                    2 * nodes.cell_width[axis] as isize - nodes.ghost_nodes as isize
+                            }
+                            Side::Middle => {}
+                            Side::Right => source[axis] += nodes.cell_width[axis] as isize,
+                        }
+                    }
+                }
+            }
+            InterfaceKind::Fine => {
+                // Source is stored in supernodes
+                for axis in 0..N {
+                    source[axis] /= 2;
+                }
+
+                for axis in 0..N {
+                    if a.region.side(axis) == Side::Left {
+                        source[axis] +=
+                            nodes.cell_width[axis] as isize / 2 - nodes.ghost_nodes as isize;
+                    }
+                }
+            }
+        }
+
+        source
+    }
+}
+
 /// Caches information about every neighbor touching each cell (including non-adjacent neighbors).
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 pub struct TreeNeighbors<const N: usize> {
@@ -1077,5 +1434,94 @@ mod tests {
         assert_eq!(nodes.block_nodes(0), 0..529);
         assert_eq!(nodes.block_nodes(1), 529..874);
         assert_eq!(nodes.block_nodes(2), 874..1099);
+    }
+
+    #[test]
+    fn neighbors2() {
+        let mut tree = Tree::new(Rectangle::<2>::UNIT);
+        let mut blocks = TreeBlocks::default();
+        let mut nodes = TreeNodes::new([4; 2], 2);
+        let mut interfaces = TreeInterfaces::default();
+
+        tree.refine(&[true, false, false, false]);
+        blocks.build(&tree);
+        nodes.build(&blocks);
+        interfaces.build(&tree, &blocks, &nodes);
+
+        let mut interfaces = interfaces.iter();
+
+        assert_eq!(
+            interfaces.next(),
+            Some(&BlockInterface {
+                block: 0,
+                neighbor: 1,
+                interface: InterfaceKind::Coarse,
+                source: [0, 0],
+                dest: [8, 0],
+                size: [3, 11],
+            })
+        );
+
+        assert_eq!(
+            interfaces.next(),
+            Some(&BlockInterface {
+                block: 0,
+                neighbor: 2,
+                interface: InterfaceKind::Coarse,
+                source: [0, 0],
+                dest: [0, 8],
+                size: [8, 3],
+            })
+        );
+
+        assert_eq!(
+            interfaces.next(),
+            Some(&BlockInterface {
+                block: 1,
+                neighbor: 0,
+                interface: InterfaceKind::Fine,
+                source: [2, 0],
+                dest: [-2, 0],
+                size: [3, 4],
+            })
+        );
+
+        assert_eq!(
+            interfaces.next(),
+            Some(&BlockInterface {
+                block: 1,
+                neighbor: 2,
+                interface: InterfaceKind::Direct,
+                source: [2, 0],
+                dest: [-2, 4],
+                size: [3, 5],
+            })
+        );
+
+        assert_eq!(
+            interfaces.next(),
+            Some(&BlockInterface {
+                block: 2,
+                neighbor: 0,
+                interface: InterfaceKind::Fine,
+                source: [0, 2],
+                dest: [0, -2],
+                size: [4, 3],
+            })
+        );
+
+        assert_eq!(
+            interfaces.next(),
+            Some(&BlockInterface {
+                block: 2,
+                neighbor: 1,
+                interface: InterfaceKind::Direct,
+                source: [0, 2],
+                dest: [4, -2],
+                size: [3, 7],
+            })
+        );
+
+        assert_eq!(interfaces.next(), None);
     }
 }

@@ -320,11 +320,11 @@ impl<const N: usize> NodeSpace<N> {
         axis: usize,
     ) -> Support {
         if vertex[axis] < border && boundary.kind(Face::negative(axis)).is_weak() {
-            Support::Negative(vertex[axis])
+            Support::FreeNegative(vertex[axis])
         } else if vertex[axis] > self.size[axis] - border
             && boundary.kind(Face::positive(axis)).is_weak()
         {
-            Support::Positive(self.size[axis] - vertex[axis])
+            Support::FreePositive(self.size[axis] - vertex[axis])
         } else {
             Support::Interior
         }
@@ -339,11 +339,11 @@ impl<const N: usize> NodeSpace<N> {
     ) -> Support {
         if vertex[axis] < border.saturating_sub(1) && boundary.kind(Face::negative(axis)).is_weak()
         {
-            Support::Negative(vertex[axis] + 1)
+            Support::FreeNegative(vertex[axis] + 1)
         } else if vertex[axis] > self.size[axis] - border
             && boundary.kind(Face::positive(axis)).is_weak()
         {
-            Support::Positive(self.size[axis] - vertex[axis])
+            Support::FreePositive(self.size[axis] - vertex[axis])
         } else {
             Support::Interior
         }
@@ -372,8 +372,14 @@ impl<const N: usize> NodeSpace<N> {
             weights[axis] = operator[axis].weights(order, support);
             corner[axis] = match support {
                 Support::Interior => node[axis] - border as isize,
-                Support::Negative(_) => 0,
-                Support::Positive(_) => (self.size[axis] + 1 - weights[axis].len()) as isize,
+                Support::FreeNegative(_)
+                | Support::SymNegative(_)
+                | Support::AntiSymNegative(_) => 0,
+                Support::FreePositive(_)
+                | Support::SymPositive(_)
+                | Support::AntiSymPositive(_) => {
+                    (self.size[axis] + 1 - weights[axis].len()) as isize
+                }
             };
         }
 
@@ -403,8 +409,14 @@ impl<const N: usize> NodeSpace<N> {
                 weights[axis] = Interpolation::weights(order, support);
                 corner[axis] = match support {
                     Support::Interior => node[axis] - border as isize + 1,
-                    Support::Negative(_) => 0,
-                    Support::Positive(_) => (self.size[axis] + 1 - weights[axis].len()) as isize,
+                    Support::FreeNegative(_)
+                    | Support::SymNegative(_)
+                    | Support::AntiSymNegative(_) => 0,
+                    Support::FreePositive(_)
+                    | Support::SymPositive(_)
+                    | Support::AntiSymPositive(_) => {
+                        (self.size[axis] + 1 - weights[axis].len()) as isize
+                    }
                 };
 
                 scale *= Interpolation::scale(order);
@@ -540,8 +552,8 @@ mod tests {
             Support::Interior,
             Support::Interior,
             Support::Interior,
-            Support::Positive(1),
-            Support::Positive(0),
+            Support::FreePositive(1),
+            Support::FreePositive(0),
         ];
 
         for i in 0..9 {

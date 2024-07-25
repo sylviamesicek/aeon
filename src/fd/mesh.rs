@@ -262,6 +262,7 @@ impl<'a, const N: usize, const ORDER: usize> MeshOrder<'a, N, ORDER> {
         self.fill_physical(boundary, conditions, &mut system);
         self.fill_direct(&mut system);
         self.fill_prolong(boundary, &mut system);
+        self.fill_physical(boundary, conditions, &mut system);
     }
 
     fn fill_physical<B: Boundary, C: Conditions<N>>(
@@ -309,10 +310,10 @@ impl<'a, const N: usize, const ORDER: usize> MeshOrder<'a, N, ORDER> {
                 let mut subcell_size: [_; N] = from_fn(|axis| mesh.nodes.cell_width[axis] / 2);
 
                 for axis in 0..N {
-                    if region.side(axis) == Side::Right {
-                        cell_size[axis] += 1;
-                        subcell_size[axis] += 1;
-                    }
+                    // if region.side(axis) == Side::Right {
+                    cell_size[axis] += 1;
+                    subcell_size[axis] += 1;
+                    // }
                 }
 
                 // Loop over all cells on the border of the block which touch this region.
