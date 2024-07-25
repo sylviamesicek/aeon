@@ -752,66 +752,49 @@ impl InterfaceKind {
     }
 }
 
+/// An interface between two blocks on a quad tree.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct BlockInterface<const N: usize> {
+    /// Target block.
     block: usize,
+    /// Source block.
     neighbor: usize,
+    /// Type of interface between blocks.
     interface: InterfaceKind,
+    /// Source node on neighbor.
     source: [isize; N],
+    /// Destination node on target.
     dest: [isize; N],
+    /// Number of blocks to be filled.
     size: [usize; N],
 }
 
-#[derive(Clone, Copy)]
-struct CellNeighbor<const N: usize> {
-    cell: usize,
-    neighbor: usize,
-    region: Region<N>,
-}
-
+/// Caches information about interior interfaces on quadtrees, specifically
+/// storing information necessary for transferring data between blocks.
 #[derive(Default, Clone)]
 pub struct TreeInterfaces<const N: usize> {
-    neighbors: Vec<BlockInterface<N>>,
+    interfaces: Vec<BlockInterface<N>>,
 }
 
 impl<const N: usize> TreeInterfaces<N> {
+    /// Iterates over all `BlockInterface`s.
     pub fn iter(&self) -> slice::Iter<'_, BlockInterface<N>> {
-        self.neighbors.iter()
+        self.interfaces.iter()
     }
 
+    /// Rebuilds the block interface data.
     pub fn build(&mut self, tree: &Tree<N>, blocks: &TreeBlocks<N>, nodes: &TreeNodes<N>) {
+        // Reused memory for neighbors.
         let mut neighbors = Vec::new();
 
         for block in 0..blocks.num_blocks() {
-            neighbors.clear();
-
+            // Cache block info
             let block_size = blocks.block_size(block);
-            let block_cells = blocks.block_cells(block);
+            // Build cell neighbors.
+            neighbors.clear();
+            Self::build_cell_neighbors(tree, blocks, block, &mut neighbors);
 
-            for region in regions::<N>() {
-                if region == Region::CENTRAL {
-                    continue;
-                }
-
-                let block_space = IndexSpace::new(block_size);
-
-                // Find all cells adjacent to the given region.
-                for index in block_space.adjacent(region) {
-                    let cell = block_cells[block_space.linear_from_cartesian(index)];
-                    let neighbor = tree.neighbor_region(cell, region);
-
-                    if neighbor == NULL {
-                        continue;
-                    }
-
-                    neighbors.push(CellNeighbor {
-                        cell,
-                        neighbor,
-                        region: region.clone(),
-                    })
-                }
-            }
-
+            // Sort neighbors (to group cells from the same block together).
             neighbors.sort_unstable_by(|left, right| {
                 let lblock = blocks.cell_block(left.neighbor);
                 let rblock = blocks.cell_block(right.neighbor);
@@ -823,20 +806,94 @@ impl<const N: usize> TreeInterfaces<N> {
                     .then(left.region.cmp(&right.region))
             });
 
-            self.build_block(tree, blocks, nodes, block, &mut neighbors);
+            Self::taverse_cell_neighbors(blocks, &mut neighbors, |neighbor, a, b| {
+                // Find active region.
+                let (anode, bnode) = Self::block_ghost_aabb(blocks, nodes, a, b);
+                let mut source = Self::neighbor_origin(tree, blocks, nodes, a);
+                let (mut dest, mut size) = Self::space_from_aabb(anode, bnode);
+
+                // Avoid overlaps between aabbs on this block.
+                let aorigin = blocks.cell_index(a.cell);
+                let borigin = blocks.cell_index(b.cell);
+                let flags = blocks.block_boundary_flags(block);
+
+                for axis in 0..N {
+                    let right_boundary = flags.is_set(Face::positive(axis));
+                    let left_boundary = flags.is_set(Face::negative(axis));
+
+                    // If the right edge doesn't extend all the way to the right,
+                    // shrink by one.
+                    if b.region.side(axis) == Side::Middle
+                        && !(borigin[axis] == block_size[axis] - 1 && right_boundary)
+                    {
+                        size[axis] -= 1;
+                    }
+
+                    // If we do not extend further left, don't include
+                    if a.region.side(axis) == Side::Middle && aorigin[axis] == 0 && !left_boundary {
+                        source[axis] += 1;
+                        dest[axis] += 1;
+                        size[axis] -= 1;
+                    }
+                }
+
+                // Compute this boundary interface.
+                let interface =
+                    InterfaceKind::from_levels(tree.level(a.cell), tree.level(a.neighbor));
+
+                self.interfaces.push(BlockInterface {
+                    block,
+                    neighbor,
+                    interface,
+                    source,
+                    dest,
+                    size,
+                });
+            });
         }
     }
 
-    fn build_block(
-        &mut self,
+    /// Iterates the cell neighbors of a block, and pushes them onto the memory stack.
+    fn build_cell_neighbors(
         tree: &Tree<N>,
         blocks: &TreeBlocks<N>,
-        nodes: &TreeNodes<N>,
         block: usize,
-        neighbors: &mut [CellNeighbor<N>],
+        neighbors: &mut Vec<CellNeighbor<N>>,
     ) {
         let block_size = blocks.block_size(block);
+        let block_cells = blocks.block_cells(block);
 
+        for region in regions::<N>() {
+            if region == Region::CENTRAL {
+                continue;
+            }
+
+            let block_space = IndexSpace::new(block_size);
+
+            // Find all cells adjacent to the given region.
+            for index in block_space.adjacent(region) {
+                let cell = block_cells[block_space.linear_from_cartesian(index)];
+                let neighbor = tree.neighbor_region(cell, region);
+
+                if neighbor == NULL {
+                    continue;
+                }
+
+                neighbors.push(CellNeighbor {
+                    cell,
+                    neighbor,
+                    region: region.clone(),
+                })
+            }
+        }
+    }
+
+    /// Traverses a sorted list of cell neighbors, calling f once for each distinct block.
+    fn taverse_cell_neighbors(
+        blocks: &TreeBlocks<N>,
+        neighbors: &mut [CellNeighbor<N>],
+        mut f: impl FnMut(usize, CellNeighbor<N>, CellNeighbor<N>),
+    ) {
         let mut neighbors = neighbors.iter().map(|n| n.clone()).peekable();
 
         while let Some(a) = neighbors.next() {
@@ -856,46 +913,7 @@ impl<const N: usize> TreeInterfaces<N> {
                 break;
             }
 
-            let (anode, bnode) = Self::block_ghost_aabb(blocks, nodes, a, b);
-            let mut source = Self::neighbor_origin(tree, blocks, nodes, a);
-            let (mut dest, mut size) = Self::space_from_aabb(anode, bnode);
-
-            // Avoid overlaps between aabbs on this block
-            let aorigin = blocks.cell_index(a.cell);
-            let borigin = blocks.cell_index(b.cell);
-            let flags = blocks.block_boundary_flags(block);
-
-            for axis in 0..N {
-                let right_boundary = flags.is_set(Face::positive(axis));
-                let left_boundary = flags.is_set(Face::negative(axis));
-
-                // If the right edge doesn't extend all the way to the right,
-                // shrink by one.
-                if b.region.side(axis) == Side::Middle
-                    && !(borigin[axis] == block_size[axis] - 1 && right_boundary)
-                {
-                    size[axis] -= 1;
-                }
-
-                // If we do not extend further left, don't include
-                if a.region.side(axis) == Side::Middle && aorigin[axis] == 0 && !left_boundary {
-                    source[axis] += 1;
-                    dest[axis] += 1;
-                    size[axis] -= 1;
-                }
-            }
-
-            // Compute this boundary interface.
-            let interface = InterfaceKind::from_levels(tree.level(a.cell), tree.level(a.neighbor));
-
-            self.neighbors.push(BlockInterface {
-                block,
-                neighbor,
-                interface,
-                source,
-                dest,
-                size,
-            })
+            f(neighbor, a, b)
         }
     }
 
@@ -947,6 +965,7 @@ impl<const N: usize> TreeInterfaces<N> {
         (anode, bnode)
     }
 
+    /// Converts a window stored in aabb format to a window stored as an origin and a size.
     fn space_from_aabb(a: [isize; N], b: [isize; N]) -> ([isize; N], [usize; N]) {
         // Origin is just the bottom left corner of A.
         let dest = a;
@@ -1027,6 +1046,13 @@ impl<const N: usize> TreeInterfaces<N> {
 
         source
     }
+}
+
+#[derive(Clone, Copy)]
+struct CellNeighbor<const N: usize> {
+    cell: usize,
+    neighbor: usize,
+    region: Region<N>,
 }
 
 /// Caches information about every neighbor touching each cell (including non-adjacent neighbors).
@@ -1142,6 +1168,14 @@ impl<const N: usize> TreeNodes<N> {
             ghost_nodes,
             node_offsets: Vec::new(),
         }
+    }
+
+    pub fn cell_width(&self) -> [usize; N] {
+        self.cell_width
+    }
+
+    pub fn ghost(&self) -> usize {
+        self.ghost_nodes
     }
 
     /// Rebuilds the set of tree nodes.
@@ -1368,7 +1402,7 @@ mod tests {
     }
 
     #[test]
-    fn neighbors() {
+    fn neighbor_regions() {
         let mut tree = Tree::new(Rectangle::<2>::UNIT);
         let mut neighbors = TreeNeighbors::default();
 
@@ -1377,31 +1411,22 @@ mod tests {
 
         assert_eq!(tree.num_cells(), 7);
 
-        assert_eq!(
-            neighbors.cell_neighbors(0),
-            [NULL, NULL, NULL, NULL, 0, 1, NULL, 2, 3]
-        );
-        assert_eq!(
-            neighbors.cell_neighbors(1),
-            [NULL, NULL, NULL, 0, 1, 4, 2, 3, 4]
-        );
-        assert_eq!(
-            neighbors.cell_neighbors(2),
-            [NULL, 0, 1, NULL, 2, 3, NULL, 5, 5]
-        );
-        assert_eq!(neighbors.cell_neighbors(3), [0, 1, 4, 2, 3, 4, 5, 5, 6]);
-        assert_eq!(
-            neighbors.cell_neighbors(4),
-            [NULL, NULL, NULL, 1, 4, NULL, 5, 6, NULL]
-        );
-        assert_eq!(
-            neighbors.cell_neighbors(5),
-            [NULL, 2, 4, NULL, 5, 6, NULL, NULL, NULL]
-        );
-        assert_eq!(
-            neighbors.cell_neighbors(6),
-            [3, 4, NULL, 5, 6, NULL, NULL, NULL, NULL]
-        );
+        let assert_eq_regions = |cell, values: [usize; 9]| {
+            for region in regions::<2>() {
+                assert_eq!(
+                    tree.neighbor_region(cell, region),
+                    values[region.to_linear()]
+                );
+            }
+        };
+
+        assert_eq_regions(0, [NULL, NULL, NULL, NULL, 0, 1, NULL, 2, 3]);
+        assert_eq_regions(1, [NULL, NULL, NULL, 0, 1, 4, 2, 3, 4]);
+        assert_eq_regions(2, [NULL, 0, 1, NULL, 2, 3, NULL, 5, 5]);
+        assert_eq_regions(3, [0, 1, 4, 2, 3, 4, 5, 5, 6]);
+        assert_eq_regions(4, [NULL, NULL, NULL, 1, 4, NULL, 5, 6, NULL]);
+        assert_eq_regions(5, [NULL, 2, 4, NULL, 5, 6, NULL, NULL, NULL]);
+        assert_eq_regions(6, [3, 4, NULL, 5, 6, NULL, NULL, NULL, NULL]);
 
         assert_eq!(
             tree.neighbor_after_refinement(4, AxisMask::pack([true, true]), Face::negative(0)),
