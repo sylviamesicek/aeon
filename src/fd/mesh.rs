@@ -551,6 +551,40 @@ impl<'a, const N: usize, const ORDER: usize> MeshOrder<'a, N, ORDER> {
         }
     }
 
+    pub fn dissipation<BC: Boundary<N> + Conditions<N>>(
+        self,
+        bc: BC,
+        source: SystemSlice<'_, BC::System>,
+        mut dest: SystemSliceMut<'_, BC::System>,
+    ) {
+        let mesh = self.0;
+
+        for block in 0..mesh.num_blocks() {
+            let nodes = mesh.block_nodes(block);
+
+            let input = source.slice(nodes.clone()).fields();
+            let mut output = dest.slice_mut(nodes.clone());
+
+            let boundary = mesh.block_boundary(block, bc.clone());
+            let bounds = mesh.block_bounds(block);
+            let space = mesh.block_space(block).set_context(bounds);
+
+            let vertex_size = space.vertex_size();
+
+            for field in BC::System::fields() {
+                let src = input.field(field.clone());
+                let dst = output.field_mut(field.clone());
+
+                let space = space.set_bc(SystemBC::new(field.clone(), boundary.clone()));
+
+                for vertex in IndexSpace::new(vertex_size).iter() {
+                    let value = space.dissipation::<ORDER>(vertex, src);
+                    space.set_value(node_from_vertex(vertex), value, dst);
+                }
+            }
+        }
+    }
+
     /// Determines if a vertex is not within `ORDER` of any weakly enforced boundary.
     fn is_interior(
         boundary: &impl Boundary<N>,

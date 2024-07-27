@@ -639,7 +639,7 @@ pub fn hyperbolic(sys: HyperbolicSystem, pos: [f64; 2]) -> HyperbolicDerivs {
 #[cfg(test)]
 mod tests {
     use super::{hyperbolic, tensor3, HyperbolicSystem};
-    use aeon::{common::NodeSpace, geometry::Rectangle};
+    use aeon::{fd::NodeSpace, geometry::Rectangle};
 
     #[test]
     fn tensor_utils() {
@@ -655,12 +655,12 @@ mod tests {
     #[test]
     fn minkowski() {
         let space = NodeSpace {
-            bounds: Rectangle {
+            size: [100, 100],
+            ghost: 2,
+            context: Rectangle {
                 origin: [0.0, 0.0],
                 size: [10.0, 10.0],
             },
-            size: [100, 100],
-            ghost: 2,
         };
 
         for node in space.inner_window().iter() {
@@ -761,12 +761,12 @@ mod tests {
     #[test]
     fn kasner() {
         let space = NodeSpace {
-            bounds: Rectangle {
+            size: [100, 100],
+            ghost: 2,
+            context: Rectangle {
                 origin: [0.0, 1.0],
                 size: [10.0, 10.0],
             },
-            size: [100, 100],
-            ghost: 2,
         };
 
         for node in space.inner_window().iter() {

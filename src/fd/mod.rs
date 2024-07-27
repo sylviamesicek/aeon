@@ -9,7 +9,7 @@ mod node;
 
 pub use boundary::{Boundary, BoundaryKind, Condition, Conditions, Domain, SystemBC, UnitBC, BC};
 pub use engine::{Engine, FdEngine, FdIntEngine};
-pub use kernel::{BasisOperator, Interpolation, Order, Support};
+pub use kernel::{BasisOperator, Dissipation, Interpolation, Order, Support};
 pub use mesh::Mesh;
 pub use model::Model;
 pub use node::{node_from_vertex, NodeSpace, NodeWindow};

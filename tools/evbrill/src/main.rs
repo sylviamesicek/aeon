@@ -12,6 +12,7 @@ use equations::HyperbolicSystem;
 
 const STEPS: usize = 1000;
 const CFL: f64 = 0.1;
+const ORDER: usize = 4;
 
 #[derive(Clone, SystemLabel)]
 pub enum InitialData {
@@ -39,40 +40,42 @@ pub enum Dynamic {
     Debug2,
 }
 
-pub struct ParityBoundary(bool, bool);
+#[derive(Clone)]
+pub struct DynamicBC;
 
-impl Boundary for ParityBoundary {
-    fn face(&self, face: Face) -> BoundaryCondition {
-        if face.axis == 0 && face.side == false {
-            BoundaryCondition::Parity(self.0)
-        } else if face.axis == 1 && face.side == false {
-            BoundaryCondition::Parity(self.1)
-        } else {
-            BoundaryCondition::Free
+impl Boundary<2> for DynamicBC {
+    fn kind(&self, face: Face<2>) -> BoundaryKind {
+        match face.side {
+            true => BoundaryKind::Radiative,
+            false => BoundaryKind::Parity,
         }
     }
 }
 
-pub struct DynamicBoundary;
+impl Conditions<2> for DynamicBC {
+    type System = Dynamic;
 
-impl SystemBoundary for DynamicBoundary {
-    type Boundary = ParityBoundary;
-    type Label = Dynamic;
+    fn parity(&self, field: Self::System, face: Face<2>) -> bool {
+        let axes = match field {
+            Dynamic::Grr | Dynamic::Krr => [true, true],
+            Dynamic::Grz | Dynamic::Krz => [false, false],
+            Dynamic::Gzz | Dynamic::Kzz => [true, true],
+            Dynamic::S | Dynamic::Y => [false, true],
 
-    fn field(&self, label: Self::Label) -> Self::Boundary {
-        let (rho, z) = match label {
-            Dynamic::Grr | Dynamic::Krr => (true, true),
-            Dynamic::Grz | Dynamic::Krz => (false, false),
-            Dynamic::Gzz | Dynamic::Kzz => (true, true),
-            Dynamic::S | Dynamic::Y => (false, true),
+            Dynamic::Theta | Dynamic::Lapse => [true, true],
+            Dynamic::Zr | Dynamic::Shiftr => [false, true],
+            Dynamic::Zz | Dynamic::Shiftz => [true, false],
 
-            Dynamic::Theta | Dynamic::Lapse => (true, true),
-            Dynamic::Zr | Dynamic::Shiftr => (false, true),
-            Dynamic::Zz | Dynamic::Shiftz => (true, false),
-
-            Dynamic::Debug1 | Dynamic::Debug2 => (true, true),
+            Dynamic::Debug1 | Dynamic::Debug2 => [true, true],
         };
-        ParityBoundary(rho, z)
+        axes[face.axis]
+    }
+
+    fn radiative(&self, field: Self::System, _position: [f64; 2]) -> f64 {
+        match field {
+            Dynamic::Grr | Dynamic::Gzz | Dynamic::Lapse => 1.0,
+            _ => 0.0,
+        }
     }
 }
 
@@ -351,8 +354,7 @@ impl SystemOperator<2> for DynamicDerivs {
 }
 
 pub struct DynamicOde<'a> {
-    driver: &'a mut Driver,
-    mesh: &'a Mesh<2>,
+    mesh: &'a mut Mesh<2>,
 }
 
 impl<'a> Ode for DynamicOde<'a> {
@@ -361,19 +363,18 @@ impl<'a> Ode for DynamicOde<'a> {
     }
 
     fn preprocess(&mut self, system: &mut [f64]) {
-        self.driver.fill_boundary_system(
-            self.mesh,
-            &DynamicBoundary,
-            SystemSliceMut::from_contiguous(system),
-        );
+        self.mesh
+            .order::<ORDER>()
+            .fill_boundary(DynamicBC, SystemSliceMut::from_contiguous(system));
     }
 
     fn derivative(&mut self, system: &[f64], result: &mut [f64]) {
         let src = SystemSlice::from_contiguous(system);
         let dest = SystemSliceMut::from_contiguous(result);
 
-        self.driver
-            .apply_system(self.mesh, &DynamicDerivs, src, dest);
+        self.mesh
+            .order::<ORDER>()
+            .apply(DynamicBC, DynamicDerivs, src, dest);
     }
 }
 
@@ -459,9 +460,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         ron::from_str(&contents)?
     };
 
-    // Get driver
-    let mut driver = Driver::new();
-
     // Grid
     let mesh = model.mesh().clone();
     // Initial Data
@@ -502,10 +500,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     dynamic.field_mut(Dynamic::Shiftz).fill(0.0);
 
     // Fill ghost nodes
-    driver.fill_boundary_system(&mesh, &DynamicBoundary, dynamic.as_mut_slice());
+    mesh.order::<ORDER>()
+        .fill_boundary(DynamicBC, dynamic.as_mut_slice());
 
     // Begin integration
-
     let h = CFL * mesh.minimum_spacing();
     println!("Spacing {}", mesh.minimum_spacing());
     println!("Step Size {}", h);
@@ -521,15 +519,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     for i in 0..STEPS {
         // Fill ghost nodes of system
-        driver.fill_boundary_system(
-            &mesh,
-            &DynamicBoundary,
-            SystemSliceMut::from_contiguous(&mut data),
-        );
+        mesh.order::<ORDER>()
+            .fill_boundary(DynamicBC, SystemSliceMut::from_contiguous(&mut data));
 
-        driver.apply_system(
-            &mesh,
-            &DynamicDerivs,
+        mesh.order::<ORDER>().apply(
+            DynamicBC,
+            DynamicDerivs,
             SystemSlice::from_contiguous(&data),
             derivs.as_mut_slice(),
         );
@@ -553,20 +548,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         )?;
 
         // Compute step
-        integrator.step(
-            h,
-            &mut DynamicOde {
-                driver: &mut driver,
-                mesh: &mesh,
-            },
-            &data,
-            &mut update,
-        );
+        integrator.step(h, &mut DynamicOde { mesh: &mesh }, &data, &mut update);
 
         // Compute dissipation
-        driver.apply_system(
-            &mesh,
-            &DynamicDissipation,
+        mesh.order::<ORDER>().dissipation(
+            DynamicBC,
             SystemSlice::from_contiguous(&data),
             SystemSliceMut::from_contiguous(&mut dissipation),
         );

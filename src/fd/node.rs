@@ -4,7 +4,7 @@ use crate::prelude::Face;
 use std::array::from_fn;
 
 use super::boundary::{Boundary, Condition, Domain, DomainWithBC};
-use super::BoundaryKind;
+use super::{BoundaryKind, Dissipation};
 
 /// Transforms a vertex into a node (just casts an array of `usize` -> `isize`).
 pub fn node_from_vertex<const N: usize>(vertex: [usize; N]) -> [isize; N] {
@@ -413,6 +413,23 @@ impl<const N: usize, D: Boundary<N> + Condition<N>> NodeSpace<N, D> {
         }
     }
 
+    fn corner_vertex_axis(
+        &self,
+        support: Support,
+        node: [isize; N],
+        border: usize,
+        weights: &[f64],
+        axis: usize,
+    ) -> isize {
+        match support {
+            Support::Interior => node[axis] - border as isize,
+            Support::FreeNegative(_) | Support::SymNegative(_) | Support::AntiSymNegative(_) => 0,
+            Support::FreePositive(_) | Support::SymPositive(_) | Support::AntiSymPositive(_) => {
+                (self.size[axis] + 1) as isize - weights.len() as isize
+            }
+        }
+    }
+
     fn support_cell_axis(&self, vertex: [usize; N], border: usize, axis: usize) -> Support {
         if vertex[axis] < border.saturating_sub(1) {
             let right = vertex[axis] + 1;
@@ -447,6 +464,23 @@ impl<const N: usize, D: Boundary<N> + Condition<N>> NodeSpace<N, D> {
         }
     }
 
+    fn corner_cell_axis(
+        &self,
+        support: Support,
+        node: [isize; N],
+        border: usize,
+        weights: &[f64],
+        axis: usize,
+    ) -> isize {
+        match support {
+            Support::Interior => node[axis] - border as isize + 1,
+            Support::FreeNegative(_) | Support::SymNegative(_) | Support::AntiSymNegative(_) => 0,
+            Support::FreePositive(_) | Support::SymPositive(_) | Support::AntiSymPositive(_) => {
+                (self.size[axis] + 1 - weights.len()) as isize
+            }
+        }
+    }
+
     /// Computes the interpolation of the underlying data to one increased level of refinement.
     pub fn prolong<const ORDER: usize>(&self, subvertex: [usize; N], field: &[f64]) -> f64 {
         let order = const { Order::from_value(ORDER) };
@@ -463,23 +497,38 @@ impl<const N: usize, D: Boundary<N> + Condition<N>> NodeSpace<N, D> {
                 let support = self.support_cell_axis(vertex, border, axis);
 
                 weights[axis] = Interpolation::weights(order, support);
-                corner[axis] = match support {
-                    Support::Interior => node[axis] - border as isize + 1,
-                    Support::FreeNegative(_)
-                    | Support::SymNegative(_)
-                    | Support::AntiSymNegative(_) => 0,
-                    Support::FreePositive(_)
-                    | Support::SymPositive(_)
-                    | Support::AntiSymPositive(_) => {
-                        (self.size[axis] + 1 - weights[axis].len()) as isize
-                    }
-                };
+                corner[axis] = self.corner_cell_axis(support, node, border, weights[axis], axis);
 
                 scale *= Interpolation::scale(order);
             }
         }
 
         self.weights(corner, weights, field) * scale
+    }
+
+    /// Computes the interpolation of the underlying data to one increased level of refinement.
+    pub fn dissipation<const ORDER: usize>(&self, vertex: [usize; N], field: &[f64]) -> f64 {
+        let order = const { Order::from_value(ORDER) };
+        let node = node_from_vertex(vertex);
+        let scale = Dissipation::scale(order);
+
+        let mut result = 0.0;
+
+        for axis in 0..N {
+            let border = Dissipation::border(order);
+            let support = self.support_vertex_axis(vertex, border, axis);
+
+            let weights = Dissipation::weights(order, support);
+
+            let mut corner = node;
+            corner[axis] = self.corner_vertex_axis(support, node, border, weights, axis);
+
+            result += self.weights_axis(corner, weights, axis, field);
+        }
+
+        result *= scale;
+
+        result
     }
 }
 
@@ -503,17 +552,7 @@ impl<const N: usize, D: Domain<N> + Boundary<N> + Condition<N>> NodeSpace<N, D> 
             let support = self.support_vertex_axis(vertex, border, axis);
 
             weights[axis] = operator[axis].weights(order, support);
-            corner[axis] = match support {
-                Support::Interior => node[axis] - border as isize,
-                Support::FreeNegative(_)
-                | Support::SymNegative(_)
-                | Support::AntiSymNegative(_) => 0,
-                Support::FreePositive(_)
-                | Support::SymPositive(_)
-                | Support::AntiSymPositive(_) => {
-                    (self.size[axis] + 1 - weights[axis].len()) as isize
-                }
-            };
+            corner[axis] = self.corner_vertex_axis(support, node, border, weights[axis], axis);
         }
 
         self.weights(corner, weights, field) * self.scale(operator)
