@@ -3,7 +3,7 @@ use crate::geometry::{faces, CartesianIter, IndexSpace};
 use crate::prelude::Face;
 use std::array::from_fn;
 
-use super::boundary::{Boundary, Condition, Domain, DomainBC};
+use super::boundary::{Boundary, Condition, Domain, DomainWithBC};
 use super::BoundaryKind;
 
 /// Transforms a vertex into a node (just casts an array of `usize` -> `isize`).
@@ -191,8 +191,8 @@ impl<const N: usize, D: Clone> NodeSpace<N, D> {
 }
 
 impl<const N: usize, D: Domain<N>> NodeSpace<N, D> {
-    pub fn set_bc<BC>(&self, bc: BC) -> NodeSpace<N, DomainBC<D, BC>> {
-        self.map_context(|domain| DomainBC::new(domain, bc))
+    pub fn set_bc<BC>(&self, bc: BC) -> NodeSpace<N, DomainWithBC<D, BC>> {
+        self.map_context(|domain| DomainWithBC::new(domain, bc))
     }
     /// Returns the spacing along each axis of the node space.
     pub fn spacing(&self) -> [f64; N] {

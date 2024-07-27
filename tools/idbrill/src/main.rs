@@ -1,6 +1,6 @@
 use aeon::array::Array;
 use aeon::elliptic::HyperRelaxSolver;
-use aeon::fd::{Boundary, BoundaryKind, Condition, Conditions, Engine, Projection};
+use aeon::fd::{Boundary, BoundaryKind, Conditions, Engine, Function, Projection, SystemBC};
 use aeon::prelude::*;
 use aeon::system::SystemFields;
 
@@ -16,11 +16,143 @@ pub enum Garfinkle {
     Seed,
 }
 
-#[derive(Clone, SystemLabel)]
-pub struct Psi;
+/// Boundary Conditions for Garfinkle variables.
+#[derive(Clone)]
+pub struct BoundaryConditions;
 
-#[derive(Clone, SystemLabel)]
-pub struct Seed;
+impl Boundary<2> for BoundaryConditions {
+    fn kind(&self, face: Face<2>) -> BoundaryKind {
+        if face.side == false {
+            BoundaryKind::Parity
+        } else {
+            BoundaryKind::Radiative
+        }
+    }
+}
+
+impl Conditions<2> for BoundaryConditions {
+    type System = Garfinkle;
+
+    fn parity(&self, field: Self::System, face: Face<2>) -> bool {
+        match field {
+            Garfinkle::Psi => [true, true][face.axis],
+            Garfinkle::Seed => [false, true][face.axis],
+        }
+    }
+
+    fn radiative(&self, field: Self::System, _position: [f64; 2]) -> f64 {
+        match field {
+            Garfinkle::Psi => 1.0,
+            Garfinkle::Seed => 0.0,
+        }
+    }
+}
+
+const PSI_COND: SystemBC<Garfinkle, BoundaryConditions> =
+    SystemBC::new(Garfinkle::Psi, BoundaryConditions);
+
+const SEED_COND: SystemBC<Garfinkle, BoundaryConditions> =
+    SystemBC::new(Garfinkle::Seed, BoundaryConditions);
+
+#[derive(Clone)]
+pub struct SeedFunction(f64);
+
+impl Function<2> for SeedFunction {
+    type Output = ();
+
+    fn evaluate(&self, position: [f64; 2]) -> SystemValue<Self::Output> {
+        let [rho, z] = position;
+        SystemValue::new([rho * self.0 * (-(rho * rho + z * z)).exp()])
+    }
+}
+
+#[derive(Clone)]
+pub struct SeedDRhoFunction(f64);
+
+impl Function<2> for SeedDRhoFunction {
+    type Output = ();
+
+    fn evaluate(&self, position: [f64; 2]) -> SystemValue<Self::Output> {
+        let [rho, z] = position;
+        SystemValue::new([self.0 * (-(rho * rho + z * z)).exp()
+            + rho * self.0 * (-(rho * rho + z * z)).exp() * (-2.0 * rho)])
+    }
+}
+
+#[derive(Clone)]
+pub struct PsiOperator;
+
+impl Operator<2> for PsiOperator {
+    type System = ();
+    type Context = ();
+
+    fn apply(
+        &self,
+        engine: &impl Engine<2>,
+        psi: SystemFields<'_, Self::System>,
+        seed: SystemFields<'_, Self::Context>,
+    ) -> SystemValue<Self::System> {
+        let psi = psi.field(());
+        let seed = seed.field(());
+
+        let [rho, _z] = engine.position();
+
+        let psi_val = engine.value(psi);
+        let psi_grad = engine.gradient(PSI_COND, psi);
+        let psi_hess = engine.hessian(PSI_COND, psi);
+
+        let seed_grad = engine.gradient(SEED_COND, seed);
+        let seed_hess = engine.hessian(SEED_COND, seed);
+
+        let laplacian = if rho.abs() <= 10e-10 {
+            2.0 * psi_hess[0][0] + psi_hess[1][1]
+        } else {
+            psi_hess[0][0] + psi_grad[0] / rho + psi_hess[1][1]
+        };
+
+        let result = laplacian
+            + psi_val / 4.0 * (rho * seed_hess[0][0] + 2.0 * seed_grad[0] + rho * seed_hess[1][1]);
+
+        SystemValue::new([result])
+    }
+}
+
+#[derive(Clone)]
+pub struct Hamiltonian;
+
+impl Projection<2> for Hamiltonian {
+    type Input = Garfinkle;
+    type Output = ();
+
+    fn project(
+        &self,
+        engine: &impl Engine<2>,
+        input: SystemFields<'_, Self::Input>,
+    ) -> SystemValue<Self::Output> {
+        let psi = input.field(Garfinkle::Psi);
+        let seed = input.field(Garfinkle::Seed);
+
+        let [rho, _z] = engine.position();
+
+        let psi_val = engine.value(psi);
+        let psi_grad = engine.gradient(PSI_COND, psi);
+        let psi_hess = engine.hessian(PSI_COND, psi);
+
+        let seed_grad = engine.gradient(SEED_COND, seed);
+        let seed_hess = engine.hessian(SEED_COND, seed);
+
+        let laplacian = if rho.abs() <= 10e-10 {
+            2.0 * psi_hess[0][0] + psi_hess[1][1]
+        } else {
+            psi_hess[0][0] + psi_grad[0] / rho + psi_hess[1][1]
+        };
+
+        let result = laplacian
+            + psi_val / 4.0 * (rho * seed_hess[0][0] + 2.0 * seed_grad[0] + rho * seed_hess[1][1]);
+
+        SystemValue::new([result])
+    }
+}
 
 /// Initial data in Rinne's hyperbolic variables.
 #[derive(Clone, SystemLabel)]
@@ -29,6 +161,7 @@ pub enum Rinne {
     Seed,
 }
 
+#[derive(Clone)]
 pub struct RinneFromGarfinkle;
 
 impl Projection<2> for RinneFromGarfinkle {
@@ -41,186 +174,14 @@ impl Projection<2> for RinneFromGarfinkle {
         input: SystemFields<'_, Self::Input>,
     ) -> SystemValue<Self::Output> {
         let [rho, _z] = engine.position();
-        let index = engine.index();
 
-        let psi = input.field(Garfinkle::Psi)[index];
-        let seed = input.field(Garfinkle::Seed)[index];
+        let psi = engine.value(input.field(Garfinkle::Psi));
+        let seed = engine.value(input.field(Garfinkle::Seed));
 
         let mut result: SystemValue<_> = SystemValue::default();
         result.set_field(Rinne::Conformal, psi.powi(4) * (2.0 * rho * seed).exp());
         result.set_field(Rinne::Seed, -seed);
         result
-    }
-}
-
-/// Boundary for quadrant of domain.
-#[derive(Clone)]
-pub struct Quadrant;
-
-impl Boundary for Quadrant {
-    fn kind(&self, face: Face) -> aeon::fd::BoundaryKind {
-        if face.side == false {
-            BoundaryKind::Parity
-        } else {
-            BoundaryKind::Radiative
-        }
-    }
-}
-
-/// Boundary Conditions for Garfinkle variables.
-pub struct GarfinkleConditions;
-
-impl Conditions<2> for GarfinkleConditions {
-    type Condition = GarfinkleCondition;
-    type System = Garfinkle;
-
-    fn field(&self, label: Self::System) -> Self::Condition {
-        match label {
-            Garfinkle::Psi => GarfinkleCondition([true, true], 1.0),
-            Garfinkle::Seed => GarfinkleCondition([false, true], 0.0),
-        }
-    }
-}
-
-pub struct GarfinkleCondition([bool; 2], f64);
-
-impl Condition<2> for GarfinkleCondition {
-    fn parity(&self, face: Face) -> bool {
-        self.0[face.axis]
-    }
-
-    fn radiative(&self, _position: [f64; 2]) -> f64 {
-        self.1
-    }
-}
-
-pub struct PsiConditions;
-
-impl Conditions<2> for PsiConditions {
-    type System = Psi;
-    type Condition = GarfinkleCondition;
-
-    fn field(&self, _label: Self::System) -> Self::Condition {
-        GarfinkleConditions.field(Garfinkle::Psi)
-    }
-}
-
-pub struct SeedConditions;
-
-impl Conditions<2> for SeedConditions {
-    type System = Seed;
-    type Condition = GarfinkleCondition;
-
-    fn field(&self, _label: Self::System) -> Self::Condition {
-        GarfinkleConditions.field(Garfinkle::Seed)
-    }
-}
-
-pub struct PsiOperator;
-
-impl Operator<2> for PsiOperator {
-    type System = Psi;
-    type Context = Seed;
-
-    fn evaluate(
-        &self,
-        engine: &impl Engine<2>,
-        psi: SystemFields<'_, Self::System>,
-        seed: SystemFields<'_, Self::Context>,
-    ) -> SystemValue<Self::System> {
-        let psi = psi.field(Psi);
-        let seed = seed.field(Seed);
-
-        let [rho, _z] = engine.position();
-        let index = engine.index();
-
-        let psi_val = psi[index];
-        let psi_grad = engine.gradient(psi);
-        let psi_hess = engine.hessian(psi);
-
-        let seed_grad = engine.gradient(seed);
-        let seed_hess = engine.hessian(seed);
-
-        let laplacian = if rho.abs() <= 10e-10 {
-            2.0 * psi_hess[0][0] + psi_hess[1][1]
-        } else {
-            psi_hess[0][0] + psi_grad[0] / rho + psi_hess[1][1]
-        };
-
-        let result = laplacian
-            + psi_val / 4.0 * (rho * seed_hess[0][0] + 2.0 * seed_grad[0] + rho * seed_hess[1][1]);
-
-        SystemValue::new([result])
-    }
-}
-
-pub struct Hamiltonian;
-
-impl Projection<2> for Hamiltonian {
-    type Input = Garfinkle;
-    type Output = Scalar;
-
-    fn project(
-        &self,
-        engine: &impl Engine<2>,
-        input: SystemFields<'_, Self::Input>,
-    ) -> SystemValue<Self::Output> {
-        let psi = input.field(Garfinkle::Psi);
-        let seed = input.field(Garfinkle::Seed);
-
-        let [rho, _z] = engine.position();
-        let index = engine.index();
-
-        let psi_val = psi[index];
-        let psi_grad = engine.gradient(psi);
-        let psi_hess = engine.hessian(psi);
-
-        let seed_grad = engine.gradient(seed);
-        let seed_hess = engine.hessian(seed);
-
-        let laplacian = if rho.abs() <= 10e-10 {
-            2.0 * psi_hess[0][0] + psi_hess[1][1]
-        } else {
-            psi_hess[0][0] + psi_grad[0] / rho + psi_hess[1][1]
-        };
-
-        let result = laplacian
-            + psi_val / 4.0 * (rho * seed_hess[0][0] + 2.0 * seed_grad[0] + rho * seed_hess[1][1]);
-
-        SystemValue::new([result])
-    }
-}
-
-pub struct SeedProjection(f64);
-
-impl Projection<2> for SeedProjection {
-    type Input = Scalar;
-    type Output = Scalar;
-
-    fn project(
-        &self,
-        engine: &impl Engine<2>,
-        _input: SystemFields<'_, Self::Input>,
-    ) -> SystemValue<Self::Output> {
-        let [rho, z] = engine.position();
-        SystemValue::new([rho * self.0 * (-(rho * rho + z * z)).exp()])
-    }
-}
-
-pub struct SeedDRhoProjection(f64);
-
-impl Projection<2> for SeedDRhoProjection {
-    type Input = Scalar;
-    type Output = Scalar;
-
-    fn project(
-        &self,
-        engine: &impl Engine<2>,
-        _input: SystemFields<'_, Self::Input>,
-    ) -> SystemValue<Self::Output> {
-        let [rho, z] = engine.position();
-        SystemValue::new([self.0 * (-(rho * rho + z * z)).exp()
-            + rho * self.0 * (-(rho * rho + z * z)).exp() * (-2.0 * rho)])
     }
 }
 
@@ -287,17 +248,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let (psi, seed) = data.split_at_mut(num_nodes);
 
     // Compute seed values.
-    mesh.order::<4>().project(
-        &Quadrant,
-        &SeedProjection(1.0),
-        SystemSlice::from_contiguous(&[]),
-        SystemSliceMut::from_contiguous(seed),
-    );
-    mesh.order::<4>().fill_boundary(
-        &Quadrant,
-        &SeedConditions,
-        SystemSliceMut::from_contiguous(seed),
-    );
+    mesh.order::<4>().evaluate(SeedFunction(1.0), seed.into());
+    mesh.order::<4>()
+        .fill_boundary(UnitBC(SEED_COND), seed.into());
 
     // Initial Guess for Psi
     psi.fill(1.0);
@@ -310,27 +263,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     solver.cfl = 0.1;
     solver.dampening = 0.4;
 
-    solver.solve::<2, 4, _>(
-        &mut mesh,
-        &Quadrant,
-        &PsiConditions,
-        &PsiOperator,
-        SystemSlice::from_contiguous(seed),
-        SystemSliceMut::from_contiguous(psi),
-    );
-    mesh.order::<4>().fill_boundary(
-        &Quadrant,
-        &PsiConditions,
-        SystemSliceMut::from_contiguous(psi),
-    );
+    solver.solve::<2, 4, _, _>(&mut mesh, PSI_COND, PsiOperator, seed.into(), psi.into());
+    mesh.order::<4>().fill_boundary(PSI_COND, psi.into());
 
     let system = SystemSlice::from_contiguous(&data);
 
     let mut hamiltonian = vec![0.0; mesh.num_nodes()].into_boxed_slice();
 
     mesh.order::<4>().project(
-        &Quadrant,
-        &Hamiltonian,
+        BoundaryConditions,
+        Hamiltonian,
         system.rb(),
         SystemSliceMut::from_contiguous(&mut hamiltonian),
     );
@@ -359,8 +301,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let mut rinne = SystemVec::with_length(mesh.num_nodes());
 
         mesh.order::<4>().project(
-            &Quadrant,
-            &RinneFromGarfinkle,
+            BoundaryConditions,
+            RinneFromGarfinkle,
             system.rb(),
             rinne.as_mut_slice(),
         );

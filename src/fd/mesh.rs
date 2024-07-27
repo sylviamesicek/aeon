@@ -14,7 +14,7 @@ use crate::geometry::{
 use crate::system::{SystemLabel, SystemSlice, SystemSliceMut};
 
 use super::boundary::BlockBC;
-use super::SystemBC;
+use super::{Function, SystemBC};
 
 /// Implementation of an axis aligned tree mesh using standard finite difference operators.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -402,22 +402,46 @@ impl<'a, const N: usize, const ORDER: usize> MeshOrder<'a, N, ORDER> {
 
                     let index = space.index_from_vertex(vertex);
 
-                    for label in BC::System::fields() {
-                        let f = block_fields.field(label.clone());
-                        let dfdt = block_deriv_fields.field_mut(label.clone());
+                    for field in BC::System::fields() {
+                        let field_values = block_fields.field(field.clone());
+                        let field_derivs = block_deriv_fields.field_mut(field.clone());
+                        let field_boundary = SystemBC::new(field.clone(), boundary.clone());
 
-                        let field_boundary = SystemBC::new(label.clone(), bc.clone());
-
-                        let target = field_boundary.radiative(position);
-                        let gradient = engine.gradient(field_boundary.clone(), f);
-                        let mut advection = engine.value(f) - target;
+                        let target = Condition::radiative(&field_boundary, position);
+                        let gradient = engine.gradient(field_boundary.clone(), field_values);
+                        let mut advection = engine.value(field_values) - target;
 
                         for axis in 0..N {
                             advection += position[axis] * gradient[axis];
                         }
 
-                        dfdt[index] = -advection / r;
+                        field_derivs[index] = -advection / r;
                     }
+                }
+            }
+        }
+    }
+
+    /// Fills the system by applying the given function at each node on the mesh.
+    pub fn evaluate<F: Function<N>>(self, f: F, mut dest: SystemSliceMut<'_, F::Output>) {
+        let mesh = self.0;
+
+        for block in 0..mesh.num_blocks() {
+            let nodes = mesh.block_nodes(block);
+
+            let mut output = dest.slice_mut(nodes.clone()).fields_mut();
+
+            let bounds = mesh.block_bounds(block);
+            let space = mesh.block_space(block).set_context(bounds);
+            let vertex_size = space.vertex_size();
+
+            for vertex in IndexSpace::new(vertex_size).iter() {
+                let position = space.position(node_from_vertex(vertex));
+                let result = f.evaluate(position);
+
+                let index = space.index_from_vertex(vertex);
+                for field in F::Output::fields() {
+                    output.field_mut(field.clone())[index] = result.field(field.clone());
                 }
             }
         }
@@ -507,7 +531,7 @@ impl<'a, const N: usize, const ORDER: usize> MeshOrder<'a, N, ORDER> {
                         vertex,
                     };
 
-                    operator.evaluate(&engine, input.as_fields(), context.as_fields())
+                    operator.apply(&engine, input.as_fields(), context.as_fields())
                 } else {
                     let engine = FdEngine::<N, ORDER, _> {
                         space: space.clone(),
@@ -515,7 +539,7 @@ impl<'a, const N: usize, const ORDER: usize> MeshOrder<'a, N, ORDER> {
                         boundary: boundary.clone(),
                     };
 
-                    operator.evaluate(&engine, input.as_fields(), context.as_fields())
+                    operator.apply(&engine, input.as_fields(), context.as_fields())
                 };
 
                 let index = space.index_from_node(node_from_vertex(vertex));

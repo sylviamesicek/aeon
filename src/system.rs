@@ -277,8 +277,14 @@ impl<'long, 'short, Label: SystemLabel> Reborrow<'short> for SystemSlice<'long, 
     }
 }
 
-impl<'a> From<&'a [f64]> for SystemSlice<'a, Scalar> {
+impl<'a> From<&'a [f64]> for SystemSlice<'a, ()> {
     fn from(value: &'a [f64]) -> Self {
+        SystemSlice::from_contiguous(value)
+    }
+}
+
+impl<'a> From<&'a mut [f64]> for SystemSlice<'a, ()> {
+    fn from(value: &'a mut [f64]) -> Self {
         SystemSlice::from_contiguous(value)
     }
 }
@@ -432,7 +438,7 @@ impl<'long, 'short, Label: SystemLabel> ReborrowMut<'short> for SystemSliceMut<'
     }
 }
 
-impl<'a> From<&'a mut [f64]> for SystemSliceMut<'a, Scalar> {
+impl<'a> From<&'a mut [f64]> for SystemSliceMut<'a, ()> {
     fn from(value: &'a mut [f64]) -> Self {
         SystemSliceMut::from_contiguous(value)
     }
@@ -520,39 +526,13 @@ impl<'a, Label: SystemLabel> SystemFieldsMut<'a, Label> {
     }
 }
 
-/// A default system representing zero scalar fields.
-#[derive(Clone)]
-pub struct Empty;
-
-impl SystemLabel for Empty {
-    const NAME: &'static str = "Empty";
-
-    type FieldLike<T> = [T; 0];
-
-    fn fields() -> Array<Self::FieldLike<Self>> {
-        [].into()
-    }
-
-    fn field_index(&self) -> usize {
-        panic!()
-    }
-
-    fn field_name(&self) -> String {
-        panic!()
-    }
-}
-
-/// A default system representing one scalar field.
-#[derive(Clone)]
-pub struct Scalar;
-
-impl SystemLabel for Scalar {
-    const NAME: &'static str = "Scalar";
+impl SystemLabel for () {
+    const NAME: &'static str = "Unit";
 
     type FieldLike<T> = [T; 1];
 
     fn fields() -> Array<Self::FieldLike<Self>> {
-        [Scalar].into()
+        [()].into()
     }
 
     fn field_index(&self) -> usize {
@@ -560,7 +540,7 @@ impl SystemLabel for Scalar {
     }
 
     fn field_name(&self) -> String {
-        "scalar".to_string()
+        "unit".to_string()
     }
 }
 

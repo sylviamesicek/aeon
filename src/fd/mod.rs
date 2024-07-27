@@ -7,7 +7,7 @@ mod mesh;
 mod model;
 mod node;
 
-pub use boundary::{Boundary, BoundaryKind, Condition, Conditions, Domain, SystemBC, BC};
+pub use boundary::{Boundary, BoundaryKind, Condition, Conditions, Domain, SystemBC, UnitBC, BC};
 pub use engine::{Engine, FdEngine, FdIntEngine};
 pub use kernel::{BasisOperator, Interpolation, Order, Support};
 pub use mesh::Mesh;
@@ -16,6 +16,14 @@ pub use node::{node_from_vertex, NodeSpace, NodeWindow};
 
 use crate::system::{SystemFields, SystemLabel, SystemValue};
 
+/// A function takes in a position and returns a system of values.
+pub trait Function<const N: usize>: Clone {
+    type Output: SystemLabel;
+
+    fn evaluate(&self, position: [f64; N]) -> SystemValue<Self::Output>;
+}
+
+/// A projection maps one set of scalar fields to another.
 pub trait Projection<const N: usize>: Clone {
     type Input: SystemLabel;
     type Output: SystemLabel;
@@ -27,28 +35,13 @@ pub trait Projection<const N: usize>: Clone {
     ) -> SystemValue<Self::Output>;
 }
 
-// impl<const N: usize, Output, T> Projection<N> for T
-// where
-//     Output: SystemLabel,
-//     T: Fn([f64; N]) -> SystemValue<Output>,
-// {
-//     type Input = Empty;
-//     type Output = Output;
-
-//     fn project(
-//         &self,
-//         engine: &impl Engine<N>,
-//         _input: SystemFields<'_, Self::Input>,
-//     ) -> SystemValue<Self::Output> {
-//         self(engine.position())
-//     }
-// }
-
+/// An operator transforms a set of scalar fields, using an additional set of scalar fields
+/// as context.
 pub trait Operator<const N: usize>: Clone {
     type System: SystemLabel;
     type Context: SystemLabel;
 
-    fn evaluate(
+    fn apply(
         &self,
         engine: &impl Engine<N>,
         input: SystemFields<'_, Self::System>,

@@ -1,3 +1,8 @@
+//! Provides generalized interfaces for expressing various kinds of boundary condition.
+//!
+//! This module uses a combination of trait trickery and type transformers to
+//! create an ergonomic API for working with boundaries.
+
 use crate::{
     geometry::{Face, FaceMask},
     prelude::{Rectangle, SystemLabel},
@@ -32,6 +37,7 @@ pub trait Boundary<const N: usize>: Clone {
     fn kind(&self, face: Face<N>) -> BoundaryKind;
 }
 
+/// Provides information about the bounds of the space.
 pub trait Domain<const N: usize>: Clone {
     fn bounds(&self) -> Rectangle<N>;
 }
@@ -42,8 +48,8 @@ impl<const N: usize> Domain<N> for Rectangle<N> {
     }
 }
 
-/// Provides specifics for enforcing boundary conditions, whether
-/// strongly or weakly.
+/// Provides specifics for enforcing boundary conditions for
+/// a particular field.
 pub trait Condition<const N: usize>: Clone {
     fn parity(&self, _face: Face<N>) -> bool {
         false
@@ -52,16 +58,9 @@ pub trait Condition<const N: usize>: Clone {
     fn radiative(&self, _position: [f64; N]) -> f64 {
         0.0
     }
-
-    // fn attach_boundary<B: Boundary<N>>(self, boundary: B) -> AttachBoundary<Self, B> {
-    //     AttachBoundary {
-    //         inner: self,
-    //         boundary,
-    //     }
-    // }
 }
 
-/// A generalization of `Condition<N>` for a coupled system.
+/// A generalization of `Condition<N>` for a coupled systems of scalar fields.
 pub trait Conditions<const N: usize>: Clone {
     type System: SystemLabel;
 
@@ -74,6 +73,45 @@ pub trait Conditions<const N: usize>: Clone {
     }
 }
 
+/// Transforms a single condition into a set of `Conditions<N>` where `Self::System = ()`.
+#[derive(Clone)]
+pub struct UnitBC<I>(pub I);
+
+impl<I> UnitBC<I> {
+    pub fn new(inner: I) -> Self {
+        Self(inner)
+    }
+}
+
+impl<const N: usize, I: Boundary<N>> Boundary<N> for UnitBC<I> {
+    fn kind(&self, face: Face<N>) -> BoundaryKind {
+        self.0.kind(face)
+    }
+}
+
+impl<const N: usize, I: Condition<N>> Condition<N> for UnitBC<I> {
+    fn parity(&self, face: Face<N>) -> bool {
+        self.0.parity(face)
+    }
+
+    fn radiative(&self, position: [f64; N]) -> f64 {
+        self.0.radiative(position)
+    }
+}
+
+impl<const N: usize, I: Condition<N>> Conditions<N> for UnitBC<I> {
+    type System = ();
+
+    fn parity(&self, _field: Self::System, face: Face<N>) -> bool {
+        self.0.parity(face)
+    }
+
+    fn radiative(&self, _field: Self::System, position: [f64; N]) -> f64 {
+        self.0.radiative(position)
+    }
+}
+
+/// A transformer for extracting boundary information for a specific field in a system.
 #[derive(Clone)]
 pub struct SystemBC<S: SystemLabel, I> {
     field: S,
@@ -81,7 +119,7 @@ pub struct SystemBC<S: SystemLabel, I> {
 }
 
 impl<S: SystemLabel, C> SystemBC<S, C> {
-    pub fn new(field: S, inner: C) -> Self {
+    pub const fn new(field: S, inner: C) -> Self {
         Self { field, inner }
     }
 }
@@ -92,6 +130,20 @@ impl<const N: usize, S: SystemLabel, C: Conditions<N, System = S>> Condition<N> 
     }
 
     fn radiative(&self, position: [f64; N]) -> f64 {
+        self.inner.radiative(self.field.clone(), position)
+    }
+}
+
+impl<const N: usize, S: SystemLabel, C: Conditions<N, System = S>> Conditions<N>
+    for SystemBC<S, C>
+{
+    type System = ();
+
+    fn parity(&self, _field: (), face: Face<N>) -> bool {
+        self.inner.parity(self.field.clone(), face)
+    }
+
+    fn radiative(&self, _field: (), position: [f64; N]) -> f64 {
         self.inner.radiative(self.field.clone(), position)
     }
 }
@@ -108,6 +160,9 @@ impl<const N: usize, S: SystemLabel, B: Domain<N>> Domain<N> for SystemBC<S, B> 
     }
 }
 
+/// A transformer for overriding individual boundary faces with `BoundaryKind::Custom`. This
+/// is primarily used internally to ensure interior boundaries between blocks are properly
+/// used.
 #[derive(Debug, Clone)]
 pub struct BlockBC<const N: usize, I> {
     pub inner: I,
@@ -158,68 +213,7 @@ impl<const N: usize, C: Conditions<N>> Conditions<N> for BlockBC<N, C> {
     }
 }
 
-// /// Transformer which attaches a boundary to a condition or domain.
-// #[derive(Clone)]
-// pub struct AttachBoundary<I, B> {
-//     pub inner: I,
-//     pub boundary: B,
-// }
-
-// impl<const N: usize, I: Condition<N>, B: Clone> Condition<N> for AttachBoundary<I, B> {
-//     fn parity(&self, face: Face<N>) -> bool {
-//         self.inner.parity(face)
-//     }
-
-//     fn radiative(&self, position: [f64; N]) -> f64 {
-//         self.inner.radiative(position)
-//     }
-// }
-
-// impl<const N: usize, I: Domain<N> + Clone, B: Clone> Domain<N> for AttachBoundary<I, B> {
-//     fn bounds(&self) -> Rectangle<N> {
-//         self.inner.bounds()
-//     }
-// }
-
-// impl<const N: usize, I: Clone, B: Boundary<N>> Boundary<N> for AttachBoundary<I, B> {
-//     const GHOST: usize = B::GHOST;
-
-//     fn kind(&self, face: Face<N>) -> BoundaryKind {
-//         self.boundary.kind(face)
-//     }
-// }
-
-// /// Transformer which attaches a boundary to a condition or domain.
-// #[derive(Clone)]
-// pub struct AttachCondition<I, C> {
-//     pub inner: I,
-//     pub condition: C,
-// }
-
-// impl<const N: usize, I: Clone, C: Condition<N>> Condition<N> for AttachCondition<I, C> {
-//     fn parity(&self, face: Face<N>) -> bool {
-//         self.condition.parity(face)
-//     }
-
-//     fn radiative(&self, position: [f64; N]) -> f64 {
-//         self.condition.radiative(position)
-//     }
-// }
-
-// impl<const N: usize, I: Domain<N>, C: Clone> Domain<N> for AttachCondition<I, C> {
-//     fn bounds(&self) -> Rectangle<N> {
-//         self.inner.bounds()
-//     }
-// }
-
-// impl<const N: usize, I: Boundary<N>, C> Boundary<N> for AttachCondition<I, C> {
-//     const GHOST: usize = I::GHOST;
-
-//     fn kind(&self, face: Face<N>) -> BoundaryKind {
-//         self.inner.kind(face)
-//     }
-// }
-
+/// Combines a `Boundary<N>` with a `Condition<N>` or `Conditions<N>`.
 #[derive(Clone)]
 pub struct BC<B, C> {
     pub boundary: B,
@@ -263,31 +257,32 @@ impl<const N: usize, B: Clone, C: Conditions<N>> Conditions<N> for BC<B, C> {
     }
 }
 
+/// Bundles a domain with a set of boundary conditions.
 #[derive(Clone)]
-pub struct DomainBC<D, I> {
+pub struct DomainWithBC<D, I> {
     pub domain: D,
     pub inner: I,
 }
 
-impl<D, I> DomainBC<D, I> {
+impl<D, I> DomainWithBC<D, I> {
     pub fn new(domain: D, inner: I) -> Self {
         Self { domain, inner }
     }
 }
 
-impl<const N: usize, D: Domain<N>, I: Clone> Domain<N> for DomainBC<D, I> {
+impl<const N: usize, D: Domain<N>, I: Clone> Domain<N> for DomainWithBC<D, I> {
     fn bounds(&self) -> Rectangle<N> {
         self.domain.bounds()
     }
 }
 
-impl<const N: usize, I: Clone, BC: Boundary<N>> Boundary<N> for DomainBC<I, BC> {
+impl<const N: usize, I: Clone, BC: Boundary<N>> Boundary<N> for DomainWithBC<I, BC> {
     fn kind(&self, face: Face<N>) -> BoundaryKind {
         self.inner.kind(face)
     }
 }
 
-impl<const N: usize, I: Clone, BC: Condition<N>> Condition<N> for DomainBC<I, BC> {
+impl<const N: usize, I: Clone, BC: Condition<N>> Condition<N> for DomainWithBC<I, BC> {
     fn parity(&self, face: Face<N>) -> bool {
         self.inner.parity(face)
     }
@@ -297,7 +292,7 @@ impl<const N: usize, I: Clone, BC: Condition<N>> Condition<N> for DomainBC<I, BC
     }
 }
 
-impl<const N: usize, B: Clone, C: Conditions<N>> Conditions<N> for DomainBC<B, C> {
+impl<const N: usize, B: Clone, C: Conditions<N>> Conditions<N> for DomainWithBC<B, C> {
     type System = C::System;
 
     fn parity(&self, field: Self::System, face: Face<N>) -> bool {
@@ -308,36 +303,3 @@ impl<const N: usize, B: Clone, C: Conditions<N>> Conditions<N> for DomainBC<B, C
         self.inner.radiative(field, position)
     }
 }
-
-// /// Transformer that combines a boundary and a condition.
-// pub struct BoundaryCondition<B, C> {
-//     pub boundary: B,
-//     pub condition: C,
-// }
-
-// impl<B, C> BoundaryCondition<B, C> {
-//     pub fn new(boundary: B, condition: C) -> Self {
-//         Self {
-//             boundary,
-//             condition,
-//         }
-//     }
-// }
-
-// impl<const N: usize, B: Boundary<N>, C> Boundary<N> for BoundaryCondition<B, C> {
-//     const GHOST: usize = B::GHOST;
-
-//     fn kind(&self, face: Face<N>) -> BoundaryKind {
-//         self.boundary.kind(face)
-//     }
-// }
-
-// impl<const N: usize, B, C: Condition<N>> Condition<N> for BoundaryCondition<B, C> {
-//     fn parity(&self, face: Face<N>) -> bool {
-//         self.condition.parity(face)
-//     }
-
-//     fn radiative(&self, position: [f64; N]) -> f64 {
-//         self.condition.radiative(position)
-//     }
-// }

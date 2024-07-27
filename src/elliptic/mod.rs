@@ -39,7 +39,7 @@ impl<Label: SystemLabel> HyperRelaxSolver<Label> {
         &mut self,
         mesh: &mut Mesh<N>,
         bc: BC,
-        operator: &O,
+        operator: O,
         context: SystemSlice<'_, O::Context>,
         mut system: SystemSliceMut<'_, Label>,
     ) {
@@ -124,9 +124,9 @@ impl<Label: SystemLabel> HyperRelaxSolver<Label> {
                 mesh,
                 dimension,
                 dampening: self.dampening,
-                bc: &bc,
-                operator,
-                context: context.slice(..),
+                bc: bc.clone(),
+                operator: operator.clone(),
+                context: context.rb(),
                 _marker: PhantomData::<[usize; ORDER]>,
             };
 
@@ -163,7 +163,7 @@ impl<'a, const N: usize, System: SystemLabel> Operator<N> for UOperator<N, Syste
     type System = System;
     type Context = System;
 
-    fn evaluate(
+    fn apply(
         &self,
         engine: &impl Engine<N>,
         input: SystemFields<'_, System>,
@@ -181,18 +181,18 @@ impl<'a, const N: usize, System: SystemLabel> Operator<N> for UOperator<N, Syste
 /// Provides boundary conditions for v. All strong boundary condition commute with the time derivative
 /// and radiative boundary conditions simply need to be multipled by the dampening.
 #[derive(Clone)]
-struct VBC<I> {
+struct VBoundary<I> {
     dampening: f64,
     inner: I,
 }
 
-impl<const N: usize, I: Boundary<N>> Boundary<N> for VBC<I> {
+impl<const N: usize, I: Boundary<N>> Boundary<N> for VBoundary<I> {
     fn kind(&self, face: Face<N>) -> crate::fd::BoundaryKind {
         self.inner.kind(face)
     }
 }
 
-impl<const N: usize, I: Conditions<N>> Conditions<N> for VBC<I> {
+impl<const N: usize, I: Conditions<N>> Conditions<N> for VBoundary<I> {
     type System = I::System;
 
     fn parity(&self, field: Self::System, face: Face<N>) -> bool {
@@ -215,8 +215,8 @@ struct FictitiousOde<
     dimension: usize,
     dampening: f64,
 
-    bc: &'a BC,
-    operator: &'a O,
+    bc: BC,
+    operator: O,
 
     context: SystemSlice<'a, O::Context>,
 
@@ -241,7 +241,7 @@ where
             .fill_boundary(self.bc.clone(), SystemSliceMut::from_contiguous(u));
 
         self.mesh.order::<ORDER>().fill_boundary(
-            VBC {
+            VBoundary {
                 inner: self.bc.clone(),
                 dampening: self.dampening,
             },
@@ -290,7 +290,7 @@ where
             .weak_boundary(self.bc.clone(), u, dudt);
 
         self.mesh.order::<ORDER>().weak_boundary(
-            VBC {
+            VBoundary {
                 dampening: self.dampening,
                 inner: self.bc.clone(),
             },
