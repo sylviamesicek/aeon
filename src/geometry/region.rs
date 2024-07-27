@@ -71,7 +71,7 @@ impl<const N: usize> Region<N> {
     }
 
     /// Iterates over all faces one would have to move over to get to the region.
-    pub fn adjacent_faces(&self) -> impl Iterator<Item = Face> + '_ {
+    pub fn adjacent_faces(&self) -> impl Iterator<Item = Face<N>> + '_ {
         (0..N)
             .filter(|&axis| self.side(axis) != Side::Middle)
             .map(|axis| Face {
@@ -104,7 +104,7 @@ impl<const N: usize> Region<N> {
         result
     }
 
-    pub fn face_from_axis(&self, axis: usize) -> Face {
+    pub fn face_from_axis(&self, axis: usize) -> Face<N> {
         Face {
             axis,
             side: self.sides[axis] == Side::Right,

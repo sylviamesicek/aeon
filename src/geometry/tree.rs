@@ -83,7 +83,7 @@ impl<const N: usize> Tree<N> {
     }
 
     /// Returns the neighbor of the cell along the given face.
-    pub fn neighbor(&self, cell: usize, face: Face) -> usize {
+    pub fn neighbor(&self, cell: usize, face: Face<N>) -> usize {
         self.neighbors[cell * 2 * N + face.to_linear()]
     }
 
@@ -148,7 +148,12 @@ impl<const N: usize> Tree<N> {
     }
 
     /// Finds the outer neighbor along the face of the given subcell.
-    pub fn neighbor_after_refinement(&self, cell: usize, split: AxisMask<N>, face: Face) -> usize {
+    pub fn neighbor_after_refinement(
+        &self,
+        cell: usize,
+        split: AxisMask<N>,
+        face: Face<N>,
+    ) -> usize {
         let mut result = self.neighbor(cell, face);
 
         if result == NULL {
@@ -320,7 +325,7 @@ impl<const N: usize> Tree<N> {
                                     (true, -1) => {
                                         // We refine both and the neighbor started finer
                                         update_map[neighbor]
-                                            + face.reversed().adjacent_split::<N>().to_linear()
+                                            + face.reversed().adjacent_split().to_linear()
                                         // update_map[neighbor + mask.toggled(face.axis).to_linear()]
                                     }
                                     (false, -1) => {
@@ -374,8 +379,7 @@ impl<const N: usize> Tree<N> {
                     if flags[neighbor] {
                         // Find an adjacent split across face.
                         neighbors.push(
-                            update_map[neighbor]
-                                + face.reversed().adjacent_split::<N>().to_linear(),
+                            update_map[neighbor] + face.reversed().adjacent_split().to_linear(),
                         );
                     } else {
                         neighbors.push(update_map[neighbor])
@@ -608,7 +612,7 @@ impl<const N: usize> TreeBlocks<N> {
             for axis in 0..N {
                 // Perform greedy meshing.
                 'expand: loop {
-                    let face = Face::positive(axis);
+                    let face = Face::<N>::positive(axis);
 
                     let size = self.block_sizes[block];
                     let space = IndexSpace::new(size);
@@ -734,7 +738,7 @@ impl<const N: usize> From<TreeBlocksSerde<N>> for TreeBlocks<N> {
 // Neighbors **************
 // ************************
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum InterfaceKind {
     Coarse,
     Direct,
@@ -752,34 +756,29 @@ impl InterfaceKind {
     }
 }
 
-/// An interface between two blocks on a quad tree.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct BlockInterface<const N: usize> {
-    /// Target block.
-    block: usize,
-    /// Source block.
-    neighbor: usize,
-    /// Type of interface between blocks.
-    interface: InterfaceKind,
-    /// Source node on neighbor.
-    source: [isize; N],
-    /// Destination node on target.
-    dest: [isize; N],
-    /// Number of blocks to be filled.
-    size: [usize; N],
-}
-
 /// Caches information about interior interfaces on quadtrees, specifically
 /// storing information necessary for transferring data between blocks.
-#[derive(Default, Clone)]
+#[derive(Default, Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct TreeInterfaces<const N: usize> {
-    interfaces: Vec<BlockInterface<N>>,
+    fine: Vec<BlockInterface<N>>,
+    direct: Vec<BlockInterface<N>>,
+    coarse: Vec<BlockInterface<N>>,
 }
 
 impl<const N: usize> TreeInterfaces<N> {
-    /// Iterates over all `BlockInterface`s.
-    pub fn iter(&self) -> slice::Iter<'_, BlockInterface<N>> {
-        self.interfaces.iter()
+    /// Iterates over all fine `BlockInterface`s.
+    pub fn fine(&self) -> slice::Iter<'_, BlockInterface<N>> {
+        self.fine.iter()
+    }
+
+    /// Iterates over all fine `BlockInterface`s.
+    pub fn direct(&self) -> slice::Iter<'_, BlockInterface<N>> {
+        self.direct.iter()
+    }
+
+    /// Iterates over all fine `BlockInterface`s.
+    pub fn coarse(&self) -> slice::Iter<'_, BlockInterface<N>> {
+        self.coarse.iter()
     }
 
     /// Rebuilds the block interface data.
@@ -838,17 +837,20 @@ impl<const N: usize> TreeInterfaces<N> {
                 }
 
                 // Compute this boundary interface.
-                let interface =
-                    InterfaceKind::from_levels(tree.level(a.cell), tree.level(a.neighbor));
-
-                self.interfaces.push(BlockInterface {
+                let kind = InterfaceKind::from_levels(tree.level(a.cell), tree.level(a.neighbor));
+                let interface = BlockInterface {
                     block,
                     neighbor,
-                    interface,
                     source,
                     dest,
                     size,
-                });
+                };
+
+                match kind {
+                    InterfaceKind::Fine => self.fine.push(interface),
+                    InterfaceKind::Direct => self.direct.push(interface),
+                    InterfaceKind::Coarse => self.coarse.push(interface),
+                }
             });
         }
     }
@@ -1048,6 +1050,61 @@ impl<const N: usize> TreeInterfaces<N> {
     }
 }
 
+/// An interface between two blocks on a quad tree.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(from = "BlockInterfaceSerde<N>")]
+#[serde(into = "BlockInterfaceSerde<N>")]
+pub struct BlockInterface<const N: usize> {
+    /// Target block.
+    pub block: usize,
+    /// Source block.
+    pub neighbor: usize,
+    /// Source node on neighbor.
+    pub source: [isize; N],
+    /// Destination node on target.
+    pub dest: [isize; N],
+    /// Number of blocks to be filled.
+    pub size: [usize; N],
+}
+
+#[derive(serde::Serialize, serde::Deserialize)]
+pub struct BlockInterfaceSerde<const N: usize> {
+    /// Target block.
+    block: usize,
+    /// Source block.
+    neighbor: usize,
+    /// Source node on neighbor.
+    source: Array<[isize; N]>,
+    /// Destination node on target.
+    dest: Array<[isize; N]>,
+    /// Number of blocks to be filled.
+    size: Array<[usize; N]>,
+}
+
+impl<const N: usize> From<BlockInterface<N>> for BlockInterfaceSerde<N> {
+    fn from(value: BlockInterface<N>) -> Self {
+        Self {
+            block: value.block,
+            neighbor: value.neighbor,
+            source: value.source.into(),
+            dest: value.dest.into(),
+            size: value.size.into(),
+        }
+    }
+}
+
+impl<const N: usize> From<BlockInterfaceSerde<N>> for BlockInterface<N> {
+    fn from(value: BlockInterfaceSerde<N>) -> Self {
+        Self {
+            block: value.block,
+            neighbor: value.neighbor,
+            source: value.source.inner(),
+            dest: value.dest.inner(),
+            size: value.size.inner(),
+        }
+    }
+}
+
 #[derive(Clone, Copy)]
 struct CellNeighbor<const N: usize> {
     cell: usize,
@@ -1055,98 +1112,98 @@ struct CellNeighbor<const N: usize> {
     region: Region<N>,
 }
 
-/// Caches information about every neighbor touching each cell (including non-adjacent neighbors).
-#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
-pub struct TreeNeighbors<const N: usize> {
-    neighbors: Vec<usize>,
-}
+// /// Caches information about every neighbor touching each cell (including non-adjacent neighbors).
+// #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+// pub struct TreeNeighbors<const N: usize> {
+//     neighbors: Vec<usize>,
+// }
 
-impl<const N: usize> TreeNeighbors<N> {
-    /// Rebuilds the set of tree neighbors.
-    pub fn build(&mut self, tree: &Tree<N>) {
-        // Reset and reserve
-        self.neighbors.clear();
-        self.neighbors
-            .reserve(tree.num_cells() * Region::<N>::COUNT);
+// impl<const N: usize> TreeNeighbors<N> {
+//     /// Rebuilds the set of tree neighbors.
+//     pub fn build(&mut self, tree: &Tree<N>) {
+//         // Reset and reserve
+//         self.neighbors.clear();
+//         self.neighbors
+//             .reserve(tree.num_cells() * Region::<N>::COUNT);
 
-        // Loop through every cell
-        for cell in 0..tree.num_cells() {
-            let split = tree.split(cell);
-            let level = tree.level(cell);
+//         // Loop through every cell
+//         for cell in 0..tree.num_cells() {
+//             let split = tree.split(cell);
+//             let level = tree.level(cell);
 
-            'regions: for region in regions::<N>() {
-                // Start with self
-                let mut neighbor = cell;
+//             'regions: for region in regions::<N>() {
+//                 // Start with self
+//                 let mut neighbor = cell;
 
-                let mut neighbor_fine: bool = false;
-                let mut neighbor_coarse: bool = false;
+//                 let mut neighbor_fine: bool = false;
+//                 let mut neighbor_coarse: bool = false;
 
-                let mut rsplit = region.adjacent_split();
+//                 let mut rsplit = region.adjacent_split();
 
-                // Iterate over faces
-                for face in region.adjacent_faces() {
-                    // Make sure face is compatible with split.
-                    if neighbor_coarse && split.is_inner_face(face) {
-                        continue;
-                    }
+//                 // Iterate over faces
+//                 for face in region.adjacent_faces() {
+//                     // Make sure face is compatible with split.
+//                     if neighbor_coarse && split.is_inner_face(face) {
+//                         continue;
+//                     }
 
-                    // Snap origin to be adjacent to face
-                    if neighbor_fine {
-                        if tree.split(neighbor).is_inner_face(face) {
-                            neighbor = tree.neighbor(neighbor, face);
-                        }
-                        debug_assert!(tree.split(neighbor).is_outer_face(face));
-                    }
+//                     // Snap origin to be adjacent to face
+//                     if neighbor_fine {
+//                         if tree.split(neighbor).is_inner_face(face) {
+//                             neighbor = tree.neighbor(neighbor, face);
+//                         }
+//                         debug_assert!(tree.split(neighbor).is_outer_face(face));
+//                     }
 
-                    // Get neighbor of current cell
-                    let nneighbor = tree.neighbor_after_refinement(neighbor, rsplit, face);
-                    rsplit.toggle(face.axis);
+//                     // Get neighbor of current cell
+//                     let nneighbor = tree.neighbor_after_refinement(neighbor, rsplit, face);
+//                     rsplit.toggle(face.axis);
 
-                    // Short circut if we have encountered a boundary
-                    if nneighbor == NULL {
-                        self.neighbors.push(NULL);
-                        continue 'regions;
-                    }
+//                     // Short circut if we have encountered a boundary
+//                     if nneighbor == NULL {
+//                         self.neighbors.push(NULL);
+//                         continue 'regions;
+//                     }
 
-                    // Get level of neighbor
-                    let nlevel = tree.level(nneighbor);
+//                     // Get level of neighbor
+//                     let nlevel = tree.level(nneighbor);
 
-                    match nlevel.cmp(&level) {
-                        Ordering::Less => {
-                            debug_assert!(nlevel == level - 1);
-                            debug_assert!(!neighbor_fine);
-                            neighbor_coarse = true;
-                        }
-                        Ordering::Greater => {
-                            debug_assert!(nlevel == level + 1);
-                            debug_assert!(!neighbor_coarse);
-                            neighbor_fine = true;
-                        }
-                        _ => {}
-                    }
+//                     match nlevel.cmp(&level) {
+//                         Ordering::Less => {
+//                             debug_assert!(nlevel == level - 1);
+//                             debug_assert!(!neighbor_fine);
+//                             neighbor_coarse = true;
+//                         }
+//                         Ordering::Greater => {
+//                             debug_assert!(nlevel == level + 1);
+//                             debug_assert!(!neighbor_coarse);
+//                             neighbor_fine = true;
+//                         }
+//                         _ => {}
+//                     }
 
-                    neighbor = nneighbor;
-                }
+//                     neighbor = nneighbor;
+//                 }
 
-                self.neighbors.push(neighbor);
-            }
-        }
-    }
+//                 self.neighbors.push(neighbor);
+//             }
+//         }
+//     }
 
-    pub fn num_cells(&self) -> usize {
-        self.neighbors.len() / Region::<N>::COUNT
-    }
+//     pub fn num_cells(&self) -> usize {
+//         self.neighbors.len() / Region::<N>::COUNT
+//     }
 
-    /// Retrieves the neighbors of the given cell for each region.
-    pub fn cell_neighbors(&self, cell: usize) -> &[usize] {
-        &self.neighbors[cell * Region::<N>::COUNT..(cell + 1) * Region::<N>::COUNT]
-    }
+//     /// Retrieves the neighbors of the given cell for each region.
+//     pub fn cell_neighbors(&self, cell: usize) -> &[usize] {
+//         &self.neighbors[cell * Region::<N>::COUNT..(cell + 1) * Region::<N>::COUNT]
+//     }
 
-    /// Retrieves the neighbors of the given cell for each region.
-    pub fn cell_neighbor(&self, cell: usize, region: Region<N>) -> usize {
-        self.cell_neighbors(cell)[region.to_linear()]
-    }
-}
+//     /// Retrieves the neighbors of the given cell for each region.
+//     pub fn cell_neighbor(&self, cell: usize, region: Region<N>) -> usize {
+//         self.cell_neighbors(cell)[region.to_linear()]
+//     }
+// }
 
 // ************************
 // Nodes ******************
@@ -1404,10 +1461,7 @@ mod tests {
     #[test]
     fn neighbor_regions() {
         let mut tree = Tree::new(Rectangle::<2>::UNIT);
-        let mut neighbors = TreeNeighbors::default();
-
         tree.refine(&[true, false, false, false]);
-        neighbors.build(&tree);
 
         assert_eq!(tree.num_cells(), 7);
 
@@ -1462,7 +1516,7 @@ mod tests {
     }
 
     #[test]
-    fn neighbors2() {
+    fn interfaces() {
         let mut tree = Tree::new(Rectangle::<2>::UNIT);
         let mut blocks = TreeBlocks::default();
         let mut nodes = TreeNodes::new([4; 2], 2);
@@ -1473,14 +1527,13 @@ mod tests {
         nodes.build(&blocks);
         interfaces.build(&tree, &blocks, &nodes);
 
-        let mut interfaces = interfaces.iter();
+        let mut coarse = interfaces.coarse();
 
         assert_eq!(
-            interfaces.next(),
+            coarse.next(),
             Some(&BlockInterface {
                 block: 0,
                 neighbor: 1,
-                interface: InterfaceKind::Coarse,
                 source: [0, 0],
                 dest: [8, 0],
                 size: [3, 11],
@@ -1488,23 +1541,25 @@ mod tests {
         );
 
         assert_eq!(
-            interfaces.next(),
+            coarse.next(),
             Some(&BlockInterface {
                 block: 0,
                 neighbor: 2,
-                interface: InterfaceKind::Coarse,
                 source: [0, 0],
                 dest: [0, 8],
                 size: [8, 3],
             })
         );
 
+        assert_eq!(coarse.next(), None);
+
+        let mut fine = interfaces.fine();
+
         assert_eq!(
-            interfaces.next(),
+            fine.next(),
             Some(&BlockInterface {
                 block: 1,
                 neighbor: 0,
-                interface: InterfaceKind::Fine,
                 source: [2, 0],
                 dest: [-2, 0],
                 size: [3, 4],
@@ -1512,11 +1567,25 @@ mod tests {
         );
 
         assert_eq!(
-            interfaces.next(),
+            fine.next(),
+            Some(&BlockInterface {
+                block: 2,
+                neighbor: 0,
+                source: [0, 2],
+                dest: [0, -2],
+                size: [4, 3],
+            })
+        );
+
+        assert_eq!(fine.next(), None);
+
+        let mut direct = interfaces.direct();
+
+        assert_eq!(
+            direct.next(),
             Some(&BlockInterface {
                 block: 1,
                 neighbor: 2,
-                interface: InterfaceKind::Direct,
                 source: [2, 0],
                 dest: [-2, 4],
                 size: [3, 5],
@@ -1524,29 +1593,16 @@ mod tests {
         );
 
         assert_eq!(
-            interfaces.next(),
-            Some(&BlockInterface {
-                block: 2,
-                neighbor: 0,
-                interface: InterfaceKind::Fine,
-                source: [0, 2],
-                dest: [0, -2],
-                size: [4, 3],
-            })
-        );
-
-        assert_eq!(
-            interfaces.next(),
+            direct.next(),
             Some(&BlockInterface {
                 block: 2,
                 neighbor: 1,
-                interface: InterfaceKind::Direct,
                 source: [0, 2],
                 dest: [4, -2],
                 size: [3, 7],
             })
         );
 
-        assert_eq!(interfaces.next(), None);
+        assert_eq!(direct.next(), None);
     }
 }

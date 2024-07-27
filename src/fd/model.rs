@@ -146,12 +146,12 @@ impl<const N: usize> Model<N> {
         let mut vertices = Vec::new();
 
         for block in 0..self.mesh.num_blocks() {
-            let space = self.mesh.block_space(block);
             let bounds = self.mesh.block_bounds(block);
+            let space = self.mesh.block_space(block).set_context(bounds);
             let vertex_space = IndexSpace::new(space.vertex_size());
 
             for vertex in vertex_space.iter() {
-                let position = space.position(bounds.clone(), node_from_vertex(vertex));
+                let position = space.position(node_from_vertex(vertex));
                 let mut vertex = [0.0; 3];
                 vertex[..N].copy_from_slice(&position);
                 vertices.extend(vertex);

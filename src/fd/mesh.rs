@@ -8,18 +8,21 @@ use crate::fd::{
     NodeSpace, Operator, Projection,
 };
 use crate::geometry::{
-    faces, regions, AxisMask, Face, FaceMask, IndexSpace, Rectangle, Region, Side, Tree,
-    TreeBlocks, TreeNeighbors, TreeNodes, NULL,
+    faces, AxisMask, Face, FaceMask, IndexSpace, Rectangle, Tree, TreeBlocks, TreeInterfaces,
+    TreeNodes,
 };
 use crate::system::{SystemLabel, SystemSlice, SystemSliceMut};
+
+use super::boundary::BlockBC;
+use super::SystemBC;
 
 /// Implementation of an axis aligned tree mesh using standard finite difference operators.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Mesh<const N: usize> {
     tree: Tree<N>,
     blocks: TreeBlocks<N>,
-    neighbors: TreeNeighbors<N>,
     nodes: TreeNodes<N>,
+    interfaces: TreeInterfaces<N>,
 }
 
 impl<const N: usize> Mesh<N> {
@@ -29,7 +32,7 @@ impl<const N: usize> Mesh<N> {
         let mut result = Self {
             tree: Tree::new(bounds),
             blocks: TreeBlocks::default(),
-            neighbors: TreeNeighbors::default(),
+            interfaces: TreeInterfaces::default(),
             nodes: TreeNodes::new(cell_width, ghost_nodes),
         };
 
@@ -56,8 +59,8 @@ impl<const N: usize> Mesh<N> {
     /// Reconstructs interal structure of the TreeMesh, automatically called during refinement.
     pub fn build(&mut self) {
         self.blocks.build(&self.tree);
-        self.neighbors.build(&self.tree);
         self.nodes.build(&self.blocks);
+        self.interfaces.build(&self.tree, &self.blocks, &self.nodes);
     }
 
     /// Number of cells in the mesh.
@@ -103,21 +106,22 @@ impl<const N: usize> Mesh<N> {
 
     /// Produces a block boundary which correctly accounts for
     /// interior interfaces.
-    pub fn block_boundary<B: Boundary>(&self, block: usize, boundary: B) -> BlockBoundary<N, B> {
-        BlockBoundary {
-            mask: self.block_boundary_flags(block),
+    pub fn block_boundary<B: Boundary<N>>(&self, block: usize, boundary: B) -> BlockBC<N, B> {
+        BlockBC {
+            flags: self.block_boundary_flags(block),
             inner: boundary,
         }
     }
 
     /// Computes the nodespace corresponding to a block.
-    pub fn block_space(&self, block: usize) -> NodeSpace<N> {
+    pub fn block_space(&self, block: usize) -> NodeSpace<N, ()> {
         let size = self.blocks.block_size(block);
         let cell_size = from_fn(|axis| size[axis] * self.nodes.cell_width[axis]);
 
         NodeSpace {
             size: cell_size,
             ghost: self.nodes.ghost_nodes,
+            context: (),
         }
     }
 
@@ -139,37 +143,37 @@ impl<const N: usize> Mesh<N> {
     //     system.slice_mut(nodes).fields_mut()
     // }
 
-    /// Retrieves the neighbors of the given cell for each region.
-    pub fn cell_neighbors(&self, cell: usize) -> &[usize] {
-        self.neighbors.cell_neighbors(cell)
-    }
+    // /// Retrieves the neighbors of the given cell for each region.
+    // pub fn cell_neighbors(&self, cell: usize) -> &[usize] {
+    //     self.neighbors.cell_neighbors(cell)
+    // }
 
-    /// Retrieves the neighbors of the given cell for each region.
-    pub fn cell_neighbor(&self, cell: usize, region: Region<N>) -> usize {
-        self.neighbors.cell_neighbor(cell, region)
-    }
+    // /// Retrieves the neighbors of the given cell for each region.
+    // pub fn cell_neighbor(&self, cell: usize, region: Region<N>) -> usize {
+    //     self.neighbors.cell_neighbor(cell, region)
+    // }
 
-    pub fn cell_neighbor_after_refinement(
-        &self,
-        cell: usize,
-        split: AxisMask<N>,
-        region: Region<N>,
-    ) -> usize {
-        let neighbor = self.neighbors.cell_neighbor(cell, region);
+    // pub fn cell_neighbor_after_refinement(
+    //     &self,
+    //     cell: usize,
+    //     split: AxisMask<N>,
+    //     region: Region<N>,
+    // ) -> usize {
+    //     let neighbor = self.neighbors.cell_neighbor(cell, region);
 
-        if neighbor == NULL || self.cell_level(neighbor) <= self.cell_level(cell) {
-            return neighbor;
-        }
+    //     if neighbor == NULL || self.cell_level(neighbor) <= self.cell_level(cell) {
+    //         return neighbor;
+    //     }
 
-        let mut target = [Side::Middle; N];
-        for axis in 0..N {
-            if region.side(axis) == Side::Middle && split.is_set(axis) {
-                target[axis] = Side::Right;
-            }
-        }
+    //     let mut target = [Side::Middle; N];
+    //     for axis in 0..N {
+    //         if region.side(axis) == Side::Middle && split.is_set(axis) {
+    //             target[axis] = Side::Right;
+    //         }
+    //     }
 
-        self.cell_neighbor(neighbor, Region::new(target))
-    }
+    //     self.cell_neighbor(neighbor, Region::new(target))
+    // }
 
     /// The level of the mesh the cell resides on.
     pub fn cell_level(&self, cell: usize) -> usize {
@@ -224,26 +228,6 @@ impl<const N: usize> Mesh<N> {
     }
 }
 
-// ******************************
-// Blocks ***********************
-// ******************************
-
-#[derive(Debug, Clone)]
-pub struct BlockBoundary<const N: usize, B> {
-    inner: B,
-    mask: FaceMask<N>,
-}
-
-impl<const N: usize, B: Boundary> Boundary for BlockBoundary<N, B> {
-    fn kind(&self, face: Face) -> BoundaryKind {
-        if self.mask.is_set(face) {
-            self.inner.kind(face)
-        } else {
-            BoundaryKind::Custom
-        }
-    }
-}
-
 // *****************************
 // Node Routines ***************
 // *****************************
@@ -253,39 +237,37 @@ pub struct MeshOrder<'a, const N: usize, const ORDER: usize>(&'a mut Mesh<N>);
 impl<'a, const N: usize, const ORDER: usize> MeshOrder<'a, N, ORDER> {
     /// Enforces strong boundary conditions. This includes strong physical boundary conditions, as well
     /// as handling interior boundaries (same level, coarse-fine, or fine-coarse).
-    pub fn fill_boundary<B: Boundary, C: Conditions<N>>(
+    pub fn fill_boundary<BC: Boundary<N> + Conditions<N>>(
         mut self,
-        boundary: &B,
-        conditions: &C,
-        mut system: SystemSliceMut<'_, C::System>,
+        bc: BC,
+        mut system: SystemSliceMut<'_, BC::System>,
     ) {
-        self.fill_physical(boundary, conditions, &mut system);
+        self.fill_physical(&bc, &mut system);
         self.fill_direct(&mut system);
-        self.fill_prolong(boundary, &mut system);
-        self.fill_physical(boundary, conditions, &mut system);
+        self.fill_fine(&mut system);
+        self.fill_prolong(&bc, &mut system);
     }
 
-    fn fill_physical<B: Boundary, C: Conditions<N>>(
+    fn fill_physical<BC: Boundary<N> + Conditions<N>>(
         &mut self,
-        boundary: &B,
-        conditions: &C,
-        system: &mut SystemSliceMut<'_, C::System>,
+        bc: &BC,
+        system: &mut SystemSliceMut<'_, BC::System>,
     ) {
         let mesh = self.0.rb_mut();
 
         for block in 0..mesh.num_blocks() {
             // Fill Physical Boundary conditions
-            let space = mesh.block_space(block);
             let nodes = mesh.block_nodes(block);
-
-            let boundary = mesh.block_boundary(block, boundary.clone());
+            let space = mesh.block_space(block);
+            let boundary = mesh.block_boundary(block, bc.clone());
 
             // Take slice of system and
             let mut block_fields = system.slice_mut(nodes.clone()).fields_mut();
 
-            for field in C::System::fields() {
-                let condition = conditions.field(field.clone());
-                space.fill_boundary(&boundary, &condition, block_fields.field_mut(field));
+            for field in BC::System::fields() {
+                space
+                    .set_context(SystemBC::new(field.clone(), boundary.clone()))
+                    .fill_boundary(block_fields.field_mut(field));
             }
         }
     }
@@ -293,234 +275,110 @@ impl<'a, const N: usize, const ORDER: usize> MeshOrder<'a, N, ORDER> {
     fn fill_direct<System: SystemLabel>(&mut self, system: &mut SystemSliceMut<'_, System>) {
         let mesh = self.0.rb_mut();
 
-        for block in 0..mesh.num_blocks() {
-            let space = mesh.block_space(block);
-            let nodes = mesh.block_nodes(block);
+        // Fill direct interfaces
+        for interface in mesh.interfaces.direct() {
+            let block_space = mesh.block_space(interface.block);
+            let block_nodes = mesh.block_nodes(interface.block);
+            let neighbor_space = mesh.block_space(interface.neighbor);
+            let neighbor_nodes = mesh.block_nodes(interface.neighbor);
 
-            // Fill Injection boundary conditions
-            let block_size = mesh.block_size(block);
-            let block_space = IndexSpace::new(block_size);
-            let block_cells = mesh.block_cells(block);
+            for node in IndexSpace::new(interface.size).iter() {
+                let block_node = from_fn(|axis| node[axis] as isize + interface.dest[axis]);
+                let neighbor_node = from_fn(|axis| node[axis] as isize + interface.source[axis]);
 
-            // For each neighboring region
-            for region in regions::<N>() {
-                let offset_dir = region.offset_dir();
+                let block_index = block_space.index_from_node(block_node);
+                let neighbor_index = neighbor_space.index_from_node(neighbor_node);
 
-                let mut cell_size: [_; N] = from_fn(|axis| mesh.nodes.cell_width[axis]);
-                let mut subcell_size: [_; N] = from_fn(|axis| mesh.nodes.cell_width[axis] / 2);
-
-                for axis in 0..N {
-                    // if region.side(axis) == Side::Right {
-                    cell_size[axis] += 1;
-                    subcell_size[axis] += 1;
-                    // }
-                }
-
-                // Loop over all cells on the border of the block which touch this region.
-                for cell_index in block_space.adjacent(region) {
-                    let cell = block_cells[block_space.linear_from_cartesian(cell_index)];
-                    let cell_origin: [isize; N] = mesh.cell_node_origin(cell_index);
-
-                    // Retrieve appropriate neighbor.
-                    let neighbor = mesh.cell_neighbor(cell, region.clone());
-
-                    // If physical boundary we skip
-                    if neighbor == NULL {
-                        continue;
-                    }
-
-                    // If neighbor is coarser we skip
-                    if mesh.cell_level(neighbor) < mesh.cell_level(cell) {
-                        continue;
-                    }
-
-                    // If neighbor is more refined we use injection
-                    if mesh.cell_level(neighbor) > mesh.cell_level(cell) {
-                        // Loop over every subdivision of this cell that touches the given region.
-                        for split in region.adjacent_splits() {
-                            // Offset from origin of block to subcell.
-                            let cell_offset: [isize; N] = from_fn(|axis| {
-                                if split.is_set(axis) {
-                                    cell_origin[axis] + (mesh.nodes.cell_width[axis] / 2) as isize
-                                } else {
-                                    cell_origin[axis]
-                                }
-                            });
-
-                            // Compute neighbor
-                            let neighbor = mesh.cell_neighbor_after_refinement(cell, split, region);
-                            let neighbor_index = mesh.blocks.cell_index(neighbor);
-                            let neighbor_block = mesh.cell_block(neighbor);
-                            let neighbor_origin = mesh.cell_node_origin(neighbor_index);
-                            let neighbor_space = mesh.block_space(neighbor_block);
-                            let neighbor_nodes = mesh.block_nodes(neighbor_block);
-
-                            // Offset from origin of neighbor block to neighbor cell
-                            let neighbor_offset: [isize; N] = from_fn(|axis| {
-                                neighbor_origin[axis]
-                                    - offset_dir[axis] * mesh.nodes.cell_width[axis] as isize
-                            });
-
-                            for node in NodeSpace::new(subcell_size, mesh.nodes.ghost_nodes)
-                                .region_inclusive_window(region)
-                            {
-                                let source = from_fn(|axis| neighbor_offset[axis] + 2 * node[axis]);
-                                let dest = from_fn(|axis| cell_offset[axis] + node[axis]);
-
-                                for field in System::fields() {
-                                    let v = neighbor_space.value(
-                                        source,
-                                        &system.field(field.clone())[neighbor_nodes.clone()],
-                                    );
-                                    space.set_value(
-                                        dest,
-                                        v,
-                                        &mut system.field_mut(field.clone())[nodes.clone()],
-                                    )
-                                }
-                            }
-                        }
-
-                        continue;
-                    }
-
-                    // Store various information about neighbor
-                    let neighbor_index = mesh.blocks.cell_index(neighbor);
-                    let neighbor_block = mesh.blocks.cell_block(neighbor);
-                    let neighbor_origin: [isize; N] = mesh.cell_node_origin(neighbor_index);
-                    let neighbor_space = mesh.block_space(neighbor_block);
-                    let neighbor_nodes = mesh.block_nodes(neighbor_block);
-
-                    let neighbor_offset: [isize; N] = from_fn(|axis| {
-                        neighbor_origin[axis]
-                            - offset_dir[axis] * mesh.nodes.cell_width[axis] as isize
-                    });
-
-                    for node in NodeSpace::new(cell_size, mesh.nodes.ghost_nodes)
-                        .region_inclusive_window(region)
-                    {
-                        let source = from_fn(|axis| neighbor_offset[axis] + node[axis]);
-                        let dest = from_fn(|axis| cell_origin[axis] + node[axis]);
-
-                        for field in System::fields() {
-                            let v = neighbor_space.value(
-                                source,
-                                &system.field(field.clone())[neighbor_nodes.clone()],
-                            );
-                            space.set_value(dest, v, &mut system.field_mut(field)[nodes.clone()])
-                        }
-                    }
+                for field in System::fields() {
+                    let value =
+                        system.slice(neighbor_nodes.clone()).field(field.clone())[neighbor_index];
+                    system
+                        .slice_mut(block_nodes.clone())
+                        .field_mut(field.clone())[block_index] = value;
                 }
             }
         }
     }
 
-    fn fill_prolong<B: Boundary, System: SystemLabel>(
+    fn fill_fine<System: SystemLabel>(&mut self, system: &mut SystemSliceMut<'_, System>) {
+        let mesh = self.0.rb_mut();
+
+        for interface in mesh.interfaces.fine() {
+            let block_space = mesh.block_space(interface.block);
+            let block_nodes = mesh.block_nodes(interface.block);
+            let neighbor_space = mesh.block_space(interface.neighbor);
+            let neighbor_nodes = mesh.block_nodes(interface.neighbor);
+
+            for node in IndexSpace::new(interface.size).iter() {
+                let block_node = from_fn(|axis| node[axis] as isize + interface.dest[axis]);
+                let neighbor_node =
+                    from_fn(|axis| 2 * (node[axis] as isize + interface.source[axis]));
+
+                let block_index = block_space.index_from_node(block_node);
+                let neighbor_index = neighbor_space.index_from_node(neighbor_node);
+
+                for field in System::fields() {
+                    let value =
+                        system.slice(neighbor_nodes.clone()).field(field.clone())[neighbor_index];
+                    system
+                        .slice_mut(block_nodes.clone())
+                        .field_mut(field.clone())[block_index] = value;
+                }
+            }
+        }
+    }
+
+    fn fill_prolong<BC: Boundary<N> + Conditions<N>>(
         &mut self,
-        boundary: &B,
-        system: &mut SystemSliceMut<'_, System>,
+        bc: &BC,
+        system: &mut SystemSliceMut<'_, BC::System>,
     ) {
         let mesh = self.0.rb_mut();
 
-        for block in 0..mesh.num_blocks() {
-            // Cache node space
-            let space = mesh.block_space(block);
-            let domain = mesh.block_boundary(block, boundary.clone());
-            let nodes = mesh.block_nodes(block);
-            // Fill Injection boundary conditions
-            let size = mesh.block_size(block);
-            let cells = mesh.block_cells(block);
-            let cell_space = IndexSpace::new(size);
+        for interface in mesh.interfaces.coarse() {
+            let block_nodes = mesh.block_nodes(interface.block);
+            let block_space = mesh.block_space(interface.block);
 
-            for region in regions::<N>() {
-                let offset_dir = region.offset_dir();
+            let neighbor_nodes = mesh.block_nodes(interface.neighbor);
+            let neighbor_boundary = mesh.block_boundary(interface.neighbor, bc.clone());
+            let neighbor_space = mesh.block_space(interface.neighbor);
 
-                let mut region_size: [_; N] = from_fn(|axis| mesh.nodes.cell_width[axis]);
+            for node in IndexSpace::new(interface.size).iter() {
+                let block_node = from_fn(|axis| node[axis] as isize + interface.dest[axis]);
 
-                for axis in 0..N {
-                    if region.side(axis) == Side::Right {
-                        region_size[axis] += 1;
-                    }
-                }
+                let neighbor_vertex =
+                    from_fn(|axis| (node[axis] as isize + interface.source[axis]) as usize);
 
-                for cell_index in region.face_vertices(size) {
-                    let cell = cells[cell_space.linear_from_cartesian(cell_index)];
-                    let cell_offset = mesh.cell_node_origin(cell_index);
-                    let cell_split = mesh.cell_split(cell);
+                let block_index = block_space.index_from_node(block_node);
 
-                    let neighbor = mesh.cell_neighbor(cell, region.clone());
+                for field in BC::System::fields() {
+                    let bc = SystemBC::new(field.clone(), neighbor_boundary.clone());
 
-                    // If physical boundary we skip
-                    if neighbor == NULL {
-                        continue;
-                    }
+                    let value = neighbor_space.set_context(bc).prolong::<ORDER>(
+                        neighbor_vertex,
+                        system.slice(neighbor_nodes.clone()).field(field.clone()),
+                    );
 
-                    // We only consider this neighbor if it is coarser
-                    if mesh.cell_level(neighbor) >= mesh.cell_level(cell) {
-                        continue;
-                    }
-
-                    let neighbor_index = mesh.blocks.cell_index(neighbor);
-                    let neighbor_block = mesh.blocks.cell_block(neighbor);
-                    let neighbor_nodes = mesh.block_nodes(neighbor_block);
-                    let neighbor_space = mesh.block_space(neighbor_block);
-
-                    // Compute which subcell of the neighbor we are accessing
-                    let mut neighbor_split = cell_split;
-                    for axis in 0..N {
-                        if region.side(axis) != Side::Middle {
-                            neighbor_split.toggle(axis);
-                        }
-                    }
-
-                    let mut neighbor_origin: [isize; N] = mesh.cell_node_origin(neighbor_index);
-                    for axis in 0..N {
-                        if neighbor_split.is_set(axis) {
-                            neighbor_origin[axis] += mesh.nodes.cell_width[axis] as isize / 2;
-                        }
-                    }
-
-                    let neighbor_offset: [isize; N] = from_fn(|axis| {
-                        neighbor_origin[axis]
-                            - offset_dir[axis] * mesh.nodes.cell_width[axis] as isize / 2
-                    });
-
-                    for node in region.nodes(mesh.nodes.ghost_nodes, region_size) {
-                        let source =
-                            from_fn(|axis| (2 * neighbor_offset[axis] + node[axis]) as usize);
-                        let dest = from_fn(|axis| cell_offset[axis] + node[axis]);
-
-                        for field in System::fields() {
-                            let v = neighbor_space.prolong::<ORDER>(
-                                &domain,
-                                source,
-                                &system.field(field.clone())[neighbor_nodes.clone()],
-                            );
-                            space.set_value(
-                                dest,
-                                v,
-                                &mut system.field_mut(field.clone())[nodes.clone()],
-                            );
-                        }
-                    }
+                    system
+                        .slice_mut(block_nodes.clone())
+                        .field_mut(field.clone())[block_index] = value;
                 }
             }
         }
     }
 
-    pub fn weak_boundary<B: Boundary, C: Conditions<N>>(
+    pub fn weak_boundary<BC: Boundary<N> + Conditions<N>>(
         self,
-        boundary: &B,
-        conditions: &C,
-        field: SystemSlice<'_, C::System>,
-        mut deriv: SystemSliceMut<'_, C::System>,
+        bc: BC,
+        field: SystemSlice<'_, BC::System>,
+        mut deriv: SystemSliceMut<'_, BC::System>,
     ) {
         let mesh = self.0;
 
         for block in 0..mesh.num_blocks() {
-            let boundary = mesh.block_boundary(block, boundary.clone());
-            let space = mesh.block_space(block);
+            let boundary = mesh.block_boundary(block, bc.clone());
             let bounds = mesh.block_bounds(block);
+            let space = mesh.block_space(block).set_context(bounds);
             let nodes = mesh.block_nodes(block);
             let vertex_size = space.vertex_size();
 
@@ -536,21 +394,23 @@ impl<'a, const N: usize, const ORDER: usize> MeshOrder<'a, N, ORDER> {
                 for vertex in IndexSpace::new(vertex_size).face(face).iter() {
                     let engine = FdEngine::<N, ORDER, _> {
                         space: space.clone(),
-                        bounds: bounds.clone(),
-                        boundary: boundary.clone(),
                         vertex,
+                        boundary: boundary.clone(),
                     };
-                    let index = engine.index();
                     let position: [f64; N] = engine.position();
                     let r = position.iter().map(|&v| v * v).sum::<f64>().sqrt();
 
-                    for label in C::System::fields() {
+                    let index = space.index_from_vertex(vertex);
+
+                    for label in BC::System::fields() {
                         let f = block_fields.field(label.clone());
                         let dfdt = block_deriv_fields.field_mut(label.clone());
 
-                        let target = conditions.field(label.clone()).radiative(position);
-                        let gradient = engine.gradient(f);
-                        let mut advection = f[index] - target;
+                        let field_boundary = SystemBC::new(label.clone(), bc.clone());
+
+                        let target = field_boundary.radiative(position);
+                        let gradient = engine.gradient(field_boundary.clone(), f);
+                        let mut advection = engine.value(f) - target;
 
                         for axis in 0..N {
                             advection += position[axis] * gradient[axis];
@@ -564,10 +424,10 @@ impl<'a, const N: usize, const ORDER: usize> MeshOrder<'a, N, ORDER> {
     }
 
     /// Applies the projection to `source`, and stores the result in `dest`.
-    pub fn project<P: Projection<N>>(
+    pub fn project<BC: Boundary<N>, P: Projection<N>>(
         self,
-        boundary: &impl Boundary,
-        projection: &P,
+        boundary: BC,
+        projection: P,
         source: SystemSlice<'_, P::Input>,
         mut dest: SystemSliceMut<'_, P::Output>,
     ) {
@@ -579,10 +439,11 @@ impl<'a, const N: usize, const ORDER: usize> MeshOrder<'a, N, ORDER> {
             let input = source.slice(nodes.clone()).fields();
             let mut output = dest.slice_mut(nodes.clone()).fields_mut();
 
-            let space = mesh.block_space(block);
-            let boundary = mesh.block_boundary(block, boundary.clone());
             let bounds = mesh.block_bounds(block);
+            let space = mesh.block_space(block).set_context(bounds);
             let vertex_size = space.vertex_size();
+
+            let boundary = mesh.block_boundary(block, boundary.clone());
 
             for vertex in IndexSpace::new(vertex_size).iter() {
                 let is_interior = Self::is_interior(&boundary, vertex_size, vertex);
@@ -590,7 +451,6 @@ impl<'a, const N: usize, const ORDER: usize> MeshOrder<'a, N, ORDER> {
                 let result = if is_interior {
                     let engine = FdIntEngine::<N, ORDER> {
                         space: space.clone(),
-                        bounds: bounds.clone(),
                         vertex,
                     };
 
@@ -598,9 +458,8 @@ impl<'a, const N: usize, const ORDER: usize> MeshOrder<'a, N, ORDER> {
                 } else {
                     let engine = FdEngine::<N, ORDER, _> {
                         space: space.clone(),
-                        bounds: bounds.clone(),
-                        boundary: boundary.clone(),
                         vertex,
+                        boundary: boundary.clone(),
                     };
 
                     projection.project(&engine, input.as_fields())
@@ -617,10 +476,10 @@ impl<'a, const N: usize, const ORDER: usize> MeshOrder<'a, N, ORDER> {
 
     /// Applies the given operator to `source`, storing the result in `dest`, and utilizing `context` to store
     /// extra fields.
-    pub fn apply<O: Operator<N>>(
+    pub fn apply<BC: Boundary<N>, O: Operator<N>>(
         self,
-        boundary: &impl Boundary,
-        operator: &O,
+        boundary: BC,
+        operator: O,
         source: SystemSlice<'_, O::System>,
         context: SystemSlice<'_, O::Context>,
         mut dest: SystemSliceMut<'_, O::System>,
@@ -634,9 +493,9 @@ impl<'a, const N: usize, const ORDER: usize> MeshOrder<'a, N, ORDER> {
             let context = context.slice(nodes.clone()).fields();
             let mut output = dest.slice_mut(nodes.clone());
 
-            let space = mesh.block_space(block);
             let boundary = mesh.block_boundary(block, boundary.clone());
             let bounds = mesh.block_bounds(block);
+            let space = mesh.block_space(block).set_context(bounds);
             let vertex_size = space.vertex_size();
 
             for vertex in IndexSpace::new(vertex_size).iter() {
@@ -645,7 +504,6 @@ impl<'a, const N: usize, const ORDER: usize> MeshOrder<'a, N, ORDER> {
                 let result = if is_interior {
                     let engine = FdIntEngine::<N, ORDER> {
                         space: space.clone(),
-                        bounds: bounds.clone(),
                         vertex,
                     };
 
@@ -653,9 +511,8 @@ impl<'a, const N: usize, const ORDER: usize> MeshOrder<'a, N, ORDER> {
                 } else {
                     let engine = FdEngine::<N, ORDER, _> {
                         space: space.clone(),
-                        bounds: bounds.clone(),
-                        boundary: boundary.clone(),
                         vertex,
+                        boundary: boundary.clone(),
                     };
 
                     operator.evaluate(&engine, input.as_fields(), context.as_fields())
@@ -671,13 +528,17 @@ impl<'a, const N: usize, const ORDER: usize> MeshOrder<'a, N, ORDER> {
     }
 
     /// Determines if a vertex is not within `ORDER` of any weakly enforced boundary.
-    fn is_interior(boundary: &impl Boundary, vertex_size: [usize; N], vertex: [usize; N]) -> bool {
+    fn is_interior(
+        boundary: &impl Boundary<N>,
+        vertex_size: [usize; N],
+        vertex: [usize; N],
+    ) -> bool {
         let mut result = true;
 
         for axis in 0..N {
-            result &= !(boundary.kind(Face::negative(axis)).is_weak() && vertex[axis] < ORDER / 2);
-            result &= !(boundary.kind(Face::positive(axis)).is_weak()
-                && vertex[axis] >= vertex_size[axis] - ORDER / 2);
+            result &= boundary.kind(Face::negative(axis)).has_ghost() || vertex[axis] >= ORDER / 2;
+            result &= boundary.kind(Face::positive(axis)).has_ghost()
+                || vertex[axis] < vertex_size[axis] - ORDER / 2;
         }
 
         result
@@ -700,8 +561,8 @@ impl<const N: usize> Mesh<N> {
         let mut result = 0.0;
 
         for block in 0..self.num_blocks() {
-            let space = self.block_space(block);
             let bounds = self.block_bounds(block);
+            let space = self.block_space(block).set_context(bounds);
             let vertex_size = space.vertex_size();
 
             let data = &src[self.block_nodes(block)];
@@ -722,7 +583,7 @@ impl<const N: usize> Mesh<N> {
                 block_result += value;
             }
 
-            for spacing in space.spacing(bounds) {
+            for spacing in space.spacing() {
                 block_result *= spacing;
             }
 

@@ -72,23 +72,23 @@ impl<const N: usize> AxisMask<N> {
         (self.0 & (1 << axis)) != 0
     }
 
-    pub fn is_inner_face(self, face: Face) -> bool {
+    pub fn is_inner_face(self, face: Face<N>) -> bool {
         self.is_set(face.axis) != face.side
     }
 
-    pub fn is_outer_face(self, face: Face) -> bool {
+    pub fn is_outer_face(self, face: Face<N>) -> bool {
         self.is_set(face.axis) == face.side
     }
 
-    pub fn inner_faces(self) -> impl Iterator<Item = Face> {
+    pub fn inner_faces(self) -> impl Iterator<Item = Face<N>> {
         faces::<N>().filter(move |&face| self.is_inner_face(face))
     }
 
-    pub fn outer_faces(self) -> impl Iterator<Item = Face> {
+    pub fn outer_faces(self) -> impl Iterator<Item = Face<N>> {
         faces::<N>().filter(move |&face| self.is_outer_face(face))
     }
 
-    pub fn is_compatible_with_face(self, face: Face) -> bool {
+    pub fn is_compatible_with_face(self, face: Face<N>) -> bool {
         self.is_set(face.axis) == face.side
     }
 }

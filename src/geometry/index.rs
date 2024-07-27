@@ -82,7 +82,7 @@ impl<const N: usize> IndexSpace<N> {
     }
 
     /// Returns the window containing all points along a face in index space.
-    pub fn face(self, face: Face) -> IndexWindow<N> {
+    pub fn face(self, face: Face<N>) -> IndexWindow<N> {
         let intercept = if face.side {
             self.size[face.axis] - 1
         } else {

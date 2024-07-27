@@ -2,19 +2,21 @@ use super::AxisMask;
 
 /// A face of a rectangular prism in `N` dimensional space.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub struct Face {
+pub struct Face<const N: usize> {
     pub axis: usize,
     pub side: bool,
 }
 
-impl Face {
+impl<const N: usize> Face<N> {
     /// Face on negative side of axis.
     pub fn negative(axis: usize) -> Self {
+        assert!(axis < N);
         Self { axis, side: false }
     }
 
     /// Face on positive side of axis.
     pub fn positive(axis: usize) -> Self {
+        assert!(axis < N);
         Self { axis, side: true }
     }
 
@@ -32,13 +34,15 @@ impl Face {
 
     /// Constructs a face from a linear index.
     pub fn from_linear(linear: usize) -> Self {
+        assert!(linear < 2 * N);
+
         Self {
             axis: linear / 2,
             side: linear % 2 == 1,
         }
     }
 
-    pub fn adjacent_split<const N: usize>(self) -> AxisMask<N> {
+    pub fn adjacent_split(self) -> AxisMask<N> {
         let mut result = AxisMask::empty();
         result.set_to(self.axis, self.side);
         result
@@ -53,7 +57,7 @@ pub struct FaceIter<const N: usize> {
 }
 
 impl<const N: usize> Iterator for FaceIter<N> {
-    type Item = Face;
+    type Item = Face<N>;
 
     fn next(&mut self) -> Option<Self::Item> {
         if self.axis >= N {
@@ -106,19 +110,19 @@ impl<const N: usize> FaceMask<N> {
         Self([[true; 2]; N])
     }
 
-    pub fn is_set(&self, face: Face) -> bool {
+    pub fn is_set(&self, face: Face<N>) -> bool {
         self.0[face.axis][face.side as usize]
     }
 
-    pub fn set(&mut self, face: Face) {
+    pub fn set(&mut self, face: Face<N>) {
         self.0[face.axis][face.side as usize] = true;
     }
 
-    pub fn clear(&mut self, face: Face) {
+    pub fn clear(&mut self, face: Face<N>) {
         self.0[face.axis][face.side as usize] = false;
     }
 
-    pub fn set_to(&mut self, face: Face, val: bool) {
+    pub fn set_to(&mut self, face: Face<N>, val: bool) {
         self.0[face.axis][face.side as usize] = val;
     }
 }
@@ -138,8 +142,8 @@ mod tests {
         assert_eq!(list.next(), Some(Face::positive(2)));
         assert_eq!(list.next(), None);
 
-        assert_eq!(Face::negative(1).to_linear(), 2);
-        assert_eq!(Face::positive(3).to_linear(), 7);
-        assert_eq!(Face::positive(3), Face::from_linear(7));
+        assert_eq!(Face::<3>::negative(1).to_linear(), 2);
+        assert_eq!(Face::<3>::positive(3).to_linear(), 7);
+        assert_eq!(Face::<3>::positive(3), Face::from_linear(7));
     }
 }
