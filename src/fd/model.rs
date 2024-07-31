@@ -3,6 +3,7 @@ use std::fs::File;
 use std::io::{self, Read as _, Write};
 use std::path::Path;
 
+use ron::ser::PrettyConfig;
 use vtkio::{model::*, Vtk};
 
 use crate::fd::Mesh;
@@ -92,7 +93,8 @@ impl<const N: usize> Model<N> {
 
     /// Exports a model to a dat file.
     pub fn export_dat(&self, path: impl AsRef<Path>) -> Result<(), io::Error> {
-        let data = ron::to_string(self).map_err(|err| io::Error::other(err))?;
+        let data = ron::ser::to_string_pretty(self, PrettyConfig::new())
+            .map_err(|err| io::Error::other(err))?;
         let mut file = File::create(path)?;
         file.write_all(data.as_bytes())
     }

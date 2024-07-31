@@ -10,12 +10,13 @@ pub mod equations;
 
 use equations::HyperbolicSystem;
 
-const STEPS: usize = 1000;
+const STEPS: usize = 5000;
 const CFL: f64 = 0.1;
 const ORDER: usize = 4;
 
+/// Initial data in Rinne's hyperbolic variables.
 #[derive(Clone, SystemLabel)]
-pub enum InitialData {
+pub enum Rinne {
     Conformal,
     Seed,
 }
@@ -559,7 +560,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     discrete.set_mesh_from_model(&model);
 
     // Read initial data
-    let initial = model.read_system::<InitialData>().unwrap();
+    let initial = model.read_system::<Rinne>().unwrap();
 
     // Setup dynamic variables
     let mut dynamic = SystemVec::with_length(discrete.num_nodes());
@@ -567,15 +568,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Metric
     dynamic
         .field_mut(Dynamic::Grr)
-        .copy_from_slice(initial.field(InitialData::Conformal));
+        .copy_from_slice(initial.field(Rinne::Conformal));
     dynamic
         .field_mut(Dynamic::Gzz)
-        .copy_from_slice(initial.field(InitialData::Conformal));
+        .copy_from_slice(initial.field(Rinne::Conformal));
     dynamic.field_mut(Dynamic::Grz).fill(0.0);
     // S
     dynamic
         .field_mut(Dynamic::S)
-        .copy_from_slice(initial.field(InitialData::Seed));
+        .copy_from_slice(initial.field(Rinne::Seed));
     // Extrinsic Curvature
     dynamic.field_mut(Dynamic::Krr).fill(0.0);
     dynamic.field_mut(Dynamic::Kzz).fill(0.0);
@@ -601,16 +602,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Spacing {}", discrete.mesh().min_spacing());
     println!("Step Size {}", h);
 
+    // Allocate vectors
+    let mut derivs = SystemVec::with_length(discrete.num_nodes());
     let mut update = SystemVec::<Dynamic>::with_length(discrete.num_nodes());
     let mut dissipation = SystemVec::with_length(discrete.num_nodes());
 
-    // let mut data = dynamic.as_slice().to_contigious().into_boxed_slice();
-    // let mut update = vec![0.0; data.len()].into_boxed_slice();
-    // let mut dissipation = vec![0.0; data.len()].into_boxed_slice();
-
-    // Vector for derivatives
-    let mut derivs = SystemVec::with_length(discrete.num_nodes());
-
+    // Integrate
     let mut integrator = Rk4::new();
 
     for i in 0..STEPS {
@@ -631,23 +628,25 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let norm = discrete.norm(dynamic.as_slice());
         println!("Step {i}, Time {:.5} Norm {:.5e}", i as f64 * h, norm);
 
-        // Output current system to disk
-        let mut model = Model::empty();
-        model.set_mesh(discrete.mesh());
-        model.write_system(dynamic.as_slice());
+        if i % 10 == 0 {
+            // Output current system to disk
+            let mut model = Model::empty();
+            model.set_mesh(discrete.mesh());
+            model.write_system(dynamic.as_slice());
 
-        for field in Dynamic::fields() {
-            let name = format!("{}_dt", field.field_name());
-            model.write_field(&name, derivs.field(field).to_vec());
+            for field in Dynamic::fields() {
+                let name = format!("{}_dt", field.field_name());
+                model.write_field(&name, derivs.field(field).to_vec());
+            }
+
+            model.export_vtk(
+                format!("output/evbrill{}.vtu", i / 10),
+                ExportVtkConfig {
+                    title: "evbrill".to_string(),
+                    ghost: false,
+                },
+            )?;
         }
-
-        model.export_vtk(
-            format!("output/evbrill{}.vtu", i),
-            ExportVtkConfig {
-                title: "evbrill".to_string(),
-                ghost: false,
-            },
-        )?;
 
         // Compute step
         integrator.step(

@@ -316,7 +316,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut model = Model::empty();
     model.set_mesh(discrete.mesh());
-    model.write_system(SystemSlice::<Garfinkle>::from_contiguous(&garfinkle));
+    model.write_system(rinne.as_slice());
     model.export_dat("output/idbrill.dat")?;
 
     Ok(())

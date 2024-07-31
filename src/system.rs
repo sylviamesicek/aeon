@@ -119,7 +119,11 @@ impl<Label: SystemLabel> SystemVec<Label> {
 
     /// Returns the length of the system.
     pub fn len(&self) -> usize {
-        self.data.len() / field_count::<Label>()
+        if field_count::<Label>() == 0 {
+            0
+        } else {
+            self.data.len() / field_count::<Label>()
+        }
     }
 
     /// Caches pointers to each field in the system.
@@ -185,6 +189,15 @@ impl<Label: SystemLabel> SystemVec<Label> {
     }
 }
 
+impl SystemVec<Empty> {
+    pub fn empty() -> Self {
+        Self {
+            data: Vec::new(),
+            _marker: PhantomData,
+        }
+    }
+}
+
 /// Represents a subslice of an owned system vector.
 pub struct SystemSlice<'a, Label: SystemLabel> {
     data: &'a [f64],
@@ -227,23 +240,26 @@ impl<'a, Label: SystemLabel> SystemSlice<'a, Label> {
         self.length
     }
 
-    /// Returns true if the system slice is empty.
-    pub fn is_empty(&self) -> bool {
-        self.len() == 0
-    }
-
     /// Caches immutable pointers to each field in the slice.
     pub fn fields(self) -> SystemFields<'a, Label> {
-        let length = self.data.len() / field_count::<Label>();
-        let fields = Label::FieldLike::from_fn(|index| unsafe {
-            self.data.as_ptr().add(index * length + self.offset)
-        })
-        .into();
+        if field_count::<Label>() == 0 {
+            SystemFields {
+                length: 0,
+                fields: Label::FieldLike::from_fn(|_| std::ptr::null()).into(),
+                _marker: PhantomData,
+            }
+        } else {
+            let length = self.data.len() / field_count::<Label>();
+            let fields = Label::FieldLike::from_fn(|index| unsafe {
+                self.data.as_ptr().add(index * length + self.offset)
+            })
+            .into();
 
-        SystemFields {
-            length,
-            fields,
-            _marker: PhantomData,
+            SystemFields {
+                length,
+                fields,
+                _marker: PhantomData,
+            }
         }
     }
 
@@ -356,31 +372,47 @@ impl<'a, Label: SystemLabel> SystemSliceMut<'a, Label> {
 
     /// Caches immutable pointers to the constituent fields in the system.
     pub fn fields(self) -> SystemFields<'a, Label> {
-        let length = self.data.len() / field_count::<Label>();
-        let fields = Label::FieldLike::from_fn(|index| unsafe {
-            self.data.as_ptr().add(index * length + self.offset)
-        })
-        .into();
+        if field_count::<Label>() == 0 {
+            SystemFields {
+                length: 0,
+                fields: Label::FieldLike::from_fn(|_| std::ptr::null()).into(),
+                _marker: PhantomData,
+            }
+        } else {
+            let length = self.data.len() / field_count::<Label>();
+            let fields = Label::FieldLike::from_fn(|index| unsafe {
+                self.data.as_ptr().add(index * length + self.offset)
+            })
+            .into();
 
-        SystemFields {
-            length,
-            fields,
-            _marker: PhantomData,
+            SystemFields {
+                length,
+                fields,
+                _marker: PhantomData,
+            }
         }
     }
 
     /// Caches mutable pointers to the constituent fields in the system.
     pub fn fields_mut(self) -> SystemFieldsMut<'a, Label> {
-        let length = self.data.len() / field_count::<Label>();
-        let fields = Label::FieldLike::from_fn(|index| unsafe {
-            self.data.as_mut_ptr().add(index * length + self.offset)
-        })
-        .into();
+        if field_count::<Label>() == 0 {
+            SystemFieldsMut {
+                length: 0,
+                fields: Label::FieldLike::from_fn(|_| std::ptr::null_mut()).into(),
+                _marker: PhantomData,
+            }
+        } else {
+            let length = self.data.len() / field_count::<Label>();
+            let fields = Label::FieldLike::from_fn(|index| unsafe {
+                self.data.as_mut_ptr().add(index * length + self.offset)
+            })
+            .into();
 
-        SystemFieldsMut {
-            length,
-            fields,
-            _marker: PhantomData,
+            SystemFieldsMut {
+                length,
+                fields,
+                _marker: PhantomData,
+            }
         }
     }
 
