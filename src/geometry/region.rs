@@ -80,7 +80,7 @@ impl<const N: usize> Region<N> {
             })
     }
 
-    pub fn adjacent_splits(&self) -> impl Iterator<Item = AxisMask<N>> + '_ {
+    pub fn adjacent_splits(self) -> impl Iterator<Item = AxisMask<N>> {
         let origin: [_; N] = from_fn(|axis| match self.side(axis) {
             Side::Left | Side::Middle => 0,
             Side::Right => 1,

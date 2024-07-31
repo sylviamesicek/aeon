@@ -77,28 +77,41 @@ impl<Label: SystemLabel> HyperRelaxSolver<Label> {
 
         for index in 0..self.max_steps {
             {
-                let u = &mut data[..dimension];
-
-                mesh.order::<ORDER>()
-                    .fill_boundary(bc.clone(), SystemSliceMut::from_contiguous(u));
+                mesh.order::<ORDER>().fill_boundary(
+                    bc.clone(),
+                    SystemSliceMut::from_contiguous(&mut data[..dimension]),
+                );
                 mesh.order::<ORDER>().apply(
                     bc.clone(),
                     operator.clone(),
-                    SystemSlice::from_contiguous(u),
+                    SystemSlice::from_contiguous(&mut data[..dimension]),
                     context.slice(..),
                     system.slice_mut(..),
                 );
             }
 
-            if index % 1 == 0 {
+            if index % 10 == 0 {
+                mesh.order::<ORDER>().fill_boundary(
+                    bc.clone(),
+                    SystemSliceMut::from_contiguous(&mut data[..dimension]),
+                );
+
+                mesh.order::<ORDER>().fill_boundary(
+                    VBoundary {
+                        dampening: self.dampening,
+                        inner: bc.clone(),
+                    },
+                    SystemSliceMut::from_contiguous(&mut data[dimension..]),
+                );
+
                 let mut model = Model::from_mesh(mesh);
                 model.attach_field("u", data[..dimension].to_vec());
                 model.attach_field("v", data[dimension..].to_vec());
 
                 model
-                    .export_vtk(
+                    .export_vtk_ghost(
                         format!("idbrill").as_str(),
-                        PathBuf::from(format!("output/idbrill{}.vtu", { index / 1 })),
+                        PathBuf::from(format!("output/idbrill{}.vtu", { index / 10 })),
                     )
                     .unwrap();
             }

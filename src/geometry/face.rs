@@ -1,4 +1,6 @@
-use super::AxisMask;
+use std::array::from_fn;
+
+use super::{index::IndexWindow, AxisMask, Region, Side};
 
 /// A face of a rectangular prism in `N` dimensional space.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -46,6 +48,10 @@ impl<const N: usize> Face<N> {
         let mut result = AxisMask::empty();
         result.set_to(self.axis, self.side);
         result
+    }
+
+    pub fn adjacent_splits(self) -> impl Iterator<Item = AxisMask<N>> {
+        AxisMask::<N>::enumerate().filter(move |split| split.is_set(self.axis) == self.side)
     }
 }
 
@@ -124,6 +130,25 @@ impl<const N: usize> FaceMask<N> {
 
     pub fn set_to(&mut self, face: Face<N>, val: bool) {
         self.0[face.axis][face.side as usize] = val;
+    }
+
+    pub fn adjacent_regions(&self) -> impl Iterator<Item = Region<N>> {
+        let mut window = IndexWindow::new([1; N], [1; N]);
+
+        for axis in 0..N {
+            if self.is_set(Face::negative(axis)) {
+                window.origin[axis] -= 1;
+                window.size[axis] += 1;
+            }
+
+            if self.is_set(Face::positive(axis)) {
+                window.size[axis] += 1;
+            }
+        }
+
+        window
+            .iter()
+            .map(|index| Region::new(from_fn(|axis| Side::from_value(index[axis] as u8))))
     }
 }
 

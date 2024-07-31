@@ -4,7 +4,7 @@ use std::path::Path;
 
 use vtkio::{model::*, Vtk};
 
-use crate::fd::{node_from_vertex, Mesh};
+use crate::fd::Mesh;
 use crate::prelude::IndexSpace;
 use crate::system::{SystemLabel, SystemSlice, SystemVec};
 
@@ -72,14 +72,22 @@ impl<const N: usize> Model<N> {
 
     /// Saves the model as a vtk file on disk for visualization in an external program.
     pub fn export_vtk(&self, title: &str, path: impl AsRef<Path>) -> Result<(), io::Error> {
-        let model = self.vtk_model(title);
+        let model = self.vtk_model(title, false);
         model.export(path).map_err(|i| match i {
             vtkio::Error::IO(io) => io,
             _ => io::Error::from(io::ErrorKind::Other),
         })
     }
 
-    fn vtk_model(&self, title: &str) -> Vtk {
+    pub fn export_vtk_ghost(&self, title: &str, path: impl AsRef<Path>) -> Result<(), io::Error> {
+        let model = self.vtk_model(title, true);
+        model.export(path).map_err(|i| match i {
+            vtkio::Error::IO(io) => io,
+            _ => io::Error::from(io::ErrorKind::Other),
+        })
+    }
+
+    fn vtk_model(&self, title: &str, ghost: bool) -> Vtk {
         const {
             assert!(N > 0 && N <= 2, "Vtk Output only supported for 0 < N ≤ 2");
         }
@@ -93,8 +101,19 @@ impl<const N: usize> Model<N> {
 
         for block in 0..self.mesh.num_blocks() {
             let space = self.mesh.block_space(block);
-            let cell_space = IndexSpace::new(space.cell_size());
-            let vertex_space = IndexSpace::new(space.vertex_size());
+
+            let mut cell_size = space.cell_size();
+            let mut vertex_size = space.vertex_size();
+
+            if ghost {
+                for axis in 0..N {
+                    cell_size[axis] += 2 * space.ghost;
+                    vertex_size[axis] += 2 * space.ghost;
+                }
+            }
+
+            let cell_space = IndexSpace::new(cell_size);
+            let vertex_space = IndexSpace::new(vertex_size);
 
             for cell in cell_space.iter() {
                 let mut vertex = [0; N];
@@ -130,8 +149,8 @@ impl<const N: usize> Model<N> {
                 offsets.push(connectivity.len() as u64);
             }
 
-            cell_total += space.cell_size().iter().product::<usize>();
-            vertex_total += space.vertex_size().iter().product::<usize>() as u64;
+            cell_total += cell_space.index_count() as usize;
+            vertex_total += vertex_space.index_count() as u64;
         }
 
         let cells = Cells {
@@ -148,10 +167,14 @@ impl<const N: usize> Model<N> {
         for block in 0..self.mesh.num_blocks() {
             let bounds = self.mesh.block_bounds(block);
             let space = self.mesh.block_space(block).set_context(bounds);
-            let vertex_space = IndexSpace::new(space.vertex_size());
+            let window = if ghost {
+                space.full_window()
+            } else {
+                space.inner_window()
+            };
 
-            for vertex in vertex_space.iter() {
-                let position = space.position(node_from_vertex(vertex));
+            for node in window {
+                let position = space.position(node);
                 let mut vertex = [0.0; 3];
                 vertex[..N].copy_from_slice(&position);
                 vertices.extend(vertex);
@@ -178,12 +201,14 @@ impl<const N: usize> Model<N> {
                 for block in 0..self.mesh.num_blocks() {
                     let space = self.mesh.block_space(block);
                     let nodes = self.mesh.block_nodes(block);
+                    let window = if ghost {
+                        space.full_window()
+                    } else {
+                        space.inner_window()
+                    };
 
-                    let vertex_space = IndexSpace::new(space.vertex_size());
-
-                    for vertex in vertex_space.iter() {
-                        let value =
-                            space.value(node_from_vertex(vertex), &field_data[nodes.clone()]);
+                    for node in window {
+                        let value = space.value(node, &field_data[nodes.clone()]);
                         data.push(value);
                     }
                 }
@@ -206,10 +231,14 @@ impl<const N: usize> Model<N> {
                 let space = self.mesh.block_space(block);
                 let nodes = self.mesh.block_nodes(block);
 
-                let vertex_space = IndexSpace::new(space.vertex_size());
+                let window = if ghost {
+                    space.full_window()
+                } else {
+                    space.inner_window()
+                };
 
-                for vertex in vertex_space.iter() {
-                    let value = space.value(node_from_vertex(vertex), &system[nodes.clone()]);
+                for node in window {
+                    let value = space.value(node, &system[nodes.clone()]);
                     data.push(value);
                 }
             }

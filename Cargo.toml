@@ -1,6 +1,6 @@
 # Workspace configuration
 [workspace]
-members = ["crates/*", "tools/idbrill", "tools/evbrill"]
+members = ["crates/*", "tools/idbrill"]
 resolver = "2"
 
 [workspace.dependencies]

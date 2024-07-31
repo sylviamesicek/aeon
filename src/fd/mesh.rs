@@ -1,7 +1,7 @@
 #![allow(dead_code)]
 
 use reborrow::ReborrowMut;
-use std::{array::from_fn, ops::Range};
+use std::{array::from_fn, fmt::Write, ops::Range};
 
 use crate::fd::{
     node_from_vertex, Boundary, BoundaryKind, Condition, Conditions, Engine, FdEngine, FdIntEngine,
@@ -123,6 +123,128 @@ impl<const N: usize> Mesh<N> {
             ghost: self.nodes.ghost_nodes,
             context: (),
         }
+    }
+
+    pub fn write_debug(&self) -> String {
+        let mut result = String::new();
+
+        writeln!(result, "// **********************").unwrap();
+        writeln!(result, "// Cells ****************").unwrap();
+        writeln!(result, "// **********************").unwrap();
+        writeln!(result, "").unwrap();
+
+        for cell in 0..self.num_cells() {
+            writeln!(result, "Cell {cell}").unwrap();
+            writeln!(result, "    Bounds {:?}", self.tree.bounds(cell)).unwrap();
+            writeln!(result, "    Block {}", self.blocks.cell_block(cell)).unwrap();
+            writeln!(
+                result,
+                "    Block Position {:?}",
+                self.blocks.cell_index(cell)
+            )
+            .unwrap();
+
+            writeln!(result, "    Neighbors {:?}", self.tree.neighbors(cell)).unwrap();
+        }
+
+        writeln!(result, "").unwrap();
+        writeln!(result, "// **********************").unwrap();
+        writeln!(result, "// Blocks ***************").unwrap();
+        writeln!(result, "// **********************").unwrap();
+        writeln!(result, "").unwrap();
+
+        for block in 0..self.num_blocks() {
+            writeln!(result, "Block {block}").unwrap();
+            writeln!(result, "    Bounds {:?}", self.blocks.block_bounds(block)).unwrap();
+            writeln!(result, "    Size {:?}", self.blocks.block_size(block)).unwrap();
+            writeln!(result, "    Cells {:?}", self.blocks.block_cells(block)).unwrap();
+            writeln!(
+                result,
+                "    Boundary {:?}",
+                self.blocks.block_boundary_flags(block)
+            )
+            .unwrap();
+        }
+
+        writeln!(result, "").unwrap();
+        writeln!(result, "// **********************").unwrap();
+        writeln!(result, "// Interfaces ***********").unwrap();
+        writeln!(result, "// **********************").unwrap();
+        writeln!(result, "").unwrap();
+
+        writeln!(result, "// Fine Interfaces").unwrap();
+        writeln!(result, "").unwrap();
+
+        for interface in self.interfaces.fine() {
+            writeln!(
+                result,
+                "Fine Interface {} -> {}",
+                interface.block, interface.neighbor
+            )
+            .unwrap();
+            writeln!(
+                result,
+                "    Source {}: Origin {:?}, Size {:?}",
+                interface.neighbor, interface.source, interface.size
+            )
+            .unwrap();
+            writeln!(
+                result,
+                "    Dest {}: Origin {:?}, Size {:?}",
+                interface.block, interface.dest, interface.size
+            )
+            .unwrap();
+        }
+
+        writeln!(result, "// Direct Interfaces").unwrap();
+        writeln!(result, "").unwrap();
+
+        for interface in self.interfaces.direct() {
+            writeln!(
+                result,
+                "Direct Interface {} -> {}",
+                interface.block, interface.neighbor
+            )
+            .unwrap();
+            writeln!(
+                result,
+                "    Source {}: Origin {:?}, Size {:?}",
+                interface.neighbor, interface.source, interface.size
+            )
+            .unwrap();
+            writeln!(
+                result,
+                "    Dest {}: Origin {:?}, Size {:?}",
+                interface.block, interface.dest, interface.size
+            )
+            .unwrap();
+        }
+
+        writeln!(result, "// Coarse Interfaces").unwrap();
+        writeln!(result, "").unwrap();
+
+        for interface in self.interfaces.coarse() {
+            writeln!(
+                result,
+                "Coarse Interface {} -> {}",
+                interface.block, interface.neighbor
+            )
+            .unwrap();
+            writeln!(
+                result,
+                "    Source {}: Origin {:?}, Size {:?}",
+                interface.neighbor, interface.source, interface.size
+            )
+            .unwrap();
+            writeln!(
+                result,
+                "    Dest {}: Origin {:?}, Size {:?}",
+                interface.block, interface.dest, interface.size
+            )
+            .unwrap();
+        }
+
+        result
     }
 
     // pub fn block_fields<'a, Label: SystemLabel>(

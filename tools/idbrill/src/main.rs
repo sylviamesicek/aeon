@@ -236,6 +236,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut mesh = Mesh::new(bounds, size, 2);
     mesh.refine(&[true, false, false, false]);
+    mesh.refine(&[true, false, false, false, false, false, false]);
+
+    std::fs::write("output/mesh.txt", mesh.write_debug()).unwrap();
 
     println!("Num Blocks: {}", mesh.num_blocks());
     println!("Num Cells: {}", mesh.num_cells());
@@ -259,7 +262,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut solver = HyperRelaxSolver::new();
     solver.tolerance = 1e-9;
-    solver.max_steps = 1000;
+    solver.max_steps = 3000;
     solver.cfl = 0.1;
     solver.dampening = 0.4;
 

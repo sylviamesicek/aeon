@@ -110,24 +110,14 @@ impl<const N: usize> IndexSpace<N> {
 /// Represents a subset of an index space, and provides utilities for iterating over this window.
 #[derive(Debug, Clone)]
 pub struct IndexWindow<const N: usize> {
-    origin: [usize; N],
-    size: [usize; N],
+    pub origin: [usize; N],
+    pub size: [usize; N],
 }
 
 impl<const N: usize> IndexWindow<N> {
     /// Constructs a new index window.
     pub fn new(origin: [usize; N], size: [usize; N]) -> Self {
         Self { origin, size }
-    }
-
-    /// Origin of the index window.
-    pub fn origin(&self) -> [usize; N] {
-        self.origin
-    }
-
-    /// Size of the index window.
-    pub fn size(&self) -> [usize; N] {
-        self.size
     }
 
     /// Iterates over indices in the index window.

@@ -4,7 +4,8 @@ use crate::array::{Array, ArrayLike};
 use crate::geometry::{faces, AxisMask, Rectangle, Side};
 use bitvec::prelude::*;
 use std::array::from_fn;
-use std::cmp::Ordering;
+// use std::cmp::Ordering;
+use std::iter::once;
 use std::mem::ManuallyDrop;
 use std::ops::Range;
 use std::slice;
@@ -77,6 +78,16 @@ impl<const N: usize> Tree<N> {
         self.bounds.len()
     }
 
+    /// Moves in a positive direction for each axis that mask is set. This is most
+    /// commonly used to find sibling cells in neighbor searches.
+    fn sibling(&self, mut cell: usize, mask: AxisMask<N>) -> usize {
+        (0..N).filter(|&axis| mask.is_set(axis)).for_each(|axis| {
+            cell = self.neighbor(cell, Face::positive(axis));
+        });
+
+        cell
+    }
+
     /// Returns neighbors for each face of the cell.
     pub fn neighbors(&self, cell: usize) -> &[usize] {
         &self.neighbors[cell * 2 * N..(cell + 1) * 2 * N]
@@ -87,20 +98,71 @@ impl<const N: usize> Tree<N> {
         self.neighbors[cell * 2 * N + face.to_linear()]
     }
 
+    /// Finds the outer neighbor along the face of the given subcell.
+    pub fn neighbor_after_refinement(
+        &self,
+        cell: usize,
+        subcell: AxisMask<N>,
+        face: Face<N>,
+    ) -> usize {
+        let result = self.neighbor(cell, face);
+
+        if result == NULL {
+            return NULL;
+        }
+
+        if self.level(result) <= self.level(cell) {
+            return result;
+        }
+
+        let mut sibling = subcell;
+        sibling.set_to(face.axis, false);
+
+        self.sibling(result, sibling)
+    }
+
+    /// Returns all neighbors on a given face
+    pub fn neighbors_on_face(
+        &self,
+        cell: usize,
+        face: Face<N>,
+    ) -> impl Iterator<Item = usize> + '_ {
+        let neighbor = self.neighbor(cell, face);
+
+        let count = if neighbor == NULL {
+            0
+        } else if self.level(neighbor) > self.level(cell) {
+            AxisMask::<N>::COUNT / 2
+        } else {
+            1
+        };
+
+        let mut splits = face.adjacent_splits();
+        splits.next();
+
+        once(neighbor)
+            .chain(splits.map(move |mut split| {
+                split.clear(face.axis);
+                self.sibling(neighbor, split)
+            }))
+            .take(count)
+    }
+
     /// Returns the neighbor of the cell in the given region.
-    pub fn neighbor_region(&self, cell: usize, region: Region<N>) -> usize {
-        let split = self.split(cell);
+    pub fn neighbor_in_region(&self, cell: usize, region: Region<N>) -> usize {
+        let split: AxisMask<N> = self.split(cell);
         let level = self.level(cell);
 
         // Start with self
         let mut neighbor = cell;
 
+        // Flags indicating if we have crossed over a coarse or fine boundary
         let mut neighbor_fine: bool = false;
         let mut neighbor_coarse: bool = false;
 
-        let mut rsplit = region.adjacent_split();
+        let mut subcell = region.adjacent_split();
 
-        // Iterate over faces
+        // Iterate over adjacent faces.
         for face in region.adjacent_faces() {
             // Make sure face is compatible with split.
             if neighbor_coarse && split.is_inner_face(face) {
@@ -116,8 +178,8 @@ impl<const N: usize> Tree<N> {
             }
 
             // Get neighbor of current cell
-            let nneighbor = self.neighbor_after_refinement(neighbor, rsplit, face);
-            rsplit.toggle(face.axis);
+            let nneighbor = self.neighbor_after_refinement(neighbor, subcell, face);
+            subcell.toggle(face.axis);
 
             // Short circut if we have encountered a boundary
             if nneighbor == NULL {
@@ -127,18 +189,17 @@ impl<const N: usize> Tree<N> {
             // Get level of neighbor
             let nlevel = self.level(nneighbor);
 
-            match nlevel.cmp(&level) {
-                Ordering::Less => {
-                    debug_assert!(nlevel == level - 1);
-                    debug_assert!(!neighbor_fine);
-                    neighbor_coarse = true;
-                }
-                Ordering::Greater => {
-                    debug_assert!(nlevel == level + 1);
-                    debug_assert!(!neighbor_coarse);
-                    neighbor_fine = true;
-                }
-                _ => {}
+            if nlevel < level {
+                debug_assert!(nlevel == level - 1);
+                debug_assert!(!neighbor_fine);
+                neighbor_coarse = true;
+            } else if nlevel > level {
+                debug_assert!(nlevel == level + 1);
+                debug_assert!(!neighbor_coarse);
+                neighbor_fine = true;
+            } else {
+                neighbor_coarse = false;
+                neighbor_fine = false;
             }
 
             neighbor = nneighbor;
@@ -147,32 +208,40 @@ impl<const N: usize> Tree<N> {
         neighbor
     }
 
-    /// Finds the outer neighbor along the face of the given subcell.
-    pub fn neighbor_after_refinement(
+    pub fn neighbors_in_region(
         &self,
         cell: usize,
-        split: AxisMask<N>,
-        face: Face<N>,
-    ) -> usize {
-        let mut result = self.neighbor(cell, face);
+        region: Region<N>,
+    ) -> impl Iterator<Item = usize> + '_ {
+        let neighbor = self.neighbor_in_region(cell, region);
 
-        if result == NULL {
-            return NULL;
-        }
+        let count = if neighbor == NULL {
+            0
+        } else if self.level(neighbor) > self.level(cell) {
+            AxisMask::<N>::COUNT / 2usize.pow(region.adjacency() as u32)
+        } else {
+            1
+        };
 
-        if self.level(result) <= self.level(cell) {
-            return result;
-        }
+        let mut splits = region.adjacent_splits();
+        splits.next();
 
-        (0..N)
-            .into_iter()
-            .filter(|&i| i != face.axis && split.is_set(i))
-            .for_each(|i| {
-                result = self.neighbor(result, Face::positive(i));
-            });
+        once(neighbor)
+            .chain(splits.map(move |mut split| {
+                (0..N)
+                    .filter(|&axis| region.side(axis) != Side::Middle)
+                    .for_each(|axis| split.clear(axis));
 
-        result
+                self.sibling(neighbor, split)
+            }))
+            .take(count)
     }
+
+    // pub fn neighborhood(&self, cell: usize, mask: FaceMask<N>) -> impl Iterator<Item = usize> + '_ {
+    //     mask.adjacent_regions()
+    //         .filter(|region| *region != Region::<N>::CENTRAL)
+    //         .flat_map(move |region| self.neighbors_in_region(cell, region))
+    // }
 
     /// Computes the level of a cell.
     pub fn level(&self, cell: usize) -> usize {
@@ -807,29 +876,45 @@ impl<const N: usize> TreeInterfaces<N> {
 
             Self::taverse_cell_neighbors(blocks, &mut neighbors, |neighbor, a, b| {
                 // Find active region.
-                let (anode, bnode) = Self::block_ghost_aabb(blocks, nodes, a, b);
+                let (anode, bnode) = Self::block_ghost_aabb(tree, blocks, nodes, a, b);
                 let mut source = Self::neighbor_origin(tree, blocks, nodes, a);
                 let (mut dest, mut size) = Self::space_from_aabb(anode, bnode);
 
                 // Avoid overlaps between aabbs on this block.
-                let aorigin = blocks.cell_index(a.cell);
-                let borigin = blocks.cell_index(b.cell);
+                // let aorigin = blocks.cell_index(a.cell);
+                // let borigin = blocks.cell_index(b.cell);
                 let flags = blocks.block_boundary_flags(block);
 
                 for axis in 0..N {
                     let right_boundary = flags.is_set(Face::positive(axis));
                     let left_boundary = flags.is_set(Face::negative(axis));
 
+                    // // If the right edge doesn't extend all the way to the right,
+                    // // shrink by one.
+                    // if b.region.side(axis) == Side::Middle
+                    //     && !(borigin[axis] == block_size[axis] - 1 && right_boundary)
+                    // {
+                    //     size[axis] -= 1;
+                    // }
+
+                    // // If we do not extend further left, don't include
+                    // if a.region.side(axis) == Side::Middle && aorigin[axis] == 0 && !left_boundary {
+                    //     source[axis] += 1;
+                    //     dest[axis] += 1;
+                    //     size[axis] -= 1;
+                    // }
+
                     // If the right edge doesn't extend all the way to the right,
                     // shrink by one.
                     if b.region.side(axis) == Side::Middle
-                        && !(borigin[axis] == block_size[axis] - 1 && right_boundary)
+                        && !(bnode[axis] == (block_size[axis] * nodes.cell_width[axis]) as isize
+                            && right_boundary)
                     {
                         size[axis] -= 1;
                     }
 
                     // If we do not extend further left, don't include
-                    if a.region.side(axis) == Side::Middle && aorigin[axis] == 0 && !left_boundary {
+                    if a.region.side(axis) == Side::Middle && anode[axis] == 0 && !left_boundary {
                         source[axis] += 1;
                         dest[axis] += 1;
                         size[axis] -= 1;
@@ -875,17 +960,16 @@ impl<const N: usize> TreeInterfaces<N> {
             // Find all cells adjacent to the given region.
             for index in block_space.adjacent(region) {
                 let cell = block_cells[block_space.linear_from_cartesian(index)];
-                let neighbor = tree.neighbor_region(cell, region);
 
-                if neighbor == NULL {
-                    continue;
+                for neighbor in tree.neighbors_in_region(cell, region) {
+                    debug_assert!(neighbor != NULL);
+
+                    neighbors.push(CellNeighbor {
+                        cell,
+                        neighbor,
+                        region: region.clone(),
+                    })
                 }
-
-                neighbors.push(CellNeighbor {
-                    cell,
-                    neighbor,
-                    region: region.clone(),
-                })
             }
         }
     }
@@ -922,6 +1006,7 @@ impl<const N: usize> TreeInterfaces<N> {
     /// Computes the nodes that ghost nodes adjacent to the AABB of cells
     /// defined by A and B.
     fn block_ghost_aabb(
+        tree: &Tree<N>,
         blocks: &TreeBlocks<N>,
         nodes: &TreeNodes<N>,
         a: CellNeighbor<N>,
@@ -933,6 +1018,13 @@ impl<const N: usize> TreeInterfaces<N> {
 
         // Compute bottom right corner of A cell.
         let mut anode: [_; N] = from_fn(|axis| (aindex[axis] * nodes.cell_width[axis]) as isize);
+
+        if tree.level(a.cell) < tree.level(a.neighbor) {
+            let split = tree.split(a.neighbor);
+            (0..N)
+                .filter(|&axis| a.region.side(axis) == Side::Middle && split.is_set(axis))
+                .for_each(|axis| anode[axis] += (nodes.cell_width[axis] / 2) as isize);
+        }
 
         // Offset by appropriate ghost nodes/width
         for axis in 0..N {
@@ -950,6 +1042,13 @@ impl<const N: usize> TreeInterfaces<N> {
         // Compute top left corner of B cell
         let mut bnode: [_; N] =
             from_fn(|axis| ((bindex[axis] + 1) * nodes.cell_width[axis]) as isize);
+
+        if tree.level(b.cell) < tree.level(b.neighbor) {
+            let split = tree.split(b.neighbor);
+            (0..N)
+                .filter(|&axis| b.region.side(axis) == Side::Middle && !split.is_set(axis))
+                .for_each(|axis| bnode[axis] -= (nodes.cell_width[axis] / 2) as isize);
+        }
 
         // Offset by appropriate ghost nodes/width
         for axis in 0..N {
@@ -1111,99 +1210,6 @@ struct CellNeighbor<const N: usize> {
     neighbor: usize,
     region: Region<N>,
 }
-
-// /// Caches information about every neighbor touching each cell (including non-adjacent neighbors).
-// #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
-// pub struct TreeNeighbors<const N: usize> {
-//     neighbors: Vec<usize>,
-// }
-
-// impl<const N: usize> TreeNeighbors<N> {
-//     /// Rebuilds the set of tree neighbors.
-//     pub fn build(&mut self, tree: &Tree<N>) {
-//         // Reset and reserve
-//         self.neighbors.clear();
-//         self.neighbors
-//             .reserve(tree.num_cells() * Region::<N>::COUNT);
-
-//         // Loop through every cell
-//         for cell in 0..tree.num_cells() {
-//             let split = tree.split(cell);
-//             let level = tree.level(cell);
-
-//             'regions: for region in regions::<N>() {
-//                 // Start with self
-//                 let mut neighbor = cell;
-
-//                 let mut neighbor_fine: bool = false;
-//                 let mut neighbor_coarse: bool = false;
-
-//                 let mut rsplit = region.adjacent_split();
-
-//                 // Iterate over faces
-//                 for face in region.adjacent_faces() {
-//                     // Make sure face is compatible with split.
-//                     if neighbor_coarse && split.is_inner_face(face) {
-//                         continue;
-//                     }
-
-//                     // Snap origin to be adjacent to face
-//                     if neighbor_fine {
-//                         if tree.split(neighbor).is_inner_face(face) {
-//                             neighbor = tree.neighbor(neighbor, face);
-//                         }
-//                         debug_assert!(tree.split(neighbor).is_outer_face(face));
-//                     }
-
-//                     // Get neighbor of current cell
-//                     let nneighbor = tree.neighbor_after_refinement(neighbor, rsplit, face);
-//                     rsplit.toggle(face.axis);
-
-//                     // Short circut if we have encountered a boundary
-//                     if nneighbor == NULL {
-//                         self.neighbors.push(NULL);
-//                         continue 'regions;
-//                     }
-
-//                     // Get level of neighbor
-//                     let nlevel = tree.level(nneighbor);
-
-//                     match nlevel.cmp(&level) {
-//                         Ordering::Less => {
-//                             debug_assert!(nlevel == level - 1);
-//                             debug_assert!(!neighbor_fine);
-//                             neighbor_coarse = true;
-//                         }
-//                         Ordering::Greater => {
-//                             debug_assert!(nlevel == level + 1);
-//                             debug_assert!(!neighbor_coarse);
-//                             neighbor_fine = true;
-//                         }
-//                         _ => {}
-//                     }
-
-//                     neighbor = nneighbor;
-//                 }
-
-//                 self.neighbors.push(neighbor);
-//             }
-//         }
-//     }
-
-//     pub fn num_cells(&self) -> usize {
-//         self.neighbors.len() / Region::<N>::COUNT
-//     }
-
-//     /// Retrieves the neighbors of the given cell for each region.
-//     pub fn cell_neighbors(&self, cell: usize) -> &[usize] {
-//         &self.neighbors[cell * Region::<N>::COUNT..(cell + 1) * Region::<N>::COUNT]
-//     }
-
-//     /// Retrieves the neighbors of the given cell for each region.
-//     pub fn cell_neighbor(&self, cell: usize, region: Region<N>) -> usize {
-//         self.cell_neighbors(cell)[region.to_linear()]
-//     }
-// }
 
 // ************************
 // Nodes ******************
@@ -1459,7 +1465,7 @@ mod tests {
     }
 
     #[test]
-    fn neighbor_regions() {
+    fn neighbors_two_levels() {
         let mut tree = Tree::new(Rectangle::<2>::UNIT);
         tree.refine(&[true, false, false, false]);
 
@@ -1468,7 +1474,7 @@ mod tests {
         let assert_eq_regions = |cell, values: [usize; 9]| {
             for region in regions::<2>() {
                 assert_eq!(
-                    tree.neighbor_region(cell, region),
+                    tree.neighbor_in_region(cell, region),
                     values[region.to_linear()]
                 );
             }
@@ -1496,6 +1502,41 @@ mod tests {
             tree.neighbor_after_refinement(6, AxisMask::pack([false, false]), Face::negative(0)),
             5
         );
+    }
+
+    #[test]
+    fn neighbors_three_levels() {
+        let mut tree = Tree::new(Rectangle::<2>::UNIT);
+        tree.refine(&[true, false, false, false]);
+        tree.refine(&[true, false, false, false, false, false, false]);
+
+        assert_eq!(
+            tree.neighbor_after_refinement(5, AxisMask::pack([true, false]), Face::negative(1)),
+            3
+        );
+
+        let mut neighbors = tree.neighbors_on_face(5, Face::negative(1));
+        assert_eq!(neighbors.next(), Some(2));
+        assert_eq!(neighbors.next(), Some(3));
+        assert_eq!(neighbors.next(), None);
+
+        assert_eq!(
+            tree.neighbor_in_region(5, Region::new([Side::Right, Side::Left])),
+            4
+        );
+
+        let mut neighbors = tree.neighbors_in_region(5, Region::new([Side::Middle, Side::Left]));
+        assert_eq!(neighbors.next(), Some(2));
+        assert_eq!(neighbors.next(), Some(3));
+        assert_eq!(neighbors.next(), None);
+
+        // let mut neighborhood = tree.neighborhood(5, FaceMask::full());
+        // assert_eq!(neighborhood.next(), Some(2));
+        // assert_eq!(neighborhood.next(), Some(3));
+        // assert_eq!(neighborhood.next(), Some(4));
+        // assert_eq!(neighborhood.next(), Some(6));
+        // assert_eq!(neighborhood.next(), Some(8));
+        // assert_eq!(neighborhood.next(), None);
     }
 
     #[test]
