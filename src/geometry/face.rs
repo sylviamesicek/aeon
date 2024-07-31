@@ -167,8 +167,8 @@ mod tests {
         assert_eq!(list.next(), Some(Face::positive(2)));
         assert_eq!(list.next(), None);
 
-        assert_eq!(Face::<3>::negative(1).to_linear(), 2);
-        assert_eq!(Face::<3>::positive(3).to_linear(), 7);
-        assert_eq!(Face::<3>::positive(3), Face::from_linear(7));
+        assert_eq!(Face::<4>::negative(1).to_linear(), 2);
+        assert_eq!(Face::<4>::positive(3).to_linear(), 7);
+        assert_eq!(Face::<4>::positive(3), Face::<4>::from_linear(7));
     }
 }

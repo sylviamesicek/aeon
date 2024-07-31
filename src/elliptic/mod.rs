@@ -3,7 +3,7 @@ use std::{marker::PhantomData, path::PathBuf};
 use reborrow::{Reborrow, ReborrowMut};
 
 use crate::{
-    fd::{Boundary, Conditions, Engine, Mesh, Model, Operator},
+    fd::{Boundary, Conditions, Discretization, Engine, ExportVtkConfig, Model, Operator},
     ode::{Ode, Rk4},
     prelude::Face,
     system::{field_count, SystemFields, SystemLabel, SystemSlice, SystemSliceMut, SystemValue},
@@ -37,7 +37,7 @@ impl<Label: SystemLabel> HyperRelaxSolver<Label> {
         BC: Boundary<N> + Conditions<N, System = Label>,
     >(
         &mut self,
-        mesh: &mut Mesh<N>,
+        discrete: &mut Discretization<N>,
         bc: BC,
         operator: O,
         context: SystemSlice<'_, O::Context>,
@@ -72,16 +72,16 @@ impl<Label: SystemLabel> HyperRelaxSolver<Label> {
             }
         }
 
-        let spacing: f64 = mesh.min_spacing();
+        let spacing: f64 = discrete.mesh().min_spacing();
         let step = self.cfl * spacing;
 
         for index in 0..self.max_steps {
             {
-                mesh.order::<ORDER>().fill_boundary(
+                discrete.order::<ORDER>().fill_boundary(
                     bc.clone(),
                     SystemSliceMut::from_contiguous(&mut data[..dimension]),
                 );
-                mesh.order::<ORDER>().apply(
+                discrete.order::<ORDER>().apply(
                     bc.clone(),
                     operator.clone(),
                     SystemSlice::from_contiguous(&mut data[..dimension]),
@@ -91,12 +91,12 @@ impl<Label: SystemLabel> HyperRelaxSolver<Label> {
             }
 
             if index % 10 == 0 {
-                mesh.order::<ORDER>().fill_boundary(
+                discrete.order::<ORDER>().fill_boundary(
                     bc.clone(),
                     SystemSliceMut::from_contiguous(&mut data[..dimension]),
                 );
 
-                mesh.order::<ORDER>().fill_boundary(
+                discrete.order::<ORDER>().fill_boundary(
                     VBoundary {
                         dampening: self.dampening,
                         inner: bc.clone(),
@@ -104,19 +104,21 @@ impl<Label: SystemLabel> HyperRelaxSolver<Label> {
                     SystemSliceMut::from_contiguous(&mut data[dimension..]),
                 );
 
-                let mut model = Model::from_mesh(mesh);
-                model.attach_field("u", data[..dimension].to_vec());
-                model.attach_field("v", data[dimension..].to_vec());
+                let mut model = Model::empty();
+                model.set_mesh(discrete.mesh());
+                model.write_field("u", data[..dimension].to_vec());
+                model.write_field("v", data[dimension..].to_vec());
 
-                model
-                    .export_vtk_ghost(
-                        format!("idbrill").as_str(),
-                        PathBuf::from(format!("output/idbrill{}.vtu", { index / 10 })),
-                    )
-                    .unwrap();
+                let path = PathBuf::from(format!("output/idbrill{}.vtu", { index / 10 }));
+                let config = ExportVtkConfig {
+                    title: "idbrill".to_string(),
+                    ghost: false,
+                };
+
+                model.export_vtk(path, config).unwrap();
             }
 
-            let norm = mesh.norm(system.slice(..));
+            let norm = discrete.norm(system.slice(..));
 
             log::trace!(
                 "Time {:.5}/{:.5} Norm {:.5e}",
@@ -134,7 +136,7 @@ impl<Label: SystemLabel> HyperRelaxSolver<Label> {
             }
 
             let mut ode = FictitiousOde {
-                mesh,
+                discrete,
                 dimension,
                 dampening: self.dampening,
                 bc: bc.clone(),
@@ -224,7 +226,7 @@ struct FictitiousOde<
     BC: Boundary<N> + Conditions<N>,
     O: Operator<N>,
 > {
-    mesh: &'a mut Mesh<N>,
+    discrete: &'a mut Discretization<N>,
     dimension: usize,
     dampening: f64,
 
@@ -249,11 +251,11 @@ where
     fn preprocess(&mut self, system: &mut [f64]) {
         let (u, v) = system.split_at_mut(self.dimension);
 
-        self.mesh
+        self.discrete
             .order::<ORDER>()
             .fill_boundary(self.bc.clone(), SystemSliceMut::from_contiguous(u));
 
-        self.mesh.order::<ORDER>().fill_boundary(
+        self.discrete.order::<ORDER>().fill_boundary(
             VBoundary {
                 inner: self.bc.clone(),
                 dampening: self.dampening,
@@ -276,7 +278,7 @@ where
         // Compute derivatives
 
         // Find du/dt from the definition v = du/dt + η u
-        self.mesh.order::<ORDER>().apply(
+        self.discrete.order::<ORDER>().apply(
             self.bc.clone(),
             UOperator {
                 dampening: self.dampening,
@@ -288,7 +290,7 @@ where
         );
 
         // dv/dt = Lu
-        self.mesh.order::<ORDER>().apply(
+        self.discrete.order::<ORDER>().apply(
             self.bc.clone(),
             self.operator.clone(),
             u.rb(),
@@ -298,11 +300,11 @@ where
 
         // Apply Outer boundary conditions
 
-        self.mesh
+        self.discrete
             .order::<ORDER>()
             .weak_boundary(self.bc.clone(), u, dudt);
 
-        self.mesh.order::<ORDER>().weak_boundary(
+        self.discrete.order::<ORDER>().weak_boundary(
             VBoundary {
                 dampening: self.dampening,
                 inner: self.bc.clone(),

@@ -105,8 +105,16 @@ impl<Label: SystemLabel> SystemVec<Label> {
     }
 
     /// Transforms a system vector back into a linear vector
-    pub fn to_contiguous(&self) -> Vec<f64> {
-        self.data.clone()
+    pub fn into_contiguous(self) -> Vec<f64> {
+        self.data
+    }
+
+    pub fn contigious(&self) -> &[f64] {
+        &self.data
+    }
+
+    pub fn contigious_mut(&mut self) -> &mut [f64] {
+        &mut self.data
     }
 
     /// Returns the length of the system.
@@ -264,6 +272,17 @@ impl<'a, Label: SystemLabel> SystemSlice<'a, Label> {
     }
 }
 
+impl<'a> SystemSlice<'a, Empty> {
+    pub fn empty() -> Self {
+        Self {
+            data: &[],
+            offset: 0,
+            length: 0,
+            _marker: PhantomData,
+        }
+    }
+}
+
 impl<'long, 'short, Label: SystemLabel> Reborrow<'short> for SystemSlice<'long, Label> {
     type Target = SystemSlice<'short, Label>;
 
@@ -277,13 +296,13 @@ impl<'long, 'short, Label: SystemLabel> Reborrow<'short> for SystemSlice<'long, 
     }
 }
 
-impl<'a> From<&'a [f64]> for SystemSlice<'a, ()> {
+impl<'a> From<&'a [f64]> for SystemSlice<'a, Scalar> {
     fn from(value: &'a [f64]) -> Self {
         SystemSlice::from_contiguous(value)
     }
 }
 
-impl<'a> From<&'a mut [f64]> for SystemSlice<'a, ()> {
+impl<'a> From<&'a mut [f64]> for SystemSlice<'a, Scalar> {
     fn from(value: &'a mut [f64]) -> Self {
         SystemSlice::from_contiguous(value)
     }
@@ -412,6 +431,17 @@ impl<'a, Label: SystemLabel> SystemSliceMut<'a, Label> {
     }
 }
 
+impl<'a> SystemSliceMut<'a, Empty> {
+    pub fn empty() -> Self {
+        Self {
+            data: &mut [],
+            offset: 0,
+            length: 0,
+            _marker: PhantomData,
+        }
+    }
+}
+
 impl<'long, 'short, Label: SystemLabel> Reborrow<'short> for SystemSliceMut<'long, Label> {
     type Target = SystemSlice<'short, Label>;
 
@@ -438,7 +468,7 @@ impl<'long, 'short, Label: SystemLabel> ReborrowMut<'short> for SystemSliceMut<'
     }
 }
 
-impl<'a> From<&'a mut [f64]> for SystemSliceMut<'a, ()> {
+impl<'a> From<&'a mut [f64]> for SystemSliceMut<'a, Scalar> {
     fn from(value: &'a mut [f64]) -> Self {
         SystemSliceMut::from_contiguous(value)
     }
@@ -526,13 +556,41 @@ impl<'a, Label: SystemLabel> SystemFieldsMut<'a, Label> {
     }
 }
 
-impl SystemLabel for () {
-    const NAME: &'static str = "Unit";
+// ****************************
+// Builtin Labels *************
+// ****************************
+
+#[derive(Clone)]
+pub enum Empty {}
+
+impl SystemLabel for Empty {
+    const NAME: &'static str = "Empty";
+
+    type FieldLike<T> = [T; 0];
+
+    fn fields() -> Array<Self::FieldLike<Self>> {
+        Array::from([])
+    }
+
+    fn field_index(&self) -> usize {
+        unreachable!()
+    }
+
+    fn field_name(&self) -> String {
+        unreachable!()
+    }
+}
+
+#[derive(Clone)]
+pub struct Scalar;
+
+impl SystemLabel for Scalar {
+    const NAME: &'static str = "Scalar";
 
     type FieldLike<T> = [T; 1];
 
     fn fields() -> Array<Self::FieldLike<Self>> {
-        [()].into()
+        [Scalar].into()
     }
 
     fn field_index(&self) -> usize {
@@ -540,7 +598,7 @@ impl SystemLabel for () {
     }
 
     fn field_name(&self) -> String {
-        "unit".to_string()
+        "scalar".to_string()
     }
 }
 

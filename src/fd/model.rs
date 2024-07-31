@@ -1,12 +1,28 @@
 use std::collections::HashMap;
-use std::io;
+use std::fs::File;
+use std::io::{self, Read as _, Write};
 use std::path::Path;
 
 use vtkio::{model::*, Vtk};
 
 use crate::fd::Mesh;
-use crate::prelude::IndexSpace;
+use crate::geometry::{IndexSpace, Rectangle};
 use crate::system::{SystemLabel, SystemSlice, SystemVec};
+
+#[derive(Clone, Debug)]
+pub struct ExportVtkConfig {
+    pub title: String,
+    pub ghost: bool,
+}
+
+impl Default for ExportVtkConfig {
+    fn default() -> Self {
+        Self {
+            ghost: false,
+            title: String::new(),
+        }
+    }
+}
 
 /// A model of numerical data which can be serialized and deserialized from the disk,
 /// as well as converted to other visualization formats (such as VTK).
@@ -18,26 +34,30 @@ pub struct Model<const N: usize> {
 }
 
 impl<const N: usize> Model<N> {
-    /// Constructs a new empty model of the mesh, to which systems and fields can be attached.
-    pub fn from_mesh(mesh: &Mesh<N>) -> Self {
+    /// Constructs an empty model, to which meshes
+    pub fn empty() -> Model<N> {
         Self {
-            mesh: mesh.clone(),
+            mesh: Mesh::new(Rectangle::UNIT, [2; N], 0),
             systems: HashMap::new(),
             fields: HashMap::new(),
         }
     }
 
+    pub fn set_mesh(&mut self, mesh: &Mesh<N>) {
+        self.mesh.clone_from(mesh);
+    }
+
     // Retrieves the mesh that this struct models.
-    pub fn mesh(&self) -> &Mesh<N> {
-        &self.mesh
+    pub fn load_mesh(&self, mesh: &mut Mesh<N>) {
+        mesh.clone_from(&self.mesh);
     }
 
     /// Attaches a system for serialization and deserialization
-    pub fn attach_system<Label: SystemLabel>(&mut self, system: SystemSlice<'_, Label>) {
+    pub fn write_system<Label: SystemLabel>(&mut self, system: SystemSlice<'_, Label>) {
         assert!(!self.systems.contains_key(Label::NAME));
 
         let node_count = system.len();
-        let data = system.to_vec().to_contiguous();
+        let data = system.to_vec().into_contiguous();
 
         let fields = Label::fields()
             .into_iter()
@@ -60,7 +80,7 @@ impl<const N: usize> Model<N> {
     }
 
     /// Attaches a field for serialization in the model.
-    pub fn attach_field(&mut self, name: &str, data: Vec<f64>) {
+    pub fn write_field(&mut self, name: &str, data: Vec<f64>) {
         assert!(!self.fields.contains_key(name));
         self.fields.insert(name.to_string(), data);
     }
@@ -70,24 +90,24 @@ impl<const N: usize> Model<N> {
         self.fields.get(name).cloned()
     }
 
-    /// Saves the model as a vtk file on disk for visualization in an external program.
-    pub fn export_vtk(&self, title: &str, path: impl AsRef<Path>) -> Result<(), io::Error> {
-        let model = self.vtk_model(title, false);
-        model.export(path).map_err(|i| match i {
-            vtkio::Error::IO(io) => io,
-            _ => io::Error::from(io::ErrorKind::Other),
-        })
+    /// Exports a model to a dat file.
+    pub fn export_dat(&self, path: impl AsRef<Path>) -> Result<(), io::Error> {
+        let data = ron::to_string(self).map_err(|err| io::Error::other(err))?;
+        let mut file = File::create(path)?;
+        file.write_all(data.as_bytes())
     }
 
-    pub fn export_vtk_ghost(&self, title: &str, path: impl AsRef<Path>) -> Result<(), io::Error> {
-        let model = self.vtk_model(title, true);
-        model.export(path).map_err(|i| match i {
-            vtkio::Error::IO(io) => io,
-            _ => io::Error::from(io::ErrorKind::Other),
-        })
+    /// Imports a model from a dat file.
+    pub fn import_dat(path: impl AsRef<Path>) -> Result<Self, io::Error> {
+        let mut contents: String = String::new();
+        let mut file = File::open(path)?;
+        file.read_to_string(&mut contents)?;
+
+        Ok(ron::from_str(&contents).map_err(io::Error::other)?)
     }
 
-    fn vtk_model(&self, title: &str, ghost: bool) -> Vtk {
+    /// Exports the model to a vtk file.
+    pub fn export_vtk(&self, path: impl AsRef<Path>, config: ExportVtkConfig) -> io::Result<()> {
         const {
             assert!(N > 0 && N <= 2, "Vtk Output only supported for 0 < N ≤ 2");
         }
@@ -105,7 +125,7 @@ impl<const N: usize> Model<N> {
             let mut cell_size = space.cell_size();
             let mut vertex_size = space.vertex_size();
 
-            if ghost {
+            if config.ghost {
                 for axis in 0..N {
                     cell_size[axis] += 2 * space.ghost;
                     vertex_size[axis] += 2 * space.ghost;
@@ -167,7 +187,7 @@ impl<const N: usize> Model<N> {
         for block in 0..self.mesh.num_blocks() {
             let bounds = self.mesh.block_bounds(block);
             let space = self.mesh.block_space(block).set_context(bounds);
-            let window = if ghost {
+            let window = if config.ghost {
                 space.full_window()
             } else {
                 space.inner_window()
@@ -201,7 +221,7 @@ impl<const N: usize> Model<N> {
                 for block in 0..self.mesh.num_blocks() {
                     let space = self.mesh.block_space(block);
                     let nodes = self.mesh.block_nodes(block);
-                    let window = if ghost {
+                    let window = if config.ghost {
                         space.full_window()
                     } else {
                         space.inner_window()
@@ -231,7 +251,7 @@ impl<const N: usize> Model<N> {
                 let space = self.mesh.block_space(block);
                 let nodes = self.mesh.block_nodes(block);
 
-                let window = if ghost {
+                let window = if config.ghost {
                     space.full_window()
                 } else {
                     space.inner_window()
@@ -259,16 +279,23 @@ impl<const N: usize> Model<N> {
             data: attributes,
         };
 
-        Vtk {
+        let model = Vtk {
             version: (2, 2).into(),
-            title: title.to_string(),
+            title: config.title,
             byte_order: ByteOrder::LittleEndian,
             data: DataSet::UnstructuredGrid {
                 meta: None,
                 pieces: vec![Piece::Inline(Box::new(piece))],
             },
             file_path: None,
-        }
+        };
+
+        model.export(path).map_err(|i| match i {
+            vtkio::Error::IO(io) => io,
+            _ => io::Error::from(io::ErrorKind::Other),
+        })?;
+
+        Ok(())
     }
 }
 

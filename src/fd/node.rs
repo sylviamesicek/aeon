@@ -384,7 +384,7 @@ impl<const N: usize, D: Boundary<N> + Condition<N>> NodeSpace<N, D> {
             let right = vertex[axis];
 
             match self.context.kind(Face::negative(axis)) {
-                BoundaryKind::Free => Support::FreeNegative(right),
+                BoundaryKind::Free | BoundaryKind::Radiative => Support::FreeNegative(right),
                 BoundaryKind::Parity => {
                     if self.context.parity(Face::negative(axis)) {
                         Support::SymNegative(right)
@@ -392,13 +392,13 @@ impl<const N: usize, D: Boundary<N> + Condition<N>> NodeSpace<N, D> {
                         Support::AntiSymNegative(right)
                     }
                 }
-                _ => Support::Interior,
+                BoundaryKind::Custom => Support::Interior,
             }
         } else if vertex[axis] > self.size[axis] - border {
             let left = self.size[axis] - vertex[axis];
 
             match self.context.kind(Face::positive(axis)) {
-                BoundaryKind::Free => Support::FreePositive(left),
+                BoundaryKind::Free | BoundaryKind::Radiative => Support::FreePositive(left),
                 BoundaryKind::Parity => {
                     if self.context.parity(Face::positive(axis)) {
                         Support::SymPositive(left)
@@ -406,7 +406,7 @@ impl<const N: usize, D: Boundary<N> + Condition<N>> NodeSpace<N, D> {
                         Support::AntiSymPositive(left)
                     }
                 }
-                _ => Support::Interior,
+                BoundaryKind::Custom => Support::Interior,
             }
         } else {
             Support::Interior
@@ -435,7 +435,7 @@ impl<const N: usize, D: Boundary<N> + Condition<N>> NodeSpace<N, D> {
             let right = vertex[axis] + 1;
 
             match self.context.kind(Face::negative(axis)) {
-                BoundaryKind::Free => Support::FreeNegative(right),
+                BoundaryKind::Free | BoundaryKind::Radiative => Support::FreeNegative(right),
                 BoundaryKind::Parity => {
                     if self.context.parity(Face::negative(axis)) {
                         Support::SymNegative(right)
@@ -443,13 +443,13 @@ impl<const N: usize, D: Boundary<N> + Condition<N>> NodeSpace<N, D> {
                         Support::AntiSymNegative(right)
                     }
                 }
-                _ => Support::Interior,
+                BoundaryKind::Custom => Support::Interior,
             }
         } else if vertex[axis] > self.size[axis] - border {
             let left = self.size[axis] - vertex[axis];
 
             match self.context.kind(Face::positive(axis)) {
-                BoundaryKind::Free => Support::FreePositive(left),
+                BoundaryKind::Free | BoundaryKind::Radiative => Support::FreePositive(left),
                 BoundaryKind::Parity => {
                     if self.context.parity(Face::positive(axis)) {
                         Support::SymPositive(left)
@@ -457,7 +457,7 @@ impl<const N: usize, D: Boundary<N> + Condition<N>> NodeSpace<N, D> {
                         Support::AntiSymPositive(left)
                     }
                 }
-                _ => Support::Interior,
+                BoundaryKind::Custom => Support::Interior,
             }
         } else {
             Support::Interior

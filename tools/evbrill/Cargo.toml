@@ -11,6 +11,7 @@ clap.workspace = true
 env_logger.workspace = true
 itertools.workspace = true
 log.workspace = true
+reborrow.workspace = true
 ron.workspace = true
 
 [build-dependencies]

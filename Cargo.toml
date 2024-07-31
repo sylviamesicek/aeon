@@ -1,6 +1,6 @@
 # Workspace configuration
 [workspace]
-members = ["crates/*", "tools/idbrill"]
+members = ["crates/*", "tools/idbrill", "tools/evbrill"]
 resolver = "2"
 
 [workspace.dependencies]
@@ -31,6 +31,7 @@ aeon_macros.workspace = true
 bitvec.workspace = true
 log.workspace = true
 reborrow.workspace = true
+ron.workspace = true
 
 bumpalo = "3"
 serde = "1.0.200"

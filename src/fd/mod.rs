@@ -1,17 +1,21 @@
 #![allow(clippy::needless_range_loop)]
 
 mod boundary;
+mod discrete;
 mod engine;
 mod kernel;
 mod mesh;
 mod model;
 mod node;
 
-pub use boundary::{Boundary, BoundaryKind, Condition, Conditions, Domain, SystemBC, UnitBC, BC};
+pub use boundary::{
+    BlockBC, Boundary, BoundaryKind, Condition, Conditions, Domain, SystemBC, UnitBC, BC,
+};
+pub use discrete::{Discretization, DiscretizationOrder};
 pub use engine::{Engine, FdEngine, FdIntEngine};
 pub use kernel::{BasisOperator, Dissipation, Interpolation, Order, Support};
 pub use mesh::Mesh;
-pub use model::Model;
+pub use model::{ExportVtkConfig, Model};
 pub use node::{node_from_vertex, NodeSpace, NodeWindow};
 
 use crate::system::{SystemFields, SystemLabel, SystemValue};
@@ -22,6 +26,23 @@ pub trait Function<const N: usize>: Clone {
 
     fn evaluate(&self, position: [f64; N]) -> SystemValue<Self::Output>;
 }
+
+// #[derive(Clone)]
+// pub struct ProjectionFromFunction<const N: usize, I: Function<N>>(pub I);
+
+// impl<const N: usize, I: Function<N>> Projection<N> for ProjectionFromFunction<N, I> {
+//     type Output = I::Output;
+//     type Input = Empty;
+
+//     fn project(
+//         &self,
+//         engine: &impl Engine<N>,
+//         _input: SystemFields<'_, Self::Input>,
+//     ) -> SystemValue<Self::Output> {
+//         let position = engine.position();
+//         self.0.evaluate(position)
+//     }
+// }
 
 /// A projection maps one set of scalar fields to another.
 pub trait Projection<const N: usize>: Clone {

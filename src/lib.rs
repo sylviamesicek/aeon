@@ -13,11 +13,14 @@ pub mod system;
 pub mod prelude {
     // pub use crate::arena::Arena;
     pub use crate::fd::{
-        Boundary, BoundaryKind, Condition, Conditions, Mesh, Model, Operator, Projection, SystemBC,
-        UnitBC,
+        Boundary, BoundaryKind, Condition, Conditions, Engine, Mesh, Model, Operator, Projection,
+        SystemBC, UnitBC,
     };
     pub use crate::geometry::{Face, IndexSpace, Rectangle};
     pub use crate::lac::{BiCGStabConfig, BiCGStabSolver, IdentityMap, LinearMap, LinearSolver};
     pub use crate::ode::{ForwardEuler, Ode, Rk4};
-    pub use crate::system::{SystemLabel, SystemSlice, SystemSliceMut, SystemValue, SystemVec};
+    pub use crate::system::{
+        Empty, Scalar, SystemFields, SystemFieldsMut, SystemLabel, SystemSlice, SystemSliceMut,
+        SystemValue, SystemVec,
+    };
 }

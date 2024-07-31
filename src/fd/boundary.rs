@@ -6,6 +6,7 @@
 use crate::{
     geometry::{Face, FaceMask},
     prelude::{Rectangle, SystemLabel},
+    system::Scalar,
 };
 
 /// Indicates what type of boundary condition is used along a particualr
@@ -100,7 +101,7 @@ impl<const N: usize, I: Condition<N>> Condition<N> for UnitBC<I> {
 }
 
 impl<const N: usize, I: Condition<N>> Conditions<N> for UnitBC<I> {
-    type System = ();
+    type System = Scalar;
 
     fn parity(&self, _field: Self::System, face: Face<N>) -> bool {
         self.0.parity(face)
@@ -137,13 +138,13 @@ impl<const N: usize, S: SystemLabel, C: Conditions<N, System = S>> Condition<N> 
 impl<const N: usize, S: SystemLabel, C: Conditions<N, System = S>> Conditions<N>
     for SystemBC<S, C>
 {
-    type System = ();
+    type System = Scalar;
 
-    fn parity(&self, _field: (), face: Face<N>) -> bool {
+    fn parity(&self, _field: Scalar, face: Face<N>) -> bool {
         self.inner.parity(self.field.clone(), face)
     }
 
-    fn radiative(&self, _field: (), position: [f64; N]) -> f64 {
+    fn radiative(&self, _field: Scalar, position: [f64; N]) -> f64 {
         self.inner.radiative(self.field.clone(), position)
     }
 }

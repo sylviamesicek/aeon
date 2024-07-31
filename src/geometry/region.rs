@@ -80,6 +80,7 @@ impl<const N: usize> Region<N> {
             })
     }
 
+    /// Iterates over all splits that can touch this region.
     pub fn adjacent_splits(self) -> impl Iterator<Item = AxisMask<N>> {
         let origin: [_; N] = from_fn(|axis| match self.side(axis) {
             Side::Left | Side::Middle => 0,

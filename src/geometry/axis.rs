@@ -4,28 +4,35 @@ use crate::geometry::{faces, Face};
 pub struct AxisMask<const N: usize>(usize);
 
 impl<const N: usize> AxisMask<N> {
+    /// Total permutations of axis maskes for a given dimension.
     pub const COUNT: usize = 2usize.pow(N as u32);
 
+    /// Iterates of all axis maskes of a given dimension.
     pub const fn enumerate() -> AxisMaskIter<N> {
         AxisMaskIter { cursor: 0 }
     }
 
+    /// Constructs an empty axis mask.
     pub fn empty() -> Self {
         Self(0)
     }
 
+    /// Constructs an axis mask with all axes set to true.
     pub fn full() -> Self {
         Self(usize::MAX)
     }
 
+    /// Converts a linear value into an axis mask.
     pub fn from_linear(linear: usize) -> Self {
         Self(linear)
     }
 
+    /// Transforms this mask into a linear index.
     pub fn to_linear(self) -> usize {
         self.0.min(Self::COUNT - 1)
     }
 
+    /// Transforms an axis mask into an array of bit values.
     pub fn unpack(self) -> [bool; N] {
         let mut result = [false; N];
 
@@ -36,6 +43,7 @@ impl<const N: usize> AxisMask<N> {
         result
     }
 
+    /// Transforms an array of bit values into an axis mask.
     pub fn pack(bits: [bool; N]) -> Self {
         let mut result = Self::empty();
 
@@ -46,28 +54,34 @@ impl<const N: usize> AxisMask<N> {
         result
     }
 
+    /// Sets the given axis.
     pub fn set(&mut self, axis: usize) {
         self.0 |= 1 << axis
     }
 
+    /// Unsets the given axis.
     pub fn clear(&mut self, axis: usize) {
         self.0 &= !(1 << axis)
     }
 
+    /// Sets the axis to the given value.
     pub fn set_to(&mut self, axis: usize, value: bool) {
         self.0 &= !(1 << axis);
         self.0 |= (value as usize) << axis;
     }
 
+    /// Toggles an axis.
     pub fn toggle(&mut self, axis: usize) {
         self.0 ^= 1 << axis
     }
 
+    /// Returns a new axis mask with the given axis toggled.
     pub fn toggled(mut self, axis: usize) -> Self {
         self.0 ^= 1 << axis;
         self
     }
 
+    /// Checks if the given axis is set.
     pub fn is_set(self, axis: usize) -> bool {
         (self.0 & (1 << axis)) != 0
     }
@@ -93,6 +107,7 @@ impl<const N: usize> AxisMask<N> {
     }
 }
 
+/// Iterates over all possible axis masks for a given dimension.
 pub struct AxisMaskIter<const N: usize> {
     cursor: usize,
 }
@@ -108,5 +123,25 @@ impl<const N: usize> Iterator for AxisMaskIter<N> {
         let result = self.cursor;
         self.cursor += 1;
         Some(AxisMask::from_linear(result))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn masks() {
+        let mut masks = AxisMask::<2>::enumerate();
+        assert_eq!(masks.next(), Some(AxisMask::pack([false, false])));
+        assert_eq!(masks.next(), Some(AxisMask::pack([true, false])));
+        assert_eq!(masks.next(), Some(AxisMask::pack([false, true])));
+        assert_eq!(masks.next(), Some(AxisMask::pack([true, true])));
+        assert_eq!(masks.next(), None);
+
+        let mut faces = AxisMask::<2>::pack([false, true]).outer_faces();
+        assert_eq!(faces.next(), Some(Face::<2>::negative(0)));
+        assert_eq!(faces.next(), Some(Face::<2>::positive(1)));
+        assert_eq!(faces.next(), None);
     }
 }

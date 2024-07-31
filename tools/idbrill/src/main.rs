@@ -1,13 +1,11 @@
 use aeon::array::Array;
 use aeon::elliptic::HyperRelaxSolver;
-use aeon::fd::{Boundary, BoundaryKind, Conditions, Engine, Function, Projection, SystemBC};
+use aeon::fd::{
+    Boundary, BoundaryKind, Conditions, Discretization, Engine, ExportVtkConfig, Function,
+    Projection, SystemBC,
+};
 use aeon::prelude::*;
-use aeon::system::SystemFields;
-
-use reborrow::Reborrow;
-use std::fs::File;
-use std::io::Write;
-use std::path::PathBuf;
+use aeon::system::{Scalar, SystemFields};
 
 /// Initial data is Garfinkle's variables.
 #[derive(Clone, SystemLabel)]
@@ -58,7 +56,7 @@ const SEED_COND: SystemBC<Garfinkle, BoundaryConditions> =
 pub struct SeedFunction(f64);
 
 impl Function<2> for SeedFunction {
-    type Output = ();
+    type Output = Scalar;
 
     fn evaluate(&self, position: [f64; 2]) -> SystemValue<Self::Output> {
         let [rho, z] = position;
@@ -70,7 +68,7 @@ impl Function<2> for SeedFunction {
 pub struct SeedDRhoFunction(f64);
 
 impl Function<2> for SeedDRhoFunction {
-    type Output = ();
+    type Output = Scalar;
 
     fn evaluate(&self, position: [f64; 2]) -> SystemValue<Self::Output> {
         let [rho, z] = position;
@@ -83,8 +81,8 @@ impl Function<2> for SeedDRhoFunction {
 pub struct PsiOperator;
 
 impl Operator<2> for PsiOperator {
-    type System = ();
-    type Context = ();
+    type System = Scalar;
+    type Context = Scalar;
 
     fn apply(
         &self,
@@ -92,8 +90,8 @@ impl Operator<2> for PsiOperator {
         psi: SystemFields<'_, Self::System>,
         seed: SystemFields<'_, Self::Context>,
     ) -> SystemValue<Self::System> {
-        let psi = psi.field(());
-        let seed = seed.field(());
+        let psi = psi.field(Scalar);
+        let seed = seed.field(Scalar);
 
         let [rho, _z] = engine.position();
 
@@ -122,7 +120,7 @@ pub struct Hamiltonian;
 
 impl Projection<2> for Hamiltonian {
     type Input = Garfinkle;
-    type Output = ();
+    type Output = Scalar;
 
     fn project(
         &self,
@@ -243,16 +241,22 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Num Blocks: {}", mesh.num_blocks());
     println!("Num Cells: {}", mesh.num_cells());
 
+    let mut discrete = Discretization::new();
+    discrete.set_mesh(&mesh);
+
     log::info!("Filling Seed Function");
 
-    let num_nodes = mesh.num_nodes();
+    let num_nodes = discrete.mesh().num_nodes();
 
-    let mut data = vec![0.0; num_nodes * 2];
-    let (psi, seed) = data.split_at_mut(num_nodes);
+    let mut garfinkle = vec![0.0; num_nodes * 2];
+    let (psi, seed) = garfinkle.split_at_mut(num_nodes);
 
     // Compute seed values.
-    mesh.order::<4>().evaluate(SeedFunction(1.0), seed.into());
-    mesh.order::<4>()
+    discrete
+        .order::<4>()
+        .evaluate(SeedFunction(1.0), seed.into());
+    discrete
+        .order::<4>()
         .fill_boundary(UnitBC(SEED_COND), seed.into());
 
     // Initial Guess for Psi
@@ -262,60 +266,58 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut solver = HyperRelaxSolver::new();
     solver.tolerance = 1e-9;
-    solver.max_steps = 3000;
+    solver.max_steps = 5000;
     solver.cfl = 0.1;
     solver.dampening = 0.4;
 
-    solver.solve::<2, 4, _, _>(&mut mesh, PSI_COND, PsiOperator, seed.into(), psi.into());
-    mesh.order::<4>().fill_boundary(PSI_COND, psi.into());
-
-    let system = SystemSlice::from_contiguous(&data);
+    solver.solve::<2, 4, _, _>(
+        &mut discrete,
+        PSI_COND,
+        PsiOperator,
+        seed.into(),
+        psi.into(),
+    );
+    discrete.order::<4>().fill_boundary(PSI_COND, psi.into());
 
     let mut hamiltonian = vec![0.0; mesh.num_nodes()].into_boxed_slice();
 
-    mesh.order::<4>().project(
+    discrete.order::<4>().project(
         BoundaryConditions,
         Hamiltonian,
-        system.rb(),
+        SystemSlice::from_contiguous(&garfinkle),
         SystemSliceMut::from_contiguous(&mut hamiltonian),
     );
 
-    let mut model = Model::from_mesh(&mesh);
-    model.attach_field(
-        "psi",
-        system
-            .field(Garfinkle::Psi)
-            .iter()
-            .map(|&p| p - 1.0)
-            .collect(),
-    );
-    model.attach_field("seed", system.field(Garfinkle::Seed).to_vec());
-    model.attach_field("hamiltonian", hamiltonian.to_vec());
+    let (psi, seed) = garfinkle.split_at_mut(num_nodes);
 
-    model
-        .export_vtk(
-            format!("idbrill").as_str(),
-            PathBuf::from(format!("output/idbrill.vtu")),
-        )
-        .unwrap();
+    let mut model = Model::empty();
+    model.set_mesh(discrete.mesh());
+    model.write_field("psi", psi.iter().map(|&p| p - 1.0).collect());
+    model.write_field("seed", seed.to_vec());
+    model.write_field("hamiltonian", hamiltonian.to_vec());
+
+    model.export_vtk(
+        format!("output/idbrill.vtu"),
+        ExportVtkConfig {
+            title: "idbrill".to_string(),
+            ghost: false,
+        },
+    )?;
 
     // Write model data to file
-    {
-        let mut rinne = SystemVec::with_length(mesh.num_nodes());
+    let mut rinne = SystemVec::with_length(mesh.num_nodes());
 
-        mesh.order::<4>().project(
-            BoundaryConditions,
-            RinneFromGarfinkle,
-            system.rb(),
-            rinne.as_mut_slice(),
-        );
+    discrete.order::<4>().project(
+        BoundaryConditions,
+        RinneFromGarfinkle,
+        SystemSlice::from_contiguous(&garfinkle),
+        rinne.as_mut_slice(),
+    );
 
-        let mut model = Model::from_mesh(&mesh);
-        model.attach_system(SystemSlice::<Garfinkle>::from_contiguous(&data));
-
-        let mut file = File::create("output/idbrill.dat")?;
-        file.write_all(ron::to_string(&model)?.as_bytes())?;
-    }
+    let mut model = Model::empty();
+    model.set_mesh(discrete.mesh());
+    model.write_system(SystemSlice::<Garfinkle>::from_contiguous(&garfinkle));
+    model.export_dat("output/idbrill.dat")?;
 
     Ok(())
 }
