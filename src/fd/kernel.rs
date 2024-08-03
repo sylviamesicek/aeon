@@ -33,6 +33,7 @@ impl Order {
         match val {
             2 => Order::Second,
             4 => Order::Fourth,
+            6 => Order::Sixth,
             _ => panic!("Unknown Order"),
         }
     }
@@ -183,14 +184,17 @@ impl Dissipation {
             Order::Second => unimplemented!(),
             Order::Fourth => match support {
                 Support::Interior => &[1.0, -4.0, 6.0, -4.0, 1.0],
+
                 Support::SymNegative(0) => &[6.0, -8.0, 2.0],
                 Support::SymNegative(_) => &[-4.0, 7.0, -4.0, 1.0],
                 Support::SymPositive(0) => &[2.0, -8.0, 6.0],
                 Support::SymPositive(_) => &[1.0, -4.0, 7.0, -4.0],
+
                 Support::AntiSymNegative(0) => &[0.0],
                 Support::AntiSymNegative(_) => &[-4.0, 5.0, -4.0, 1.0],
                 Support::AntiSymPositive(0) => &[0.0],
                 Support::AntiSymPositive(_) => &[1.0, -4.0, 5.0, -4.0],
+
                 Support::FreeNegative(0) => &[3.0, -14.0, 26.0, -24.0, 11.0, -2.0],
                 Support::FreeNegative(_) => &[2.0, -9.0, 16.0, -14.0, 6.0, -1.0],
                 Support::FreePositive(0) => &[-2.0, 11.0, -24.0, 26.0, -14.0, 3.0],
@@ -198,10 +202,11 @@ impl Dissipation {
             },
             Order::Sixth => match support {
                 Support::Interior => &[1.0, -6.0, 15.0, -20.0, 15.0, -6.0, 1.0],
-                Support::SymNegative(0) => &[-20.0, 15.0, -6.0, 1.0],
+
+                Support::SymNegative(0) => &[-20.0, 30.0, -12.0, 2.0],
                 Support::SymNegative(1) => &[15.0, -26.0, 16.0, -6.0, 1.0],
                 Support::SymNegative(_) => &[-6.0, 16.0, -20.0, 15.0, -6.0, 1.0],
-                Support::SymPositive(0) => &[1.0, -6.0, 15.0, -20.0],
+                Support::SymPositive(0) => &[2.0, -12.0, 30.0, -20.0],
                 Support::SymPositive(1) => &[1.0, -6.0, 16.0, -26.0, 15.0],
                 Support::SymPositive(_) => &[1.0, -6.0, 15.0, -20.0, 16.0, -6.0],
 

@@ -13,6 +13,7 @@ use equations::HyperbolicSystem;
 const STEPS: usize = 5000;
 const CFL: f64 = 0.1;
 const ORDER: usize = 4;
+const DISS_ORDER: usize = ORDER + 2;
 
 /// Initial data in Rinne's hyperbolic variables.
 #[derive(Clone, SystemLabel)]
@@ -625,7 +626,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         );
 
         // Output debugging data
-        let norm = discrete.norm(dynamic.as_slice());
+        let norm = discrete.norm(dynamic.field(Dynamic::Theta).into());
         println!("Step {i}, Time {:.5} Norm {:.5e}", i as f64 * h, norm);
 
         if i % 10 == 0 {
@@ -659,7 +660,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         );
 
         // Compute dissipation
-        discrete.order::<ORDER>().dissipation(
+        discrete.order::<DISS_ORDER>().dissipation(
             DynamicBC,
             dynamic.as_slice(),
             dissipation.as_mut_slice(),

@@ -688,16 +688,16 @@ mod tests {
             context: Quadrant,
         };
 
-        const BORDER: usize = 2;
+        const BORDER: usize = 3;
 
         let supports = [
             Support::AntiSymNegative(0),
             Support::AntiSymNegative(1),
+            Support::AntiSymNegative(2),
             Support::Interior,
             Support::Interior,
             Support::Interior,
-            Support::Interior,
-            Support::Interior,
+            Support::FreePositive(2),
             Support::FreePositive(1),
             Support::FreePositive(0),
         ];

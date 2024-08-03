@@ -69,6 +69,10 @@ impl<const N: usize> Mesh<N> {
         self.nodes.num_nodes()
     }
 
+    pub fn ghost(&self) -> usize {
+        self.nodes.ghost
+    }
+
     /// Size of a given block, measured in cells.
     pub fn block_size(&self, block: usize) -> [usize; N] {
         self.blocks.block_size(block)

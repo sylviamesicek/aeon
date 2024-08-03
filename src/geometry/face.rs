@@ -171,4 +171,28 @@ mod tests {
         assert_eq!(Face::<4>::positive(3).to_linear(), 7);
         assert_eq!(Face::<4>::positive(3), Face::<4>::from_linear(7));
     }
+
+    #[test]
+    fn adjacent_regions() {
+        let mut mask = FaceMask::<2>::empty();
+        mask.set(Face::positive(0));
+        mask.set(Face::negative(1));
+
+        let mut regions = mask.adjacent_regions();
+
+        assert_eq!(
+            regions.next(),
+            Some(Region::new([Side::Middle, Side::Left]))
+        );
+        assert_eq!(regions.next(), Some(Region::new([Side::Right, Side::Left])));
+        assert_eq!(
+            regions.next(),
+            Some(Region::new([Side::Middle, Side::Middle]))
+        );
+        assert_eq!(
+            regions.next(),
+            Some(Region::new([Side::Right, Side::Middle]))
+        );
+        assert_eq!(regions.next(), None);
+    }
 }

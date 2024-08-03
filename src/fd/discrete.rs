@@ -39,6 +39,10 @@ impl<const N: usize> Discretization<N> {
         const {
             assert!(ORDER % 2 == 0);
         }
+        debug_assert!(
+            self.mesh.ghost() >= ORDER / 2,
+            "Mesh has insufficient ghost nodes for the requested order."
+        );
         DiscretizationOrder(&mut self.mesh)
     }
 }

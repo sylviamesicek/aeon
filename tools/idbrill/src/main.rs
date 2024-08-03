@@ -230,11 +230,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         origin: [0.0, 0.0],
     };
 
-    let size = [40, 40];
+    let size = [80, 80];
 
-    let mut mesh = Mesh::new(bounds, size, 2);
-    mesh.refine(&[true, false, false, false]);
-    mesh.refine(&[true, false, false, false, false, false, false]);
+    let mesh = Mesh::new(bounds, size, 3);
+    // mesh.refine(&[true, false, false, false]);
+    // mesh.refine(&[true, false, false, false, false, false, false]);
 
     std::fs::write("output/mesh.txt", mesh.write_debug()).unwrap();
 
