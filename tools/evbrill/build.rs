@@ -8,9 +8,10 @@ fn main() {
         panic!("Double data type on architecture is not f64.")
     }
 
-    println!("cargo::rerun-if-changed=eqs/symc.c");
-    println!("cargo::rerun-if-changed=eqs/hyperbolic.h");
-    println!("cargo::rerun-if-changed=eqs/hyperbolic_regular.h");
+    println!("cargo::rerun-if-changed=symbolicc/symc.c");
+    println!("cargo::rerun-if-changed=symbolicc/hyperbolic.h");
+    println!("cargo::rerun-if-changed=symbolicc/hyperbolic_regular.h");
+    println!("cargo::rerun-if-changed=symbolicc/geometric.h");
 
     let manifest_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
     let eqs_dir = manifest_dir.join("symbolicc");
