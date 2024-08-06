@@ -16,3 +16,6 @@ ron.workspace = true
 
 [build-dependencies]
 cc.workspace = true
+
+[dev-dependencies]
+rand.workspace = true

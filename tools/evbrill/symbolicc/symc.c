@@ -146,3 +146,38 @@ HyperbolicDerivs hyperbolic_regular_sys(HyperbolicSystem vars, double rho, doubl
 
     return derivs;
 }
+
+typedef struct Geometric
+{
+    double ricci_rr, ricci_rz, ricci_zz;
+} Geometric;
+
+Geometric geometric_sys(HyperbolicSystem vars, double rho, double z) {
+    VARS_SECOND(grr);
+    VARS_SECOND(gzz);
+    VARS_SECOND(grz);
+    VARS_SECOND(s);
+
+    VARS_FIRST(krr);
+    VARS_FIRST(kzz);
+    VARS_FIRST(krz);
+    VARS_FIRST(y);
+
+    VARS_SECOND(lapse);
+    VARS_FIRST(shiftr);
+    VARS_FIRST(shiftz);
+
+    VARS_FIRST(theta);
+    VARS_FIRST(zr);
+    VARS_FIRST(zz);
+
+#include "geometric.h"
+
+    Geometric result;
+
+    result.ricci_rr = ricci_rr;
+    result.ricci_rz = ricci_rz;
+    result.ricci_zz = ricci_zz;
+
+    return result;
+}

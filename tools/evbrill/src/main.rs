@@ -6,9 +6,10 @@ use aeon::{array::Array, system::field_count};
 use reborrow::{Reborrow, ReborrowMut};
 
 // mod eqs;
-pub mod equations;
+pub mod eqs;
+pub mod symbolicc;
 
-use equations::HyperbolicSystem;
+use eqs::HyperbolicSystem;
 
 const STEPS: usize = 5000;
 const CFL: f64 = 0.1;
@@ -38,8 +39,6 @@ pub enum Dynamic {
     Lapse,
     Shiftr,
     Shiftz,
-    Debug1,
-    Debug2,
 }
 
 #[derive(Clone)]
@@ -67,8 +66,6 @@ impl Conditions<2> for DynamicBC {
             Dynamic::Theta | Dynamic::Lapse => [true, true],
             Dynamic::Zr | Dynamic::Shiftr => [false, true],
             Dynamic::Zz | Dynamic::Shiftz => [true, false],
-
-            Dynamic::Debug1 | Dynamic::Debug2 => [true, true],
         };
         axes[face.axis]
     }
@@ -218,7 +215,7 @@ impl Operator<2> for DynamicDerivs {
             shiftz_z: shiftz_z,
         };
 
-        let derivs = equations::hyperbolic(system, [rho, z]);
+        let derivs = eqs::hyperbolic(system, [rho, z]);
 
         let mut result = SystemValue::default();
 
@@ -240,8 +237,8 @@ impl Operator<2> for DynamicDerivs {
         result.set_field(Dynamic::Shiftr, derivs.shiftr_t);
         result.set_field(Dynamic::Shiftz, derivs.shiftz_t);
 
-        result.set_field(Dynamic::Debug1, derivs.debug1);
-        result.set_field(Dynamic::Debug2, derivs.debug2);
+        // result.set_field(Dynamic::Debug1, derivs.debug1);
+        // result.set_field(Dynamic::Debug2, derivs.debug2);
 
         result
     }
