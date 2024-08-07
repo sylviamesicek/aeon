@@ -21,4 +21,4 @@ output/
 examples/output
 
 # Jupyter Notebooks
-*/.ipynb_checkpoints/
+**/.ipynb_checkpoints/
