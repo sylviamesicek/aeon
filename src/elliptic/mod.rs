@@ -1,9 +1,9 @@
-use std::{marker::PhantomData, path::PathBuf};
+use std::marker::PhantomData;
 
 use reborrow::{Reborrow, ReborrowMut};
 
 use crate::{
-    fd::{Boundary, Conditions, Discretization, Engine, ExportVtkConfig, Model, Operator},
+    fd::{Boundary, Conditions, Discretization, Engine, Operator},
     ode::{Ode, Rk4},
     prelude::Face,
     system::{field_count, SystemFields, SystemLabel, SystemSlice, SystemSliceMut, SystemValue},
@@ -85,40 +85,19 @@ impl<Label: SystemLabel> HyperRelaxSolver<Label> {
                     bc.clone(),
                     operator.clone(),
                     SystemSlice::from_contiguous(&mut data[..dimension]),
-                    context.slice(..),
-                    system.slice_mut(..),
+                    context.rb(),
+                    system.rb_mut(),
+                );
+
+                operator.callback(
+                    discrete,
+                    SystemSlice::from_contiguous(&mut data[..dimension]),
+                    context.rb(),
+                    index,
                 );
             }
 
-            if index % 10 == 0 {
-                discrete.order::<ORDER>().fill_boundary(
-                    bc.clone(),
-                    SystemSliceMut::from_contiguous(&mut data[..dimension]),
-                );
-
-                discrete.order::<ORDER>().fill_boundary(
-                    VBoundary {
-                        dampening: self.dampening,
-                        inner: bc.clone(),
-                    },
-                    SystemSliceMut::from_contiguous(&mut data[dimension..]),
-                );
-
-                let mut model = Model::empty();
-                model.set_mesh(discrete.mesh());
-                model.write_field("u", data[..dimension].to_vec());
-                model.write_field("v", data[dimension..].to_vec());
-
-                let path = PathBuf::from(format!("output/idbrill{}.vtu", { index / 10 }));
-                let config = ExportVtkConfig {
-                    title: "idbrill".to_string(),
-                    ghost: false,
-                };
-
-                model.export_vtk(path, config).unwrap();
-            }
-
-            let norm = discrete.norm(system.slice(..));
+            let norm = discrete.norm(system.rb());
 
             log::trace!(
                 "Time {:.5}/{:.5} Norm {:.5e}",

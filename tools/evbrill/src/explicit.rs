@@ -804,7 +804,7 @@ mod tests {
     }
 
     #[test]
-    fn symbolicc() {
+    fn fuzzing() {
         let mut rng = rand::thread_rng();
 
         macro_rules! assert_almost_eq {

@@ -26,7 +26,7 @@ pub fn system_label_impl(input: DeriveInput) -> TokenStream {
 
                     type FieldLike<T> = [T; 1];
 
-                    fn fields() -> Array<Self::FieldLike<Self>> {
+                    fn fields() -> ::aeon::array::Array<Self::FieldLike<Self>> {
                         [Self].into()
                     }
 
@@ -73,7 +73,7 @@ pub fn system_label_impl(input: DeriveInput) -> TokenStream {
 
                     type FieldLike<T> = [T; #variant_count];
 
-                    fn fields() -> Array<Self::FieldLike<Self>> {
+                    fn fields() -> ::aeon::array::Array<Self::FieldLike<Self>> {
                         [#fields].into()
                     }
 

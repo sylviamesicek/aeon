@@ -2,7 +2,7 @@
 
 use aeon::fd::{Discretization, ExportVtkConfig};
 use aeon::prelude::*;
-use aeon::{array::Array, system::field_count};
+use aeon::system::field_count;
 use reborrow::{Reborrow, ReborrowMut};
 
 // mod eqs;
@@ -12,10 +12,12 @@ pub mod types;
 
 use types::HyperbolicSystem;
 
-const STEPS: usize = 101;
+const STEPS: usize = 201;
 const CFL: f64 = 0.1;
 const ORDER: usize = 4;
 const DISS_ORDER: usize = ORDER + 2;
+
+const SYMBOLIC: bool = false;
 
 /// Initial data in Rinne's hyperbolic variables.
 #[derive(Clone, SystemLabel)]
@@ -216,7 +218,11 @@ impl Operator<2> for DynamicDerivs {
             shiftz_z: shiftz_z,
         };
 
-        let derivs = explicit::hyperbolic(system, [rho, z]);
+        let derivs = if SYMBOLIC {
+            symbolicc::hyperbolic(system, [rho, z])
+        } else {
+            explicit::hyperbolic(system, [rho, z])
+        };
 
         let mut result = SystemValue::default();
 
@@ -277,7 +283,10 @@ impl<'a> Ode for DynamicOde<'a> {
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Read model from disk
-    let model = Model::<2>::import_dat("output/idbrill160.dat")?;
+    let model = Model::<2>::import_dat("output/idbrill.dat")?;
+
+    // Create output directory.
+    std::fs::create_dir_all("output/evbrill")?;
 
     // Build discretization
     let mut discrete = Discretization::new();
@@ -352,7 +361,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let norm = discrete.norm(dynamic.field(Dynamic::Theta).into());
         println!("Step {i}, Time {:.5} Norm {:.5e}", i as f64 * h, norm);
 
-        if i % 10 == 0 {
+        if true {
             // Output current system to disk
             let mut model = Model::empty();
             model.set_mesh(discrete.mesh());
@@ -364,7 +373,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
 
             model.export_vtk(
-                format!("output/evbrill{}.vtu", i / 10),
+                format!("output/evbrill/iter{}.vtu", i),
                 ExportVtkConfig {
                     title: "evbrill".to_string(),
                     ghost: false,

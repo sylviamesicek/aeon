@@ -285,9 +285,7 @@ impl<const N: usize> Mesh<N> {
         let domain = self.tree.domain();
 
         from_fn::<_, N, _>(|axis| {
-            domain.size[axis]
-                / (self.nodes.cell_width[axis] + 1) as f64
-                / 2_f64.powi(max_level as i32)
+            domain.size[axis] / self.nodes.cell_width[axis] as f64 / 2_f64.powi(max_level as i32)
         })
         .iter()
         .min_by(|a, b| f64::total_cmp(a, b))
