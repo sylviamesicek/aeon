@@ -1,16 +1,12 @@
 #![allow(unused_assignments)]
 
 // A very useful function
+use crate::types::*;
 use std::array::from_fn;
 
 // *********************************
 // Tensor Utils ********************
 // *********************************
-
-type Rank1 = [f64; 2];
-type Rank2 = [[f64; 2]; 2];
-type Rank3 = [[[f64; 2]; 2]; 2];
-type Rank4 = [[[[f64; 2]; 2]; 2]; 2];
 
 pub fn tensor1(f: impl FnMut(usize) -> f64) -> Rank1 {
     from_fn(f)
@@ -147,174 +143,6 @@ pub fn lie2(t: Rank2, tpar: Rank3, v: Rank1, vpar: Rank2) -> Rank2 {
             term1 + term2
         })
     })
-}
-
-#[repr(C)]
-#[derive(Clone, Debug)]
-pub struct HyperbolicSystem {
-    pub grr: f64,
-    pub grr_r: f64,
-    pub grr_z: f64,
-    pub grr_rr: f64,
-    pub grr_rz: f64,
-    pub grr_zz: f64,
-
-    pub grz: f64,
-    pub grz_r: f64,
-    pub grz_z: f64,
-    pub grz_rr: f64,
-    pub grz_rz: f64,
-    pub grz_zz: f64,
-
-    pub gzz: f64,
-    pub gzz_r: f64,
-    pub gzz_z: f64,
-    pub gzz_rr: f64,
-    pub gzz_rz: f64,
-    pub gzz_zz: f64,
-
-    pub s: f64,
-    pub s_r: f64,
-    pub s_z: f64,
-    pub s_rr: f64,
-    pub s_rz: f64,
-    pub s_zz: f64,
-
-    pub krr: f64,
-    pub krr_r: f64,
-    pub krr_z: f64,
-
-    pub krz: f64,
-    pub krz_r: f64,
-    pub krz_z: f64,
-
-    pub kzz: f64,
-    pub kzz_r: f64,
-    pub kzz_z: f64,
-
-    pub y: f64,
-    pub y_r: f64,
-    pub y_z: f64,
-
-    pub lapse: f64,
-    pub lapse_r: f64,
-    pub lapse_z: f64,
-    pub lapse_rr: f64,
-    pub lapse_rz: f64,
-    pub lapse_zz: f64,
-
-    pub shiftr: f64,
-    pub shiftr_r: f64,
-    pub shiftr_z: f64,
-
-    pub shiftz: f64,
-    pub shiftz_r: f64,
-    pub shiftz_z: f64,
-
-    pub theta: f64,
-    pub theta_r: f64,
-    pub theta_z: f64,
-
-    pub zr: f64,
-    pub zr_r: f64,
-    pub zr_z: f64,
-
-    pub zz: f64,
-    pub zz_r: f64,
-    pub zz_z: f64,
-}
-
-impl HyperbolicSystem {
-    pub fn metric(&self) -> Rank2 {
-        [[self.grr, self.grz], [self.grz, self.gzz]]
-    }
-
-    pub fn metric_par(&self) -> Rank3 {
-        let grr_par = [self.grr_r, self.grr_z];
-        let grz_par = [self.grz_r, self.grz_z];
-        let gzz_par = [self.gzz_r, self.gzz_z];
-
-        [[grr_par, grz_par], [grz_par, gzz_par]]
-    }
-
-    pub fn metric_par2(&self) -> Rank4 {
-        let grr_par2 = [[self.grr_rr, self.grr_rz], [self.grr_rz, self.grr_zz]];
-        let grz_par2 = [[self.grz_rr, self.grz_rz], [self.grz_rz, self.grz_zz]];
-        let gzz_par2 = [[self.gzz_rr, self.gzz_rz], [self.gzz_rz, self.gzz_zz]];
-
-        [[grr_par2, grz_par2], [grz_par2, gzz_par2]]
-    }
-
-    pub fn seed(&self) -> f64 {
-        self.s
-    }
-
-    pub fn seed_par(&self) -> Rank1 {
-        [self.s_r, self.s_z]
-    }
-
-    pub fn seed_par2(&self) -> Rank2 {
-        [[self.s_rr, self.s_rz], [self.s_rz, self.s_zz]]
-    }
-
-    pub fn extrinsic(&self) -> Rank2 {
-        [[self.krr, self.krz], [self.krz, self.kzz]]
-    }
-
-    pub fn extrinsic_par(&self) -> Rank3 {
-        let krr_par = [self.krr_r, self.krr_z];
-        let krz_par = [self.krz_r, self.krz_z];
-        let kzz_par = [self.kzz_r, self.kzz_z];
-
-        [[krr_par, krz_par], [krz_par, kzz_par]]
-    }
-}
-
-#[repr(C)]
-#[derive(Clone, Debug)]
-pub struct HyperbolicDerivs {
-    pub grr_t: f64,
-    pub grz_t: f64,
-    pub gzz_t: f64,
-    pub s_t: f64,
-
-    pub krr_t: f64,
-    pub krz_t: f64,
-    pub kzz_t: f64,
-    pub y_t: f64,
-
-    pub lapse_t: f64,
-    pub shiftr_t: f64,
-    pub shiftz_t: f64,
-
-    pub theta_t: f64,
-    pub zr_t: f64,
-    pub zz_t: f64,
-}
-
-#[repr(C)]
-#[derive(Clone, Debug)]
-pub struct Geometric {
-    pub ricci_rr: f64,
-    pub ricci_rz: f64,
-    pub ricci_zz: f64,
-
-    pub gamma_rrr: f64,
-    pub gamma_rrz: f64,
-    pub gamma_rzr: f64,
-    pub gamma_rzz: f64,
-
-    pub gamma_zrr: f64,
-    pub gamma_zrz: f64,
-    pub gamma_zzr: f64,
-    pub gamma_zzz: f64,
-
-    pub gamma_rrr_r: f64,
-
-    pub g_inv_rr_r: f64,
-
-    pub g_det_r: f64,
-    pub g_det_z: f64,
 }
 
 pub fn hyperbolic(sys: HyperbolicSystem, pos: [f64; 2]) -> HyperbolicDerivs {
@@ -662,9 +490,7 @@ pub fn hyperbolic(sys: HyperbolicSystem, pos: [f64; 2]) -> HyperbolicDerivs {
     }
 }
 
-pub fn geometric(sys: HyperbolicSystem, pos: [f64; 2]) -> Geometric {
-    let on_axis = pos[0].abs() <= 10e-10;
-
+pub fn geometric(sys: HyperbolicSystem, _pos: [f64; 2]) -> Geometric {
     // ******************************
     // Unpack variables
     // ******************************
@@ -673,44 +499,6 @@ pub fn geometric(sys: HyperbolicSystem, pos: [f64; 2]) -> Geometric {
     let g = sys.metric();
     let g_par = sys.metric_par();
     let g_par2 = sys.metric_par2();
-
-    let s = sys.seed();
-    let s_par = sys.seed_par();
-    let s_par2 = sys.seed_par2();
-
-    // Extrinsic curvature
-    let k = sys.extrinsic();
-    let k_par = sys.extrinsic_par();
-
-    let y = sys.y;
-    let y_par = [sys.y_r, sys.y_z];
-
-    let l = pos[0] * y + k[0][0] / g[0][0];
-    let l_par = {
-        // Apply product rule to definition of l.
-        let mut result = tensor1(|i| {
-            pos[0] * y_par[i] + k_par[0][0][i] / g[0][0]
-                - k[0][0] / g[0][0] * g_par[0][0][i] / g[0][0]
-        });
-        // Extra term from ρ * y
-        result[0] += y;
-        result
-    };
-
-    // Constraints
-    let theta = sys.theta;
-    let theta_par = [sys.theta_r, sys.theta_z];
-
-    let z = [sys.zr, sys.zz];
-    let z_par = [[sys.zr_r, sys.zr_z], [sys.zz_r, sys.zz_z]];
-
-    // Gauge
-    let lapse = sys.lapse;
-    let lapse_par = [sys.lapse_r, sys.lapse_z];
-    let lapse_par2 = [[sys.lapse_rr, sys.lapse_rz], [sys.lapse_rz, sys.lapse_zz]];
-
-    let shift = [sys.shiftr, sys.shiftz];
-    let shift_par = [[sys.shiftr_r, sys.shiftr_z], [sys.shiftz_r, sys.shiftz_z]];
 
     // **************************************
     // Geometry *****************************
@@ -743,8 +531,6 @@ pub fn geometric(sys: HyperbolicSystem, pos: [f64; 2]) -> Geometric {
 
     // And now the Ricci tensor
     let ricci = ricci(gamma_2nd, gamma_2nd_par);
-    // // As well as the Ricci scalar
-    // let ricci_trace = sum2(|i, j| ricci[i][j] * g_inv[i][j]);
 
     Geometric {
         ricci_rr: ricci[0][0],
@@ -752,26 +538,16 @@ pub fn geometric(sys: HyperbolicSystem, pos: [f64; 2]) -> Geometric {
         ricci_zz: ricci[1][1],
         gamma_rrr: gamma_2nd[0][0][0],
         gamma_rrz: gamma_2nd[0][0][1],
-        gamma_rzr: gamma_2nd[0][1][0],
         gamma_rzz: gamma_2nd[0][1][1],
         gamma_zrr: gamma_2nd[1][0][0],
         gamma_zrz: gamma_2nd[1][0][1],
-        gamma_zzr: gamma_2nd[1][1][0],
         gamma_zzz: gamma_2nd[1][1][1],
-
-        gamma_rrr_r: gamma_2nd_par[0][0][0][0],
-
-        g_inv_rr_r: g_inv_par[0][0][0],
-        g_det_r: g_det_par[0],
-        g_det_z: g_det_par[1],
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use std::ops::Range;
-
-    use crate::eqs;
+    use crate::explicit;
     use crate::symbolicc;
 
     use super::{tensor3, HyperbolicSystem};
@@ -873,7 +649,7 @@ mod tests {
                 shiftz_z: 0.0,
             };
 
-            let derivs = eqs::hyperbolic(system, position);
+            let derivs = explicit::hyperbolic(system, position);
 
             assert_eq!(derivs.grr_t, 0.0);
             assert_eq!(derivs.grz_t, 0.0);
@@ -993,7 +769,7 @@ mod tests {
                 shiftz_z: 0.0,
             };
 
-            let derivs = eqs::hyperbolic(system, [rho, z]);
+            let derivs = explicit::hyperbolic(system, [rho, z]);
             // println!("{derivs:?}");
 
             // break;
@@ -1029,9 +805,6 @@ mod tests {
 
     #[test]
     fn symbolicc() {
-        const NEAR_ONE: Range<f64> = 0.2..1.8;
-        const NEAR_ZERO: Range<f64> = -1.0..1.0;
-
         let mut rng = rand::thread_rng();
 
         macro_rules! assert_almost_eq {
@@ -1053,109 +826,12 @@ mod tests {
         for trial in 0..10000 {
             println!("Running trial {trial}");
 
-            let system = HyperbolicSystem {
-                grr: rng.gen_range(NEAR_ONE),
-                grr_r: rng.gen_range(NEAR_ZERO),
-                grr_z: rng.gen_range(NEAR_ZERO),
-                grr_rr: rng.gen_range(NEAR_ZERO),
-                grr_rz: rng.gen_range(NEAR_ZERO),
-                grr_zz: rng.gen_range(NEAR_ZERO),
-                grz: rng.gen_range(NEAR_ZERO),
-                grz_r: rng.gen_range(NEAR_ZERO),
-                grz_z: rng.gen_range(NEAR_ZERO),
-                grz_rr: rng.gen_range(NEAR_ZERO),
-                grz_rz: rng.gen_range(NEAR_ZERO),
-                grz_zz: rng.gen_range(NEAR_ZERO),
-                gzz: rng.gen_range(NEAR_ONE),
-                gzz_r: rng.gen_range(NEAR_ZERO),
-                gzz_z: rng.gen_range(NEAR_ZERO),
-                gzz_rr: rng.gen_range(NEAR_ZERO),
-                gzz_rz: rng.gen_range(NEAR_ZERO),
-                gzz_zz: rng.gen_range(NEAR_ZERO),
-                s: rng.gen_range(NEAR_ZERO),
-                s_r: rng.gen_range(NEAR_ZERO),
-                s_z: rng.gen_range(NEAR_ZERO),
-                s_rr: rng.gen_range(NEAR_ZERO),
-                s_rz: rng.gen_range(NEAR_ZERO),
-                s_zz: rng.gen_range(NEAR_ZERO),
-                // s: 0.0,
-                // s_r: 0.0,
-                // s_z: 0.0,
-                // s_rr: 0.0,
-                // s_rz: 0.0,
-                // s_zz: 0.0,
-                krr: rng.gen_range(NEAR_ZERO),
-                krr_r: rng.gen_range(NEAR_ZERO),
-                krr_z: rng.gen_range(NEAR_ZERO),
-                krz: rng.gen_range(NEAR_ZERO),
-                krz_r: rng.gen_range(NEAR_ZERO),
-                krz_z: rng.gen_range(NEAR_ZERO),
-                kzz: rng.gen_range(NEAR_ZERO),
-                kzz_r: rng.gen_range(NEAR_ZERO),
-                kzz_z: rng.gen_range(NEAR_ZERO),
-                y: rng.gen_range(NEAR_ZERO),
-                y_r: rng.gen_range(NEAR_ZERO),
-                y_z: rng.gen_range(NEAR_ZERO),
-                // krr: 0.0,
-                // krr_r: 0.0,
-                // krr_z: 0.0,
-                // krz: 0.0,
-                // krz_r: 0.0,
-                // krz_z: 0.0,
-                // kzz: 0.0,
-                // kzz_r: 0.0,
-                // kzz_z: 0.0,
-                // y: 0.0,
-                // y_r: 0.0,
-                // y_z: 0.0,
-                lapse: rng.gen_range(NEAR_ONE),
-                lapse_r: rng.gen_range(NEAR_ZERO),
-                lapse_z: rng.gen_range(NEAR_ZERO),
-                lapse_rr: rng.gen_range(NEAR_ZERO),
-                lapse_rz: rng.gen_range(NEAR_ZERO),
-                lapse_zz: rng.gen_range(NEAR_ZERO),
-                shiftr: rng.gen_range(NEAR_ZERO),
-                shiftr_r: rng.gen_range(NEAR_ZERO),
-                shiftr_z: rng.gen_range(NEAR_ZERO),
-                shiftz: rng.gen_range(NEAR_ZERO),
-                shiftz_r: rng.gen_range(NEAR_ZERO),
-                shiftz_z: rng.gen_range(NEAR_ZERO),
-                // lapse: 1.0,
-                // lapse_r: 0.0,
-                // lapse_z: 0.0,
-                // lapse_rr: 0.0,
-                // lapse_rz: 0.0,
-                // lapse_zz: 0.0,
-                // shiftr: 0.0,
-                // shiftr_r: 0.0,
-                // shiftr_z: 0.0,
-                // shiftz: 0.0,
-                // shiftz_r: 0.0,
-                // shiftz_z: 0.0,
-                theta: rng.gen_range(NEAR_ZERO),
-                theta_r: rng.gen_range(NEAR_ZERO),
-                theta_z: rng.gen_range(NEAR_ZERO),
-                zr: rng.gen_range(NEAR_ZERO),
-                zr_r: rng.gen_range(NEAR_ZERO),
-                zr_z: rng.gen_range(NEAR_ZERO),
-                zz: rng.gen_range(NEAR_ZERO),
-                zz_r: rng.gen_range(NEAR_ZERO),
-                zz_z: rng.gen_range(NEAR_ZERO),
-                // theta: 0.0,
-                // theta_r: 0.0,
-                // theta_z: 0.0,
-                // zr: 0.0,
-                // zr_r: 0.0,
-                // zr_z: 0.0,
-                // zz: 0.0,
-                // zz_r: 0.0,
-                // zz_z: 0.0,
-            };
+            let system = HyperbolicSystem::fuzzy(&mut rng);
 
-            let rho = rng.gen_range(0.1..10.0);
-            let z = rng.gen_range(0.0..10.0);
+            let rho = rng.gen_range(0.0..=10.0);
+            let z = rng.gen_range(-10.0..=10.0);
 
-            let det = system.grr * system.gzz - system.grz * system.grz;
+            let det = system.det();
 
             if det.abs() <= 1e-3 {
                 continue;
@@ -1163,29 +839,8 @@ mod tests {
 
             println!("Det {:e}", det);
 
-            // println!("{}", system.grr * system.gzz - system.grz * system.grz);
-
-            // let fmore = system.gzz_r / det
-            //     - (system.gzz * system.grr_r - 2.0 * system.grz * system.grz_r
-            //         + system.grr * system.gzz_r)
-            //         * system.gzz
-            //         / (det * det);
-
-            // let fmore = (-system.grr_r * system.gzz.powi(2)
-            //     + 2.0 * system.grz * system.grz_r * system.gzz
-            //     - system.grz * system.grz * system.gzz_r)
-            //     / (det * det);
-
-            // dbg!(system.clone());
-
-            // let more = (-system.grr_r * system.gzz.powi(2)
-            //     + 2.0 * system.grz * system.grz_r * system.gzz
-            //     - system.gzz_r * system.grz * system.grz)
-            //     / (system.grr.powi(2) * system.gzz.powi(2) + system.grz.powi(4)
-            //         - system.grr * system.gzz * 2.0 * system.grz.powi(2));
-
-            let explicit = eqs::geometric(system.clone(), [rho, z]);
-            let symbolic = symbolicc::geometric(system.clone(), rho, z);
+            let explicit = explicit::geometric(system.clone(), [rho, z]);
+            let symbolic = symbolicc::geometric(system.clone(), [rho, z]);
 
             assert_almost_eq!(
                 explicit.gamma_rrr,
@@ -1196,11 +851,6 @@ mod tests {
                 explicit.gamma_rrz,
                 symbolic.gamma_rrz,
                 "Gammarrz does not match"
-            );
-            assert_almost_eq!(
-                explicit.gamma_rzr,
-                symbolic.gamma_rzr,
-                "Gammarzr does not match"
             );
             assert_almost_eq!(
                 explicit.gamma_rzz,
@@ -1219,42 +869,17 @@ mod tests {
                 "Gammazrz does not match"
             );
             assert_almost_eq!(
-                explicit.gamma_zzr,
-                symbolic.gamma_zzr,
-                "Gammazzr does not match"
-            );
-            assert_almost_eq!(
                 explicit.gamma_zzz,
                 symbolic.gamma_zzz,
                 "Gammazzz does not match"
-            );
-
-            assert_almost_eq!(explicit.g_det_r, symbolic.g_det_r, "Gdet_r does not match");
-
-            assert_almost_eq!(explicit.g_det_z, symbolic.g_det_z, "Gdet_z does not match");
-
-            // assert_almost_eq!(fmore, explicit.g_inv_rr_r, "More vs Explicit");
-
-            // assert_almost_eq!(fmore, symbolic.g_inv_rr_r, "More vs Symbolic");
-
-            assert_almost_eq!(
-                explicit.g_inv_rr_r,
-                symbolic.g_inv_rr_r,
-                "Ginvrr_r does not match"
-            );
-
-            assert_almost_eq!(
-                explicit.gamma_rrr_r,
-                symbolic.gamma_rrr_r,
-                "Gammarrrr does not match"
             );
 
             assert_almost_eq!(explicit.ricci_rr, symbolic.ricci_rr, "Rrr does not match");
             assert_almost_eq!(explicit.ricci_rz, symbolic.ricci_rz, "Rrz does not match");
             assert_almost_eq!(explicit.ricci_zz, symbolic.ricci_zz, "Rzz does not match");
 
-            let explicit = eqs::hyperbolic(system.clone(), [rho, z]);
-            let symbolic = symbolicc::hyperbolic(system, rho, z);
+            let explicit = explicit::hyperbolic(system.clone(), [rho, z]);
+            let symbolic = symbolicc::hyperbolic(system, [rho, z]);
 
             assert_almost_eq!(explicit.grr_t, symbolic.grr_t, "Grr does not match");
             assert_almost_eq!(explicit.grz_t, symbolic.grz_t, "Grz does not match");

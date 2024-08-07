@@ -150,8 +150,8 @@ HyperbolicDerivs hyperbolic_regular_sys(HyperbolicSystem vars, double rho, doubl
 typedef struct Geometric
 {
     double ricci_rr, ricci_rz, ricci_zz;
-    double gamma_rrr, gamma_rrz, gamma_rzr, gamma_rzz;
-    double gamma_zrr, gamma_zrz, gamma_zzr, gamma_zzz;
+    double gamma_rrr, gamma_rrz, gamma_rzz;
+    double gamma_zrr, gamma_zrz, gamma_zzz;
     double gamma_rrr_r;
     double g_inv_rr_r;
 
@@ -186,17 +186,10 @@ Geometric geometric_sys(HyperbolicSystem vars, double rho, double z) {
     result.ricci_zz = ricci_zz;
     result.gamma_rrr = gamma_rrr;
     result.gamma_rrz = gamma_rrz;
-    result.gamma_rzr = gamma_rzr;
     result.gamma_rzz = gamma_rzz;
     result.gamma_zrr = gamma_zrr;
     result.gamma_zrz = gamma_zrz;
-    result.gamma_zzr = gamma_zzr;
     result.gamma_zzz = gamma_zzz;
-    result.gamma_rrr_r = gamma_rrr_r;
-    result.g_inv_rr_r = g_inv_rr_r;
-    result.g_det_r = g_det_r;
-    result.g_det_z = g_det_z;
-
-
+    
     return result;
 }

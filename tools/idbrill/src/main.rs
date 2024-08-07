@@ -266,7 +266,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut solver = HyperRelaxSolver::new();
     solver.tolerance = 1e-9;
-    solver.max_steps = 5000;
+    solver.max_steps = 10000;
     solver.cfl = 0.1;
     solver.dampening = 0.4;
 
@@ -317,7 +317,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut model = Model::empty();
     model.set_mesh(discrete.mesh());
     model.write_system(rinne.as_slice());
-    model.export_dat("output/idbrill.dat")?;
+    model.export_dat("output/idbrill80.dat")?;
 
     Ok(())
 }

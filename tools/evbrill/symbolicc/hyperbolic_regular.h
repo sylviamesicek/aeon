@@ -41,15 +41,15 @@ double x32 = pow(lapse, 2);
 // Final Equations
 double grr_t = 2*grr*shiftr_r + grr_z*shiftz - x1;
 
-double gzz_t = gzz*x2 + gzz_z*shiftz - x3;
-
 double grz_t = 0;
+
+double gzz_t = gzz*x2 + gzz_z*shiftz - x3;
 
 double krr_t = x18*((1.0/4.0)*grr*x9*(grr_z - x8) - grr_rr*x7 + (1.0/2.0)*grz_r*x5 + gzz*x15*(-grr_z*lapse_z - grr_zz*lapse - gzz_rr*lapse + kzz*x1 + lapse*x12 - 4*lapse*x14 + lapse_z*x8 + x0*x13) + x11*(2*krr*shiftr_r + krr_z*shiftz - 6*lapse*s_r + 2*lapse*zr_r - lapse_rr - x0*x10));
 
-double kzz_t = (1.0/2.0)*x27*(pow(grr_z, 2)*x4 + x20*x9 + x21*(gzz_z*lapse_z - gzz_z*x22 - pow(kzz, 2)*x0) + x23*(-grr_zz + 2*grz_rz - gzz_rr + 2*krr*kzz) + 2*x24*(kzz*x2 + kzz_z*shiftz + 2*lapse*zz_z - lapse_zz - theta*x3));
-
 double krz_t = 0;
+
+double kzz_t = (1.0/2.0)*x27*(pow(grr_z, 2)*x4 + x20*x9 + x21*(gzz_z*lapse_z - gzz_z*x22 - pow(kzz, 2)*x0) + x23*(-grr_zz + 2*grz_rz - gzz_rr + 2*krr*kzz) + 2*x24*(kzz*x2 + kzz_z*shiftz + 2*lapse*zz_z - lapse_zz - theta*x3));
 
 double theta_t = x17*x25*(shiftz*theta_z*x21*x6 + x0*x11*(-3*s_r - x10 + zr_r) + x15*x19*x9 + x24*(lapse*zz_z - lapse_z*zz - theta*x29) - 1.0/2.0*x28*x9 + x31*(-grr_zz - gzz_rr + kzz*x30 + x12 + x13 - x14) + (1.0/4.0)*x5*(grr_z + x8) + x7*(-grr_rr + pow(krr, 2)));
 
