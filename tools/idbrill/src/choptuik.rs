@@ -103,7 +103,7 @@ impl Operator<2> for PsiOperator {
         let mut term3 = rho * seed_hess[0][0]
             + 4.0 * seed_grad[0]
             + (seed_val + rho * seed_grad[0]).powi(2)
-            + rho * seed_hess[0][0]
+            + rho * seed_hess[1][1]
             + (rho * seed_grad[1]).powi(2);
 
         if on_axis {
@@ -142,6 +142,10 @@ impl Operator<2> for PsiOperator {
                 hamiltonian.as_mut_slice().into(),
             );
 
+            discrete
+                .order::<4>()
+                .fill_boundary(crate::HAM_COND, hamiltonian.as_mut_slice().into());
+
             let mut model = Model::empty();
             model.set_mesh(discrete.mesh());
             model.write_field("psi", garfinkle.field(Choptuik::Psi).to_vec());
@@ -150,7 +154,7 @@ impl Operator<2> for PsiOperator {
             let path = PathBuf::from(format!("output/choptuik/iter{}.vtu", { index / 25 }));
             let config = ExportVtkConfig {
                 title: "choptuik".to_string(),
-                ghost: false,
+                ghost: crate::GHOST,
             };
 
             model.export_vtk(path, config).unwrap();
@@ -196,7 +200,7 @@ impl Projection<2> for Hamiltonian {
         let mut term3 = rho * seed_hess[0][0]
             + 4.0 * seed_grad[0]
             + (seed_val + rho * seed_grad[0]).powi(2)
-            + rho * seed_hess[0][0]
+            + rho * seed_hess[1][1]
             + (rho * seed_grad[1]).powi(2);
 
         if on_axis {

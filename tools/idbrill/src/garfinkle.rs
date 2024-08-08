@@ -126,6 +126,10 @@ impl Operator<2> for PsiOperator {
                 hamiltonian.as_mut_slice().into(),
             );
 
+            discrete
+                .order::<4>()
+                .fill_boundary(crate::HAM_COND, hamiltonian.as_mut_slice().into());
+
             let mut model = Model::empty();
             model.set_mesh(discrete.mesh());
             model.write_field("psi", garfinkle.field(Garfinkle::Psi).to_vec());
@@ -134,7 +138,7 @@ impl Operator<2> for PsiOperator {
             let path = PathBuf::from(format!("output/garfinkle/iter{}.vtu", { index / 25 }));
             let config = ExportVtkConfig {
                 title: "garfinkle".to_string(),
-                ghost: false,
+                ghost: crate::GHOST,
             };
 
             model.export_vtk(path, config).unwrap();

@@ -447,6 +447,7 @@ impl<const N: usize, D: Boundary<N> + Condition<N>> NodeSpace<N, D> {
             }
         } else if vertex[axis] > self.size[axis] - border {
             let left = self.size[axis] - vertex[axis];
+            debug_assert!(left > 0);
 
             match self.context.kind(Face::positive(axis)) {
                 BoundaryKind::Free | BoundaryKind::Radiative => Support::FreePositive(left),

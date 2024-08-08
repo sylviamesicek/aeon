@@ -6,7 +6,8 @@ use aeon::{
 mod choptuik;
 mod garfinkle;
 
-const CHOPTUIK: bool = false;
+pub const CHOPTUIK: bool = true;
+pub const GHOST: bool = true;
 
 /// Initial data in Rinne's hyperbolic variables.
 #[derive(Clone, SystemLabel)]
@@ -14,6 +15,41 @@ pub enum Rinne {
     Conformal,
     Seed,
 }
+
+/// Boundary Conditions for Garfinkle variables.
+#[derive(Clone)]
+pub struct BoundaryConditions;
+
+impl Boundary<2> for BoundaryConditions {
+    fn kind(&self, face: Face<2>) -> BoundaryKind {
+        if face.side == false {
+            BoundaryKind::Parity
+        } else {
+            BoundaryKind::Radiative
+        }
+    }
+}
+
+impl Conditions<2> for BoundaryConditions {
+    type System = Rinne;
+
+    fn parity(&self, field: Self::System, face: Face<2>) -> bool {
+        match field {
+            Rinne::Conformal => [true, true][face.axis],
+            Rinne::Seed => [false, true][face.axis],
+        }
+    }
+
+    fn radiative(&self, field: Self::System, _position: [f64; 2]) -> f64 {
+        match field {
+            Rinne::Conformal => 1.0,
+            Rinne::Seed => 0.0,
+        }
+    }
+}
+
+pub const HAM_COND: SystemBC<Rinne, BoundaryConditions> =
+    SystemBC::new(Rinne::Conformal, BoundaryConditions);
 
 use clap::{Arg, Command};
 
@@ -93,6 +129,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         garfinkle::solve(&mut discrete, 5.0, rinne.as_mut_slice(), &mut hamiltonian)?;
     }
 
+    discrete
+        .order::<4>()
+        .fill_boundary(BoundaryConditions, rinne.as_mut_slice());
+
+    discrete
+        .order::<4>()
+        .fill_boundary(HAM_COND, hamiltonian.as_mut().into());
+
     let mut model = Model::empty();
     model.set_mesh(discrete.mesh());
     model.write_field("conformal", rinne.field(Rinne::Conformal).to_vec());
@@ -104,7 +148,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             format!("output/choptuik.vtu"),
             ExportVtkConfig {
                 title: "idbrill".to_string(),
-                ghost: false,
+                ghost: crate::GHOST,
             },
         )?;
     } else {
@@ -112,7 +156,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             format!("output/garfinkle.vtu"),
             ExportVtkConfig {
                 title: "idbrill".to_string(),
-                ghost: false,
+                ghost: crate::GHOST,
             },
         )?;
     }
