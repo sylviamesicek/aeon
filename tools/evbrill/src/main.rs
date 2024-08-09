@@ -12,7 +12,7 @@ pub mod types;
 
 use types::HyperbolicSystem;
 
-const STEPS: usize = 201;
+const STEPS: usize = 7501;
 const CFL: f64 = 0.1;
 const ORDER: usize = 4;
 const DISS_ORDER: usize = ORDER + 2;
@@ -361,19 +361,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let norm = discrete.norm(dynamic.field(Dynamic::Theta).into());
         println!("Step {i}, Time {:.5} Norm {:.5e}", i as f64 * h, norm);
 
-        if true {
+        if i % 25 == 0 {
             // Output current system to disk
             let mut model = Model::empty();
             model.set_mesh(discrete.mesh());
             model.write_system(dynamic.as_slice());
 
-            for field in Dynamic::fields() {
-                let name = format!("{}_dt", field.field_name());
-                model.write_field(&name, derivs.field(field).to_vec());
-            }
+            // for field in Dynamic::fields() {
+            //     let name = format!("{}_dt", field.field_name());
+            //     model.write_field(&name, derivs.field(field).to_vec());
+            // }
 
             model.export_vtk(
-                format!("output/evbrill/iter{}.vtu", i),
+                format!("output/evbrill/iter{}.vtu", i / 25),
                 ExportVtkConfig {
                     title: "evbrill".to_string(),
                     ghost: false,

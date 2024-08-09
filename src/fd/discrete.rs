@@ -1,4 +1,4 @@
-use reborrow::ReborrowMut;
+use rayon::prelude::*;
 use std::array::from_fn;
 
 use crate::fd::{
@@ -10,17 +10,23 @@ use crate::system::{SystemLabel, SystemSlice, SystemSliceMut};
 
 pub struct Discretization<const N: usize> {
     mesh: Mesh<N>,
+    // pool: ThreadPool,
 }
 
 impl<const N: usize> Discretization<N> {
     pub fn new() -> Self {
         Self {
             mesh: Mesh::new(Rectangle::UNIT, [2; N], 0),
+            // pool: ThreadPoolBuilder::new().build().unwrap(),
         }
     }
 
     pub fn mesh(&self) -> &Mesh<N> {
         &self.mesh
+    }
+
+    pub fn mesh_mut(&mut self) -> &mut Mesh<N> {
+        &mut self.mesh
     }
 
     pub fn set_mesh(&mut self, mesh: &Mesh<N>) {
@@ -43,16 +49,16 @@ impl<const N: usize> Discretization<N> {
             self.mesh.ghost() >= ORDER / 2,
             "Mesh has insufficient ghost nodes for the requested order."
         );
-        DiscretizationOrder(&mut self.mesh)
+        DiscretizationOrder(self)
     }
 }
 
-pub struct DiscretizationOrder<'a, const N: usize, const ORDER: usize>(&'a mut Mesh<N>);
+pub struct DiscretizationOrder<'a, const N: usize, const ORDER: usize>(&'a mut Discretization<N>);
 
 impl<'a, const N: usize, const ORDER: usize> DiscretizationOrder<'a, N, ORDER> {
     /// Enforces strong boundary conditions. This includes strong physical boundary conditions, as well
     /// as handling interior boundaries (same level, coarse-fine, or fine-coarse).
-    pub fn fill_boundary<BC: Boundary<N> + Conditions<N>>(
+    pub fn fill_boundary<BC: Boundary<N> + Conditions<N> + Sync>(
         mut self,
         bc: BC,
         mut system: SystemSliceMut<'_, BC::System>,
@@ -63,39 +69,44 @@ impl<'a, const N: usize, const ORDER: usize> DiscretizationOrder<'a, N, ORDER> {
         self.fill_prolong(&bc, &mut system);
     }
 
-    fn fill_physical<BC: Boundary<N> + Conditions<N>>(
+    fn fill_physical<BC: Boundary<N> + Conditions<N> + Sync>(
         &mut self,
         bc: &BC,
         system: &mut SystemSliceMut<'_, BC::System>,
     ) {
-        let mesh = self.0.rb_mut();
+        let mesh = &self.0.mesh;
 
-        for block in 0..mesh.num_blocks() {
+        let system = system.as_range();
+
+        (0..mesh.num_blocks()).for_each(|block| {
             // Fill Physical Boundary conditions
             let nodes = mesh.block_nodes(block);
             let space = mesh.block_space(block);
             let boundary = mesh.block_boundary(block, bc.clone());
 
-            // Take slice of system and
-            let mut block_fields = system.slice_mut(nodes.clone()).fields_mut();
+            let mut block_system = unsafe { system.slice_mut(nodes) };
 
             for field in BC::System::fields() {
                 space
                     .set_context(SystemBC::new(field.clone(), boundary.clone()))
-                    .fill_boundary(block_fields.field_mut(field));
+                    .fill_boundary(block_system.field_mut(field));
             }
-        }
+        });
     }
 
     fn fill_direct<System: SystemLabel>(&mut self, system: &mut SystemSliceMut<'_, System>) {
-        let mesh = self.0.rb_mut();
+        let mesh = self.0.mesh();
+        let system = system.as_range();
 
         // Fill direct interfaces
-        for interface in mesh.direct_interfaces() {
+        mesh.direct_interfaces().par_bridge().for_each(|interface| {
             let block_space = mesh.block_space(interface.block);
             let block_nodes = mesh.block_nodes(interface.block);
             let neighbor_space = mesh.block_space(interface.neighbor);
             let neighbor_nodes = mesh.block_nodes(interface.neighbor);
+
+            let mut block_system = unsafe { system.slice_mut(block_nodes).fields_mut() };
+            let neighbor_system = unsafe { system.slice(neighbor_nodes).fields() };
 
             for node in IndexSpace::new(interface.size).iter() {
                 let block_node = from_fn(|axis| node[axis] as isize + interface.dest[axis]);
@@ -105,24 +116,25 @@ impl<'a, const N: usize, const ORDER: usize> DiscretizationOrder<'a, N, ORDER> {
                 let neighbor_index = neighbor_space.index_from_node(neighbor_node);
 
                 for field in System::fields() {
-                    let value =
-                        system.slice(neighbor_nodes.clone()).field(field.clone())[neighbor_index];
-                    system
-                        .slice_mut(block_nodes.clone())
-                        .field_mut(field.clone())[block_index] = value;
+                    let value = neighbor_system.field(field.clone())[neighbor_index];
+                    block_system.field_mut(field.clone())[block_index] = value;
                 }
             }
-        }
+        });
     }
 
     fn fill_fine<System: SystemLabel>(&mut self, system: &mut SystemSliceMut<'_, System>) {
-        let mesh = self.0.rb_mut();
+        let mesh = self.0.mesh();
+        let system = system.as_range();
 
-        for interface in mesh.fine_interfaces() {
+        mesh.fine_interfaces().par_bridge().for_each(|interface| {
             let block_space = mesh.block_space(interface.block);
             let block_nodes = mesh.block_nodes(interface.block);
             let neighbor_space = mesh.block_space(interface.neighbor);
             let neighbor_nodes = mesh.block_nodes(interface.neighbor);
+
+            let mut block_system = unsafe { system.slice_mut(block_nodes).fields_mut() };
+            let neighbor_system = unsafe { system.slice(neighbor_nodes).fields() };
 
             for node in IndexSpace::new(interface.size).iter() {
                 let block_node = from_fn(|axis| node[axis] as isize + interface.dest[axis]);
@@ -133,30 +145,30 @@ impl<'a, const N: usize, const ORDER: usize> DiscretizationOrder<'a, N, ORDER> {
                 let neighbor_index = neighbor_space.index_from_node(neighbor_node);
 
                 for field in System::fields() {
-                    let value =
-                        system.slice(neighbor_nodes.clone()).field(field.clone())[neighbor_index];
-                    system
-                        .slice_mut(block_nodes.clone())
-                        .field_mut(field.clone())[block_index] = value;
+                    let value = neighbor_system.field(field.clone())[neighbor_index];
+                    block_system.field_mut(field.clone())[block_index] = value;
                 }
             }
-        }
+        });
     }
 
-    fn fill_prolong<BC: Boundary<N> + Conditions<N>>(
+    fn fill_prolong<BC: Boundary<N> + Conditions<N> + Sync>(
         &mut self,
         bc: &BC,
         system: &mut SystemSliceMut<'_, BC::System>,
     ) {
-        let mesh = self.0.rb_mut();
+        let mesh = self.0.mesh();
+        let system = system.as_range();
 
-        for interface in mesh.coarse_interfaces() {
+        mesh.coarse_interfaces().par_bridge().for_each(|interface| {
             let block_nodes = mesh.block_nodes(interface.block);
             let block_space = mesh.block_space(interface.block);
-
             let neighbor_nodes = mesh.block_nodes(interface.neighbor);
             let neighbor_boundary = mesh.block_boundary(interface.neighbor, bc.clone());
             let neighbor_space = mesh.block_space(interface.neighbor);
+
+            let mut block_system = unsafe { system.slice_mut(block_nodes).fields_mut() };
+            let neighbor_system = unsafe { system.slice(neighbor_nodes).fields() };
 
             for node in IndexSpace::new(interface.size).iter() {
                 let block_node = from_fn(|axis| node[axis] as isize + interface.dest[axis]);
@@ -169,36 +181,34 @@ impl<'a, const N: usize, const ORDER: usize> DiscretizationOrder<'a, N, ORDER> {
                 for field in BC::System::fields() {
                     let bc = SystemBC::new(field.clone(), neighbor_boundary.clone());
 
-                    let value = neighbor_space.set_context(bc).prolong::<ORDER>(
-                        neighbor_vertex,
-                        system.slice(neighbor_nodes.clone()).field(field.clone()),
-                    );
-
-                    system
-                        .slice_mut(block_nodes.clone())
-                        .field_mut(field.clone())[block_index] = value;
+                    let value = neighbor_space
+                        .set_context(bc)
+                        .prolong::<ORDER>(neighbor_vertex, neighbor_system.field(field.clone()));
+                    block_system.field_mut(field.clone())[block_index] = value;
                 }
             }
-        }
+        });
     }
 
     pub fn weak_boundary<BC: Boundary<N> + Conditions<N>>(
         self,
         bc: BC,
-        field: SystemSlice<'_, BC::System>,
-        mut deriv: SystemSliceMut<'_, BC::System>,
+        system: SystemSlice<'_, BC::System>,
+        deriv: SystemSliceMut<'_, BC::System>,
     ) {
-        let mesh = self.0;
+        let mesh = self.0.mesh();
+        let system = system.as_range();
+        let deriv = deriv.as_range();
 
-        for block in 0..mesh.num_blocks() {
+        (0..mesh.num_blocks()).for_each(|block| {
             let boundary = mesh.block_boundary(block, bc.clone());
             let bounds = mesh.block_bounds(block);
             let space = mesh.block_space(block).set_context(bounds);
             let nodes = mesh.block_nodes(block);
             let vertex_size = space.vertex_size();
 
-            let block_fields = field.slice(nodes.clone()).fields();
-            let mut block_deriv_fields = deriv.slice_mut(nodes.clone()).fields_mut();
+            let block_system = unsafe { system.slice(nodes.clone()).fields() };
+            let mut block_deriv = unsafe { deriv.slice_mut(nodes.clone()).fields_mut() };
 
             for face in faces::<N>() {
                 if boundary.kind(face) != BoundaryKind::Radiative {
@@ -250,17 +260,16 @@ impl<'a, const N: usize, const ORDER: usize> DiscretizationOrder<'a, N, ORDER> {
                     let inner_index = space.index_from_vertex(inner);
 
                     for field in BC::System::fields() {
-                        let field_values = block_fields.field(field.clone());
-                        let field_derivs = block_deriv_fields.field_mut(field.clone());
+                        let field_system = block_system.field(field.clone());
+                        let field_derivs = block_deriv.field_mut(field.clone());
                         let field_boundary = SystemBC::new(field.clone(), boundary.clone());
 
                         let target = Condition::radiative(&field_boundary, position);
 
                         // Inner R dependence
-
                         let inner_gradient =
-                            inner_engine.gradient(field_boundary.clone(), field_values);
-                        let mut inner_advection = inner_engine.value(field_values) - target;
+                            inner_engine.gradient(field_boundary.clone(), field_system);
+                        let mut inner_advection = inner_engine.value(field_system) - target;
 
                         for axis in 0..N {
                             inner_advection += inner_position[axis] * inner_gradient[axis];
@@ -272,9 +281,8 @@ impl<'a, const N: usize, const ORDER: usize> DiscretizationOrder<'a, N, ORDER> {
                             * (field_derivs[inner_index] + inner_advection / inner_r);
 
                         // Vertex
-
-                        let gradient = engine.gradient(field_boundary.clone(), field_values);
-                        let mut advection = engine.value(field_values) - target;
+                        let gradient = engine.gradient(field_boundary.clone(), field_system);
+                        let mut advection = engine.value(field_system) - target;
 
                         for axis in 0..N {
                             advection += position[axis] * gradient[axis];
@@ -285,17 +293,18 @@ impl<'a, const N: usize, const ORDER: usize> DiscretizationOrder<'a, N, ORDER> {
                     }
                 }
             }
-        }
+        });
     }
 
     /// Fills the system by applying the given function at each node on the mesh.
-    pub fn evaluate<F: Function<N>>(self, f: F, mut dest: SystemSliceMut<'_, F::Output>) {
-        let mesh = self.0;
+    pub fn evaluate<F: Function<N> + Sync>(self, f: F, system: SystemSliceMut<'_, F::Output>) {
+        let mesh = self.0.mesh();
+        let system = system.as_range();
 
-        for block in 0..mesh.num_blocks() {
+        (0..mesh.num_blocks()).par_bridge().for_each(|block| {
             let nodes = mesh.block_nodes(block);
 
-            let mut output = dest.slice_mut(nodes.clone()).fields_mut();
+            let mut block_system = unsafe { system.slice_mut(nodes.clone()).fields_mut() };
 
             let bounds = mesh.block_bounds(block);
             let space = mesh.block_space(block).set_context(bounds);
@@ -307,27 +316,29 @@ impl<'a, const N: usize, const ORDER: usize> DiscretizationOrder<'a, N, ORDER> {
 
                 let index = space.index_from_vertex(vertex);
                 for field in F::Output::fields() {
-                    output.field_mut(field.clone())[index] = result.field(field.clone());
+                    block_system.field_mut(field.clone())[index] = result.field(field.clone());
                 }
             }
-        }
+        });
     }
 
     /// Applies the projection to `source`, and stores the result in `dest`.
-    pub fn project<BC: Boundary<N>, P: Projection<N>>(
+    pub fn project<BC: Boundary<N> + Sync, P: Projection<N> + Sync>(
         self,
         boundary: BC,
         projection: P,
         source: SystemSlice<'_, P::Input>,
-        mut dest: SystemSliceMut<'_, P::Output>,
+        dest: SystemSliceMut<'_, P::Output>,
     ) {
-        let mesh = self.0;
+        let mesh = self.0.mesh();
+        let source = source.as_range();
+        let dest = dest.as_range();
 
-        for block in 0..mesh.num_blocks() {
+        (0..mesh.num_blocks()).par_bridge().for_each(|block| {
             let nodes = mesh.block_nodes(block);
 
-            let input = source.slice(nodes.clone()).fields();
-            let mut output = dest.slice_mut(nodes.clone()).fields_mut();
+            let block_source = unsafe { source.slice(nodes.clone()).fields() };
+            let mut block_dest = unsafe { dest.slice_mut(nodes.clone()).fields_mut() };
 
             let bounds = mesh.block_bounds(block);
             let space = mesh.block_space(block).set_context(bounds);
@@ -344,7 +355,7 @@ impl<'a, const N: usize, const ORDER: usize> DiscretizationOrder<'a, N, ORDER> {
                         vertex,
                     };
 
-                    projection.project(&engine, input.as_fields())
+                    projection.project(&engine, block_source.as_fields())
                 } else {
                     let engine = FdEngine::<N, ORDER, _> {
                         space: space.clone(),
@@ -352,36 +363,39 @@ impl<'a, const N: usize, const ORDER: usize> DiscretizationOrder<'a, N, ORDER> {
                         boundary: boundary.clone(),
                     };
 
-                    projection.project(&engine, input.as_fields())
+                    projection.project(&engine, block_source.as_fields())
                 };
 
                 let index = space.index_from_vertex(vertex);
 
                 for field in P::Output::fields() {
-                    output.field_mut(field.clone())[index] = result.field(field.clone());
+                    block_dest.field_mut(field.clone())[index] = result.field(field.clone());
                 }
             }
-        }
+        });
     }
 
     /// Applies the given operator to `source`, storing the result in `dest`, and utilizing `context` to store
     /// extra fields.
-    pub fn apply<BC: Boundary<N>, O: Operator<N>>(
+    pub fn apply<BC: Boundary<N> + Sync, O: Operator<N> + Sync>(
         self,
         boundary: BC,
         operator: O,
         source: SystemSlice<'_, O::System>,
         context: SystemSlice<'_, O::Context>,
-        mut dest: SystemSliceMut<'_, O::System>,
+        dest: SystemSliceMut<'_, O::System>,
     ) {
-        let mesh = self.0;
+        let mesh = self.0.mesh();
+        let source = source.as_range();
+        let context = context.as_range();
+        let dest = dest.as_range();
 
-        for block in 0..mesh.num_blocks() {
+        (0..mesh.num_blocks()).par_bridge().for_each(|block| {
             let nodes = mesh.block_nodes(block);
 
-            let input = source.slice(nodes.clone()).fields();
-            let context = context.slice(nodes.clone()).fields();
-            let mut output = dest.slice_mut(nodes.clone());
+            let block_source = unsafe { source.slice(nodes.clone()).fields() };
+            let block_context = unsafe { context.slice(nodes.clone()).fields() };
+            let mut block_dest = unsafe { dest.slice_mut(nodes.clone()).fields_mut() };
 
             let boundary = mesh.block_boundary(block, boundary.clone());
             let bounds = mesh.block_bounds(block);
@@ -397,7 +411,7 @@ impl<'a, const N: usize, const ORDER: usize> DiscretizationOrder<'a, N, ORDER> {
                         vertex,
                     };
 
-                    operator.apply(&engine, input.as_fields(), context.as_fields())
+                    operator.apply(&engine, block_source.as_fields(), block_context.as_fields())
                 } else {
                     let engine = FdEngine::<N, ORDER, _> {
                         space: space.clone(),
@@ -405,31 +419,33 @@ impl<'a, const N: usize, const ORDER: usize> DiscretizationOrder<'a, N, ORDER> {
                         boundary: boundary.clone(),
                     };
 
-                    operator.apply(&engine, input.as_fields(), context.as_fields())
+                    operator.apply(&engine, block_source.as_fields(), block_context.as_fields())
                 };
 
                 let index = space.index_from_node(node_from_vertex(vertex));
 
                 for field in O::System::fields() {
-                    output.field_mut(field.clone())[index] = result.field(field.clone());
+                    block_dest.field_mut(field.clone())[index] = result.field(field.clone());
                 }
             }
-        }
+        });
     }
 
-    pub fn dissipation<BC: Boundary<N> + Conditions<N>>(
+    pub fn dissipation<BC: Boundary<N> + Conditions<N> + Sync>(
         self,
         bc: BC,
         source: SystemSlice<'_, BC::System>,
-        mut dest: SystemSliceMut<'_, BC::System>,
+        dest: SystemSliceMut<'_, BC::System>,
     ) {
-        let mesh = self.0;
+        let mesh = self.0.mesh();
+        let source = source.as_range();
+        let dest = dest.as_range();
 
-        for block in 0..mesh.num_blocks() {
+        (0..mesh.num_blocks()).par_bridge().for_each(|block| {
             let nodes = mesh.block_nodes(block);
 
-            let input = source.slice(nodes.clone()).fields();
-            let mut output = dest.slice_mut(nodes.clone());
+            let block_source = unsafe { source.slice(nodes.clone()).fields() };
+            let mut block_dest = unsafe { dest.slice_mut(nodes.clone()).fields_mut() };
 
             let boundary = mesh.block_boundary(block, bc.clone());
             let bounds = mesh.block_bounds(block);
@@ -438,8 +454,8 @@ impl<'a, const N: usize, const ORDER: usize> DiscretizationOrder<'a, N, ORDER> {
             let vertex_size = space.vertex_size();
 
             for field in BC::System::fields() {
-                let src = input.field(field.clone());
-                let dst = output.field_mut(field.clone());
+                let src = block_source.field(field.clone());
+                let dst = block_dest.field_mut(field.clone());
 
                 let space = space.set_bc(SystemBC::new(field.clone(), boundary.clone()));
 
@@ -448,7 +464,7 @@ impl<'a, const N: usize, const ORDER: usize> DiscretizationOrder<'a, N, ORDER> {
                     space.set_value(node_from_vertex(vertex), value, dst);
                 }
             }
-        }
+        });
     }
 
     /// Determines if a vertex is not within `ORDER` of any weakly enforced boundary.

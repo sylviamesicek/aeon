@@ -33,8 +33,8 @@ impl<Label: SystemLabel> HyperRelaxSolver<Label> {
     pub fn solve<
         const N: usize,
         const ORDER: usize,
-        O: Operator<N, System = Label>,
-        BC: Boundary<N> + Conditions<N, System = Label>,
+        O: Operator<N, System = Label> + Sync,
+        BC: Boundary<N> + Conditions<N, System = Label> + Sync,
     >(
         &mut self,
         discrete: &mut Discretization<N>,
@@ -219,9 +219,8 @@ struct FictitiousOde<
 
 impl<'a, const N: usize, const ORDER: usize, BC, O> Ode for FictitiousOde<'a, N, ORDER, BC, O>
 where
-    BC: Boundary<N> + Conditions<N>,
-
-    O: Operator<N, System = BC::System>,
+    BC: Boundary<N> + Conditions<N> + Sync,
+    O: Operator<N, System = BC::System> + Sync,
 {
     fn dim(&self) -> usize {
         2 * self.dimension

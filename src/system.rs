@@ -6,6 +6,7 @@
 
 use crate::array::{Array, ArrayLike};
 
+use core::slice;
 use reborrow::{Reborrow, ReborrowMut};
 use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
@@ -17,7 +18,7 @@ use std::slice::SliceIndex;
 pub use aeon_macros::SystemLabel;
 
 /// This trait is used to define systems of fields.
-pub trait SystemLabel: Sized + Clone + 'static {
+pub trait SystemLabel: Sized + Clone + Send + Sync + 'static {
     /// Name of the system (used for debugging and when serializing a system).
     const NAME: &'static str;
 
@@ -148,6 +149,16 @@ impl<Label: SystemLabel> SystemVec<Label> {
         &mut self.data[length * label.field_index()..length * (label.field_index() + 1)]
     }
 
+    pub fn as_range(&self) -> SystemRange<Label> {
+        SystemRange {
+            ptr: self.data.as_ptr() as *mut f64,
+            total: self.data.len(),
+            offset: 0,
+            length: self.len(),
+            _marker: PhantomData,
+        }
+    }
+
     /// Borrows the vector as a system slice.
     pub fn as_slice<'s>(&'s self) -> SystemSlice<'s, Label> {
         self.slice(..)
@@ -269,6 +280,16 @@ impl<'a, Label: SystemLabel> SystemSlice<'a, Label> {
 
         &self.data[length * label.field_index()..length * (label.field_index() + 1)]
             [self.offset..self.offset + self.length]
+    }
+
+    pub fn as_range(&self) -> SystemRange<Label> {
+        SystemRange {
+            ptr: self.data.as_ptr() as *mut f64,
+            total: self.data.len(),
+            offset: self.offset,
+            length: self.length,
+            _marker: PhantomData,
+        }
     }
 
     /// Takes a subslice of the existing slice.
@@ -430,6 +451,16 @@ impl<'a, Label: SystemLabel> SystemSliceMut<'a, Label> {
             [self.offset..self.offset + self.length]
     }
 
+    pub fn as_range(&self) -> SystemRange<Label> {
+        SystemRange {
+            ptr: self.data.as_ptr() as *mut f64,
+            total: self.data.len(),
+            offset: self.offset,
+            length: self.length,
+            _marker: PhantomData,
+        }
+    }
+
     /// Takes a subslice of this slice.
     pub fn slice<'s, R>(&'s self, range: R) -> SystemSlice<'s, Label>
     where
@@ -505,6 +536,50 @@ impl<'a> From<&'a mut [f64]> for SystemSliceMut<'a, Scalar> {
         SystemSliceMut::from_contiguous(value)
     }
 }
+
+#[derive(Debug, Clone)]
+pub struct SystemRange<Label: SystemLabel> {
+    ptr: *mut f64,
+    total: usize,
+    offset: usize,
+    length: usize,
+    _marker: PhantomData<Label>,
+}
+
+impl<Label: SystemLabel> SystemRange<Label> {
+    pub unsafe fn slice<R>(&self, range: R) -> SystemSlice<'_, Label>
+    where
+        R: RangeBounds<usize> + SliceIndex<[f64], Output = [f64]> + Clone,
+    {
+        let bounds = bounds_to_range(self.length, range);
+        let length = bounds.end - bounds.start;
+
+        SystemSlice {
+            data: unsafe { slice::from_raw_parts(self.ptr, self.total) },
+            offset: self.offset + bounds.start,
+            length,
+            _marker: PhantomData,
+        }
+    }
+
+    pub unsafe fn slice_mut<R>(&self, range: R) -> SystemSliceMut<'_, Label>
+    where
+        R: RangeBounds<usize> + SliceIndex<[f64], Output = [f64]> + Clone,
+    {
+        let bounds = bounds_to_range(self.length, range);
+        let length = bounds.end - bounds.start;
+
+        SystemSliceMut {
+            data: unsafe { slice::from_raw_parts_mut(self.ptr, self.total) },
+            offset: self.offset + bounds.start,
+            length,
+            _marker: PhantomData,
+        }
+    }
+}
+
+unsafe impl<Label: SystemLabel> Send for SystemRange<Label> {}
+unsafe impl<Label: SystemLabel> Sync for SystemRange<Label> {}
 
 /// Converts genetic range to a concrete range type.
 fn bounds_to_range<R>(total: usize, range: R) -> Range<usize>

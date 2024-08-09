@@ -379,6 +379,42 @@ impl<const N: usize, D: Boundary<N> + Condition<N>> NodeSpace<N, D> {
         }
     }
 
+    pub fn vertex_support(&self, vertex: [usize; N], border: [usize; N]) -> [Support; N] {
+        from_fn(|axis| {
+            if vertex[axis] < border[axis] {
+                let right = vertex[axis];
+
+                match self.context.kind(Face::negative(axis)) {
+                    BoundaryKind::Free | BoundaryKind::Radiative => Support::FreeNegative(right),
+                    BoundaryKind::Parity => {
+                        if self.context.parity(Face::negative(axis)) {
+                            Support::SymNegative(right)
+                        } else {
+                            Support::AntiSymNegative(right)
+                        }
+                    }
+                    BoundaryKind::Custom => Support::Interior,
+                }
+            } else if vertex[axis] > self.size[axis] - border[axis] {
+                let left = self.size[axis] - vertex[axis];
+
+                match self.context.kind(Face::positive(axis)) {
+                    BoundaryKind::Free | BoundaryKind::Radiative => Support::FreePositive(left),
+                    BoundaryKind::Parity => {
+                        if self.context.parity(Face::positive(axis)) {
+                            Support::SymPositive(left)
+                        } else {
+                            Support::AntiSymPositive(left)
+                        }
+                    }
+                    BoundaryKind::Custom => Support::Interior,
+                }
+            } else {
+                Support::Interior
+            }
+        })
+    }
+
     fn support_vertex_axis(&self, vertex: [usize; N], border: usize, axis: usize) -> Support {
         if vertex[axis] < border {
             let right = vertex[axis];

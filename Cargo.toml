@@ -12,6 +12,7 @@ itertools = "0.13.0"
 log = "0.4"
 paste = "1.0.15"
 rand = "0.8.5"
+rayon = "1.10.0"
 reborrow = "0.5.5"
 ron = "0.8"
 
@@ -32,9 +33,9 @@ aeon_macros.workspace = true
 
 bitvec.workspace = true
 log.workspace = true
+rayon.workspace = true
 reborrow.workspace = true
 ron.workspace = true
 
-bumpalo = "3"
 serde = "1.0.200"
 vtkio = "0.6"

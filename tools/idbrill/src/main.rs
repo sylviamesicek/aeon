@@ -6,8 +6,8 @@ use aeon::{
 mod choptuik;
 mod garfinkle;
 
-pub const CHOPTUIK: bool = true;
-pub const GHOST: bool = true;
+pub const CHOPTUIK: bool = false;
+pub const GHOST: bool = false;
 
 /// Initial data in Rinne's hyperbolic variables.
 #[derive(Clone, SystemLabel)]
@@ -65,7 +65,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .long("points")
                 .help("Number of grid points along each axis")
                 .value_name("POINTS")
-                .default_value("40"),
+                .default_value("16"),
         )
         .arg(
             Arg::new("radius")
@@ -74,18 +74,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .long("radius")
                 .help("Size of grid along each axis")
                 .value_name("RADIUS")
-                .default_value("20.0"),
+                .default_value("128.0"),
         )
         .get_matches();
 
     let points = matches
         .get_one::<String>("points")
         .map(|s| s.parse::<usize>().unwrap())
-        .unwrap_or(10);
+        .unwrap_or(16);
     let radius = matches
         .get_one::<String>("radius")
         .map(|s| s.parse().unwrap())
-        .unwrap_or(20.0);
+        .unwrap_or(128.0);
 
     env_logger::builder()
         .filter_level(log::LevelFilter::Trace)
@@ -98,11 +98,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         origin: [0.0, 0.0],
     };
 
-    let size = [20, 20];
+    let size = [16, 16];
 
     let mut mesh = Mesh::new(bounds, size, 3);
-    mesh.refine(&[true, false, false, false]);
-    mesh.refine(&[true, false, false, false, false, false, false]);
+
+    for _ in 0..4 {
+        let mut flags = vec![false; mesh.num_cells()];
+        flags[0] = true;
+
+        mesh.refine(&flags);
+    }
 
     log::warn!("Min Spacing {}", mesh.min_spacing());
 
@@ -124,9 +129,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut hamiltonian = vec![0.0; mesh.num_nodes()].into_boxed_slice();
 
     if CHOPTUIK {
-        choptuik::solve(&mut discrete, 5.0, rinne.as_mut_slice(), &mut hamiltonian)?;
+        choptuik::solve(&mut discrete, 1.0, rinne.as_mut_slice(), &mut hamiltonian)?;
     } else {
-        garfinkle::solve(&mut discrete, 5.0, rinne.as_mut_slice(), &mut hamiltonian)?;
+        garfinkle::solve(&mut discrete, 1.0, rinne.as_mut_slice(), &mut hamiltonian)?;
     }
 
     discrete
