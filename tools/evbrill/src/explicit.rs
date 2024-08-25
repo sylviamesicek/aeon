@@ -567,17 +567,18 @@ mod tests {
 
     #[test]
     fn minkowski() {
+        let bounds = Rectangle {
+            origin: [0.0, 0.0],
+            size: [10.0, 10.0],
+        };
         let space = NodeSpace {
             size: [100, 100],
             ghost: 2,
-            context: Rectangle {
-                origin: [0.0, 0.0],
-                size: [10.0, 10.0],
-            },
+            context: (),
         };
 
         for node in space.inner_window().iter() {
-            let position = space.position(node);
+            let position = space.position(node, bounds.clone());
 
             let system = HyperbolicSystem {
                 grr: 1.0,
@@ -673,17 +674,18 @@ mod tests {
 
     #[test]
     fn kasner() {
+        let bounds = Rectangle {
+            origin: [0.0, 1.0],
+            size: [10.0, 10.0],
+        };
         let space = NodeSpace {
             size: [100, 100],
             ghost: 2,
-            context: Rectangle {
-                origin: [0.0, 1.0],
-                size: [10.0, 10.0],
-            },
+            context: (),
         };
 
         for node in space.inner_window().iter() {
-            let [rho, z] = space.position(node);
+            let [rho, z] = space.position(node, bounds.clone());
 
             let conformal = z.powi(4);
             let conformal_r = 0.0;

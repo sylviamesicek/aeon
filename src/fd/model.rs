@@ -125,7 +125,7 @@ impl<const N: usize> Model<N> {
             let space = self.mesh.block_space(block);
 
             let mut cell_size = space.cell_size();
-            let mut vertex_size = space.vertex_size();
+            let mut vertex_size = space.inner_size();
 
             if config.ghost {
                 for axis in 0..N {
@@ -188,7 +188,7 @@ impl<const N: usize> Model<N> {
 
         for block in 0..self.mesh.num_blocks() {
             let bounds = self.mesh.block_bounds(block);
-            let space = self.mesh.block_space(block).set_context(bounds);
+            let space = self.mesh.block_space(block);
             let window = if config.ghost {
                 space.full_window()
             } else {
@@ -196,7 +196,7 @@ impl<const N: usize> Model<N> {
             };
 
             for node in window {
-                let position = space.position(node);
+                let position = space.position(node, bounds.clone());
                 let mut vertex = [0.0; 3];
                 vertex[..N].copy_from_slice(&position);
                 vertices.extend(vertex);

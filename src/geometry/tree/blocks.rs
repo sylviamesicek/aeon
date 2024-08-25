@@ -1,4 +1,3 @@
-use crate::array::{unwrap_vec_of_arrays, wrap_vec_of_arrays, Array};
 use crate::geometry::{faces, Face, FaceMask, IndexSpace, Rectangle};
 use bitvec::prelude::*;
 use std::array::from_fn;
@@ -6,14 +5,14 @@ use std::array::from_fn;
 use super::{Tree, NULL};
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-#[serde(from = "TreeBlocksSerde<N>")]
-#[serde(into = "TreeBlocksSerde<N>")]
 pub struct TreeBlocks<const N: usize> {
     /// Stores each cell's position within its parent's block.
+    #[serde(with = "crate::array::serialize")]
     cell_indices: Vec<[usize; N]>,
     /// Maps cell to the block that contains it.
     cell_to_block: Vec<usize>,
     /// Stores the size of each block.
+    #[serde(with = "crate::array::serialize")]
     block_sizes: Vec<[usize; N]>,
     block_cell_indices: Vec<usize>,
     block_cell_offsets: Vec<usize>,
@@ -203,45 +202,6 @@ impl<const N: usize> TreeBlocks<N> {
                 let neighbor = tree.neighbor(cell, face);
                 self.boundaries.push(neighbor == NULL);
             }
-        }
-    }
-}
-
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct TreeBlocksSerde<const N: usize> {
-    cell_indices: Vec<Array<[usize; N]>>,
-    cell_to_block: Vec<usize>,
-    block_sizes: Vec<Array<[usize; N]>>,
-    block_cell_indices: Vec<usize>,
-    block_cell_offsets: Vec<usize>,
-    block_bounds: Vec<Rectangle<N>>,
-    boundaries: BitVec,
-}
-
-impl<const N: usize> From<TreeBlocks<N>> for TreeBlocksSerde<N> {
-    fn from(value: TreeBlocks<N>) -> Self {
-        Self {
-            cell_indices: wrap_vec_of_arrays(value.cell_indices),
-            cell_to_block: value.cell_to_block,
-            block_sizes: wrap_vec_of_arrays(value.block_sizes),
-            block_cell_indices: value.block_cell_indices,
-            block_cell_offsets: value.block_cell_offsets,
-            block_bounds: value.block_bounds,
-            boundaries: value.boundaries,
-        }
-    }
-}
-
-impl<const N: usize> From<TreeBlocksSerde<N>> for TreeBlocks<N> {
-    fn from(value: TreeBlocksSerde<N>) -> Self {
-        Self {
-            cell_indices: unwrap_vec_of_arrays(value.cell_indices),
-            cell_to_block: value.cell_to_block,
-            block_sizes: unwrap_vec_of_arrays(value.block_sizes),
-            block_cell_indices: value.block_cell_indices,
-            block_cell_offsets: value.block_cell_offsets,
-            block_bounds: value.block_bounds,
-            boundaries: value.boundaries,
         }
     }
 }

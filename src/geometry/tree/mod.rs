@@ -1,6 +1,5 @@
 #![allow(clippy::needless_range_loop)]
 
-use crate::array::Array;
 use crate::geometry::{faces, AxisMask, Face, Rectangle, Region, Side};
 use bitvec::prelude::*;
 use std::array::from_fn;
@@ -9,6 +8,7 @@ use std::ops::Range;
 
 mod blocks;
 mod interface;
+mod interface2;
 
 pub use blocks::TreeBlocks;
 pub use interface::{BlockInterface, TreeInterfaces};
@@ -21,8 +21,6 @@ pub const NULL: usize = usize::MAX;
 /// To enable various optimisations, and avoid certain checks, the tree always contains
 /// at least one level of refinement.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-#[serde(from = "TreeSerde<N>")]
-#[serde(into = "TreeSerde<N>")]
 pub struct Tree<const N: usize> {
     /// Domain of the full tree
     domain: Rectangle<N>,
@@ -31,6 +29,7 @@ pub struct Tree<const N: usize> {
     /// Stores neighbors along each face
     neighbors: Vec<usize>,
     /// Index within z-filling curve
+    #[serde(with = "crate::array::serialize")]
     indices: [BitVec<usize, Lsb0>; N],
     /// Offsets into indices,
     offsets: Vec<usize>,
@@ -545,51 +544,13 @@ impl<const N: usize> Tree<N> {
     }
 }
 
-#[derive(serde::Serialize, serde::Deserialize)]
-struct TreeSerde<const N: usize> {
-    domain: Rectangle<N>,
-    /// Bounds of each cell in tree
-    bounds: Vec<Rectangle<N>>,
-    /// Stores neighbors along each face
-    neighbors: Vec<usize>,
-    /// Index within z-filling curve
-    indices: Array<[BitVec<usize, Lsb0>; N]>,
-    /// Offsets into indices,
-    offsets: Vec<usize>,
-}
-
-impl<const N: usize> From<Tree<N>> for TreeSerde<N> {
-    fn from(value: Tree<N>) -> Self {
-        Self {
-            domain: value.domain,
-            bounds: value.bounds,
-            neighbors: value.neighbors,
-            indices: value.indices.into(),
-            offsets: value.offsets,
-        }
-    }
-}
-
-impl<const N: usize> From<TreeSerde<N>> for Tree<N> {
-    fn from(value: TreeSerde<N>) -> Self {
-        Self {
-            domain: value.domain,
-            bounds: value.bounds,
-            neighbors: value.neighbors,
-            indices: value.indices.inner(),
-            offsets: value.offsets,
-        }
-    }
-}
-
 // ************************
 // Nodes ******************
 // ************************
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-#[serde(from = "TreeNodesSerde<N>")]
-#[serde(into = "TreeNodesSerde<N>")]
 pub struct TreeNodes<const N: usize> {
+    #[serde(with = "crate::array::serialize")]
     pub cell_width: [usize; N],
     pub ghost: usize,
     node_offsets: Vec<usize>,
@@ -654,33 +615,6 @@ impl<const N: usize> Default for TreeNodes<N> {
             cell_width: [2; N],
             ghost: 0,
             node_offsets: Default::default(),
-        }
-    }
-}
-
-#[derive(serde::Serialize, serde::Deserialize)]
-struct TreeNodesSerde<const N: usize> {
-    cell_width: Array<[usize; N]>,
-    ghost_nodes: usize,
-    node_offsets: Vec<usize>,
-}
-
-impl<const N: usize> From<TreeNodes<N>> for TreeNodesSerde<N> {
-    fn from(value: TreeNodes<N>) -> Self {
-        Self {
-            cell_width: value.cell_width.into(),
-            ghost_nodes: value.ghost,
-            node_offsets: value.node_offsets,
-        }
-    }
-}
-
-impl<const N: usize> From<TreeNodesSerde<N>> for TreeNodes<N> {
-    fn from(value: TreeNodesSerde<N>) -> Self {
-        Self {
-            cell_width: value.cell_width.inner(),
-            ghost: value.ghost_nodes,
-            node_offsets: value.node_offsets,
         }
     }
 }

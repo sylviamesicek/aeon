@@ -203,9 +203,9 @@ impl<'a, const N: usize, const ORDER: usize> DiscretizationOrder<'a, N, ORDER> {
         (0..mesh.num_blocks()).for_each(|block| {
             let boundary = mesh.block_boundary(block, bc.clone());
             let bounds = mesh.block_bounds(block);
-            let space = mesh.block_space(block).set_context(bounds);
+            let space = mesh.block_space(block);
             let nodes = mesh.block_nodes(block);
-            let vertex_size = space.vertex_size();
+            let vertex_size = space.inner_size();
 
             let block_system = unsafe { system.slice(nodes.clone()).fields() };
             let mut block_deriv = unsafe { deriv.slice_mut(nodes.clone()).fields_mut() };
@@ -224,6 +224,7 @@ impl<'a, const N: usize, const ORDER: usize> DiscretizationOrder<'a, N, ORDER> {
                         space: space.clone(),
                         vertex,
                         boundary: boundary.clone(),
+                        bounds: bounds.clone(),
                     };
                     let position: [f64; N] = engine.position();
                     let r = position.iter().map(|&v| v * v).sum::<f64>().sqrt();
@@ -253,6 +254,7 @@ impl<'a, const N: usize, const ORDER: usize> DiscretizationOrder<'a, N, ORDER> {
                         space: space.clone(),
                         vertex: inner,
                         boundary: boundary.clone(),
+                        bounds: bounds.clone(),
                     };
 
                     let inner_position = inner_engine.position();
@@ -307,11 +309,11 @@ impl<'a, const N: usize, const ORDER: usize> DiscretizationOrder<'a, N, ORDER> {
             let mut block_system = unsafe { system.slice_mut(nodes.clone()).fields_mut() };
 
             let bounds = mesh.block_bounds(block);
-            let space = mesh.block_space(block).set_context(bounds);
-            let vertex_size = space.vertex_size();
+            let space = mesh.block_space(block);
+            let vertex_size = space.inner_size();
 
             for vertex in IndexSpace::new(vertex_size).iter() {
-                let position = space.position(node_from_vertex(vertex));
+                let position = space.position(node_from_vertex(vertex), bounds.clone());
                 let result = f.evaluate(position);
 
                 let index = space.index_from_vertex(vertex);
@@ -341,8 +343,8 @@ impl<'a, const N: usize, const ORDER: usize> DiscretizationOrder<'a, N, ORDER> {
             let mut block_dest = unsafe { dest.slice_mut(nodes.clone()).fields_mut() };
 
             let bounds = mesh.block_bounds(block);
-            let space = mesh.block_space(block).set_context(bounds);
-            let vertex_size = space.vertex_size();
+            let space = mesh.block_space(block);
+            let vertex_size = space.inner_size();
 
             let boundary = mesh.block_boundary(block, boundary.clone());
 
@@ -353,6 +355,7 @@ impl<'a, const N: usize, const ORDER: usize> DiscretizationOrder<'a, N, ORDER> {
                     let engine = FdIntEngine::<N, ORDER> {
                         space: space.clone(),
                         vertex,
+                        bounds: bounds.clone(),
                     };
 
                     projection.project(&engine, block_source.as_fields())
@@ -361,6 +364,7 @@ impl<'a, const N: usize, const ORDER: usize> DiscretizationOrder<'a, N, ORDER> {
                         space: space.clone(),
                         vertex,
                         boundary: boundary.clone(),
+                        bounds: bounds.clone(),
                     };
 
                     projection.project(&engine, block_source.as_fields())
@@ -399,8 +403,8 @@ impl<'a, const N: usize, const ORDER: usize> DiscretizationOrder<'a, N, ORDER> {
 
             let boundary = mesh.block_boundary(block, boundary.clone());
             let bounds = mesh.block_bounds(block);
-            let space = mesh.block_space(block).set_context(bounds);
-            let vertex_size = space.vertex_size();
+            let space = mesh.block_space(block);
+            let vertex_size = space.inner_size();
 
             for vertex in IndexSpace::new(vertex_size).iter() {
                 let is_interior = Self::is_interior(&boundary, vertex_size, vertex);
@@ -409,6 +413,7 @@ impl<'a, const N: usize, const ORDER: usize> DiscretizationOrder<'a, N, ORDER> {
                     let engine = FdIntEngine::<N, ORDER> {
                         space: space.clone(),
                         vertex,
+                        bounds: bounds.clone(),
                     };
 
                     operator.apply(&engine, block_source.as_fields(), block_context.as_fields())
@@ -417,6 +422,7 @@ impl<'a, const N: usize, const ORDER: usize> DiscretizationOrder<'a, N, ORDER> {
                         space: space.clone(),
                         vertex,
                         boundary: boundary.clone(),
+                        bounds: bounds.clone(),
                     };
 
                     operator.apply(&engine, block_source.as_fields(), block_context.as_fields())
@@ -448,16 +454,15 @@ impl<'a, const N: usize, const ORDER: usize> DiscretizationOrder<'a, N, ORDER> {
             let mut block_dest = unsafe { dest.slice_mut(nodes.clone()).fields_mut() };
 
             let boundary = mesh.block_boundary(block, bc.clone());
-            let bounds = mesh.block_bounds(block);
-            let space = mesh.block_space(block).set_context(bounds);
+            let space = mesh.block_space(block);
 
-            let vertex_size = space.vertex_size();
+            let vertex_size = space.inner_size();
 
             for field in BC::System::fields() {
                 let src = block_source.field(field.clone());
                 let dst = block_dest.field_mut(field.clone());
 
-                let space = space.set_bc(SystemBC::new(field.clone(), boundary.clone()));
+                let space = space.set_context(SystemBC::new(field.clone(), boundary.clone()));
 
                 for vertex in IndexSpace::new(vertex_size).iter() {
                     let value = space.dissipation::<ORDER>(vertex, src);
@@ -502,8 +507,8 @@ impl<const N: usize> Discretization<N> {
 
         for block in 0..self.mesh.num_blocks() {
             let bounds = self.mesh.block_bounds(block);
-            let space = self.mesh.block_space(block).set_context(bounds);
-            let vertex_size = space.vertex_size();
+            let space = self.mesh.block_space(block);
+            let vertex_size = space.inner_size();
 
             let data = &src[self.mesh.block_nodes(block)];
 
@@ -523,7 +528,7 @@ impl<const N: usize> Discretization<N> {
                 block_result += value;
             }
 
-            for spacing in space.spacing() {
+            for spacing in space.spacing(bounds.clone()) {
                 block_result *= spacing;
             }
 

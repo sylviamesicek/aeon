@@ -2,7 +2,7 @@ use std::{array::from_fn, cmp::Ordering};
 
 use super::{index::IndexWindow, AxisMask, CartesianIter, Face, IndexSpace};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
 pub enum Side {
     Left = 0,
@@ -27,8 +27,11 @@ impl Side {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+use crate::array::serialize;
+
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Region<const N: usize> {
+    #[serde(with = "serialize")]
     sides: [Side; N],
 }
 

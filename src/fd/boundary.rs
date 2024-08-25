@@ -5,8 +5,7 @@
 
 use crate::{
     geometry::{Face, FaceMask},
-    prelude::{Rectangle, SystemLabel},
-    system::Scalar,
+    system::{Scalar, SystemLabel},
 };
 
 /// Indicates what type of boundary condition is used along a particualr
@@ -36,17 +35,6 @@ impl BoundaryKind {
 /// Provides information about what kind of boundary is used on each face.
 pub trait Boundary<const N: usize>: Clone {
     fn kind(&self, face: Face<N>) -> BoundaryKind;
-}
-
-/// Provides information about the bounds of the space.
-pub trait Domain<const N: usize>: Clone {
-    fn bounds(&self) -> Rectangle<N>;
-}
-
-impl<const N: usize> Domain<N> for Rectangle<N> {
-    fn bounds(&self) -> Rectangle<N> {
-        self.clone()
-    }
 }
 
 /// Provides specifics for enforcing boundary conditions for
@@ -155,12 +143,6 @@ impl<const N: usize, S: SystemLabel, B: Boundary<N>> Boundary<N> for SystemBC<S,
     }
 }
 
-impl<const N: usize, S: SystemLabel, B: Domain<N>> Domain<N> for SystemBC<S, B> {
-    fn bounds(&self) -> Rectangle<N> {
-        self.inner.bounds()
-    }
-}
-
 /// A transformer for overriding individual boundary faces with `BoundaryKind::Custom`. This
 /// is primarily used internally to ensure interior boundaries between blocks are properly
 /// used.
@@ -183,12 +165,6 @@ impl<const N: usize, I: Boundary<N>> Boundary<N> for BlockBC<N, I> {
         } else {
             BoundaryKind::Custom
         }
-    }
-}
-
-impl<const N: usize, I: Domain<N>> Domain<N> for BlockBC<N, I> {
-    fn bounds(&self) -> Rectangle<N> {
-        self.inner.bounds()
     }
 }
 
@@ -255,52 +231,5 @@ impl<const N: usize, B: Clone, C: Conditions<N>> Conditions<N> for BC<B, C> {
 
     fn radiative(&self, field: Self::System, position: [f64; N]) -> f64 {
         self.condition.radiative(field, position)
-    }
-}
-
-/// Bundles a domain with a set of boundary conditions.
-#[derive(Clone)]
-pub struct DomainWithBC<D, I> {
-    pub domain: D,
-    pub inner: I,
-}
-
-impl<D, I> DomainWithBC<D, I> {
-    pub fn new(domain: D, inner: I) -> Self {
-        Self { domain, inner }
-    }
-}
-
-impl<const N: usize, D: Domain<N>, I: Clone> Domain<N> for DomainWithBC<D, I> {
-    fn bounds(&self) -> Rectangle<N> {
-        self.domain.bounds()
-    }
-}
-
-impl<const N: usize, I: Clone, BC: Boundary<N>> Boundary<N> for DomainWithBC<I, BC> {
-    fn kind(&self, face: Face<N>) -> BoundaryKind {
-        self.inner.kind(face)
-    }
-}
-
-impl<const N: usize, I: Clone, BC: Condition<N>> Condition<N> for DomainWithBC<I, BC> {
-    fn parity(&self, face: Face<N>) -> bool {
-        self.inner.parity(face)
-    }
-
-    fn radiative(&self, position: [f64; N]) -> f64 {
-        self.inner.radiative(position)
-    }
-}
-
-impl<const N: usize, B: Clone, C: Conditions<N>> Conditions<N> for DomainWithBC<B, C> {
-    type System = C::System;
-
-    fn parity(&self, field: Self::System, face: Face<N>) -> bool {
-        self.inner.parity(field, face)
-    }
-
-    fn radiative(&self, field: Self::System, position: [f64; N]) -> f64 {
-        self.inner.radiative(field, position)
     }
 }

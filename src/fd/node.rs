@@ -1,9 +1,9 @@
 use crate::fd::{BasisOperator, Interpolation, Order, Support};
 use crate::geometry::{faces, CartesianIter, IndexSpace};
-use crate::prelude::Face;
+use crate::prelude::{Face, Rectangle};
 use std::array::from_fn;
 
-use super::boundary::{Boundary, Condition, Domain, DomainWithBC};
+use super::boundary::{Boundary, Condition};
 use super::{BoundaryKind, Dissipation};
 
 /// Transforms a vertex into a node (just casts an array of `usize` -> `isize`).
@@ -61,11 +61,21 @@ impl<const N: usize, D: Clone> NodeSpace<N, D> {
     }
 
     /// Returns the number of vertices along each axis.
-    pub fn vertex_size(&self) -> [usize; N] {
+    pub fn inner_size(&self) -> [usize; N] {
         let mut size = self.size;
 
         for s in size.iter_mut() {
             *s += 1;
+        }
+
+        size
+    }
+
+    pub fn full_size(&self) -> [usize; N] {
+        let mut size = self.size;
+
+        for s in size.iter_mut() {
+            *s += 1 + 2 * self.ghost;
         }
 
         size
@@ -128,7 +138,7 @@ impl<const N: usize, D: Clone> NodeSpace<N, D> {
     pub fn inner_window(&self) -> NodeWindow<N> {
         NodeWindow {
             origin: [0isize; N],
-            size: self.vertex_size(),
+            size: self.inner_size(),
         }
     }
 
@@ -190,19 +200,14 @@ impl<const N: usize, D: Clone> NodeSpace<N, D> {
     }
 }
 
-impl<const N: usize, D: Domain<N>> NodeSpace<N, D> {
-    pub fn set_bc<BC>(&self, bc: BC) -> NodeSpace<N, DomainWithBC<D, BC>> {
-        self.map_context(|domain| DomainWithBC::new(domain, bc))
-    }
+impl<const N: usize, B> NodeSpace<N, B> {
     /// Returns the spacing along each axis of the node space.
-    pub fn spacing(&self) -> [f64; N] {
-        let bounds = self.context.bounds();
+    pub fn spacing(&self, bounds: Rectangle<N>) -> [f64; N] {
         from_fn(|axis| bounds.size[axis] / self.size[axis] as f64)
     }
 
     /// Computes the position of the given vertex.
-    pub fn position(&self, node: [isize; N]) -> [f64; N] {
-        let bounds = self.context.bounds();
+    pub fn position(&self, node: [isize; N], bounds: Rectangle<N>) -> [f64; N] {
         let spacing: [_; N] = from_fn(|axis| bounds.size[axis] / self.size[axis] as f64);
 
         let mut result = [0.0; N];
@@ -214,18 +219,18 @@ impl<const N: usize, D: Domain<N>> NodeSpace<N, D> {
         result
     }
 
-    /// Returns the covariant scaling that must be applied to the given operator.
-    pub fn scale(&self, operator: [BasisOperator; N]) -> f64 {
-        let spacing = self.spacing();
+    // /// Returns the covariant scaling that must be applied to the given operator.
+    // pub fn scale(&self, operator: [BasisOperator; N] bounds: Rectangle<N>) -> f64 {
+    //     let spacing = self.spacing();
 
-        let mut result = 1.0;
+    //     let mut result = 1.0;
 
-        for axis in 0..N {
-            result *= operator[axis].scale(spacing[axis])
-        }
+    //     for axis in 0..N {
+    //         result *= operator[axis].scale(spacing[axis])
+    //     }
 
-        result
-    }
+    //     result
+    // }
 }
 
 impl<const N: usize, D: Boundary<N>> NodeSpace<N, D> {
@@ -279,7 +284,7 @@ impl<const N: usize, D: Boundary<N>> NodeSpace<N, D> {
     /// for kernel evaluation.
     pub fn active_window(&self) -> NodeWindow<N> {
         let mut origin = [0isize; N];
-        let mut size = self.vertex_size();
+        let mut size = self.inner_size();
 
         faces::<N>()
             .filter(|&face| self.context.kind(face).has_ghost())
@@ -310,7 +315,7 @@ impl<const N: usize, D: Boundary<N>> NodeSpace<N, D> {
 impl<const N: usize, D: Boundary<N> + Condition<N>> NodeSpace<N, D> {
     /// Set strongly enforced boundary conditions.
     pub fn fill_boundary(&self, dest: &mut [f64]) {
-        let vertex_size = self.vertex_size();
+        let vertex_size = self.inner_size();
         let active_window = self.active_window();
 
         // Loop over faces
@@ -569,7 +574,7 @@ impl<const N: usize, D: Boundary<N> + Condition<N>> NodeSpace<N, D> {
     }
 }
 
-impl<const N: usize, D: Domain<N> + Boundary<N> + Condition<N>> NodeSpace<N, D> {
+impl<const N: usize, D: Boundary<N> + Condition<N>> NodeSpace<N, D> {
     /// Evaluates the tensor product of the given operators at the vertex.
     pub fn evaluate<const ORDER: usize>(
         &self,
@@ -592,7 +597,7 @@ impl<const N: usize, D: Domain<N> + Boundary<N> + Condition<N>> NodeSpace<N, D> 
             corner[axis] = self.corner_vertex_axis(support, node, border, weights[axis], axis);
         }
 
-        self.weights(corner, weights, field) * self.scale(operator)
+        self.weights(corner, weights, field)
     }
 }
 
@@ -696,12 +701,6 @@ mod tests {
     #[derive(Clone)]
     struct Quadrant;
 
-    impl<const N: usize> Domain<N> for Quadrant {
-        fn bounds(&self) -> Rectangle<N> {
-            Rectangle::UNIT
-        }
-    }
-
     impl<const N: usize> Boundary<N> for Quadrant {
         fn kind(&self, face: Face<N>) -> BoundaryKind {
             match face.side {
@@ -750,12 +749,13 @@ mod tests {
             ghost: 2,
             context: Quadrant,
         };
+        let bounds = Rectangle::UNIT;
 
         let mut field = vec![0.0; space.node_count()];
 
         for node in space.full_window().iter() {
             let index = space.index_from_node(node);
-            let [x, y] = space.position(node);
+            let [x, y] = space.position(node, bounds.clone());
             field[index] = x.sin() * y.sin();
         }
 
@@ -763,7 +763,7 @@ mod tests {
 
         for node in space.inner_window().iter() {
             let vertex = [node[0] as usize, node[1] as usize];
-            let [x, y] = space.position(node);
+            let [x, y] = space.position(node, bounds.clone());
             let numerical = space.evaluate::<4>(
                 vertex,
                 [BasisOperator::Derivative, BasisOperator::Derivative],
@@ -799,11 +799,13 @@ mod tests {
             context: Quadrant,
         };
 
+        let bounds = Rectangle::UNIT;
+
         let mut field = vec![0.0; cspace.node_count()];
 
         for node in cspace.full_window().iter() {
             let index = cspace.index_from_node(node);
-            let [x, y] = cspace.position(node);
+            let [x, y] = cspace.position(node, bounds.clone());
             field[index] = x.sin() * y.sin();
         }
 
@@ -811,7 +813,7 @@ mod tests {
 
         for node in rspace.inner_window().iter() {
             let vertex = [node[0] as usize, node[1] as usize];
-            let [x, y] = rspace.position(node);
+            let [x, y] = rspace.position(node, bounds.clone());
             let numerical = cspace.prolong::<4>(vertex, &field);
             let analytical = x.sin() * y.sin();
             let error: f64 = (numerical - analytical).abs();

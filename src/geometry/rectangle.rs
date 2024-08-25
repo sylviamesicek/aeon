@@ -1,17 +1,16 @@
 use serde::{Deserialize, Serialize};
 use std::array::from_fn;
 
-use crate::array::Array;
 use crate::geometry::AxisMask;
 
 /// Represents a rectangular physical domain.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(from = "RectangleSerde<N>")]
-#[serde(into = "RectangleSerde<N>")]
 pub struct Rectangle<const N: usize> {
     /// Size of the rectangle along each axis.
+    #[serde(with = "crate::array::serialize")]
     pub size: [f64; N],
     /// Origin of the rectangle (located at the bottom-left corner).
+    #[serde(with = "crate::array::serialize")]
     pub origin: [f64; N],
 }
 
@@ -39,29 +38,5 @@ impl<const N: usize> Rectangle<N> {
         });
 
         Self { size, origin }
-    }
-}
-
-#[derive(Serialize, Deserialize)]
-struct RectangleSerde<const N: usize> {
-    size: Array<[f64; N]>,
-    origin: Array<[f64; N]>,
-}
-
-impl<const N: usize> From<Rectangle<N>> for RectangleSerde<N> {
-    fn from(value: Rectangle<N>) -> Self {
-        Self {
-            size: value.size.into(),
-            origin: value.origin.into(),
-        }
-    }
-}
-
-impl<const N: usize> From<RectangleSerde<N>> for Rectangle<N> {
-    fn from(value: RectangleSerde<N>) -> Self {
-        Self {
-            size: value.size.inner(),
-            origin: value.origin.inner(),
-        }
     }
 }
