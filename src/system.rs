@@ -4,7 +4,7 @@
 //! his is used to represent coupled PDEs and ODEs. Each system is defined by a `SystemLabel`, which can be
 //! implemented by hand or using the provided procedural macro.
 
-use crate::array::{Array, ArrayLike};
+use aeon_array::ArrayLike;
 
 use core::slice;
 use reborrow::{Reborrow, ReborrowMut};
@@ -26,7 +26,7 @@ pub trait SystemLabel: Sized + Clone + Send + Sync + 'static {
     type FieldLike<T>: ArrayLike<Elem = T>;
 
     /// Returns an array of all possible system labels.
-    fn fields() -> Array<Self::FieldLike<Self>>;
+    fn fields() -> Self::FieldLike<Self>;
 
     /// Retrieves the index of an individual field.
     fn field_index(&self) -> usize;
@@ -35,9 +35,6 @@ pub trait SystemLabel: Sized + Clone + Send + Sync + 'static {
     fn field_name(&self) -> String;
 }
 
-/// Helper alias for building an array with the same number of elements as different fields.
-pub type FieldArray<Label, T> = Array<<Label as SystemLabel>::FieldLike<T>>;
-
 /// Number of fields in a given system.
 pub const fn field_count<Label: SystemLabel>() -> usize {
     Label::FieldLike::<()>::LEN
@@ -45,7 +42,7 @@ pub const fn field_count<Label: SystemLabel>() -> usize {
 
 /// Represents the values of a coupled system at a single point.
 #[derive(Debug, Clone)]
-pub struct SystemValue<Label: SystemLabel>(FieldArray<Label, f64>);
+pub struct SystemValue<Label: SystemLabel>(Label::FieldLike<f64>);
 
 impl<Label: SystemLabel> SystemValue<Label> {
     /// Constructs a new system value by wrapping an array of values.
@@ -55,13 +52,8 @@ impl<Label: SystemLabel> SystemValue<Label> {
 
     /// Constructs the SystemVal by calling a function for each field
     pub fn from_fn<F: FnMut(Label) -> f64>(mut f: F) -> Self {
-        let mut values = Array::default();
-
-        for field in Label::fields() {
-            values[field.field_index()] = f(field.clone())
-        }
-
-        Self(values)
+        let fields = Label::fields();
+        Self(Label::FieldLike::<f64>::from_fn(|i| f(fields[i].clone())))
     }
 
     /// Retrieves the value of the given field
@@ -604,7 +596,7 @@ where
 /// A cache of immutable pointers to underlying system data.
 pub struct SystemFields<'a, Label: SystemLabel> {
     length: usize,
-    fields: FieldArray<Label, *const f64>,
+    fields: Label::FieldLike<*const f64>,
     _marker: PhantomData<&'a [f64]>,
 }
 
@@ -619,7 +611,7 @@ impl<'a, Label: SystemLabel> SystemFields<'a, Label> {
 
     pub fn as_fields<'s>(&'s self) -> SystemFields<'s, Label> {
         SystemFields {
-            fields: self.fields.clone(),
+            fields: Label::FieldLike::from_fn(|i| self.fields[i].clone()),
             length: self.length,
             _marker: PhantomData,
         }
@@ -633,7 +625,7 @@ impl<'a, Label: SystemLabel> SystemFields<'a, Label> {
 /// A cache of mutable pointers to underlying system data.
 pub struct SystemFieldsMut<'a, Label: SystemLabel> {
     length: usize,
-    fields: FieldArray<Label, *mut f64>,
+    fields: Label::FieldLike<*mut f64>,
     _marker: PhantomData<&'a [f64]>,
 }
 
@@ -675,8 +667,8 @@ impl SystemLabel for Empty {
 
     type FieldLike<T> = [T; 0];
 
-    fn fields() -> Array<Self::FieldLike<Self>> {
-        Array::from([])
+    fn fields() -> Self::FieldLike<Self> {
+        []
     }
 
     fn field_index(&self) -> usize {
@@ -696,8 +688,8 @@ impl SystemLabel for Scalar {
 
     type FieldLike<T> = [T; 1];
 
-    fn fields() -> Array<Self::FieldLike<Self>> {
-        [Scalar].into()
+    fn fields() -> Self::FieldLike<Self> {
+        [Scalar]
     }
 
     fn field_index(&self) -> usize {
@@ -724,7 +716,7 @@ mod tests {
     fn systems() {
         assert_eq!(MySystem::NAME, "MySystem");
         assert_eq!(
-            MySystem::fields().inner(),
+            MySystem::fields(),
             [MySystem::First, MySystem::Second, MySystem::Third],
         );
         assert_eq!(MySystem::First.field_index(), 0);

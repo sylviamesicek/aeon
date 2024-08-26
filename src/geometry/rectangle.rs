@@ -7,10 +7,10 @@ use crate::geometry::AxisMask;
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Rectangle<const N: usize> {
     /// Size of the rectangle along each axis.
-    #[serde(with = "crate::array::serialize")]
+    #[serde(with = "aeon_array")]
     pub size: [f64; N],
     /// Origin of the rectangle (located at the bottom-left corner).
-    #[serde(with = "crate::array::serialize")]
+    #[serde(with = "aeon_array")]
     pub origin: [f64; N],
 }
 

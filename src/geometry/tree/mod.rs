@@ -29,7 +29,7 @@ pub struct Tree<const N: usize> {
     /// Stores neighbors along each face
     neighbors: Vec<usize>,
     /// Index within z-filling curve
-    #[serde(with = "crate::array::serialize")]
+    #[serde(with = "aeon_array")]
     indices: [BitVec<usize, Lsb0>; N],
     /// Offsets into indices,
     offsets: Vec<usize>,
@@ -550,7 +550,7 @@ impl<const N: usize> Tree<N> {
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct TreeNodes<const N: usize> {
-    #[serde(with = "crate::array::serialize")]
+    #[serde(with = "aeon_array")]
     pub cell_width: [usize; N],
     pub ghost: usize,
     node_offsets: Vec<usize>,

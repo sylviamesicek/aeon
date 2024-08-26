@@ -1,4 +1,3 @@
-use crate::array::Array;
 use crate::geometry::{regions, Face, IndexSpace, Region, Side, NULL};
 use std::array::from_fn;
 use std::slice;
@@ -330,57 +329,20 @@ impl<const N: usize> TreeInterfaces<N> {
 
 /// An interface between two blocks on a quad tree.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[serde(from = "BlockInterfaceSerde<N>")]
-#[serde(into = "BlockInterfaceSerde<N>")]
 pub struct BlockInterface<const N: usize> {
     /// Target block.
     pub block: usize,
     /// Source block.
     pub neighbor: usize,
     /// Source node on neighbor.
+    #[serde(with = "aeon_array")]
     pub source: [isize; N],
     /// Destination node on target.
+    #[serde(with = "aeon_array")]
     pub dest: [isize; N],
     /// Number of blocks to be filled.
+    #[serde(with = "aeon_array")]
     pub size: [usize; N],
-}
-
-#[derive(serde::Serialize, serde::Deserialize)]
-pub struct BlockInterfaceSerde<const N: usize> {
-    /// Target block.
-    block: usize,
-    /// Source block.
-    neighbor: usize,
-    /// Source node on neighbor.
-    source: Array<[isize; N]>,
-    /// Destination node on target.
-    dest: Array<[isize; N]>,
-    /// Number of blocks to be filled.
-    size: Array<[usize; N]>,
-}
-
-impl<const N: usize> From<BlockInterface<N>> for BlockInterfaceSerde<N> {
-    fn from(value: BlockInterface<N>) -> Self {
-        Self {
-            block: value.block,
-            neighbor: value.neighbor,
-            source: value.source.into(),
-            dest: value.dest.into(),
-            size: value.size.into(),
-        }
-    }
-}
-
-impl<const N: usize> From<BlockInterfaceSerde<N>> for BlockInterface<N> {
-    fn from(value: BlockInterfaceSerde<N>) -> Self {
-        Self {
-            block: value.block,
-            neighbor: value.neighbor,
-            source: value.source.inner(),
-            dest: value.dest.inner(),
-            size: value.size.inner(),
-        }
-    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]

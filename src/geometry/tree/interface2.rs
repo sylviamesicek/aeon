@@ -146,11 +146,11 @@ pub struct BlockInterface<const N: usize> {
     /// Source block.
     pub neighbor: usize,
 
-    #[serde(with = "crate::array::serialize")]
+    #[serde(with = "aeon_array")]
     pub acell: [usize; N],
     pub aregion: Region<N>,
 
-    #[serde(with = "crate::array::serialize")]
+    #[serde(with = "aeon_array")]
     pub bcell: [usize; N],
     pub bregion: Region<N>,
 }

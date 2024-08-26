@@ -15,7 +15,9 @@ rand = "0.8.5"
 rayon = "1.10.0"
 reborrow = "0.5.5"
 ron = "0.8"
+serde = "1.0.200"
 
+aeon_array = { path = "crates/aeon_array" }
 aeon_macros = { path = "crates/aeon_macros" }
 aeon_tensor = { path = "crates/aeon_tensor" }
 
@@ -29,6 +31,7 @@ exclude = ["crates/", "tools/"]
 readme = "README.md"
 
 [dependencies]
+aeon_array.workspace = true
 aeon_macros.workspace = true
 
 bitvec.workspace = true
@@ -36,6 +39,6 @@ log.workspace = true
 rayon.workspace = true
 reborrow.workspace = true
 ron.workspace = true
+serde.workspace = true
 
-serde = "1.0.200"
 vtkio = "0.6"

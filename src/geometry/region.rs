@@ -27,11 +27,9 @@ impl Side {
     }
 }
 
-use crate::array::serialize;
-
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Region<const N: usize> {
-    #[serde(with = "serialize")]
+    #[serde(with = "aeon_array")]
     sides: [Side; N],
 }
 
