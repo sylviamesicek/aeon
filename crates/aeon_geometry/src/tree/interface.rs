@@ -210,12 +210,12 @@ impl<const N: usize> TreeOverlaps<N> {
         }
 
         for direct in interfaces.direct() {
-            self.fine
+            self.direct
                 .push(Self::process_interface(tree, blocks, dofs, direct));
         }
 
         for coarse in interfaces.coarse() {
-            self.fine
+            self.coarse
                 .push(Self::process_interface(tree, blocks, dofs, coarse));
         }
     }
@@ -476,12 +476,31 @@ mod tests {
                     region: Region::new([Side::Right, Side::Middle])
                 },
                 b: TreeNeighbor {
-                    cell: 1,
+                    cell: 3,
                     neighbor: 6,
                     region: Region::new([Side::Right, Side::Right])
                 }
             })
-        )
+        );
+
+        assert_eq!(
+            coarse.next(),
+            Some(&TreeInterface {
+                block: 0,
+                neighbor: 2,
+                a: TreeNeighbor {
+                    cell: 2,
+                    neighbor: 5,
+                    region: Region::new([Side::Middle, Side::Right])
+                },
+                b: TreeNeighbor {
+                    cell: 3,
+                    neighbor: 5,
+                    region: Region::new([Side::Middle, Side::Right])
+                }
+            })
+        );
+        assert_eq!(coarse.next(), None);
     }
 
     #[test]

@@ -1,4 +1,6 @@
 //! A module for various geometric primatives (AABBs, working with cartesian indices, etc.).
+//!
+//! This includes several classes which handle associating dofs with N-dimensional quadtrees.
 
 #![allow(clippy::needless_range_loop)]
 

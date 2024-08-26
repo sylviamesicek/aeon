@@ -750,6 +750,7 @@ mod tests {
             context: Quadrant,
         };
         let bounds = Rectangle::UNIT;
+        let spacing = space.spacing(bounds);
 
         let mut field = vec![0.0; space.node_count()];
 
@@ -763,13 +764,14 @@ mod tests {
 
         for node in space.inner_window().iter() {
             let vertex = [node[0] as usize, node[1] as usize];
-            let [x, y] = space.position(node, bounds.clone());
+            let [x, y] = space.position(node, bounds);
             let numerical = space.evaluate::<4>(
                 vertex,
                 [BasisOperator::Derivative, BasisOperator::Derivative],
                 &field,
-            );
+            ) / (spacing[0] * spacing[1]);
             let analytical = x.cos() * y.cos();
+            // dbg!(numerical - analytical);
             let error: f64 = (numerical - analytical).abs();
             result = result.max(error);
         }

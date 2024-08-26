@@ -3,7 +3,7 @@ use std::array::from_fn;
 use crate::AxisMask;
 
 /// Represents a rectangular physical domain.
-#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Copy, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Rectangle<const N: usize> {
     /// Size of the rectangle along each axis.
     #[serde(with = "aeon_array")]

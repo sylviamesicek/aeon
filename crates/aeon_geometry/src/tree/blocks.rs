@@ -1,9 +1,8 @@
 use crate::{faces, Face, FaceMask, IndexSpace, Rectangle, Tree, NULL};
 use bitvec::prelude::*;
-use serde::{Deserialize, Serialize};
 use std::array::from_fn;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct TreeBlocks<const N: usize> {
     /// Stores each cell's position within its parent's block.
     #[serde(with = "aeon_array::vec")]

@@ -1,6 +1,12 @@
 # Workspace configuration
 [workspace]
 members = ["crates/*", "tools/idbrill", "tools/evbrill"]
+default-members = [
+    "crates/aeon_geometry",
+    "tools/idbrill",
+    "tools/evbrill",
+    ".",
+]
 resolver = "2"
 
 [workspace.dependencies]
@@ -20,7 +26,7 @@ rand = "0.8.5"
 rayon = "1.10.0"
 reborrow = "0.5.5"
 ron = "0.8"
-serde = "1.0.200"
+serde = { version = "1.0.200", features = ["derive"] }
 
 
 # Main package (`aeon`) configuration.

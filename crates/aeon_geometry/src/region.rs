@@ -2,6 +2,7 @@ use std::{array::from_fn, cmp::Ordering};
 
 use super::{index::IndexWindow, AxisMask, CartesianIter, Face, IndexSpace};
 
+/// Denotes where the region falls on a certain axis.
 #[repr(u8)]
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Side {
@@ -175,7 +176,7 @@ impl<const N: usize> Region<N> {
         })
     }
 
-    /// Returns a mask for which a given axis is set if and only if self.sides[axis] != Middle.
+    /// Returns a mask for which a given axis is set if and only if `self.sides[axis] != Side::Middle`.
     pub fn to_mask(&self) -> AxisMask<N> {
         let mut result = AxisMask::empty();
 
@@ -341,6 +342,7 @@ impl<const N: usize> Iterator for RegionIter<N> {
     }
 }
 
+/// Iterates over all regions in an N-dimensional space.
 pub fn regions<const N: usize>() -> RegionIter<N> {
     RegionIter {
         inner: IndexSpace::new([3; N]).iter(),

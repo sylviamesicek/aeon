@@ -3,6 +3,8 @@ use std::array::from_fn;
 use super::{index::IndexWindow, AxisMask, Region, Side};
 
 /// A face of a rectangular prism in `N` dimensional space.
+/// If `face.side` is true, than this face points in the positive direction along
+/// `face.axis`, otherwise it points along the negative direction.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Face<const N: usize> {
     pub axis: usize,
@@ -22,6 +24,7 @@ impl<const N: usize> Face<N> {
         Self { axis, side: true }
     }
 
+    /// Reverses the direction of the face along its axis.
     pub fn reversed(self) -> Self {
         Self {
             axis: self.axis,
@@ -44,12 +47,14 @@ impl<const N: usize> Face<N> {
         }
     }
 
+    /// Finds a split adjacent to the given face (all other axes default to negative).
     pub fn adjacent_split(self) -> AxisMask<N> {
         let mut result = AxisMask::empty();
         result.set_to(self.axis, self.side);
         result
     }
 
+    /// Iterates over all splits adjacent to the given face.
     pub fn adjacent_splits(self) -> impl Iterator<Item = AxisMask<N>> {
         AxisMask::<N>::enumerate().filter(move |split| split.is_set(self.axis) == self.side)
     }
@@ -100,6 +105,7 @@ pub fn faces<const N: usize>() -> FaceIter<N> {
     }
 }
 
+/// Stores a boolean flag for each face of a rectangular prism.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct FaceMask<const N: usize>([[bool; 2]; N]);
 
@@ -108,10 +114,12 @@ impl<const N: usize> FaceMask<N> {
         Self(bits)
     }
 
+    /// Constructs a mask where all flags have been set to false.
     pub fn empty() -> Self {
         Self([[false; 2]; N])
     }
 
+    /// Constructs a mask where all flags have been set to true.
     pub fn full() -> Self {
         Self([[true; 2]; N])
     }
@@ -132,6 +140,7 @@ impl<const N: usize> FaceMask<N> {
         self.0[face.axis][face.side as usize] = val;
     }
 
+    /// Iterates over regions adjacent to flagged faces.
     pub fn adjacent_regions(&self) -> impl Iterator<Item = Region<N>> {
         let mut window = IndexWindow::new([1; N], [1; N]);
 
