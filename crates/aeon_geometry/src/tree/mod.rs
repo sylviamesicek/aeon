@@ -1,17 +1,17 @@
 #![allow(clippy::needless_range_loop)]
 
-use crate::geometry::{faces, AxisMask, Face, Rectangle, Region, Side};
+use crate::{faces, AxisMask, Face, Rectangle, Region, Side};
 use bitvec::prelude::*;
 use std::array::from_fn;
 use std::iter::once;
-use std::ops::Range;
 
 mod blocks;
+mod dofs;
 mod interface;
-mod interface2;
 
 pub use blocks::TreeBlocks;
-pub use interface::{BlockInterface, TreeInterfaces};
+pub use dofs::TreeDofs;
+pub use interface::{TreeInterface, TreeInterfaces, TreeOverlap, TreeOverlaps};
 
 /// Denotes that the cell neighbors the physical boundary of a spatial domain.
 pub const NULL: usize = usize::MAX;
@@ -544,85 +544,10 @@ impl<const N: usize> Tree<N> {
     }
 }
 
-// ************************
-// Nodes ******************
-// ************************
-
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct TreeNodes<const N: usize> {
-    #[serde(with = "aeon_array")]
-    pub cell_width: [usize; N],
-    pub ghost: usize,
-    node_offsets: Vec<usize>,
-}
-
-impl<const N: usize> TreeNodes<N> {
-    pub fn new(cell_width: [usize; N], ghost: usize) -> Self {
-        Self {
-            cell_width,
-            ghost,
-            node_offsets: Vec::new(),
-        }
-    }
-
-    pub fn cell_width(&self) -> [usize; N] {
-        self.cell_width
-    }
-
-    pub fn ghost(&self) -> usize {
-        self.ghost
-    }
-
-    /// Returns the total number of nodes in the tree.
-    pub fn num_nodes(&self) -> usize {
-        self.node_offsets.last().unwrap().clone()
-    }
-
-    /// The range of nodes associated with the given block.
-    pub fn block_nodes(&self, block: usize) -> Range<usize> {
-        self.node_offsets[block]..self.node_offsets[block + 1]
-    }
-
-    /// Rebuilds the set of tree nodes.
-    pub fn build(&mut self, blocks: &TreeBlocks<N>) {
-        for axis in 0..N {
-            assert!(self.cell_width[axis] % 2 == 0);
-        }
-
-        // Reset map
-        self.node_offsets.clear();
-        self.node_offsets.reserve(blocks.num_blocks() + 1);
-
-        // Start cursor at 0.
-        let mut cursor = 0;
-        self.node_offsets.push(cursor);
-
-        for block in 0..blocks.num_blocks() {
-            let size = blocks.block_size(block);
-            // Width of block in nodes.
-            let block_width: [usize; N] =
-                from_fn(|axis| self.cell_width[axis] * size[axis] + 1 + 2 * self.ghost);
-
-            cursor += block_width.iter().product::<usize>();
-            self.node_offsets.push(cursor);
-        }
-    }
-}
-
-impl<const N: usize> Default for TreeNodes<N> {
-    fn default() -> Self {
-        Self {
-            cell_width: [2; N],
-            ghost: 0,
-            node_offsets: Default::default(),
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::geometry::{regions, FaceMask};
+    use crate::{regions, FaceMask};
 
     #[test]
     fn balancing() {
@@ -837,22 +762,5 @@ mod tests {
 
         assert_eq!(blocks.block_size(4), [1, 1]);
         assert_eq!(blocks.block_cells(4), &[8]);
-    }
-
-    #[test]
-    fn node_offsets() {
-        let mut tree = Tree::new(Rectangle::<2>::UNIT);
-        let mut blocks = TreeBlocks::default();
-        let mut nodes = TreeNodes::new([8; 2], 3);
-
-        tree.refine(&[true, false, false, false]);
-        blocks.build(&tree);
-        nodes.build(&blocks);
-
-        assert_eq!(blocks.num_blocks(), 3);
-
-        assert_eq!(nodes.block_nodes(0), 0..529);
-        assert_eq!(nodes.block_nodes(1), 529..874);
-        assert_eq!(nodes.block_nodes(2), 874..1099);
     }
 }

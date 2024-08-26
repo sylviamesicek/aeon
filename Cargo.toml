@@ -4,6 +4,11 @@ members = ["crates/*", "tools/idbrill", "tools/evbrill"]
 resolver = "2"
 
 [workspace.dependencies]
+aeon_array = { path = "crates/aeon_array" }
+aeon_geometry = { path = "crates/aeon_geometry" }
+aeon_macros = { path = "crates/aeon_macros" }
+aeon_tensor = { path = "crates/aeon_tensor" }
+
 bitvec = { version = "1.0.1", features = ["serde"] }
 cc = "1.0"
 clap = "4.5.4"
@@ -17,10 +22,6 @@ reborrow = "0.5.5"
 ron = "0.8"
 serde = "1.0.200"
 
-aeon_array = { path = "crates/aeon_array" }
-aeon_macros = { path = "crates/aeon_macros" }
-aeon_tensor = { path = "crates/aeon_tensor" }
-
 
 # Main package (`aeon`) configuration.
 [package]
@@ -32,6 +33,7 @@ readme = "README.md"
 
 [dependencies]
 aeon_array.workspace = true
+aeon_geometry.workspace = true
 aeon_macros.workspace = true
 
 bitvec.workspace = true

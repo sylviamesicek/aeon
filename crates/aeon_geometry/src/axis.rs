@@ -1,4 +1,4 @@
-use crate::geometry::{faces, Face};
+use crate::{faces, Face};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct AxisMask<const N: usize>(usize);

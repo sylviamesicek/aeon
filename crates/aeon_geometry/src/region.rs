@@ -2,8 +2,8 @@ use std::{array::from_fn, cmp::Ordering};
 
 use super::{index::IndexWindow, AxisMask, CartesianIter, Face, IndexSpace};
 
-#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Side {
     Left = 0,
     Middle = 1,

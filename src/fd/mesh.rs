@@ -3,8 +3,10 @@
 use std::{array::from_fn, fmt::Write, ops::Range};
 
 use crate::fd::{BlockBC, Boundary, NodeSpace};
-use crate::geometry::{
-    AxisMask, BlockInterface, FaceMask, Rectangle, Tree, TreeBlocks, TreeInterfaces, TreeNodes,
+
+use aeon_geometry::{
+    AxisMask, FaceMask, Rectangle, Tree, TreeBlocks, TreeDofs, TreeInterfaces, TreeOverlap,
+    TreeOverlaps,
 };
 
 /// Implementation of an axis aligned tree mesh using standard finite difference operators.
@@ -12,8 +14,9 @@ use crate::geometry::{
 pub struct Mesh<const N: usize> {
     tree: Tree<N>,
     blocks: TreeBlocks<N>,
-    nodes: TreeNodes<N>,
+    nodes: TreeDofs<N>,
     interfaces: TreeInterfaces<N>,
+    overlaps: TreeOverlaps<N>,
 }
 
 impl<const N: usize> Mesh<N> {
@@ -24,7 +27,8 @@ impl<const N: usize> Mesh<N> {
             tree: Tree::new(bounds),
             blocks: TreeBlocks::default(),
             interfaces: TreeInterfaces::default(),
-            nodes: TreeNodes::new(cell_width, ghost_nodes),
+            nodes: TreeDofs::new(cell_width, ghost_nodes),
+            overlaps: TreeOverlaps::default(),
         };
 
         result.build();
@@ -51,7 +55,7 @@ impl<const N: usize> Mesh<N> {
     pub fn build(&mut self) {
         self.blocks.build(&self.tree);
         self.nodes.build(&self.blocks);
-        self.interfaces.build(&self.tree, &self.blocks, &self.nodes);
+        self.interfaces.build(&self.tree, &self.blocks);
     }
 
     /// Number of cells in the mesh.
@@ -111,7 +115,7 @@ impl<const N: usize> Mesh<N> {
     /// Computes the nodespace corresponding to a block.
     pub fn block_space(&self, block: usize) -> NodeSpace<N, ()> {
         let size = self.blocks.block_size(block);
-        let cell_size = from_fn(|axis| size[axis] * self.nodes.cell_width[axis]);
+        let cell_size = from_fn(|axis| size[axis] * self.nodes.width[axis]);
 
         NodeSpace {
             size: cell_size,
@@ -120,16 +124,16 @@ impl<const N: usize> Mesh<N> {
         }
     }
 
-    pub fn fine_interfaces(&self) -> impl Iterator<Item = &BlockInterface<N>> + '_ {
-        self.interfaces.fine()
+    pub fn fine_interfaces(&self) -> impl Iterator<Item = &TreeOverlap<N>> + '_ {
+        self.overlaps.fine()
     }
 
-    pub fn direct_interfaces(&self) -> impl Iterator<Item = &BlockInterface<N>> + '_ {
-        self.interfaces.direct()
+    pub fn direct_interfaces(&self) -> impl Iterator<Item = &TreeOverlap<N>> + '_ {
+        self.overlaps.direct()
     }
 
-    pub fn coarse_interfaces(&self) -> impl Iterator<Item = &BlockInterface<N>> + '_ {
-        self.interfaces.coarse()
+    pub fn coarse_interfaces(&self) -> impl Iterator<Item = &TreeOverlap<N>> + '_ {
+        self.overlaps.coarse()
     }
 
     pub fn write_debug(&self) -> String {
@@ -182,7 +186,7 @@ impl<const N: usize> Mesh<N> {
         writeln!(result, "// Fine Interfaces").unwrap();
         writeln!(result, "").unwrap();
 
-        for interface in self.interfaces.fine() {
+        for interface in self.overlaps.fine() {
             writeln!(
                 result,
                 "Fine Interface {} -> {}",
@@ -206,7 +210,7 @@ impl<const N: usize> Mesh<N> {
         writeln!(result, "// Direct Interfaces").unwrap();
         writeln!(result, "").unwrap();
 
-        for interface in self.interfaces.direct() {
+        for interface in self.overlaps.direct() {
             writeln!(
                 result,
                 "Direct Interface {} -> {}",
@@ -230,7 +234,7 @@ impl<const N: usize> Mesh<N> {
         writeln!(result, "// Coarse Interfaces").unwrap();
         writeln!(result, "").unwrap();
 
-        for interface in self.interfaces.coarse() {
+        for interface in self.overlaps.coarse() {
             writeln!(
                 result,
                 "Coarse Interface {} -> {}",
@@ -285,7 +289,7 @@ impl<const N: usize> Mesh<N> {
         let domain = self.tree.domain();
 
         from_fn::<_, N, _>(|axis| {
-            domain.size[axis] / self.nodes.cell_width[axis] as f64 / 2_f64.powi(max_level as i32)
+            domain.size[axis] / self.nodes.width[axis] as f64 / 2_f64.powi(max_level as i32)
         })
         .iter()
         .min_by(|a, b| f64::total_cmp(a, b))

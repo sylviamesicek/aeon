@@ -1,4 +1,4 @@
-use crate::geometry::{regions, Face, IndexSpace, Region, Side, NULL};
+use crate::{regions, Face, IndexSpace, Region, Side, NULL};
 use std::array::from_fn;
 use std::slice;
 
@@ -372,7 +372,7 @@ struct CellNeighbor<const N: usize> {
 
 #[cfg(test)]
 mod tests {
-    use crate::geometry::Rectangle;
+    use crate::Rectangle;
 
     use super::*;
 
