@@ -1,49 +1,52 @@
 use crate::{regions, IndexSpace, Region, NULL};
-use crate::{Face, Side, Tree, TreeBlocks};
+use crate::{Face, Side, Tree, TreeBlocks, TreeVertices};
 use std::{array, slice};
-
-use super::TreeDofs;
 
 /// Stores neighbor of a cell on a tree.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub struct TreeNeighbor<const N: usize> {
+pub struct TreeCellNeighbor<const N: usize> {
+    /// Primary cell.
     pub cell: usize,
+    /// Neighbor cell.
     pub neighbor: usize,
+    /// Which region is the neighbor cell in?
     pub region: Region<N>,
 }
 
-/// An interface between two blocks on a tree.
+/// Neighbor of block.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub struct TreeInterface<const N: usize> {
-    /// Target block.
+pub struct TreeBlockNeighbor<const N: usize> {
+    /// Primary block.
     pub block: usize,
-    /// Source block.
+    /// Neighbor block.
     pub neighbor: usize,
-    pub a: TreeNeighbor<N>,
-    pub b: TreeNeighbor<N>,
+    /// Leftmost cell neighbor.
+    pub a: TreeCellNeighbor<N>,
+    /// Rightmost cell neighbor.
+    pub b: TreeCellNeighbor<N>,
 }
 
-/// Caches information about interior interfaces on trees.
+/// Stores information about neighbors of blocks and cells.
 #[derive(Default, Clone, Debug, serde::Serialize, serde::Deserialize)]
-pub struct TreeInterfaces<const N: usize> {
-    fine: Vec<TreeInterface<N>>,
-    direct: Vec<TreeInterface<N>>,
-    coarse: Vec<TreeInterface<N>>,
+pub struct TreeNeighbors<const N: usize> {
+    fine: Vec<TreeBlockNeighbor<N>>,
+    direct: Vec<TreeBlockNeighbor<N>>,
+    coarse: Vec<TreeBlockNeighbor<N>>,
 }
 
-impl<const N: usize> TreeInterfaces<N> {
+impl<const N: usize> TreeNeighbors<N> {
     /// Iterates over all fine `BlockInterface`s.
-    pub fn fine(&self) -> slice::Iter<'_, TreeInterface<N>> {
+    pub fn fine(&self) -> slice::Iter<'_, TreeBlockNeighbor<N>> {
         self.fine.iter()
     }
 
     /// Iterates over all fine `BlockInterface`s.
-    pub fn direct(&self) -> slice::Iter<'_, TreeInterface<N>> {
+    pub fn direct(&self) -> slice::Iter<'_, TreeBlockNeighbor<N>> {
         self.direct.iter()
     }
 
     /// Iterates over all fine `BlockInterface`s.
-    pub fn coarse(&self) -> slice::Iter<'_, TreeInterface<N>> {
+    pub fn coarse(&self) -> slice::Iter<'_, TreeBlockNeighbor<N>> {
         self.coarse.iter()
     }
 
@@ -72,7 +75,7 @@ impl<const N: usize> TreeInterfaces<N> {
             Self::taverse_cell_neighbors(blocks, &mut neighbors, |neighbor, a, b| {
                 // Compute this boundary interface.
                 let kind = InterfaceKind::from_levels(tree.level(a.cell), tree.level(a.neighbor));
-                let interface = TreeInterface {
+                let interface = TreeBlockNeighbor {
                     block,
                     neighbor,
                     a,
@@ -93,7 +96,7 @@ impl<const N: usize> TreeInterfaces<N> {
         tree: &Tree<N>,
         blocks: &TreeBlocks<N>,
         block: usize,
-        neighbors: &mut Vec<TreeNeighbor<N>>,
+        neighbors: &mut Vec<TreeCellNeighbor<N>>,
     ) {
         let block_size = blocks.block_size(block);
         let block_cells = blocks.block_cells(block);
@@ -112,7 +115,7 @@ impl<const N: usize> TreeInterfaces<N> {
                 for neighbor in tree.neighbors_in_region(cell, region) {
                     debug_assert!(neighbor != NULL);
 
-                    neighbors.push(TreeNeighbor {
+                    neighbors.push(TreeCellNeighbor {
                         cell,
                         neighbor,
                         region: region.clone(),
@@ -125,8 +128,8 @@ impl<const N: usize> TreeInterfaces<N> {
     /// Traverses a sorted list of cell neighbors, calling f once for each distinct block.
     fn taverse_cell_neighbors(
         blocks: &TreeBlocks<N>,
-        neighbors: &mut [TreeNeighbor<N>],
-        mut f: impl FnMut(usize, TreeNeighbor<N>, TreeNeighbor<N>),
+        neighbors: &mut [TreeCellNeighbor<N>],
+        mut f: impl FnMut(usize, TreeCellNeighbor<N>, TreeCellNeighbor<N>),
     ) {
         let mut neighbors = neighbors.iter().map(|n| n.clone()).peekable();
 
@@ -152,13 +155,9 @@ impl<const N: usize> TreeInterfaces<N> {
     }
 }
 
-// *******************************
-// Dofs **************************
-// *******************************
-
-/// Stores data on which dofs border one another, and how to fill interior interfaces.
+/// Stores dataon how to fill coarse-fine interfaces.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub struct TreeOverlap<const N: usize> {
+pub struct TreeInterface<const N: usize> {
     /// Target block.
     pub block: usize,
     /// Source block.
@@ -175,57 +174,58 @@ pub struct TreeOverlap<const N: usize> {
 }
 
 #[derive(Default, Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct TreeOverlaps<const N: usize> {
-    fine: Vec<TreeOverlap<N>>,
-    direct: Vec<TreeOverlap<N>>,
-    coarse: Vec<TreeOverlap<N>>,
+pub struct TreeInterfaces<const N: usize> {
+    fine: Vec<TreeInterface<N>>,
+    direct: Vec<TreeInterface<N>>,
+    coarse: Vec<TreeInterface<N>>,
 }
 
-impl<const N: usize> TreeOverlaps<N> {
+impl<const N: usize> TreeInterfaces<N> {
     /// Iterates over all fine `BlockInterface`s.
-    pub fn fine(&self) -> slice::Iter<'_, TreeOverlap<N>> {
+    pub fn fine(&self) -> slice::Iter<'_, TreeInterface<N>> {
         self.fine.iter()
     }
 
     /// Iterates over all fine `BlockInterface`s.
-    pub fn direct(&self) -> slice::Iter<'_, TreeOverlap<N>> {
+    pub fn direct(&self) -> slice::Iter<'_, TreeInterface<N>> {
         self.direct.iter()
     }
 
     /// Iterates over all fine `BlockInterface`s.
-    pub fn coarse(&self) -> slice::Iter<'_, TreeOverlap<N>> {
+    pub fn coarse(&self) -> slice::Iter<'_, TreeInterface<N>> {
         self.coarse.iter()
     }
 
+    /// Constructs interfaces from neighbors and vertices.
     pub fn build(
         &mut self,
         tree: &Tree<N>,
         blocks: &TreeBlocks<N>,
-        interfaces: &TreeInterfaces<N>,
-        dofs: &TreeDofs<N>,
+        neighbors: &TreeNeighbors<N>,
+        vertices: &TreeVertices<N>,
     ) {
-        for fine in interfaces.fine() {
+        for fine in neighbors.fine() {
             self.fine
-                .push(Self::process_interface(tree, blocks, dofs, fine));
+                .push(Self::interface_from_neighbor(tree, blocks, vertices, fine));
         }
 
-        for direct in interfaces.direct() {
+        for direct in neighbors.direct() {
             self.direct
-                .push(Self::process_interface(tree, blocks, dofs, direct));
+                .push(Self::interface_from_neighbor(tree, blocks, vertices, direct));
         }
 
-        for coarse in interfaces.coarse() {
+        for coarse in neighbors.coarse() {
             self.coarse
-                .push(Self::process_interface(tree, blocks, dofs, coarse));
+                .push(Self::interface_from_neighbor(tree, blocks, vertices, coarse));
         }
     }
 
-    fn process_interface(
+    fn interface_from_neighbor(
         tree: &Tree<N>,
         blocks: &TreeBlocks<N>,
-        dofs: &TreeDofs<N>,
-        interface: &TreeInterface<N>,
-    ) -> TreeOverlap<N> {
+        dofs: &TreeVertices<N>,
+        interface: &TreeBlockNeighbor<N>,
+    ) -> TreeInterface<N> {
         let a = interface.a.clone();
         let b = interface.b.clone();
 
@@ -244,21 +244,6 @@ impl<const N: usize> TreeOverlaps<N> {
             let right_boundary = flags.is_set(Face::positive(axis));
             let left_boundary = flags.is_set(Face::negative(axis));
 
-            // // If the right edge doesn't extend all the way to the right,
-            // // shrink by one.
-            // if b.region.side(axis) == Side::Middle
-            //     && !(borigin[axis] == block_size[axis] - 1 && right_boundary)
-            // {
-            //     size[axis] -= 1;
-            // }
-
-            // // If we do not extend further left, don't include
-            // if a.region.side(axis) == Side::Middle && aorigin[axis] == 0 && !left_boundary {
-            //     source[axis] += 1;
-            //     dest[axis] += 1;
-            //     size[axis] -= 1;
-            // }
-
             // If the right edge doesn't extend all the way to the right,
             // shrink by one.
             if b.region.side(axis) == Side::Middle
@@ -276,7 +261,7 @@ impl<const N: usize> TreeOverlaps<N> {
             }
         }
 
-        TreeOverlap {
+        TreeInterface {
             block: interface.block,
             neighbor: interface.neighbor,
             source,
@@ -290,8 +275,8 @@ impl<const N: usize> TreeOverlaps<N> {
     fn block_ghost_aabb(
         tree: &Tree<N>,
         blocks: &TreeBlocks<N>,
-        dofs: &TreeDofs<N>,
-        interface: &TreeInterface<N>,
+        dofs: &TreeVertices<N>,
+        interface: &TreeBlockNeighbor<N>,
     ) -> ([isize; N], [isize; N]) {
         let a = interface.a.clone();
         let b = interface.b.clone();
@@ -363,8 +348,8 @@ impl<const N: usize> TreeOverlaps<N> {
     fn neighbor_origin(
         tree: &Tree<N>,
         blocks: &TreeBlocks<N>,
-        nodes: &TreeDofs<N>,
-        a: TreeNeighbor<N>,
+        nodes: &TreeVertices<N>,
+        a: TreeCellNeighbor<N>,
     ) -> [isize; N] {
         // Compute this boundary interface.
         let interface = InterfaceKind::from_levels(tree.level(a.cell), tree.level(a.neighbor));
@@ -454,10 +439,10 @@ mod tests {
     use super::*;
 
     #[test]
-    fn interfaces() {
+    fn neighbors() {
         let mut tree = Tree::new(Rectangle::<2>::UNIT);
         let mut blocks = TreeBlocks::default();
-        let mut interfaces = TreeInterfaces::default();
+        let mut interfaces = TreeNeighbors::default();
 
         tree.refine(&[true, false, false, false]);
         blocks.build(&tree);
@@ -467,15 +452,15 @@ mod tests {
 
         assert_eq!(
             coarse.next(),
-            Some(&TreeInterface {
+            Some(&TreeBlockNeighbor {
                 block: 0,
                 neighbor: 1,
-                a: TreeNeighbor {
+                a: TreeCellNeighbor {
                     cell: 1,
                     neighbor: 4,
                     region: Region::new([Side::Right, Side::Middle])
                 },
-                b: TreeNeighbor {
+                b: TreeCellNeighbor {
                     cell: 3,
                     neighbor: 6,
                     region: Region::new([Side::Right, Side::Right])
@@ -485,15 +470,15 @@ mod tests {
 
         assert_eq!(
             coarse.next(),
-            Some(&TreeInterface {
+            Some(&TreeBlockNeighbor {
                 block: 0,
                 neighbor: 2,
-                a: TreeNeighbor {
+                a: TreeCellNeighbor {
                     cell: 2,
                     neighbor: 5,
                     region: Region::new([Side::Middle, Side::Right])
                 },
-                b: TreeNeighbor {
+                b: TreeCellNeighbor {
                     cell: 3,
                     neighbor: 5,
                     region: Region::new([Side::Middle, Side::Right])
@@ -504,24 +489,24 @@ mod tests {
     }
 
     #[test]
-    fn overlaps() {
+    fn interfaces() {
         let mut tree = Tree::new(Rectangle::<2>::UNIT);
         let mut blocks = TreeBlocks::default();
-        let mut dofs = TreeDofs::new([4; 2], 2);
+        let mut dofs = TreeVertices::new([4; 2], 2);
+        let mut neighbors = TreeNeighbors::default();
         let mut interfaces = TreeInterfaces::default();
-        let mut overlaps = TreeOverlaps::default();
 
         tree.refine(&[true, false, false, false]);
         blocks.build(&tree);
         dofs.build(&blocks);
-        interfaces.build(&tree, &blocks);
-        overlaps.build(&tree, &blocks, &interfaces, &dofs);
+        neighbors.build(&tree, &blocks);
+        interfaces.build(&tree, &blocks, &neighbors, &dofs);
 
-        let mut coarse = overlaps.coarse();
+        let mut coarse = interfaces.coarse();
 
         assert_eq!(
             coarse.next(),
-            Some(&TreeOverlap {
+            Some(&TreeInterface {
                 block: 0,
                 neighbor: 1,
                 source: [0, 0],
@@ -532,7 +517,7 @@ mod tests {
 
         assert_eq!(
             coarse.next(),
-            Some(&TreeOverlap {
+            Some(&TreeInterface {
                 block: 0,
                 neighbor: 2,
                 source: [0, 0],
@@ -543,11 +528,11 @@ mod tests {
 
         assert_eq!(coarse.next(), None);
 
-        let mut fine = overlaps.fine();
+        let mut fine = interfaces.fine();
 
         assert_eq!(
             fine.next(),
-            Some(&TreeOverlap {
+            Some(&TreeInterface {
                 block: 1,
                 neighbor: 0,
                 source: [2, 0],
@@ -558,7 +543,7 @@ mod tests {
 
         assert_eq!(
             fine.next(),
-            Some(&TreeOverlap {
+            Some(&TreeInterface {
                 block: 2,
                 neighbor: 0,
                 source: [0, 2],
@@ -569,11 +554,11 @@ mod tests {
 
         assert_eq!(fine.next(), None);
 
-        let mut direct = overlaps.direct();
+        let mut direct = interfaces.direct();
 
         assert_eq!(
             direct.next(),
-            Some(&TreeOverlap {
+            Some(&TreeInterface {
                 block: 1,
                 neighbor: 2,
                 source: [2, 0],
@@ -584,7 +569,7 @@ mod tests {
 
         assert_eq!(
             direct.next(),
-            Some(&TreeOverlap {
+            Some(&TreeInterface {
                 block: 2,
                 neighbor: 1,
                 source: [0, 2],

@@ -1,5 +1,6 @@
 use crate::{faces, Face};
 
+/// Stores a flag for each axis.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct AxisMask<const N: usize>(usize);
 
@@ -13,12 +14,12 @@ impl<const N: usize> AxisMask<N> {
     }
 
     /// Constructs an empty axis mask.
-    pub fn empty() -> Self {
+    pub const fn empty() -> Self {
         Self(0)
     }
 
     /// Constructs an axis mask with all axes set to true.
-    pub fn full() -> Self {
+    pub const fn full() -> Self {
         Self(usize::MAX)
     }
 

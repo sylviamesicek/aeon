@@ -5,8 +5,8 @@ use std::{array::from_fn, fmt::Write, ops::Range};
 use crate::fd::{BlockBC, Boundary, NodeSpace};
 
 use aeon_geometry::{
-    AxisMask, FaceMask, Rectangle, Tree, TreeBlocks, TreeDofs, TreeInterfaces, TreeOverlap,
-    TreeOverlaps,
+    AxisMask, FaceMask, Rectangle, Tree, TreeBlocks, TreeVertices, TreeNeighbors, TreeInterface,
+    TreeInterfaces,
 };
 
 /// Implementation of an axis aligned tree mesh using standard finite difference operators.
@@ -14,9 +14,9 @@ use aeon_geometry::{
 pub struct Mesh<const N: usize> {
     tree: Tree<N>,
     blocks: TreeBlocks<N>,
-    nodes: TreeDofs<N>,
-    interfaces: TreeInterfaces<N>,
-    overlaps: TreeOverlaps<N>,
+    nodes: TreeVertices<N>,
+    interfaces: TreeNeighbors<N>,
+    overlaps: TreeInterfaces<N>,
 }
 
 impl<const N: usize> Mesh<N> {
@@ -26,9 +26,9 @@ impl<const N: usize> Mesh<N> {
         let mut result = Self {
             tree: Tree::new(bounds),
             blocks: TreeBlocks::default(),
-            interfaces: TreeInterfaces::default(),
-            nodes: TreeDofs::new(cell_width, ghost_nodes),
-            overlaps: TreeOverlaps::default(),
+            interfaces: TreeNeighbors::default(),
+            nodes: TreeVertices::new(cell_width, ghost_nodes),
+            overlaps: TreeInterfaces::default(),
         };
 
         result.build();
@@ -70,7 +70,7 @@ impl<const N: usize> Mesh<N> {
 
     // Number of nodes in mesh.
     pub fn num_nodes(&self) -> usize {
-        self.nodes.num_nodes()
+        self.nodes.num_vertices()
     }
 
     pub fn ghost(&self) -> usize {
@@ -94,7 +94,7 @@ impl<const N: usize> Mesh<N> {
 
     /// The range of nodes that the block owns.
     pub fn block_nodes(&self, block: usize) -> Range<usize> {
-        self.nodes.block_nodes(block)
+        self.nodes.block_vertices(block)
     }
 
     /// Computes flags indicating whether a particular face of a block borders a physical
@@ -124,15 +124,15 @@ impl<const N: usize> Mesh<N> {
         }
     }
 
-    pub fn fine_interfaces(&self) -> impl Iterator<Item = &TreeOverlap<N>> + '_ {
+    pub fn fine_interfaces(&self) -> impl Iterator<Item = &TreeInterface<N>> + '_ {
         self.overlaps.fine()
     }
 
-    pub fn direct_interfaces(&self) -> impl Iterator<Item = &TreeOverlap<N>> + '_ {
+    pub fn direct_interfaces(&self) -> impl Iterator<Item = &TreeInterface<N>> + '_ {
         self.overlaps.direct()
     }
 
-    pub fn coarse_interfaces(&self) -> impl Iterator<Item = &TreeOverlap<N>> + '_ {
+    pub fn coarse_interfaces(&self) -> impl Iterator<Item = &TreeInterface<N>> + '_ {
         self.overlaps.coarse()
     }
 

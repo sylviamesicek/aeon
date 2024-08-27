@@ -25,7 +25,18 @@ impl<const N: usize> Rectangle<N> {
         from_fn(|i| self.origin[i] + self.size[i] / 2.0)
     }
 
-    /// Returns the subdivision
+    /// Returns true if the rectangle contains a point.
+    pub fn contains(&self, point: [f64; N]) -> bool {
+        for axis in 0..N {
+            if point[axis] < self.origin[axis] || point[axis] > self.origin[axis] + self.size[axis] {
+                return false;
+            }
+        }
+
+        true
+    }
+
+    /// Subdivides the rectangle.
     pub fn split(&self, mask: AxisMask<N>) -> Self {
         let size = from_fn(|i| self.size[i] / 2.0);
         let origin = from_fn(|i| {

@@ -99,6 +99,7 @@ impl<const N: usize> Region<N> {
             .map(|index| AxisMask::pack(from_fn(|axis| index[axis] != 0)))
     }
 
+    /// Computes a split which touches the given region.
     pub fn adjacent_split(&self) -> AxisMask<N> {
         let mut result = AxisMask::empty();
         for axis in 0..N {
@@ -339,6 +340,12 @@ impl<const N: usize> Iterator for RegionIter<N> {
             2 => Side::Right,
             _ => unreachable!(),
         })))
+    }
+}
+
+impl<const N: usize> ExactSizeIterator for RegionIter<N> {
+    fn len(&self) -> usize {
+        Region::<N>::COUNT
     }
 }
 

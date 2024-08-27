@@ -10,10 +10,12 @@ pub struct Rk4 {
 }
 
 impl Rk4 {
+    /// Constructs an empty, default Rk4 integrator.
     pub fn new() -> Self {
         Self::default()
     }
 
+    /// Take one Rk4 step.
     pub fn step<Problem: Ode>(
         &mut self,
         h: f64,

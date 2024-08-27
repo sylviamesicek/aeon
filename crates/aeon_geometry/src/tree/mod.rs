@@ -6,12 +6,12 @@ use std::array::from_fn;
 use std::iter::once;
 
 mod blocks;
-mod dofs;
+mod vertices;
 mod interface;
 
 pub use blocks::TreeBlocks;
-pub use dofs::TreeDofs;
-pub use interface::{TreeInterface, TreeInterfaces, TreeOverlap, TreeOverlaps};
+pub use vertices::TreeVertices;
+pub use interface::{TreeBlockNeighbor, TreeNeighbors, TreeInterface, TreeInterfaces};
 
 /// Denotes that the cell neighbors the physical boundary of a spatial domain.
 pub const NULL: usize = usize::MAX;
@@ -208,6 +208,7 @@ impl<const N: usize> Tree<N> {
         neighbor
     }
 
+    /// Iterates over all neighbors in a given region.
     pub fn neighbors_in_region(
         &self,
         cell: usize,
@@ -246,49 +247,6 @@ impl<const N: usize> Tree<N> {
     /// Returns all coarse cells that neighbor the given cells, including on
     /// corners.
     pub fn neighborhood_coarse(&self, cell: usize) -> impl Iterator<Item = usize> + '_ {
-        // Old Algorithm
-        // let subdivision = self.split(cell);
-
-        // // Loop over possible directions
-        // AxisMask::<N>::enumerate()
-        //     .skip(1)
-        //     .map(move |dir| {
-        //         // Get neighboring node
-        //         let mut neighbor = cell;
-        //         // Is this neighbor coarser than this node?
-        //         let mut neighbor_coarse = false;
-        //         // Loop over axes which can potentially be coarse
-        //         for face in subdivision.outer_faces() {
-        //             if !dir.is_set(face.axis) {
-        //                 continue;
-        //             }
-
-        //             // Get neighbor
-        //             let traverse = self.neighbor(neighbor, face);
-
-        //             if traverse == NULL {
-        //                 // No Update necessary if face is on boundary
-        //                 neighbor_coarse = false;
-        //                 neighbor = NULL;
-        //                 break;
-        //             }
-
-        //             if self.level(traverse) < self.level(cell) {
-        //                 neighbor_coarse = true;
-        //             }
-
-        //             // Update node
-        //             neighbor = traverse;
-        //         }
-
-        //         if neighbor_coarse {
-        //             neighbor
-        //         } else {
-        //             NULL
-        //         }
-        //     })
-        //     .filter(|&neighbor| neighbor != NULL)
-
         let split = self.split(cell);
 
         AxisMask::<N>::enumerate().skip(1).flat_map(move |dir| {
@@ -552,7 +510,6 @@ mod tests {
     #[test]
     fn balancing() {
         let mut tree = Tree::new(Rectangle::<2>::UNIT);
-
         tree.refine(&[true, false, false, false]);
 
         // Produce unbalanced flags

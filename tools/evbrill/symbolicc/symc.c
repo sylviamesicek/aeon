@@ -17,23 +17,23 @@
 /// @brief System of fields that evolve according to the z4 axisymmetric EFEs.
 typedef struct HyperbolicSystem
 {
-    FIELD_SECOND(grr);
-    FIELD_SECOND(grz);
-    FIELD_SECOND(gzz);
-    FIELD_SECOND(s);
+    FIELD_SECOND(grr)
+    FIELD_SECOND(grz)
+    FIELD_SECOND(gzz)
+    FIELD_SECOND(s)
 
-    FIELD_FIRST(krr);
-    FIELD_FIRST(krz);
-    FIELD_FIRST(kzz);
-    FIELD_FIRST(y);
+    FIELD_FIRST(krr)
+    FIELD_FIRST(krz)
+    FIELD_FIRST(kzz)
+    FIELD_FIRST(y)
 
-    FIELD_SECOND(lapse);
-    FIELD_FIRST(shiftr);
-    FIELD_FIRST(shiftz);
+    FIELD_SECOND(lapse)
+    FIELD_FIRST(shiftr)
+    FIELD_FIRST(shiftz)
 
-    FIELD_FIRST(theta);
-    FIELD_FIRST(zr);
-    FIELD_FIRST(zz);
+    FIELD_FIRST(theta)
+    FIELD_FIRST(zr)
+    FIELD_FIRST(zz)
 } HyperbolicSystem;
 
 typedef struct HyperbolicDerivs
