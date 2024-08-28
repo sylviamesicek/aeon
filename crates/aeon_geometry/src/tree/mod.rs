@@ -11,7 +11,7 @@ mod interface;
 
 pub use blocks::TreeBlocks;
 pub use dofs::TreeDofs;
-pub use interface::{TreeBlockNeighbor, TreeNeighbors, TreeInterface, TreeInterfaces};
+pub use interface::{TreeBlockNeighbor, TreeInterface, TreeInterfaces, TreeNeighbors};
 
 /// Denotes that the cell neighbors the physical boundary of a spatial domain.
 pub const NULL: usize = usize::MAX;

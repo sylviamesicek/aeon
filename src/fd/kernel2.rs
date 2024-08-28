@@ -445,3 +445,129 @@ impl_convolution_for_tuples! {
    3 => K0 0 K1 1 K2 2
    4 => K0 0 K1 1 K2 2 K3 3
 }
+
+/// Computes the gradient along the given axis.
+pub struct Gradient<const N: usize, const ORDER: usize>(pub usize);
+
+impl<const N: usize, const ORDER: usize> Convolution<N> for Gradient<N, ORDER>
+where
+    SecondDerivative<ORDER>: Kernel,
+    Derivative<ORDER>: Kernel,
+{
+    fn border_width(&self, axis: usize) -> usize {
+        if axis == self.0 {
+            Derivative::<ORDER>.border_width()
+        } else {
+            Value.border_width()
+        }
+    }
+
+    fn interior(&self, axis: usize) -> &[f64] {
+        if axis == self.0 {
+            Derivative::<ORDER>.interior()
+        } else {
+            Value.interior()
+        }
+    }
+
+    fn free(&self, border: Border, axis: usize) -> &[f64] {
+        if axis == self.0 {
+            Derivative::<ORDER>.free(border)
+        } else {
+            Value.free(border)
+        }
+    }
+
+    fn symmetric(&self, border: Border, axis: usize) -> &[f64] {
+        if axis == self.0 {
+            Derivative::<ORDER>.symmetric(border)
+        } else {
+            Value.symmetric(border)
+        }
+    }
+
+    fn antisymmetric(&self, border: Border, axis: usize) -> &[f64] {
+        if axis == self.0 {
+            Derivative::<ORDER>.antisymmetric(border)
+        } else {
+            Value.antisymmetric(border)
+        }
+    }
+
+    fn scale(&self, spacing: [f64; N]) -> f64 {
+        1.0 / spacing[self.0]
+    }
+}
+
+/// Computes the mixed derivative of the given axes.
+pub struct Hessian<const N: usize, const ORDER: usize>(pub usize, pub usize);
+
+impl<const N: usize, const ORDER: usize> Hessian<N, ORDER> {
+    fn is_second(&self, axis: usize) -> bool {
+        self.0 == self.1 && axis == self.0
+    }
+
+    fn is_first(&self, axis: usize) -> bool {
+        self.0 == axis || self.1 == axis
+    }
+}
+
+impl<const N: usize, const ORDER: usize> Convolution<N> for Hessian<N, ORDER>
+where
+    SecondDerivative<ORDER>: Kernel,
+    Derivative<ORDER>: Kernel,
+{
+    fn border_width(&self, axis: usize) -> usize {
+        if self.is_second(axis) {
+            SecondDerivative::<ORDER>.border_width()
+        } else if self.is_first(axis) {
+            Derivative::<ORDER>.border_width()
+        } else {
+            Value.border_width()
+        }
+    }
+
+    fn interior(&self, axis: usize) -> &[f64] {
+        if self.is_second(axis) {
+            SecondDerivative::<ORDER>.interior()
+        } else if self.is_first(axis) {
+            Derivative::<ORDER>.interior()
+        } else {
+            Value.interior()
+        }
+    }
+
+    fn free(&self, border: Border, axis: usize) -> &[f64] {
+        if self.is_second(axis) {
+            SecondDerivative::<ORDER>.free(border)
+        } else if self.is_first(axis) {
+            Derivative::<ORDER>.free(border)
+        } else {
+            Value.free(border)
+        }
+    }
+
+    fn symmetric(&self, border: Border, axis: usize) -> &[f64] {
+        if self.is_second(axis) {
+            SecondDerivative::<ORDER>.symmetric(border)
+        } else if self.is_first(axis) {
+            Derivative::<ORDER>.symmetric(border)
+        } else {
+            Value.symmetric(border)
+        }
+    }
+
+    fn antisymmetric(&self, border: Border, axis: usize) -> &[f64] {
+        if self.is_second(axis) {
+            SecondDerivative::<ORDER>.antisymmetric(border)
+        } else if self.is_first(axis) {
+            Derivative::<ORDER>.antisymmetric(border)
+        } else {
+            Value.antisymmetric(border)
+        }
+    }
+
+    fn scale(&self, spacing: [f64; N]) -> f64 {
+        1.0 / (spacing[self.0] * spacing[self.1])
+    }
+}

@@ -28,7 +28,8 @@ impl<const N: usize> Rectangle<N> {
     /// Returns true if the rectangle contains a point.
     pub fn contains(&self, point: [f64; N]) -> bool {
         for axis in 0..N {
-            if point[axis] < self.origin[axis] || point[axis] > self.origin[axis] + self.size[axis] {
+            if point[axis] < self.origin[axis] || point[axis] > self.origin[axis] + self.size[axis]
+            {
                 return false;
             }
         }

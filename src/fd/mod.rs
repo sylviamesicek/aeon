@@ -8,14 +8,12 @@ mod kernel2;
 mod mesh;
 mod node;
 mod node2;
-mod vertex;
 
 pub use boundary::{BlockBC, Boundary, BoundaryKind, Condition, Conditions, SystemBC, UnitBC, BC};
 pub use engine::{Engine, FdEngine, FdIntEngine};
 pub use kernel::{BasisOperator, Dissipation, Interpolation, Order, Support};
 pub use mesh::{ExportVtkConfig, Mesh, MeshCheckpoint, MeshOrder, SystemCheckpoint};
 pub use node::{node_from_vertex, NodeSpace, NodeWindow};
-pub use vertex::StencilSpace;
 
 use crate::system::{SystemFields, SystemLabel, SystemSlice, SystemValue};
 

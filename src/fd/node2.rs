@@ -5,10 +5,9 @@ use std::array::{self, from_fn};
 
 use super::boundary::{Boundary, BoundaryKind, Condition};
 use super::kernel2::{Border, Convolution};
-use super::vertex::StencilSpace;
 use super::BC;
 
-#[derive(PartialEq, Eq, Debug)]
+#[derive(Copy, Clone, PartialEq, Eq, Debug)]
 pub enum Support {
     Interior,
     Negative(usize),
@@ -79,7 +78,7 @@ impl<const N: usize, D> NodeSpace<N, D> {
         IndexSpace::new(self.node_size()).linear_from_cartesian(cartesian)
     }
 
-    pub fn apply(self, corner: [isize; N], stencils: [&[f64]; N], field: &[f64]) -> f64 {
+    pub fn apply(&self, corner: [isize; N], stencils: [&[f64]; N], field: &[f64]) -> f64 {
         let ssize: [_; N] = array::from_fn(|axis| stencils[axis].len());
 
         let mut result = 0.0;
@@ -100,7 +99,7 @@ impl<const N: usize, D> NodeSpace<N, D> {
     }
 
     pub fn apply_axis(
-        self,
+        &self,
         corner: [isize; N],
         stencil: &[f64],
         axis: usize,
@@ -109,6 +108,17 @@ impl<const N: usize, D> NodeSpace<N, D> {
         let mut stencils: [&[f64]; N] = [&[1.0]; N];
         stencils[axis] = stencil;
 
+        self.apply(corner, stencils, field)
+    }
+
+    pub fn evaluate_interior(
+        &self,
+        node: [usize; N],
+        convolution: impl Convolution<N>,
+        field: &[f64],
+    ) -> f64 {
+        let stencils = array::from_fn(|axis| convolution.interior(axis));
+        let corner = array::from_fn(|axis| (node[axis] - convolution.border_width(axis)) as isize);
         self.apply(corner, stencils, field)
     }
 }
@@ -140,21 +150,6 @@ impl<const N: usize, D: Boundary<N>> NodeSpace<N, D> {
             Support::Positive(self.size[axis] - 1 - node[axis])
         } else {
             Support::Interior
-        }
-    }
-
-    pub fn corner(
-        &self,
-        support: Support,
-        node: [usize; N],
-        border_width: usize,
-        weights: &[f64],
-        axis: usize,
-    ) -> isize {
-        match support {
-            Support::Interior => node[axis] as isize - border_width as isize,
-            Support::Negative(_) => 0,
-            Support::Positive(_) => (self.size[axis] + 1) as isize - weights.len() as isize,
         }
     }
 }
@@ -189,5 +184,22 @@ impl<const N: usize, D: Boundary<N> + Condition<N>> NodeSpace<N, D> {
                 (BoundaryKind::Free | BoundaryKind::Radiative, _) => convolution.free(border, axis),
             }
         })
+    }
+
+    pub fn evaluate(
+        &self,
+        node: [usize; N],
+        convolution: impl Convolution<N>,
+        field: &[f64],
+    ) -> f64 {
+        let support =
+            array::from_fn(|axis| self.support(node, convolution.border_width(axis), axis));
+        let stencils = self.stencils(support, &convolution);
+        let corner = array::from_fn(|axis| match support[axis] {
+            Support::Interior => node[axis] as isize - convolution.border_width(axis) as isize,
+            Support::Negative(_) => 0,
+            Support::Positive(_) => (self.size[axis] + 1) as isize - stencils[axis].len() as isize,
+        });
+        self.apply(corner, stencils, field)
     }
 }
