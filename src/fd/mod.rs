@@ -1,24 +1,22 @@
 #![allow(clippy::needless_range_loop)]
 
 mod boundary;
-mod discrete;
 mod engine;
 // mod engine2;
 mod kernel;
 // mod kernel2;
 mod mesh;
-mod mesh2;
-mod model;
 mod node;
 // mod node2;
 mod vertex;
 
 pub use boundary::{BlockBC, Boundary, BoundaryKind, Condition, Conditions, SystemBC, UnitBC, BC};
-pub use discrete::{Discretization, DiscretizationOrder};
 pub use engine::{Engine, FdEngine, FdIntEngine};
 pub use kernel::{BasisOperator, Dissipation, Interpolation, Order, Support};
-pub use mesh::Mesh;
-pub use model::{ExportVtkConfig, Model};
+pub use mesh::{
+    export_checkpoint, import_checkpoint, ExportVtkConfig, Mesh, MeshCheckpoint, MeshOrder,
+    SystemCheckpoint,
+};
 pub use node::{node_from_vertex, NodeSpace, NodeWindow};
 pub use vertex::VertexSpace;
 
@@ -58,7 +56,7 @@ pub trait Operator<const N: usize>: Clone {
 
     fn callback(
         &self,
-        _discrete: &mut Discretization<N>,
+        _mesh: &mut Mesh<N>,
         _system: SystemSlice<Self::System>,
         _context: SystemSlice<Self::Context>,
         _index: usize,

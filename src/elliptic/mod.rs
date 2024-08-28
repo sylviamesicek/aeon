@@ -3,7 +3,7 @@ use std::marker::PhantomData;
 use reborrow::{Reborrow, ReborrowMut};
 
 use crate::{
-    fd::{Boundary, Conditions, Discretization, Engine, Operator},
+    fd::{Boundary, Conditions, Engine, Mesh, Operator},
     ode::{Ode, Rk4},
     prelude::Face,
     system::{field_count, SystemFields, SystemLabel, SystemSlice, SystemSliceMut, SystemValue},
@@ -37,7 +37,7 @@ impl<Label: SystemLabel> HyperRelaxSolver<Label> {
         BC: Boundary<N> + Conditions<N, System = Label> + Sync,
     >(
         &mut self,
-        discrete: &mut Discretization<N>,
+        mesh: &mut Mesh<N>,
         bc: BC,
         operator: O,
         context: SystemSlice<'_, O::Context>,
@@ -72,16 +72,16 @@ impl<Label: SystemLabel> HyperRelaxSolver<Label> {
             }
         }
 
-        let spacing: f64 = discrete.mesh().min_spacing();
+        let spacing: f64 = mesh.min_spacing();
         let step = self.cfl * spacing;
 
         for index in 0..self.max_steps {
             {
-                discrete.order::<ORDER>().fill_boundary(
+                mesh.order::<ORDER>().fill_boundary(
                     bc.clone(),
                     SystemSliceMut::from_contiguous(&mut data[..dimension]),
                 );
-                discrete.order::<ORDER>().apply(
+                mesh.order::<ORDER>().apply(
                     bc.clone(),
                     operator.clone(),
                     SystemSlice::from_contiguous(&mut data[..dimension]),
@@ -90,14 +90,14 @@ impl<Label: SystemLabel> HyperRelaxSolver<Label> {
                 );
 
                 operator.callback(
-                    discrete,
+                    mesh,
                     SystemSlice::from_contiguous(&mut data[..dimension]),
                     context.rb(),
                     index,
                 );
             }
 
-            let norm = discrete.norm(system.rb());
+            let norm = mesh.norm(system.rb());
 
             log::trace!(
                 "Time {:.5}/{:.5} Norm {:.5e}",
@@ -115,7 +115,7 @@ impl<Label: SystemLabel> HyperRelaxSolver<Label> {
             }
 
             let mut ode = FictitiousOde {
-                discrete,
+                mesh,
                 dimension,
                 dampening: self.dampening,
                 bc: bc.clone(),
@@ -205,7 +205,7 @@ struct FictitiousOde<
     BC: Boundary<N> + Conditions<N>,
     O: Operator<N>,
 > {
-    discrete: &'a mut Discretization<N>,
+    mesh: &'a mut Mesh<N>,
     dimension: usize,
     dampening: f64,
 
@@ -229,11 +229,11 @@ where
     fn preprocess(&mut self, system: &mut [f64]) {
         let (u, v) = system.split_at_mut(self.dimension);
 
-        self.discrete
+        self.mesh
             .order::<ORDER>()
             .fill_boundary(self.bc.clone(), SystemSliceMut::from_contiguous(u));
 
-        self.discrete.order::<ORDER>().fill_boundary(
+        self.mesh.order::<ORDER>().fill_boundary(
             VBoundary {
                 inner: self.bc.clone(),
                 dampening: self.dampening,
@@ -256,7 +256,7 @@ where
         // Compute derivatives
 
         // Find du/dt from the definition v = du/dt + η u
-        self.discrete.order::<ORDER>().apply(
+        self.mesh.order::<ORDER>().apply(
             self.bc.clone(),
             UOperator {
                 dampening: self.dampening,
@@ -268,7 +268,7 @@ where
         );
 
         // dv/dt = Lu
-        self.discrete.order::<ORDER>().apply(
+        self.mesh.order::<ORDER>().apply(
             self.bc.clone(),
             self.operator.clone(),
             u.rb(),
@@ -278,11 +278,11 @@ where
 
         // Apply Outer boundary conditions
 
-        self.discrete
+        self.mesh
             .order::<ORDER>()
             .weak_boundary(self.bc.clone(), u, dudt);
 
-        self.discrete.order::<ORDER>().weak_boundary(
+        self.mesh.order::<ORDER>().weak_boundary(
             VBoundary {
                 dampening: self.dampening,
                 inner: self.bc.clone(),

@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use super::Rinne;
 use aeon::{
     elliptic::HyperRelaxSolver,
-    fd::{Discretization, ExportVtkConfig},
+    fd::{ExportVtkConfig, Mesh},
     prelude::*,
 };
 
@@ -119,13 +119,13 @@ impl Operator<2> for PsiOperator {
 
     fn callback(
         &self,
-        discrete: &mut Discretization<2>,
+        mesh: &mut Mesh<2>,
         system: SystemSlice<Self::System>,
         context: SystemSlice<Self::Context>,
         index: usize,
     ) {
         if index % 25 == 0 {
-            let mut garfinkle = SystemVec::with_length(discrete.mesh().num_dofs());
+            let mut garfinkle = SystemVec::with_length(mesh.num_dofs());
             garfinkle
                 .field_mut(Choptuik::Psi)
                 .copy_from_slice(system.field(Scalar));
@@ -133,31 +133,31 @@ impl Operator<2> for PsiOperator {
                 .field_mut(Choptuik::Seed)
                 .copy_from_slice(context.field(Scalar));
 
-            let mut hamiltonian = vec![0.0; discrete.mesh().num_dofs()];
+            let mut hamiltonian = vec![0.0; mesh.num_dofs()];
 
-            discrete.order::<4>().project(
+            mesh.order::<4>().project(
                 BoundaryConditions,
                 Hamiltonian,
                 garfinkle.as_slice(),
                 hamiltonian.as_mut_slice().into(),
             );
 
-            discrete
-                .order::<4>()
+            mesh.order::<4>()
                 .fill_boundary(crate::HAM_COND, hamiltonian.as_mut_slice().into());
 
-            let mut model = Model::empty();
-            model.load_mesh(discrete.mesh());
-            model.write_field("psi", garfinkle.field(Choptuik::Psi).to_vec());
-            model.write_field("hamiltonian", hamiltonian);
+            let mut systems = SystemCheckpoint::default();
+            systems.save_field("psi", garfinkle.field(Choptuik::Psi));
+            systems.save_field("hamiltonian", &hamiltonian);
 
-            let path = PathBuf::from(format!("output/choptuik/iter{}.vtu", { index / 25 }));
-            let config = ExportVtkConfig {
-                title: "choptuik".to_string(),
-                ghost: crate::GHOST,
-            };
-
-            model.export_vtk(path, config).unwrap();
+            mesh.export_to_vtk(
+                format!("output/choptuik/iter{}.vtu", { index / 25 }),
+                ExportVtkConfig {
+                    title: "choptuik".to_string(),
+                    ghost: crate::GHOST,
+                    systems,
+                },
+            )
+            .unwrap();
         }
     }
 }
@@ -238,24 +238,22 @@ impl Projection<2> for RinneFromChoptuik {
 }
 
 pub fn solve(
-    discrete: &mut Discretization<2>,
+    mesh: &mut Mesh<2>,
     amplitude: f64,
     rinne: SystemSliceMut<Rinne>,
     hamiltonian: &mut [f64],
 ) -> Result<(), Box<dyn std::error::Error>> {
     log::info!("Filling Seed Function");
 
-    let num_nodes = discrete.mesh().num_dofs();
+    let num_nodes = mesh.num_dofs();
 
     let mut choptuik = vec![0.0; num_nodes * 2];
     let (psi, seed) = choptuik.split_at_mut(num_nodes);
 
     // Compute seed values.
-    discrete
-        .order::<4>()
+    mesh.order::<4>()
         .evaluate(SeedFunction(amplitude), seed.into());
-    discrete
-        .order::<4>()
+    mesh.order::<4>()
         .fill_boundary(UnitBC(SEED_COND), seed.into());
 
     // Initial Guess for Psi
@@ -269,21 +267,21 @@ pub fn solve(
     solver.cfl = 0.1;
     solver.dampening = 0.4;
 
-    solver.solve::<2, 4, _, _>(discrete, PSI_COND, PsiOperator, seed.into(), psi.into());
+    solver.solve::<2, 4, _, _>(mesh, PSI_COND, PsiOperator, seed.into(), psi.into());
 
-    discrete.order::<4>().fill_boundary(
+    mesh.order::<4>().fill_boundary(
         BoundaryConditions,
         SystemSliceMut::from_contiguous(&mut choptuik),
     );
 
-    discrete.order::<4>().project(
+    mesh.order::<4>().project(
         BoundaryConditions,
         RinneFromChoptuik,
         SystemSlice::from_contiguous(&choptuik),
         rinne,
     );
 
-    discrete.order::<4>().project(
+    mesh.order::<4>().project(
         BoundaryConditions,
         Hamiltonian,
         SystemSlice::from_contiguous(&choptuik),

@@ -1,5 +1,5 @@
 use aeon::{
-    fd::{Discretization, ExportVtkConfig},
+    fd::{export_checkpoint, ExportVtkConfig, Mesh},
     prelude::*,
 };
 
@@ -117,59 +117,58 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         std::fs::create_dir_all("output/garfinkle")?;
     }
 
-    std::fs::write("output/mesh.txt", mesh.write_debug()).unwrap();
+    let mut debug = String::new();
+    mesh.write_debug(&mut debug);
+
+    std::fs::write("output/mesh.txt", debug).unwrap();
 
     println!("Num Blocks: {}", mesh.num_blocks());
     println!("Num Cells: {}", mesh.num_cells());
-
-    let mut discrete = Discretization::new();
-    discrete.load_mesh(&mesh);
 
     let mut rinne = SystemVec::with_length(mesh.num_dofs());
     let mut hamiltonian = vec![0.0; mesh.num_dofs()].into_boxed_slice();
 
     if CHOPTUIK {
-        choptuik::solve(&mut discrete, 1.0, rinne.as_mut_slice(), &mut hamiltonian)?;
+        choptuik::solve(&mut mesh, 1.0, rinne.as_mut_slice(), &mut hamiltonian)?;
     } else {
-        garfinkle::solve(&mut discrete, 1.0, rinne.as_mut_slice(), &mut hamiltonian)?;
+        garfinkle::solve(&mut mesh, 1.0, rinne.as_mut_slice(), &mut hamiltonian)?;
     }
 
-    discrete
-        .order::<4>()
+    mesh.order::<4>()
         .fill_boundary(BoundaryConditions, rinne.as_mut_slice());
 
-    discrete
-        .order::<4>()
+    mesh.order::<4>()
         .fill_boundary(HAM_COND, hamiltonian.as_mut().into());
 
-    let mut model = Model::empty();
-    model.load_mesh(discrete.mesh());
-    model.write_field("conformal", rinne.field(Rinne::Conformal).to_vec());
-    model.write_field("seed", rinne.field(Rinne::Seed).to_vec());
-    model.write_field("hamiltonian", hamiltonian.to_vec());
+    let mut systems = SystemCheckpoint::default();
+    systems.save_field("conformal", rinne.field(Rinne::Conformal));
+    systems.save_field("seed", rinne.field(Rinne::Seed));
+    systems.save_field("hamiltonian", &hamiltonian);
 
     if CHOPTUIK {
-        model.export_vtk(
+        mesh.export_to_vtk(
             format!("output/choptuik.vtu"),
             ExportVtkConfig {
                 title: "idbrill".to_string(),
                 ghost: crate::GHOST,
+                systems: systems.clone(),
             },
         )?;
     } else {
-        model.export_vtk(
+        mesh.export_to_vtk(
             format!("output/garfinkle.vtu"),
             ExportVtkConfig {
                 title: "idbrill".to_string(),
                 ghost: crate::GHOST,
+                systems: systems.clone(),
             },
         )?;
     }
 
-    let mut model = Model::empty();
-    model.load_mesh(discrete.mesh());
-    model.write_system(rinne.as_slice());
-    model.export_dat("output/idbrill.dat")?;
+    let mut model = MeshCheckpoint::default();
+    model.save_mesh(&mesh);
+
+    export_checkpoint("output/idbrill.dat", &model, &systems)?;
 
     Ok(())
 }
