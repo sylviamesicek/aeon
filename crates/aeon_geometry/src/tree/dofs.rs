@@ -7,7 +7,7 @@ use std::{array, ops::Range};
 
 /// Associates vertices with each block in the `Tree`.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct TreeVertices<const N: usize> {
+pub struct TreeDofs<const N: usize> {
     /// Number of subdivisions for each axis.
     #[serde(with = "aeon_array")]
     pub width: [usize; N],
@@ -17,7 +17,7 @@ pub struct TreeVertices<const N: usize> {
     offsets: Vec<usize>,
 }
 
-impl<const N: usize> TreeVertices<N> {
+impl<const N: usize> TreeDofs<N> {
     pub fn new(width: [usize; N], ghost: usize) -> Self {
         Self {
             width,
@@ -26,21 +26,13 @@ impl<const N: usize> TreeVertices<N> {
         }
     }
 
-    // pub fn width(&self) -> [usize; N] {
-    //     self.width
-    // }
-
-    // pub fn ghost(&self) -> usize {
-    //     self.ghost
-    // }
-
     /// Returns the total number of nodes in the tree.
-    pub fn num_vertices(&self) -> usize {
+    pub fn num_dofs(&self) -> usize {
         self.offsets.last().unwrap().clone()
     }
 
-    /// The range of nodes associated with the given block.
-    pub fn block_vertices(&self, block: usize) -> Range<usize> {
+    /// The range of dofs associated with the given block.
+    pub fn block_dofs(&self, block: usize) -> Range<usize> {
         self.offsets[block]..self.offsets[block + 1]
     }
 
@@ -70,7 +62,7 @@ impl<const N: usize> TreeVertices<N> {
     }
 }
 
-impl<const N: usize> Default for TreeVertices<N> {
+impl<const N: usize> Default for TreeDofs<N> {
     fn default() -> Self {
         Self {
             width: [2; N],
@@ -82,12 +74,12 @@ impl<const N: usize> Default for TreeVertices<N> {
 
 #[cfg(test)]
 mod tests {
-    use crate::{Rectangle, Tree, TreeBlocks, TreeVertices};
+    use crate::{Rectangle, Tree, TreeBlocks, TreeDofs};
     #[test]
     fn dof_offsets() {
         let mut tree = Tree::new(Rectangle::<2>::UNIT);
         let mut blocks = TreeBlocks::default();
-        let mut nodes = TreeVertices::new([8; 2], 3);
+        let mut nodes = TreeDofs::new([8; 2], 3);
 
         tree.refine(&[true, false, false, false]);
         blocks.build(&tree);
@@ -95,8 +87,8 @@ mod tests {
 
         assert_eq!(blocks.num_blocks(), 3);
 
-        assert_eq!(nodes.block_vertices(0), 0..529);
-        assert_eq!(nodes.block_vertices(1), 529..874);
-        assert_eq!(nodes.block_vertices(2), 874..1099);
+        assert_eq!(nodes.block_dofs(0), 0..529);
+        assert_eq!(nodes.block_dofs(1), 529..874);
+        assert_eq!(nodes.block_dofs(2), 874..1099);
     }
 }

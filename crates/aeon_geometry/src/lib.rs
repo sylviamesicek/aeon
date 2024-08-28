@@ -19,5 +19,5 @@ pub use region::{
     regions, Region, RegionFaceVertexIter, RegionIter, RegionNodeIter, RegionOffsetNodeIter, Side,
 };
 pub use tree::{
-    Tree, TreeBlocks, TreeVertices, TreeBlockNeighbor, TreeNeighbors, TreeInterface, TreeInterfaces, NULL,
+    Tree, TreeBlocks, TreeDofs, TreeBlockNeighbor, TreeNeighbors, TreeInterface, TreeInterfaces, NULL,
 };

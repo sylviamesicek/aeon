@@ -1,5 +1,6 @@
+use aeon_geometry::{TreeDofs, TreeInterfaces};
 use rayon::prelude::*;
-use std::array::from_fn;
+use std::array::{self, from_fn};
 
 use crate::fd::{
     node_from_vertex, Boundary, BoundaryKind, Condition, Conditions, Engine, FdEngine, FdIntEngine,
@@ -8,15 +9,27 @@ use crate::fd::{
 use crate::geometry::{faces, Face, IndexSpace, Rectangle};
 use crate::system::{SystemLabel, SystemSlice, SystemSliceMut};
 
+use super::NodeSpace;
+
 pub struct Discretization<const N: usize> {
     mesh: Mesh<N>,
+    coarse_dofs: TreeDofs<N>,
+    coarse_interfaces: TreeInterfaces<N>,
     // pool: ThreadPool,
 }
 
 impl<const N: usize> Discretization<N> {
     pub fn new() -> Self {
+        let mesh = Mesh::new(Rectangle::UNIT, [4; N], 1);
+
+        let mut coarse_dofs = TreeDofs::default();
+        let mut coarse_interfaces = TreeInterfaces::default();
+        mesh.compute_coarse_dofs(&mut coarse_dofs, &mut coarse_interfaces);
+
         Self {
             mesh: Mesh::new(Rectangle::UNIT, [2; N], 0),
+            coarse_dofs,
+            coarse_interfaces,
             // pool: ThreadPoolBuilder::new().build().unwrap(),
         }
     }
@@ -29,16 +42,22 @@ impl<const N: usize> Discretization<N> {
         &mut self.mesh
     }
 
-    pub fn set_mesh(&mut self, mesh: &Mesh<N>) {
+    pub fn load_mesh(&mut self, mesh: &Mesh<N>) {
         self.mesh.clone_from(mesh);
+        self.mesh.compute_coarse_dofs(&mut self.coarse_dofs, &mut self.coarse_interfaces);
     }
 
     pub fn set_mesh_from_model(&mut self, model: &Model<N>) {
-        model.load_mesh(&mut self.mesh);
+        model.save_mesh(&mut self.mesh);
+        self.mesh.compute_coarse_dofs(&mut self.coarse_dofs, &mut self.coarse_interfaces);
     }
 
-    pub fn num_nodes(&self) -> usize {
-        self.mesh.num_nodes()
+    pub fn num_dofs(&self) -> usize {
+        self.mesh.num_dofs()
+    }
+
+    pub fn num_coarse_dofs(&self) -> usize {
+        self.coarse_dofs.num_dofs()
     }
 
     pub fn order<const ORDER: usize>(&mut self) -> DiscretizationOrder<N, ORDER> {
@@ -46,7 +65,7 @@ impl<const N: usize> Discretization<N> {
             assert!(ORDER % 2 == 0);
         }
         debug_assert!(
-            self.mesh.ghost() >= ORDER / 2,
+            self.mesh.dofs().ghost >= ORDER / 2,
             "Mesh has insufficient ghost nodes for the requested order."
         );
         DiscretizationOrder(self)
@@ -298,6 +317,35 @@ impl<'a, const N: usize, const ORDER: usize> DiscretizationOrder<'a, N, ORDER> {
         });
     }
 
+    pub fn transfer_to_coarse<System: SystemLabel>(self, source: SystemSlice<System>, dest: SystemSliceMut<System>) {
+        let mesh = self.0.mesh();
+        let coarse_dofs = &self.0.coarse_dofs;
+        let coarse_interfaces = &self.0.coarse_interfaces;
+        let source = source.as_range();
+        let dest = dest.as_range();
+
+        (0..mesh.num_blocks()).par_bridge().for_each(|block| {
+            let source_dofs = mesh.block_nodes(block);
+            let dest_dofs = coarse_dofs.block_dofs(block);
+
+            let source = unsafe { source.slice(source_dofs.clone()).fields() };
+            let mut dest = unsafe { dest.slice_mut(dest_dofs.clone()).fields_mut() };
+
+            let source_space = mesh.block_space(block);
+            let dest_space = NodeSpace::<N, _>::new(array::from_fn(|axis| source_space.cell_size()[axis] / 2), coarse_dofs.ghost, ());
+
+            for dest_node in dest_space.inner_window() {
+                let source_node = array::from_fn(|axis| dest_node[axis] * 2);
+                let source_index = source_space.index_from_node(source_node);
+                let dest_index = dest_space.index_from_node(dest_node);
+
+                for field in System::fields() {
+                    dest.field_mut(field.clone())[dest_index] = source.field(field.clone())[source_index];
+                }
+            }
+        });
+    }
+
     /// Fills the system by applying the given function at each node on the mesh.
     pub fn evaluate<F: Function<N> + Sync>(self, f: F, system: SystemSliceMut<'_, F::Output>) {
         let mesh = self.0.mesh();
@@ -487,8 +535,6 @@ impl<'a, const N: usize, const ORDER: usize> DiscretizationOrder<'a, N, ORDER> {
         }
 
         result
-
-        // false
     }
 }
 

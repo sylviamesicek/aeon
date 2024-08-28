@@ -5,7 +5,7 @@ use std::{array::from_fn, fmt::Write, ops::Range};
 use crate::fd::{BlockBC, Boundary, NodeSpace};
 
 use aeon_geometry::{
-    AxisMask, FaceMask, Rectangle, Tree, TreeBlocks, TreeVertices, TreeNeighbors, TreeInterface,
+    AxisMask, FaceMask, Rectangle, Tree, TreeBlocks, TreeDofs, TreeNeighbors, TreeInterface,
     TreeInterfaces,
 };
 
@@ -14,21 +14,21 @@ use aeon_geometry::{
 pub struct Mesh<const N: usize> {
     tree: Tree<N>,
     blocks: TreeBlocks<N>,
-    nodes: TreeVertices<N>,
-    interfaces: TreeNeighbors<N>,
-    overlaps: TreeInterfaces<N>,
+    dofs: TreeDofs<N>,
+    neighbors: TreeNeighbors<N>,
+    interfaces: TreeInterfaces<N>,
 }
 
 impl<const N: usize> Mesh<N> {
     /// Constructs a new tree mesh, covering the given physical domain. Each cell has the given number of subdivisions
     /// per axis, and each block extends out an extra `ghost_nodes` distance to facilitate inter-cell communication.
-    pub fn new(bounds: Rectangle<N>, cell_width: [usize; N], ghost_nodes: usize) -> Self {
+    pub fn new(bounds: Rectangle<N>, width: [usize; N], ghost_nodes: usize) -> Self {
         let mut result = Self {
             tree: Tree::new(bounds),
             blocks: TreeBlocks::default(),
-            interfaces: TreeNeighbors::default(),
-            nodes: TreeVertices::new(cell_width, ghost_nodes),
-            overlaps: TreeInterfaces::default(),
+            neighbors: TreeNeighbors::default(),
+            dofs: TreeDofs::new(width, ghost_nodes),
+            interfaces: TreeInterfaces::default(),
         };
 
         result.build();
@@ -54,8 +54,8 @@ impl<const N: usize> Mesh<N> {
     /// Reconstructs interal structure of the TreeMesh, automatically called during refinement.
     pub fn build(&mut self) {
         self.blocks.build(&self.tree);
-        self.nodes.build(&self.blocks);
-        self.interfaces.build(&self.tree, &self.blocks);
+        self.dofs.build(&self.blocks);
+        self.neighbors.build(&self.tree, &self.blocks);
     }
 
     /// Number of cells in the mesh.
@@ -69,12 +69,41 @@ impl<const N: usize> Mesh<N> {
     }
 
     // Number of nodes in mesh.
-    pub fn num_nodes(&self) -> usize {
-        self.nodes.num_vertices()
+    pub fn num_dofs(&self) -> usize {
+        self.dofs.num_dofs()
     }
 
-    pub fn ghost(&self) -> usize {
-        self.nodes.ghost
+
+    pub fn tree(&self) -> &Tree<N> {
+        &self.tree
+    }
+
+    pub fn blocks(&self) -> &TreeBlocks<N> {
+        &self.blocks
+    }
+
+    pub fn dofs(&self) -> &TreeDofs<N> {
+        &self.dofs
+    }
+
+    pub fn neighbors(&self) -> &TreeNeighbors<N> {
+        &self.neighbors
+    }
+
+    pub fn interfaces(&self) -> &TreeInterfaces<N> {
+        &self.interfaces
+    }
+
+    pub fn compute_coarse_dofs(&self, dofs: &mut TreeDofs<N>, interface: &mut TreeInterfaces<N>) {
+        for axis in 0..N {
+            assert!(self.dofs.width[axis] % 4 == 0);
+            dofs.width[axis] = self.dofs.width[axis] 
+        }
+
+        dofs.ghost = self.dofs.ghost;
+
+        dofs.build(&self.blocks);
+        interface.build(&self.tree, &self.blocks, &self.neighbors, dofs);
     }
 
     /// Size of a given block, measured in cells.
@@ -94,7 +123,7 @@ impl<const N: usize> Mesh<N> {
 
     /// The range of nodes that the block owns.
     pub fn block_nodes(&self, block: usize) -> Range<usize> {
-        self.nodes.block_vertices(block)
+        self.dofs.block_dofs(block)
     }
 
     /// Computes flags indicating whether a particular face of a block borders a physical
@@ -115,25 +144,25 @@ impl<const N: usize> Mesh<N> {
     /// Computes the nodespace corresponding to a block.
     pub fn block_space(&self, block: usize) -> NodeSpace<N, ()> {
         let size = self.blocks.block_size(block);
-        let cell_size = from_fn(|axis| size[axis] * self.nodes.width[axis]);
+        let cell_size = from_fn(|axis| size[axis] * self.dofs.width[axis]);
 
         NodeSpace {
             size: cell_size,
-            ghost: self.nodes.ghost,
+            ghost: self.dofs.ghost,
             context: (),
         }
     }
 
     pub fn fine_interfaces(&self) -> impl Iterator<Item = &TreeInterface<N>> + '_ {
-        self.overlaps.fine()
+        self.interfaces.fine()
     }
 
     pub fn direct_interfaces(&self) -> impl Iterator<Item = &TreeInterface<N>> + '_ {
-        self.overlaps.direct()
+        self.interfaces.direct()
     }
 
     pub fn coarse_interfaces(&self) -> impl Iterator<Item = &TreeInterface<N>> + '_ {
-        self.overlaps.coarse()
+        self.interfaces.coarse()
     }
 
     pub fn write_debug(&self) -> String {
@@ -186,7 +215,7 @@ impl<const N: usize> Mesh<N> {
         writeln!(result, "// Fine Interfaces").unwrap();
         writeln!(result, "").unwrap();
 
-        for interface in self.overlaps.fine() {
+        for interface in self.interfaces.fine() {
             writeln!(
                 result,
                 "Fine Interface {} -> {}",
@@ -210,7 +239,7 @@ impl<const N: usize> Mesh<N> {
         writeln!(result, "// Direct Interfaces").unwrap();
         writeln!(result, "").unwrap();
 
-        for interface in self.overlaps.direct() {
+        for interface in self.interfaces.direct() {
             writeln!(
                 result,
                 "Direct Interface {} -> {}",
@@ -234,7 +263,7 @@ impl<const N: usize> Mesh<N> {
         writeln!(result, "// Coarse Interfaces").unwrap();
         writeln!(result, "").unwrap();
 
-        for interface in self.overlaps.coarse() {
+        for interface in self.interfaces.coarse() {
             writeln!(
                 result,
                 "Coarse Interface {} -> {}",
@@ -289,7 +318,7 @@ impl<const N: usize> Mesh<N> {
         let domain = self.tree.domain();
 
         from_fn::<_, N, _>(|axis| {
-            domain.size[axis] / self.nodes.width[axis] as f64 / 2_f64.powi(max_level as i32)
+            domain.size[axis] / self.dofs.width[axis] as f64 / 2_f64.powi(max_level as i32)
         })
         .iter()
         .min_by(|a, b| f64::total_cmp(a, b))

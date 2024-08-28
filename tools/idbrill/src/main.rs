@@ -123,10 +123,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Num Cells: {}", mesh.num_cells());
 
     let mut discrete = Discretization::new();
-    discrete.set_mesh(&mesh);
+    discrete.load_mesh(&mesh);
 
-    let mut rinne = SystemVec::with_length(mesh.num_nodes());
-    let mut hamiltonian = vec![0.0; mesh.num_nodes()].into_boxed_slice();
+    let mut rinne = SystemVec::with_length(mesh.num_dofs());
+    let mut hamiltonian = vec![0.0; mesh.num_dofs()].into_boxed_slice();
 
     if CHOPTUIK {
         choptuik::solve(&mut discrete, 1.0, rinne.as_mut_slice(), &mut hamiltonian)?;
@@ -143,7 +143,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .fill_boundary(HAM_COND, hamiltonian.as_mut().into());
 
     let mut model = Model::empty();
-    model.set_mesh(discrete.mesh());
+    model.load_mesh(discrete.mesh());
     model.write_field("conformal", rinne.field(Rinne::Conformal).to_vec());
     model.write_field("seed", rinne.field(Rinne::Seed).to_vec());
     model.write_field("hamiltonian", hamiltonian.to_vec());
@@ -167,7 +167,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     let mut model = Model::empty();
-    model.set_mesh(discrete.mesh());
+    model.load_mesh(discrete.mesh());
     model.write_system(rinne.as_slice());
     model.export_dat("output/idbrill.dat")?;
 

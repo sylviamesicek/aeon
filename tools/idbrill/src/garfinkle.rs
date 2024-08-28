@@ -109,7 +109,7 @@ impl Operator<2> for PsiOperator {
         index: usize,
     ) {
         if index % 25 == 0 {
-            let mut garfinkle = SystemVec::with_length(discrete.mesh().num_nodes());
+            let mut garfinkle = SystemVec::with_length(discrete.mesh().num_dofs());
             garfinkle
                 .field_mut(Garfinkle::Psi)
                 .copy_from_slice(system.field(Scalar));
@@ -117,7 +117,7 @@ impl Operator<2> for PsiOperator {
                 .field_mut(Garfinkle::Seed)
                 .copy_from_slice(context.field(Scalar));
 
-            let mut hamiltonian = vec![0.0; discrete.mesh().num_nodes()];
+            let mut hamiltonian = vec![0.0; discrete.mesh().num_dofs()];
 
             discrete.order::<4>().project(
                 BoundaryConditions,
@@ -131,7 +131,7 @@ impl Operator<2> for PsiOperator {
                 .fill_boundary(crate::HAM_COND, hamiltonian.as_mut_slice().into());
 
             let mut model = Model::empty();
-            model.set_mesh(discrete.mesh());
+            model.load_mesh(discrete.mesh());
             model.write_field("psi", garfinkle.field(Garfinkle::Psi).to_vec());
             model.write_field("hamiltonian", hamiltonian);
 
@@ -215,7 +215,7 @@ pub fn solve(
 ) -> Result<(), Box<dyn std::error::Error>> {
     log::info!("Filling Seed Function");
 
-    let num_nodes = discrete.mesh().num_nodes();
+    let num_nodes = discrete.mesh().num_dofs();
 
     let mut garfinkle = vec![0.0; num_nodes * 2];
     let (psi, seed) = garfinkle.split_at_mut(num_nodes);

@@ -254,7 +254,7 @@ pub struct DynamicOde<'a> {
 
 impl<'a> Ode for DynamicOde<'a> {
     fn dim(&self) -> usize {
-        field_count::<Dynamic>() * self.discrete.num_nodes()
+        field_count::<Dynamic>() * self.discrete.num_dofs()
     }
 
     fn preprocess(&mut self, system: &mut [f64]) {
@@ -296,7 +296,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let initial = model.read_system::<Rinne>().unwrap();
 
     // Setup dynamic variables
-    let mut dynamic = SystemVec::with_length(discrete.num_nodes());
+    let mut dynamic = SystemVec::with_length(discrete.num_dofs());
 
     // Metric
     dynamic
@@ -336,9 +336,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Step Size {}", h);
 
     // Allocate vectors
-    let mut derivs = SystemVec::with_length(discrete.num_nodes());
-    let mut update = SystemVec::<Dynamic>::with_length(discrete.num_nodes());
-    let mut dissipation = SystemVec::with_length(discrete.num_nodes());
+    let mut derivs = SystemVec::with_length(discrete.num_dofs());
+    let mut update = SystemVec::<Dynamic>::with_length(discrete.num_dofs());
+    let mut dissipation = SystemVec::with_length(discrete.num_dofs());
 
     // Integrate
     let mut integrator = Rk4::new();
@@ -364,7 +364,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         if i % 25 == 0 {
             // Output current system to disk
             let mut model = Model::empty();
-            model.set_mesh(discrete.mesh());
+            model.load_mesh(discrete.mesh());
             model.write_system(dynamic.as_slice());
 
             // for field in Dynamic::fields() {

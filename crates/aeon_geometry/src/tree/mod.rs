@@ -6,11 +6,11 @@ use std::array::from_fn;
 use std::iter::once;
 
 mod blocks;
-mod vertices;
+mod dofs;
 mod interface;
 
 pub use blocks::TreeBlocks;
-pub use vertices::TreeVertices;
+pub use dofs::TreeDofs;
 pub use interface::{TreeBlockNeighbor, TreeNeighbors, TreeInterface, TreeInterfaces};
 
 /// Denotes that the cell neighbors the physical boundary of a spatial domain.

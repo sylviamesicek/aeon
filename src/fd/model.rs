@@ -44,12 +44,12 @@ impl<const N: usize> Model<N> {
         }
     }
 
-    pub fn set_mesh(&mut self, mesh: &Mesh<N>) {
+    pub fn load_mesh(&mut self, mesh: &Mesh<N>) {
         self.mesh.clone_from(mesh);
     }
 
     // Retrieves the mesh that this struct models.
-    pub fn load_mesh(&self, mesh: &mut Mesh<N>) {
+    pub fn save_mesh(&self, mesh: &mut Mesh<N>) {
         mesh.clone_from(&self.mesh);
     }
 

@@ -1,5 +1,5 @@
 use crate::{regions, IndexSpace, Region, NULL};
-use crate::{Face, Side, Tree, TreeBlocks, TreeVertices};
+use crate::{Face, Side, Tree, TreeBlocks, TreeDofs};
 use std::{array, slice};
 
 /// Stores neighbor of a cell on a tree.
@@ -202,28 +202,28 @@ impl<const N: usize> TreeInterfaces<N> {
         tree: &Tree<N>,
         blocks: &TreeBlocks<N>,
         neighbors: &TreeNeighbors<N>,
-        vertices: &TreeVertices<N>,
+        dofs: &TreeDofs<N>,
     ) {
         for fine in neighbors.fine() {
             self.fine
-                .push(Self::interface_from_neighbor(tree, blocks, vertices, fine));
+                .push(Self::interface_from_neighbor(tree, blocks, dofs, fine));
         }
 
         for direct in neighbors.direct() {
             self.direct
-                .push(Self::interface_from_neighbor(tree, blocks, vertices, direct));
+                .push(Self::interface_from_neighbor(tree, blocks, dofs, direct));
         }
 
         for coarse in neighbors.coarse() {
             self.coarse
-                .push(Self::interface_from_neighbor(tree, blocks, vertices, coarse));
+                .push(Self::interface_from_neighbor(tree, blocks, dofs, coarse));
         }
     }
 
     fn interface_from_neighbor(
         tree: &Tree<N>,
         blocks: &TreeBlocks<N>,
-        dofs: &TreeVertices<N>,
+        dofs: &TreeDofs<N>,
         interface: &TreeBlockNeighbor<N>,
     ) -> TreeInterface<N> {
         let a = interface.a.clone();
@@ -275,7 +275,7 @@ impl<const N: usize> TreeInterfaces<N> {
     fn block_ghost_aabb(
         tree: &Tree<N>,
         blocks: &TreeBlocks<N>,
-        dofs: &TreeVertices<N>,
+        dofs: &TreeDofs<N>,
         interface: &TreeBlockNeighbor<N>,
     ) -> ([isize; N], [isize; N]) {
         let a = interface.a.clone();
@@ -348,7 +348,7 @@ impl<const N: usize> TreeInterfaces<N> {
     fn neighbor_origin(
         tree: &Tree<N>,
         blocks: &TreeBlocks<N>,
-        nodes: &TreeVertices<N>,
+        nodes: &TreeDofs<N>,
         a: TreeCellNeighbor<N>,
     ) -> [isize; N] {
         // Compute this boundary interface.
@@ -492,7 +492,7 @@ mod tests {
     fn interfaces() {
         let mut tree = Tree::new(Rectangle::<2>::UNIT);
         let mut blocks = TreeBlocks::default();
-        let mut dofs = TreeVertices::new([4; 2], 2);
+        let mut dofs = TreeDofs::new([4; 2], 2);
         let mut neighbors = TreeNeighbors::default();
         let mut interfaces = TreeInterfaces::default();
 
