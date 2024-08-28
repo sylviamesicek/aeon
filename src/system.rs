@@ -81,6 +81,13 @@ pub struct SystemVec<Label: SystemLabel> {
 }
 
 impl<Label: SystemLabel> SystemVec<Label> {
+    pub fn new() -> Self {
+        Self {
+            data: Vec::new(),
+            _marker: PhantomData,
+        }
+    }
+
     /// Constructs a new system with the given length.
     pub fn with_length(length: usize) -> Self {
         Self {

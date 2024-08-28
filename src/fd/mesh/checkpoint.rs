@@ -1,15 +1,8 @@
 use aeon_geometry::{Rectangle, Tree};
-use ron::ser::PrettyConfig;
-use std::{
-    collections::HashMap,
-    fs::File,
-    io::{self, Read, Write},
-    path::Path,
-};
+use std::collections::HashMap;
 
+use crate::fd::Mesh;
 use crate::system::{SystemLabel, SystemSlice, SystemVec};
-
-use super::Mesh;
 
 /// Represents all information nessessary to store and load meshes from
 /// disk.
@@ -100,22 +93,22 @@ pub struct SystemMeta {
     pub fields: Vec<String>,
 }
 
-pub fn export_checkpoint<const N: usize>(
-    path: impl AsRef<Path>,
-    mesh: &MeshCheckpoint<N>,
-    systems: &SystemCheckpoint,
-) -> io::Result<()> {
-    let data = ron::ser::to_string_pretty(&(mesh, systems), PrettyConfig::default())
-        .map_err(|err| io::Error::other(err))?;
-    let mut file = File::create(path)?;
-    file.write_all(data.as_bytes())
-}
+// pub fn export_checkpoint<const N: usize>(
+//     path: impl AsRef<Path>,
+//     mesh: &MeshCheckpoint<N>,
+//     systems: &SystemCheckpoint,
+// ) -> io::Result<()> {
+//     let data = ron::ser::to_string_pretty(&(mesh, systems), PrettyConfig::default())
+//         .map_err(|err| io::Error::other(err))?;
+//     let mut file = File::create(path)?;
+//     file.write_all(data.as_bytes())
+// }
 
-pub fn import_checkpoint<const N: usize>(
-    path: impl AsRef<Path>,
-) -> io::Result<(MeshCheckpoint<N>, SystemCheckpoint)> {
-    let mut contents: String = String::new();
-    let mut file = File::open(path)?;
-    file.read_to_string(&mut contents)?;
-    ron::from_str(&contents).map_err(io::Error::other)
-}
+// pub fn import_checkpoint<const N: usize>(
+//     path: impl AsRef<Path>,
+// ) -> io::Result<(MeshCheckpoint<N>, SystemCheckpoint)> {
+//     let mut contents: String = String::new();
+//     let mut file = File::open(path)?;
+//     file.read_to_string(&mut contents)?;
+//     ron::from_str(&contents).map_err(io::Error::other)
+// }

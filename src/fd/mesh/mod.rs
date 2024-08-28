@@ -1,7 +1,15 @@
 use aeon_geometry::{
     FaceMask, IndexSpace, Rectangle, Tree, TreeBlocks, TreeDofs, TreeInterfaces, TreeNeighbors,
 };
-use std::{array, fmt::Write, io, ops::Range, path::Path};
+use ron::ser::PrettyConfig;
+use std::{
+    array,
+    fmt::Write,
+    fs::File,
+    io::{self, Read as _, Write as _},
+    ops::Range,
+    path::Path,
+};
 use vtkio::{
     model::{
         Attribute, Attributes, ByteOrder, CellType, Cells, DataArrayBase, DataSet, ElementType,
@@ -13,7 +21,7 @@ use vtkio::{
 mod checkpoint;
 mod order;
 
-pub use checkpoint::{export_checkpoint, import_checkpoint, MeshCheckpoint, SystemCheckpoint};
+pub use checkpoint::{MeshCheckpoint, SystemCheckpoint};
 pub use order::MeshOrder;
 
 use crate::system::{SystemLabel, SystemSlice};
@@ -377,7 +385,35 @@ impl Default for ExportVtkConfig {
 }
 
 impl<const N: usize> Mesh<N> {
-    pub fn export_to_vtk(&self, path: impl AsRef<Path>, config: ExportVtkConfig) -> io::Result<()> {
+    pub fn export_dat(&self, path: impl AsRef<Path>, systems: &SystemCheckpoint) -> io::Result<()> {
+        let mut checkpoint = MeshCheckpoint::default();
+        checkpoint.save_mesh(self);
+
+        let data = ron::ser::to_string_pretty(&(checkpoint, systems), PrettyConfig::default())
+            .map_err(|err| io::Error::other(err))?;
+        let mut file = File::create(path)?;
+        file.write_all(data.as_bytes())
+    }
+
+    pub fn import_dat(
+        &mut self,
+        path: impl AsRef<Path>,
+        systems: &mut SystemCheckpoint,
+    ) -> io::Result<()> {
+        let mut contents: String = String::new();
+        let mut file = File::create(path)?;
+        file.read_to_string(&mut contents)?;
+
+        let (mesh, system): (MeshCheckpoint<N>, SystemCheckpoint) =
+            ron::from_str(&contents).map_err(io::Error::other)?;
+
+        mesh.load_mesh(self);
+        systems.clone_from(&system);
+
+        Ok(())
+    }
+
+    pub fn export_vtk(&self, path: impl AsRef<Path>, config: ExportVtkConfig) -> io::Result<()> {
         const {
             assert!(N > 0 && N <= 2, "Vtk Output only supported for 0 < N ≤ 2");
         }

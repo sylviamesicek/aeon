@@ -1,6 +1,6 @@
 #![allow(mixed_script_confusables)]
 
-use aeon::fd::{Discretization, ExportVtkConfig};
+use aeon::fd::{ExportVtkConfig, Mesh, SystemCheckpoint};
 use aeon::prelude::*;
 use aeon::system::field_count;
 use reborrow::{Reborrow, ReborrowMut};
@@ -249,16 +249,16 @@ impl Operator<2> for DynamicDerivs {
 }
 
 pub struct DynamicOde<'a> {
-    discrete: &'a mut Discretization<2>,
+    mesh: &'a mut Mesh<2>,
 }
 
 impl<'a> Ode for DynamicOde<'a> {
     fn dim(&self) -> usize {
-        field_count::<Dynamic>() * self.discrete.num_dofs()
+        field_count::<Dynamic>() * self.mesh.num_dofs()
     }
 
     fn preprocess(&mut self, system: &mut [f64]) {
-        self.discrete
+        self.mesh
             .order::<ORDER>()
             .fill_boundary(DynamicBC, SystemSliceMut::from_contiguous(system));
     }
@@ -267,7 +267,7 @@ impl<'a> Ode for DynamicOde<'a> {
         let src = SystemSlice::from_contiguous(system);
         let mut dest = SystemSliceMut::from_contiguous(result);
 
-        self.discrete.order::<ORDER>().apply(
+        self.mesh.order::<ORDER>().apply(
             DynamicBC,
             DynamicDerivs,
             src.rb(),
@@ -275,28 +275,28 @@ impl<'a> Ode for DynamicOde<'a> {
             dest.rb_mut(),
         );
 
-        self.discrete
+        self.mesh
             .order::<ORDER>()
             .weak_boundary(DynamicBC, src.rb(), dest.rb_mut())
     }
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // Read model from disk
-    let model = Model::<2>::import_dat("output/idbrill.dat")?;
-
     // Create output directory.
     std::fs::create_dir_all("output/evbrill")?;
 
     // Build discretization
-    let mut discrete = Discretization::new();
-    discrete.set_mesh_from_model(&model);
+    let mut mesh = Mesh::default();
+    let mut systems = SystemCheckpoint::default();
+
+    mesh.import_dat("output/idbrill.dat", &mut systems)?;
 
     // Read initial data
-    let initial = model.read_system::<Rinne>().unwrap();
+    let mut initial = SystemVec::<Rinne>::new();
+    systems.load_system(&mut initial);
 
     // Setup dynamic variables
-    let mut dynamic = SystemVec::with_length(discrete.num_dofs());
+    let mut dynamic = SystemVec::with_length(mesh.num_dofs());
 
     // Metric
     dynamic
@@ -326,30 +326,28 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     dynamic.field_mut(Dynamic::Shiftz).fill(0.0);
 
     // Fill ghost nodes
-    discrete
-        .order::<ORDER>()
+    mesh.order::<ORDER>()
         .fill_boundary(DynamicBC, dynamic.as_mut_slice());
 
     // Begin integration
-    let h = CFL * discrete.mesh().min_spacing();
-    println!("Spacing {}", discrete.mesh().min_spacing());
+    let h = CFL * mesh.min_spacing();
+    println!("Spacing {}", mesh.min_spacing());
     println!("Step Size {}", h);
 
     // Allocate vectors
-    let mut derivs = SystemVec::with_length(discrete.num_dofs());
-    let mut update = SystemVec::<Dynamic>::with_length(discrete.num_dofs());
-    let mut dissipation = SystemVec::with_length(discrete.num_dofs());
+    let mut derivs = SystemVec::with_length(mesh.num_dofs());
+    let mut update = SystemVec::<Dynamic>::with_length(mesh.num_dofs());
+    let mut dissipation = SystemVec::with_length(mesh.num_dofs());
 
     // Integrate
     let mut integrator = Rk4::new();
 
     for i in 0..STEPS {
         // Fill ghost nodes of system
-        discrete
-            .order::<ORDER>()
+        mesh.order::<ORDER>()
             .fill_boundary(DynamicBC, dynamic.as_mut_slice());
 
-        discrete.order::<ORDER>().apply(
+        mesh.order::<ORDER>().apply(
             DynamicBC,
             DynamicDerivs,
             dynamic.as_slice(),
@@ -358,25 +356,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         );
 
         // Output debugging data
-        let norm = discrete.norm(dynamic.field(Dynamic::Theta).into());
+        let norm = mesh.norm(dynamic.field(Dynamic::Theta).into());
         println!("Step {i}, Time {:.5} Norm {:.5e}", i as f64 * h, norm);
 
         if i % 25 == 0 {
             // Output current system to disk
-            let mut model = Model::empty();
-            model.load_mesh(discrete.mesh());
-            model.write_system(dynamic.as_slice());
+            let mut systems = SystemCheckpoint::default();
+            systems.save_system(dynamic.as_slice());
 
-            // for field in Dynamic::fields() {
-            //     let name = format!("{}_dt", field.field_name());
-            //     model.write_field(&name, derivs.field(field).to_vec());
-            // }
-
-            model.export_vtk(
+            mesh.export_vtk(
                 format!("output/evbrill/iter{}.vtu", i / 25),
                 ExportVtkConfig {
                     title: "evbrill".to_string(),
                     ghost: false,
+                    systems,
                 },
             )?;
         }
@@ -384,15 +377,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         // Compute step
         integrator.step(
             h,
-            &mut DynamicOde {
-                discrete: &mut discrete,
-            },
+            &mut DynamicOde { mesh: &mut mesh },
             dynamic.contigious(),
             update.contigious_mut(),
         );
 
         // Compute dissipation
-        discrete.order::<DISS_ORDER>().dissipation(
+        mesh.order::<DISS_ORDER>().dissipation(
             DynamicBC,
             dynamic.as_slice(),
             dissipation.as_mut_slice(),

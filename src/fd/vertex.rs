@@ -2,19 +2,12 @@ use std::array;
 
 use crate::geometry::IndexSpace;
 
-#[derive(PartialEq, Eq, Debug)]
-pub enum Support {
-    Interior,
-    Negative(usize),
-    Positive(usize),
-}
-
 #[derive(Clone, Copy, Debug)]
-pub struct VertexSpace<const N: usize> {
+pub struct StencilSpace<const N: usize> {
     size: [usize; N],
 }
 
-impl<const N: usize> VertexSpace<N> {
+impl<const N: usize> StencilSpace<N> {
     pub fn new(size: [usize; N]) -> Self {
         Self { size }
     }
@@ -25,16 +18,6 @@ impl<const N: usize> VertexSpace<N> {
 
     pub fn index_from_vertex(self, vertex: [usize; N]) -> usize {
         IndexSpace::new(self.size).linear_from_cartesian(vertex)
-    }
-
-    pub fn support(self, vertex: [usize; N], border_width: usize, axis: usize) -> Support {
-        if vertex[axis] < border_width {
-            Support::Negative(vertex[axis])
-        } else if vertex[axis] >= self.size[axis] - border_width {
-            Support::Positive(self.size[axis] - vertex[axis] - 1)
-        } else {
-            Support::Interior
-        }
     }
 
     pub fn apply(self, corner: [usize; N], stencils: [&[f64]; N], field: &[f64]) -> f64 {
@@ -85,7 +68,7 @@ mod tests {
             20.0, 21.0, 22.0, 23.0, 24.0, // 4
         ];
 
-        let space = VertexSpace::new([5, 5]);
+        let space = StencilSpace::new([5, 5]);
         let stencils: [&[f64]; 2] = [&[-1.5, 0.0, -0.5], &[1.0, 2.0, 1.0]];
 
         let apply = |corner| space.apply(corner, stencils, &data);
@@ -100,16 +83,16 @@ mod tests {
         assert_eq!(apply([1, 2]), 36.0 - 52.0);
     }
 
-    #[test]
-    fn support() {
-        let space = VertexSpace::new([7, 7]);
-        let support = |vertex| [space.support(vertex, 2, 0), space.support(vertex, 2, 1)];
+    // #[test]
+    // fn support() {
+    //     let space = VertexSpace::new([7, 7]);
+    //     let support = |vertex| [space.support(vertex, 2, 0), space.support(vertex, 2, 1)];
 
-        assert_eq!(
-            support([0, 0]),
-            [Support::Negative(0), Support::Negative(0)]
-        );
-        assert_eq!(support([5, 3]), [Support::Positive(1), Support::Interior]);
-        assert_eq!(support([2, 4]), [Support::Interior, Support::Interior]);
-    }
+    //     assert_eq!(
+    //         support([0, 0]),
+    //         [Support::Negative(0), Support::Negative(0)]
+    //     );
+    //     assert_eq!(support([5, 3]), [Support::Positive(1), Support::Interior]);
+    //     assert_eq!(support([2, 4]), [Support::Interior, Support::Interior]);
+    // }
 }

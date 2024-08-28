@@ -1,5 +1,5 @@
 use aeon::{
-    fd::{export_checkpoint, ExportVtkConfig, Mesh},
+    fd::{ExportVtkConfig, Mesh},
     prelude::*,
 };
 
@@ -146,7 +146,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     systems.save_field("hamiltonian", &hamiltonian);
 
     if CHOPTUIK {
-        mesh.export_to_vtk(
+        mesh.export_vtk(
             format!("output/choptuik.vtu"),
             ExportVtkConfig {
                 title: "idbrill".to_string(),
@@ -155,7 +155,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             },
         )?;
     } else {
-        mesh.export_to_vtk(
+        mesh.export_vtk(
             format!("output/garfinkle.vtu"),
             ExportVtkConfig {
                 title: "idbrill".to_string(),
@@ -165,10 +165,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         )?;
     }
 
-    let mut model = MeshCheckpoint::default();
-    model.save_mesh(&mesh);
-
-    export_checkpoint("output/idbrill.dat", &model, &systems)?;
+    mesh.export_dat("output/idbrill.dat", &systems)?;
 
     Ok(())
 }

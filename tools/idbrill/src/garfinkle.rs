@@ -131,7 +131,7 @@ impl Operator<2> for PsiOperator {
             systems.save_field("psi", garfinkle.field(Garfinkle::Psi));
             systems.save_field("hamiltonian", &hamiltonian);
 
-            mesh.export_to_vtk(
+            mesh.export_vtk(
                 format!("output/choptuik/iter{}.vtu", { index / 25 }),
                 ExportVtkConfig {
                     title: "choptuik".to_string(),

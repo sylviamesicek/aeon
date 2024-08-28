@@ -1,134 +1,193 @@
-// use crate::fd::{vertex::Support, BasisOperator, Interpolation, Order};
-// use crate::geometry::{faces, CartesianIter, IndexSpace};
-// use crate::prelude::{Face, Rectangle};
-// use std::array::{self, from_fn};
+use crate::fd::{BasisOperator, Interpolation, Order};
+use crate::geometry::{faces, CartesianIter, IndexSpace};
+use crate::prelude::{Face, Rectangle};
+use std::array::{self, from_fn};
 
-// use super::boundary::{Boundary, Condition, Domain, DomainWithBC};
-// use super::kernel2::{Border, Convolution};
-// use super::{BoundaryKind, Dissipation, VertexSpace, BC};
+use super::boundary::{Boundary, BoundaryKind, Condition};
+use super::kernel2::{Border, Convolution};
+use super::vertex::StencilSpace;
+use super::BC;
 
-// /// A uniform rectangular domain of nodes to which
-// /// various derivative and interpolation kernels can be
-// /// applied.
-// #[derive(Debug, Clone)]
-// pub struct NodeSpace<const N: usize, D> {
-//     /// Number of cells along each axis (one less than then number of vertices).
-//     size: [usize; N],
-//     ghost: usize,
-//     context: D,
-// }
+#[derive(PartialEq, Eq, Debug)]
+pub enum Support {
+    Interior,
+    Negative(usize),
+    Positive(usize),
+}
 
-// impl<const N: usize, D> NodeSpace<N, D> {
-//     pub fn new(size: [usize; N], ghost: usize, context: D) -> Self {
-//         Self {
-//             size,
-//             ghost,
-//             context,
-//         }
-//     }
+/// A uniform rectangular domain of nodes to which
+/// various derivative and interpolation kernels can be
+/// applied.
+#[derive(Debug, Clone)]
+pub struct NodeSpace<const N: usize, D> {
+    /// Number of cells along each axis (one less than then number of vertices).
+    size: [usize; N],
+    ghost: usize,
+    boundary: D,
+}
 
-//     pub fn cell_size(&self) -> [usize; N] {
-//         self.size
-//     }
+impl<const N: usize, D> NodeSpace<N, D> {
+    pub fn new(size: [usize; N], ghost: usize, boundary: D) -> Self {
+        Self {
+            size,
+            ghost,
+            boundary,
+        }
+    }
 
-//     /// Returns the spacing along each axis of the node space.
-//     pub fn spacing(&self, bounds: Rectangle<N>) -> [f64; N] {
-//         from_fn(|axis| bounds.size[axis] / self.size[axis] as f64)
-//     }
+    pub fn cell_size(&self) -> [usize; N] {
+        self.size
+    }
 
-//     /// Computes the position of the given vertex.
-//     pub fn position(&self, bounds: Rectangle<N>, node: [isize; N]) -> [f64; N] {
-//         let spacing: [_; N] = from_fn(|axis| bounds.size[axis] / self.size[axis] as f64);
+    pub fn vertex_size(&self) -> [usize; N] {
+        array::from_fn(|axis| self.size[axis] + 1)
+    }
 
-//         let mut result = [0.0; N];
+    pub fn node_size(&self) -> [usize; N] {
+        array::from_fn(|axis| self.size[axis] + 1 + 2 * self.ghost)
+    }
 
-//         for i in 0..N {
-//             result[i] = bounds.origin[i] + spacing[i] * node[i] as f64;
-//         }
+    /// Returns the spacing along each axis of the node space.
+    pub fn spacing(&self, bounds: Rectangle<N>) -> [f64; N] {
+        from_fn(|axis| bounds.size[axis] / self.size[axis] as f64)
+    }
 
-//         result
-//     }
+    /// Computes the position of the given vertex.
+    pub fn position(&self, bounds: Rectangle<N>, node: [isize; N]) -> [f64; N] {
+        let spacing: [_; N] = from_fn(|axis| bounds.size[axis] / self.size[axis] as f64);
 
-//     pub fn vertex_size(&self) -> [usize; N] {
-//         array::from_fn(|axis| self.size[axis] + 1)
-//     }
+        let mut result = [0.0; N];
 
-//     pub fn node_size(&self) -> [usize; N] {
-//         array::from_fn(|axis| self.size[axis] + 1 + 2 * self.ghost)
-//     }
+        for i in 0..N {
+            result[i] = bounds.origin[i] + spacing[i] * node[i] as f64;
+        }
 
-//     pub fn stencil_space(&self) -> VertexSpace<N> {
-//         VertexSpace::new(self.node_size())
-//     }
+        result
+    }
 
-//     pub fn vertex_from_node(&self, node: [isize; N]) -> [usize; N] {
-//         array::from_fn(|axis| {
-//             let mut vertex = node[axis];
+    pub fn index_from_node(&self, node: [isize; N]) -> usize {
+        let cartesian = array::from_fn(|axis| {
+            let mut vertex = node[axis];
 
-//             // if self.context.kind(Face::negative(axis)).has_ghost() {
-//             vertex += self.ghost as isize;
-//             // }
+            // if self.context.kind(Face::negative(axis)).has_ghost() {
+            vertex += self.ghost as isize;
+            // }
 
-//             vertex as usize
-//         })
-//     }
+            vertex as usize
+        });
 
-//     pub fn index_from_node(&self, node: [isize; N]) -> usize {
-//         self.vertex_space()
-//             .index_from_vertex(self.vertex_from_node(node))
-//     }
+        IndexSpace::new(self.node_size()).linear_from_cartesian(cartesian)
+    }
 
-//     pub fn support(&self, node: [isize; N], border_width: usize, axis: usize) -> Support {
-//         self.vertex_space()
-//             .support(self.vertex_from_node(node), border_width, axis)
-//     }
-// }
+    pub fn apply(self, corner: [isize; N], stencils: [&[f64]; N], field: &[f64]) -> f64 {
+        let ssize: [_; N] = array::from_fn(|axis| stencils[axis].len());
 
-// impl<const N: usize, D: Clone> NodeSpace<N, D> {
-//     pub fn map_context<E>(&self, f: impl FnOnce(D) -> E) -> NodeSpace<N, E> {
-//         NodeSpace {
-//             size: self.size,
-//             ghost: self.ghost,
-//             context: f(self.context.clone()),
-//         }
-//     }
-// }
+        let mut result = 0.0;
 
-// impl<const N: usize, D: Boundary<N>> NodeSpace<N, D> {
-//     pub fn attach_condition<E>(&self, condition: E) -> NodeSpace<N, BC<D, E>> {
-//         self.map_context(|boundary| BC::new(boundary, condition))
-//     }
-// }
+        for offset in IndexSpace::new(ssize).iter() {
+            let mut weight = 1.0;
 
-// impl<const N: usize, D: Boundary<N> + Condition<N>> NodeSpace<N, D> {
-//     pub fn stencils<'a, C: Convolution<N>>(
-//         &self,
-//         support: [Support; N],
-//         convolution: &'a C,
-//     ) -> [&'a [f64]; N] {
-//         array::from_fn(move |axis| {
-//             let border = match support[axis] {
-//                 Support::Negative(border) => Border::Negative(border),
-//                 Support::Positive(border) => Border::Positive(border),
-//                 Support::Interior => {
-//                     return convolution.interior(axis);
-//                 }
-//             };
+            for axis in 0..N {
+                weight *= stencils[axis][offset[axis]];
+            }
 
-//             let face = Face {
-//                 axis,
-//                 side: border.side(),
-//             };
+            let index =
+                self.index_from_node(array::from_fn(|axis| corner[axis] + offset[axis] as isize));
+            result += field[index] * weight;
+        }
 
-//             let kind = self.context.kind(face);
-//             let parity = self.context.parity(face);
+        result
+    }
 
-//             match (kind, parity) {
-//                 (BoundaryKind::Parity, false) => convolution.antisymmetric(border, axis),
-//                 (BoundaryKind::Parity, true) => convolution.symmetric(border, axis),
-//                 (BoundaryKind::Custom, _) => convolution.interior(axis),
-//                 (BoundaryKind::Free | BoundaryKind::Radiative, _) => convolution.free(border, axis),
-//             }
-//         })
-//     }
-// }
+    pub fn apply_axis(
+        self,
+        corner: [isize; N],
+        stencil: &[f64],
+        axis: usize,
+        field: &[f64],
+    ) -> f64 {
+        let mut stencils: [&[f64]; N] = [&[1.0]; N];
+        stencils[axis] = stencil;
+
+        self.apply(corner, stencils, field)
+    }
+}
+
+impl<const N: usize, D: Clone> NodeSpace<N, D> {
+    pub fn map_boundary<E>(&self, f: impl FnOnce(D) -> E) -> NodeSpace<N, E> {
+        NodeSpace {
+            size: self.size,
+            ghost: self.ghost,
+            boundary: f(self.boundary.clone()),
+        }
+    }
+}
+
+impl<const N: usize, D: Boundary<N>> NodeSpace<N, D> {
+    pub fn attach_condition<E>(&self, condition: E) -> NodeSpace<N, BC<D, E>> {
+        self.map_boundary(|boundary| BC::new(boundary, condition))
+    }
+
+    pub fn support(&self, node: [usize; N], border_width: usize, axis: usize) -> Support {
+        debug_assert!(self.ghost >= border_width);
+
+        let has_negative = self.boundary.kind(Face::negative(axis)).has_ghost();
+        let has_positive = self.boundary.kind(Face::positive(axis)).has_ghost();
+
+        if !has_negative && node[axis] < border_width {
+            Support::Negative(node[axis])
+        } else if !has_positive && node[axis] >= self.size[axis] + 1 - border_width {
+            Support::Positive(self.size[axis] - 1 - node[axis])
+        } else {
+            Support::Interior
+        }
+    }
+
+    pub fn corner(
+        &self,
+        support: Support,
+        node: [usize; N],
+        border_width: usize,
+        weights: &[f64],
+        axis: usize,
+    ) -> isize {
+        match support {
+            Support::Interior => node[axis] as isize - border_width as isize,
+            Support::Negative(_) => 0,
+            Support::Positive(_) => (self.size[axis] + 1) as isize - weights.len() as isize,
+        }
+    }
+}
+
+impl<const N: usize, D: Boundary<N> + Condition<N>> NodeSpace<N, D> {
+    pub fn stencils<'a, C: Convolution<N>>(
+        &self,
+        support: [Support; N],
+        convolution: &'a C,
+    ) -> [&'a [f64]; N] {
+        array::from_fn(move |axis| {
+            let border = match support[axis] {
+                Support::Negative(border) => Border::Negative(border),
+                Support::Positive(border) => Border::Positive(border),
+                Support::Interior => {
+                    return convolution.interior(axis);
+                }
+            };
+
+            let face = Face {
+                axis,
+                side: border.side(),
+            };
+
+            let kind = self.boundary.kind(face);
+            let parity = self.boundary.parity(face);
+
+            match (kind, parity) {
+                (BoundaryKind::Parity, false) => convolution.antisymmetric(border, axis),
+                (BoundaryKind::Parity, true) => convolution.symmetric(border, axis),
+                (BoundaryKind::Custom, _) => convolution.interior(axis),
+                (BoundaryKind::Free | BoundaryKind::Radiative, _) => convolution.free(border, axis),
+            }
+        })
+    }
+}
