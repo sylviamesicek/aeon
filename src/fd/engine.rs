@@ -1,10 +1,7 @@
-use crate::{
-    fd::{node_from_vertex, BasisOperator, NodeSpace},
-    geometry::Rectangle,
-};
+use crate::{fd::NodeSpace, geometry::Rectangle};
 use std::array;
 
-use crate::fd::{Boundary, Condition, Order, BC};
+use crate::fd::{Boundary, Condition, BC};
 
 /// An interface for computing values, gradients, and hessians of fields.
 pub trait Engine<const N: usize> {

@@ -1,20 +1,17 @@
-use crate::fd::{BasisOperator, Interpolation, Order, Support};
 use crate::geometry::{faces, CartesianIter, IndexSpace};
 use crate::prelude::{Face, Rectangle};
-use std::array::from_fn;
+use std::array::{self, from_fn};
+use std::env::args;
 
-use super::boundary::{Boundary, Condition};
-use super::{BoundaryKind, Dissipation};
+use super::boundary::{Boundary, BoundaryKind, Condition};
+use super::kernel::{Border, Convolution, Kernel, OffsetKernel, Value};
+use super::BC;
 
-/// Transforms a vertex into a node (just casts an array of `usize` -> `isize`).
-pub fn node_from_vertex<const N: usize>(vertex: [usize; N]) -> [isize; N] {
-    let mut result = [0isize; N];
-
-    for axis in 0..N {
-        result[axis] = vertex[axis] as isize;
-    }
-
-    result
+#[derive(Copy, Clone, PartialEq, Eq, Debug)]
+pub enum Support {
+    Interior,
+    Negative(usize),
+    Positive(usize),
 }
 
 /// A uniform rectangular domain of nodes to which
@@ -23,115 +20,110 @@ pub fn node_from_vertex<const N: usize>(vertex: [usize; N]) -> [isize; N] {
 #[derive(Debug, Clone)]
 pub struct NodeSpace<const N: usize, D> {
     /// Number of cells along each axis (one less than then number of vertices).
-    pub size: [usize; N],
-    pub ghost: usize,
-    /// Domain the node space is defined over
-    pub context: D,
+    size: [usize; N],
+    ghost: usize,
+    boundary: D,
 }
 
-impl<const N: usize, D: Clone> NodeSpace<N, D> {
-    /// Constructs new node space.
-    pub fn new(size: [usize; N], ghost: usize, context: D) -> Self {
+impl<const N: usize, D> NodeSpace<N, D> {
+    pub fn new(size: [usize; N], ghost: usize, boundary: D) -> Self {
         Self {
             size,
             ghost,
-            context,
+            boundary,
         }
     }
 
-    pub fn set_context<E>(&self, context: E) -> NodeSpace<N, E> {
-        NodeSpace {
-            size: self.size,
-            ghost: self.ghost,
-            context,
-        }
-    }
-
-    pub fn map_context<E>(&self, f: impl FnOnce(D) -> E) -> NodeSpace<N, E> {
-        NodeSpace {
-            size: self.size,
-            ghost: self.ghost,
-            context: f(self.context.clone()),
-        }
-    }
-
-    /// Computes the number of cells along each axis.
     pub fn cell_size(&self) -> [usize; N] {
         self.size
     }
 
-    /// Returns the number of vertices along each axis.
     pub fn inner_size(&self) -> [usize; N] {
-        let mut size = self.size;
-
-        for s in size.iter_mut() {
-            *s += 1;
-        }
-
-        size
+        array::from_fn(|axis| self.size[axis] + 1)
     }
 
     pub fn full_size(&self) -> [usize; N] {
-        let mut size = self.size;
+        array::from_fn(|axis| self.size[axis] + 1 + 2 * self.ghost)
+    }
 
-        for s in size.iter_mut() {
-            *s += 1 + 2 * self.ghost;
+    pub fn num_nodes(&self) -> usize {
+        self.full_size().iter().product()
+    }
+
+    /// Returns the spacing along each axis of the node space.
+    pub fn spacing(&self, bounds: Rectangle<N>) -> [f64; N] {
+        from_fn(|axis| bounds.size[axis] / self.size[axis] as f64)
+    }
+
+    /// Computes the position of the given vertex.
+    pub fn position(&self, node: [isize; N], bounds: Rectangle<N>) -> [f64; N] {
+        let spacing: [_; N] = from_fn(|axis| bounds.size[axis] / self.size[axis] as f64);
+
+        let mut result = [0.0; N];
+
+        for i in 0..N {
+            result[i] = bounds.origin[i] + spacing[i] * node[i] as f64;
         }
 
-        size
+        result
     }
 
-    /// Computes the total number of nodes in the space.
-    pub fn node_count(&self) -> usize {
-        self.node_size().iter().product()
-    }
-
-    /// Converts a node into a linear index.
     pub fn index_from_node(&self, node: [isize; N]) -> usize {
-        let mut cart = [0; N];
+        let cartesian = array::from_fn(|axis| {
+            let mut vertex = node[axis];
 
-        for axis in 0..N {
-            // if self.domain.kind(Face::negative(axis)).has_ghost() {
-            cart[axis] = (node[axis] + self.ghost as isize) as usize;
-            // } else {
-            //     cart[axis] = node[axis] as usize;
+            // if self.context.kind(Face::negative(axis)).has_ghost() {
+            vertex += self.ghost as isize;
             // }
+
+            vertex as usize
+        });
+
+        IndexSpace::new(self.full_size()).linear_from_cartesian(cartesian)
+    }
+
+    pub fn apply(&self, corner: [isize; N], stencils: [&[f64]; N], field: &[f64]) -> f64 {
+        let ssize: [_; N] = array::from_fn(|axis| stencils[axis].len());
+
+        let mut result = 0.0;
+
+        for offset in IndexSpace::new(ssize).iter() {
+            let mut weight = 1.0;
+
+            for axis in 0..N {
+                weight *= stencils[axis][offset[axis]];
+            }
+
+            let index =
+                self.index_from_node(array::from_fn(|axis| corner[axis] + offset[axis] as isize));
+            result += field[index] * weight;
         }
 
-        IndexSpace::new(self.node_size()).linear_from_cartesian(cart)
+        result
     }
 
-    pub fn index_from_vertex(&self, vertex: [usize; N]) -> usize {
-        self.index_from_node(node_from_vertex(vertex))
+    pub fn apply_axis(
+        &self,
+        corner: [isize; N],
+        stencil: &[f64],
+        axis: usize,
+        field: &[f64],
+    ) -> f64 {
+        let mut stencils: [&[f64]; N] = [&[1.0]; N];
+        stencils[axis] = stencil;
+
+        self.apply(corner, stencils, field)
     }
 
-    /// Returns the total number of indices (including ghost indices) along each axis.
-    pub fn node_size(&self) -> [usize; N] {
-        let mut size = self.size;
-
-        for axis in 0..N {
-            size[axis] += 1;
-
-            // if self.domain.kind(Face::negative(axis)).has_ghost() {
-            size[axis] += self.ghost;
-            // }
-
-            // if self.domain.kind(Face::positive(axis)).has_ghost() {
-            size[axis] += self.ghost;
-            // }
-        }
-
-        size
-    }
-
-    /// Returns the value of the field at the given node.
-    pub fn value(&self, node: [isize; N], src: &[f64]) -> f64 {
-        src[self.index_from_node(node)]
-    }
-
-    /// Sets the value of the field at the given node.
-    pub fn set_value(&self, node: [isize; N], v: f64, dest: &mut [f64]) {
-        dest[self.index_from_node(node)] = v;
+    pub fn evaluate_interior(
+        &self,
+        node: [usize; N],
+        convolution: impl Convolution<N>,
+        field: &[f64],
+    ) -> f64 {
+        let stencils = array::from_fn(|axis| convolution.interior(axis));
+        let corner = array::from_fn(|axis| (node[axis] - convolution.border_width(axis)) as isize);
+        self.apply(corner, stencils, field)
     }
 
     /// Returns a window of just the interior and edges of the node space (no ghost nodes).
@@ -154,450 +146,161 @@ impl<const N: usize, D: Clone> NodeSpace<N, D> {
 
         NodeWindow {
             origin,
-            size: self.node_size(),
+            size: self.full_size(),
         }
-    }
-
-    /// An optimized version of `weights()` for use when only one stencil needs to be applied along one axis.
-    pub fn weights_axis(
-        &self,
-        corner: [isize; N],
-        weights: &'static [f64],
-        axis: usize,
-        field: &[f64],
-    ) -> f64 {
-        let mut result = 0.0;
-
-        let mut node = corner;
-        for index in 0..weights.len() {
-            node[axis] = corner[axis] + index as isize;
-            result += self.value(node, field) * weights[index];
-        }
-
-        result
-    }
-
-    /// Applies a tensor product of weights to the given the field. Here corner is the corner of stencil
-    /// formed by the weights.
-    pub fn weights(&self, corner: [isize; N], weights: [&'static [f64]; N], field: &[f64]) -> f64 {
-        let wsize: [_; N] = from_fn(|axis| weights[axis].len());
-
-        let mut result = 0.0;
-
-        for index in IndexSpace::new(wsize).iter() {
-            let mut weight = 1.0;
-
-            for axis in 0..N {
-                weight *= weights[axis][index[axis]];
-            }
-
-            let node = from_fn(|axis| corner[axis] + index[axis] as isize);
-            // log::warn!("Node {node:?} Weight {weight}");
-            result += self.value(node, field) * weight;
-        }
-
-        result
     }
 }
 
-impl<const N: usize, B> NodeSpace<N, B> {
-    /// Returns the spacing along each axis of the node space.
-    pub fn spacing(&self, bounds: Rectangle<N>) -> [f64; N] {
-        from_fn(|axis| bounds.size[axis] / self.size[axis] as f64)
-    }
-
-    /// Computes the position of the given vertex.
-    pub fn position(&self, node: [isize; N], bounds: Rectangle<N>) -> [f64; N] {
-        let spacing: [_; N] = from_fn(|axis| bounds.size[axis] / self.size[axis] as f64);
-
-        let mut result = [0.0; N];
-
-        for i in 0..N {
-            result[i] = bounds.origin[i] + spacing[i] * node[i] as f64;
+impl<const N: usize, D: Clone> NodeSpace<N, D> {
+    pub fn map_boundary<E>(&self, f: impl FnOnce(D) -> E) -> NodeSpace<N, E> {
+        NodeSpace {
+            size: self.size,
+            ghost: self.ghost,
+            boundary: f(self.boundary.clone()),
         }
-
-        result
     }
-
-    // /// Returns the covariant scaling that must be applied to the given operator.
-    // pub fn scale(&self, operator: [BasisOperator; N] bounds: Rectangle<N>) -> f64 {
-    //     let spacing = self.spacing();
-
-    //     let mut result = 1.0;
-
-    //     for axis in 0..N {
-    //         result *= operator[axis].scale(spacing[axis])
-    //     }
-
-    //     result
-    // }
 }
 
 impl<const N: usize, D: Boundary<N>> NodeSpace<N, D> {
-    // /// Returns the window of all nodes which fall in the given region.
-    // pub fn region_window(&self, region: Region<N>) -> NodeWindow<N> {
-    //     let origin = from_fn(|axis| match region.side(axis) {
-    //         Side::Left => -(self.ghost as isize),
-    //         Side::Middle => 0,
-    //         Side::Right => (self.size[axis] + 1) as isize,
-    //     });
-
-    //     let size = from_fn(|axis| match region.side(axis) {
-    //         Side::Left | Side::Right => self.ghost,
-    //         Side::Middle => self.size[axis] + 1,
-    //     });
-
-    //     NodeWindow { origin, size }
-    // }
-
-    // /// Returns the window of all vertices which border the given region.
-    // pub fn adjacent_window(&self, region: Region<N>) -> NodeWindow<N> {
-    //     let origin = from_fn(|axis| match region.side(axis) {
-    //         Side::Left | Side::Middle => 0,
-    //         Side::Right => self.size[axis] as isize,
-    //     });
-
-    //     let size = from_fn(|axis| match region.side(axis) {
-    //         Side::Left | Side::Right => 1,
-    //         Side::Middle => self.size[axis] + 1,
-    //     });
-
-    //     NodeWindow { origin, size }
-    // }
-
-    // pub fn region_inclusive_window(&self, region: Region<N>) -> NodeWindow<N> {
-    //     let origin = from_fn(|axis| match region.side(axis) {
-    //         Side::Left => -(self.ghost as isize),
-    //         Side::Middle => 0,
-    //         Side::Right => self.size[axis] as isize,
-    //     });
-
-    //     let size = from_fn(|axis| match region.side(axis) {
-    //         Side::Left | Side::Right => self.ghost + 1,
-    //         Side::Middle => self.size[axis] + 1,
-    //     });
-
-    //     NodeWindow { origin, size }
-    // }
-
-    /// Computes the window containing active nodes. Aka all nodes that will be used
-    /// for kernel evaluation.
-    pub fn active_window(&self) -> NodeWindow<N> {
-        let mut origin = [0isize; N];
-        let mut size = self.inner_size();
-
-        faces::<N>()
-            .filter(|&face| self.context.kind(face).has_ghost())
-            .for_each(|face| {
-                if face.side {
-                    size[face.axis] += self.ghost;
-                } else {
-                    origin[face.axis] -= self.ghost as isize;
-                    size[face.axis] += self.ghost;
-                }
-            });
-
-        NodeWindow { origin, size }
+    pub fn attach_condition<E>(&self, condition: E) -> NodeSpace<N, BC<D, E>> {
+        self.map_boundary(|boundary| BC::new(boundary, condition))
     }
 
-    /// Restricts a value from a fine node space to a coarse space.
-    pub fn restrict(&self, supervertex: [usize; N], source: &[f64]) -> f64 {
-        let mut vertex = supervertex;
+    pub fn support(&self, node: [usize; N], border_width: usize, axis: usize) -> Support {
+        debug_assert!(self.ghost >= border_width);
 
-        for axis in 0..N {
-            vertex[axis] *= 2;
+        let has_negative = self.boundary.kind(Face::negative(axis)).has_ghost();
+        let has_positive = self.boundary.kind(Face::positive(axis)).has_ghost();
+
+        if !has_negative && node[axis] < border_width {
+            Support::Negative(node[axis])
+        } else if !has_positive && node[axis] >= self.size[axis] + 1 - border_width {
+            Support::Positive(self.size[axis] - 1 - node[axis])
+        } else {
+            Support::Interior
         }
+    }
 
-        self.value(node_from_vertex(vertex), source)
+    pub fn support_cell(&self, node: [usize; N], border_width: usize, axis: usize) -> Support {
+        if node[axis] < border_width.saturating_sub(1)
+            && !self.boundary.kind(Face::negative(axis)).has_ghost()
+        {
+            let right = node[axis] + 1;
+            Support::Negative(right)
+        } else if node[axis] > self.size[axis] - border_width
+            && !self.boundary.kind(Face::positive(axis)).has_ghost()
+        {
+            let left = self.size[axis] - node[axis];
+            debug_assert!(left > 0);
+            Support::Positive(left)
+        } else {
+            Support::Interior
+        }
     }
 }
 
 impl<const N: usize, D: Boundary<N> + Condition<N>> NodeSpace<N, D> {
-    /// Set strongly enforced boundary conditions.
-    pub fn fill_boundary(&self, dest: &mut [f64]) {
-        let vertex_size = self.inner_size();
-        let active_window = self.active_window();
-
-        // Loop over faces
-        for face in faces::<N>() {
-            let axis = face.axis;
-            let side = face.side;
-
-            // // Window of all active ghost nodes adjacent to the given face.
-            // let mut face_window = active_window.clone();
-
-            // if side {
-            //     // If on the right side we have to offset the origin such that it is equal to `vertex_size[axis]`
-            //     let shift = vertex_size[axis] as isize - face_window.origin[axis];
-            //     face_window.origin[axis] += shift;
-            //     // Similarly we have to shrink the size, clamping the minimum to be 0.
-            //     face_window.size[axis] = (face_window.size[axis] as isize - shift).max(0) as usize;
-            // } else {
-            //     // If on the left side we shrink the size of the window to only include that face.
-            //     face_window.size[axis] = (-face_window.origin[axis]).max(0) as usize;
-            // }
-
-            // // Now we fill the values of these nodes appropriately
-            // for node in face_window.iter() {
-            //     match boundary.kind(face) {
-            //         BoundaryKind::Parity => {
-            //             let parity = condition.parity(face);
-            //             // Compute offset from nearest vertex
-            //             let offset = if side {
-            //                 node[axis] - (vertex_size[axis] as isize - 1)
-            //             } else {
-            //                 node[axis]
-            //             };
-
-            //             // Flip across axis
-            //             let mut source = node;
-            //             source[axis] -= 2 * offset;
-
-            //             // Get value at this inner node and set current node to the (anti)symmetric reflection
-            //             // of that value.
-            //             let v = self.value(source, dest);
-
-            //             if parity {
-            //                 self.set_value(node, v, dest);
-            //             } else {
-            //                 self.set_value(node, -v, dest);
-            //             }
-            //         }
-            //         BoundaryKind::Custom | BoundaryKind::Radiative | BoundaryKind::Free => {
-            //             // Do nothing for custom boundary conditions.
-            //         }
-            //     }
-            // }
-
-            // As well as strongly enforce any diritchlet boundary conditions on axis.
-            let intercept = if side { vertex_size[axis] - 1 } else { 0 } as isize;
-
-            // Iterate over face
-            for node in active_window.plane(axis, intercept) {
-                if self.context.kind(face) == BoundaryKind::Parity
-                    && self.context.parity(face) == false
-                {
-                    // For antisymmetric boundaries we set all values on axis to be 0.
-                    self.set_value(node, 0.0, dest);
+    fn stencils<'a, C: Convolution<N>>(
+        &self,
+        support: [Support; N],
+        convolution: &'a C,
+    ) -> [&'a [f64]; N] {
+        array::from_fn(move |axis| {
+            let border = match support[axis] {
+                Support::Negative(border) => Border::Negative(border),
+                Support::Positive(border) => Border::Positive(border),
+                Support::Interior => {
+                    return convolution.interior(axis);
                 }
-            }
-        }
-    }
+            };
 
-    pub fn vertex_support(&self, vertex: [usize; N], border: [usize; N]) -> [Support; N] {
-        from_fn(|axis| {
-            if vertex[axis] < border[axis] {
-                let right = vertex[axis];
+            let face = Face {
+                axis,
+                side: border.side(),
+            };
 
-                match self.context.kind(Face::negative(axis)) {
-                    BoundaryKind::Free | BoundaryKind::Radiative => Support::FreeNegative(right),
-                    BoundaryKind::Parity => {
-                        if self.context.parity(Face::negative(axis)) {
-                            Support::SymNegative(right)
-                        } else {
-                            Support::AntiSymNegative(right)
-                        }
-                    }
-                    BoundaryKind::Custom => Support::Interior,
-                }
-            } else if vertex[axis] > self.size[axis] - border[axis] {
-                let left = self.size[axis] - vertex[axis];
+            let kind = self.boundary.kind(face);
+            let parity = self.boundary.parity(face);
 
-                match self.context.kind(Face::positive(axis)) {
-                    BoundaryKind::Free | BoundaryKind::Radiative => Support::FreePositive(left),
-                    BoundaryKind::Parity => {
-                        if self.context.parity(Face::positive(axis)) {
-                            Support::SymPositive(left)
-                        } else {
-                            Support::AntiSymPositive(left)
-                        }
-                    }
-                    BoundaryKind::Custom => Support::Interior,
-                }
-            } else {
-                Support::Interior
+            match (kind, parity) {
+                (BoundaryKind::Parity, false) => convolution.antisymmetric(border, axis),
+                (BoundaryKind::Parity, true) => convolution.symmetric(border, axis),
+                (BoundaryKind::Custom, _) => convolution.interior(axis),
+                (BoundaryKind::Free | BoundaryKind::Radiative, _) => convolution.free(border, axis),
             }
         })
     }
 
-    fn support_vertex_axis(&self, vertex: [usize; N], border: usize, axis: usize) -> Support {
-        if vertex[axis] < border {
-            let right = vertex[axis];
-
-            match self.context.kind(Face::negative(axis)) {
-                BoundaryKind::Free | BoundaryKind::Radiative => Support::FreeNegative(right),
-                BoundaryKind::Parity => {
-                    if self.context.parity(Face::negative(axis)) {
-                        Support::SymNegative(right)
-                    } else {
-                        Support::AntiSymNegative(right)
-                    }
-                }
-                BoundaryKind::Custom => Support::Interior,
-            }
-        } else if vertex[axis] > self.size[axis] - border {
-            let left = self.size[axis] - vertex[axis];
-
-            match self.context.kind(Face::positive(axis)) {
-                BoundaryKind::Free | BoundaryKind::Radiative => Support::FreePositive(left),
-                BoundaryKind::Parity => {
-                    if self.context.parity(Face::positive(axis)) {
-                        Support::SymPositive(left)
-                    } else {
-                        Support::AntiSymPositive(left)
-                    }
-                }
-                BoundaryKind::Custom => Support::Interior,
-            }
-        } else {
-            Support::Interior
-        }
-    }
-
-    fn corner_vertex_axis(
+    pub fn evaluate(
         &self,
-        support: Support,
-        node: [isize; N],
-        border: usize,
-        weights: &[f64],
-        axis: usize,
-    ) -> isize {
-        match support {
-            Support::Interior => node[axis] - border as isize,
-            Support::FreeNegative(_) | Support::SymNegative(_) | Support::AntiSymNegative(_) => 0,
-            Support::FreePositive(_) | Support::SymPositive(_) | Support::AntiSymPositive(_) => {
-                (self.size[axis] + 1) as isize - weights.len() as isize
-            }
-        }
-    }
-
-    fn support_cell_axis(&self, vertex: [usize; N], border: usize, axis: usize) -> Support {
-        if vertex[axis] < border.saturating_sub(1) {
-            let right = vertex[axis] + 1;
-
-            match self.context.kind(Face::negative(axis)) {
-                BoundaryKind::Free | BoundaryKind::Radiative => Support::FreeNegative(right),
-                BoundaryKind::Parity => {
-                    if self.context.parity(Face::negative(axis)) {
-                        Support::SymNegative(right)
-                    } else {
-                        Support::AntiSymNegative(right)
-                    }
-                }
-                BoundaryKind::Custom => Support::Interior,
-            }
-        } else if vertex[axis] > self.size[axis] - border {
-            let left = self.size[axis] - vertex[axis];
-            debug_assert!(left > 0);
-
-            match self.context.kind(Face::positive(axis)) {
-                BoundaryKind::Free | BoundaryKind::Radiative => Support::FreePositive(left),
-                BoundaryKind::Parity => {
-                    if self.context.parity(Face::positive(axis)) {
-                        Support::SymPositive(left)
-                    } else {
-                        Support::AntiSymPositive(left)
-                    }
-                }
-                BoundaryKind::Custom => Support::Interior,
-            }
-        } else {
-            Support::Interior
-        }
-    }
-
-    fn corner_cell_axis(
-        &self,
-        support: Support,
-        node: [isize; N],
-        border: usize,
-        weights: &[f64],
-        axis: usize,
-    ) -> isize {
-        match support {
-            Support::Interior => node[axis] - border as isize + 1,
-            Support::FreeNegative(_) | Support::SymNegative(_) | Support::AntiSymNegative(_) => 0,
-            Support::FreePositive(_) | Support::SymPositive(_) | Support::AntiSymPositive(_) => {
-                (self.size[axis] + 1 - weights.len()) as isize
-            }
-        }
-    }
-
-    /// Computes the interpolation of the underlying data to one increased level of refinement.
-    pub fn prolong<const ORDER: usize>(&self, subvertex: [usize; N], field: &[f64]) -> f64 {
-        let order = const { Order::from_value(ORDER) };
-        let vertex: [usize; N] = from_fn(|axis| subvertex[axis] / 2);
-        let node = node_from_vertex(vertex);
-
-        let mut weights: [&'static [f64]; N] = [&[1.0]; N];
-        let mut corner = node;
-        let mut scale = 1.0;
-
-        for axis in 0..N {
-            if subvertex[axis] % 2 == 1 {
-                let border = Interpolation::border(order);
-                let support = self.support_cell_axis(vertex, border, axis);
-
-                weights[axis] = Interpolation::weights(order, support);
-                corner[axis] = self.corner_cell_axis(support, node, border, weights[axis], axis);
-
-                scale *= Interpolation::scale(order);
-            }
-        }
-
-        self.weights(corner, weights, field) * scale
-    }
-
-    /// Computes the interpolation of the underlying data to one increased level of refinement.
-    pub fn dissipation<const ORDER: usize>(&self, vertex: [usize; N], field: &[f64]) -> f64 {
-        let order = const { Order::from_value(ORDER) };
-        let node = node_from_vertex(vertex);
-        let scale = Dissipation::scale(order);
-
-        let mut result = 0.0;
-
-        for axis in 0..N {
-            let border = Dissipation::border(order);
-            let support = self.support_vertex_axis(vertex, border, axis);
-
-            let weights = Dissipation::weights(order, support);
-
-            let mut corner = node;
-            corner[axis] = self.corner_vertex_axis(support, node, border, weights, axis);
-
-            result += self.weights_axis(corner, weights, axis, field);
-        }
-
-        result *= scale;
-
-        result
-    }
-}
-
-impl<const N: usize, D: Boundary<N> + Condition<N>> NodeSpace<N, D> {
-    /// Evaluates the tensor product of the given operators at the vertex.
-    pub fn evaluate<const ORDER: usize>(
-        &self,
-        vertex: [usize; N],
-        operator: [BasisOperator; N],
+        node: [usize; N],
+        convolution: impl Convolution<N>,
         field: &[f64],
     ) -> f64 {
-        let order = const { Order::from_value(ORDER) };
+        let support =
+            array::from_fn(|axis| self.support(node, convolution.border_width(axis), axis));
+        let stencils = self.stencils(support, &convolution);
+        let corner = array::from_fn(|axis| match support[axis] {
+            Support::Interior => node[axis] as isize - convolution.border_width(axis) as isize,
+            Support::Negative(_) => 0,
+            Support::Positive(_) => (self.size[axis] + 1) as isize - stencils[axis].len() as isize,
+        });
+        self.apply(corner, stencils, field)
+    }
 
-        let node = node_from_vertex(vertex);
+    pub fn prolong(&self, supernode: [usize; N], kernel: impl OffsetKernel, field: &[f64]) -> f64 {
+        let node: [_; N] = array::from_fn(|axis| supernode[axis] / 2);
+        let flags: [_; N] = array::from_fn(|axis| supernode[axis] % 2 == 0);
 
-        let mut weights: [&'static [f64]; N] = [&[1.0]; N];
-        let mut corner = node;
+        let border_width: [_; N] = array::from_fn(|axis| {
+            if flags[axis] {
+                kernel.border_width()
+            } else {
+                Value.border_width()
+            }
+        });
+        let support: [_; N] =
+            array::from_fn(|axis| self.support_cell(node, border_width[axis], axis));
 
-        for axis in 0..N {
-            let border = operator[axis].border(order);
-            let support = self.support_vertex_axis(vertex, border, axis);
+        let stencils = array::from_fn(|axis| {
+            if !flags[axis] {
+                return Value.interior();
+            }
 
-            weights[axis] = operator[axis].weights(order, support);
-            corner[axis] = self.corner_vertex_axis(support, node, border, weights[axis], axis);
-        }
+            let border = match support[axis] {
+                Support::Interior => return kernel.interior(),
+                Support::Negative(i) => Border::Negative(i),
+                Support::Positive(i) => Border::Positive(i),
+            };
 
-        self.weights(corner, weights, field)
+            let face = Face {
+                axis,
+                side: border.side(),
+            };
+
+            let kind = self.boundary.kind(face);
+            let parity = self.boundary.parity(face);
+
+            match (kind, parity) {
+                (BoundaryKind::Parity, false) => kernel.antisymmetric(border),
+                (BoundaryKind::Parity, true) => kernel.symmetric(border),
+                (BoundaryKind::Custom, _) => kernel.interior(),
+                (BoundaryKind::Free | BoundaryKind::Radiative, _) => kernel.free(border),
+            }
+        });
+
+        let corner = array::from_fn(|axis| {
+            if !flags[axis] {
+                return node[axis] as isize;
+            }
+
+            match support[axis] {
+                Support::Interior => node[axis] as isize - border_width[axis] as isize + 1,
+                Support::Negative(_) => 0,
+                Support::Positive(_) => (self.size[axis] + 1 - stencils[axis].len()) as isize,
+            }
+        });
+        self.apply(corner, stencils, field)
     }
 }
 
@@ -696,7 +399,10 @@ impl<const N: usize> Iterator for NodePlaneIter<N> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::geometry::Rectangle;
+    use crate::{
+        fd::kernel::{Derivative, Interpolation},
+        geometry::Rectangle,
+    };
 
     #[derive(Clone)]
     struct Quadrant;
@@ -721,25 +427,25 @@ mod tests {
         let space = NodeSpace {
             size: [8],
             ghost: 2,
-            context: Quadrant,
+            boundary: Quadrant,
         };
 
         const BORDER: usize = 3;
 
         let supports = [
-            Support::AntiSymNegative(0),
-            Support::AntiSymNegative(1),
-            Support::AntiSymNegative(2),
+            Support::Negative(0),
+            Support::Negative(1),
+            Support::Negative(2),
             Support::Interior,
             Support::Interior,
             Support::Interior,
-            Support::FreePositive(2),
-            Support::FreePositive(1),
-            Support::FreePositive(0),
+            Support::Positive(2),
+            Support::Positive(1),
+            Support::Positive(0),
         ];
 
         for i in 0..9 {
-            assert_eq!(space.support_vertex_axis([i], BORDER, 0), supports[i]);
+            assert_eq!(space.support([i], BORDER, 0), supports[i]);
         }
     }
 
@@ -747,12 +453,12 @@ mod tests {
         let space = NodeSpace {
             size,
             ghost: 2,
-            context: Quadrant,
+            boundary: Quadrant,
         };
         let bounds = Rectangle::UNIT;
         let spacing = space.spacing(bounds);
 
-        let mut field = vec![0.0; space.node_count()];
+        let mut field = vec![0.0; space.num_nodes()];
 
         for node in space.full_window().iter() {
             let index = space.index_from_node(node);
@@ -765,11 +471,8 @@ mod tests {
         for node in space.inner_window().iter() {
             let vertex = [node[0] as usize, node[1] as usize];
             let [x, y] = space.position(node, bounds);
-            let numerical = space.evaluate::<4>(
-                vertex,
-                [BasisOperator::Derivative, BasisOperator::Derivative],
-                &field,
-            ) / (spacing[0] * spacing[1]);
+            let numerical = space.evaluate(vertex, (Derivative::<4>, Derivative::<4>), &field)
+                / (spacing[0] * spacing[1]);
             let analytical = x.cos() * y.cos();
             // dbg!(numerical - analytical);
             let error: f64 = (numerical - analytical).abs();
@@ -793,17 +496,17 @@ mod tests {
         let cspace = NodeSpace {
             size,
             ghost: 2,
-            context: Quadrant,
+            boundary: Quadrant,
         };
         let rspace = NodeSpace {
             size: size.map(|v| v * 2),
             ghost: 2,
-            context: Quadrant,
+            boundary: Quadrant,
         };
 
         let bounds = Rectangle::UNIT;
 
-        let mut field = vec![0.0; cspace.node_count()];
+        let mut field = vec![0.0; cspace.num_nodes()];
 
         for node in cspace.full_window().iter() {
             let index = cspace.index_from_node(node);
@@ -816,7 +519,7 @@ mod tests {
         for node in rspace.inner_window().iter() {
             let vertex = [node[0] as usize, node[1] as usize];
             let [x, y] = rspace.position(node, bounds.clone());
-            let numerical = cspace.prolong::<4>(vertex, &field);
+            let numerical = cspace.prolong(vertex, Interpolation::<4>, &field);
             let analytical = x.sin() * y.sin();
             let error: f64 = (numerical - analytical).abs();
             result = result.max(error);
