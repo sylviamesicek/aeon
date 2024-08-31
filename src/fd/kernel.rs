@@ -17,7 +17,7 @@ impl Border {
     }
 }
 
-pub trait Kernel {
+pub trait Kernel: Clone {
     fn border_width(&self) -> usize;
 
     fn interior(&self) -> &[f64];
@@ -31,6 +31,7 @@ pub trait Kernel {
 pub trait OffsetKernel: Kernel {}
 
 /// Value operation.
+#[derive(Clone)]
 pub struct Value;
 
 impl Kernel for Value {
@@ -60,6 +61,7 @@ impl Kernel for Value {
 }
 
 /// Derivative operation of a given order.
+#[derive(Clone)]
 pub struct Derivative<const ORDER: usize>;
 
 impl Kernel for Derivative<2> {
@@ -146,6 +148,7 @@ impl Kernel for Derivative<4> {
 }
 
 /// Second derivative operator of a given order.
+#[derive(Clone)]
 pub struct SecondDerivative<const ORDER: usize>;
 
 impl Kernel for SecondDerivative<2> {
@@ -235,6 +238,7 @@ impl Kernel for SecondDerivative<4> {
 }
 
 /// Kriss Olgier dissipation of the given order.
+#[derive(Clone)]
 pub struct Dissipation<const ORDER: usize>;
 
 impl Kernel for Dissipation<4> {
@@ -449,11 +453,11 @@ impl_convolution_for_tuples! {
 }
 
 /// Computes the gradient along the given axis.
-pub struct Gradient<const N: usize, const ORDER: usize>(pub usize);
+#[derive(Clone)]
+pub struct Gradient<const ORDER: usize>(pub usize);
 
-impl<const N: usize, const ORDER: usize> Convolution<N> for Gradient<N, ORDER>
+impl<const N: usize, const ORDER: usize> Convolution<N> for Gradient<ORDER>
 where
-    SecondDerivative<ORDER>: Kernel,
     Derivative<ORDER>: Kernel,
 {
     fn border_width(&self, axis: usize) -> usize {
@@ -502,9 +506,9 @@ where
 }
 
 /// Computes the mixed derivative of the given axes.
-pub struct Hessian<const N: usize, const ORDER: usize>(pub usize, pub usize);
+pub struct Hessian<const ORDER: usize>(pub usize, pub usize);
 
-impl<const N: usize, const ORDER: usize> Hessian<N, ORDER> {
+impl<const ORDER: usize> Hessian<ORDER> {
     fn is_second(&self, axis: usize) -> bool {
         self.0 == self.1 && axis == self.0
     }
@@ -514,7 +518,7 @@ impl<const N: usize, const ORDER: usize> Hessian<N, ORDER> {
     }
 }
 
-impl<const N: usize, const ORDER: usize> Convolution<N> for Hessian<N, ORDER>
+impl<const N: usize, const ORDER: usize> Convolution<N> for Hessian<ORDER>
 where
     SecondDerivative<ORDER>: Kernel,
     Derivative<ORDER>: Kernel,
@@ -574,6 +578,7 @@ where
     }
 }
 
+#[derive(Clone)]
 pub struct Interpolation<const ORDER: usize>;
 
 impl Kernel for Interpolation<2> {

@@ -1,6 +1,6 @@
 #![allow(mixed_script_confusables)]
 
-use aeon::fd::{ExportVtkConfig, Mesh, SystemCheckpoint};
+use aeon::fd::{DissipationOperator, ExportVtkConfig, Mesh, SystemCheckpoint};
 use aeon::prelude::*;
 use aeon::system::field_count;
 use reborrow::{Reborrow, ReborrowMut};
@@ -106,9 +106,16 @@ impl Operator<2> for DynamicDerivs {
 
                 let $value = engine.value(field);
 
-                let grad = engine.gradient(condition(Dynamic::$field), field);
-                let $dr = grad[0];
-                let $dz = grad[1];
+                let $dr = engine.evaluate(
+                    (Derivative::<ORDER>, Value),
+                    condition(Dynamic::$field),
+                    field,
+                );
+                let $dz = engine.evaluate(
+                    (Value, Derivative::<ORDER>),
+                    condition(Dynamic::$field),
+                    field,
+                );
             };
         }
 
@@ -118,14 +125,32 @@ impl Operator<2> for DynamicDerivs {
 
                 let $value = engine.value(field);
 
-                let grad = engine.gradient(condition(Dynamic::$field), field);
-                let $dr = grad[0];
-                let $dz = grad[1];
+                let $dr = engine.evaluate(
+                    (Derivative::<ORDER>, Value),
+                    condition(Dynamic::$field),
+                    field,
+                );
+                let $dz = engine.evaluate(
+                    (Value, Derivative::<ORDER>),
+                    condition(Dynamic::$field),
+                    field,
+                );
 
-                let hess = engine.hessian(condition(Dynamic::$field), field);
-                let $drr = hess[0][0];
-                let $drz = hess[0][1];
-                let $dzz = hess[1][1];
+                let $drr = engine.evaluate(
+                    (SecondDerivative::<ORDER>, Value),
+                    condition(Dynamic::$field),
+                    field,
+                );
+                let $drz = engine.evaluate(
+                    (Derivative::<ORDER>, Derivative::<ORDER>),
+                    condition(Dynamic::$field),
+                    field,
+                );
+                let $dzz = engine.evaluate(
+                    (Value, SecondDerivative::<ORDER>),
+                    condition(Dynamic::$field),
+                    field,
+                );
             };
         }
 
@@ -259,15 +284,14 @@ impl<'a> Ode for DynamicOde<'a> {
 
     fn preprocess(&mut self, system: &mut [f64]) {
         self.mesh
-            .order::<ORDER>()
-            .fill_boundary(DynamicBC, SystemSliceMut::from_contiguous(system));
+            .fill_boundary::<ORDER, _>(DynamicBC, SystemSliceMut::from_contiguous(system));
     }
 
     fn derivative(&mut self, system: &[f64], result: &mut [f64]) {
         let src = SystemSlice::from_contiguous(system);
         let mut dest = SystemSliceMut::from_contiguous(result);
 
-        self.mesh.order::<ORDER>().apply(
+        self.mesh.apply(
             DynamicBC,
             DynamicDerivs,
             src.rb(),
@@ -276,8 +300,7 @@ impl<'a> Ode for DynamicOde<'a> {
         );
 
         self.mesh
-            .order::<ORDER>()
-            .weak_boundary(DynamicBC, src.rb(), dest.rb_mut())
+            .weak_boundary::<ORDER, _>(DynamicBC, src.rb(), dest.rb_mut())
     }
 }
 
@@ -326,8 +349,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     dynamic.field_mut(Dynamic::Shiftz).fill(0.0);
 
     // Fill ghost nodes
-    mesh.order::<ORDER>()
-        .fill_boundary(DynamicBC, dynamic.as_mut_slice());
+    mesh.fill_boundary::<ORDER, _>(DynamicBC, dynamic.as_mut_slice());
 
     // Begin integration
     let h = CFL * mesh.min_spacing();
@@ -344,10 +366,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     for i in 0..STEPS {
         // Fill ghost nodes of system
-        mesh.order::<ORDER>()
-            .fill_boundary(DynamicBC, dynamic.as_mut_slice());
+        mesh.fill_boundary::<ORDER, _>(DynamicBC, dynamic.as_mut_slice());
 
-        mesh.order::<ORDER>().apply(
+        mesh.apply(
             DynamicBC,
             DynamicDerivs,
             dynamic.as_slice(),
@@ -383,9 +404,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         );
 
         // Compute dissipation
-        mesh.order::<DISS_ORDER>().dissipation(
+        mesh.apply(
             DynamicBC,
+            DissipationOperator::<DISS_ORDER, _>(DynamicBC),
             dynamic.as_slice(),
+            SystemSlice::empty(),
             dissipation.as_mut_slice(),
         );
 

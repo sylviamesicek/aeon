@@ -1,7 +1,8 @@
+use aeon_geometry::IndexWindow;
+
 use crate::geometry::{faces, CartesianIter, IndexSpace};
 use crate::prelude::{Face, Rectangle};
 use std::array::{self, from_fn};
-use std::env::args;
 
 use super::boundary::{Boundary, BoundaryKind, Condition};
 use super::kernel::{Border, Convolution, Kernel, OffsetKernel, Value};
@@ -12,6 +13,14 @@ pub enum Support {
     Interior,
     Negative(usize),
     Positive(usize),
+}
+
+pub fn vertex_from_node<const N: usize>(node: [isize; N]) -> [usize; N] {
+    array::from_fn(|axis| node[axis] as usize)
+}
+
+pub fn node_from_vertex<const N: usize>(vertex: [usize; N]) -> [isize; N] {
+    array::from_fn(|axis| vertex[axis] as isize)
 }
 
 /// A uniform rectangular domain of nodes to which
@@ -34,8 +43,12 @@ impl<const N: usize, D> NodeSpace<N, D> {
         }
     }
 
-    pub fn cell_size(&self) -> [usize; N] {
+    pub fn size(&self) -> [usize; N] {
         self.size
+    }
+
+    pub fn ghost(&self) -> usize {
+        self.ghost
     }
 
     pub fn inner_size(&self) -> [usize; N] {
@@ -82,6 +95,15 @@ impl<const N: usize, D> NodeSpace<N, D> {
         IndexSpace::new(self.full_size()).linear_from_cartesian(cartesian)
     }
 
+    pub fn index_from_vertex(&self, vertex: [usize; N]) -> usize {
+        self.index_from_node(node_from_vertex(vertex))
+    }
+
+    // pub fn value(&self, node: [isize; N], field: &[f64]) -> f64 {
+    //     let index = self.index_from_node(node);
+    //     field[index]
+    // }
+
     pub fn apply(&self, corner: [isize; N], stencils: [&[f64]; N], field: &[f64]) -> f64 {
         let ssize: [_; N] = array::from_fn(|axis| stencils[axis].len());
 
@@ -117,13 +139,21 @@ impl<const N: usize, D> NodeSpace<N, D> {
 
     pub fn evaluate_interior(
         &self,
-        node: [usize; N],
+        vertex: [usize; N],
         convolution: impl Convolution<N>,
         field: &[f64],
     ) -> f64 {
         let stencils = array::from_fn(|axis| convolution.interior(axis));
-        let corner = array::from_fn(|axis| (node[axis] - convolution.border_width(axis)) as isize);
+        let corner =
+            array::from_fn(|axis| (vertex[axis] - convolution.border_width(axis)) as isize);
         self.apply(corner, stencils, field)
+    }
+
+    pub fn vertices(&self) -> IndexWindow<N> {
+        IndexWindow {
+            origin: [0; N],
+            size: self.inner_size(),
+        }
     }
 
     /// Returns a window of just the interior and edges of the node space (no ghost nodes).
@@ -149,6 +179,14 @@ impl<const N: usize, D> NodeSpace<N, D> {
             size: self.full_size(),
         }
     }
+
+    pub fn attach_boundary<E>(&self, f: E) -> NodeSpace<N, E> {
+        NodeSpace {
+            size: self.size,
+            ghost: self.ghost,
+            boundary: f,
+        }
+    }
 }
 
 impl<const N: usize, D: Clone> NodeSpace<N, D> {
@@ -166,16 +204,16 @@ impl<const N: usize, D: Boundary<N>> NodeSpace<N, D> {
         self.map_boundary(|boundary| BC::new(boundary, condition))
     }
 
-    pub fn support(&self, node: [usize; N], border_width: usize, axis: usize) -> Support {
+    pub fn support(&self, vertex: [usize; N], border_width: usize, axis: usize) -> Support {
         debug_assert!(self.ghost >= border_width);
 
         let has_negative = self.boundary.kind(Face::negative(axis)).has_ghost();
         let has_positive = self.boundary.kind(Face::positive(axis)).has_ghost();
 
-        if !has_negative && node[axis] < border_width {
-            Support::Negative(node[axis])
-        } else if !has_positive && node[axis] >= self.size[axis] + 1 - border_width {
-            Support::Positive(self.size[axis] - 1 - node[axis])
+        if !has_negative && vertex[axis] < border_width {
+            Support::Negative(vertex[axis])
+        } else if !has_positive && vertex[axis] >= self.size[axis] + 1 - border_width {
+            Support::Positive(self.size[axis] - 1 - vertex[axis])
         } else {
             Support::Interior
         }
@@ -200,6 +238,32 @@ impl<const N: usize, D: Boundary<N>> NodeSpace<N, D> {
 }
 
 impl<const N: usize, D: Boundary<N> + Condition<N>> NodeSpace<N, D> {
+    /// Set strongly enforced boundary conditions.
+    pub fn fill_boundary(&self, dest: &mut [f64]) {
+        let vertex_size = self.inner_size();
+        let active_window = self.inner_window();
+
+        // Loop over faces
+        for face in faces::<N>() {
+            let axis = face.axis;
+            let side = face.side;
+
+            // As well as strongly enforce any diritchlet boundary conditions on axis.
+            let intercept = if side { vertex_size[axis] - 1 } else { 0 } as isize;
+
+            // Iterate over face
+            for node in active_window.plane(axis, intercept) {
+                if self.boundary.kind(face) == BoundaryKind::Parity
+                    && self.boundary.parity(face) == false
+                {
+                    // For antisymmetric boundaries we set all values on axis to be 0.
+                    let index = self.index_from_node(node);
+                    dest[index] = 0.0;
+                }
+            }
+        }
+    }
+
     fn stencils<'a, C: Convolution<N>>(
         &self,
         support: [Support; N],
@@ -233,15 +297,15 @@ impl<const N: usize, D: Boundary<N> + Condition<N>> NodeSpace<N, D> {
 
     pub fn evaluate(
         &self,
-        node: [usize; N],
+        vertex: [usize; N],
         convolution: impl Convolution<N>,
         field: &[f64],
     ) -> f64 {
         let support =
-            array::from_fn(|axis| self.support(node, convolution.border_width(axis), axis));
+            array::from_fn(|axis| self.support(vertex, convolution.border_width(axis), axis));
         let stencils = self.stencils(support, &convolution);
         let corner = array::from_fn(|axis| match support[axis] {
-            Support::Interior => node[axis] as isize - convolution.border_width(axis) as isize,
+            Support::Interior => vertex[axis] as isize - convolution.border_width(axis) as isize,
             Support::Negative(_) => 0,
             Support::Positive(_) => (self.size[axis] + 1) as isize - stencils[axis].len() as isize,
         });

@@ -2,18 +2,20 @@
 
 mod boundary;
 mod engine;
-// mod engine2;
 mod kernel;
 mod mesh;
 mod node;
 
 pub use boundary::{BlockBC, Boundary, BoundaryKind, Condition, Conditions, SystemBC, UnitBC, BC};
 pub use engine::{Engine, FdEngine, FdIntEngine};
-pub use kernel::{Derivative, Dissipation, Interpolation, SecondDerivative};
-pub use mesh::{ExportVtkConfig, Mesh, MeshCheckpoint, MeshOrder, SystemCheckpoint};
-pub use node::{NodeSpace, NodeWindow};
+pub use kernel::{
+    Derivative, Dissipation, Gradient, Hessian, Interpolation, Kernel, SecondDerivative, Single,
+    Value,
+};
+pub use mesh::{ExportVtkConfig, Mesh, MeshCheckpoint, SystemCheckpoint};
+pub use node::{node_from_vertex, vertex_from_node, NodeSpace, NodeWindow};
 
-use crate::system::{SystemFields, SystemLabel, SystemSlice, SystemValue};
+use crate::system::{Empty, SystemFields, SystemLabel, SystemSlice, SystemValue};
 
 /// A function takes in a position and returns a system of values.
 pub trait Function<const N: usize>: Clone {
@@ -27,6 +29,9 @@ pub trait Projection<const N: usize>: Clone {
     type Input: SystemLabel;
     type Output: SystemLabel;
 
+    type Boundary: Boundary<N>;
+    fn boundary(&self) -> Self::Boundary;
+
     fn project(
         &self,
         engine: &impl Engine<N>,
@@ -39,6 +44,9 @@ pub trait Projection<const N: usize>: Clone {
 pub trait Operator<const N: usize>: Clone {
     type System: SystemLabel;
     type Context: SystemLabel;
+
+    type Boundary: Boundary<N>;
+    fn boundary(&self) -> Self::Boundary;
 
     fn apply(
         &self,
@@ -54,5 +62,45 @@ pub trait Operator<const N: usize>: Clone {
         _context: SystemSlice<Self::Context>,
         _index: usize,
     ) {
+    }
+}
+
+#[derive(Clone)]
+pub struct DissipationOperator<const ORDER: usize, B>(pub B);
+
+impl<const N: usize, const ORDER: usize, B: Boundary<N> + Conditions<N>> Operator<N>
+    for DissipationOperator<ORDER, B>
+where
+    Dissipation<ORDER>: Kernel,
+{
+    type System = B::System;
+    type Context = Empty;
+
+    type Boundary = B;
+    fn boundary(&self) -> Self::Boundary {
+        self.0.clone()
+    }
+
+    fn apply(
+        &self,
+        engine: &impl Engine<N>,
+        input: SystemFields<'_, Self::System>,
+        _context: SystemFields<'_, Self::Context>,
+    ) -> SystemValue<Self::System> {
+        SystemValue::<Self::System>::from_fn(|system| {
+            let mut result = 0.0;
+
+            for axis in 0..N {
+                let value = engine.evaluate(
+                    Single(Dissipation::<ORDER>, axis),
+                    SystemBC::new(system.clone(), self.0.clone()),
+                    input.field(system.clone()),
+                );
+
+                result += value;
+            }
+
+            result
+        })
     }
 }

@@ -22,7 +22,6 @@ mod checkpoint;
 mod order;
 
 pub use checkpoint::{MeshCheckpoint, SystemCheckpoint};
-pub use order::MeshOrder;
 
 use crate::system::{SystemLabel, SystemSlice};
 
@@ -111,11 +110,7 @@ impl<const N: usize> Mesh<N> {
         let size = self.blocks.block_size(block);
         let cell_size = array::from_fn(|axis| size[axis] * self.dofs.width[axis]);
 
-        NodeSpace {
-            size: cell_size,
-            ghost: self.dofs.ghost,
-            context: (),
-        }
+        NodeSpace::new(cell_size, self.dofs.ghost, ())
     }
 
     pub fn num_coarse_dofs(&self) -> usize {
@@ -130,11 +125,7 @@ impl<const N: usize> Mesh<N> {
         let size = self.blocks.block_size(block);
         let cell_size = array::from_fn(|axis| size[axis] * self.coarse_dofs.width[axis]);
 
-        NodeSpace {
-            size: cell_size,
-            ghost: self.coarse_dofs.ghost,
-            context: (),
-        }
+        NodeSpace::new(cell_size, self.coarse_dofs.ghost, ())
     }
 
     /// Computes flags indicating whether a particular face of a block borders a physical
@@ -191,19 +182,18 @@ impl<const N: usize> Mesh<N> {
         for block in 0..self.blocks.num_blocks() {
             let bounds = self.blocks.block_bounds(block);
             let space = self.block_space(block);
-            let vertex_size = space.inner_size();
+            let size = space.size();
 
             let data = &src[self.block_dofs(block)];
 
             let mut block_result = 0.0;
 
-            for vertex in IndexSpace::new(vertex_size).iter() {
-                let index = space.index_from_vertex(vertex);
-
+            for node in space.inner_window() {
+                let index = space.index_from_node(node);
                 let mut value = data[index] * data[index];
 
                 for axis in 0..N {
-                    if vertex[axis] == 0 || vertex[axis] == vertex_size[axis] - 1 {
+                    if node[axis] == 0 || node[axis] == size[axis] as isize {
                         value *= 0.5;
                     }
                 }
@@ -338,10 +328,6 @@ impl<const N: usize> Mesh<N> {
             .unwrap();
         }
     }
-
-    pub fn order<const ORDER: usize>(&mut self) -> MeshOrder<'_, N, ORDER> {
-        MeshOrder(self)
-    }
 }
 
 impl<const N: usize> Default for Mesh<N> {
@@ -428,13 +414,13 @@ impl<const N: usize> Mesh<N> {
         for block in 0..self.blocks.num_blocks() {
             let space = self.block_space(block);
 
-            let mut cell_size = space.cell_size();
+            let mut cell_size = space.size();
             let mut vertex_size = space.inner_size();
 
             if config.ghost {
                 for axis in 0..N {
-                    cell_size[axis] += 2 * space.ghost;
-                    vertex_size[axis] += 2 * space.ghost;
+                    cell_size[axis] += 2 * space.ghost();
+                    vertex_size[axis] += 2 * space.ghost();
                 }
             }
 
@@ -534,7 +520,8 @@ impl<const N: usize> Mesh<N> {
                     };
 
                     for node in window {
-                        let value = space.value(node, &field_data[nodes.clone()]);
+                        let index = space.index_from_node(node);
+                        let value = field_data[nodes.start + index];
                         data.push(value);
                     }
                 }
@@ -564,7 +551,8 @@ impl<const N: usize> Mesh<N> {
                 };
 
                 for node in window {
-                    let value = space.value(node, &system[nodes.clone()]);
+                    let index = space.index_from_node(node);
+                    let value = system[nodes.start + index];
                     data.push(value);
                 }
             }

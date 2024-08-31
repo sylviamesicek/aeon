@@ -3,7 +3,7 @@ use std::marker::PhantomData;
 use reborrow::{Reborrow, ReborrowMut};
 
 use crate::{
-    fd::{Boundary, Conditions, Engine, Mesh, Operator},
+    fd::{Boundary, Conditions, Derivative, Engine, Interpolation, Kernel, Mesh, Operator},
     ode::{Ode, Rk4},
     prelude::Face,
     system::{field_count, SystemFields, SystemLabel, SystemSlice, SystemSliceMut, SystemValue},
@@ -38,11 +38,14 @@ impl<Label: SystemLabel> HyperRelaxSolver<Label> {
     >(
         &mut self,
         mesh: &mut Mesh<N>,
-        bc: BC,
         operator: O,
         context: SystemSlice<'_, O::Context>,
         mut system: SystemSliceMut<'_, Label>,
-    ) {
+    ) where
+        Interpolation<ORDER>: Kernel,
+        Derivative<ORDER>: Kernel,
+        O::Boundary: Conditions<N, System = O::System> + Sync,
+    {
         // Total number of degreees of freedom in the whole system
         let dimension = field_count::<Label>() * system.len();
 
@@ -77,12 +80,11 @@ impl<Label: SystemLabel> HyperRelaxSolver<Label> {
 
         for index in 0..self.max_steps {
             {
-                mesh.order::<ORDER>().fill_boundary(
-                    bc.clone(),
+                mesh.fill_boundary::<ORDER, _>(
+                    operator.boundary(),
                     SystemSliceMut::from_contiguous(&mut data[..dimension]),
                 );
-                mesh.order::<ORDER>().apply(
-                    bc.clone(),
+                mesh.apply(
                     operator.clone(),
                     SystemSlice::from_contiguous(&mut data[..dimension]),
                     context.rb(),
@@ -118,7 +120,6 @@ impl<Label: SystemLabel> HyperRelaxSolver<Label> {
                 mesh,
                 dimension,
                 dampening: self.dampening,
-                bc: bc.clone(),
                 operator: operator.clone(),
                 context: context.rb(),
                 _marker: PhantomData::<[usize; ORDER]>,
@@ -148,27 +149,62 @@ impl<Label: SystemLabel> HyperRelaxSolver<Label> {
 
 /// Wraps the du/dt = v - u * η operation.
 #[derive(Clone)]
-struct UOperator<const N: usize, System: SystemLabel> {
+struct UOperator<const N: usize, System, B> {
     dampening: f64,
+    boundary: B,
     _marker: PhantomData<System>,
 }
 
-impl<'a, const N: usize, System: SystemLabel> Operator<N> for UOperator<N, System> {
-    type System = System;
-    type Context = System;
+impl<const N: usize, S: SystemLabel, B: Boundary<N>> Operator<N> for UOperator<N, S, B> {
+    type System = S;
+    type Context = S;
+
+    type Boundary = B;
+    fn boundary(&self) -> Self::Boundary {
+        self.boundary.clone()
+    }
 
     fn apply(
         &self,
         engine: &impl Engine<N>,
-        input: SystemFields<'_, System>,
-        context: SystemFields<'_, System>,
-    ) -> SystemValue<System> {
-        SystemValue::from_fn(|field: System| {
+        input: SystemFields<'_, S>,
+        context: SystemFields<'_, S>,
+    ) -> SystemValue<S> {
+        SystemValue::from_fn(|field: S| {
             let u = engine.value(input.field(field.clone()));
             let v = engine.value(context.field(field.clone()));
 
             v - u * self.dampening
         })
+    }
+}
+
+#[derive(Clone)]
+struct VOperator<const N: usize, O> {
+    dampening: f64,
+    inner: O,
+}
+
+impl<const N: usize, O: Operator<N>> Operator<N> for VOperator<N, O> {
+    type System = O::System;
+    type Context = O::Context;
+
+    type Boundary = VBoundary<O::Boundary>;
+
+    fn boundary(&self) -> Self::Boundary {
+        VBoundary {
+            dampening: self.dampening,
+            inner: self.inner.boundary(),
+        }
+    }
+
+    fn apply(
+        &self,
+        engine: &impl Engine<N>,
+        input: SystemFields<'_, Self::System>,
+        context: SystemFields<'_, Self::Context>,
+    ) -> SystemValue<Self::System> {
+        self.inner.apply(engine, input, context)
     }
 }
 
@@ -198,18 +234,11 @@ impl<const N: usize, I: Conditions<N>> Conditions<N> for VBoundary<I> {
     }
 }
 
-struct FictitiousOde<
-    'a,
-    const N: usize,
-    const ORDER: usize,
-    BC: Boundary<N> + Conditions<N>,
-    O: Operator<N>,
-> {
+struct FictitiousOde<'a, const N: usize, const ORDER: usize, O: Operator<N>> {
     mesh: &'a mut Mesh<N>,
     dimension: usize,
     dampening: f64,
 
-    bc: BC,
     operator: O,
 
     context: SystemSlice<'a, O::Context>,
@@ -217,10 +246,12 @@ struct FictitiousOde<
     _marker: PhantomData<[usize; ORDER]>,
 }
 
-impl<'a, const N: usize, const ORDER: usize, BC, O> Ode for FictitiousOde<'a, N, ORDER, BC, O>
+impl<'a, const N: usize, const ORDER: usize, O> Ode for FictitiousOde<'a, N, ORDER, O>
 where
-    BC: Boundary<N> + Conditions<N> + Sync,
-    O: Operator<N, System = BC::System> + Sync,
+    O: Operator<N> + Sync,
+    O::Boundary: Conditions<N, System = O::System> + Sync,
+    Interpolation<ORDER>: Kernel,
+    Derivative<ORDER>: Kernel,
 {
     fn dim(&self) -> usize {
         2 * self.dimension
@@ -229,13 +260,14 @@ where
     fn preprocess(&mut self, system: &mut [f64]) {
         let (u, v) = system.split_at_mut(self.dimension);
 
-        self.mesh
-            .order::<ORDER>()
-            .fill_boundary(self.bc.clone(), SystemSliceMut::from_contiguous(u));
+        self.mesh.fill_boundary::<ORDER, _>(
+            self.operator.boundary(),
+            SystemSliceMut::from_contiguous(u),
+        );
 
-        self.mesh.order::<ORDER>().fill_boundary(
+        self.mesh.fill_boundary::<ORDER, _>(
             VBoundary {
-                inner: self.bc.clone(),
+                inner: self.operator.boundary(),
                 dampening: self.dampening,
             },
             SystemSliceMut::from_contiguous(v),
@@ -256,10 +288,10 @@ where
         // Compute derivatives
 
         // Find du/dt from the definition v = du/dt + η u
-        self.mesh.order::<ORDER>().apply(
-            self.bc.clone(),
+        self.mesh.apply(
             UOperator {
                 dampening: self.dampening,
+                boundary: self.operator.boundary(),
                 _marker: PhantomData,
             },
             u.rb(),
@@ -268,8 +300,7 @@ where
         );
 
         // dv/dt = Lu
-        self.mesh.order::<ORDER>().apply(
-            self.bc.clone(),
+        self.mesh.apply(
             self.operator.clone(),
             u.rb(),
             self.context.rb(),
@@ -279,13 +310,12 @@ where
         // Apply Outer boundary conditions
 
         self.mesh
-            .order::<ORDER>()
-            .weak_boundary(self.bc.clone(), u, dudt);
+            .weak_boundary::<ORDER, _>(self.operator.boundary(), u, dudt);
 
-        self.mesh.order::<ORDER>().weak_boundary(
+        self.mesh.weak_boundary::<ORDER, _>(
             VBoundary {
                 dampening: self.dampening,
-                inner: self.bc.clone(),
+                inner: self.operator.boundary(),
             },
             v,
             dvdt,
