@@ -9,9 +9,10 @@ use aeon_array::ArrayLike;
 use core::slice;
 use reborrow::{Reborrow, ReborrowMut};
 use serde::{Deserialize, Serialize};
+use std::array;
 use std::fmt::Debug;
 use std::marker::PhantomData;
-use std::ops::{Bound, Range, RangeBounds};
+use std::ops::{Bound, Index, IndexMut, Range, RangeBounds};
 use std::slice::SliceIndex;
 
 /// Custom derive macro for the `SystemLabel` trait.
@@ -20,24 +21,62 @@ pub use aeon_macros::SystemLabel;
 /// This trait is used to define systems of fields.
 pub trait SystemLabel: Sized + Clone + Send + Sync + 'static {
     /// Name of the system (used for debugging and when serializing a system).
-    const NAME: &'static str;
-
-    /// Array type with same length as number of fields
-    type FieldLike<T>: ArrayLike<Elem = T>;
-
-    /// Returns an array of all possible system labels.
-    fn fields() -> Self::FieldLike<Self>;
-
-    /// Retrieves the index of an individual field.
-    fn field_index(&self) -> usize;
+    const SYSTEM_NAME: &'static str;
 
     /// Retrieves the name of an individual field.
-    fn field_name(&self) -> String;
+    fn name(&self) -> String;
+
+    /// Retrieves the index of an individual field.
+    fn index(&self) -> usize;
+
+    /// Array type with same length as number of fields
+    type FieldLike<T>: ArrayLike<Self, Elem = T>;
+
+    /// Returns an array of all possible system labels.
+    fn fields() -> impl Iterator<Item = Self>;
+
+    fn field_from_index(index: usize) -> Self;
 }
 
 /// Number of fields in a given system.
 pub const fn field_count<Label: SystemLabel>() -> usize {
     Label::FieldLike::<()>::LEN
+}
+
+pub struct SystemArray<T, const L: usize, S>(pub [T; L], PhantomData<S>);
+
+impl<T, const L: usize, S: SystemLabel> Index<S> for SystemArray<T, L, S> {
+    type Output = T;
+
+    fn index(&self, index: S) -> &Self::Output {
+        let index = index.index();
+        self.0.index(index)
+    }
+}
+
+impl<T, const L: usize, S: SystemLabel> IndexMut<S> for SystemArray<T, L, S> {
+    fn index_mut(&mut self, index: S) -> &mut Self::Output {
+        let index = index.index();
+        self.0.index_mut(index)
+    }
+}
+
+impl<T, const L: usize, S: SystemLabel> ArrayLike<S> for SystemArray<T, L, S> {
+    const LEN: usize = L;
+    type Elem = T;
+
+    fn from_fn<F: FnMut(S) -> Self::Elem>(mut cb: F) -> Self {
+        Self(
+            array::from_fn(|index| cb(S::field_from_index(index))),
+            PhantomData,
+        )
+    }
+}
+
+impl<T, const L: usize, S: SystemLabel> From<[T; L]> for SystemArray<T, L, S> {
+    fn from(value: [T; L]) -> Self {
+        SystemArray(value, PhantomData)
+    }
 }
 
 /// Represents the values of a coupled system at a single point.
@@ -51,19 +90,18 @@ impl<Label: SystemLabel> SystemValue<Label> {
     }
 
     /// Constructs the SystemVal by calling a function for each field
-    pub fn from_fn<F: FnMut(Label) -> f64>(mut f: F) -> Self {
-        let fields = Label::fields();
-        Self(Label::FieldLike::<f64>::from_fn(|i| f(fields[i].clone())))
+    pub fn from_fn<F: FnMut(Label) -> f64>(f: F) -> Self {
+        Self(Label::FieldLike::<f64>::from_fn(f))
     }
 
     /// Retrieves the value of the given field
     pub fn field(&self, label: Label) -> f64 {
-        self.0[label.field_index()]
+        self.0[label]
     }
 
     /// Sets the value of the given field.
     pub fn set_field(&mut self, label: Label, v: f64) {
-        self.0[label.field_index()] = v
+        self.0[label] = v
     }
 }
 
@@ -139,13 +177,13 @@ impl<Label: SystemLabel> SystemVec<Label> {
     /// Retrieves an immutable reference to a field located at the given index.
     pub fn field(&self, label: Label) -> &[f64] {
         let length = self.data.len() / field_count::<Label>();
-        &self.data[length * label.field_index()..length * (label.field_index() + 1)]
+        &self.data[length * label.index()..length * (label.index() + 1)]
     }
 
     /// Retrieves a mutable reference to a field located at the given index.
     pub fn field_mut(&mut self, label: Label) -> &mut [f64] {
         let length = self.data.len() / field_count::<Label>();
-        &mut self.data[length * label.field_index()..length * (label.field_index() + 1)]
+        &mut self.data[length * label.index()..length * (label.index() + 1)]
     }
 
     pub fn as_range(&self) -> SystemRange<Label> {
@@ -260,8 +298,8 @@ impl<'a, Label: SystemLabel> SystemSlice<'a, Label> {
             }
         } else {
             let length = self.data.len() / field_count::<Label>();
-            let fields = Label::FieldLike::from_fn(|index| unsafe {
-                self.data.as_ptr().add(index * length + self.offset)
+            let fields = Label::FieldLike::from_fn(|field| unsafe {
+                self.data.as_ptr().add(field.index() * length + self.offset)
             })
             .into();
 
@@ -277,7 +315,7 @@ impl<'a, Label: SystemLabel> SystemSlice<'a, Label> {
     pub fn field(&self, label: Label) -> &[f64] {
         let length = self.data.len() / field_count::<Label>();
 
-        &self.data[length * label.field_index()..length * (label.field_index() + 1)]
+        &self.data[length * label.index()..length * (label.index() + 1)]
             [self.offset..self.offset + self.length]
     }
 
@@ -400,8 +438,8 @@ impl<'a, Label: SystemLabel> SystemSliceMut<'a, Label> {
             }
         } else {
             let length = self.data.len() / field_count::<Label>();
-            let fields = Label::FieldLike::from_fn(|index| unsafe {
-                self.data.as_ptr().add(index * length + self.offset)
+            let fields = Label::FieldLike::from_fn(|field| unsafe {
+                self.data.as_ptr().add(field.index() * length + self.offset)
             })
             .into();
 
@@ -423,8 +461,10 @@ impl<'a, Label: SystemLabel> SystemSliceMut<'a, Label> {
             }
         } else {
             let length = self.data.len() / field_count::<Label>();
-            let fields = Label::FieldLike::from_fn(|index| unsafe {
-                self.data.as_mut_ptr().add(index * length + self.offset)
+            let fields = Label::FieldLike::from_fn(|field| unsafe {
+                self.data
+                    .as_mut_ptr()
+                    .add(field.index() * length + self.offset)
             })
             .into();
 
@@ -439,14 +479,14 @@ impl<'a, Label: SystemLabel> SystemSliceMut<'a, Label> {
     /// Retrieves an immutable slice to the given field.
     pub fn field(&self, label: Label) -> &[f64] {
         let length = self.data.len() / field_count::<Label>();
-        &self.data[length * label.field_index()..length * (label.field_index() + 1)]
+        &self.data[length * label.index()..length * (label.index() + 1)]
             [self.offset..self.offset + self.length]
     }
 
     /// Retrieves a mutable slice of the given field.
     pub fn field_mut(&mut self, label: Label) -> &mut [f64] {
         let length = self.data.len() / field_count::<Label>();
-        &mut self.data[length * label.field_index()..length * (label.field_index() + 1)]
+        &mut self.data[length * label.index()..length * (label.index() + 1)]
             [self.offset..self.offset + self.length]
     }
 
@@ -625,7 +665,7 @@ impl<'a, Label: SystemLabel> SystemFields<'a, Label> {
     }
 
     pub fn field(&self, label: Label) -> &'a [f64] {
-        unsafe { std::slice::from_raw_parts(self.fields[label.field_index()], self.length) }
+        unsafe { std::slice::from_raw_parts(self.fields[label], self.length) }
     }
 }
 
@@ -654,11 +694,11 @@ impl<'a, Label: SystemLabel> SystemFieldsMut<'a, Label> {
     }
 
     pub fn field(&self, label: Label) -> &'a [f64] {
-        unsafe { std::slice::from_raw_parts(self.fields[label.field_index()], self.length) }
+        unsafe { std::slice::from_raw_parts(self.fields[label], self.length) }
     }
 
     pub fn field_mut(&mut self, label: Label) -> &'a mut [f64] {
-        unsafe { std::slice::from_raw_parts_mut(self.fields[label.field_index()], self.length) }
+        unsafe { std::slice::from_raw_parts_mut(self.fields[label], self.length) }
     }
 }
 
@@ -670,19 +710,23 @@ impl<'a, Label: SystemLabel> SystemFieldsMut<'a, Label> {
 pub enum Empty {}
 
 impl SystemLabel for Empty {
-    const NAME: &'static str = "Empty";
+    const SYSTEM_NAME: &'static str = "Empty";
 
-    type FieldLike<T> = [T; 0];
-
-    fn fields() -> Self::FieldLike<Self> {
-        []
-    }
-
-    fn field_index(&self) -> usize {
+    fn name(&self) -> String {
         unreachable!()
     }
 
-    fn field_name(&self) -> String {
+    fn index(&self) -> usize {
+        unreachable!()
+    }
+
+    type FieldLike<T> = SystemArray<T, 0, Self>;
+
+    fn fields() -> impl Iterator<Item = Self> {
+        None::<Self>.into_iter()
+    }
+
+    fn field_from_index(_index: usize) -> Self {
         unreachable!()
     }
 }
@@ -691,20 +735,98 @@ impl SystemLabel for Empty {
 pub struct Scalar;
 
 impl SystemLabel for Scalar {
-    const NAME: &'static str = "Scalar";
+    const SYSTEM_NAME: &'static str = "Scalar";
 
-    type FieldLike<T> = [T; 1];
-
-    fn fields() -> Self::FieldLike<Self> {
-        [Scalar]
+    fn name(&self) -> String {
+        "scalar".to_string()
     }
 
-    fn field_index(&self) -> usize {
+    fn index(&self) -> usize {
         0
     }
 
-    fn field_name(&self) -> String {
-        "scalar".to_string()
+    type FieldLike<T> = SystemArray<T, 1, Self>;
+
+    fn fields() -> impl Iterator<Item = Self> {
+        [Scalar].into_iter()
+    }
+
+    fn field_from_index(_index: usize) -> Self {
+        Self
+    }
+}
+
+#[derive(Clone)]
+pub enum Pair<L, R> {
+    Left(L),
+    Right(R),
+}
+
+struct PairArray<T, L: SystemLabel, R: SystemLabel> {
+    left: L::FieldLike<T>,
+    right: R::FieldLike<T>,
+}
+
+impl<T, L: SystemLabel, R: SystemLabel> Index<Pair<L, R>> for PairArray<T, L, R> {
+    type Output = T;
+
+    fn index(&self, index: Pair<L, R>) -> &Self::Output {
+        match index {
+            Pair::Left(index) => &self.left[index],
+            Pair::Right(index) => &self.right[index],
+        }
+    }
+}
+
+impl<T, L: SystemLabel, R: SystemLabel> IndexMut<Pair<L, R>> for PairArray<T, L, R> {
+    fn index_mut(&mut self, index: Pair<L, R>) -> &mut Self::Output {
+        match index {
+            Pair::Left(index) => &mut self.left[index],
+            Pair::Right(index) => &mut self.right[index],
+        }
+    }
+}
+
+impl<T, L: SystemLabel, R: SystemLabel> ArrayLike<Pair<L, R>> for PairArray<T, L, R> {
+    type Elem = T;
+    const LEN: usize = L::FieldLike::<()>::LEN + R::FieldLike::<()>::LEN;
+
+    fn from_fn<F: FnMut(Pair<L, R>) -> Self::Elem>(mut f: F) -> Self {
+        Self {
+            left: L::FieldLike::from_fn(|left| f(Pair::Left(left))),
+            right: R::FieldLike::from_fn(|right| f(Pair::Right(right))),
+        }
+    }
+}
+
+impl<L: SystemLabel, R: SystemLabel> SystemLabel for Pair<L, R> {
+    const SYSTEM_NAME: &'static str = "Pair";
+
+    fn name(&self) -> String {
+        "Element of Pair".to_string()
+    }
+
+    fn index(&self) -> usize {
+        match self {
+            Pair::Left(left) => left.index(),
+            Pair::Right(right) => right.index() + L::FieldLike::<()>::LEN,
+        }
+    }
+
+    type FieldLike<T> = PairArray<T, L, R>;
+
+    fn fields() -> impl Iterator<Item = Self> {
+        L::fields()
+            .map(Pair::Left)
+            .chain(R::fields().map(Pair::Right))
+    }
+
+    fn field_from_index(index: usize) -> Self {
+        if index < L::FieldLike::<()>::LEN {
+            Pair::Left(L::field_from_index(index))
+        } else {
+            Pair::Right(R::field_from_index(index - L::FieldLike::<()>::LEN))
+        }
     }
 }
 
@@ -721,17 +843,16 @@ mod tests {
 
     #[test]
     fn systems() {
-        assert_eq!(MySystem::NAME, "MySystem");
-        assert_eq!(
-            MySystem::fields(),
-            [MySystem::First, MySystem::Second, MySystem::Third],
-        );
-        assert_eq!(MySystem::First.field_index(), 0);
-        assert_eq!(MySystem::Second.field_index(), 1);
-        assert_eq!(MySystem::Third.field_index(), 2);
-        assert_eq!(MySystem::First.field_name(), "First");
-        assert_eq!(MySystem::Second.field_name(), "Second");
-        assert_eq!(MySystem::Third.field_name(), "Third");
+        assert_eq!(MySystem::SYSTEM_NAME, "MySystem");
+        for (a, b) in MySystem::fields().zip([MySystem::First, MySystem::Second, MySystem::Third]) {
+            assert_eq!(a, b)
+        }
+        assert_eq!(MySystem::First.index(), 0);
+        assert_eq!(MySystem::Second.index(), 1);
+        assert_eq!(MySystem::Third.index(), 2);
+        assert_eq!(MySystem::First.name(), "First");
+        assert_eq!(MySystem::Second.name(), "Second");
+        assert_eq!(MySystem::Third.name(), "Third");
 
         let data = vec![0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0];
         let owned = SystemSlice::<MySystem>::from_contiguous(data.as_ref()).to_vec();

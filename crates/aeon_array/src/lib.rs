@@ -22,7 +22,6 @@ extern crate self as aeon_array;
 
 use serde::de::{Deserialize, Deserializer, Error as _};
 use serde::ser::{Serialize, SerializeTuple as _, Serializer};
-use std::borrow::{Borrow, BorrowMut};
 use std::marker::PhantomData;
 use std::mem::MaybeUninit;
 use std::{
@@ -33,12 +32,8 @@ use std::{
 /// A helper trait for array types which can be indexed and iterated, with
 /// compile time known length. Use of this trait can be removed if `generic_const_exprs`
 /// is ever stabilized.
-pub trait ArrayLike:
-    Index<usize, Output = Self::Elem>
-    + IndexMut<usize, Output = Self::Elem>
-    + IntoIterator<Item = Self::Elem>
-    + Borrow<[Self::Elem]>
-    + BorrowMut<[Self::Elem]>
+pub trait ArrayLike<Idx>:
+    Index<Idx, Output = Self::Elem> + IndexMut<Idx, Output = Self::Elem>
 {
     /// Length of array, known at compile time.
     const LEN: usize;
@@ -47,10 +42,10 @@ pub trait ArrayLike:
     type Elem;
 
     /// Creates an array of the given length and type by repeatly calling the given function.
-    fn from_fn<F: FnMut(usize) -> Self::Elem>(cb: F) -> Self;
+    fn from_fn<F: FnMut(Idx) -> Self::Elem>(cb: F) -> Self;
 }
 
-impl<T, const N: usize> ArrayLike for [T; N] {
+impl<T, const N: usize> ArrayLike<usize> for [T; N] {
     const LEN: usize = N;
 
     type Elem = T;

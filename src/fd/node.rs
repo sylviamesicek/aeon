@@ -5,7 +5,7 @@ use crate::prelude::{Face, Rectangle};
 use std::array::{self, from_fn};
 
 use super::boundary::{Boundary, BoundaryKind, Condition};
-use super::kernel::{Border, Convolution, Kernel, OffsetKernel, Value};
+use super::kernel::{Border, Convolution, Kernel, ProlongKernel, Value};
 use super::BC;
 
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
@@ -312,7 +312,7 @@ impl<const N: usize, D: Boundary<N> + Condition<N>> NodeSpace<N, D> {
         self.apply(corner, stencils, field)
     }
 
-    pub fn prolong(&self, supernode: [usize; N], kernel: impl OffsetKernel, field: &[f64]) -> f64 {
+    pub fn prolong(&self, supernode: [usize; N], kernel: impl ProlongKernel, field: &[f64]) -> f64 {
         let node: [_; N] = array::from_fn(|axis| supernode[axis] / 2);
         let flags: [_; N] = array::from_fn(|axis| supernode[axis] % 2 == 0);
 
@@ -464,7 +464,7 @@ impl<const N: usize> Iterator for NodePlaneIter<N> {
 mod tests {
     use super::*;
     use crate::{
-        fd::kernel::{Derivative, Interpolation},
+        fd::kernel::{FourthOrder, Kernels as _},
         geometry::Rectangle,
     };
 
@@ -535,8 +535,14 @@ mod tests {
         for node in space.inner_window().iter() {
             let vertex = [node[0] as usize, node[1] as usize];
             let [x, y] = space.position(node, bounds);
-            let numerical = space.evaluate(vertex, (Derivative::<4>, Derivative::<4>), &field)
-                / (spacing[0] * spacing[1]);
+            let numerical = space.evaluate(
+                vertex,
+                (
+                    FourthOrder::derivative().clone(),
+                    FourthOrder::derivative().clone(),
+                ),
+                &field,
+            ) / (spacing[0] * spacing[1]);
             let analytical = x.cos() * y.cos();
             // dbg!(numerical - analytical);
             let error: f64 = (numerical - analytical).abs();
@@ -583,7 +589,7 @@ mod tests {
         for node in rspace.inner_window().iter() {
             let vertex = [node[0] as usize, node[1] as usize];
             let [x, y] = rspace.position(node, bounds.clone());
-            let numerical = cspace.prolong(vertex, Interpolation::<4>, &field);
+            let numerical = cspace.prolong(vertex, FourthOrder::interpolation().clone(), &field);
             let analytical = x.sin() * y.sin();
             let error: f64 = (numerical - analytical).abs();
             result = result.max(error);

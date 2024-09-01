@@ -3,7 +3,7 @@ use std::marker::PhantomData;
 use reborrow::{Reborrow, ReborrowMut};
 
 use crate::{
-    fd::{Boundary, Conditions, Derivative, Engine, Interpolation, Kernel, Mesh, Operator},
+    fd::{Boundary, Conditions, Engine, Kernel, Kernels, Mesh, Operator, Order},
     ode::{Ode, Rk4},
     prelude::Face,
     system::{field_count, SystemFields, SystemLabel, SystemSlice, SystemSliceMut, SystemValue},
@@ -30,21 +30,14 @@ impl<Label: SystemLabel> HyperRelaxSolver<Label> {
         }
     }
 
-    pub fn solve<
-        const N: usize,
-        const ORDER: usize,
-        O: Operator<N, System = Label> + Sync,
-        BC: Boundary<N> + Conditions<N, System = Label> + Sync,
-    >(
+    pub fn solve<const N: usize, O: Operator<N, System = Label> + Sync>(
         &mut self,
         mesh: &mut Mesh<N>,
         operator: O,
         context: SystemSlice<'_, O::Context>,
         mut system: SystemSliceMut<'_, Label>,
     ) where
-        Interpolation<ORDER>: Kernel,
-        Derivative<ORDER>: Kernel,
-        O::Boundary: Conditions<N, System = O::System> + Sync,
+        O::Boundary: Conditions<N, System = O::System> + Order + Sync,
     {
         // Total number of degreees of freedom in the whole system
         let dimension = field_count::<Label>() * system.len();
@@ -80,7 +73,7 @@ impl<Label: SystemLabel> HyperRelaxSolver<Label> {
 
         for index in 0..self.max_steps {
             {
-                mesh.fill_boundary::<ORDER, _>(
+                mesh.fill_boundary(
                     operator.boundary(),
                     SystemSliceMut::from_contiguous(&mut data[..dimension]),
                 );
@@ -122,7 +115,6 @@ impl<Label: SystemLabel> HyperRelaxSolver<Label> {
                 dampening: self.dampening,
                 operator: operator.clone(),
                 context: context.rb(),
-                _marker: PhantomData::<[usize; ORDER]>,
             };
 
             // Take step
@@ -234,7 +226,12 @@ impl<const N: usize, I: Conditions<N>> Conditions<N> for VBoundary<I> {
     }
 }
 
-struct FictitiousOde<'a, const N: usize, const ORDER: usize, O: Operator<N>> {
+impl<I: Order> Order for VBoundary<I> {
+    const ORDER: usize = I::ORDER;
+    const BORDER: usize = I::BORDER;
+}
+
+struct FictitiousOde<'a, const N: usize, O: Operator<N>> {
     mesh: &'a mut Mesh<N>,
     dimension: usize,
     dampening: f64,
@@ -242,16 +239,12 @@ struct FictitiousOde<'a, const N: usize, const ORDER: usize, O: Operator<N>> {
     operator: O,
 
     context: SystemSlice<'a, O::Context>,
-
-    _marker: PhantomData<[usize; ORDER]>,
 }
 
-impl<'a, const N: usize, const ORDER: usize, O> Ode for FictitiousOde<'a, N, ORDER, O>
+impl<'a, const N: usize, O> Ode for FictitiousOde<'a, N, O>
 where
     O: Operator<N> + Sync,
-    O::Boundary: Conditions<N, System = O::System> + Sync,
-    Interpolation<ORDER>: Kernel,
-    Derivative<ORDER>: Kernel,
+    O::Boundary: Conditions<N, System = O::System> + Order + Sync,
 {
     fn dim(&self) -> usize {
         2 * self.dimension
@@ -260,12 +253,10 @@ where
     fn preprocess(&mut self, system: &mut [f64]) {
         let (u, v) = system.split_at_mut(self.dimension);
 
-        self.mesh.fill_boundary::<ORDER, _>(
-            self.operator.boundary(),
-            SystemSliceMut::from_contiguous(u),
-        );
+        self.mesh
+            .fill_boundary(self.operator.boundary(), SystemSliceMut::from_contiguous(u));
 
-        self.mesh.fill_boundary::<ORDER, _>(
+        self.mesh.fill_boundary(
             VBoundary {
                 inner: self.operator.boundary(),
                 dampening: self.dampening,
@@ -309,10 +300,8 @@ where
 
         // Apply Outer boundary conditions
 
-        self.mesh
-            .weak_boundary::<ORDER, _>(self.operator.boundary(), u, dudt);
-
-        self.mesh.weak_boundary::<ORDER, _>(
+        self.mesh.weak_boundary(self.operator.boundary(), u, dudt);
+        self.mesh.weak_boundary(
             VBoundary {
                 dampening: self.dampening,
                 inner: self.operator.boundary(),

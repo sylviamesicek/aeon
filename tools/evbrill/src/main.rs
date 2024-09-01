@@ -405,7 +405,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         // Compute dissipation
         mesh.apply(
-            DynamicBC,
             DissipationOperator::<DISS_ORDER, _>(DynamicBC),
             dynamic.as_slice(),
             SystemSlice::empty(),

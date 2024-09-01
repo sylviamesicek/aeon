@@ -5,9 +5,9 @@ use rayon::iter::{ParallelBridge, ParallelIterator};
 
 use crate::{
     fd::{
-        kernel::{Gradient, Kernel},
-        node_from_vertex, Boundary, BoundaryKind, Condition, Conditions, Derivative, Engine,
-        FdEngine, FdIntEngine, Function, Interpolation, Operator, Projection, SystemBC,
+        kernel::{Gradient, Kernels},
+        node_from_vertex, Boundary, BoundaryKind, Condition, Conditions, Engine, FdEngine,
+        FdIntEngine, Function, Operator, Order, Projection, SystemBC,
     },
     system::{SystemLabel, SystemSlice, SystemSliceMut},
 };
@@ -17,17 +17,16 @@ use super::Mesh;
 impl<const N: usize> Mesh<N> {
     /// Enforces strong boundary conditions. This includes strong physical boundary conditions, as well
     /// as handling interior boundaries (same level, coarse-fine, or fine-coarse).
-    pub fn fill_boundary<const ORDER: usize, BC: Boundary<N> + Conditions<N> + Sync>(
+    pub fn fill_boundary<O: Order, BC: Boundary<N> + Conditions<N> + Sync>(
         &mut self,
+        order: O,
         bc: BC,
         mut system: SystemSliceMut<'_, BC::System>,
-    ) where
-        Interpolation<ORDER>: Kernel,
-    {
+    ) {
         self.fill_physical(&bc, &mut system);
         self.fill_direct(&mut system);
         self.fill_fine(&mut system);
-        self.fill_prolong::<ORDER, _>(&bc, &mut system);
+        self.fill_prolong(order, &bc, &mut system);
     }
 
     fn fill_physical<BC: Boundary<N> + Conditions<N> + Sync>(
@@ -110,13 +109,12 @@ impl<const N: usize> Mesh<N> {
         });
     }
 
-    fn fill_prolong<const ORDER: usize, BC: Boundary<N> + Conditions<N> + Sync>(
+    fn fill_prolong<O: Order, BC: Boundary<N> + Conditions<N> + Sync>(
         &mut self,
+        _order: O,
         bc: &BC,
         system: &mut SystemSliceMut<'_, BC::System>,
-    ) where
-        Interpolation<ORDER>: Kernel,
-    {
+    ) {
         let system = system.as_range();
         self.interfaces.coarse().par_bridge().for_each(|interface| {
             let block_nodes = self.block_dofs(interface.block);
@@ -141,7 +139,7 @@ impl<const N: usize> Mesh<N> {
 
                     let value = neighbor_space.attach_boundary(bc).prolong(
                         neighbor_vertex,
-                        Interpolation::<ORDER>,
+                        O::interpolation().clone(),
                         neighbor_system.field(field.clone()),
                     );
                     block_system.field_mut(field.clone())[block_index] = value;
@@ -150,14 +148,13 @@ impl<const N: usize> Mesh<N> {
         });
     }
 
-    pub fn weak_boundary<const ORDER: usize, BC: Boundary<N> + Conditions<N>>(
+    pub fn weak_boundary<O: Order, BC: Boundary<N> + Conditions<N>>(
         &mut self,
+        _order: O,
         bc: BC,
         system: SystemSlice<'_, BC::System>,
         deriv: SystemSliceMut<'_, BC::System>,
-    ) where
-        Derivative<ORDER>: Kernel,
-    {
+    ) {
         let system = system.as_range();
         let deriv = deriv.as_range();
 
@@ -233,7 +230,7 @@ impl<const N: usize> Mesh<N> {
 
                         for axis in 0..N {
                             let derivative = inner_engine.evaluate(
-                                Gradient(axis),
+                                Gradient::<O>::new(axis),
                                 field_boundary.clone(),
                                 field_system,
                             );
@@ -250,7 +247,7 @@ impl<const N: usize> Mesh<N> {
 
                         for axis in 0..N {
                             let derivative = engine.evaluate(
-                                Gradient(axis),
+                                Gradient::<O>::new(axis),
                                 field_boundary.clone(),
                                 field_system,
                             );

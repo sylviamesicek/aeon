@@ -49,14 +49,14 @@ pub struct SystemCheckpoint {
 impl SystemCheckpoint {
     /// Attaches a system for serialization and deserialization
     pub fn save_system<Label: SystemLabel>(&mut self, system: SystemSlice<'_, Label>) {
-        assert!(!self.systems.contains_key(Label::NAME));
+        assert!(!self.systems.contains_key(Label::SYSTEM_NAME));
 
         let count = system.len();
         let data = system.to_vec().into_contiguous();
 
         let fields = Label::fields()
             .into_iter()
-            .map(|label| label.field_name())
+            .map(|label| label.name())
             .collect();
 
         let meta = SystemMeta {
@@ -65,12 +65,12 @@ impl SystemCheckpoint {
             fields,
         };
 
-        self.systems.insert(Label::NAME.to_string(), meta);
+        self.systems.insert(Label::SYSTEM_NAME.to_string(), meta);
     }
 
     /// Reads a system from the model.
     pub fn load_system<Label: SystemLabel>(&self, vec: &mut SystemVec<Label>) {
-        let meta = self.systems.get(Label::NAME).unwrap();
+        let meta = self.systems.get(Label::SYSTEM_NAME).unwrap();
         let _ = std::mem::replace(vec, SystemSlice::from_contiguous(&meta.data).to_vec());
     }
 

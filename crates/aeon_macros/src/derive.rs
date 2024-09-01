@@ -22,21 +22,26 @@ pub fn system_label_impl(input: DeriveInput) -> TokenStream {
             quote! {
                 #[automatically_derived]
                 impl ::aeon::system::SystemLabel for #ident {
-                    const NAME: &'static str = stringify!(#ident);
+                    const SYSTEM_NAME: &'static str = stringify!(#ident);
 
-                    type FieldLike<T> = [T; 1];
-
-                    fn fields() -> Self::FieldLike<Self> {
-                        [Self]
+                    fn name(&self) -> String {
+                        stringify!(#ident).to_string()
                     }
 
-                    fn field_index(&self) -> usize {
+                    fn index(&self) -> usize {
                         0
                     }
 
-                    fn field_name(&self) -> String {
-                        stringify!(#ident).to_string()
+                    type FieldLike<T> = ::aeon::system::SystemArray<T, 1, Self>;
+
+                    fn fields() -> impl Iterator<Item = Self> {
+                        [Self].into_iter()
                     }
+
+                    fn field_from_index(_index: usize) -> Self {
+                        Self
+                    }
+
                 }
             }
         }
@@ -69,25 +74,30 @@ pub fn system_label_impl(input: DeriveInput) -> TokenStream {
             quote! {
                 #[automatically_derived]
                 impl ::aeon::system::SystemLabel for #ident {
-                    const NAME: &'static str = stringify!(#ident);
+                    const SYSTEM_NAME: &'static str = stringify!(#ident);
 
-                    type FieldLike<T> = [T; #variant_count];
-
-                    fn fields() -> Self::FieldLike<Self> {
-                        [#fields]
+                    fn name(&self) -> String {
+                        match self {
+                            #field_names
+                        }.to_string()
                     }
 
-                    fn field_index(&self) -> usize {
+                    fn index(&self) -> usize {
                         match self {
                             #field_indices
                         }
                     }
 
-                    fn field_name(&self) -> String {
-                        match self {
-                            #field_names
-                        }.to_string()
+                    type FieldLike<T> = SystemArray<T, #variant_count, Self>;
+
+                    fn fields() -> impl Iterator<Item = Self> {
+                        [#fields].into_iter()
                     }
+
+                    fn field_from_index(index: usize) -> Self {
+                        [#fields][index].clone()
+                    }
+
                 }
             }
         }
