@@ -90,7 +90,7 @@ pub struct SystemValue<Label: SystemLabel>(Label::Array<f64>);
 
 impl<Label: SystemLabel> SystemValue<Label> {
     /// Constructs a new system value by wrapping an array of values.
-    pub fn new(values: Label::Array<f64>) -> Self {
+    pub fn new(values: impl Into<Label::Array<f64>>) -> Self {
         Self(values.into())
     }
 

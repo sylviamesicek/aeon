@@ -571,11 +571,7 @@ mod tests {
             origin: [0.0, 0.0],
             size: [10.0, 10.0],
         };
-        let space = NodeSpace {
-            size: [100, 100],
-            ghost: 2,
-            context: (),
-        };
+        let space = NodeSpace::new([100, 100], 2);
 
         for node in space.inner_window().iter() {
             let position = space.position(node, bounds.clone());
@@ -678,11 +674,7 @@ mod tests {
             origin: [0.0, 1.0],
             size: [10.0, 10.0],
         };
-        let space = NodeSpace {
-            size: [100, 100],
-            ghost: 2,
-            context: (),
-        };
+        let space = NodeSpace::new([100, 100], 2);
 
         for node in space.inner_window().iter() {
             let [rho, z] = space.position(node, bounds.clone());

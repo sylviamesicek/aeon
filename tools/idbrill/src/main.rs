@@ -1,5 +1,5 @@
 use aeon::{
-    fd::{ExportVtkConfig, Mesh},
+    fd::{ExportVtkConfig, FourthOrder, Mesh, Order, SystemCondition},
     prelude::*,
 };
 
@@ -9,6 +9,8 @@ mod garfinkle;
 pub const CHOPTUIK: bool = false;
 pub const GHOST: bool = false;
 
+pub const ORDER: FourthOrder = Order::<4>;
+
 /// Initial data in Rinne's hyperbolic variables.
 #[derive(Clone, SystemLabel)]
 pub enum Rinne {
@@ -16,11 +18,10 @@ pub enum Rinne {
     Seed,
 }
 
-/// Boundary Conditions for Garfinkle variables.
 #[derive(Clone)]
-pub struct BoundaryConditions;
+pub struct Quadrant;
 
-impl Boundary<2> for BoundaryConditions {
+impl Boundary<2> for Quadrant {
     fn kind(&self, face: Face<2>) -> BoundaryKind {
         if face.side == false {
             BoundaryKind::Parity
@@ -30,7 +31,10 @@ impl Boundary<2> for BoundaryConditions {
     }
 }
 
-impl Conditions<2> for BoundaryConditions {
+#[derive(Clone)]
+pub struct RinneConditions;
+
+impl Conditions<2> for RinneConditions {
     type System = Rinne;
 
     fn parity(&self, field: Self::System, face: Face<2>) -> bool {
@@ -48,8 +52,8 @@ impl Conditions<2> for BoundaryConditions {
     }
 }
 
-pub const HAM_COND: SystemBC<Rinne, BoundaryConditions> =
-    SystemBC::new(Rinne::Conformal, BoundaryConditions);
+pub const HAMILTONIAN_CONDITIONS: ScalarConditions<SystemCondition<Rinne, RinneConditions>> =
+    ScalarConditions::new(SystemCondition::new(Rinne::Conformal, RinneConditions));
 
 use clap::{Arg, Command};
 
@@ -134,11 +138,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         garfinkle::solve(&mut mesh, 1.0, rinne.as_mut_slice(), &mut hamiltonian)?;
     }
 
-    mesh.order::<4>()
-        .fill_boundary(BoundaryConditions, rinne.as_mut_slice());
-
-    mesh.order::<4>()
-        .fill_boundary(HAM_COND, hamiltonian.as_mut().into());
+    mesh.fill_boundary(ORDER, Quadrant, RinneConditions, rinne.as_mut_slice());
+    mesh.fill_boundary(
+        ORDER,
+        Quadrant,
+        HAMILTONIAN_CONDITIONS,
+        hamiltonian.as_mut().into(),
+    );
 
     let mut systems = SystemCheckpoint::default();
     systems.save_field("conformal", rinne.field(Rinne::Conformal));

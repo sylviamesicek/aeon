@@ -1,7 +1,9 @@
-use super::Rinne;
+use crate::HAMILTONIAN_CONDITIONS;
+
+use super::{Quadrant, Rinne, ORDER};
 use aeon::{
     elliptic::HyperRelaxSolver,
-    fd::{ExportVtkConfig, Mesh},
+    fd::{ExportVtkConfig, Mesh, SystemCondition},
     prelude::*,
 };
 
@@ -14,19 +16,9 @@ pub enum Garfinkle {
 
 /// Boundary Conditions for Garfinkle variables.
 #[derive(Clone)]
-pub struct BoundaryConditions;
+pub struct GarfinkleConditions;
 
-impl Boundary<2> for BoundaryConditions {
-    fn kind(&self, face: Face<2>) -> BoundaryKind {
-        if face.side == false {
-            BoundaryKind::Parity
-        } else {
-            BoundaryKind::Radiative
-        }
-    }
-}
-
-impl Conditions<2> for BoundaryConditions {
+impl Conditions<2> for GarfinkleConditions {
     type System = Garfinkle;
 
     fn parity(&self, field: Self::System, face: Face<2>) -> bool {
@@ -44,16 +36,16 @@ impl Conditions<2> for BoundaryConditions {
     }
 }
 
-const PSI_COND: SystemBC<Garfinkle, BoundaryConditions> =
-    SystemBC::new(Garfinkle::Psi, BoundaryConditions);
+const PSI_CONDITIONS: ScalarConditions<SystemCondition<Garfinkle, GarfinkleConditions>> =
+    ScalarConditions::new(SystemCondition::new(Garfinkle::Psi, GarfinkleConditions));
 
-const SEED_COND: SystemBC<Garfinkle, BoundaryConditions> =
-    SystemBC::new(Garfinkle::Seed, BoundaryConditions);
+const SEED_CONDITIONS: ScalarConditions<SystemCondition<Garfinkle, GarfinkleConditions>> =
+    ScalarConditions::new(SystemCondition::new(Garfinkle::Seed, GarfinkleConditions));
 
 #[derive(Clone)]
-pub struct SeedFunction(f64);
+pub struct SeedProjection(f64);
 
-impl Projection<2> for SeedFunction {
+impl Projection<2> for SeedProjection {
     type Output = Scalar;
 
     fn project(&self, position: [f64; 2]) -> SystemValue<Self::Output> {
@@ -69,32 +61,40 @@ impl Operator<2> for PsiOperator {
     type System = Scalar;
     type Context = Scalar;
 
+    type SystemConditions = ScalarConditions<SystemCondition<Garfinkle, GarfinkleConditions>>;
+    type ContextConditions = ScalarConditions<SystemCondition<Garfinkle, GarfinkleConditions>>;
+
+    fn system_conditions(&self) -> Self::SystemConditions {
+        PSI_CONDITIONS
+    }
+
+    fn context_conditions(&self) -> Self::ContextConditions {
+        SEED_CONDITIONS
+    }
+
     fn apply(
         &self,
-        engine: &impl Engine<2>,
-        psi: SystemFields<'_, Self::System>,
-        seed: SystemFields<'_, Self::Context>,
+        engine: &impl Engine<2, Pair<Self::System, Self::Context>>,
     ) -> SystemValue<Self::System> {
-        let psi = psi.field(Scalar);
-        let seed = seed.field(Scalar);
-
         let [rho, _z] = engine.position();
 
-        let psi_val = engine.value(psi);
-        let psi_grad = engine.gradient(PSI_COND, psi);
-        let psi_hess = engine.hessian(PSI_COND, psi);
+        let psi = engine.value(Pair::Left(Scalar));
+        let psi_r = engine.derivative(Pair::Left(Scalar), 0);
 
-        let seed_grad = engine.gradient(SEED_COND, seed);
-        let seed_hess = engine.hessian(SEED_COND, seed);
+        let psi_rr = engine.second_derivative(Pair::Left(Scalar), 0, 0);
+        let psi_zz = engine.second_derivative(Pair::Left(Scalar), 1, 1);
+
+        let seed_r = engine.derivative(Pair::Right(Scalar), 0);
+        let seed_rr = engine.second_derivative(Pair::Right(Scalar), 0, 0);
+        let seed_zz = engine.second_derivative(Pair::Right(Scalar), 1, 1);
 
         let laplacian = if rho.abs() <= 10e-10 {
-            2.0 * psi_hess[0][0] + psi_hess[1][1]
+            2.0 * psi_rr + psi_zz
         } else {
-            psi_hess[0][0] + psi_grad[0] / rho + psi_hess[1][1]
+            psi_rr + psi_r / rho + psi_zz
         };
 
-        let result = laplacian
-            + psi_val / 4.0 * (rho * seed_hess[0][0] + 2.0 * seed_grad[0] + rho * seed_hess[1][1]);
+        let result = laplacian + psi / 4.0 * (rho * seed_rr + 2.0 * seed_r + rho * seed_zz);
 
         SystemValue::new([result])
     }
@@ -117,15 +117,27 @@ impl Operator<2> for PsiOperator {
 
             let mut hamiltonian = vec![0.0; mesh.num_dofs()];
 
-            mesh.order::<4>().project(
-                BoundaryConditions,
+            mesh.fill_boundary(
+                ORDER,
+                Quadrant,
+                GarfinkleConditions,
+                garfinkle.as_mut_slice(),
+            );
+
+            mesh.evaluate(
+                ORDER,
+                Quadrant,
                 Hamiltonian,
                 garfinkle.as_slice(),
                 hamiltonian.as_mut_slice().into(),
             );
 
-            mesh.order::<4>()
-                .fill_boundary(crate::HAM_COND, hamiltonian.as_mut_slice().into());
+            mesh.fill_boundary(
+                ORDER,
+                Quadrant,
+                HAMILTONIAN_CONDITIONS,
+                hamiltonian.as_mut_slice().into(),
+            );
 
             let mut systems = SystemCheckpoint::default();
             systems.save_field("psi", garfinkle.field(Garfinkle::Psi));
@@ -151,31 +163,32 @@ impl Function<2> for Hamiltonian {
     type Input = Garfinkle;
     type Output = Scalar;
 
-    fn evaluate(
-        &self,
-        engine: &impl Engine<2>,
-        input: SystemFields<'_, Self::Input>,
-    ) -> SystemValue<Self::Output> {
-        let psi = input.field(Garfinkle::Psi);
-        let seed = input.field(Garfinkle::Seed);
+    type Conditions = GarfinkleConditions;
 
+    fn conditions(&self) -> Self::Conditions {
+        GarfinkleConditions
+    }
+
+    fn evaluate(&self, engine: &impl Engine<2, Garfinkle>) -> SystemValue<Self::Output> {
         let [rho, _z] = engine.position();
 
-        let psi_val = engine.value(psi);
-        let psi_grad = engine.gradient(PSI_COND, psi);
-        let psi_hess = engine.hessian(PSI_COND, psi);
+        let psi = engine.value(Garfinkle::Psi);
+        let psi_r = engine.derivative(Garfinkle::Psi, 0);
 
-        let seed_grad = engine.gradient(SEED_COND, seed);
-        let seed_hess = engine.hessian(SEED_COND, seed);
+        let psi_rr = engine.second_derivative(Garfinkle::Psi, 0, 0);
+        let psi_zz = engine.second_derivative(Garfinkle::Psi, 1, 1);
+
+        let seed_r = engine.derivative(Garfinkle::Seed, 0);
+        let seed_rr = engine.second_derivative(Garfinkle::Seed, 0, 0);
+        let seed_zz = engine.second_derivative(Garfinkle::Seed, 1, 1);
 
         let laplacian = if rho.abs() <= 10e-10 {
-            2.0 * psi_hess[0][0] + psi_hess[1][1]
+            2.0 * psi_rr + psi_zz
         } else {
-            psi_hess[0][0] + psi_grad[0] / rho + psi_hess[1][1]
+            psi_rr + psi_r / rho + psi_zz
         };
 
-        let result = laplacian
-            + psi_val / 4.0 * (rho * seed_hess[0][0] + 2.0 * seed_grad[0] + rho * seed_hess[1][1]);
+        let result = laplacian + psi / 4.0 * (rho * seed_rr + 2.0 * seed_r + rho * seed_zz);
 
         SystemValue::new([result])
     }
@@ -188,15 +201,17 @@ impl Function<2> for RinneFromGarfinkle {
     type Input = Garfinkle;
     type Output = Rinne;
 
-    fn evaluate(
-        &self,
-        engine: &impl Engine<2>,
-        input: SystemFields<'_, Self::Input>,
-    ) -> SystemValue<Self::Output> {
+    type Conditions = GarfinkleConditions;
+
+    fn conditions(&self) -> Self::Conditions {
+        GarfinkleConditions
+    }
+
+    fn evaluate(&self, engine: &impl Engine<2, Self::Input>) -> SystemValue<Self::Output> {
         let [rho, _z] = engine.position();
 
-        let psi = engine.value(input.field(Garfinkle::Psi));
-        let seed = engine.value(input.field(Garfinkle::Seed));
+        let psi = engine.value(Garfinkle::Psi);
+        let seed = engine.value(Garfinkle::Seed);
 
         let mut result: SystemValue<_> = SystemValue::default();
         result.set_field(Rinne::Conformal, psi.powi(4) * (2.0 * rho * seed).exp());
@@ -219,9 +234,8 @@ pub fn solve(
     let (psi, seed) = garfinkle.split_at_mut(num_nodes);
 
     // Compute seed values.
-    mesh.order::<4>()
-        .evaluate(SeedFunction(amplitude), seed.into());
-    mesh.order::<4>().fill_boundary(SEED_COND, seed.into());
+    mesh.project(ORDER, Quadrant, SeedProjection(amplitude), seed.into());
+    mesh.fill_boundary(ORDER, Quadrant, SEED_CONDITIONS, seed.into());
 
     // Initial Guess for Psi
     psi.fill(1.0);
@@ -234,26 +248,30 @@ pub fn solve(
     solver.cfl = 0.1;
     solver.dampening = 0.4;
 
-    solver.solve::<2, 4, _, _>(mesh, PSI_COND, PsiOperator, seed.into(), psi.into());
+    solver.solve(mesh, ORDER, Quadrant, PsiOperator, seed.into(), psi.into());
 
     // Fill garkfinkle again.
-    mesh.order::<4>().fill_boundary(
-        BoundaryConditions,
+    mesh.fill_boundary(
+        ORDER,
+        Quadrant,
+        GarfinkleConditions,
         SystemSliceMut::from_contiguous(&mut garfinkle),
     );
 
-    mesh.order::<4>().project(
-        BoundaryConditions,
+    mesh.evaluate(
+        ORDER,
+        Quadrant,
         RinneFromGarfinkle,
         SystemSlice::from_contiguous(&garfinkle),
         rinne,
     );
 
-    mesh.order::<4>().project(
-        BoundaryConditions,
+    mesh.evaluate(
+        ORDER,
+        Quadrant,
         Hamiltonian,
         SystemSlice::from_contiguous(&garfinkle),
-        SystemSliceMut::from_contiguous(hamiltonian),
+        hamiltonian.into(),
     );
 
     Ok(())

@@ -88,7 +88,7 @@ pub fn system_label_impl(input: DeriveInput) -> TokenStream {
                         }
                     }
 
-                    type Array<T> = SystemArray<T, #variant_count>;
+                    type Array<T> = ::aeon::system::SystemArray<T, #variant_count>;
 
                     fn fields() -> impl Iterator<Item = Self> {
                         [#fields].into_iter()

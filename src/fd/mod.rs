@@ -7,23 +7,26 @@ mod mesh;
 mod node;
 
 pub use boundary::{
-    BlockBoundary, Boundary, BoundaryKind, Condition, Conditions, PairConditions, ScalarConditions,
-    SystemBC, BC,
+    BlockBoundary, Boundary, BoundaryKind, Condition, Conditions, EmptyConditions, PairConditions,
+    ScalarConditions, SystemBC, SystemCondition, BC,
 };
 pub use engine::{Engine, FdEngine, FdIntEngine};
 pub use kernel::{
-    Convolution, DissipationAxis, FourthOrder, Gradient, Hessian, Kernel, Kernels, Order,
-    SecondOrder, SixthOrder, Value,
+    Convolution, FourthOrder, Gradient, Hessian, Kernel, Kernels, Order, SecondOrder, SixthOrder,
+    Value,
 };
 pub use mesh::{ExportVtkConfig, Mesh, MeshCheckpoint, SystemCheckpoint};
 pub use node::{node_from_vertex, vertex_from_node, NodeSpace, NodeWindow};
 
-use crate::system::{Pair, SystemLabel, SystemSlice, SystemValue};
+use crate::system::{Empty, Pair, SystemLabel, SystemSlice, SystemValue};
 
 /// A function maps one set of scalar fields to another.
 pub trait Function<const N: usize>: Clone {
     type Input: SystemLabel;
     type Output: SystemLabel;
+
+    type Conditions: Conditions<N, System = Self::Input>;
+    fn conditions(&self) -> Self::Conditions;
 
     fn evaluate(&self, engine: &impl Engine<N, Self::Input>) -> SystemValue<Self::Output>;
 }
@@ -35,22 +38,11 @@ pub trait Projection<const N: usize>: Clone {
     fn project(&self, position: [f64; N]) -> SystemValue<Self::Output>;
 }
 
-// impl<const N: usize, F: Projection<N>> Function<N> for F {
-//     type Input = Empty;
-//     type Output = F::Output;
-
-//     fn evaluate(&self, engine: &impl Engine<N, Self::Input>) -> SystemValue<Self::Output> {
-//         self.project(engine.position())
-//     }
-// }
 /// An operator transforms a set of scalar fields, using an additional set of scalar fields
 /// as context.
 pub trait Operator<const N: usize>: Clone {
     type System: SystemLabel;
     type Context: SystemLabel;
-
-    type Boundary: Boundary<N>;
-    fn boundary(&self) -> Self::Boundary;
 
     type SystemConditions: Conditions<N, System = Self::System>;
     fn system_conditions(&self) -> Self::SystemConditions;
@@ -73,49 +65,59 @@ pub trait Operator<const N: usize>: Clone {
     }
 }
 
-impl<const N: usize, O: Operator<N>> Function<N> for O {
-    type Input = Pair<O::System, O::Context>;
-    type Output = O::System;
+#[derive(Clone)]
+pub struct ProjectionAsFunction<P>(pub P);
+
+impl<const N: usize, P: Projection<N>> Function<N> for ProjectionAsFunction<P> {
+    type Input = Empty;
+    type Output = P::Output;
+
+    type Conditions = EmptyConditions;
+
+    fn conditions(&self) -> Self::Conditions {
+        EmptyConditions
+    }
 
     fn evaluate(&self, engine: &impl Engine<N, Self::Input>) -> SystemValue<Self::Output> {
-        self.apply(engine)
+        self.0.project(engine.position())
     }
 }
 
-// #[derive(Clone)]
-// pub struct DissipationOperator<O, B>(pub B);
+#[derive(Clone)]
+pub struct OperatorAsFunction<O>(pub O);
 
-// impl<const N: usize, const ORDER: usize, B: Boundary<N> + Conditions<N>> Operator<N>
-//     for DissipationOperator<ORDER, B>
-// {
-//     type System = B::System;
-//     type Context = Empty;
+impl<const N: usize, O: Operator<N>> Function<N> for OperatorAsFunction<O> {
+    type Input = Pair<O::System, O::Context>;
+    type Output = O::System;
 
-//     type Boundary = B;
-//     fn boundary(&self) -> Self::Boundary {
-//         self.0.clone()
-//     }
+    type Conditions = PairConditions<O::SystemConditions, O::ContextConditions>;
 
-//     fn apply(
-//         &self,
-//         engine: &impl Engine<N>,
-//         input: SystemFields<'_, Self::System>,
-//         _context: SystemFields<'_, Self::Context>,
-//     ) -> SystemValue<Self::System> {
-//         SystemValue::<Self::System>::from_fn(|system| {
-//             let mut result = 0.0;
+    fn conditions(&self) -> Self::Conditions {
+        PairConditions {
+            left: self.0.system_conditions(),
+            right: self.0.context_conditions(),
+        }
+    }
 
-//             for axis in 0..N {
-//                 let value = engine.evaluate(
-//                     Single(Dissipation::<ORDER>, axis),
-//                     SystemBC::new(system.clone(), self.0.clone()),
-//                     input.field(system.clone()),
-//                 );
+    fn evaluate(&self, engine: &impl Engine<N, Self::Input>) -> SystemValue<Self::Output> {
+        self.0.apply(engine)
+    }
+}
 
-//                 result += value;
-//             }
+#[derive(Clone)]
+pub struct DissipationFunction<C>(pub C);
 
-//             result
-//         })
-//     }
-// }
+impl<const N: usize, C: Conditions<N>> Function<N> for DissipationFunction<C> {
+    type Input = C::System;
+    type Output = C::System;
+
+    type Conditions = C;
+
+    fn conditions(&self) -> Self::Conditions {
+        self.0.clone()
+    }
+
+    fn evaluate(&self, engine: &impl Engine<N, Self::Input>) -> SystemValue<Self::Output> {
+        SystemValue::from_fn(|field: C::System| engine.dissipation(field))
+    }
+}

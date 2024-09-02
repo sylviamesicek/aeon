@@ -1,9 +1,9 @@
-use std::path::PathBuf;
+use crate::{Quadrant, HAMILTONIAN_CONDITIONS, ORDER};
 
 use super::Rinne;
 use aeon::{
     elliptic::HyperRelaxSolver,
-    fd::{ExportVtkConfig, Mesh},
+    fd::{ExportVtkConfig, Mesh, SystemCondition},
     prelude::*,
 };
 
@@ -14,21 +14,11 @@ pub enum Choptuik {
     Seed,
 }
 
-/// Boundary Conditions for Garfinkle variables.
+/// Boundary Conditions for Choptuik variables.
 #[derive(Clone)]
-pub struct BoundaryConditions;
+pub struct ChoptuikConditions;
 
-impl Boundary<2> for BoundaryConditions {
-    fn kind(&self, face: Face<2>) -> BoundaryKind {
-        if face.side == false {
-            BoundaryKind::Parity
-        } else {
-            BoundaryKind::Radiative
-        }
-    }
-}
-
-impl Conditions<2> for BoundaryConditions {
+impl Conditions<2> for ChoptuikConditions {
     type System = Choptuik;
 
     fn parity(&self, field: Self::System, face: Face<2>) -> bool {
@@ -46,16 +36,16 @@ impl Conditions<2> for BoundaryConditions {
     }
 }
 
-const PSI_COND: SystemBC<Choptuik, BoundaryConditions> =
-    SystemBC::new(Choptuik::Psi, BoundaryConditions);
+const PSI_CONDITIONS: ScalarConditions<SystemCondition<Choptuik, ChoptuikConditions>> =
+    ScalarConditions::new(SystemCondition::new(Choptuik::Psi, ChoptuikConditions));
 
-const SEED_COND: SystemBC<Choptuik, BoundaryConditions> =
-    SystemBC::new(Choptuik::Seed, BoundaryConditions);
+const SEED_CONDITIONS: ScalarConditions<SystemCondition<Choptuik, ChoptuikConditions>> =
+    ScalarConditions::new(SystemCondition::new(Choptuik::Seed, ChoptuikConditions));
 
 #[derive(Clone)]
-pub struct SeedFunction(f64);
+pub struct SeedProjection(f64);
 
-impl Projection<2> for SeedFunction {
+impl Projection<2> for SeedProjection {
     type Output = Scalar;
 
     fn project(&self, position: [f64; 2]) -> SystemValue<Self::Output> {
@@ -71,48 +61,58 @@ impl Operator<2> for PsiOperator {
     type System = Scalar;
     type Context = Scalar;
 
+    type SystemConditions = ScalarConditions<SystemCondition<Choptuik, ChoptuikConditions>>;
+    type ContextConditions = ScalarConditions<SystemCondition<Choptuik, ChoptuikConditions>>;
+
+    fn system_conditions(&self) -> Self::SystemConditions {
+        PSI_CONDITIONS
+    }
+
+    fn context_conditions(&self) -> Self::ContextConditions {
+        SEED_CONDITIONS
+    }
+
     fn apply(
         &self,
-        engine: &impl Engine<2>,
-        psi: SystemFields<'_, Self::System>,
-        seed: SystemFields<'_, Self::Context>,
+        engine: &impl Engine<2, Pair<Self::System, Self::Context>>,
     ) -> SystemValue<Self::System> {
-        let psi = psi.field(Scalar);
-        let seed = seed.field(Scalar);
-
         let [rho, _z] = engine.position();
         let on_axis = rho.abs() <= 10e-10;
 
-        let psi_val = engine.value(psi);
-        let psi_grad = engine.gradient(PSI_COND, psi);
-        let psi_hess = engine.hessian(PSI_COND, psi);
+        let psi = engine.value(Pair::Left(Scalar));
+        let psi_r = engine.derivative(Pair::Left(Scalar), 0);
+        let psi_z = engine.derivative(Pair::Left(Scalar), 1);
 
-        let seed_val = engine.value(seed);
-        let seed_grad = engine.gradient(SEED_COND, seed);
-        let seed_hess = engine.hessian(SEED_COND, seed);
+        let psi_rr = engine.second_derivative(Pair::Left(Scalar), 0, 0);
+        let psi_zz = engine.second_derivative(Pair::Left(Scalar), 1, 1);
+
+        let seed = engine.value(Pair::Right(Scalar));
+        let seed_r = engine.derivative(Pair::Right(Scalar), 0);
+        let seed_z = engine.derivative(Pair::Right(Scalar), 1);
+        let seed_rr = engine.second_derivative(Pair::Right(Scalar), 0, 0);
+        let seed_zz = engine.second_derivative(Pair::Right(Scalar), 1, 1);
 
         let term1 = if on_axis {
-            2.0 * psi_hess[0][0] + psi_hess[1][1]
+            2.0 * psi_rr + psi_zz
         } else {
-            psi_hess[0][0] + psi_grad[0] / rho + psi_hess[1][1]
+            psi_rr + psi_r / rho + psi_zz
         };
 
-        let term2 =
-            (seed_val + rho * seed_grad[0]) * psi_grad[0] + rho * seed_grad[1] * psi_grad[1];
+        let term2 = (seed + rho * seed_r) * psi_r + rho * seed_z * psi_z;
 
-        let mut term3 = rho * seed_hess[0][0]
-            + 4.0 * seed_grad[0]
-            + (seed_val + rho * seed_grad[0]).powi(2)
-            + rho * seed_hess[1][1]
-            + (rho * seed_grad[1]).powi(2);
+        let mut term3 = rho * seed_rr
+            + 4.0 * seed_r
+            + (seed + rho * seed_r).powi(2)
+            + rho * seed_zz
+            + (rho * seed_z).powi(2);
 
         if on_axis {
-            term3 += 2.0 * seed_grad[0];
+            term3 += 2.0 * seed_r;
         } else {
-            term3 += 2.0 * seed_val / rho
+            term3 += 2.0 * seed / rho
         }
 
-        let result = term1 + term2 + psi_val / 4.0 * term3;
+        let result = term1 + term2 + psi / 4.0 * term3;
 
         SystemValue::new([result])
     }
@@ -125,28 +125,33 @@ impl Operator<2> for PsiOperator {
         index: usize,
     ) {
         if index % 25 == 0 {
-            let mut garfinkle = SystemVec::with_length(mesh.num_dofs());
-            garfinkle
+            let mut choptuik = SystemVec::with_length(mesh.num_dofs());
+            choptuik
                 .field_mut(Choptuik::Psi)
                 .copy_from_slice(system.field(Scalar));
-            garfinkle
+            choptuik
                 .field_mut(Choptuik::Seed)
                 .copy_from_slice(context.field(Scalar));
 
             let mut hamiltonian = vec![0.0; mesh.num_dofs()];
 
-            mesh.order::<4>().project(
-                BoundaryConditions,
+            mesh.evaluate(
+                ORDER,
+                Quadrant,
                 Hamiltonian,
-                garfinkle.as_slice(),
+                choptuik.as_slice(),
                 hamiltonian.as_mut_slice().into(),
             );
 
-            mesh.order::<4>()
-                .fill_boundary(crate::HAM_COND, hamiltonian.as_mut_slice().into());
+            mesh.fill_boundary(
+                ORDER,
+                Quadrant,
+                HAMILTONIAN_CONDITIONS,
+                hamiltonian.as_mut_slice().into(),
+            );
 
             let mut systems = SystemCheckpoint::default();
-            systems.save_field("psi", garfinkle.field(Choptuik::Psi));
+            systems.save_field("psi", choptuik.field(Choptuik::Psi));
             systems.save_field("hamiltonian", &hamiltonian);
 
             mesh.export_vtk(
@@ -169,47 +174,50 @@ impl Function<2> for Hamiltonian {
     type Input = Choptuik;
     type Output = Scalar;
 
-    fn evaluate(
-        &self,
-        engine: &impl Engine<2>,
-        input: SystemFields<'_, Self::Input>,
-    ) -> SystemValue<Self::Output> {
-        let psi = input.field(Choptuik::Psi);
-        let seed = input.field(Choptuik::Seed);
+    type Conditions = ChoptuikConditions;
 
+    fn conditions(&self) -> Self::Conditions {
+        ChoptuikConditions
+    }
+
+    fn evaluate(&self, engine: &impl Engine<2, Self::Input>) -> SystemValue<Self::Output> {
         let [rho, _z] = engine.position();
         let on_axis = rho.abs() <= 10e-10;
 
-        let psi_val = engine.value(psi);
-        let psi_grad = engine.gradient(PSI_COND, psi);
-        let psi_hess = engine.hessian(PSI_COND, psi);
+        let psi = engine.value(Choptuik::Psi);
+        let psi_r = engine.derivative(Choptuik::Psi, 0);
+        let psi_z = engine.derivative(Choptuik::Psi, 1);
 
-        let seed_val = engine.value(seed);
-        let seed_grad = engine.gradient(SEED_COND, seed);
-        let seed_hess = engine.hessian(SEED_COND, seed);
+        let psi_rr = engine.second_derivative(Choptuik::Psi, 0, 0);
+        let psi_zz = engine.second_derivative(Choptuik::Psi, 1, 1);
+
+        let seed = engine.value(Choptuik::Seed);
+        let seed_r = engine.derivative(Choptuik::Seed, 0);
+        let seed_z = engine.derivative(Choptuik::Seed, 1);
+        let seed_rr = engine.second_derivative(Choptuik::Seed, 0, 0);
+        let seed_zz = engine.second_derivative(Choptuik::Seed, 1, 1);
 
         let term1 = if on_axis {
-            2.0 * psi_hess[0][0] + psi_hess[1][1]
+            2.0 * psi_rr + psi_zz
         } else {
-            psi_hess[0][0] + psi_grad[0] / rho + psi_hess[1][1]
+            psi_rr + psi_r / rho + psi_zz
         };
 
-        let term2 =
-            (seed_val + rho * seed_grad[0]) * psi_grad[0] + rho * seed_grad[1] * psi_grad[1];
+        let term2 = (seed + rho * seed_r) * psi_r + rho * seed_z * psi_z;
 
-        let mut term3 = rho * seed_hess[0][0]
-            + 4.0 * seed_grad[0]
-            + (seed_val + rho * seed_grad[0]).powi(2)
-            + rho * seed_hess[1][1]
-            + (rho * seed_grad[1]).powi(2);
+        let mut term3 = rho * seed_rr
+            + 4.0 * seed_r
+            + (seed + rho * seed_r).powi(2)
+            + rho * seed_zz
+            + (rho * seed_z).powi(2);
 
         if on_axis {
-            term3 += 2.0 * seed_grad[0];
+            term3 += 2.0 * seed_r;
         } else {
-            term3 += 2.0 * seed_val / rho
+            term3 += 2.0 * seed / rho
         }
 
-        let result = term1 + term2 + psi_val / 4.0 * term3;
+        let result = term1 + term2 + psi / 4.0 * term3;
 
         SystemValue::new([result])
     }
@@ -222,13 +230,15 @@ impl Function<2> for RinneFromChoptuik {
     type Input = Choptuik;
     type Output = Rinne;
 
-    fn evaluate(
-        &self,
-        engine: &impl Engine<2>,
-        input: SystemFields<'_, Self::Input>,
-    ) -> SystemValue<Self::Output> {
-        let psi = engine.value(input.field(Choptuik::Psi));
-        let seed = engine.value(input.field(Choptuik::Seed));
+    type Conditions = ChoptuikConditions;
+
+    fn conditions(&self) -> Self::Conditions {
+        ChoptuikConditions
+    }
+
+    fn evaluate(&self, engine: &impl Engine<2, Self::Input>) -> SystemValue<Self::Output> {
+        let psi = engine.value(Choptuik::Psi);
+        let seed = engine.value(Choptuik::Seed);
 
         let mut result: SystemValue<_> = SystemValue::default();
         result.set_field(Rinne::Conformal, psi.powi(4));
@@ -251,10 +261,8 @@ pub fn solve(
     let (psi, seed) = choptuik.split_at_mut(num_nodes);
 
     // Compute seed values.
-    mesh.order::<4>()
-        .evaluate(SeedFunction(amplitude), seed.into());
-    mesh.order::<4>()
-        .fill_boundary(ScalarConditions(SEED_COND), seed.into());
+    mesh.project(ORDER, Quadrant, SeedProjection(amplitude), seed.into());
+    mesh.fill_boundary(ORDER, Quadrant, SEED_CONDITIONS, seed.into());
 
     // Initial Guess for Psi
     psi.fill(1.0);
@@ -267,25 +275,30 @@ pub fn solve(
     solver.cfl = 0.1;
     solver.dampening = 0.4;
 
-    solver.solve::<2, 4, _, _>(mesh, PSI_COND, PsiOperator, seed.into(), psi.into());
+    solver.solve(mesh, ORDER, Quadrant, PsiOperator, seed.into(), psi.into());
 
-    mesh.order::<4>().fill_boundary(
-        BoundaryConditions,
+    // Fill garkfinkle again.
+    mesh.fill_boundary(
+        ORDER,
+        Quadrant,
+        ChoptuikConditions,
         SystemSliceMut::from_contiguous(&mut choptuik),
     );
 
-    mesh.order::<4>().project(
-        BoundaryConditions,
+    mesh.evaluate(
+        ORDER,
+        Quadrant,
         RinneFromChoptuik,
         SystemSlice::from_contiguous(&choptuik),
         rinne,
     );
 
-    mesh.order::<4>().project(
-        BoundaryConditions,
+    mesh.evaluate(
+        ORDER,
+        Quadrant,
         Hamiltonian,
         SystemSlice::from_contiguous(&choptuik),
-        SystemSliceMut::from_contiguous(hamiltonian),
+        hamiltonian.into(),
     );
 
     Ok(())

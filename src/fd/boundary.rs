@@ -5,7 +5,7 @@
 
 use crate::{
     geometry::{Face, FaceMask},
-    system::{Pair, Scalar, SystemLabel},
+    system::{Empty, Pair, Scalar, SystemLabel},
 };
 
 /// Indicates what type of boundary condition is used along a particualr
@@ -67,7 +67,7 @@ pub trait Conditions<const N: usize>: Clone {
 pub struct ScalarConditions<I>(pub I);
 
 impl<I> ScalarConditions<I> {
-    pub fn new(inner: I) -> Self {
+    pub const fn new(inner: I) -> Self {
         Self(inner)
     }
 }
@@ -138,6 +138,30 @@ impl<const N: usize, B: Clone, C: Condition<N>> Condition<N> for BC<B, C> {
 
     fn radiative(&self, position: [f64; N]) -> f64 {
         self.condition.radiative(position)
+    }
+}
+
+#[derive(Clone)]
+pub struct SystemCondition<S, C> {
+    field: S,
+    conditions: C,
+}
+
+impl<S, C> SystemCondition<S, C> {
+    pub const fn new(field: S, conditions: C) -> Self {
+        Self { field, conditions }
+    }
+}
+
+impl<const N: usize, S: SystemLabel, C: Conditions<N, System = S>> Condition<N>
+    for SystemCondition<S, C>
+{
+    fn parity(&self, face: Face<N>) -> bool {
+        self.conditions.parity(self.field.clone(), face)
+    }
+
+    fn radiative(&self, position: [f64; N]) -> f64 {
+        self.conditions.radiative(self.field.clone(), position)
     }
 }
 
@@ -212,5 +236,20 @@ impl<const N: usize, L: Conditions<N>, R: Conditions<N>> Conditions<N> for PairC
             Pair::Left(left) => self.left.radiative(left, position),
             Pair::Right(right) => self.right.radiative(right, position),
         }
+    }
+}
+
+#[derive(Clone)]
+pub struct EmptyConditions;
+
+impl<const N: usize> Conditions<N> for EmptyConditions {
+    type System = Empty;
+
+    fn parity(&self, _field: Self::System, _face: Face<N>) -> bool {
+        unreachable!()
+    }
+
+    fn radiative(&self, _field: Self::System, _position: [f64; N]) -> f64 {
+        unreachable!()
     }
 }

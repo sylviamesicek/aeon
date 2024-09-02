@@ -1,6 +1,9 @@
 #![allow(mixed_script_confusables)]
 
-use aeon::fd::{DissipationOperator, ExportVtkConfig, Mesh, SystemCheckpoint};
+use aeon::fd::{
+    DissipationFunction, ExportVtkConfig, FourthOrder, Mesh, Order, SixthOrder, SystemCheckpoint,
+    SystemCondition,
+};
 use aeon::prelude::*;
 use aeon::system::field_count;
 use reborrow::{Reborrow, ReborrowMut};
@@ -14,8 +17,8 @@ use types::HyperbolicSystem;
 
 const STEPS: usize = 7501;
 const CFL: f64 = 0.1;
-const ORDER: usize = 4;
-const DISS_ORDER: usize = ORDER + 2;
+const ORDER: FourthOrder = Order::<4>;
+const DISS_ORDER: SixthOrder = Order::<6>;
 
 const SYMBOLIC: bool = false;
 
@@ -45,9 +48,9 @@ pub enum Dynamic {
 }
 
 #[derive(Clone)]
-pub struct DynamicBC;
+pub struct Quadrant;
 
-impl Boundary<2> for DynamicBC {
+impl Boundary<2> for Quadrant {
     fn kind(&self, face: Face<2>) -> BoundaryKind {
         match face.side {
             true => BoundaryKind::Radiative,
@@ -56,7 +59,10 @@ impl Boundary<2> for DynamicBC {
     }
 }
 
-impl Conditions<2> for DynamicBC {
+#[derive(Clone)]
+pub struct DynamicConditions;
+
+impl Conditions<2> for DynamicConditions {
     type System = Dynamic;
 
     fn parity(&self, field: Self::System, face: Face<2>) -> bool {
@@ -81,76 +87,43 @@ impl Conditions<2> for DynamicBC {
     }
 }
 
-pub fn condition(field: Dynamic) -> SystemBC<Dynamic, DynamicBC> {
-    SystemBC::new(field, DynamicBC)
+pub fn condition(field: Dynamic) -> SystemCondition<Dynamic, DynamicConditions> {
+    SystemCondition::new(field, DynamicConditions)
 }
 
 #[derive(Clone)]
 pub struct DynamicDerivs;
 
-impl Operator<2> for DynamicDerivs {
-    type System = Dynamic;
-    type Context = Empty;
+impl Function<2> for DynamicDerivs {
+    type Input = Dynamic;
+    type Output = Dynamic;
 
-    fn apply(
-        &self,
-        engine: &impl Engine<2>,
-        input: SystemFields<'_, Self::System>,
-        _context: SystemFields<'_, Self::Context>,
-    ) -> SystemValue<Self::System> {
+    type Conditions = DynamicConditions;
+
+    fn conditions(&self) -> Self::Conditions {
+        DynamicConditions
+    }
+
+    fn evaluate(&self, engine: &impl Engine<2, Self::Input>) -> SystemValue<Self::Output> {
         let [rho, z] = engine.position();
 
         macro_rules! derivatives {
             ($field:ident, $value:ident, $dr:ident, $dz:ident) => {
-                let field = input.field(Dynamic::$field);
-
-                let $value = engine.value(field);
-
-                let $dr = engine.evaluate(
-                    (Derivative::<ORDER>, Value),
-                    condition(Dynamic::$field),
-                    field,
-                );
-                let $dz = engine.evaluate(
-                    (Value, Derivative::<ORDER>),
-                    condition(Dynamic::$field),
-                    field,
-                );
+                let $value = engine.value(Dynamic::$field);
+                let $dr = engine.derivative(Dynamic::$field, 0);
+                let $dz = engine.derivative(Dynamic::$field, 1);
             };
         }
 
         macro_rules! second_derivatives {
             ($field:ident, $value:ident, $dr:ident, $dz:ident, $drr:ident, $drz:ident, $dzz:ident) => {
-                let field = input.field(Dynamic::$field);
+                let $value = engine.value(Dynamic::$field);
+                let $dr = engine.derivative(Dynamic::$field, 0);
+                let $dz = engine.derivative(Dynamic::$field, 1);
 
-                let $value = engine.value(field);
-
-                let $dr = engine.evaluate(
-                    (Derivative::<ORDER>, Value),
-                    condition(Dynamic::$field),
-                    field,
-                );
-                let $dz = engine.evaluate(
-                    (Value, Derivative::<ORDER>),
-                    condition(Dynamic::$field),
-                    field,
-                );
-
-                let $drr = engine.evaluate(
-                    (SecondDerivative::<ORDER>, Value),
-                    condition(Dynamic::$field),
-                    field,
-                );
-                let $drz = engine.evaluate(
-                    (Derivative::<ORDER>, Derivative::<ORDER>),
-                    condition(Dynamic::$field),
-                    field,
-                );
-                let $dzz = engine.evaluate(
-                    (Value, SecondDerivative::<ORDER>),
-                    condition(Dynamic::$field),
-                    field,
-                );
+                let $drr = engine.second_derivative(Dynamic::$field, 0, 0);
+                let $drz = engine.second_derivative(Dynamic::$field, 0, 1);
+                let $dzz = engine.second_derivative(Dynamic::$field, 1, 1);
             };
         }
 
@@ -283,24 +256,23 @@ impl<'a> Ode for DynamicOde<'a> {
     }
 
     fn preprocess(&mut self, system: &mut [f64]) {
-        self.mesh
-            .fill_boundary::<ORDER, _>(DynamicBC, SystemSliceMut::from_contiguous(system));
+        self.mesh.fill_boundary(
+            ORDER,
+            Quadrant,
+            DynamicConditions,
+            SystemSliceMut::from_contiguous(system),
+        );
     }
 
     fn derivative(&mut self, system: &[f64], result: &mut [f64]) {
         let src = SystemSlice::from_contiguous(system);
         let mut dest = SystemSliceMut::from_contiguous(result);
 
-        self.mesh.apply(
-            DynamicBC,
-            DynamicDerivs,
-            src.rb(),
-            SystemSlice::empty(),
-            dest.rb_mut(),
-        );
+        self.mesh
+            .evaluate(ORDER, Quadrant, DynamicDerivs, src.rb(), dest.rb_mut());
 
         self.mesh
-            .weak_boundary::<ORDER, _>(DynamicBC, src.rb(), dest.rb_mut())
+            .weak_boundary(ORDER, Quadrant, DynamicConditions, src.rb(), dest.rb_mut());
     }
 }
 
@@ -349,7 +321,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     dynamic.field_mut(Dynamic::Shiftz).fill(0.0);
 
     // Fill ghost nodes
-    mesh.fill_boundary::<ORDER, _>(DynamicBC, dynamic.as_mut_slice());
+    mesh.fill_boundary(ORDER, Quadrant, DynamicConditions, dynamic.as_mut_slice());
 
     // Begin integration
     let h = CFL * mesh.min_spacing();
@@ -366,13 +338,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     for i in 0..STEPS {
         // Fill ghost nodes of system
-        mesh.fill_boundary::<ORDER, _>(DynamicBC, dynamic.as_mut_slice());
+        mesh.fill_boundary(ORDER, Quadrant, DynamicConditions, dynamic.as_mut_slice());
 
-        mesh.apply(
-            DynamicBC,
+        mesh.evaluate(
+            ORDER,
+            Quadrant,
             DynamicDerivs,
             dynamic.as_slice(),
-            SystemSlice::empty(),
             derivs.as_mut_slice(),
         );
 
@@ -404,10 +376,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         );
 
         // Compute dissipation
-        mesh.apply(
-            DissipationOperator::<DISS_ORDER, _>(DynamicBC),
+        mesh.evaluate(
+            DISS_ORDER,
+            Quadrant,
+            DissipationFunction(DynamicConditions),
             dynamic.as_slice(),
-            SystemSlice::empty(),
             dissipation.as_mut_slice(),
         );
 

@@ -3,8 +3,10 @@ use crate::{fd::NodeSpace, geometry::Rectangle};
 
 use crate::fd::Boundary;
 
-use super::{kernel::Convolution, node_from_vertex};
-use super::{Conditions, DissipationAxis, Gradient, Hessian, Kernels, SystemBC};
+use super::{
+    kernel::{Convolution, DissipationAxis},
+    node_from_vertex, Conditions, Gradient, Hessian, Kernels, SystemBC,
+};
 
 /// An interface for computing values, gradients, and hessians of fields.
 pub trait Engine<const N: usize, S: SystemLabel> {
