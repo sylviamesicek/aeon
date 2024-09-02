@@ -1,121 +1,16 @@
-//! Utilities and classes for working with `System`s.
-//!
-//! Systems are collections of multiple scalar fields that all have the same length, but different data. T
-//! his is used to represent coupled PDEs and ODEs. Each system is defined by a `SystemLabel`, which can be
-//! implemented by hand or using the provided procedural macro.
-
+use crate::system::{field_count, SystemLabel};
 use aeon_array::ArrayLike;
-
-use core::slice;
 use reborrow::{Reborrow, ReborrowMut};
 use serde::{Deserialize, Serialize};
-use std::array;
-use std::fmt::Debug;
 use std::marker::PhantomData;
-use std::ops::{Bound, Index, IndexMut, Range, RangeBounds};
-use std::slice::SliceIndex;
-
-/// Custom derive macro for the `SystemLabel` trait.
-pub use aeon_macros::SystemLabel;
-
-/// This trait is used to define systems of fields.
-pub trait SystemLabel: Sized + Clone + Send + Sync + 'static {
-    /// Name of the system (used for debugging and when serializing a system).
-    const SYSTEM_NAME: &'static str;
-
-    /// Retrieves the name of an individual field.
-    fn name(&self) -> String;
-
-    /// Retrieves the index of an individual field.
-    fn index(&self) -> usize;
-
-    /// Array type with same length as number of fields
-    type FieldLike<T>: ArrayLike<Self, Elem = T>;
-
-    /// Returns an array of all possible system labels.
-    fn fields() -> impl Iterator<Item = Self>;
-
-    fn field_from_index(index: usize) -> Self;
-}
-
-/// Number of fields in a given system.
-pub const fn field_count<Label: SystemLabel>() -> usize {
-    Label::FieldLike::<()>::LEN
-}
-
-pub struct SystemArray<T, const L: usize, S>(pub [T; L], PhantomData<S>);
-
-impl<T, const L: usize, S: SystemLabel> Index<S> for SystemArray<T, L, S> {
-    type Output = T;
-
-    fn index(&self, index: S) -> &Self::Output {
-        let index = index.index();
-        self.0.index(index)
-    }
-}
-
-impl<T, const L: usize, S: SystemLabel> IndexMut<S> for SystemArray<T, L, S> {
-    fn index_mut(&mut self, index: S) -> &mut Self::Output {
-        let index = index.index();
-        self.0.index_mut(index)
-    }
-}
-
-impl<T, const L: usize, S: SystemLabel> ArrayLike<S> for SystemArray<T, L, S> {
-    const LEN: usize = L;
-    type Elem = T;
-
-    fn from_fn<F: FnMut(S) -> Self::Elem>(mut cb: F) -> Self {
-        Self(
-            array::from_fn(|index| cb(S::field_from_index(index))),
-            PhantomData,
-        )
-    }
-}
-
-impl<T, const L: usize, S: SystemLabel> From<[T; L]> for SystemArray<T, L, S> {
-    fn from(value: [T; L]) -> Self {
-        SystemArray(value, PhantomData)
-    }
-}
-
-/// Represents the values of a coupled system at a single point.
-#[derive(Debug, Clone)]
-pub struct SystemValue<Label: SystemLabel>(Label::FieldLike<f64>);
-
-impl<Label: SystemLabel> SystemValue<Label> {
-    /// Constructs a new system value by wrapping an array of values.
-    pub fn new(values: Label::FieldLike<f64>) -> Self {
-        Self(values.into())
-    }
-
-    /// Constructs the SystemVal by calling a function for each field
-    pub fn from_fn<F: FnMut(Label) -> f64>(f: F) -> Self {
-        Self(Label::FieldLike::<f64>::from_fn(f))
-    }
-
-    /// Retrieves the value of the given field
-    pub fn field(&self, label: Label) -> f64 {
-        self.0[label]
-    }
-
-    /// Sets the value of the given field.
-    pub fn set_field(&mut self, label: Label, v: f64) {
-        self.0[label] = v
-    }
-}
-
-impl<Label: SystemLabel> Default for SystemValue<Label> {
-    fn default() -> Self {
-        Self::from_fn(|_| f64::default())
-    }
-}
+use std::ops::{Bound, Range, RangeBounds};
+use std::slice::{self, SliceIndex};
 
 /// Stores a system in memory as an structure of field vectors.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SystemVec<Label: SystemLabel> {
-    data: Vec<f64>,
-    _marker: PhantomData<Label>,
+    pub(crate) data: Vec<f64>,
+    pub(crate) _marker: PhantomData<Label>,
 }
 
 impl<Label: SystemLabel> SystemVec<Label> {
@@ -237,21 +132,12 @@ impl<Label: SystemLabel> SystemVec<Label> {
     }
 }
 
-impl SystemVec<Empty> {
-    pub fn empty() -> Self {
-        Self {
-            data: Vec::new(),
-            _marker: PhantomData,
-        }
-    }
-}
-
 /// Represents a subslice of an owned system vector.
 pub struct SystemSlice<'a, Label: SystemLabel> {
-    data: &'a [f64],
-    offset: usize,
-    length: usize,
-    _marker: PhantomData<Label>,
+    pub(crate) data: &'a [f64],
+    pub(crate) offset: usize,
+    pub(crate) length: usize,
+    pub(crate) _marker: PhantomData<Label>,
 }
 
 impl<'a, Label: SystemLabel> SystemSlice<'a, Label> {
@@ -293,12 +179,12 @@ impl<'a, Label: SystemLabel> SystemSlice<'a, Label> {
         if field_count::<Label>() == 0 {
             SystemFields {
                 length: 0,
-                fields: Label::FieldLike::from_fn(|_| std::ptr::null()).into(),
+                fields: Label::Array::from_fn(|_| std::ptr::null()).into(),
                 _marker: PhantomData,
             }
         } else {
             let length = self.data.len() / field_count::<Label>();
-            let fields = Label::FieldLike::from_fn(|field| unsafe {
+            let fields = Label::Array::from_fn(|field| unsafe {
                 self.data.as_ptr().add(field.index() * length + self.offset)
             })
             .into();
@@ -346,17 +232,6 @@ impl<'a, Label: SystemLabel> SystemSlice<'a, Label> {
     }
 }
 
-impl<'a> SystemSlice<'a, Empty> {
-    pub fn empty() -> Self {
-        Self {
-            data: &[],
-            offset: 0,
-            length: 0,
-            _marker: PhantomData,
-        }
-    }
-}
-
 impl<'long, 'short, Label: SystemLabel> Reborrow<'short> for SystemSlice<'long, Label> {
     type Target = SystemSlice<'short, Label>;
 
@@ -370,24 +245,12 @@ impl<'long, 'short, Label: SystemLabel> Reborrow<'short> for SystemSlice<'long, 
     }
 }
 
-impl<'a> From<&'a [f64]> for SystemSlice<'a, Scalar> {
-    fn from(value: &'a [f64]) -> Self {
-        SystemSlice::from_contiguous(value)
-    }
-}
-
-impl<'a> From<&'a mut [f64]> for SystemSlice<'a, Scalar> {
-    fn from(value: &'a mut [f64]) -> Self {
-        SystemSlice::from_contiguous(value)
-    }
-}
-
 /// A mutable reference to an owned system.
 pub struct SystemSliceMut<'a, Label: SystemLabel> {
-    data: &'a mut [f64],
-    offset: usize,
-    length: usize,
-    _marker: PhantomData<Label>,
+    pub(crate) data: &'a mut [f64],
+    pub(crate) offset: usize,
+    pub(crate) length: usize,
+    pub(crate) _marker: PhantomData<Label>,
 }
 
 impl<'a, Label: SystemLabel> SystemSliceMut<'a, Label> {
@@ -433,12 +296,12 @@ impl<'a, Label: SystemLabel> SystemSliceMut<'a, Label> {
         if field_count::<Label>() == 0 {
             SystemFields {
                 length: 0,
-                fields: Label::FieldLike::from_fn(|_| std::ptr::null()).into(),
+                fields: Label::Array::from_fn(|_| std::ptr::null()).into(),
                 _marker: PhantomData,
             }
         } else {
             let length = self.data.len() / field_count::<Label>();
-            let fields = Label::FieldLike::from_fn(|field| unsafe {
+            let fields = Label::Array::from_fn(|field| unsafe {
                 self.data.as_ptr().add(field.index() * length + self.offset)
             })
             .into();
@@ -456,12 +319,12 @@ impl<'a, Label: SystemLabel> SystemSliceMut<'a, Label> {
         if field_count::<Label>() == 0 {
             SystemFieldsMut {
                 length: 0,
-                fields: Label::FieldLike::from_fn(|_| std::ptr::null_mut()).into(),
+                fields: Label::Array::from_fn(|_| std::ptr::null_mut()).into(),
                 _marker: PhantomData,
             }
         } else {
             let length = self.data.len() / field_count::<Label>();
-            let fields = Label::FieldLike::from_fn(|field| unsafe {
+            let fields = Label::Array::from_fn(|field| unsafe {
                 self.data
                     .as_mut_ptr()
                     .add(field.index() * length + self.offset)
@@ -533,17 +396,6 @@ impl<'a, Label: SystemLabel> SystemSliceMut<'a, Label> {
     }
 }
 
-impl<'a> SystemSliceMut<'a, Empty> {
-    pub fn empty() -> Self {
-        Self {
-            data: &mut [],
-            offset: 0,
-            length: 0,
-            _marker: PhantomData,
-        }
-    }
-}
-
 impl<'long, 'short, Label: SystemLabel> Reborrow<'short> for SystemSliceMut<'long, Label> {
     type Target = SystemSlice<'short, Label>;
 
@@ -570,12 +422,7 @@ impl<'long, 'short, Label: SystemLabel> ReborrowMut<'short> for SystemSliceMut<'
     }
 }
 
-impl<'a> From<&'a mut [f64]> for SystemSliceMut<'a, Scalar> {
-    fn from(value: &'a mut [f64]) -> Self {
-        SystemSliceMut::from_contiguous(value)
-    }
-}
-
+/// An unsafe pointer to a range of a system.
 #[derive(Debug, Clone)]
 pub struct SystemRange<Label: SystemLabel> {
     ptr: *mut f64,
@@ -642,9 +489,9 @@ where
 
 /// A cache of immutable pointers to underlying system data.
 pub struct SystemFields<'a, Label: SystemLabel> {
-    length: usize,
-    fields: Label::FieldLike<*const f64>,
-    _marker: PhantomData<&'a [f64]>,
+    pub(crate) length: usize,
+    pub(crate) fields: Label::Array<*const f64>,
+    pub(crate) _marker: PhantomData<&'a [f64]>,
 }
 
 impl<'a, Label: SystemLabel> SystemFields<'a, Label> {
@@ -656,24 +503,28 @@ impl<'a, Label: SystemLabel> SystemFields<'a, Label> {
         self.len() == 0
     }
 
-    pub fn as_fields<'s>(&'s self) -> SystemFields<'s, Label> {
-        SystemFields {
-            fields: Label::FieldLike::from_fn(|i| self.fields[i].clone()),
-            length: self.length,
-            _marker: PhantomData,
-        }
-    }
-
     pub fn field(&self, label: Label) -> &'a [f64] {
         unsafe { std::slice::from_raw_parts(self.fields[label], self.length) }
     }
 }
 
+impl<'long, 'short, Label: SystemLabel> Reborrow<'short> for SystemFields<'long, Label> {
+    type Target = SystemFields<'short, Label>;
+
+    fn rb(&'short self) -> Self::Target {
+        SystemFields {
+            fields: Label::Array::from_fn(|i| self.fields[i].clone()),
+            length: self.length,
+            _marker: PhantomData,
+        }
+    }
+}
+
 /// A cache of mutable pointers to underlying system data.
 pub struct SystemFieldsMut<'a, Label: SystemLabel> {
-    length: usize,
-    fields: Label::FieldLike<*mut f64>,
-    _marker: PhantomData<&'a [f64]>,
+    pub(crate) length: usize,
+    pub(crate) fields: Label::Array<*mut f64>,
+    pub(crate) _marker: PhantomData<&'a [f64]>,
 }
 
 impl<'a, Label: SystemLabel> SystemFieldsMut<'a, Label> {
@@ -685,14 +536,6 @@ impl<'a, Label: SystemLabel> SystemFieldsMut<'a, Label> {
         self.len() == 0
     }
 
-    pub fn as_fields<'s>(&'s self) -> SystemFields<'s, Label> {
-        SystemFields {
-            fields: Label::FieldLike::from_fn(|index| self.fields[index] as *const f64).into(),
-            length: self.length,
-            _marker: PhantomData,
-        }
-    }
-
     pub fn field(&self, label: Label) -> &'a [f64] {
         unsafe { std::slice::from_raw_parts(self.fields[label], self.length) }
     }
@@ -702,184 +545,26 @@ impl<'a, Label: SystemLabel> SystemFieldsMut<'a, Label> {
     }
 }
 
-// ****************************
-// Builtin Labels *************
-// ****************************
+impl<'long, 'short, Label: SystemLabel> Reborrow<'short> for SystemFieldsMut<'long, Label> {
+    type Target = SystemFields<'short, Label>;
 
-#[derive(Clone)]
-pub enum Empty {}
-
-impl SystemLabel for Empty {
-    const SYSTEM_NAME: &'static str = "Empty";
-
-    fn name(&self) -> String {
-        unreachable!()
-    }
-
-    fn index(&self) -> usize {
-        unreachable!()
-    }
-
-    type FieldLike<T> = SystemArray<T, 0, Self>;
-
-    fn fields() -> impl Iterator<Item = Self> {
-        None::<Self>.into_iter()
-    }
-
-    fn field_from_index(_index: usize) -> Self {
-        unreachable!()
-    }
-}
-
-#[derive(Clone)]
-pub struct Scalar;
-
-impl SystemLabel for Scalar {
-    const SYSTEM_NAME: &'static str = "Scalar";
-
-    fn name(&self) -> String {
-        "scalar".to_string()
-    }
-
-    fn index(&self) -> usize {
-        0
-    }
-
-    type FieldLike<T> = SystemArray<T, 1, Self>;
-
-    fn fields() -> impl Iterator<Item = Self> {
-        [Scalar].into_iter()
-    }
-
-    fn field_from_index(_index: usize) -> Self {
-        Self
-    }
-}
-
-#[derive(Clone)]
-pub enum Pair<L, R> {
-    Left(L),
-    Right(R),
-}
-
-struct PairArray<T, L: SystemLabel, R: SystemLabel> {
-    left: L::FieldLike<T>,
-    right: R::FieldLike<T>,
-}
-
-impl<T, L: SystemLabel, R: SystemLabel> Index<Pair<L, R>> for PairArray<T, L, R> {
-    type Output = T;
-
-    fn index(&self, index: Pair<L, R>) -> &Self::Output {
-        match index {
-            Pair::Left(index) => &self.left[index],
-            Pair::Right(index) => &self.right[index],
+    fn rb(&'short self) -> Self::Target {
+        SystemFields {
+            fields: Label::Array::from_fn(|index| self.fields[index] as *const f64).into(),
+            length: self.length,
+            _marker: PhantomData,
         }
     }
 }
 
-impl<T, L: SystemLabel, R: SystemLabel> IndexMut<Pair<L, R>> for PairArray<T, L, R> {
-    fn index_mut(&mut self, index: Pair<L, R>) -> &mut Self::Output {
-        match index {
-            Pair::Left(index) => &mut self.left[index],
-            Pair::Right(index) => &mut self.right[index],
+impl<'long, 'short, Label: SystemLabel> ReborrowMut<'short> for SystemFieldsMut<'long, Label> {
+    type Target = SystemFieldsMut<'short, Label>;
+
+    fn rb_mut(&'short mut self) -> Self::Target {
+        SystemFieldsMut {
+            fields: Label::Array::from_fn(|index| self.fields[index] as *mut f64).into(),
+            length: self.length,
+            _marker: PhantomData,
         }
-    }
-}
-
-impl<T, L: SystemLabel, R: SystemLabel> ArrayLike<Pair<L, R>> for PairArray<T, L, R> {
-    type Elem = T;
-    const LEN: usize = L::FieldLike::<()>::LEN + R::FieldLike::<()>::LEN;
-
-    fn from_fn<F: FnMut(Pair<L, R>) -> Self::Elem>(mut f: F) -> Self {
-        Self {
-            left: L::FieldLike::from_fn(|left| f(Pair::Left(left))),
-            right: R::FieldLike::from_fn(|right| f(Pair::Right(right))),
-        }
-    }
-}
-
-impl<L: SystemLabel, R: SystemLabel> SystemLabel for Pair<L, R> {
-    const SYSTEM_NAME: &'static str = "Pair";
-
-    fn name(&self) -> String {
-        "Element of Pair".to_string()
-    }
-
-    fn index(&self) -> usize {
-        match self {
-            Pair::Left(left) => left.index(),
-            Pair::Right(right) => right.index() + L::FieldLike::<()>::LEN,
-        }
-    }
-
-    type FieldLike<T> = PairArray<T, L, R>;
-
-    fn fields() -> impl Iterator<Item = Self> {
-        L::fields()
-            .map(Pair::Left)
-            .chain(R::fields().map(Pair::Right))
-    }
-
-    fn field_from_index(index: usize) -> Self {
-        if index < L::FieldLike::<()>::LEN {
-            Pair::Left(L::field_from_index(index))
-        } else {
-            Pair::Right(R::field_from_index(index - L::FieldLike::<()>::LEN))
-        }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[derive(Clone, PartialEq, Eq, Debug, SystemLabel)]
-    pub enum MySystem {
-        First,
-        Second,
-        Third,
-    }
-
-    #[test]
-    fn systems() {
-        assert_eq!(MySystem::SYSTEM_NAME, "MySystem");
-        for (a, b) in MySystem::fields().zip([MySystem::First, MySystem::Second, MySystem::Third]) {
-            assert_eq!(a, b)
-        }
-        assert_eq!(MySystem::First.index(), 0);
-        assert_eq!(MySystem::Second.index(), 1);
-        assert_eq!(MySystem::Third.index(), 2);
-        assert_eq!(MySystem::First.name(), "First");
-        assert_eq!(MySystem::Second.name(), "Second");
-        assert_eq!(MySystem::Third.name(), "Third");
-
-        let data = vec![0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0];
-        let owned = SystemSlice::<MySystem>::from_contiguous(data.as_ref()).to_vec();
-
-        assert_eq!(owned.len(), 3);
-        assert_eq!(owned.field(MySystem::First), &[0.0, 1.0, 2.0]);
-        assert_eq!(owned.field(MySystem::Second), &[3.0, 4.0, 5.0]);
-        assert_eq!(owned.field(MySystem::Third), &[6.0, 7.0, 8.0]);
-
-        let slice = owned.slice(1..3);
-        let slice_cast = SystemSlice::<MySystem>::from_contiguous(&data);
-        assert_eq!(
-            slice.field(MySystem::First),
-            &slice_cast.field(MySystem::First)[1..3]
-        );
-        assert_eq!(
-            slice.field(MySystem::Second),
-            &slice_cast.field(MySystem::Second)[1..3]
-        );
-        assert_eq!(
-            slice.field(MySystem::Third),
-            &slice_cast.field(MySystem::Third)[1..3]
-        );
-
-        let fields = owned.as_slice().fields();
-        assert_eq!(fields.field(MySystem::First), &[0.0, 1.0, 2.0]);
-        assert_eq!(fields.field(MySystem::Second), &[3.0, 4.0, 5.0]);
-        assert_eq!(fields.field(MySystem::Third), &[6.0, 7.0, 8.0]);
     }
 }

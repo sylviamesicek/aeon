@@ -19,32 +19,6 @@ impl Border {
     }
 }
 
-// ************************************
-// Order ******************************
-// ************************************
-
-/// Associates an order with a type. Commonly used to set the order of accuracy for certain
-/// operators or boundary conditions.
-pub trait Order: 'static {
-    const ORDER: usize;
-    const BORDER: usize = Self::ORDER / 2;
-}
-
-/// Declares a struct which implements order
-macro_rules! OrderStruct {
-    ($name:ident<$order:literal>) => {
-        pub struct $name;
-
-        impl Order for $name {
-            const ORDER: usize = $order;
-        }
-    };
-}
-
-OrderStruct! { SecondOrder<2> }
-OrderStruct! { FourthOrder<2> }
-OrderStruct! { SixthOrder<2> }
-
 // *********************************
 // Kernel **************************
 // *********************************
@@ -93,94 +67,65 @@ impl Kernel for Value {
     }
 }
 
-/// Derivative operation of a given order.
-struct Derivative<O: Order>(PhantomData<O>);
+#[derive(Clone)]
+pub struct Unimplemented(usize);
 
-impl<O: Order> Derivative<O> {
-    pub const fn new() -> Self {
-        Self(PhantomData)
-    }
-}
-
-impl<O: Order> Clone for Derivative<O> {
-    fn clone(&self) -> Self {
-        Self::new()
-    }
-}
-
-impl<O: Order> Kernel for Derivative<O> {
+impl Kernel for Unimplemented {
     fn border_width(&self) -> usize {
-        O::BORDER
+        unimplemented!("Kernel is unimplemented for order {}", self.0)
     }
 
     fn interior(&self) -> &[f64] {
-        if O::ORDER == 2 {
-            &derivative!(1, 1, 0)
-        } else if O::ORDER == 4 {
-            &derivative!(2, 2, 0)
-        } else {
-            unimplemented!()
-        }
+        unimplemented!("Kernel is unimplemented for order {}", self.0)
+    }
+
+    fn free(&self, _border: Border) -> &[f64] {
+        unimplemented!("Kernel is unimplemented for order {}", self.0)
+    }
+
+    fn symmetric(&self, _border: Border) -> &[f64] {
+        unimplemented!("Kernel is unimplemented for order {}", self.0)
+    }
+
+    fn antisymmetric(&self, _border: Border) -> &[f64] {
+        unimplemented!("Kernel is unimplemented for order {}", self.0)
+    }
+
+    fn scale(&self, _spacing: f64) -> f64 {
+        unimplemented!("Kernel is unimplemented for order {}", self.0)
+    }
+}
+
+impl ProlongKernel for Unimplemented {}
+
+/// Derivative operation of a given order.
+#[derive(Clone)]
+pub struct Derivative<const ORDER: usize>;
+
+impl Kernel for Derivative<2> {
+    fn border_width(&self) -> usize {
+        1
+    }
+
+    fn interior(&self) -> &[f64] {
+        &derivative!(1, 1, 0)
     }
 
     fn free(&self, border: Border) -> &[f64] {
-        if O::ORDER == 2 {
-            match border {
-                Border::Negative(_) => &derivative!(0, 2, 0),
-                Border::Positive(_) => &derivative!(2, 0, 0),
-            }
-        } else if O::ORDER == 4 {
-            match border {
-                Border::Negative(0) => &derivative!(0, 4, 0),
-                Border::Negative(_) => &derivative!(0, 4, 1),
-                Border::Positive(0) => &derivative!(4, 0, 0),
-                Border::Positive(_) => &derivative!(4, 0, -1),
-            }
-        } else {
-            unimplemented!()
+        match border {
+            Border::Negative(_) => &derivative!(0, 2, 0),
+            Border::Positive(_) => &derivative!(2, 0, 0),
         }
     }
 
-    fn symmetric(&self, border: Border) -> &[f64] {
-        if O::ORDER == 2 {
-            &[0.0]
-        } else if O::ORDER == 4 {
-            const NEG_0: &'static [f64] = &[0.0];
-            const NEG_1: &'static [f64] = &[-2.0 / 3.0, 1.0 / 12.0, 2.0 / 3.0, -1.0 / 12.0];
-            const POS_0: &'static [f64] = &[0.0];
-            const POS_1: &'static [f64] = &[1.0 / 12.0, -2.0 / 3.0, -1.0 / 12.0, 2.0 / 3.0];
-
-            match border {
-                Border::Negative(0) => NEG_0,
-                Border::Negative(_) => NEG_1,
-                Border::Positive(0) => POS_0,
-                Border::Positive(_) => POS_1,
-            }
-        } else {
-            unimplemented!()
-        }
+    fn symmetric(&self, _border: Border) -> &[f64] {
+        &[0.0]
     }
 
     fn antisymmetric(&self, border: Border) -> &[f64] {
-        if O::ORDER == 2 {
-            match border {
-                Border::Negative(_) => &[0.0, 1.0],
-                Border::Positive(_) => &[1.0, 0.0],
-            }
-        } else if O::ORDER == 4 {
-            const NEG_0: &'static [f64] = &[0.0, 4.0 / 3.0, -2.0 / 12.0];
-            const NEG_1: &'static [f64] = &[-2.0 / 3.0, -1.0 / 12.0, 2.0 / 3.0, -1.0 / 12.0];
-            const POS_0: &'static [f64] = &[2.0 / 12.0, -4.0 / 3.0, 0.0];
-            const POS_1: &'static [f64] = &[1.0 / 12.0, -2.0 / 3.0, 1.0 / 12.0, 2.0 / 3.0];
-
-            match border {
-                Border::Negative(0) => NEG_0,
-                Border::Negative(_) => NEG_1,
-                Border::Positive(0) => POS_0,
-                Border::Positive(_) => POS_1,
-            }
-        } else {
-            unimplemented!()
+        match border {
+            Border::Negative(_) => &[0.0, 1.0],
+            Border::Positive(_) => &[1.0, 0.0],
         }
     }
 
@@ -189,98 +134,88 @@ impl<O: Order> Kernel for Derivative<O> {
     }
 }
 
-/// Second derivative operation of a given order.
-struct SecondDerivative<O: Order>(PhantomData<O>);
-
-impl<O: Order> SecondDerivative<O> {
-    pub fn new() -> Self {
-        Self(PhantomData)
-    }
-}
-
-impl<O: Order> Clone for SecondDerivative<O> {
-    fn clone(&self) -> Self {
-        Self::new()
-    }
-}
-
-impl<O: Order> Kernel for SecondDerivative<O> {
+impl Kernel for Derivative<4> {
     fn border_width(&self) -> usize {
-        O::BORDER
+        2
     }
 
     fn interior(&self) -> &[f64] {
-        if O::ORDER == 2 {
-            &second_derivative!(1, 1, 0)
-        } else if O::ORDER == 4 {
-            &second_derivative!(2, 2, 0)
-        } else {
-            unimplemented!()
-        }
+        &derivative!(2, 2, 0)
     }
 
     fn free(&self, border: Border) -> &[f64] {
-        if O::ORDER == 2 {
-            match border {
-                Border::Negative(_) => &second_derivative!(0, 3, 0),
-                Border::Positive(_) => &second_derivative!(3, 0, 0),
-            }
-        } else if O::ORDER == 4 {
-            match border {
-                Border::Negative(0) => &second_derivative!(0, 5, 0),
-                Border::Negative(_) => &second_derivative!(0, 5, 1),
-                Border::Positive(0) => &second_derivative!(5, 0, 0),
-                Border::Positive(_) => &second_derivative!(5, 0, -1),
-            }
-        } else {
-            unimplemented!()
+        match border {
+            Border::Negative(0) => &derivative!(0, 4, 0),
+            Border::Negative(_) => &derivative!(0, 4, 1),
+            Border::Positive(0) => &derivative!(4, 0, 0),
+            Border::Positive(_) => &derivative!(4, 0, -1),
         }
     }
 
     fn symmetric(&self, border: Border) -> &[f64] {
-        if O::ORDER == 2 {
-            match border {
-                Border::Negative(_) => &[-2.0, 2.0],
-                Border::Positive(_) => &[2.0, -2.0],
-            }
-        } else if O::ORDER == 4 {
-            const NEG_0: &'static [f64] = &[-5.0 / 2.0, 8.0 / 3.0, -2.0 / 12.0];
-            const NEG_1: &'static [f64] =
-                &[4.0 / 3.0, -5.0 / 2.0 - 1.0 / 12.0, 4.0 / 3.0, -1.0 / 12.0];
-            const POS_0: &'static [f64] = &[-2.0 / 12.0, 8.0 / 3.0, -5.0 / 2.0];
-            const POS_1: &'static [f64] =
-                &[-1.0 / 12.0, 4.0 / 3.0, -5.0 / 2.0 - 1.0 / 12.0, 4.0 / 3.0];
+        const NEG_0: &'static [f64] = &[0.0];
+        const NEG_1: &'static [f64] = &[-2.0 / 3.0, 1.0 / 12.0, 2.0 / 3.0, -1.0 / 12.0];
+        const POS_0: &'static [f64] = &[0.0];
+        const POS_1: &'static [f64] = &[1.0 / 12.0, -2.0 / 3.0, -1.0 / 12.0, 2.0 / 3.0];
 
-            match border {
-                Border::Negative(0) => NEG_0,
-                Border::Negative(_) => NEG_1,
-                Border::Positive(0) => POS_0,
-                Border::Positive(_) => POS_1,
-            }
-        } else {
-            unimplemented!()
+        match border {
+            Border::Negative(0) => NEG_0,
+            Border::Negative(_) => NEG_1,
+            Border::Positive(0) => POS_0,
+            Border::Positive(_) => POS_1,
         }
     }
 
     fn antisymmetric(&self, border: Border) -> &[f64] {
-        if O::ORDER == 2 {
-            &[0.0]
-        } else if O::ORDER == 4 {
-            const NEG_0: &'static [f64] = &[0.0];
-            const NEG_1: &'static [f64] =
-                &[4.0 / 3.0, -5.0 / 2.0 + 1.0 / 12.0, 4.0 / 3.0, -1.0 / 12.0];
-            const POS_0: &'static [f64] = &[0.0];
-            const POS_1: &'static [f64] =
-                &[-1.0 / 12.0, 4.0 / 3.0, -5.0 / 2.0 + 1.0 / 12.0, 4.0 / 3.0];
+        const NEG_0: &'static [f64] = &[0.0, 4.0 / 3.0, -2.0 / 12.0];
+        const NEG_1: &'static [f64] = &[-2.0 / 3.0, -1.0 / 12.0, 2.0 / 3.0, -1.0 / 12.0];
+        const POS_0: &'static [f64] = &[2.0 / 12.0, -4.0 / 3.0, 0.0];
+        const POS_1: &'static [f64] = &[1.0 / 12.0, -2.0 / 3.0, 1.0 / 12.0, 2.0 / 3.0];
 
-            match border {
-                Border::Negative(0) => NEG_0,
-                Border::Negative(_) => NEG_1,
-                Border::Positive(0) => POS_0,
-                Border::Positive(_) => POS_1,
-            }
-        } else {
-            unimplemented!()
+        match border {
+            Border::Negative(0) => NEG_0,
+            Border::Negative(_) => NEG_1,
+            Border::Positive(0) => POS_0,
+            Border::Positive(_) => POS_1,
+        }
+    }
+
+    fn scale(&self, spacing: f64) -> f64 {
+        1.0 / spacing
+    }
+}
+
+/// Second derivative operator of a given order.
+#[derive(Clone)]
+pub struct SecondDerivative<const ORDER: usize>;
+
+impl Kernel for SecondDerivative<2> {
+    fn border_width(&self) -> usize {
+        1
+    }
+
+    fn interior(&self) -> &[f64] {
+        &second_derivative!(1, 1, 0)
+    }
+
+    fn free(&self, border: Border) -> &[f64] {
+        match border {
+            Border::Negative(_) => &second_derivative!(0, 3, 0),
+            Border::Positive(_) => &second_derivative!(3, 0, 0),
+        }
+    }
+
+    fn symmetric(&self, border: Border) -> &[f64] {
+        match border {
+            Border::Negative(_) => &[-2.0, 2.0],
+            Border::Positive(_) => &[2.0, -2.0],
+        }
+    }
+
+    fn antisymmetric(&self, border: Border) -> &[f64] {
+        match border {
+            Border::Negative(_) => &[0.0],
+            Border::Positive(_) => &[0.0],
         }
     }
 
@@ -289,239 +224,321 @@ impl<O: Order> Kernel for SecondDerivative<O> {
     }
 }
 
-/// Dissipation operation of a given order.
-struct Dissipation<O: Order>(PhantomData<O>);
-
-impl<O: Order> Dissipation<O> {
-    pub fn new() -> Self {
-        Self(PhantomData)
-    }
-}
-
-impl<O: Order> Clone for Dissipation<O> {
-    fn clone(&self) -> Self {
-        Self::new()
-    }
-}
-
-impl<O: Order> Kernel for Dissipation<O> {
+impl Kernel for SecondDerivative<4> {
     fn border_width(&self) -> usize {
-        O::BORDER
+        2
     }
 
     fn interior(&self) -> &[f64] {
-        if O::ORDER == 4 {
-            &[1.0, -4.0, 6.0, -4.0, 1.0]
-        } else if O::ORDER == 6 {
-            &[1.0, -6.0, 15.0, -20.0, 15.0, -6.0, 1.0]
-        } else {
-            unimplemented!()
-        }
+        &second_derivative!(2, 2, 0)
     }
 
     fn free(&self, border: Border) -> &[f64] {
-        if O::ORDER == 4 {
-            match border {
-                Border::Negative(0) => &[3.0, -14.0, 26.0, -24.0, 11.0, -2.0],
-                Border::Negative(_) => &[2.0, -9.0, 16.0, -14.0, 6.0, -1.0],
-                Border::Positive(0) => &[-2.0, 11.0, -24.0, 26.0, -14.0, 3.0],
-                Border::Positive(_) => &[-1.0, 6.0, -14.0, 16.0, -9.0, 2.0],
-            }
-        } else if O::ORDER == 6 {
-            match border {
-                Border::Negative(0) => &[4.0, -27.0, 78.0, -125.0, 120.0, -69.0, 22.0, -3.0],
-                Border::Negative(1) => &[3.0, -20.0, 57.0, -90.0, 85.0, -48.0, 15.0, -2.0],
-                Border::Negative(_) => &[2.0, -13.0, 36.0, -55.0, 50.0, -27.0, 8.0, -1.0],
-                Border::Positive(0) => &[-3.0, 22.0, -69.0, 120.0, -125.0, 78.0, -27.0, 4.0],
-                Border::Positive(1) => &[-2.0, 15.0, -48.0, 85.0, -90.0, 57.0, -20.0, 3.0],
-                Border::Positive(_) => &[-1.0, 8.0, -27.0, 50.0, -55.0, 36.0, -13.0, 2.0],
-            }
-        } else {
-            unimplemented!()
+        match border {
+            Border::Negative(0) => &second_derivative!(0, 5, 0),
+            Border::Negative(_) => &second_derivative!(0, 5, 1),
+            Border::Positive(0) => &second_derivative!(5, 0, 0),
+            Border::Positive(_) => &second_derivative!(5, 0, -1),
         }
     }
 
     fn symmetric(&self, border: Border) -> &[f64] {
-        if O::ORDER == 4 {
-            match border {
-                Border::Negative(0) => &[6.0, -8.0, 2.0],
-                Border::Negative(_) => &[-4.0, 7.0, -4.0, 1.0],
-                Border::Positive(0) => &[2.0, -8.0, 6.0],
-                Border::Positive(_) => &[1.0, -4.0, 7.0, -4.0],
-            }
-        } else if O::ORDER == 6 {
-            match border {
-                Border::Negative(0) => &[-20.0, 30.0, -12.0, 2.0],
-                Border::Negative(1) => &[15.0, -26.0, 16.0, -6.0, 1.0],
-                Border::Negative(_) => &[-6.0, 16.0, -20.0, 15.0, -6.0, 1.0],
-                Border::Positive(0) => &[2.0, -12.0, 30.0, -20.0],
-                Border::Positive(1) => &[1.0, -6.0, 16.0, -26.0, 15.0],
-                Border::Positive(_) => &[1.0, -6.0, 15.0, -20.0, 16.0, -6.0],
-            }
-        } else {
-            unimplemented!()
+        const NEG_0: &'static [f64] = &[-5.0 / 2.0, 8.0 / 3.0, -2.0 / 12.0];
+        const NEG_1: &'static [f64] = &[4.0 / 3.0, -5.0 / 2.0 - 1.0 / 12.0, 4.0 / 3.0, -1.0 / 12.0];
+        const POS_0: &'static [f64] = &[-2.0 / 12.0, 8.0 / 3.0, -5.0 / 2.0];
+        const POS_1: &'static [f64] = &[-1.0 / 12.0, 4.0 / 3.0, -5.0 / 2.0 - 1.0 / 12.0, 4.0 / 3.0];
+
+        match border {
+            Border::Negative(0) => NEG_0,
+            Border::Negative(_) => NEG_1,
+            Border::Positive(0) => POS_0,
+            Border::Positive(_) => POS_1,
         }
     }
 
     fn antisymmetric(&self, border: Border) -> &[f64] {
-        if O::ORDER == 4 {
-            match border {
-                Border::Negative(0) => &[0.0],
-                Border::Negative(_) => &[-4.0, 5.0, -4.0, 1.0],
-                Border::Positive(0) => &[0.0],
-                Border::Positive(_) => &[1.0, -4.0, 5.0, -4.0],
-            }
-        } else if O::ORDER == 6 {
-            match border {
-                Border::Negative(0) => &[0.0],
-                Border::Negative(1) => &[15.0, -14.0, 14.0, -6.0, 1.0],
-                Border::Negative(_) => &[-6.0, 14.0, -20.0, 15.0, -6.0, 1.0],
-                Border::Positive(0) => &[0.0],
-                Border::Positive(1) => &[1.0, -6.0, 14.0, -14.0, 15.0],
-                Border::Positive(_) => &[1.0, -6.0, 15.0, -20.0, 14.0, -6.0],
-            }
-        } else {
-            unimplemented!()
+        const NEG_0: &'static [f64] = &[0.0];
+        const NEG_1: &'static [f64] = &[4.0 / 3.0, -5.0 / 2.0 + 1.0 / 12.0, 4.0 / 3.0, -1.0 / 12.0];
+        const POS_0: &'static [f64] = &[0.0];
+        const POS_1: &'static [f64] = &[-1.0 / 12.0, 4.0 / 3.0, -5.0 / 2.0 + 1.0 / 12.0, 4.0 / 3.0];
+
+        match border {
+            Border::Negative(0) => NEG_0,
+            Border::Negative(_) => NEG_1,
+            Border::Positive(0) => POS_0,
+            Border::Positive(_) => POS_1,
         }
     }
 
-    fn scale(&self, _spacing: f64) -> f64 {
-        if O::ORDER == 4 {
-            -1.0 / 16.0
-        } else if O::ORDER == 6 {
-            1.0 / 64.0
-        } else {
-            unimplemented!()
-        }
+    fn scale(&self, spacing: f64) -> f64 {
+        1.0 / (spacing * spacing)
     }
 }
 
-/// Interpolating operator of a given order.
-struct Interpolation<O: Order>(PhantomData<O>);
+/// Kriss Olgier dissipation of the given order.
+#[derive(Clone)]
+pub struct Dissipation<const ORDER: usize>;
 
-impl<O: Order> Interpolation<O> {
-    pub fn new() -> Self {
-        Self(PhantomData)
-    }
-}
-
-impl<O: Order> Clone for Interpolation<O> {
-    fn clone(&self) -> Self {
-        Self::new()
-    }
-}
-
-impl<O: Order> Kernel for Interpolation<O> {
+impl Kernel for Dissipation<4> {
     fn border_width(&self) -> usize {
-        O::BORDER
+        2
     }
 
     fn interior(&self) -> &[f64] {
-        if O::ORDER == 2 {
-            &[-1.0, 9.0, 9.0, -1.0]
-        } else if O::ORDER == 4 {
-            &[3.0, -25.0, 150.0, 150.0, -25.0, 3.0]
-        } else {
-            unimplemented!()
-        }
+        &[1.0, -4.0, 6.0, -4.0, 1.0]
     }
 
     fn free(&self, border: Border) -> &[f64] {
-        if O::ORDER == 2 {
-            match border {
-                Border::Positive(_) => &[1.0, -5.0, 15.0, 5.0],
-                Border::Negative(_) => &[5.0, 15.0, -5.0, 1.0],
-            }
-        } else if O::ORDER == 4 {
-            match border {
-                Border::Negative(1) => &[63.0, 315.0, -210.0, 126.0, -45.0, 7.0],
-                Border::Negative(_) => &[-7.0, 105.0, 210.0, -70.0, 21.0, -3.0],
-                Border::Positive(1) => &[7.0, -45.0, 126.0, -210.0, 315.0, 63.0],
-                Border::Positive(_) => &[-3.0, 21.0, -70.0, 210.0, 105.0, -7.0],
-            }
-        } else {
-            unimplemented!()
+        match border {
+            Border::Negative(0) => &[3.0, -14.0, 26.0, -24.0, 11.0, -2.0],
+            Border::Negative(_) => &[2.0, -9.0, 16.0, -14.0, 6.0, -1.0],
+            Border::Positive(0) => &[-2.0, 11.0, -24.0, 26.0, -14.0, 3.0],
+            Border::Positive(_) => &[-1.0, 6.0, -14.0, 16.0, -9.0, 2.0],
         }
     }
 
     fn symmetric(&self, border: Border) -> &[f64] {
-        if O::ORDER == 2 {
-            match border {
-                Border::Negative(_) => &[9.0, 8.0, -1.0],
-                Border::Positive(_) => &[-1.0, 8.0, 9.0],
-            }
-        } else if O::ORDER == 4 {
-            match border {
-                Border::Negative(1) => &[150.0, 125.0, -22.0, 3.0],
-                Border::Negative(_) => &[-25.0, 153.0, 150.0, -25.0, 3.0],
-                Border::Positive(1) => &[3.0, -22.0, 125.0, 150.0],
-                Border::Positive(_) => &[3.0, -25.0, 150.0, 153.0, -25.0],
-            }
-        } else {
-            unimplemented!()
+        match border {
+            Border::Negative(0) => &[6.0, -8.0, 2.0],
+            Border::Negative(_) => &[-4.0, 7.0, -4.0, 1.0],
+            Border::Positive(0) => &[2.0, -8.0, 6.0],
+            Border::Positive(_) => &[1.0, -4.0, 7.0, -4.0],
         }
     }
 
     fn antisymmetric(&self, border: Border) -> &[f64] {
-        if O::ORDER == 2 {
-            match border {
-                Border::Negative(_) => &[9.0, 10.0, -1.0],
-                Border::Positive(_) => &[-1.0, 10.0, 9.0],
-            }
-        } else if O::ORDER == 4 {
-            match border {
-                Border::Negative(1) => &[150.0, 175.0, -28.0, 3.0],
-                Border::Negative(_) => &[-25.0, 147.0, 150.0, -25.0, 3.0],
-                Border::Positive(1) => &[3.0, -28.0, 175.0, 150.0],
-                Border::Positive(_) => &[3.0, -25.0, 150.0, 147.0, -28.0],
-            }
-        } else {
-            unimplemented!()
+        match border {
+            Border::Negative(0) => &[0.0],
+            Border::Negative(_) => &[-4.0, 5.0, -4.0, 1.0],
+            Border::Positive(0) => &[0.0],
+            Border::Positive(_) => &[1.0, -4.0, 5.0, -4.0],
         }
     }
 
     fn scale(&self, _spacing: f64) -> f64 {
-        if O::ORDER == 2 {
-            1.0 / 16.0
-        } else if O::ORDER == 6 {
-            1.0 / 256.0
-        } else {
-            unimplemented!()
-        }
+        -1.0 / 16.0
     }
 }
 
-impl<O: Order> ProlongKernel for Interpolation<O> {}
+impl Kernel for Dissipation<6> {
+    fn border_width(&self) -> usize {
+        3
+    }
+
+    fn interior(&self) -> &[f64] {
+        &[1.0, -6.0, 15.0, -20.0, 15.0, -6.0, 1.0]
+    }
+
+    fn free(&self, border: Border) -> &[f64] {
+        match border {
+            Border::Negative(0) => &[4.0, -27.0, 78.0, -125.0, 120.0, -69.0, 22.0, -3.0],
+            Border::Negative(1) => &[3.0, -20.0, 57.0, -90.0, 85.0, -48.0, 15.0, -2.0],
+            Border::Negative(_) => &[2.0, -13.0, 36.0, -55.0, 50.0, -27.0, 8.0, -1.0],
+            Border::Positive(0) => &[-3.0, 22.0, -69.0, 120.0, -125.0, 78.0, -27.0, 4.0],
+            Border::Positive(1) => &[-2.0, 15.0, -48.0, 85.0, -90.0, 57.0, -20.0, 3.0],
+            Border::Positive(_) => &[-1.0, 8.0, -27.0, 50.0, -55.0, 36.0, -13.0, 2.0],
+        }
+    }
+
+    fn symmetric(&self, border: Border) -> &[f64] {
+        match border {
+            Border::Negative(0) => &[-20.0, 30.0, -12.0, 2.0],
+            Border::Negative(1) => &[15.0, -26.0, 16.0, -6.0, 1.0],
+            Border::Negative(_) => &[-6.0, 16.0, -20.0, 15.0, -6.0, 1.0],
+            Border::Positive(0) => &[2.0, -12.0, 30.0, -20.0],
+            Border::Positive(1) => &[1.0, -6.0, 16.0, -26.0, 15.0],
+            Border::Positive(_) => &[1.0, -6.0, 15.0, -20.0, 16.0, -6.0],
+        }
+    }
+
+    fn antisymmetric(&self, border: Border) -> &[f64] {
+        match border {
+            Border::Negative(0) => &[0.0],
+            Border::Negative(1) => &[15.0, -14.0, 14.0, -6.0, 1.0],
+            Border::Negative(_) => &[-6.0, 14.0, -20.0, 15.0, -6.0, 1.0],
+            Border::Positive(0) => &[0.0],
+            Border::Positive(1) => &[1.0, -6.0, 14.0, -14.0, 15.0],
+            Border::Positive(_) => &[1.0, -6.0, 15.0, -20.0, 14.0, -6.0],
+        }
+    }
+
+    fn scale(&self, _spacing: f64) -> f64 {
+        1.0 / 64.0
+    }
+}
+
+#[derive(Clone)]
+pub struct Interpolation<const ORDER: usize>;
+
+impl Kernel for Interpolation<2> {
+    fn border_width(&self) -> usize {
+        2
+    }
+
+    fn interior(&self) -> &[f64] {
+        &[-1.0, 9.0, 9.0, -1.0]
+    }
+
+    fn free(&self, border: Border) -> &[f64] {
+        match border {
+            Border::Positive(_) => &[1.0, -5.0, 15.0, 5.0],
+            Border::Negative(_) => &[5.0, 15.0, -5.0, 1.0],
+        }
+    }
+
+    fn symmetric(&self, border: Border) -> &[f64] {
+        match border {
+            Border::Negative(_) => &[9.0, 8.0, -1.0],
+            Border::Positive(_) => &[-1.0, 8.0, 9.0],
+        }
+    }
+
+    fn antisymmetric(&self, border: Border) -> &[f64] {
+        match border {
+            Border::Negative(_) => &[9.0, 10.0, -1.0],
+            Border::Positive(_) => &[-1.0, 10.0, 9.0],
+        }
+    }
+
+    fn scale(&self, _spacing: f64) -> f64 {
+        1.0 / 16.0
+    }
+}
+
+impl Kernel for Interpolation<4> {
+    fn border_width(&self) -> usize {
+        3
+    }
+
+    fn interior(&self) -> &[f64] {
+        &[3.0, -25.0, 150.0, 150.0, -25.0, 3.0]
+    }
+
+    fn free(&self, border: Border) -> &[f64] {
+        match border {
+            Border::Negative(1) => &[63.0, 315.0, -210.0, 126.0, -45.0, 7.0],
+            Border::Negative(_) => &[-7.0, 105.0, 210.0, -70.0, 21.0, -3.0],
+            Border::Positive(1) => &[7.0, -45.0, 126.0, -210.0, 315.0, 63.0],
+            Border::Positive(_) => &[-3.0, 21.0, -70.0, 210.0, 105.0, -7.0],
+        }
+    }
+
+    fn symmetric(&self, border: Border) -> &[f64] {
+        match border {
+            Border::Negative(1) => &[150.0, 125.0, -22.0, 3.0],
+            Border::Negative(_) => &[-25.0, 153.0, 150.0, -25.0, 3.0],
+            Border::Positive(1) => &[3.0, -22.0, 125.0, 150.0],
+            Border::Positive(_) => &[3.0, -25.0, 150.0, 153.0, -25.0],
+        }
+    }
+
+    fn antisymmetric(&self, border: Border) -> &[f64] {
+        match border {
+            Border::Negative(1) => &[150.0, 175.0, -28.0, 3.0],
+            Border::Negative(_) => &[-25.0, 147.0, 150.0, -25.0, 3.0],
+            Border::Positive(1) => &[3.0, -28.0, 175.0, 150.0],
+            Border::Positive(_) => &[3.0, -25.0, 150.0, 147.0, -28.0],
+        }
+    }
+
+    fn scale(&self, _spacing: f64) -> f64 {
+        1.0 / 256.0
+    }
+}
+
+impl<const ORDER: usize> ProlongKernel for Interpolation<ORDER> where Interpolation<ORDER>: Kernel {}
+
+// ************************************
+// Order ******************************
+// ************************************
+
+#[derive(Clone, Copy, Default)]
+pub struct Order<const ORDER: usize>;
+
+pub type SecondOrder = Order<2>;
+pub type FourthOrder = Order<4>;
+pub type SixthOrder = Order<6>;
 
 mod private {
     pub trait Sealed {}
 }
 
-impl<T: Order> private::Sealed for T {}
+impl private::Sealed for Order<2> {}
+impl private::Sealed for Order<4> {}
+impl private::Sealed for Order<6> {}
 
-/// Associates kernels for common operations with any type that implements Order.
-pub trait Kernels: private::Sealed + 'static {
+/// Associates an order with a type. Commonly used to set the order of accuracy for certain
+/// operators or boundary conditions.
+pub trait Kernels: private::Sealed + Clone + Copy + Default + 'static {
+    const ORDER: usize;
+    const MAX_BORDER: usize;
+
     fn derivative() -> &'static impl Kernel;
     fn second_derivative() -> &'static impl Kernel;
     fn dissipation() -> &'static impl Kernel;
     fn interpolation() -> &'static impl ProlongKernel;
 }
 
-impl<T: Order> Kernels for T {
+impl Kernels for SecondOrder {
+    const ORDER: usize = 2;
+    const MAX_BORDER: usize = 1;
+
     fn derivative() -> &'static impl Kernel {
-        &Derivative::<T>(PhantomData)
+        &Derivative::<2>
     }
 
     fn second_derivative() -> &'static impl Kernel {
-        &SecondDerivative::<T>(PhantomData)
+        &SecondDerivative::<2>
     }
 
     fn dissipation() -> &'static impl Kernel {
-        &Dissipation::<T>(PhantomData)
+        &Unimplemented(2)
     }
 
     fn interpolation() -> &'static impl ProlongKernel {
-        &Interpolation::<T>(PhantomData)
+        &Interpolation::<2>
+    }
+}
+
+impl Kernels for FourthOrder {
+    const ORDER: usize = 4;
+    const MAX_BORDER: usize = 2;
+
+    fn derivative() -> &'static impl Kernel {
+        &Derivative::<4>
+    }
+
+    fn second_derivative() -> &'static impl Kernel {
+        &SecondDerivative::<4>
+    }
+
+    fn dissipation() -> &'static impl Kernel {
+        &Unimplemented(4)
+    }
+
+    fn interpolation() -> &'static impl ProlongKernel {
+        &Interpolation::<4>
+    }
+}
+
+impl Kernels for SixthOrder {
+    const ORDER: usize = 6;
+    const MAX_BORDER: usize = 3;
+
+    fn derivative() -> &'static impl Kernel {
+        &Unimplemented(6)
+    }
+
+    fn second_derivative() -> &'static impl Kernel {
+        &Unimplemented(6)
+    }
+
+    fn dissipation() -> &'static impl Kernel {
+        &Dissipation::<6>
+    }
+
+    fn interpolation() -> &'static impl ProlongKernel {
+        &Unimplemented(6)
     }
 }
 
@@ -604,22 +621,22 @@ impl_convolution_for_tuples! {
 }
 
 /// Computes the gradient along the given axis.
-pub struct Gradient<O: Order>(usize, PhantomData<O>);
+pub struct Gradient<O: Kernels>(usize, PhantomData<O>);
 
-impl<O: Order> Gradient<O> {
+impl<O: Kernels> Gradient<O> {
     /// Constructs a convolution which computes the derivative along the given axis.
     pub const fn new(axis: usize) -> Self {
         Self(axis, PhantomData)
     }
 }
 
-impl<O: Order> Clone for Gradient<O> {
+impl<O: Kernels> Clone for Gradient<O> {
     fn clone(&self) -> Self {
         Self(self.0, PhantomData)
     }
 }
 
-impl<const N: usize, O: Order> Convolution<N> for Gradient<O> {
+impl<const N: usize, O: Kernels> Convolution<N> for Gradient<O> {
     fn border_width(&self, axis: usize) -> usize {
         if axis == self.0 {
             O::derivative().border_width()
@@ -666,16 +683,16 @@ impl<const N: usize, O: Order> Convolution<N> for Gradient<O> {
 }
 
 /// Computes the mixed derivative of the given axes.
-pub struct Hessian<O: Order>(usize, usize, PhantomData<O>);
+pub struct Hessian<O: Kernels>(usize, usize, PhantomData<O>);
 
-impl<O: Order> Hessian<O> {
+impl<O: Kernels> Hessian<O> {
     /// Constructs a convolution which computes the given entry of the hessian matrix.
     pub fn new(i: usize, j: usize) -> Self {
         Self(i, j, PhantomData)
     }
 }
 
-impl<O: Order> Hessian<O> {
+impl<O: Kernels> Hessian<O> {
     fn is_second(&self, axis: usize) -> bool {
         self.0 == self.1 && axis == self.0
     }
@@ -685,7 +702,7 @@ impl<O: Order> Hessian<O> {
     }
 }
 
-impl<const N: usize, O: Order> Convolution<N> for Hessian<O> {
+impl<const N: usize, O: Kernels> Convolution<N> for Hessian<O> {
     fn border_width(&self, axis: usize) -> usize {
         if self.is_second(axis) {
             O::second_derivative().border_width()
@@ -738,5 +755,67 @@ impl<const N: usize, O: Order> Convolution<N> for Hessian<O> {
 
     fn scale(&self, spacing: [f64; N]) -> f64 {
         1.0 / (spacing[self.0] * spacing[self.1])
+    }
+}
+
+/// Computes the gradient along the given axis.
+pub struct DissipationAxis<O: Kernels>(usize, PhantomData<O>);
+
+impl<O: Kernels> DissipationAxis<O> {
+    /// Constructs a convolution which computes the derivative along the given axis.
+    pub const fn new(axis: usize) -> Self {
+        Self(axis, PhantomData)
+    }
+}
+
+impl<O: Kernels> Clone for DissipationAxis<O> {
+    fn clone(&self) -> Self {
+        Self(self.0, PhantomData)
+    }
+}
+
+impl<const N: usize, O: Kernels> Convolution<N> for DissipationAxis<O> {
+    fn border_width(&self, axis: usize) -> usize {
+        if axis == self.0 {
+            O::dissipation().border_width()
+        } else {
+            Value.border_width()
+        }
+    }
+
+    fn interior(&self, axis: usize) -> &[f64] {
+        if axis == self.0 {
+            O::dissipation().interior()
+        } else {
+            Value.interior()
+        }
+    }
+
+    fn free(&self, border: Border, axis: usize) -> &[f64] {
+        if axis == self.0 {
+            O::dissipation().free(border)
+        } else {
+            Value.free(border)
+        }
+    }
+
+    fn symmetric(&self, border: Border, axis: usize) -> &[f64] {
+        if axis == self.0 {
+            O::dissipation().symmetric(border)
+        } else {
+            Value.symmetric(border)
+        }
+    }
+
+    fn antisymmetric(&self, border: Border, axis: usize) -> &[f64] {
+        if axis == self.0 {
+            O::dissipation().antisymmetric(border)
+        } else {
+            Value.antisymmetric(border)
+        }
+    }
+
+    fn scale(&self, spacing: [f64; N]) -> f64 {
+        1.0 / spacing[self.0]
     }
 }

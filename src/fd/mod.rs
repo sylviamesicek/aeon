@@ -6,39 +6,43 @@ mod kernel;
 mod mesh;
 mod node;
 
-pub use boundary::{BlockBC, Boundary, BoundaryKind, Condition, Conditions, SystemBC, UnitBC, BC};
+pub use boundary::{
+    BlockBoundary, Boundary, BoundaryKind, Condition, Conditions, PairConditions, ScalarConditions,
+    SystemBC, BC,
+};
 pub use engine::{Engine, FdEngine, FdIntEngine};
 pub use kernel::{
-    Convolution, FourthOrder, Gradient, Hessian, Kernel, Kernels, Order, SecondOrder, SixthOrder,
-    Value,
+    Convolution, DissipationAxis, FourthOrder, Gradient, Hessian, Kernel, Kernels, Order,
+    SecondOrder, SixthOrder, Value,
 };
 pub use mesh::{ExportVtkConfig, Mesh, MeshCheckpoint, SystemCheckpoint};
 pub use node::{node_from_vertex, vertex_from_node, NodeSpace, NodeWindow};
 
-use crate::system::{Empty, Pair, SystemFields, SystemLabel, SystemSlice, SystemValue};
+use crate::system::{Pair, SystemLabel, SystemSlice, SystemValue};
 
-/// A function takes in a position and returns a system of values.
+/// A function maps one set of scalar fields to another.
 pub trait Function<const N: usize>: Clone {
-    type Output: SystemLabel;
-
-    fn evaluate(&self, position: [f64; N]) -> SystemValue<Self::Output>;
-}
-
-/// A projection maps one set of scalar fields to another.
-pub trait Projection<const N: usize>: Clone {
     type Input: SystemLabel;
     type Output: SystemLabel;
 
-    type Boundary: Boundary<N>;
-    fn boundary(&self) -> Self::Boundary;
-
-    fn project(
-        &self,
-        engine: &impl Engine<N>,
-        input: SystemFields<'_, Self::Input>,
-    ) -> SystemValue<Self::Output>;
+    fn evaluate(&self, engine: &impl Engine<N, Self::Input>) -> SystemValue<Self::Output>;
 }
 
+/// A projection takes in a position and returns a system of values.
+pub trait Projection<const N: usize>: Clone {
+    type Output: SystemLabel;
+
+    fn project(&self, position: [f64; N]) -> SystemValue<Self::Output>;
+}
+
+// impl<const N: usize, F: Projection<N>> Function<N> for F {
+//     type Input = Empty;
+//     type Output = F::Output;
+
+//     fn evaluate(&self, engine: &impl Engine<N, Self::Input>) -> SystemValue<Self::Output> {
+//         self.project(engine.position())
+//     }
+// }
 /// An operator transforms a set of scalar fields, using an additional set of scalar fields
 /// as context.
 pub trait Operator<const N: usize>: Clone {
@@ -48,11 +52,15 @@ pub trait Operator<const N: usize>: Clone {
     type Boundary: Boundary<N>;
     fn boundary(&self) -> Self::Boundary;
 
+    type SystemConditions: Conditions<N, System = Self::System>;
+    fn system_conditions(&self) -> Self::SystemConditions;
+
+    type ContextConditions: Conditions<N, System = Self::Context>;
+    fn context_conditions(&self) -> Self::ContextConditions;
+
     fn apply(
         &self,
-        engine: &impl Engine<N>,
-        input: SystemFields<'_, Self::System>,
-        context: SystemFields<'_, Self::Context>,
+        engine: &impl Engine<N, Pair<Self::System, Self::Context>>,
     ) -> SystemValue<Self::System>;
 
     fn callback(
@@ -65,18 +73,14 @@ pub trait Operator<const N: usize>: Clone {
     }
 }
 
-// impl<const N: usize, O: Operator<N>> Projection<N> for Operator<N> {
-//     type Input = Pair<O::System, O::Context>;
-//     type Output = O::System;
+impl<const N: usize, O: Operator<N>> Function<N> for O {
+    type Input = Pair<O::System, O::Context>;
+    type Output = O::System;
 
-//     fn project(
-//             &self,
-//             engine: &impl Engine<N>,
-//             input: SystemFields<'_, Self::Input>,
-//         ) -> SystemValue<Self::Output> {
-
-//     }
-// }
+    fn evaluate(&self, engine: &impl Engine<N, Self::Input>) -> SystemValue<Self::Output> {
+        self.apply(engine)
+    }
+}
 
 // #[derive(Clone)]
 // pub struct DissipationOperator<O, B>(pub B);

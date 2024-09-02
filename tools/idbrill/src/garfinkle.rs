@@ -53,10 +53,10 @@ const SEED_COND: SystemBC<Garfinkle, BoundaryConditions> =
 #[derive(Clone)]
 pub struct SeedFunction(f64);
 
-impl Function<2> for SeedFunction {
+impl Projection<2> for SeedFunction {
     type Output = Scalar;
 
-    fn evaluate(&self, position: [f64; 2]) -> SystemValue<Self::Output> {
+    fn project(&self, position: [f64; 2]) -> SystemValue<Self::Output> {
         let [rho, z] = position;
         SystemValue::new([rho * self.0 * (-(rho * rho + z * z)).exp()])
     }
@@ -147,11 +147,11 @@ impl Operator<2> for PsiOperator {
 #[derive(Clone)]
 pub struct Hamiltonian;
 
-impl Projection<2> for Hamiltonian {
+impl Function<2> for Hamiltonian {
     type Input = Garfinkle;
     type Output = Scalar;
 
-    fn project(
+    fn evaluate(
         &self,
         engine: &impl Engine<2>,
         input: SystemFields<'_, Self::Input>,
@@ -184,11 +184,11 @@ impl Projection<2> for Hamiltonian {
 #[derive(Clone)]
 pub struct RinneFromGarfinkle;
 
-impl Projection<2> for RinneFromGarfinkle {
+impl Function<2> for RinneFromGarfinkle {
     type Input = Garfinkle;
     type Output = Rinne;
 
-    fn project(
+    fn evaluate(
         &self,
         engine: &impl Engine<2>,
         input: SystemFields<'_, Self::Input>,

@@ -1,12 +1,7 @@
-use aeon_geometry::IndexWindow;
-
-use crate::geometry::{faces, CartesianIter, IndexSpace};
-use crate::prelude::{Face, Rectangle};
+use crate::fd::boundary::{Boundary, BoundaryKind, Condition};
+use crate::fd::kernel::{Border, Convolution, Kernel, ProlongKernel, Value};
+use aeon_geometry::{faces, CartesianIter, Face, IndexSpace, IndexWindow, Rectangle};
 use std::array::{self, from_fn};
-
-use super::boundary::{Boundary, BoundaryKind, Condition};
-use super::kernel::{Border, Convolution, Kernel, ProlongKernel, Value};
-use super::BC;
 
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
 pub enum Support {
@@ -27,20 +22,15 @@ pub fn node_from_vertex<const N: usize>(vertex: [usize; N]) -> [isize; N] {
 /// various derivative and interpolation kernels can be
 /// applied.
 #[derive(Debug, Clone)]
-pub struct NodeSpace<const N: usize, D> {
+pub struct NodeSpace<const N: usize> {
     /// Number of cells along each axis (one less than then number of vertices).
     size: [usize; N],
     ghost: usize,
-    boundary: D,
 }
 
-impl<const N: usize, D> NodeSpace<N, D> {
-    pub fn new(size: [usize; N], ghost: usize, boundary: D) -> Self {
-        Self {
-            size,
-            ghost,
-            boundary,
-        }
+impl<const N: usize> NodeSpace<N> {
+    pub fn new(size: [usize; N], ghost: usize) -> Self {
+        Self { size, ghost }
     }
 
     pub fn size(&self) -> [usize; N] {
@@ -139,8 +129,8 @@ impl<const N: usize, D> NodeSpace<N, D> {
 
     pub fn evaluate_interior(
         &self,
-        vertex: [usize; N],
         convolution: impl Convolution<N>,
+        vertex: [usize; N],
         field: &[f64],
     ) -> f64 {
         let stencils = array::from_fn(|axis| convolution.interior(axis));
@@ -180,35 +170,17 @@ impl<const N: usize, D> NodeSpace<N, D> {
         }
     }
 
-    pub fn attach_boundary<E>(&self, f: E) -> NodeSpace<N, E> {
-        NodeSpace {
-            size: self.size,
-            ghost: self.ghost,
-            boundary: f,
-        }
-    }
-}
-
-impl<const N: usize, D: Clone> NodeSpace<N, D> {
-    pub fn map_boundary<E>(&self, f: impl FnOnce(D) -> E) -> NodeSpace<N, E> {
-        NodeSpace {
-            size: self.size,
-            ghost: self.ghost,
-            boundary: f(self.boundary.clone()),
-        }
-    }
-}
-
-impl<const N: usize, D: Boundary<N>> NodeSpace<N, D> {
-    pub fn attach_condition<E>(&self, condition: E) -> NodeSpace<N, BC<D, E>> {
-        self.map_boundary(|boundary| BC::new(boundary, condition))
-    }
-
-    pub fn support(&self, vertex: [usize; N], border_width: usize, axis: usize) -> Support {
+    pub fn support(
+        &self,
+        boundary: &impl Boundary<N>,
+        vertex: [usize; N],
+        border_width: usize,
+        axis: usize,
+    ) -> Support {
         debug_assert!(self.ghost >= border_width);
 
-        let has_negative = self.boundary.kind(Face::negative(axis)).has_ghost();
-        let has_positive = self.boundary.kind(Face::positive(axis)).has_ghost();
+        let has_negative = boundary.kind(Face::negative(axis)).has_ghost();
+        let has_positive = boundary.kind(Face::positive(axis)).has_ghost();
 
         if !has_negative && vertex[axis] < border_width {
             Support::Negative(vertex[axis])
@@ -219,14 +191,20 @@ impl<const N: usize, D: Boundary<N>> NodeSpace<N, D> {
         }
     }
 
-    pub fn support_cell(&self, node: [usize; N], border_width: usize, axis: usize) -> Support {
+    pub fn support_cell(
+        &self,
+        boundary: &impl Boundary<N>,
+        node: [usize; N],
+        border_width: usize,
+        axis: usize,
+    ) -> Support {
         if node[axis] < border_width.saturating_sub(1)
-            && !self.boundary.kind(Face::negative(axis)).has_ghost()
+            && !boundary.kind(Face::negative(axis)).has_ghost()
         {
             let right = node[axis] + 1;
             Support::Negative(right)
         } else if node[axis] > self.size[axis] - border_width
-            && !self.boundary.kind(Face::positive(axis)).has_ghost()
+            && !boundary.kind(Face::positive(axis)).has_ghost()
         {
             let left = self.size[axis] - node[axis];
             debug_assert!(left > 0);
@@ -237,9 +215,9 @@ impl<const N: usize, D: Boundary<N>> NodeSpace<N, D> {
     }
 }
 
-impl<const N: usize, D: Boundary<N> + Condition<N>> NodeSpace<N, D> {
+impl<const N: usize> NodeSpace<N> {
     /// Set strongly enforced boundary conditions.
-    pub fn fill_boundary(&self, dest: &mut [f64]) {
+    pub fn fill_boundary(&self, boundary: impl Boundary<N> + Condition<N>, dest: &mut [f64]) {
         let vertex_size = self.inner_size();
         let active_window = self.inner_window();
 
@@ -253,9 +231,7 @@ impl<const N: usize, D: Boundary<N> + Condition<N>> NodeSpace<N, D> {
 
             // Iterate over face
             for node in active_window.plane(axis, intercept) {
-                if self.boundary.kind(face) == BoundaryKind::Parity
-                    && self.boundary.parity(face) == false
-                {
+                if boundary.kind(face) == BoundaryKind::Parity && boundary.parity(face) == false {
                     // For antisymmetric boundaries we set all values on axis to be 0.
                     let index = self.index_from_node(node);
                     dest[index] = 0.0;
@@ -266,6 +242,7 @@ impl<const N: usize, D: Boundary<N> + Condition<N>> NodeSpace<N, D> {
 
     fn stencils<'a, C: Convolution<N>>(
         &self,
+        boundary: impl Boundary<N> + Condition<N>,
         support: [Support; N],
         convolution: &'a C,
     ) -> [&'a [f64]; N] {
@@ -283,8 +260,8 @@ impl<const N: usize, D: Boundary<N> + Condition<N>> NodeSpace<N, D> {
                 side: border.side(),
             };
 
-            let kind = self.boundary.kind(face);
-            let parity = self.boundary.parity(face);
+            let kind = boundary.kind(face);
+            let parity = boundary.parity(face);
 
             match (kind, parity) {
                 (BoundaryKind::Parity, false) => convolution.antisymmetric(border, axis),
@@ -297,13 +274,15 @@ impl<const N: usize, D: Boundary<N> + Condition<N>> NodeSpace<N, D> {
 
     pub fn evaluate(
         &self,
-        vertex: [usize; N],
+        boundary: impl Boundary<N> + Condition<N>,
         convolution: impl Convolution<N>,
+        vertex: [usize; N],
         field: &[f64],
     ) -> f64 {
-        let support =
-            array::from_fn(|axis| self.support(vertex, convolution.border_width(axis), axis));
-        let stencils = self.stencils(support, &convolution);
+        let support = array::from_fn(|axis| {
+            self.support(&boundary, vertex, convolution.border_width(axis), axis)
+        });
+        let stencils = self.stencils(boundary, support, &convolution);
         let corner = array::from_fn(|axis| match support[axis] {
             Support::Interior => vertex[axis] as isize - convolution.border_width(axis) as isize,
             Support::Negative(_) => 0,
@@ -312,7 +291,13 @@ impl<const N: usize, D: Boundary<N> + Condition<N>> NodeSpace<N, D> {
         self.apply(corner, stencils, field)
     }
 
-    pub fn prolong(&self, supernode: [usize; N], kernel: impl ProlongKernel, field: &[f64]) -> f64 {
+    pub fn prolong(
+        &self,
+        boundary: impl Boundary<N> + Condition<N>,
+        kernel: impl ProlongKernel,
+        supernode: [usize; N],
+        field: &[f64],
+    ) -> f64 {
         let node: [_; N] = array::from_fn(|axis| supernode[axis] / 2);
         let flags: [_; N] = array::from_fn(|axis| supernode[axis] % 2 == 0);
 
@@ -324,7 +309,7 @@ impl<const N: usize, D: Boundary<N> + Condition<N>> NodeSpace<N, D> {
             }
         });
         let support: [_; N] =
-            array::from_fn(|axis| self.support_cell(node, border_width[axis], axis));
+            array::from_fn(|axis| self.support_cell(&boundary, node, border_width[axis], axis));
 
         let stencils = array::from_fn(|axis| {
             if !flags[axis] {
@@ -342,8 +327,8 @@ impl<const N: usize, D: Boundary<N> + Condition<N>> NodeSpace<N, D> {
                 side: border.side(),
             };
 
-            let kind = self.boundary.kind(face);
-            let parity = self.boundary.parity(face);
+            let kind = boundary.kind(face);
+            let parity = boundary.parity(face);
 
             match (kind, parity) {
                 (BoundaryKind::Parity, false) => kernel.antisymmetric(border),
@@ -491,7 +476,6 @@ mod tests {
         let space = NodeSpace {
             size: [8],
             ghost: 2,
-            boundary: Quadrant,
         };
 
         const BORDER: usize = 3;
@@ -509,16 +493,12 @@ mod tests {
         ];
 
         for i in 0..9 {
-            assert_eq!(space.support([i], BORDER, 0), supports[i]);
+            assert_eq!(space.support(&Quadrant, [i], BORDER, 0), supports[i]);
         }
     }
 
     fn eval_convergence(size: [usize; 2]) -> f64 {
-        let space = NodeSpace {
-            size,
-            ghost: 2,
-            boundary: Quadrant,
-        };
+        let space = NodeSpace { size, ghost: 2 };
         let bounds = Rectangle::UNIT;
         let spacing = space.spacing(bounds);
 
@@ -536,11 +516,12 @@ mod tests {
             let vertex = [node[0] as usize, node[1] as usize];
             let [x, y] = space.position(node, bounds);
             let numerical = space.evaluate(
-                vertex,
+                Quadrant,
                 (
                     FourthOrder::derivative().clone(),
                     FourthOrder::derivative().clone(),
                 ),
+                vertex,
                 &field,
             ) / (spacing[0] * spacing[1]);
             let analytical = x.cos() * y.cos();
@@ -563,15 +544,10 @@ mod tests {
     }
 
     fn prolong_convergence(size: [usize; 2]) -> f64 {
-        let cspace = NodeSpace {
-            size,
-            ghost: 2,
-            boundary: Quadrant,
-        };
+        let cspace = NodeSpace { size, ghost: 2 };
         let rspace = NodeSpace {
             size: size.map(|v| v * 2),
             ghost: 2,
-            boundary: Quadrant,
         };
 
         let bounds = Rectangle::UNIT;
@@ -589,7 +565,12 @@ mod tests {
         for node in rspace.inner_window().iter() {
             let vertex = [node[0] as usize, node[1] as usize];
             let [x, y] = rspace.position(node, bounds.clone());
-            let numerical = cspace.prolong(vertex, FourthOrder::interpolation().clone(), &field);
+            let numerical = cspace.prolong(
+                Quadrant,
+                FourthOrder::interpolation().clone(),
+                vertex,
+                &field,
+            );
             let analytical = x.sin() * y.sin();
             let error: f64 = (numerical - analytical).abs();
             result = result.max(error);

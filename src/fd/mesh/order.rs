@@ -2,14 +2,14 @@ use std::array;
 
 use aeon_geometry::{faces, Face, IndexSpace};
 use rayon::iter::{ParallelBridge, ParallelIterator};
+use reborrow::Reborrow as _;
 
 use crate::{
     fd::{
-        kernel::{Gradient, Kernels},
-        node_from_vertex, Boundary, BoundaryKind, Condition, Conditions, Engine, FdEngine,
-        FdIntEngine, Function, Operator, Order, Projection, SystemBC,
+        boundary::PairConditions, kernel::Kernels, Boundary, BoundaryKind, Condition, Conditions,
+        Engine, FdEngine, FdIntEngine, Function, Operator, SystemBC,
     },
-    system::{SystemLabel, SystemSlice, SystemSliceMut},
+    system::{SystemFields, SystemFieldsMut, SystemLabel, SystemSlice, SystemSliceMut},
 };
 
 use super::Mesh;
@@ -17,22 +17,24 @@ use super::Mesh;
 impl<const N: usize> Mesh<N> {
     /// Enforces strong boundary conditions. This includes strong physical boundary conditions, as well
     /// as handling interior boundaries (same level, coarse-fine, or fine-coarse).
-    pub fn fill_boundary<O: Order, BC: Boundary<N> + Conditions<N> + Sync>(
+    pub fn fill_boundary<K: Kernels, B: Boundary<N> + Sync, C: Conditions<N> + Sync>(
         &mut self,
-        order: O,
-        bc: BC,
-        mut system: SystemSliceMut<'_, BC::System>,
+        order: K,
+        boundary: B,
+        conditions: C,
+        mut system: SystemSliceMut<'_, C::System>,
     ) {
-        self.fill_physical(&bc, &mut system);
+        self.fill_physical(&boundary, &conditions, &mut system);
         self.fill_direct(&mut system);
         self.fill_fine(&mut system);
-        self.fill_prolong(order, &bc, &mut system);
+        self.fill_prolong(order, &boundary, &conditions, &mut system);
     }
 
-    fn fill_physical<BC: Boundary<N> + Conditions<N> + Sync>(
+    fn fill_physical<B: Boundary<N> + Sync, C: Conditions<N> + Sync>(
         &mut self,
-        bc: &BC,
-        system: &mut SystemSliceMut<'_, BC::System>,
+        boundary: &B,
+        conditions: &C,
+        system: &mut SystemSliceMut<'_, C::System>,
     ) {
         let system = system.as_range();
 
@@ -40,14 +42,13 @@ impl<const N: usize> Mesh<N> {
             // Fill Physical Boundary conditions
             let nodes = self.block_dofs(block);
             let space = self.block_space(block);
-            let boundary = self.block_boundary(block, bc.clone());
+            let boundary = self.block_boundary(block, boundary.clone());
 
             let mut block_system = unsafe { system.slice_mut(nodes) };
 
-            for field in BC::System::fields() {
-                space
-                    .attach_boundary(SystemBC::new(field.clone(), boundary.clone()))
-                    .fill_boundary(block_system.field_mut(field));
+            for field in C::System::fields() {
+                let bcs = SystemBC::new(field.clone(), boundary.clone(), conditions.clone());
+                space.fill_boundary(bcs, block_system.field_mut(field.clone()));
             }
         });
     }
@@ -109,18 +110,19 @@ impl<const N: usize> Mesh<N> {
         });
     }
 
-    fn fill_prolong<O: Order, BC: Boundary<N> + Conditions<N> + Sync>(
+    fn fill_prolong<K: Kernels, B: Boundary<N> + Sync, C: Conditions<N> + Sync>(
         &mut self,
-        _order: O,
-        bc: &BC,
-        system: &mut SystemSliceMut<'_, BC::System>,
+        _order: K,
+        boundary: &B,
+        conditions: &C,
+        system: &mut SystemSliceMut<'_, C::System>,
     ) {
         let system = system.as_range();
         self.interfaces.coarse().par_bridge().for_each(|interface| {
             let block_nodes = self.block_dofs(interface.block);
             let block_space = self.block_space(interface.block);
             let neighbor_nodes = self.block_dofs(interface.neighbor);
-            let neighbor_boundary = self.block_boundary(interface.neighbor, bc.clone());
+            let neighbor_boundary = self.block_boundary(interface.neighbor, boundary.clone());
             let neighbor_space = self.block_space(interface.neighbor);
 
             let mut block_system = unsafe { system.slice_mut(block_nodes).fields_mut() };
@@ -134,12 +136,14 @@ impl<const N: usize> Mesh<N> {
 
                 let block_index = block_space.index_from_node(block_node);
 
-                for field in BC::System::fields() {
-                    let bc = SystemBC::new(field.clone(), neighbor_boundary.clone());
+                for field in C::System::fields() {
+                    let bcs =
+                        SystemBC::new(field.clone(), neighbor_boundary.clone(), conditions.clone());
 
-                    let value = neighbor_space.attach_boundary(bc).prolong(
+                    let value = neighbor_space.prolong(
+                        bcs,
+                        K::interpolation().clone(),
                         neighbor_vertex,
-                        O::interpolation().clone(),
                         neighbor_system.field(field.clone()),
                     );
                     block_system.field_mut(field.clone())[block_index] = value;
@@ -148,18 +152,19 @@ impl<const N: usize> Mesh<N> {
         });
     }
 
-    pub fn weak_boundary<O: Order, BC: Boundary<N> + Conditions<N>>(
+    pub fn weak_boundary<O: Kernels, B: Boundary<N>, C: Conditions<N>>(
         &mut self,
-        _order: O,
-        bc: BC,
-        system: SystemSlice<'_, BC::System>,
-        deriv: SystemSliceMut<'_, BC::System>,
+        order: O,
+        boundary: B,
+        conditions: C,
+        system: SystemSlice<'_, C::System>,
+        deriv: SystemSliceMut<'_, C::System>,
     ) {
         let system = system.as_range();
         let deriv = deriv.as_range();
 
         (0..self.blocks.num_blocks()).for_each(|block| {
-            let boundary = self.block_boundary(block, bc.clone());
+            let boundary = self.block_boundary(block, boundary.clone());
             let bounds = self.blocks.block_bounds(block);
             let space = self.block_space(block);
             let nodes = self.block_dofs(block);
@@ -178,11 +183,15 @@ impl<const N: usize> Mesh<N> {
                     // *************************
                     // At vertex
 
-                    let engine = FdEngine::<N, _>::new(
-                        space.attach_boundary(boundary.clone()),
+                    let engine = FdEngine {
+                        space: space.clone(),
                         vertex,
                         bounds,
-                    );
+                        fields: block_system.rb(),
+                        order,
+                        boundary: boundary.clone(),
+                        conditions: conditions.clone(),
+                    };
 
                     let position: [f64; N] = engine.position();
                     let r = position.iter().map(|&v| v * v).sum::<f64>().sqrt();
@@ -208,32 +217,32 @@ impl<const N: usize> Mesh<N> {
                         }
                     }
 
-                    let inner_engine = FdEngine::<N, _>::new(
-                        space.attach_boundary(boundary.clone()),
-                        vertex,
+                    let inner_engine = FdEngine {
+                        space: space.clone(),
+                        vertex: inner,
                         bounds,
-                    );
+                        fields: block_system.rb(),
+                        order,
+                        boundary: boundary.clone(),
+                        conditions: conditions.clone(),
+                    };
 
                     let inner_position = inner_engine.position();
                     let inner_r = inner_position.iter().map(|&v| v * v).sum::<f64>().sqrt();
                     let inner_index = space.index_from_vertex(inner);
 
-                    for field in BC::System::fields() {
-                        let field_system = block_system.field(field.clone());
+                    for field in C::System::fields() {
                         let field_derivs = block_deriv.field_mut(field.clone());
-                        let field_boundary = SystemBC::new(field.clone(), boundary.clone());
+                        let bcs =
+                            SystemBC::new(field.clone(), boundary.clone(), conditions.clone());
 
-                        let target = Condition::radiative(&field_boundary, position);
+                        let target = Condition::radiative(&bcs, position);
 
                         // Inner R dependence
-                        let mut inner_advection = inner_engine.value(field_system) - target;
+                        let mut inner_advection = inner_engine.value(field.clone()) - target;
 
                         for axis in 0..N {
-                            let derivative = inner_engine.evaluate(
-                                Gradient::<O>::new(axis),
-                                field_boundary.clone(),
-                                field_system,
-                            );
+                            let derivative = inner_engine.derivative(field.clone(), axis);
                             inner_advection += inner_position[axis] * derivative;
                         }
 
@@ -243,14 +252,10 @@ impl<const N: usize> Mesh<N> {
                             * (field_derivs[inner_index] + inner_advection / inner_r);
 
                         // Vertex
-                        let mut advection = engine.value(field_system) - target;
+                        let mut advection = engine.value(field.clone()) - target;
 
                         for axis in 0..N {
-                            let derivative = engine.evaluate(
-                                Gradient::<O>::new(axis),
-                                field_boundary.clone(),
-                                field_system,
-                            );
+                            let derivative = engine.derivative(field.clone(), axis);
                             advection += position[axis] * derivative;
                         }
 
@@ -297,37 +302,45 @@ impl<const N: usize> Mesh<N> {
 }
 
 impl<const N: usize> Mesh<N> {
-    /// Fills the system by applying the given function at each node on the mesh.
-    pub fn evaluate<F: Function<N> + Sync>(&mut self, f: F, system: SystemSliceMut<'_, F::Output>) {
-        let system = system.as_range();
+    // /// Fills the system by applying the given function at each node on the mesh.
+    // pub fn evaluate<F: Function<N> + Sync>(&mut self, f: F, system: SystemSliceMut<'_, F::Output>) {
+    //     let system = system.as_range();
 
-        (0..self.blocks.num_blocks())
-            .par_bridge()
-            .for_each(|block| {
-                let nodes = self.block_dofs(block);
+    //     (0..self.blocks.num_blocks())
+    //         .par_bridge()
+    //         .for_each(|block| {
+    //             let nodes = self.block_dofs(block);
 
-                let mut block_system = unsafe { system.slice_mut(nodes.clone()).fields_mut() };
+    //             let mut block_system = unsafe { system.slice_mut(nodes.clone()).fields_mut() };
 
-                let bounds = self.blocks.block_bounds(block);
-                let space = self.block_space(block);
-                let vertex_size = space.inner_size();
+    //             let bounds = self.blocks.block_bounds(block);
+    //             let space = self.block_space(block);
+    //             let vertex_size = space.inner_size();
 
-                for vertex in IndexSpace::new(vertex_size).iter() {
-                    let position = space.position(node_from_vertex(vertex), bounds.clone());
-                    let result = f.evaluate(position);
+    //             for vertex in IndexSpace::new(vertex_size).iter() {
+    //                 let position = space.position(node_from_vertex(vertex), bounds.clone());
+    //                 let result = f.evaluate(position);
 
-                    let index = space.index_from_vertex(vertex);
-                    for field in F::Output::fields() {
-                        block_system.field_mut(field.clone())[index] = result.field(field.clone());
-                    }
-                }
-            });
-    }
+    //                 let index = space.index_from_vertex(vertex);
+    //                 for field in F::Output::fields() {
+    //                     block_system.field_mut(field.clone())[index] = result.field(field.clone());
+    //                 }
+    //             }
+    //         });
+    // }
 
     /// Applies the projection to `source`, and stores the result in `dest`.
-    pub fn project<P: Projection<N> + Sync>(
+    pub fn evaluate<
+        K: Kernels + Sync,
+        B: Boundary<N> + Sync,
+        C: Conditions<N> + Sync,
+        P: Function<N, Input = C::System> + Sync,
+    >(
         &mut self,
-        projection: P,
+        order: K,
+        boundary: B,
+        conditions: C,
+        function: P,
         source: SystemSlice<'_, P::Input>,
         dest: SystemSliceMut<'_, P::Output>,
     ) {
@@ -339,48 +352,35 @@ impl<const N: usize> Mesh<N> {
             .for_each(|block| {
                 let nodes = self.block_dofs(block);
 
-                let block_source = unsafe { source.slice(nodes.clone()).fields() };
-                let mut block_dest = unsafe { dest.slice_mut(nodes.clone()).fields_mut() };
+                let input = unsafe { source.slice(nodes.clone()).fields() };
+                let output = unsafe { dest.slice_mut(nodes.clone()).fields_mut() };
 
-                let bounds = self.blocks.block_bounds(block);
-                let space = self.block_space(block);
-                let vertex_size = space.inner_size();
-
-                let boundary = self.block_boundary(block, projection.boundary());
-
-                for vertex in IndexSpace::new(vertex_size).iter() {
-                    let is_interior = Self::is_interior(&boundary, vertex_size, vertex);
-
-                    let result = if is_interior {
-                        let engine = FdIntEngine::<N>::new(space.clone(), vertex, bounds);
-                        projection.project(&engine, block_source.as_fields())
-                    } else {
-                        let engine = FdEngine::<N, _>::new(
-                            space.attach_boundary(boundary.clone()),
-                            vertex,
-                            bounds,
-                        );
-                        projection.project(&engine, block_source.as_fields())
-                    };
-
-                    let index = space.index_from_vertex(vertex);
-
-                    for field in P::Output::fields() {
-                        block_dest.field_mut(field.clone())[index] = result.field(field.clone());
-                    }
-                }
+                self.evaluate_block(
+                    order,
+                    &boundary,
+                    &conditions,
+                    &function,
+                    block,
+                    input,
+                    output,
+                );
             });
     }
 
     /// Applies the given operator to `source`, storing the result in `dest`, and utilizing `context` to store
     /// extra fields.
-    pub fn apply<O: Operator<N> + Sync>(
+    pub fn apply<K: Kernels + Sync, O: Operator<N> + Sync>(
         &mut self,
+        order: K,
         operator: O,
         source: SystemSlice<'_, O::System>,
         context: SystemSlice<'_, O::Context>,
         dest: SystemSliceMut<'_, O::System>,
-    ) {
+    ) where
+        O::Boundary: Sync,
+        O::SystemConditions: Sync,
+        O::ContextConditions: Sync,
+    {
         let source = source.as_range();
         let context = context.as_range();
         let dest = dest.as_range();
@@ -390,55 +390,100 @@ impl<const N: usize> Mesh<N> {
             .for_each(|block| {
                 let nodes = self.block_dofs(block);
 
-                let block_source = unsafe { source.slice(nodes.clone()).fields() };
-                let block_context = unsafe { context.slice(nodes.clone()).fields() };
-                let mut block_dest = unsafe { dest.slice_mut(nodes.clone()).fields_mut() };
+                let source = unsafe { source.slice(nodes.clone()).fields() };
+                let context = unsafe { context.slice(nodes.clone()).fields() };
+                let dest = unsafe { dest.slice_mut(nodes.clone()).fields_mut() };
 
-                let boundary = self.block_boundary(block, operator.boundary());
-                let bounds = self.blocks.block_bounds(block);
-                let space = self.block_space(block);
-                let vertex_size = space.inner_size();
+                let input = SystemFields::join_pair(source, context);
+                let output = dest;
 
-                for vertex in IndexSpace::new(vertex_size).iter() {
-                    let is_interior = Self::is_interior(&boundary, vertex_size, vertex);
-
-                    let result = if is_interior {
-                        let engine = FdIntEngine::<N>::new(space.clone(), vertex, bounds);
-                        operator.apply(&engine, block_source.as_fields(), block_context.as_fields())
-                    } else {
-                        let engine = FdEngine::<N, _>::new(
-                            space.attach_boundary(boundary.clone()),
-                            vertex,
-                            bounds,
-                        );
-                        operator.apply(&engine, block_source.as_fields(), block_context.as_fields())
-                    };
-
-                    let index = space.index_from_node(node_from_vertex(vertex));
-
-                    for field in O::System::fields() {
-                        block_dest.field_mut(field.clone())[index] = result.field(field.clone());
-                    }
-                }
+                self.evaluate_block(
+                    order,
+                    &operator.boundary(),
+                    &PairConditions {
+                        left: operator.system_conditions(),
+                        right: operator.context_conditions(),
+                    },
+                    &operator,
+                    block,
+                    input,
+                    output,
+                );
             });
     }
 
+    fn evaluate_block<
+        K: Kernels + Sync,
+        B: Boundary<N> + Sync,
+        C: Conditions<N> + Sync,
+        P: Function<N, Input = C::System> + Sync,
+    >(
+        &self,
+        order: K,
+        boundary: &B,
+        conditions: &C,
+        projection: &P,
+        block: usize,
+        input: SystemFields<'_, P::Input>,
+        mut output: SystemFieldsMut<'_, P::Output>,
+    ) {
+        let bounds = self.block_bounds(block);
+        let space = self.block_space(block);
+        let vertex_size = space.inner_size();
+
+        let boundary = self.block_boundary(block, boundary.clone());
+
+        for vertex in IndexSpace::new(vertex_size).iter() {
+            let is_interior = Self::is_interior(order, &boundary, vertex_size, vertex);
+
+            let result = if is_interior {
+                let engine = FdIntEngine {
+                    space: space.clone(),
+                    vertex,
+                    bounds: bounds.clone(),
+                    fields: input.rb(),
+                    order,
+                };
+
+                projection.evaluate(&engine)
+            } else {
+                let engine = FdEngine {
+                    space: space.clone(),
+                    vertex,
+                    bounds: bounds.clone(),
+                    fields: input.rb(),
+                    order,
+                    boundary: boundary.clone(),
+                    conditions: conditions.clone(),
+                };
+
+                projection.evaluate(&engine)
+            };
+
+            let index = space.index_from_vertex(vertex);
+
+            for field in P::Output::fields() {
+                output.field_mut(field.clone())[index] = result.field(field.clone());
+            }
+        }
+    }
+
     /// Determines if a vertex is not within `ORDER` of any weakly enforced boundary.
-    fn is_interior(
-        _boundary: &impl Boundary<N>,
-        _vertex_size: [usize; N],
-        _vertex: [usize; N],
+    fn is_interior<K: Kernels>(
+        _order: K,
+        boundary: &impl Boundary<N>,
+        vertex_size: [usize; N],
+        vertex: [usize; N],
     ) -> bool {
-        // let mut result = true;
+        let mut result = true;
 
-        // for axis in 0..N {
-        //     result &= boundary.kind(Face::negative(axis)).has_ghost() || vertex[axis] >= ORDER / 2;
-        //     result &= boundary.kind(Face::positive(axis)).has_ghost()
-        //         || vertex[axis] < vertex_size[axis] - ORDER / 2;
-        // }
+        for axis in 0..N {
+            result &=
+                boundary.kind(Face::negative(axis)).has_ghost() || vertex[axis] >= K::MAX_BORDER;
+            result &= boundary.kind(Face::positive(axis)).has_ghost()
+                || vertex[axis] < vertex_size[axis] - K::MAX_BORDER;
+        }
 
-        // result
-
-        false
+        result
     }
 }

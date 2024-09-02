@@ -13,9 +13,9 @@ pub use aeon_geometry as geometry;
 pub mod prelude {
     // pub use crate::arena::Arena;
     pub use crate::fd::{
-        Boundary, BoundaryKind, Condition, Conditions, Engine, ExportVtkConfig, Function, Gradient,
-        Hessian, Mesh, MeshCheckpoint, Operator, Projection, SystemBC, SystemCheckpoint, UnitBC,
-        Value,
+        Boundary, BoundaryKind, Condition, Conditions, Engine, ExportVtkConfig, Projection,
+        Gradient, Hessian, Mesh, MeshCheckpoint, Operator, Function, SystemBC, SystemCheckpoint,
+        ScalarConditions, Value,
     };
     pub use crate::lac::{BiCGStabConfig, BiCGStabSolver, IdentityMap, LinearMap, LinearSolver};
     pub use crate::ode::{ForwardEuler, Ode, Rk4};

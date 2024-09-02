@@ -32,7 +32,7 @@ pub fn system_label_impl(input: DeriveInput) -> TokenStream {
                         0
                     }
 
-                    type FieldLike<T> = ::aeon::system::SystemArray<T, 1, Self>;
+                    type Array<T> = ::aeon::system::SystemArray<T, 1>;
 
                     fn fields() -> impl Iterator<Item = Self> {
                         [Self].into_iter()
@@ -88,7 +88,7 @@ pub fn system_label_impl(input: DeriveInput) -> TokenStream {
                         }
                     }
 
-                    type FieldLike<T> = SystemArray<T, #variant_count, Self>;
+                    type Array<T> = SystemArray<T, #variant_count>;
 
                     fn fields() -> impl Iterator<Item = Self> {
                         [#fields].into_iter()

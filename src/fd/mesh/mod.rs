@@ -25,7 +25,7 @@ pub use checkpoint::{MeshCheckpoint, SystemCheckpoint};
 
 use crate::system::{SystemLabel, SystemSlice};
 
-use super::{BlockBC, NodeSpace};
+use super::{BlockBoundary, NodeSpace};
 
 #[derive(Debug, Clone)]
 pub struct Mesh<const N: usize> {
@@ -106,11 +106,11 @@ impl<const N: usize> Mesh<N> {
     }
 
     /// Computes the nodespace corresponding to a block.
-    pub fn block_space(&self, block: usize) -> NodeSpace<N, ()> {
+    pub fn block_space(&self, block: usize) -> NodeSpace<N> {
         let size = self.blocks.block_size(block);
         let cell_size = array::from_fn(|axis| size[axis] * self.dofs.width[axis]);
 
-        NodeSpace::new(cell_size, self.dofs.ghost, ())
+        NodeSpace::new(cell_size, self.dofs.ghost)
     }
 
     pub fn num_coarse_dofs(&self) -> usize {
@@ -121,11 +121,15 @@ impl<const N: usize> Mesh<N> {
         self.coarse_dofs.block_dofs(block)
     }
 
-    pub fn block_coarse_space(&self, block: usize) -> NodeSpace<N, ()> {
+    pub fn block_coarse_space(&self, block: usize) -> NodeSpace<N> {
         let size = self.blocks.block_size(block);
         let cell_size = array::from_fn(|axis| size[axis] * self.coarse_dofs.width[axis]);
 
-        NodeSpace::new(cell_size, self.coarse_dofs.ghost, ())
+        NodeSpace::new(cell_size, self.coarse_dofs.ghost)
+    }
+
+    pub fn block_bounds(&self, block: usize) -> Rectangle<N> {
+        self.blocks.block_bounds(block)
     }
 
     /// Computes flags indicating whether a particular face of a block borders a physical
@@ -136,8 +140,8 @@ impl<const N: usize> Mesh<N> {
 
     /// Produces a block boundary which correctly accounts for
     /// interior interfaces.
-    pub fn block_boundary<B>(&self, block: usize, boundary: B) -> BlockBC<N, B> {
-        BlockBC {
+    pub fn block_boundary<B>(&self, block: usize, boundary: B) -> BlockBoundary<N, B> {
+        BlockBoundary {
             flags: self.block_boundary_flags(block),
             inner: boundary,
         }
