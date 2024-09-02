@@ -1,6 +1,7 @@
 #![allow(clippy::needless_range_loop)]
 
 mod boundary;
+mod convolution;
 mod engine;
 mod kernel;
 mod mesh;
@@ -10,11 +11,9 @@ pub use boundary::{
     BlockBoundary, Boundary, BoundaryKind, Condition, Conditions, EmptyConditions, PairConditions,
     ScalarConditions, SystemBC, SystemCondition, BC,
 };
+pub use convolution::{Convolution, Dissipation, Gradient, Hessian};
 pub use engine::{Engine, FdEngine, FdIntEngine};
-pub use kernel::{
-    Convolution, FourthOrder, Gradient, Hessian, Kernel, Kernels, Order, SecondOrder, SixthOrder,
-    Value,
-};
+pub use kernel::{Kernel, Kernels, Order, Value};
 pub use mesh::{ExportVtkConfig, Mesh, MeshCheckpoint, SystemCheckpoint};
 pub use node::{node_from_vertex, vertex_from_node, NodeSpace, NodeWindow};
 

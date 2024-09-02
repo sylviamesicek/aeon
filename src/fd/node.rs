@@ -1,5 +1,6 @@
 use crate::fd::boundary::{Boundary, BoundaryKind, Condition};
-use crate::fd::kernel::{Border, CellKernel, Convolution, Kernel, Value};
+use crate::fd::convolution::Convolution;
+use crate::fd::kernel::{Border, CellKernel, Kernel, Value};
 use aeon_geometry::{faces, CartesianIter, Face, IndexSpace, IndexWindow, Rectangle};
 use std::array::{self, from_fn};
 
@@ -139,7 +140,7 @@ impl<const N: usize> NodeSpace<N> {
         let spacing = self.spacing(bounds);
         let stencils = array::from_fn(|axis| convolution.interior(axis));
         let corner =
-            array::from_fn(|axis| (vertex[axis] - convolution.border_width(axis)) as isize);
+            array::from_fn(|axis| vertex[axis] as isize - convolution.border_width(axis) as isize);
         self.apply(corner, stencils, field) * convolution.scale(spacing)
     }
 
@@ -464,7 +465,7 @@ impl<const N: usize> Iterator for NodePlaneIter<N> {
 mod tests {
     use super::*;
     use crate::{
-        fd::kernel::{FourthOrder, Kernels as _},
+        fd::kernel::{Kernels as _, Order},
         geometry::Rectangle,
     };
 
@@ -557,8 +558,8 @@ mod tests {
             let numerical = space.evaluate(
                 Quadrant,
                 (
-                    FourthOrder::derivative().clone(),
-                    FourthOrder::derivative().clone(),
+                    Order::<4>::derivative().clone(),
+                    Order::<4>::derivative().clone(),
                 ),
                 bounds.clone(),
                 vertex,
@@ -607,7 +608,7 @@ mod tests {
             let [x, y] = rspace.position(node, bounds.clone());
             let numerical = cspace.prolong(
                 Quadrant,
-                FourthOrder::interpolation().clone(),
+                Order::<4>::interpolation().clone(),
                 vertex,
                 &field,
             );

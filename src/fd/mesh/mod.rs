@@ -20,7 +20,7 @@ use vtkio::{
 
 mod checkpoint;
 mod evaluate;
-mod fill;
+mod transfer;
 
 pub use checkpoint::{MeshCheckpoint, SystemCheckpoint};
 
@@ -384,8 +384,11 @@ impl<const N: usize> Mesh<N> {
         let mut checkpoint = MeshCheckpoint::default();
         checkpoint.save_mesh(self);
 
-        let data = ron::ser::to_string_pretty(&(checkpoint, systems), PrettyConfig::default())
-            .map_err(|err| io::Error::other(err))?;
+        let data = ron::ser::to_string_pretty::<(MeshCheckpoint<N>, SystemCheckpoint)>(
+            &(checkpoint, systems.clone()),
+            PrettyConfig::default(),
+        )
+        .map_err(|err| io::Error::other(err))?;
         let mut file = File::create(path)?;
         file.write_all(data.as_bytes())
     }
@@ -396,7 +399,7 @@ impl<const N: usize> Mesh<N> {
         systems: &mut SystemCheckpoint,
     ) -> io::Result<()> {
         let mut contents: String = String::new();
-        let mut file = File::create(path)?;
+        let mut file = File::open(path)?;
         file.read_to_string(&mut contents)?;
 
         let (mesh, system): (MeshCheckpoint<N>, SystemCheckpoint) =

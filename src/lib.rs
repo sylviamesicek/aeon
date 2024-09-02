@@ -14,7 +14,7 @@ pub mod prelude {
     // pub use crate::arena::Arena;
     pub use crate::fd::{
         Boundary, BoundaryKind, Condition, Conditions, Engine, ExportVtkConfig, Function, Gradient,
-        Hessian, Mesh, MeshCheckpoint, Operator, Projection, ScalarConditions, SystemBC,
+        Hessian, Mesh, MeshCheckpoint, Operator, Order, Projection, ScalarConditions, SystemBC,
         SystemCheckpoint, Value,
     };
     pub use crate::lac::{BiCGStabConfig, BiCGStabSolver, IdentityMap, LinearMap, LinearSolver};

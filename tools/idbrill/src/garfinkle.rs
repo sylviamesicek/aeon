@@ -144,9 +144,9 @@ impl Operator<2> for PsiOperator {
             systems.save_field("hamiltonian", &hamiltonian);
 
             mesh.export_vtk(
-                format!("output/choptuik/iter{}.vtu", { index / 25 }),
+                format!("output/garfinkle/iter{}.vtu", { index / 25 }),
                 ExportVtkConfig {
-                    title: "choptuik".to_string(),
+                    title: "garfinkle".to_string(),
                     ghost: crate::GHOST,
                     systems,
                 },

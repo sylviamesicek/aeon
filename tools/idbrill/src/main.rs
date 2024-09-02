@@ -1,15 +1,15 @@
 use aeon::{
-    fd::{ExportVtkConfig, FourthOrder, Mesh, Order, SystemCondition},
+    fd::{ExportVtkConfig, Mesh, SystemCondition},
     prelude::*,
 };
 
 mod choptuik;
 mod garfinkle;
 
-pub const CHOPTUIK: bool = false;
-pub const GHOST: bool = false;
+const CHOPTUIK: bool = true;
+const GHOST: bool = false;
 
-pub const ORDER: FourthOrder = Order::<4>;
+const ORDER: Order<4> = Order::<4>;
 
 /// Initial data in Rinne's hyperbolic variables.
 #[derive(Clone, SystemLabel)]
@@ -147,8 +147,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
 
     let mut systems = SystemCheckpoint::default();
-    systems.save_field("conformal", rinne.field(Rinne::Conformal));
-    systems.save_field("seed", rinne.field(Rinne::Seed));
+    systems.save_system(rinne.as_slice());
     systems.save_field("hamiltonian", &hamiltonian);
 
     if CHOPTUIK {

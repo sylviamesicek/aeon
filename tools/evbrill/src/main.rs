@@ -1,8 +1,7 @@
 #![allow(mixed_script_confusables)]
 
 use aeon::fd::{
-    DissipationFunction, ExportVtkConfig, FourthOrder, Mesh, Order, SixthOrder, SystemCheckpoint,
-    SystemCondition,
+    DissipationFunction, ExportVtkConfig, Mesh, Order, SystemCheckpoint, SystemCondition,
 };
 use aeon::prelude::*;
 use aeon::system::field_count;
@@ -15,10 +14,10 @@ pub mod types;
 
 use types::HyperbolicSystem;
 
-const STEPS: usize = 7501;
+const STEPS: usize = 5000;
 const CFL: f64 = 0.1;
-const ORDER: FourthOrder = Order::<4>;
-const DISS_ORDER: SixthOrder = Order::<6>;
+const ORDER: Order<4> = Order::<4>;
+const DISS_ORDER: Order<6> = Order::<6>;
 
 const SYMBOLIC: bool = false;
 
@@ -278,13 +277,14 @@ impl<'a> Ode for DynamicOde<'a> {
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Create output directory.
-    std::fs::create_dir_all("output/evbrill")?;
+    std::fs::create_dir_all("output/evbrill").expect("Unable to create evbrill directory.");
 
     // Build discretization
     let mut mesh = Mesh::default();
     let mut systems = SystemCheckpoint::default();
 
-    mesh.import_dat("output/idbrill.dat", &mut systems)?;
+    mesh.import_dat("output/idbrill.dat", &mut systems)
+        .expect("Unable to load initial data");
 
     // Read initial data
     let mut initial = SystemVec::<Rinne>::new();
@@ -364,7 +364,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     ghost: false,
                     systems,
                 },
-            )?;
+            )
+            .unwrap();
         }
 
         // Compute step

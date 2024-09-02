@@ -4,7 +4,7 @@ use crate::{fd::NodeSpace, geometry::Rectangle};
 use crate::fd::Boundary;
 
 use super::{
-    kernel::{Convolution, DissipationAxis},
+    convolution::{Convolution, Dissipation},
     node_from_vertex, Conditions, Gradient, Hessian, Kernels, SystemBC,
 };
 
@@ -75,7 +75,7 @@ impl<'a, const N: usize, K: Kernels, B: Boundary<N>, C: Conditions<N>> Engine<N,
         let mut result = 0.0;
 
         for axis in 0..N {
-            result += self.evaluate(system.clone(), DissipationAxis::<K>::new(axis))
+            result += self.evaluate(system.clone(), Dissipation::<K>::new(axis))
         }
 
         result
@@ -130,7 +130,7 @@ impl<'a, const N: usize, K: Kernels, S: SystemLabel> Engine<N, S> for FdIntEngin
         let mut result = 0.0;
 
         for axis in 0..N {
-            result += self.evaluate(system.clone(), DissipationAxis::<K>::new(axis))
+            result += self.evaluate(system.clone(), Dissipation::<K>::new(axis))
         }
 
         result
