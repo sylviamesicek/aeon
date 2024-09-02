@@ -252,7 +252,7 @@ pub struct DynamicOde<'a> {
 
 impl<'a> Ode for DynamicOde<'a> {
     fn dim(&self) -> usize {
-        field_count::<Dynamic>() * self.mesh.num_dofs()
+        field_count::<Dynamic>() * self.mesh.num_nodes()
     }
 
     fn preprocess(&mut self, system: &mut [f64]) {
@@ -291,7 +291,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     systems.load_system(&mut initial);
 
     // Setup dynamic variables
-    let mut dynamic = SystemVec::with_length(mesh.num_dofs());
+    let mut dynamic = SystemVec::with_length(mesh.num_nodes());
 
     // Metric
     dynamic
@@ -329,9 +329,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Step Size {}", h);
 
     // Allocate vectors
-    let mut derivs = SystemVec::with_length(mesh.num_dofs());
-    let mut update = SystemVec::<Dynamic>::with_length(mesh.num_dofs());
-    let mut dissipation = SystemVec::with_length(mesh.num_dofs());
+    let mut derivs = SystemVec::with_length(mesh.num_nodes());
+    let mut update = SystemVec::<Dynamic>::with_length(mesh.num_nodes());
+    let mut dissipation = SystemVec::with_length(mesh.num_nodes());
 
     // Integrate
     let mut integrator = Rk4::new();

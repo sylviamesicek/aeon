@@ -129,8 +129,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Num Blocks: {}", mesh.num_blocks());
     println!("Num Cells: {}", mesh.num_cells());
 
-    let mut rinne = SystemVec::with_length(mesh.num_dofs());
-    let mut hamiltonian = vec![0.0; mesh.num_dofs()].into_boxed_slice();
+    let mut rinne = SystemVec::with_length(mesh.num_nodes());
+    let mut hamiltonian = vec![0.0; mesh.num_nodes()].into_boxed_slice();
 
     if CHOPTUIK {
         choptuik::solve(&mut mesh, 1.0, rinne.as_mut_slice(), &mut hamiltonian)?;

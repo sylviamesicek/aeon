@@ -37,9 +37,9 @@ impl<const N: usize> Mesh<N> {
     ) {
         let system = system.as_range();
 
-        (0..self.blocks.num_blocks()).for_each(|block| {
+        (0..self.blocks.len()).for_each(|block| {
             // Fill Physical Boundary conditions
-            let nodes = self.block_dofs(block);
+            let nodes = self.block_nodes(block);
             let space = self.block_space(block);
             let boundary = self.block_boundary(block, boundary.clone());
 
@@ -58,9 +58,9 @@ impl<const N: usize> Mesh<N> {
         // Fill direct interfaces
         self.interfaces.direct().par_bridge().for_each(|interface| {
             let block_space = self.block_space(interface.block);
-            let block_nodes = self.block_dofs(interface.block);
+            let block_nodes = self.block_nodes(interface.block);
             let neighbor_space = self.block_space(interface.neighbor);
-            let neighbor_nodes = self.block_dofs(interface.neighbor);
+            let neighbor_nodes = self.block_nodes(interface.neighbor);
 
             let mut block_system = unsafe { system.slice_mut(block_nodes).fields_mut() };
             let neighbor_system = unsafe { system.slice(neighbor_nodes).fields() };
@@ -86,9 +86,9 @@ impl<const N: usize> Mesh<N> {
 
         self.interfaces.fine().par_bridge().for_each(|interface| {
             let block_space = self.block_space(interface.block);
-            let block_nodes = self.block_dofs(interface.block);
+            let block_nodes = self.block_nodes(interface.block);
             let neighbor_space = self.block_space(interface.neighbor);
-            let neighbor_nodes = self.block_dofs(interface.neighbor);
+            let neighbor_nodes = self.block_nodes(interface.neighbor);
 
             let mut block_system = unsafe { system.slice_mut(block_nodes).fields_mut() };
             let neighbor_system = unsafe { system.slice(neighbor_nodes).fields() };
@@ -118,9 +118,9 @@ impl<const N: usize> Mesh<N> {
     ) {
         let system = system.as_range();
         self.interfaces.coarse().par_bridge().for_each(|interface| {
-            let block_nodes = self.block_dofs(interface.block);
+            let block_nodes = self.block_nodes(interface.block);
             let block_space = self.block_space(interface.block);
-            let neighbor_nodes = self.block_dofs(interface.neighbor);
+            let neighbor_nodes = self.block_nodes(interface.neighbor);
             let neighbor_boundary = self.block_boundary(interface.neighbor, boundary.clone());
             let neighbor_space = self.block_space(interface.neighbor);
 
@@ -162,11 +162,11 @@ impl<const N: usize> Mesh<N> {
         let system = system.as_range();
         let deriv = deriv.as_range();
 
-        (0..self.blocks.num_blocks()).for_each(|block| {
+        (0..self.blocks.len()).for_each(|block| {
             let boundary = self.block_boundary(block, boundary.clone());
-            let bounds = self.blocks.block_bounds(block);
+            let bounds = self.blocks.bounds(block);
             let space = self.block_space(block);
-            let nodes = self.block_dofs(block);
+            let nodes = self.block_nodes(block);
             let vertex_size = space.inner_size();
 
             let block_system = unsafe { system.slice(nodes.clone()).fields() };
@@ -274,28 +274,26 @@ impl<const N: usize> Mesh<N> {
         let source = source.as_range();
         let dest = dest.as_range();
 
-        (0..self.blocks.num_blocks())
-            .par_bridge()
-            .for_each(|block| {
-                let source_dofs = self.block_dofs(block);
-                let dest_dofs = self.block_coarse_dofs(block);
+        (0..self.blocks.len()).par_bridge().for_each(|block| {
+            let source_dofs = self.block_nodes(block);
+            let dest_dofs = self.block_coarse_nodes(block);
 
-                let source = unsafe { source.slice(source_dofs.clone()).fields() };
-                let mut dest = unsafe { dest.slice_mut(dest_dofs.clone()).fields_mut() };
+            let source = unsafe { source.slice(source_dofs.clone()).fields() };
+            let mut dest = unsafe { dest.slice_mut(dest_dofs.clone()).fields_mut() };
 
-                let source_space = self.block_space(block);
-                let dest_space = self.block_coarse_space(block);
+            let source_space = self.block_space(block);
+            let dest_space = self.block_coarse_space(block);
 
-                for dest_node in dest_space.inner_window() {
-                    let source_node = array::from_fn(|axis| dest_node[axis] * 2);
-                    let source_index = source_space.index_from_node(source_node);
-                    let dest_index = dest_space.index_from_node(dest_node);
+            for dest_node in dest_space.inner_window() {
+                let source_node = array::from_fn(|axis| dest_node[axis] * 2);
+                let source_index = source_space.index_from_node(source_node);
+                let dest_index = dest_space.index_from_node(dest_node);
 
-                    for field in System::fields() {
-                        dest.field_mut(field.clone())[dest_index] =
-                            source.field(field.clone())[source_index];
-                    }
+                for field in System::fields() {
+                    dest.field_mut(field.clone())[dest_index] =
+                        source.field(field.clone())[source_index];
                 }
-            });
+            }
+        });
     }
 }

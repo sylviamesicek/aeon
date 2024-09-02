@@ -27,16 +27,14 @@ impl<const N: usize> Mesh<N> {
         let source = source.as_range();
         let dest = dest.as_range();
 
-        (0..self.blocks.num_blocks())
-            .par_bridge()
-            .for_each(|block| {
-                let nodes = self.block_dofs(block);
+        (0..self.blocks.len()).par_bridge().for_each(|block| {
+            let nodes = self.block_nodes(block);
 
-                let input = unsafe { source.slice(nodes.clone()).fields() };
-                let output = unsafe { dest.slice_mut(nodes.clone()).fields_mut() };
+            let input = unsafe { source.slice(nodes.clone()).fields() };
+            let output = unsafe { dest.slice_mut(nodes.clone()).fields_mut() };
 
-                self.evaluate_block(order, &boundary, &function, block, input, output);
-            });
+            self.evaluate_block(order, &boundary, &function, block, input, output);
+        });
     }
 
     fn evaluate_block<K: Kernels + Sync, B: Boundary<N> + Sync, P: Function<N> + Sync>(
@@ -139,26 +137,24 @@ impl<const N: usize> Mesh<N> {
         let context = context.as_range();
         let dest = dest.as_range();
 
-        (0..self.blocks.num_blocks())
-            .par_bridge()
-            .for_each(|block| {
-                let nodes = self.block_dofs(block);
+        (0..self.blocks.len()).par_bridge().for_each(|block| {
+            let nodes = self.block_nodes(block);
 
-                let source = unsafe { source.slice(nodes.clone()).fields() };
-                let context = unsafe { context.slice(nodes.clone()).fields() };
-                let dest = unsafe { dest.slice_mut(nodes.clone()).fields_mut() };
+            let source = unsafe { source.slice(nodes.clone()).fields() };
+            let context = unsafe { context.slice(nodes.clone()).fields() };
+            let dest = unsafe { dest.slice_mut(nodes.clone()).fields_mut() };
 
-                let input = SystemFields::join_pair(source, context);
-                let output = dest;
+            let input = SystemFields::join_pair(source, context);
+            let output = dest;
 
-                self.evaluate_block(
-                    order,
-                    &boundary,
-                    &OperatorAsFunction(operator.clone()),
-                    block,
-                    input,
-                    output,
-                );
-            });
+            self.evaluate_block(
+                order,
+                &boundary,
+                &OperatorAsFunction(operator.clone()),
+                block,
+                input,
+                output,
+            );
+        });
     }
 }

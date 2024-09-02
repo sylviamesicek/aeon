@@ -1,5 +1,5 @@
 use aeon_geometry::{
-    FaceMask, IndexSpace, Rectangle, Tree, TreeBlocks, TreeDofs, TreeInterfaces, TreeNeighbors,
+    FaceMask, IndexSpace, Rectangle, Tree, TreeBlocks, TreeInterfaces, TreeNeighbors, TreeNodes,
 };
 use ron::ser::PrettyConfig;
 use std::{
@@ -37,10 +37,10 @@ pub struct Mesh<const N: usize> {
     blocks: TreeBlocks<N>,
     neighbors: TreeNeighbors<N>,
 
-    dofs: TreeDofs<N>,
+    nodes: TreeNodes<N>,
     interfaces: TreeInterfaces<N>,
 
-    coarse_dofs: TreeDofs<N>,
+    coarse_nodes: TreeNodes<N>,
     coarse_interfaces: TreeInterfaces<N>,
 }
 
@@ -56,10 +56,10 @@ impl<const N: usize> Mesh<N> {
             blocks: TreeBlocks::default(),
             neighbors: TreeNeighbors::default(),
 
-            dofs: TreeDofs::default(),
+            nodes: TreeNodes::default(),
             interfaces: TreeInterfaces::default(),
 
-            coarse_dofs: TreeDofs::default(),
+            coarse_nodes: TreeNodes::default(),
             coarse_interfaces: TreeInterfaces::default(),
         };
 
@@ -72,17 +72,21 @@ impl<const N: usize> Mesh<N> {
         self.blocks.build(&self.tree);
         self.neighbors.build(&self.tree, &self.blocks);
 
-        self.dofs.width = self.width;
-        self.dofs.ghost = self.ghost;
-        self.dofs.build(&self.blocks);
+        self.nodes.width = self.width;
+        self.nodes.ghost = self.ghost;
+        self.nodes.build(&self.blocks);
         self.interfaces
-            .build(&self.tree, &self.blocks, &self.neighbors, &self.dofs);
+            .build(&self.tree, &self.blocks, &self.neighbors, &self.nodes);
 
-        self.coarse_dofs.width = array::from_fn(|axis| self.width[axis] / 2);
-        self.coarse_dofs.ghost = self.ghost;
-        self.coarse_dofs.build(&self.blocks);
-        self.coarse_interfaces
-            .build(&self.tree, &self.blocks, &self.neighbors, &self.coarse_dofs);
+        self.coarse_nodes.width = array::from_fn(|axis| self.width[axis] / 2);
+        self.coarse_nodes.ghost = self.ghost;
+        self.coarse_nodes.build(&self.blocks);
+        self.coarse_interfaces.build(
+            &self.tree,
+            &self.blocks,
+            &self.neighbors,
+            &self.coarse_nodes,
+        );
     }
 
     pub fn refine(&mut self, flags: &[bool]) {
@@ -91,52 +95,52 @@ impl<const N: usize> Mesh<N> {
     }
 
     pub fn num_blocks(&self) -> usize {
-        self.blocks.num_blocks()
+        self.blocks.len()
     }
 
     pub fn num_cells(&self) -> usize {
         self.tree.num_cells()
     }
 
-    pub fn num_dofs(&self) -> usize {
-        self.dofs.num_dofs()
+    pub fn num_nodes(&self) -> usize {
+        self.nodes.len()
     }
 
-    pub fn block_dofs(&self, block: usize) -> Range<usize> {
-        self.dofs.block_dofs(block)
+    pub fn block_nodes(&self, block: usize) -> Range<usize> {
+        self.nodes.range(block)
     }
 
     /// Computes the nodespace corresponding to a block.
     pub fn block_space(&self, block: usize) -> NodeSpace<N> {
-        let size = self.blocks.block_size(block);
-        let cell_size = array::from_fn(|axis| size[axis] * self.dofs.width[axis]);
+        let size = self.blocks.size(block);
+        let cell_size = array::from_fn(|axis| size[axis] * self.nodes.width[axis]);
 
-        NodeSpace::new(cell_size, self.dofs.ghost)
+        NodeSpace::new(cell_size, self.nodes.ghost)
     }
 
-    pub fn num_coarse_dofs(&self) -> usize {
-        self.coarse_dofs.num_dofs()
+    pub fn num_coarse_nodes(&self) -> usize {
+        self.coarse_nodes.len()
     }
 
-    pub fn block_coarse_dofs(&self, block: usize) -> Range<usize> {
-        self.coarse_dofs.block_dofs(block)
+    pub fn block_coarse_nodes(&self, block: usize) -> Range<usize> {
+        self.coarse_nodes.range(block)
     }
 
     pub fn block_coarse_space(&self, block: usize) -> NodeSpace<N> {
-        let size = self.blocks.block_size(block);
-        let cell_size = array::from_fn(|axis| size[axis] * self.coarse_dofs.width[axis]);
+        let size = self.blocks.size(block);
+        let cell_size = array::from_fn(|axis| size[axis] * self.coarse_nodes.width[axis]);
 
-        NodeSpace::new(cell_size, self.coarse_dofs.ghost)
+        NodeSpace::new(cell_size, self.coarse_nodes.ghost)
     }
 
     pub fn block_bounds(&self, block: usize) -> Rectangle<N> {
-        self.blocks.block_bounds(block)
+        self.blocks.bounds(block)
     }
 
     /// Computes flags indicating whether a particular face of a block borders a physical
     /// boundary.
     pub fn block_boundary_flags(&self, block: usize) -> FaceMask<N> {
-        self.blocks.block_boundary_flags(block)
+        self.blocks.boundary_flags(block)
     }
 
     /// Produces a block boundary which correctly accounts for
@@ -151,8 +155,8 @@ impl<const N: usize> Mesh<N> {
     pub fn max_level(&self) -> usize {
         let mut level = 1;
 
-        for block in 0..self.blocks.num_blocks() {
-            let cell = self.blocks.block_cells(block)[0];
+        for block in 0..self.blocks.len() {
+            let cell = self.blocks.cells(block)[0];
             level = level.max(self.tree.level(cell))
         }
 
@@ -164,7 +168,7 @@ impl<const N: usize> Mesh<N> {
         let domain = self.tree.domain();
 
         array::from_fn::<_, N, _>(|axis| {
-            domain.size[axis] / self.dofs.width[axis] as f64 / 2_f64.powi(max_level as i32)
+            domain.size[axis] / self.nodes.width[axis] as f64 / 2_f64.powi(max_level as i32)
         })
         .iter()
         .min_by(|a, b| f64::total_cmp(a, b))
@@ -184,12 +188,12 @@ impl<const N: usize> Mesh<N> {
     fn norm_scalar(&mut self, src: &[f64]) -> f64 {
         let mut result = 0.0;
 
-        for block in 0..self.blocks.num_blocks() {
-            let bounds = self.blocks.block_bounds(block);
+        for block in 0..self.blocks.len() {
+            let bounds = self.blocks.bounds(block);
             let space = self.block_space(block);
             let size = space.size();
 
-            let data = &src[self.block_dofs(block)];
+            let data = &src[self.block_nodes(block)];
 
             let mut block_result = 0.0;
 
@@ -229,7 +233,7 @@ impl<const N: usize> Mesh<N> {
             writeln!(
                 result,
                 "    Block Position {:?}",
-                self.blocks.cell_index(cell)
+                self.blocks.cell_position(cell)
             )
             .unwrap();
 
@@ -242,15 +246,15 @@ impl<const N: usize> Mesh<N> {
         writeln!(result, "// **********************").unwrap();
         writeln!(result, "").unwrap();
 
-        for block in 0..self.blocks.num_blocks() {
+        for block in 0..self.blocks.len() {
             writeln!(result, "Block {block}").unwrap();
-            writeln!(result, "    Bounds {:?}", self.blocks.block_bounds(block)).unwrap();
-            writeln!(result, "    Size {:?}", self.blocks.block_size(block)).unwrap();
-            writeln!(result, "    Cells {:?}", self.blocks.block_cells(block)).unwrap();
+            writeln!(result, "    Bounds {:?}", self.blocks.bounds(block)).unwrap();
+            writeln!(result, "    Size {:?}", self.blocks.size(block)).unwrap();
+            writeln!(result, "    Cells {:?}", self.blocks.cells(block)).unwrap();
             writeln!(
                 result,
                 "    Boundary {:?}",
-                self.blocks.block_boundary_flags(block)
+                self.blocks.boundary_flags(block)
             )
             .unwrap();
         }
@@ -345,10 +349,10 @@ impl<const N: usize> Default for Mesh<N> {
             blocks: TreeBlocks::default(),
             neighbors: TreeNeighbors::default(),
 
-            dofs: TreeDofs::default(),
+            nodes: TreeNodes::default(),
             interfaces: TreeInterfaces::default(),
 
-            coarse_dofs: TreeDofs::default(),
+            coarse_nodes: TreeNodes::default(),
             coarse_interfaces: TreeInterfaces::default(),
         };
 
@@ -416,7 +420,7 @@ impl<const N: usize> Mesh<N> {
         let mut vertex_total = 0;
         let mut cell_total = 0;
 
-        for block in 0..self.blocks.num_blocks() {
+        for block in 0..self.blocks.len() {
             let space = self.block_space(block);
 
             let mut cell_size = space.size();
@@ -481,8 +485,8 @@ impl<const N: usize> Mesh<N> {
         // Generate point data
         let mut vertices = Vec::new();
 
-        for block in 0..self.blocks.num_blocks() {
-            let bounds = self.blocks.block_bounds(block);
+        for block in 0..self.blocks.len() {
+            let bounds = self.blocks.bounds(block);
             let space = self.block_space(block);
             let window = if config.ghost {
                 space.full_window()
@@ -515,9 +519,9 @@ impl<const N: usize> Mesh<N> {
 
                 let mut data = Vec::new();
 
-                for block in 0..self.blocks.num_blocks() {
+                for block in 0..self.blocks.len() {
                     let space = self.block_space(block);
-                    let nodes = self.block_dofs(block);
+                    let nodes = self.block_nodes(block);
                     let window = if config.ghost {
                         space.full_window()
                     } else {
@@ -545,9 +549,9 @@ impl<const N: usize> Mesh<N> {
         for (name, system) in config.systems.fields.iter() {
             let mut data = Vec::new();
 
-            for block in 0..self.blocks.num_blocks() {
+            for block in 0..self.blocks.len() {
                 let space = self.block_space(block);
-                let nodes = self.block_dofs(block);
+                let nodes = self.block_nodes(block);
 
                 let window = if config.ghost {
                     space.full_window()

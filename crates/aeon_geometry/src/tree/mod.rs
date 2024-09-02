@@ -6,12 +6,12 @@ use std::array::from_fn;
 use std::iter::once;
 
 mod blocks;
-mod dofs;
 mod interface;
+mod nodes;
 
 pub use blocks::TreeBlocks;
-pub use dofs::TreeDofs;
 pub use interface::{TreeBlockNeighbor, TreeInterface, TreeInterfaces, TreeNeighbors};
+pub use nodes::TreeNodes;
 
 /// Denotes that the cell neighbors the physical boundary of a spatial domain.
 pub const NULL: usize = usize::MAX;
@@ -598,14 +598,11 @@ mod tests {
         let mut blocks = TreeBlocks::default();
         blocks.build(&tree);
 
-        assert_eq!(blocks.num_blocks(), 1);
-        assert_eq!(blocks.block_size(0), [2, 2]);
-        assert_eq!(blocks.block_cells(0), &[0, 1, 2, 3]);
+        assert_eq!(blocks.len(), 1);
+        assert_eq!(blocks.size(0), [2, 2]);
+        assert_eq!(blocks.cells(0), &[0, 1, 2, 3]);
 
-        assert_eq!(
-            blocks.block_boundary_flags(0),
-            FaceMask::pack([[true; 2]; 2])
-        );
+        assert_eq!(blocks.boundary_flags(0), FaceMask::pack([[true; 2]; 2]));
     }
 
     #[test]
@@ -650,16 +647,16 @@ mod tests {
         let mut blocks = TreeBlocks::default();
         blocks.build(&tree);
 
-        assert_eq!(blocks.num_blocks(), 3);
+        assert_eq!(blocks.len(), 3);
 
-        assert_eq!(blocks.block_size(0), [2, 2]);
-        assert_eq!(blocks.block_cells(0), &[0, 1, 2, 3]);
+        assert_eq!(blocks.size(0), [2, 2]);
+        assert_eq!(blocks.cells(0), &[0, 1, 2, 3]);
 
-        assert_eq!(blocks.block_size(1), [1, 2]);
-        assert_eq!(blocks.block_cells(1), &[4, 6]);
+        assert_eq!(blocks.size(1), [1, 2]);
+        assert_eq!(blocks.cells(1), &[4, 6]);
 
-        assert_eq!(blocks.block_size(2), [1, 1]);
-        assert_eq!(blocks.block_cells(2), &[5]);
+        assert_eq!(blocks.size(2), [1, 1]);
+        assert_eq!(blocks.cells(2), &[5]);
     }
 
     #[test]
@@ -703,21 +700,21 @@ mod tests {
         let mut blocks = TreeBlocks::default();
         blocks.build(&tree);
 
-        assert_eq!(blocks.num_blocks(), 5);
+        assert_eq!(blocks.len(), 5);
 
-        assert_eq!(blocks.block_size(0), [2, 2]);
-        assert_eq!(blocks.block_cells(0), &[0, 1, 2, 3]);
+        assert_eq!(blocks.size(0), [2, 2]);
+        assert_eq!(blocks.cells(0), &[0, 1, 2, 3]);
 
-        assert_eq!(blocks.block_size(1), [1, 2]);
-        assert_eq!(blocks.block_cells(1), &[4, 6]);
+        assert_eq!(blocks.size(1), [1, 2]);
+        assert_eq!(blocks.cells(1), &[4, 6]);
 
-        assert_eq!(blocks.block_size(2), [1, 1]);
-        assert_eq!(blocks.block_cells(2), &[5]);
+        assert_eq!(blocks.size(2), [1, 1]);
+        assert_eq!(blocks.cells(2), &[5]);
 
-        assert_eq!(blocks.block_size(3), [1, 2]);
-        assert_eq!(blocks.block_cells(3), &[7, 9]);
+        assert_eq!(blocks.size(3), [1, 2]);
+        assert_eq!(blocks.cells(3), &[7, 9]);
 
-        assert_eq!(blocks.block_size(4), [1, 1]);
-        assert_eq!(blocks.block_cells(4), &[8]);
+        assert_eq!(blocks.size(4), [1, 1]);
+        assert_eq!(blocks.cells(4), &[8]);
     }
 }

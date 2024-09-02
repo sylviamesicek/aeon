@@ -30,12 +30,16 @@ pub trait Kernel: Clone {
     fn free(&self, border: Border) -> &[f64];
     fn symmetric(&self, border: Border) -> &[f64];
     fn antisymmetric(&self, border: Border) -> &[f64];
+}
 
+pub trait VertexKernel: Kernel {
     fn scale(&self, spacing: f64) -> f64;
 }
 
 /// A kernel which is used for prolonging values between levels.
-pub trait ProlongKernel: Kernel {}
+pub trait CellKernel: Kernel {
+    fn scale(&self) -> f64;
+}
 
 /// Value operation.
 #[derive(Clone)]
@@ -61,7 +65,9 @@ impl Kernel for Value {
     fn symmetric(&self, _border: Border) -> &[f64] {
         &[1.0]
     }
+}
 
+impl VertexKernel for Value {
     fn scale(&self, _spacing: f64) -> f64 {
         1.0
     }
@@ -90,13 +96,19 @@ impl Kernel for Unimplemented {
     fn antisymmetric(&self, _border: Border) -> &[f64] {
         unimplemented!("Kernel is unimplemented for order {}", self.0)
     }
+}
 
+impl VertexKernel for Unimplemented {
     fn scale(&self, _spacing: f64) -> f64 {
         unimplemented!("Kernel is unimplemented for order {}", self.0)
     }
 }
 
-impl ProlongKernel for Unimplemented {}
+impl CellKernel for Unimplemented {
+    fn scale(&self) -> f64 {
+        unimplemented!("Kernel is unimplemented for order {}", self.0)
+    }
+}
 
 /// Derivative operation of a given order.
 #[derive(Clone)]
@@ -127,10 +139,6 @@ impl Kernel for Derivative<2> {
             Border::Negative(_) => &[0.0, 1.0],
             Border::Positive(_) => &[1.0, 0.0],
         }
-    }
-
-    fn scale(&self, spacing: f64) -> f64 {
-        1.0 / spacing
     }
 }
 
@@ -179,7 +187,12 @@ impl Kernel for Derivative<4> {
             Border::Positive(_) => POS_1,
         }
     }
+}
 
+impl<const ORDER: usize> VertexKernel for Derivative<ORDER>
+where
+    Derivative<ORDER>: Kernel,
+{
     fn scale(&self, spacing: f64) -> f64 {
         1.0 / spacing
     }
@@ -217,10 +230,6 @@ impl Kernel for SecondDerivative<2> {
             Border::Negative(_) => &[0.0],
             Border::Positive(_) => &[0.0],
         }
-    }
-
-    fn scale(&self, spacing: f64) -> f64 {
-        1.0 / (spacing * spacing)
     }
 }
 
@@ -269,7 +278,12 @@ impl Kernel for SecondDerivative<4> {
             Border::Positive(_) => POS_1,
         }
     }
+}
 
+impl<const ORDER: usize> VertexKernel for SecondDerivative<ORDER>
+where
+    SecondDerivative<ORDER>: Kernel,
+{
     fn scale(&self, spacing: f64) -> f64 {
         1.0 / (spacing * spacing)
     }
@@ -314,7 +328,9 @@ impl Kernel for Dissipation<4> {
             Border::Positive(_) => &[1.0, -4.0, 5.0, -4.0],
         }
     }
+}
 
+impl VertexKernel for Dissipation<4> {
     fn scale(&self, _spacing: f64) -> f64 {
         -1.0 / 16.0
     }
@@ -361,7 +377,9 @@ impl Kernel for Dissipation<6> {
             Border::Positive(_) => &[1.0, -6.0, 15.0, -20.0, 14.0, -6.0],
         }
     }
+}
 
+impl VertexKernel for Dissipation<6> {
     fn scale(&self, _spacing: f64) -> f64 {
         1.0 / 64.0
     }
@@ -372,7 +390,7 @@ pub struct Interpolation<const ORDER: usize>;
 
 impl Kernel for Interpolation<2> {
     fn border_width(&self) -> usize {
-        2
+        1
     }
 
     fn interior(&self) -> &[f64] {
@@ -399,15 +417,17 @@ impl Kernel for Interpolation<2> {
             Border::Positive(_) => &[-1.0, 10.0, 9.0],
         }
     }
+}
 
-    fn scale(&self, _spacing: f64) -> f64 {
+impl CellKernel for Interpolation<2> {
+    fn scale(&self) -> f64 {
         1.0 / 16.0
     }
 }
 
 impl Kernel for Interpolation<4> {
     fn border_width(&self) -> usize {
-        3
+        2
     }
 
     fn interior(&self) -> &[f64] {
@@ -416,37 +436,37 @@ impl Kernel for Interpolation<4> {
 
     fn free(&self, border: Border) -> &[f64] {
         match border {
-            Border::Negative(1) => &[63.0, 315.0, -210.0, 126.0, -45.0, 7.0],
+            Border::Negative(0) => &[63.0, 315.0, -210.0, 126.0, -45.0, 7.0],
             Border::Negative(_) => &[-7.0, 105.0, 210.0, -70.0, 21.0, -3.0],
-            Border::Positive(1) => &[7.0, -45.0, 126.0, -210.0, 315.0, 63.0],
+            Border::Positive(0) => &[7.0, -45.0, 126.0, -210.0, 315.0, 63.0],
             Border::Positive(_) => &[-3.0, 21.0, -70.0, 210.0, 105.0, -7.0],
         }
     }
 
     fn symmetric(&self, border: Border) -> &[f64] {
         match border {
-            Border::Negative(1) => &[150.0, 125.0, -22.0, 3.0],
+            Border::Negative(0) => &[150.0, 125.0, -22.0, 3.0],
             Border::Negative(_) => &[-25.0, 153.0, 150.0, -25.0, 3.0],
-            Border::Positive(1) => &[3.0, -22.0, 125.0, 150.0],
+            Border::Positive(0) => &[3.0, -22.0, 125.0, 150.0],
             Border::Positive(_) => &[3.0, -25.0, 150.0, 153.0, -25.0],
         }
     }
 
     fn antisymmetric(&self, border: Border) -> &[f64] {
         match border {
-            Border::Negative(1) => &[150.0, 175.0, -28.0, 3.0],
+            Border::Negative(0) => &[150.0, 175.0, -28.0, 3.0],
             Border::Negative(_) => &[-25.0, 147.0, 150.0, -25.0, 3.0],
-            Border::Positive(1) => &[3.0, -28.0, 175.0, 150.0],
+            Border::Positive(0) => &[3.0, -28.0, 175.0, 150.0],
             Border::Positive(_) => &[3.0, -25.0, 150.0, 147.0, -28.0],
         }
     }
+}
 
-    fn scale(&self, _spacing: f64) -> f64 {
+impl CellKernel for Interpolation<4> {
+    fn scale(&self) -> f64 {
         1.0 / 256.0
     }
 }
-
-impl<const ORDER: usize> ProlongKernel for Interpolation<ORDER> where Interpolation<ORDER>: Kernel {}
 
 // ************************************
 // Order ******************************
@@ -473,29 +493,29 @@ pub trait Kernels: private::Sealed + Clone + Copy + Default + 'static {
     const ORDER: usize;
     const MAX_BORDER: usize;
 
-    fn derivative() -> &'static impl Kernel;
-    fn second_derivative() -> &'static impl Kernel;
-    fn dissipation() -> &'static impl Kernel;
-    fn interpolation() -> &'static impl ProlongKernel;
+    fn derivative() -> &'static impl VertexKernel;
+    fn second_derivative() -> &'static impl VertexKernel;
+    fn dissipation() -> &'static impl VertexKernel;
+    fn interpolation() -> &'static impl CellKernel;
 }
 
 impl Kernels for SecondOrder {
     const ORDER: usize = 2;
     const MAX_BORDER: usize = 1;
 
-    fn derivative() -> &'static impl Kernel {
+    fn derivative() -> &'static impl VertexKernel {
         &Derivative::<2>
     }
 
-    fn second_derivative() -> &'static impl Kernel {
+    fn second_derivative() -> &'static impl VertexKernel {
         &SecondDerivative::<2>
     }
 
-    fn dissipation() -> &'static impl Kernel {
+    fn dissipation() -> &'static impl VertexKernel {
         &Unimplemented(2)
     }
 
-    fn interpolation() -> &'static impl ProlongKernel {
+    fn interpolation() -> &'static impl CellKernel {
         &Interpolation::<2>
     }
 }
@@ -504,19 +524,19 @@ impl Kernels for FourthOrder {
     const ORDER: usize = 4;
     const MAX_BORDER: usize = 2;
 
-    fn derivative() -> &'static impl Kernel {
+    fn derivative() -> &'static impl VertexKernel {
         &Derivative::<4>
     }
 
-    fn second_derivative() -> &'static impl Kernel {
+    fn second_derivative() -> &'static impl VertexKernel {
         &SecondDerivative::<4>
     }
 
-    fn dissipation() -> &'static impl Kernel {
+    fn dissipation() -> &'static impl VertexKernel {
         &Unimplemented(4)
     }
 
-    fn interpolation() -> &'static impl ProlongKernel {
+    fn interpolation() -> &'static impl CellKernel {
         &Interpolation::<4>
     }
 }
@@ -525,19 +545,19 @@ impl Kernels for SixthOrder {
     const ORDER: usize = 6;
     const MAX_BORDER: usize = 3;
 
-    fn derivative() -> &'static impl Kernel {
+    fn derivative() -> &'static impl VertexKernel {
         &Unimplemented(6)
     }
 
-    fn second_derivative() -> &'static impl Kernel {
+    fn second_derivative() -> &'static impl VertexKernel {
         &Unimplemented(6)
     }
 
-    fn dissipation() -> &'static impl Kernel {
+    fn dissipation() -> &'static impl VertexKernel {
         &Dissipation::<6>
     }
 
-    fn interpolation() -> &'static impl ProlongKernel {
+    fn interpolation() -> &'static impl CellKernel {
         &Unimplemented(6)
     }
 }
@@ -561,7 +581,7 @@ pub trait Convolution<const N: usize> {
 macro_rules! impl_convolution_for_tuples {
     ($($N:literal => $($T:ident $i:tt)*)*) => {
         $(
-            impl<$($T: Kernel,)*> Convolution<$N> for ($($T,)*) {
+            impl<$($T: VertexKernel,)*> Convolution<$N> for ($($T,)*) {
                 fn border_width(&self, axis: usize) -> usize {
                     match axis {
                         $($i => self.$i.border_width(),)*

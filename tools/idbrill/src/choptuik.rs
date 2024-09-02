@@ -125,7 +125,7 @@ impl Operator<2> for PsiOperator {
         index: usize,
     ) {
         if index % 25 == 0 {
-            let mut choptuik = SystemVec::with_length(mesh.num_dofs());
+            let mut choptuik = SystemVec::with_length(mesh.num_nodes());
             choptuik
                 .field_mut(Choptuik::Psi)
                 .copy_from_slice(system.field(Scalar));
@@ -133,7 +133,7 @@ impl Operator<2> for PsiOperator {
                 .field_mut(Choptuik::Seed)
                 .copy_from_slice(context.field(Scalar));
 
-            let mut hamiltonian = vec![0.0; mesh.num_dofs()];
+            let mut hamiltonian = vec![0.0; mesh.num_nodes()];
 
             mesh.evaluate(
                 ORDER,
@@ -255,7 +255,7 @@ pub fn solve(
 ) -> Result<(), Box<dyn std::error::Error>> {
     log::info!("Filling Seed Function");
 
-    let num_nodes = mesh.num_dofs();
+    let num_nodes = mesh.num_nodes();
 
     let mut choptuik = vec![0.0; num_nodes * 2];
     let (psi, seed) = choptuik.split_at_mut(num_nodes);

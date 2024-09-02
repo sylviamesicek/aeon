@@ -48,25 +48,35 @@ impl<const N: usize> TreeBlocks<N> {
     }
 
     // Number of blocks in the mesh.
-    pub fn num_blocks(&self) -> usize {
+    pub fn len(&self) -> usize {
         self.block_sizes.len()
     }
 
     /// Size of a given block, measured in cells.
-    pub fn block_size(&self, block: usize) -> [usize; N] {
+    pub fn size(&self, block: usize) -> [usize; N] {
         self.block_sizes[block]
     }
 
-    /// Map from cartesian indices within block to cell at the given positions
-    pub fn block_cells(&self, block: usize) -> &[usize] {
+    /// Returns the cells associated with the given block.
+    pub fn cells(&self, block: usize) -> &[usize] {
         &self.block_cell_indices[self.block_cell_offsets[block]..self.block_cell_offsets[block + 1]]
     }
 
-    pub fn block_bounds(&self, block: usize) -> Rectangle<N> {
+    /// Finds the cell at the given position within the block.
+    pub fn cell_from_position(&self, block: usize, position: [usize; N]) -> usize {
+        let space = IndexSpace::new(self.size(block));
+        let index = space.linear_from_cartesian(position);
+
+        self.block_cell_indices[self.block_cell_offsets[block] + index]
+    }
+
+    /// Returns the bounds of the given block.
+    pub fn bounds(&self, block: usize) -> Rectangle<N> {
         self.block_bounds[block].clone()
     }
 
-    pub fn block_boundary_flags(&self, block: usize) -> FaceMask<N> {
+    /// Returns boundary flags for a block.
+    pub fn boundary_flags(&self, block: usize) -> FaceMask<N> {
         let mut flags = [[false; 2]; N];
 
         for face in faces::<N>() {
@@ -77,13 +87,8 @@ impl<const N: usize> TreeBlocks<N> {
         FaceMask::pack(flags)
     }
 
-    pub fn cell_from_block_index(&self, block: usize, index: [usize; N]) -> usize {
-        let space = IndexSpace::new(self.block_size(block));
-        let lin = space.linear_from_cartesian(index);
-        self.block_cell_indices[self.block_cell_offsets[block] + lin]
-    }
-
-    pub fn cell_index(&self, cell: usize) -> [usize; N] {
+    /// Returns the position of the cell within the block.
+    pub fn cell_position(&self, cell: usize) -> [usize; N] {
         self.cell_indices[cell]
     }
 
@@ -178,9 +183,9 @@ impl<const N: usize> TreeBlocks<N> {
     fn build_bounds(&mut self, tree: &Tree<N>) {
         self.block_bounds.clear();
 
-        for block in 0..self.num_blocks() {
+        for block in 0..self.len() {
             let size = self.block_sizes[block];
-            let a = self.block_cells(block).first().unwrap().clone();
+            let a = self.cells(block).first().unwrap().clone();
 
             let cell_bounds = tree.bounds(a);
 
@@ -194,15 +199,15 @@ impl<const N: usize> TreeBlocks<N> {
     fn build_boundaries(&mut self, tree: &Tree<N>) {
         self.boundaries.clear();
 
-        for block in 0..self.num_blocks() {
+        for block in 0..self.len() {
             let a = 0;
-            let b: usize = self.block_cells(block).len() - 1;
+            let b: usize = self.cells(block).len() - 1;
 
             for face in faces::<N>() {
                 let cell = if face.side {
-                    self.block_cells(block)[b]
+                    self.cells(block)[b]
                 } else {
-                    self.block_cells(block)[a]
+                    self.cells(block)[a]
                 };
                 let neighbor = tree.neighbor(cell, face);
                 self.boundaries.push(neighbor == NULL);
@@ -223,23 +228,23 @@ mod tests {
         let mut blocks = TreeBlocks::default();
         blocks.build(&tree);
 
-        assert_eq!(blocks.num_blocks(), 3);
-        assert_eq!(blocks.block_size(0), [2, 2]);
-        assert_eq!(blocks.block_size(1), [1, 2]);
-        assert_eq!(blocks.block_size(2), [1, 1]);
+        assert_eq!(blocks.len(), 3);
+        assert_eq!(blocks.size(0), [2, 2]);
+        assert_eq!(blocks.size(1), [1, 2]);
+        assert_eq!(blocks.size(2), [1, 1]);
 
-        assert_eq!(blocks.block_cells(0), [0, 1, 2, 3]);
-        assert_eq!(blocks.block_cells(1), [4, 6]);
-        assert_eq!(blocks.block_cells(2), [5]);
+        assert_eq!(blocks.cells(0), [0, 1, 2, 3]);
+        assert_eq!(blocks.cells(1), [4, 6]);
+        assert_eq!(blocks.cells(2), [5]);
 
         tree.refine(&[false, false, false, false, true, false, false]);
         blocks.build(&tree);
 
-        assert_eq!(blocks.num_blocks(), 2);
-        assert_eq!(blocks.block_size(0), [4, 2]);
-        assert_eq!(blocks.block_size(1), [2, 1]);
+        assert_eq!(blocks.len(), 2);
+        assert_eq!(blocks.size(0), [4, 2]);
+        assert_eq!(blocks.size(1), [2, 1]);
 
-        assert_eq!(blocks.block_cells(0), [0, 1, 4, 5, 2, 3, 6, 7]);
-        assert_eq!(blocks.block_cells(1), [8, 9]);
+        assert_eq!(blocks.cells(0), [0, 1, 4, 5, 2, 3, 6, 7]);
+        assert_eq!(blocks.cells(1), [8, 9]);
     }
 }

@@ -1,5 +1,5 @@
 use crate::{regions, IndexSpace, Region, NULL};
-use crate::{Face, Side, Tree, TreeBlocks, TreeDofs};
+use crate::{Face, Side, Tree, TreeBlocks, TreeNodes};
 use std::{array, slice};
 
 /// Stores neighbor of a cell on a tree.
@@ -55,7 +55,7 @@ impl<const N: usize> TreeNeighbors<N> {
         // Reused memory for neighbors.
         let mut neighbors = Vec::new();
 
-        for block in 0..blocks.num_blocks() {
+        for block in 0..blocks.len() {
             // Build cell neighbors.
             neighbors.clear();
             Self::build_cell_neighbors(tree, blocks, block, &mut neighbors);
@@ -98,8 +98,8 @@ impl<const N: usize> TreeNeighbors<N> {
         block: usize,
         neighbors: &mut Vec<TreeCellNeighbor<N>>,
     ) {
-        let block_size = blocks.block_size(block);
-        let block_cells = blocks.block_cells(block);
+        let block_size = blocks.size(block);
+        let block_cells = blocks.cells(block);
 
         for region in regions::<N>() {
             if region == Region::CENTRAL {
@@ -202,7 +202,7 @@ impl<const N: usize> TreeInterfaces<N> {
         tree: &Tree<N>,
         blocks: &TreeBlocks<N>,
         neighbors: &TreeNeighbors<N>,
-        dofs: &TreeDofs<N>,
+        dofs: &TreeNodes<N>,
     ) {
         for fine in neighbors.fine() {
             self.fine
@@ -223,7 +223,7 @@ impl<const N: usize> TreeInterfaces<N> {
     fn interface_from_neighbor(
         tree: &Tree<N>,
         blocks: &TreeBlocks<N>,
-        dofs: &TreeDofs<N>,
+        dofs: &TreeNodes<N>,
         interface: &TreeBlockNeighbor<N>,
     ) -> TreeInterface<N> {
         let a = interface.a.clone();
@@ -237,8 +237,8 @@ impl<const N: usize> TreeInterfaces<N> {
         // Avoid overlaps between aabbs on this block.
         // let aorigin = blocks.cell_index(a.cell);
         // let borigin = blocks.cell_index(b.cell);
-        let flags = blocks.block_boundary_flags(interface.block);
-        let block_size = blocks.block_size(interface.block);
+        let flags = blocks.boundary_flags(interface.block);
+        let block_size = blocks.size(interface.block);
 
         for axis in 0..N {
             let right_boundary = flags.is_set(Face::positive(axis));
@@ -275,15 +275,15 @@ impl<const N: usize> TreeInterfaces<N> {
     fn block_ghost_aabb(
         tree: &Tree<N>,
         blocks: &TreeBlocks<N>,
-        dofs: &TreeDofs<N>,
+        dofs: &TreeNodes<N>,
         interface: &TreeBlockNeighbor<N>,
     ) -> ([isize; N], [isize; N]) {
         let a = interface.a.clone();
         let b = interface.b.clone();
 
         // Find ghost region that must be filled
-        let aindex = blocks.cell_index(a.cell);
-        let bindex = blocks.cell_index(b.cell);
+        let aindex = blocks.cell_position(a.cell);
+        let bindex = blocks.cell_position(b.cell);
 
         // Compute bottom right corner of A cell.
         let mut anode: [_; N] = array::from_fn(|axis| (aindex[axis] * dofs.width[axis]) as isize);
@@ -348,14 +348,14 @@ impl<const N: usize> TreeInterfaces<N> {
     fn neighbor_origin(
         tree: &Tree<N>,
         blocks: &TreeBlocks<N>,
-        nodes: &TreeDofs<N>,
+        nodes: &TreeNodes<N>,
         a: TreeCellNeighbor<N>,
     ) -> [isize; N] {
         // Compute this boundary interface.
         let interface = InterfaceKind::from_levels(tree.level(a.cell), tree.level(a.neighbor));
 
         // Find source node
-        let index = blocks.cell_index(a.neighbor);
+        let index = blocks.cell_position(a.neighbor);
         let mut source: [isize; N] =
             array::from_fn(|axis| (index[axis] * nodes.width[axis]) as isize);
 
@@ -492,7 +492,7 @@ mod tests {
     fn interfaces() {
         let mut tree = Tree::new(Rectangle::<2>::UNIT);
         let mut blocks = TreeBlocks::default();
-        let mut dofs = TreeDofs::new([4; 2], 2);
+        let mut dofs = TreeNodes::new([4; 2], 2);
         let mut neighbors = TreeNeighbors::default();
         let mut interfaces = TreeInterfaces::default();
 

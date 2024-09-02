@@ -31,8 +31,6 @@ pub struct FdEngine<'a, const N: usize, K: Kernels, B: Boundary<N>, C: Condition
 
 impl<'a, const N: usize, K: Kernels, B: Boundary<N>, C: Conditions<N>> FdEngine<'a, N, K, B, C> {
     fn evaluate(&self, system: C::System, convolution: impl Convolution<N>) -> f64 {
-        let spacing = self.space.spacing(self.bounds.clone());
-        let scale = convolution.scale(spacing);
         let result = self.space.evaluate(
             SystemBC::new(
                 system.clone(),
@@ -40,10 +38,11 @@ impl<'a, const N: usize, K: Kernels, B: Boundary<N>, C: Conditions<N>> FdEngine<
                 self.conditions.clone(),
             ),
             convolution,
+            self.bounds.clone(),
             self.vertex,
             self.fields.field(system.clone()),
         );
-        result * scale
+        result
     }
 }
 
@@ -94,14 +93,13 @@ pub struct FdIntEngine<'a, const N: usize, K: Kernels, S: SystemLabel> {
 
 impl<'a, const N: usize, K: Kernels, S: SystemLabel> FdIntEngine<'a, N, K, S> {
     fn evaluate(&self, system: S, convolution: impl Convolution<N>) -> f64 {
-        let spacing = self.space.spacing(self.bounds.clone());
-        let scale = convolution.scale(spacing);
         let result = self.space.evaluate_interior(
             convolution,
+            self.bounds.clone(),
             self.vertex,
             self.fields.field(system.clone()),
         );
-        result * scale
+        result
     }
 }
 
