@@ -80,22 +80,28 @@ impl<const N: usize> Tree<N> {
 
     /// Moves in a positive direction for each axis that mask is set. This is most
     /// commonly used to find sibling cells in neighbor searches.
-    fn sibling(&self, mut cell: usize, mask: AxisMask<N>) -> usize {
-        let split = self.split(cell);
+    fn sibling(&self, mut cell: usize, sibling: AxisMask<N>) -> usize {
+        debug_assert!(cell != NULL);
 
-        dbg!(split);
+        let split = self.split(cell);
+        let level = self.level(cell);
 
         (0..N)
-            .filter(|&axis| split.is_set(axis) != mask.is_set(axis))
+            .filter(|&axis| split.is_set(axis) != sibling.is_set(axis))
             .for_each(|axis| {
                 cell = self.neighbor(
                     cell,
                     Face {
-                        side: split.is_set(axis),
+                        side: sibling.is_set(axis),
                         axis,
                     },
                 );
+
+                debug_assert!(cell != NULL);
+                debug_assert!(level == self.level(cell));
             });
+
+        debug_assert!(self.split(cell) == sibling);
 
         cell
     }
@@ -117,6 +123,8 @@ impl<const N: usize> Tree<N> {
         subcell: AxisMask<N>,
         face: Face<N>,
     ) -> usize {
+        debug_assert!(subcell.is_outer_face(face));
+
         let result = self.neighbor(cell, face);
 
         if result == NULL {
@@ -204,10 +212,12 @@ impl<const N: usize> Tree<N> {
                 debug_assert!(nlevel == level - 1);
                 debug_assert!(!neighbor_fine);
                 neighbor_coarse = true;
+                neighbor_fine = false;
             } else if nlevel > level {
                 debug_assert!(nlevel == level + 1);
                 debug_assert!(!neighbor_coarse);
                 neighbor_fine = true;
+                neighbor_coarse = false;
             } else {
                 neighbor_coarse = false;
                 neighbor_fine = false;
@@ -243,10 +253,6 @@ impl<const N: usize> Tree<N> {
                 (0..N)
                     .filter(|&axis| region.side(axis) != Side::Middle)
                     .for_each(|axis| split.toggle(axis));
-
-                dbg!(region, cell, split, neighbor);
-
-                dbg!("Calling sibling");
 
                 self.sibling(neighbor, split)
             }))
@@ -643,11 +649,6 @@ mod tests {
         assert_eq_regions(4, [NULL, NULL, NULL, 1, 4, NULL, 5, 6, NULL]);
         assert_eq_regions(5, [NULL, 2, 4, NULL, 5, 6, NULL, NULL, NULL]);
         assert_eq_regions(6, [3, 4, NULL, 5, 6, NULL, NULL, NULL, NULL]);
-
-        assert_eq!(
-            tree.neighbor_after_refinement(4, AxisMask::pack([true, true]), Face::negative(0)),
-            3
-        );
 
         assert_eq!(
             tree.neighbor_after_refinement(5, AxisMask::pack([true, false]), Face::negative(1)),

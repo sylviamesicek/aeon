@@ -78,7 +78,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .long("radius")
                 .help("Size of grid along each axis")
                 .value_name("RADIUS")
-                .default_value("128.0"),
+                .default_value("16.0"),
         )
         .get_matches();
 
@@ -89,7 +89,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let radius = matches
         .get_one::<String>("radius")
         .map(|s| s.parse().unwrap())
-        .unwrap_or(128.0);
+        .unwrap_or(16.0);
 
     env_logger::builder()
         .filter_level(log::LevelFilter::Trace)
@@ -106,22 +106,21 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut mesh = Mesh::new(bounds, size, 3);
 
-    for _ in 0..1 {
-        let flags = vec![true; mesh.num_cells()];
-        mesh.refine(&flags);
-    }
-
-    for _ in 0..2 {
-        let mut flags = vec![false; mesh.num_cells()];
-        flags[0] = true;
-
-        mesh.refine(&flags);
-    }
-
     // for _ in 0..1 {
     //     let flags = vec![true; mesh.num_cells()];
     //     mesh.refine(&flags);
     // }
+
+    for _ in 0..3 {
+        let mut flags = vec![false; mesh.num_cells()];
+        flags[0] = true;
+        mesh.refine(&flags);
+    }
+
+    for _ in 0..1 {
+        let flags = vec![true; mesh.num_cells()];
+        mesh.refine(&flags);
+    }
 
     log::warn!("Min Spacing {}", mesh.min_spacing());
 
@@ -180,6 +179,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         )?;
     }
 
+    log::warn!("Min Spacing {}", mesh.min_spacing());
     mesh.export_dat("output/idbrill4.0.dat", &systems)?;
 
     Ok(())

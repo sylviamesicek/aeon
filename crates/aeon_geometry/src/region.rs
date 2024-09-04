@@ -1,4 +1,8 @@
-use std::{array::from_fn, cmp::Ordering};
+use std::{
+    array::from_fn,
+    cmp::Ordering,
+    fmt::{Display, Write},
+};
 
 use super::{index::IndexWindow, AxisMask, CartesianIter, Face, IndexSpace};
 
@@ -244,6 +248,19 @@ impl<const N: usize> Ord for Region<N> {
 impl<const N: usize> PartialOrd for Region<N> {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         Some(self.cmp(other))
+    }
+}
+
+impl<const N: usize> Display for Region<N> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        for axis in 0..N {
+            match self.side(axis) {
+                Side::Left => f.write_char('-'),
+                Side::Middle => f.write_char('='),
+                Side::Right => f.write_char('+'),
+            }?;
+        }
+        Ok(())
     }
 }
 

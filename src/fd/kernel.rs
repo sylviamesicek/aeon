@@ -527,7 +527,7 @@ impl Kernels for Order<4> {
     }
 
     fn dissipation() -> &'static impl VertexKernel {
-        &Unimplemented(4)
+        &Dissipation::<4>
     }
 
     fn interpolation() -> &'static impl CellKernel {

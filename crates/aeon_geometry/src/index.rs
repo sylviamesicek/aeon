@@ -51,6 +51,10 @@ impl<const N: usize> IndexSpace<N> {
 
     /// Converts a cartesian index into a linear index.
     pub fn linear_from_cartesian(self, cartesian: [usize; N]) -> usize {
+        for axis in 0..N {
+            debug_assert!(cartesian[axis] < self.size[axis]);
+        }
+
         let mut result = 0;
         let mut stride = 1;
 

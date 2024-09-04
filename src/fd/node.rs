@@ -73,6 +73,11 @@ impl<const N: usize> NodeSpace<N> {
     }
 
     pub fn index_from_node(&self, node: [isize; N]) -> usize {
+        for axis in 0..N {
+            debug_assert!(node[axis] >= -(self.ghost as isize));
+            debug_assert!(node[axis] <= (self.size[axis] + self.ghost) as isize);
+        }
+
         let cartesian = array::from_fn(|axis| {
             let mut vertex = node[axis];
 
@@ -286,6 +291,10 @@ impl<const N: usize> NodeSpace<N> {
         vertex: [usize; N],
         field: &[f64],
     ) -> f64 {
+        for axis in 0..N {
+            debug_assert!(vertex[axis] <= self.size[axis]);
+        }
+
         let spacing = self.spacing(bounds);
         let support = array::from_fn(|axis| {
             self.support(&boundary, vertex, convolution.border_width(axis), axis)
@@ -303,15 +312,15 @@ impl<const N: usize> NodeSpace<N> {
         &self,
         boundary: impl Boundary<N> + Condition<N>,
         kernel: impl CellKernel,
-        supernode: [usize; N],
+        supervertex: [usize; N],
         field: &[f64],
     ) -> f64 {
         for axis in 0..N {
-            debug_assert!(supernode[axis] <= 2 * self.size[axis]);
+            debug_assert!(supervertex[axis] <= 2 * self.size[axis]);
         }
 
-        let node: [_; N] = array::from_fn(|axis| supernode[axis] / 2);
-        let flags: [_; N] = array::from_fn(|axis| supernode[axis] % 2 == 1);
+        let node: [_; N] = array::from_fn(|axis| supervertex[axis] / 2);
+        let flags: [_; N] = array::from_fn(|axis| supervertex[axis] % 2 == 1);
 
         let mut scale = 1.0;
 

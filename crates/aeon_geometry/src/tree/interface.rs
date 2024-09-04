@@ -52,6 +52,10 @@ impl<const N: usize> TreeNeighbors<N> {
 
     /// Rebuilds the block interface data.
     pub fn build(&mut self, tree: &Tree<N>, blocks: &TreeBlocks<N>) {
+        self.fine.clear();
+        self.coarse.clear();
+        self.direct.clear();
+
         // Reused memory for neighbors.
         let mut neighbors = Vec::new();
 
@@ -100,24 +104,20 @@ impl<const N: usize> TreeNeighbors<N> {
     ) {
         let block_size = blocks.size(block);
         let block_cells = blocks.cells(block);
+        let block_space = IndexSpace::new(block_size);
+
+        debug_assert!(block_size.iter().product::<usize>() == block_cells.len());
 
         for region in regions::<N>() {
             if region == Region::CENTRAL {
                 continue;
             }
 
-            let block_space = IndexSpace::new(block_size);
-
             // Find all cells adjacent to the given region.
             for index in block_space.adjacent(region) {
                 let cell = block_cells[block_space.linear_from_cartesian(index)];
 
-                dbg!("Starting neighbor search");
                 for neighbor in tree.neighbors_in_region(cell, region) {
-                    if block == 4 {
-                        assert!(neighbor != 5);
-                    }
-
                     debug_assert!(neighbor != NULL);
 
                     neighbors.push(TreeCellNeighbor {
@@ -209,6 +209,10 @@ impl<const N: usize> TreeInterfaces<N> {
         neighbors: &TreeNeighbors<N>,
         dofs: &TreeNodes<N>,
     ) {
+        self.fine.clear();
+        self.direct.clear();
+        self.coarse.clear();
+
         for fine in neighbors.fine() {
             self.fine
                 .push(Self::interface_from_neighbor(tree, blocks, dofs, fine));
@@ -290,7 +294,7 @@ impl<const N: usize> TreeInterfaces<N> {
         let aindex = blocks.cell_position(a.cell);
         let bindex = blocks.cell_position(b.cell);
 
-        // Compute bottom right corner of A cell.
+        // Compute bottom left corner of A cell.
         let mut anode: [_; N] = array::from_fn(|axis| (aindex[axis] * dofs.width[axis]) as isize);
 
         if tree.level(a.cell) < tree.level(a.neighbor) {

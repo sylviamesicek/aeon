@@ -358,7 +358,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             systems.save_system(dynamic.as_slice());
 
             mesh.export_vtk(
-                format!("output/evbrill/iter{}.vtu", i / 1),
+                format!("output/evbrill/iterultra{}.vtu", i / 1),
                 ExportVtkConfig {
                     title: "evbrill".to_string(),
                     ghost: false,

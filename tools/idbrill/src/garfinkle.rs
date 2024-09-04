@@ -245,8 +245,8 @@ pub fn solve(
 
     let mut solver = HyperRelaxSolver::new();
     solver.tolerance = 1e-9;
-    solver.max_steps = 10000;
-    solver.cfl = 0.1;
+    solver.max_steps = 50000;
+    solver.cfl = 0.5;
     solver.dampening = 0.4;
 
     solver.solve(mesh, ORDER, Quadrant, PsiOperator, seed.into(), psi.into());

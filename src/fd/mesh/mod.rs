@@ -253,8 +253,97 @@ impl<const N: usize> Mesh<N> {
             writeln!(result, "    Cells {:?}", self.blocks.cells(block)).unwrap();
             writeln!(
                 result,
+                "    Vertices {:?}",
+                self.block_space(block).inner_size()
+            )
+            .unwrap();
+            writeln!(
+                result,
                 "    Boundary {:?}",
                 self.blocks.boundary_flags(block)
+            )
+            .unwrap();
+        }
+
+        writeln!(result, "").unwrap();
+        writeln!(result, "// **********************").unwrap();
+        writeln!(result, "// Neighbors ************").unwrap();
+        writeln!(result, "// **********************").unwrap();
+        writeln!(result, "").unwrap();
+
+        writeln!(result, "// Fine Neighbors").unwrap();
+
+        for neighbor in self.neighbors.fine() {
+            writeln!(result, "Fine Neighbor").unwrap();
+
+            writeln!(
+                result,
+                "    Block: {}, Neighbor: {}",
+                neighbor.block, neighbor.neighbor,
+            )
+            .unwrap();
+            writeln!(
+                result,
+                "    Lower: Cell {}, Neighbor {}, Region {}",
+                neighbor.a.cell, neighbor.a.neighbor, neighbor.a.region,
+            )
+            .unwrap();
+            writeln!(
+                result,
+                "    Upper: Cell {}, Neighbor {}, Region {}",
+                neighbor.b.cell, neighbor.b.neighbor, neighbor.b.region,
+            )
+            .unwrap();
+        }
+
+        writeln!(result, "").unwrap();
+        writeln!(result, "// Direct Neighbors").unwrap();
+
+        for neighbor in self.neighbors.direct() {
+            writeln!(result, "Direct Neighbor").unwrap();
+
+            writeln!(
+                result,
+                "    Block: {}, Neighbor: {}",
+                neighbor.block, neighbor.neighbor,
+            )
+            .unwrap();
+            writeln!(
+                result,
+                "    Lower: Cell {}, Neighbor {}, Region {}",
+                neighbor.a.cell, neighbor.a.neighbor, neighbor.a.region,
+            )
+            .unwrap();
+            writeln!(
+                result,
+                "    Upper: Cell {}, Neighbor {}, Region {}",
+                neighbor.b.cell, neighbor.b.neighbor, neighbor.b.region,
+            )
+            .unwrap();
+        }
+
+        writeln!(result, "").unwrap();
+        writeln!(result, "// Coarse Neighbors").unwrap();
+
+        for neighbor in self.neighbors.coarse() {
+            writeln!(result, "Coarse Neighbor").unwrap();
+
+            writeln!(
+                result,
+                "    Block: {}, Neighbor: {}",
+                neighbor.block, neighbor.neighbor,
+            )
+            .unwrap();
+            writeln!(
+                result,
+                "    Lower: Cell {}, Neighbor {}, Region {}",
+                neighbor.a.cell, neighbor.a.neighbor, neighbor.a.region,
+            )
+            .unwrap();
+            writeln!(
+                result,
+                "    Upper: Cell {}, Neighbor {}, Region {}",
+                neighbor.b.cell, neighbor.b.neighbor, neighbor.b.region,
             )
             .unwrap();
         }
@@ -266,7 +355,6 @@ impl<const N: usize> Mesh<N> {
         writeln!(result, "").unwrap();
 
         writeln!(result, "// Fine Interfaces").unwrap();
-        writeln!(result, "").unwrap();
 
         for interface in self.interfaces.fine() {
             writeln!(
@@ -289,8 +377,8 @@ impl<const N: usize> Mesh<N> {
             .unwrap();
         }
 
-        writeln!(result, "// Direct Interfaces").unwrap();
         writeln!(result, "").unwrap();
+        writeln!(result, "// Direct Interfaces").unwrap();
 
         for interface in self.interfaces.direct() {
             writeln!(
@@ -313,8 +401,8 @@ impl<const N: usize> Mesh<N> {
             .unwrap();
         }
 
-        writeln!(result, "// Coarse Interfaces").unwrap();
         writeln!(result, "").unwrap();
+        writeln!(result, "// Coarse Interfaces").unwrap();
 
         for interface in self.interfaces.coarse() {
             writeln!(
