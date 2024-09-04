@@ -283,7 +283,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut mesh = Mesh::default();
     let mut systems = SystemCheckpoint::default();
 
-    mesh.import_dat("output/idbrill.dat", &mut systems)
+    mesh.import_dat("output/idbrill4.0.dat", &mut systems)
         .expect("Unable to load initial data");
 
     // Read initial data
@@ -352,13 +352,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let norm = mesh.norm(dynamic.field(Dynamic::Theta).into());
         println!("Step {i}, Time {:.5} Norm {:.5e}", i as f64 * h, norm);
 
-        if i % 25 == 0 {
+        if i % 1 == 0 {
             // Output current system to disk
             let mut systems = SystemCheckpoint::default();
             systems.save_system(dynamic.as_slice());
 
             mesh.export_vtk(
-                format!("output/evbrill/iter{}.vtu", i / 25),
+                format!("output/evbrill/iter{}.vtu", i / 1),
                 ExportVtkConfig {
                     title: "evbrill".to_string(),
                     ghost: false,

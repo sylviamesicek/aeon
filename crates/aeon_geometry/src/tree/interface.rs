@@ -112,7 +112,12 @@ impl<const N: usize> TreeNeighbors<N> {
             for index in block_space.adjacent(region) {
                 let cell = block_cells[block_space.linear_from_cartesian(index)];
 
+                dbg!("Starting neighbor search");
                 for neighbor in tree.neighbors_in_region(cell, region) {
+                    if block == 4 {
+                        assert!(neighbor != 5);
+                    }
+
                     debug_assert!(neighbor != NULL);
 
                     neighbors.push(TreeCellNeighbor {

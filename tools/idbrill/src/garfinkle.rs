@@ -226,14 +226,15 @@ pub fn solve(
     rinne: SystemSliceMut<Rinne>,
     hamiltonian: &mut [f64],
 ) -> Result<(), Box<dyn std::error::Error>> {
-    log::info!("Filling Seed Function");
-
     let num_nodes = mesh.num_nodes();
+
+    log::info!("Solving Garfinkle with {}", num_nodes);
 
     let mut garfinkle = vec![0.0; num_nodes * 2];
     let (psi, seed) = garfinkle.split_at_mut(num_nodes);
 
     // Compute seed values.
+    log::info!("Filling Seed Function");
     mesh.project(ORDER, Quadrant, SeedProjection(amplitude), seed.into());
     mesh.fill_boundary(ORDER, Quadrant, SEED_CONDITIONS, seed.into());
 

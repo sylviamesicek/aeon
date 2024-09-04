@@ -6,7 +6,7 @@ use aeon::{
 mod choptuik;
 mod garfinkle;
 
-const CHOPTUIK: bool = true;
+const CHOPTUIK: bool = false;
 const GHOST: bool = false;
 
 const ORDER: Order<4> = Order::<4>;
@@ -106,12 +106,22 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut mesh = Mesh::new(bounds, size, 3);
 
-    for _ in 0..4 {
+    for _ in 0..1 {
+        let flags = vec![true; mesh.num_cells()];
+        mesh.refine(&flags);
+    }
+
+    for _ in 0..2 {
         let mut flags = vec![false; mesh.num_cells()];
         flags[0] = true;
 
         mesh.refine(&flags);
     }
+
+    // for _ in 0..1 {
+    //     let flags = vec![true; mesh.num_cells()];
+    //     mesh.refine(&flags);
+    // }
 
     log::warn!("Min Spacing {}", mesh.min_spacing());
 
@@ -133,9 +143,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut hamiltonian = vec![0.0; mesh.num_nodes()].into_boxed_slice();
 
     if CHOPTUIK {
-        choptuik::solve(&mut mesh, 1.0, rinne.as_mut_slice(), &mut hamiltonian)?;
+        choptuik::solve(&mut mesh, 4.0, rinne.as_mut_slice(), &mut hamiltonian)?;
     } else {
-        garfinkle::solve(&mut mesh, 1.0, rinne.as_mut_slice(), &mut hamiltonian)?;
+        garfinkle::solve(&mut mesh, 4.0, rinne.as_mut_slice(), &mut hamiltonian)?;
     }
 
     mesh.fill_boundary(ORDER, Quadrant, RinneConditions, rinne.as_mut_slice());
@@ -170,7 +180,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         )?;
     }
 
-    mesh.export_dat("output/idbrill.dat", &systems)?;
+    mesh.export_dat("output/idbrill4.0.dat", &systems)?;
 
     Ok(())
 }

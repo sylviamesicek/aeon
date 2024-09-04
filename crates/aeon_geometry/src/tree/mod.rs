@@ -81,9 +81,21 @@ impl<const N: usize> Tree<N> {
     /// Moves in a positive direction for each axis that mask is set. This is most
     /// commonly used to find sibling cells in neighbor searches.
     fn sibling(&self, mut cell: usize, mask: AxisMask<N>) -> usize {
-        (0..N).filter(|&axis| mask.is_set(axis)).for_each(|axis| {
-            cell = self.neighbor(cell, Face::positive(axis));
-        });
+        let split = self.split(cell);
+
+        dbg!(split);
+
+        (0..N)
+            .filter(|&axis| split.is_set(axis) != mask.is_set(axis))
+            .for_each(|axis| {
+                cell = self.neighbor(
+                    cell,
+                    Face {
+                        side: split.is_set(axis),
+                        axis,
+                    },
+                );
+            });
 
         cell
     }
@@ -116,7 +128,7 @@ impl<const N: usize> Tree<N> {
         }
 
         let mut sibling = subcell;
-        sibling.set_to(face.axis, false);
+        sibling.toggle(face.axis);
 
         self.sibling(result, sibling)
     }
@@ -142,7 +154,7 @@ impl<const N: usize> Tree<N> {
 
         once(neighbor)
             .chain(splits.map(move |mut split| {
-                split.clear(face.axis);
+                split.toggle(face.axis);
                 self.sibling(neighbor, split)
             }))
             .take(count)
@@ -161,7 +173,6 @@ impl<const N: usize> Tree<N> {
         let mut neighbor_coarse: bool = false;
 
         let mut subcell = region.adjacent_split();
-
         // Iterate over adjacent faces.
         for face in region.adjacent_faces() {
             // Make sure face is compatible with split.
@@ -231,7 +242,11 @@ impl<const N: usize> Tree<N> {
             .chain(splits.map(move |mut split| {
                 (0..N)
                     .filter(|&axis| region.side(axis) != Side::Middle)
-                    .for_each(|axis| split.clear(axis));
+                    .for_each(|axis| split.toggle(axis));
+
+                dbg!(region, cell, split, neighbor);
+
+                dbg!("Calling sibling");
 
                 self.sibling(neighbor, split)
             }))
