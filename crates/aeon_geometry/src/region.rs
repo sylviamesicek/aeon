@@ -112,111 +112,104 @@ impl<const N: usize> Region<N> {
         result
     }
 
-    pub fn face_from_axis(&self, axis: usize) -> Face<N> {
-        Face {
-            axis,
-            side: self.sides[axis] == Side::Right,
-        }
-    }
+    // /// Returns an index space with the same size as the region.
+    // pub fn index_space(&self, support: usize, block: [usize; N]) -> IndexSpace<N> {
+    //     let mut size = [0; N];
 
-    /// Returns an index space with the same size as the region.
-    pub fn index_space(&self, support: usize, block: [usize; N]) -> IndexSpace<N> {
-        let mut size = [0; N];
+    //     for axis in 0..N {
+    //         if self.sides[axis] != Side::Middle {
+    //             size[axis] = support;
+    //         } else {
+    //             size[axis] = block[axis]
+    //         }
+    //     }
 
-        for axis in 0..N {
-            if self.sides[axis] != Side::Middle {
-                size[axis] = support;
-            } else {
-                size[axis] = block[axis]
-            }
-        }
+    //     IndexSpace::new(size)
+    // }
 
-        IndexSpace::new(size)
-    }
+    // /// Iterates nodes in the given region (including ghost nodes and nodes
+    // /// on faces).
+    // pub fn nodes(&self, support: usize, block: [usize; N]) -> RegionNodeIter<N> {
+    //     RegionNodeIter {
+    //         inner: self.index_space(support, block).iter(),
+    //         block,
+    //         sides: self.sides,
+    //     }
+    // }
 
-    /// Iterates nodes in the given region (including ghost nodes and nodes
-    /// on faces).
-    pub fn nodes(&self, support: usize, block: [usize; N]) -> RegionNodeIter<N> {
-        RegionNodeIter {
-            inner: self.index_space(support, block).iter(),
-            block,
-            sides: self.sides,
-        }
-    }
+    // pub fn face_vertices(&self, block: [usize; N]) -> RegionFaceVertexIter<N> {
+    //     let mut size = [0; N];
 
-    pub fn face_vertices(&self, block: [usize; N]) -> RegionFaceVertexIter<N> {
-        let mut size = [0; N];
+    //     for axis in 0..N {
+    //         size[axis] = match self.sides[axis] {
+    //             Side::Left | Side::Right => 1,
+    //             Side::Middle => block[axis],
+    //         }
+    //     }
 
-        for axis in 0..N {
-            size[axis] = match self.sides[axis] {
-                Side::Left | Side::Right => 1,
-                Side::Middle => block[axis],
-            }
-        }
+    //     RegionFaceVertexIter {
+    //         inner: IndexSpace::new(size).iter(),
+    //         block,
+    //         sides: self.sides,
+    //     }
+    // }
 
-        RegionFaceVertexIter {
-            inner: IndexSpace::new(size).iter(),
-            block,
-            sides: self.sides,
-        }
-    }
+    // pub fn offset_nodes(&self, support: usize) -> RegionOffsetNodeIter<N> {
+    //     let size = self.sides.map(|side| match side {
+    //         Side::Left | Side::Right => support,
+    //         Side::Middle => 1,
+    //     });
 
-    pub fn offset_nodes(&self, support: usize) -> RegionOffsetNodeIter<N> {
-        let size = self.sides.map(|side| match side {
-            Side::Left | Side::Right => support,
-            Side::Middle => 1,
-        });
+    //     RegionOffsetNodeIter {
+    //         inner: IndexSpace::new(size).iter(),
+    //         sides: self.sides,
+    //     }
+    // }
 
-        RegionOffsetNodeIter {
-            inner: IndexSpace::new(size).iter(),
-            sides: self.sides,
-        }
-    }
+    // pub fn offset_dir(&self) -> [isize; N] {
+    //     self.sides.map(|side| match side {
+    //         Side::Left => -1,
+    //         Side::Right => 1,
+    //         Side::Middle => 0,
+    //     })
+    // }
 
-    pub fn offset_dir(&self) -> [isize; N] {
-        self.sides.map(|side| match side {
-            Side::Left => -1,
-            Side::Right => 1,
-            Side::Middle => 0,
-        })
-    }
+    // /// Returns a mask for which a given axis is set if and only if `self.sides[axis] != Side::Middle`.
+    // pub fn to_mask(&self) -> AxisMask<N> {
+    //     let mut result = AxisMask::empty();
 
-    /// Returns a mask for which a given axis is set if and only if `self.sides[axis] != Side::Middle`.
-    pub fn to_mask(&self) -> AxisMask<N> {
-        let mut result = AxisMask::empty();
+    //     for axis in 0..N {
+    //         result.set_to(axis, self.sides[axis] != Side::Middle);
+    //     }
 
-        for axis in 0..N {
-            result.set_to(axis, self.sides[axis] != Side::Middle);
-        }
+    //     result
+    // }
 
-        result
-    }
+    // pub fn masked(&self, mask: AxisMask<N>) -> Self {
+    //     let mut sides = self.sides;
 
-    pub fn masked(&self, mask: AxisMask<N>) -> Self {
-        let mut sides = self.sides;
+    //     for i in 0..N {
+    //         if !mask.is_set(i) {
+    //             sides[i] = Side::Middle;
+    //         }
+    //     }
 
-        for i in 0..N {
-            if !mask.is_set(i) {
-                sides[i] = Side::Middle;
-            }
-        }
+    //     Self::new(sides)
+    // }
 
-        Self::new(sides)
-    }
+    // pub fn masked_by_split(&self, split: AxisMask<N>) -> Self {
+    //     let mut mask = AxisMask::empty();
 
-    pub fn masked_by_split(&self, split: AxisMask<N>) -> Self {
-        let mut mask = AxisMask::empty();
+    //     for axis in 0..N {
+    //         match self.sides[axis] {
+    //             Side::Left => mask.set_to(axis, !split.is_set(axis)),
+    //             Side::Middle => mask.clear(axis),
+    //             Side::Right => mask.set_to(axis, split.is_set(axis)),
+    //         }
+    //     }
 
-        for axis in 0..N {
-            match self.sides[axis] {
-                Side::Left => mask.set_to(axis, !split.is_set(axis)),
-                Side::Middle => mask.clear(axis),
-                Side::Right => mask.set_to(axis, split.is_set(axis)),
-            }
-        }
-
-        self.masked(mask)
-    }
+    //     self.masked(mask)
+    // }
 
     /// Converts the region into an integer value.
     pub fn to_linear(&self) -> usize {
@@ -264,84 +257,84 @@ impl<const N: usize> Display for Region<N> {
     }
 }
 
-/// Allows iterating the nodes in a region.
-pub struct RegionNodeIter<const N: usize> {
-    inner: CartesianIter<N>,
-    block: [usize; N],
-    sides: [Side; N],
-}
+// /// Allows iterating the nodes in a region.
+// pub struct RegionNodeIter<const N: usize> {
+//     inner: CartesianIter<N>,
+//     block: [usize; N],
+//     sides: [Side; N],
+// }
 
-impl<const N: usize> Iterator for RegionNodeIter<N> {
-    type Item = [isize; N];
+// impl<const N: usize> Iterator for RegionNodeIter<N> {
+//     type Item = [isize; N];
 
-    fn next(&mut self) -> Option<Self::Item> {
-        let cart = self.inner.next()?;
+//     fn next(&mut self) -> Option<Self::Item> {
+//         let cart = self.inner.next()?;
 
-        let mut result = [0isize; N];
+//         let mut result = [0isize; N];
 
-        for axis in 0..N {
-            result[axis] = match self.sides[axis] {
-                Side::Left => -(cart[axis] as isize),
-                Side::Right => (self.block[axis] + cart[axis]) as isize,
-                Side::Middle => cart[axis] as isize,
-            }
-        }
+//         for axis in 0..N {
+//             result[axis] = match self.sides[axis] {
+//                 Side::Left => -(cart[axis] as isize),
+//                 Side::Right => (self.block[axis] + cart[axis]) as isize,
+//                 Side::Middle => cart[axis] as isize,
+//             }
+//         }
 
-        Some(result)
-    }
-}
+//         Some(result)
+//     }
+// }
 
-/// Allows iterating the vertices on the face of a region.
-pub struct RegionFaceVertexIter<const N: usize> {
-    inner: CartesianIter<N>,
-    block: [usize; N],
-    sides: [Side; N],
-}
+// /// Allows iterating the vertices on the face of a region.
+// pub struct RegionFaceVertexIter<const N: usize> {
+//     inner: CartesianIter<N>,
+//     block: [usize; N],
+//     sides: [Side; N],
+// }
 
-impl<const N: usize> Iterator for RegionFaceVertexIter<N> {
-    type Item = [usize; N];
+// impl<const N: usize> Iterator for RegionFaceVertexIter<N> {
+//     type Item = [usize; N];
 
-    fn next(&mut self) -> Option<Self::Item> {
-        let cart = self.inner.next()?;
+//     fn next(&mut self) -> Option<Self::Item> {
+//         let cart = self.inner.next()?;
 
-        let mut result = [0; N];
+//         let mut result = [0; N];
 
-        for axis in 0..N {
-            result[axis] = match self.sides[axis] {
-                Side::Left => 0,
-                Side::Right => self.block[axis] - 1,
-                Side::Middle => cart[axis],
-            }
-        }
+//         for axis in 0..N {
+//             result[axis] = match self.sides[axis] {
+//                 Side::Left => 0,
+//                 Side::Right => self.block[axis] - 1,
+//                 Side::Middle => cart[axis],
+//             }
+//         }
 
-        Some(result)
-    }
-}
+//         Some(result)
+//     }
+// }
 
-pub struct RegionOffsetNodeIter<const N: usize> {
-    inner: CartesianIter<N>,
-    sides: [Side; N],
-}
+// pub struct RegionOffsetNodeIter<const N: usize> {
+//     inner: CartesianIter<N>,
+//     sides: [Side; N],
+// }
 
-impl<const N: usize> Iterator for RegionOffsetNodeIter<N> {
-    type Item = [isize; N];
+// impl<const N: usize> Iterator for RegionOffsetNodeIter<N> {
+//     type Item = [isize; N];
 
-    fn next(&mut self) -> Option<Self::Item> {
-        let cart = self.inner.next()?;
+//     fn next(&mut self) -> Option<Self::Item> {
+//         let cart = self.inner.next()?;
 
-        let mut result = [0isize; N];
+//         let mut result = [0isize; N];
 
-        for axis in 0..N {
-            result[axis] = match self.sides[axis] {
-                Side::Left => -(cart[axis] as isize),
-                Side::Right => cart[axis] as isize,
-                Side::Middle => 0,
-            }
-        }
+//         for axis in 0..N {
+//             result[axis] = match self.sides[axis] {
+//                 Side::Left => -(cart[axis] as isize),
+//                 Side::Right => cart[axis] as isize,
+//                 Side::Middle => 0,
+//             }
+//         }
 
-        Some(result)
-    }
-}
+//         Some(result)
+//     }
+// }
 
 pub struct RegionIter<const N: usize> {
     inner: CartesianIter<N>,
@@ -370,5 +363,48 @@ impl<const N: usize> ExactSizeIterator for RegionIter<N> {
 pub fn regions<const N: usize>() -> RegionIter<N> {
     RegionIter {
         inner: IndexSpace::new([3; N]).iter(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::{AxisMask, Face};
+
+    use super::{regions, Region, Side};
+
+    #[test]
+    fn region_iteration() {
+        let comparison = [
+            [Side::Left, Side::Left],
+            [Side::Middle, Side::Left],
+            [Side::Right, Side::Left],
+            [Side::Left, Side::Middle],
+            [Side::Middle, Side::Middle],
+            [Side::Right, Side::Middle],
+            [Side::Left, Side::Right],
+            [Side::Middle, Side::Right],
+            [Side::Right, Side::Right],
+        ];
+
+        for (region, compare) in regions().zip(comparison.into_iter()) {
+            assert_eq!(region, Region::new(compare));
+        }
+    }
+
+    #[test]
+    fn adjacency() {
+        let region = Region::new([Side::Left, Side::Right]);
+        assert_eq!(region.adjacency(), 2);
+
+        let mut faces = region.adjacent_faces();
+        assert_eq!(faces.next(), Some(Face::negative(0)));
+        assert_eq!(faces.next(), Some(Face::positive(1)));
+        assert_eq!(faces.next(), None);
+
+        let mut splits = region.adjacent_splits();
+        assert_eq!(splits.next(), Some(AxisMask::pack([false, true])));
+        assert_eq!(splits.next(), None);
+
+        assert_eq!(region.adjacent_split(), AxisMask::pack([false, true]));
     }
 }

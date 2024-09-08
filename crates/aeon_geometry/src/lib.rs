@@ -15,10 +15,8 @@ pub use axis::AxisMask;
 pub use face::{faces, Face, FaceIter, FaceMask};
 pub use index::{CartesianIter, CartesianWindowIter, IndexSpace, IndexWindow};
 pub use rectangle::Rectangle;
-pub use region::{
-    regions, Region, RegionFaceVertexIter, RegionIter, RegionNodeIter, RegionOffsetNodeIter, Side,
-};
+pub use region::{regions, Region, RegionIter, Side};
 pub use tree::{
-    Tree, TreeBlockNeighbor, TreeBlocks, TreeNodes, TreeInterface, TreeInterfaces, TreeNeighbors,
+    Tree, TreeBlockNeighbor, TreeBlocks, TreeInterface, TreeInterfaces, TreeNeighbors, TreeNodes,
     NULL,
 };

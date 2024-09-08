@@ -39,6 +39,8 @@ impl<const N: usize> IndexSpace<N> {
     /// `linear_from_cartesian()` due to several
     /// modulus operations.
     pub fn cartesian_from_linear(self, mut linear: usize) -> [usize; N] {
+        debug_assert!(linear < self.size.iter().product());
+
         let mut result = [0; N];
 
         for i in 0..N {
@@ -76,6 +78,8 @@ impl<const N: usize> IndexSpace<N> {
 
     /// Returns the window containing all points along a plane in the index space.
     pub fn plane(self, axis: usize, intercept: usize) -> IndexWindow<N> {
+        debug_assert!(intercept < self.size[axis]);
+
         let mut origin = [0; N];
         origin[axis] = intercept;
 

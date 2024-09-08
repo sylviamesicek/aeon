@@ -1,4 +1,7 @@
-use std::array::from_fn;
+use std::{
+    array::from_fn,
+    fmt::{Display, Write},
+};
 
 use super::{index::IndexWindow, AxisMask, Region, Side};
 
@@ -14,13 +17,13 @@ pub struct Face<const N: usize> {
 impl<const N: usize> Face<N> {
     /// Face on negative side of axis.
     pub fn negative(axis: usize) -> Self {
-        assert!(axis < N);
+        debug_assert!(axis < N);
         Self { axis, side: false }
     }
 
     /// Face on positive side of axis.
     pub fn positive(axis: usize) -> Self {
-        assert!(axis < N);
+        debug_assert!(axis < N);
         Self { axis, side: true }
     }
 
@@ -57,6 +60,24 @@ impl<const N: usize> Face<N> {
     /// Iterates over all splits adjacent to the given face.
     pub fn adjacent_splits(self) -> impl Iterator<Item = AxisMask<N>> {
         AxisMask::<N>::enumerate().filter(move |split| split.is_set(self.axis) == self.side)
+    }
+}
+
+const AXIS_NAMES: [char; 4] = ['x', 'y', 'z', 'w'];
+
+impl<const N: usize> Display for Face<N> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if self.side {
+            f.write_char('+')?;
+        } else {
+            f.write_char('-')?;
+        }
+
+        if N < 4 {
+            f.write_char(AXIS_NAMES[self.axis])
+        } else {
+            f.write_str(&self.axis.to_string())
+        }
     }
 }
 
