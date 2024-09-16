@@ -1,3 +1,3 @@
 mod element;
 
-pub use element::RefElement;
+pub use element::{RefElement, WaveletElement};

@@ -359,7 +359,7 @@ impl<const N: usize> Tree<N> {
 
     /// Fills the map with updated indices after refinement is performed.
     /// If a cell is refined, this will point to the base cell in that new subdivision.
-    pub fn cell_map_after_refine(&self, flags: &[bool], map: &mut [usize]) {
+    pub fn refine_index_map(&self, flags: &[bool], map: &mut [usize]) {
         assert!(flags.len() == self.num_cells());
         assert!(map.len() == self.num_cells());
 

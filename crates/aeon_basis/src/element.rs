@@ -4,12 +4,26 @@ use faer::{solvers::SpSolver, Mat, MatRef};
 
 use aeon_geometry::IndexSpace;
 
-fn monomial_vandermonde(grid: &[f64]) -> Mat<f64> {
-    Mat::from_fn(grid.len(), grid.len(), |i, j| grid[i].powi(j as i32))
+pub trait Basis {
+    fn vandermonde(grid: &[f64]) -> Mat<f64>;
+    fn evaluate(&self, point: f64) -> f64;
+    fn degree(degree: usize) -> Self;
 }
 
-fn monomial_interpolation(order: usize, point: f64) -> f64 {
-    point.powi(order as i32)
+pub struct Monomial(pub usize);
+
+impl Basis for Monomial {
+    fn vandermonde(grid: &[f64]) -> Mat<f64> {
+        Mat::from_fn(grid.len(), grid.len(), |i, j| grid[i].powi(j as i32))
+    }
+
+    fn evaluate(&self, point: f64) -> f64 {
+        point.powi(self.0 as i32)
+    }
+
+    fn degree(degree: usize) -> Self {
+        Self(degree)
+    }
 }
 
 /// A reference element defined on [-1, 1]^N.
@@ -31,15 +45,11 @@ impl<const N: usize> RefElement<N> {
         let grid = (0..=order)
             .map(|i| i as f64 * spacing - 1.0)
             .collect::<Vec<_>>();
-        let vandermonde = monomial_vandermonde(&grid);
+        let vandermonde = Monomial::vandermonde(&grid);
 
-        let basis = vandermonde.transpose().qr();
-        let rhs = Mat::from_fn(order + 1, order, |i, j| {
-            let point = -1.0 + spacing * (j as f64 + 0.5);
-            monomial_interpolation(i, point)
-        });
-
-        let interp = basis.solve(rhs);
+        let m = vandermonde.transpose().qr();
+        let rhs = Self::uniform_rhs::<Monomial>(order);
+        let interp = m.solve(rhs);
 
         Self {
             order,
@@ -49,8 +59,26 @@ impl<const N: usize> RefElement<N> {
         }
     }
 
+    fn uniform_rhs<B: Basis>(order: usize) -> Mat<f64> {
+        let spacing = 2.0 / order as f64;
+
+        let mut result = Mat::zeros(order + 1, order);
+
+        for i in 0..=order {
+            let basis = B::degree(i);
+
+            for j in 0..order {
+                let point = -1.0 + spacing * (j as f64 + 0.5);
+
+                result[(i, j)] = basis.evaluate(point);
+            }
+        }
+
+        result
+    }
+
     /// Number of support points in the reference element.
-    pub fn num_points(&self) -> usize {
+    pub fn support(&self) -> usize {
         (self.order + 1).pow(N as u32)
     }
 
@@ -67,18 +95,30 @@ impl<const N: usize> RefElement<N> {
     }
 
     pub fn prolong(&self, source: &[f64], dest: &mut [f64]) {
-        debug_assert!(source.len() == self.num_points());
+        self.refine(source, dest);
+        self.prolong_in_place(dest);
+    }
+
+    /// Performs injection from source to a refined dest.
+    pub fn refine(&self, source: &[f64], dest: &mut [f64]) {
+        debug_assert!(source.len() == self.support());
         debug_assert!(dest.len() == (2 * self.order + 1).pow(N as u32));
 
         // Perform injection
-        let space = IndexSpace::new([self.order + 1; N]);
-        let space_refined = IndexSpace::new([2 * self.order + 1; N]);
+        let source_space = IndexSpace::new([self.order + 1; N]);
+        let dest_space = IndexSpace::new([2 * self.order + 1; N]);
 
-        for (pindex, point) in space.iter().enumerate() {
+        for (pindex, point) in source_space.iter().enumerate() {
             let refined: [_; N] = array::from_fn(|axis| 2 * point[axis]);
-            let rindex = space_refined.linear_from_cartesian(refined);
+            let rindex = dest_space.linear_from_cartesian(refined);
             dest[rindex] = source[pindex];
         }
+    }
+
+    pub fn prolong_in_place(&self, dest: &mut [f64]) {
+        debug_assert!(dest.len() == (2 * self.order + 1).pow(N as u32));
+
+        let space = IndexSpace::new([2 * self.order + 1; N]);
 
         // And now perform interpolation
         for axis in (0..N).rev() {
@@ -111,5 +151,52 @@ impl<const N: usize> RefElement<N> {
                 }
             }
         }
+    }
+}
+
+pub struct WaveletElement<const N: usize> {
+    element: RefElement<N>,
+    order: usize,
+}
+
+impl<const N: usize> WaveletElement<N> {
+    pub fn new(order: usize) -> Self {
+        // Padding must be sufficiently large, and order must be even.
+        assert!(order % 2 == 0);
+        assert!(order > 0);
+
+        WaveletElement {
+            order,
+            element: RefElement::uniform(order),
+        }
+    }
+
+    pub fn support(&self) -> usize {
+        (2 * self.order + 1).pow(N as u32)
+    }
+
+    pub fn padding(&self) -> usize {
+        self.order / 2
+    }
+
+    /// Finds the point at the given cartesian index.
+    pub fn index_to_point(&self, index: [isize; N]) -> usize {
+        let space = IndexSpace::new([2 * self.order + 1; N]);
+        let index = array::from_fn(|axis| (index[axis] + self.padding() as isize) as usize);
+        space.linear_from_cartesian(index)
+    }
+
+    pub fn prolong(&self, source: &[f64], dest: &mut [f64]) {
+        debug_assert!(source.len() == self.support());
+        debug_assert!(dest.len() == self.support());
+
+        let space = IndexSpace::new([2 * self.order + 1; N]);
+
+        for index in IndexSpace::new([self.order + 1; N]).iter() {
+            let point = space.linear_from_cartesian(array::from_fn(|axis| index[axis] * 2));
+            dest[point] = source[point];
+        }
+
+        self.element.prolong_in_place(dest);
     }
 }
