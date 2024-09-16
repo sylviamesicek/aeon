@@ -1,0 +1,9 @@
+[package]
+name = "aeon_basis"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+faer.workspace = true
+
+aeon_geometry.workspace = true

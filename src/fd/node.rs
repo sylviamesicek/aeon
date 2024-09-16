@@ -283,6 +283,7 @@ impl<const N: usize> NodeSpace<N> {
         })
     }
 
+    /// Evaluates the operation of a convolution at a given vertex, assuming the given boundary conditions.
     pub fn evaluate(
         &self,
         boundary: impl Boundary<N> + Condition<N>,
