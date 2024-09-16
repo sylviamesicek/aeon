@@ -2,6 +2,7 @@
 [workspace]
 members = ["crates/*", "tools/idbrill", "tools/evbrill"]
 default-members = [
+    "crates/aeon_basis",
     "crates/aeon_geometry",
     "tools/idbrill",
     "tools/evbrill",

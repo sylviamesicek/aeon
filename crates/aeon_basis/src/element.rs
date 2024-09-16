@@ -9,7 +9,7 @@ pub trait Basis {
     fn degree(degree: usize) -> Self;
 }
 
-/// A monomial basis for the functional space.
+/// A monomial basis for an element.
 pub struct Monomial(pub usize);
 
 impl Basis for Monomial {
@@ -28,13 +28,17 @@ impl Basis for Monomial {
 
 /// A reference element defined on [-1, 1]^N.
 pub struct Element<const N: usize> {
+    /// Order of basis functions used in element.
     order: usize,
     /// Grid of points within element.
     grid: Vec<f64>,
+    /// Positions of points within element
+    /// after refinement
+    refined_grid: Vec<f64>,
     /// Vandermonde matrix on grid.
     vandermonde: Mat<f64>,
     /// Interpolation stencils.
-    interp: Mat<f64>,
+    stencils: Mat<f64>,
 }
 
 impl<const N: usize> Element<N> {
@@ -45,17 +49,23 @@ impl<const N: usize> Element<N> {
         let grid = (0..=order)
             .map(|i| i as f64 * spacing - 1.0)
             .collect::<Vec<_>>();
+
+        let refined_grid = (0..=2 * order)
+            .map(|i| i as f64 * spacing / 2.0 - 1.0)
+            .collect::<Vec<_>>();
+
         let vandermonde = Monomial::vandermonde(&grid);
 
         let m = vandermonde.transpose().qr();
         let rhs = Self::uniform_rhs::<Monomial>(order);
-        let interp = m.solve(rhs);
+        let stencils = m.solve(rhs);
 
         Self {
             order,
             grid,
+            refined_grid,
             vandermonde,
-            interp,
+            stencils,
         }
     }
 
@@ -97,6 +107,15 @@ impl<const N: usize> Element<N> {
         &self.grid
     }
 
+    /// Iterates the position of a support point in the element.
+    pub fn position(&self, index: [usize; N]) -> [f64; N] {
+        array::from_fn(|axis| self.grid[index[axis]])
+    }
+
+    pub fn refined_position(&self, index: [usize; N]) -> [f64; N] {
+        array::from_fn(|axis| self.refined_grid[index[axis]])
+    }
+
     /// Retrieves the vandermonde matrix for the basis functions along one axis.
     pub fn vandermonde(&self) -> MatRef<f64> {
         self.vandermonde.as_ref()
@@ -105,6 +124,14 @@ impl<const N: usize> Element<N> {
     // *********************
     // Point Iteration *****
     // *********************
+
+    pub fn space(&self) -> IndexSpace<N> {
+        IndexSpace::new([self.order + 1; N])
+    }
+
+    pub fn refined_space(&self) -> IndexSpace<N> {
+        IndexSpace::new([2 * self.order + 1; N])
+    }
 
     /// Iterates over all nodal coefficients in a wavelet representation on this element.
     pub fn nodal_indices(&self) -> impl Iterator<Item = [usize; N]> {
@@ -129,6 +156,8 @@ impl<const N: usize> Element<N> {
                 let mut point = index;
 
                 for axis in 0..N {
+                    point[axis] *= 2;
+
                     if mask.is_set(axis) {
                         point[axis] += 1;
                     }
@@ -191,7 +220,7 @@ impl<const N: usize> Element<N> {
                     point[i] *= 2;
                 }
 
-                let stencil = self.interp.col(point[axis]);
+                let stencil = self.stencils.col(point[axis]);
 
                 point[axis] *= 2;
                 point[axis] += 1;
@@ -283,5 +312,83 @@ impl<const N: usize> Element<N> {
             .map(|v| coefs[v].abs())
             .max_by(|a, b| a.total_cmp(b))
             .unwrap()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Element;
+
+    #[test]
+    fn iteration() {
+        let element = Element::<2>::uniform(2);
+
+        let mut nodal = element.nodal_indices();
+        assert_eq!(nodal.next(), Some([0, 0]));
+        assert_eq!(nodal.next(), Some([2, 0]));
+        assert_eq!(nodal.next(), Some([4, 0]));
+        assert_eq!(nodal.next(), Some([0, 2]));
+        assert_eq!(nodal.next(), Some([2, 2]));
+        assert_eq!(nodal.next(), Some([4, 2]));
+        assert_eq!(nodal.next(), Some([0, 4]));
+        assert_eq!(nodal.next(), Some([2, 4]));
+        assert_eq!(nodal.next(), Some([4, 4]));
+        assert_eq!(nodal.next(), None);
+
+        let mut diagonal = element.diagonal_indices();
+        assert_eq!(diagonal.next(), Some([1, 1]));
+        assert_eq!(diagonal.next(), Some([3, 1]));
+        assert_eq!(diagonal.next(), Some([1, 3]));
+        assert_eq!(diagonal.next(), Some([3, 3]));
+        assert_eq!(diagonal.next(), None);
+
+        let mut detail = element.detail_indices();
+        assert_eq!(detail.next(), Some([1, 0]));
+        assert_eq!(detail.next(), Some([0, 1]));
+        assert_eq!(detail.next(), Some([1, 1]));
+
+        assert_eq!(detail.next(), Some([3, 0]));
+        assert_eq!(detail.next(), Some([2, 1]));
+        assert_eq!(detail.next(), Some([3, 1]));
+
+        assert_eq!(detail.next(), Some([1, 2]));
+        assert_eq!(detail.next(), Some([0, 3]));
+        assert_eq!(detail.next(), Some([1, 3]));
+
+        assert_eq!(detail.next(), Some([3, 2]));
+        assert_eq!(detail.next(), Some([2, 3]));
+        assert_eq!(detail.next(), Some([3, 3]));
+        assert_eq!(detail.next(), None);
+    }
+
+    fn prolong(h: f64) -> f64 {
+        let element = Element::<2>::uniform(4);
+
+        let space = element.refined_space();
+
+        let mut values = vec![0.0; element.refined_support()];
+        let mut coefs = vec![0.0; element.refined_support()];
+
+        for index in element.nodal_indices() {
+            let point = space.linear_from_cartesian(index);
+
+            let [x, y] = element.refined_position(index);
+            let [x, y] = [x * h, y * h];
+            values[point] = x.sin() * y.sin();
+        }
+
+        element.wavelet(&values, &mut coefs);
+        element.wavelet_abs_error(&values)
+    }
+
+    #[test]
+    fn convergence() {
+        let error1 = prolong(1.0);
+        let error2 = prolong(0.5);
+        let error4 = prolong(0.25);
+
+        dbg!(error1);
+        dbg!(error2);
+        dbg!(error4);
     }
 }
