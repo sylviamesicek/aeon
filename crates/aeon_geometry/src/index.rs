@@ -1,6 +1,6 @@
 #![allow(clippy::needless_range_loop)]
 
-use std::array::from_fn;
+use std::array;
 
 use super::{Face, Region, Side};
 
@@ -101,12 +101,12 @@ impl<const N: usize> IndexSpace<N> {
 
     /// The window of all indices that border the given region.
     pub fn adjacent(self, region: Region<N>) -> IndexWindow<N> {
-        let origin = from_fn(|axis| match region.side(axis) {
+        let origin = array::from_fn(|axis| match region.side(axis) {
             Side::Left | Side::Middle => 0,
             Side::Right => self.size[axis] - 1,
         });
 
-        let size = from_fn(|axis| match region.side(axis) {
+        let size = array::from_fn(|axis| match region.side(axis) {
             Side::Left | Side::Right => 1,
             Side::Middle => self.size[axis],
         });
@@ -215,7 +215,7 @@ impl<const N: usize> Iterator for CartesianWindowIter<N> {
 
     fn next(&mut self) -> Option<Self::Item> {
         let offset = self.inner.next()?;
-        Some(from_fn(|i| self.origin[i] + offset[i]))
+        Some(array::from_fn(|i| self.origin[i] + offset[i]))
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {

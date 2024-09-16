@@ -1,8 +1,7 @@
+use faer::{solvers::SpSolver, Mat, MatRef};
 use std::array;
 
-use faer::{solvers::SpSolver, Mat, MatRef};
-
-use aeon_geometry::IndexSpace;
+use aeon_geometry::{AxisMask, IndexSpace};
 
 pub trait Basis {
     fn vandermonde(grid: &[f64]) -> Mat<f64>;
@@ -10,6 +9,7 @@ pub trait Basis {
     fn degree(degree: usize) -> Self;
 }
 
+/// A monomial basis for the functional space.
 pub struct Monomial(pub usize);
 
 impl Basis for Monomial {
@@ -27,7 +27,7 @@ impl Basis for Monomial {
 }
 
 /// A reference element defined on [-1, 1]^N.
-pub struct RefElement<const N: usize> {
+pub struct Element<const N: usize> {
     order: usize,
     /// Grid of points within element.
     grid: Vec<f64>,
@@ -37,7 +37,7 @@ pub struct RefElement<const N: usize> {
     interp: Mat<f64>,
 }
 
-impl<const N: usize> RefElement<N> {
+impl<const N: usize> Element<N> {
     /// Constructs a reference element with uniformly placed
     /// support points with `order + 1` points along each axis.
     pub fn uniform(order: usize) -> Self {
@@ -82,41 +82,95 @@ impl<const N: usize> RefElement<N> {
         (self.order + 1).pow(N as u32)
     }
 
+    /// Number of supports points after the element has been refined.
+    pub fn refined_support(&self) -> usize {
+        (2 * self.order + 1).pow(N as u32)
+    }
+
+    /// Retrieves the order of the element.
     pub fn order(&self) -> usize {
         self.order
     }
 
+    /// Retrieves the grid along one axis.
     pub fn grid(&self) -> &[f64] {
         &self.grid
     }
 
+    /// Retrieves the vandermonde matrix for the basis functions along one axis.
     pub fn vandermonde(&self) -> MatRef<f64> {
         self.vandermonde.as_ref()
     }
 
+    // *********************
+    // Point Iteration *****
+    // *********************
+
+    /// Iterates over all nodal coefficients in a wavelet representation on this element.
+    pub fn nodal_indices(&self) -> impl Iterator<Item = [usize; N]> {
+        IndexSpace::new([self.order + 1; N])
+            .iter()
+            .map(|v| array::from_fn(|axis| v[axis] * 2))
+    }
+
+    /// Iterates over all diagonal detail coefficients in a wavelet representation on this element.
+    pub fn diagonal_indices(&self) -> impl Iterator<Item = [usize; N]> {
+        IndexSpace::new([self.order; N])
+            .iter()
+            .map(|v| array::from_fn(|axis| v[axis] * 2 + 1))
+    }
+
+    /// Iterates over all detail coefficients in a wavelet representation on this element.
+    pub fn detail_indices(&self) -> impl Iterator<Item = [usize; N]> {
+        let cells = IndexSpace::new([self.order; N]).iter();
+
+        cells.flat_map(|index| {
+            AxisMask::<N>::enumerate().skip(1).map(move |mask| {
+                let mut point = index;
+
+                for axis in 0..N {
+                    if mask.is_set(axis) {
+                        point[axis] += 1;
+                    }
+                }
+
+                point
+            })
+        })
+    }
+
+    pub fn nodal_points(&self) -> impl Iterator<Item = usize> {
+        let space = IndexSpace::new([2 * self.order + 1; N]);
+        self.nodal_indices()
+            .map(move |index| space.linear_from_cartesian(index))
+    }
+
+    pub fn diagonal_points(&self) -> impl Iterator<Item = usize> {
+        let space = IndexSpace::new([2 * self.order + 1; N]);
+        self.diagonal_indices()
+            .map(move |index| space.linear_from_cartesian(index))
+    }
+
+    pub fn detail_points(&self) -> impl Iterator<Item = usize> {
+        let space = IndexSpace::new([2 * self.order + 1; N]);
+        self.detail_indices()
+            .map(move |index| space.linear_from_cartesian(index))
+    }
+
+    // ****************************
+    // Prolongation ***************
+    // ****************************
+
+    /// Prolongs data from the element to a refined version of the element.
     pub fn prolong(&self, source: &[f64], dest: &mut [f64]) {
-        self.refine(source, dest);
+        self.inject(source, dest);
         self.prolong_in_place(dest);
     }
 
-    /// Performs injection from source to a refined dest.
-    pub fn refine(&self, source: &[f64], dest: &mut [f64]) {
-        debug_assert!(source.len() == self.support());
-        debug_assert!(dest.len() == (2 * self.order + 1).pow(N as u32));
-
-        // Perform injection
-        let source_space = IndexSpace::new([self.order + 1; N]);
-        let dest_space = IndexSpace::new([2 * self.order + 1; N]);
-
-        for (pindex, point) in source_space.iter().enumerate() {
-            let refined: [_; N] = array::from_fn(|axis| 2 * point[axis]);
-            let rindex = dest_space.linear_from_cartesian(refined);
-            dest[rindex] = source[pindex];
-        }
-    }
-
+    /// Fills in-between points on dest using interpolation, assuming that nodal
+    /// points on dest have been properly filled.
     pub fn prolong_in_place(&self, dest: &mut [f64]) {
-        debug_assert!(dest.len() == (2 * self.order + 1).pow(N as u32));
+        debug_assert!(dest.len() == self.refined_support());
 
         let space = IndexSpace::new([2 * self.order + 1; N]);
 
@@ -152,51 +206,82 @@ impl<const N: usize> RefElement<N> {
             }
         }
     }
-}
 
-pub struct WaveletElement<const N: usize> {
-    element: RefElement<N>,
-    order: usize,
-}
+    // *******************************
+    // Injection *********************
+    // *******************************
 
-impl<const N: usize> WaveletElement<N> {
-    pub fn new(order: usize) -> Self {
-        // Padding must be sufficiently large, and order must be even.
-        assert!(order % 2 == 0);
-        assert!(order > 0);
+    /// Performs injection from source to a refined dest.
+    pub fn inject(&self, source: &[f64], dest: &mut [f64]) {
+        debug_assert!(source.len() == self.support());
+        debug_assert!(dest.len() == self.refined_support());
 
-        WaveletElement {
-            order,
-            element: RefElement::uniform(order),
+        // Perform injection
+        let source_space = IndexSpace::new([self.order + 1; N]);
+        let dest_space = IndexSpace::new([2 * self.order + 1; N]);
+
+        for (pindex, point) in source_space.iter().enumerate() {
+            let refined: [_; N] = array::from_fn(|axis| 2 * point[axis]);
+            let rindex = dest_space.linear_from_cartesian(refined);
+            dest[rindex] = source[pindex];
         }
     }
 
-    pub fn support(&self) -> usize {
-        (2 * self.order + 1).pow(N as u32)
-    }
-
-    pub fn padding(&self) -> usize {
-        self.order / 2
-    }
-
-    /// Finds the point at the given cartesian index.
-    pub fn index_to_point(&self, index: [isize; N]) -> usize {
-        let space = IndexSpace::new([2 * self.order + 1; N]);
-        let index = array::from_fn(|axis| (index[axis] + self.padding() as isize) as usize);
-        space.linear_from_cartesian(index)
-    }
-
-    pub fn prolong(&self, source: &[f64], dest: &mut [f64]) {
-        debug_assert!(source.len() == self.support());
+    /// Restricts refined data from source onto dest.
+    pub fn restrict(&self, source: &[f64], dest: &mut [f64]) {
+        debug_assert!(source.len() == self.refined_support());
         debug_assert!(dest.len() == self.support());
 
-        let space = IndexSpace::new([2 * self.order + 1; N]);
+        let source_space = IndexSpace::new([2 * self.order + 1; N]);
+        let dest_space = IndexSpace::new([self.order + 1; N]);
 
-        for index in IndexSpace::new([self.order + 1; N]).iter() {
-            let point = space.linear_from_cartesian(array::from_fn(|axis| index[axis] * 2));
+        for (pindex, point) in source_space.iter().enumerate() {
+            let refined: [_; N] = array::from_fn(|axis| point[axis] / 2);
+            let rindex = dest_space.linear_from_cartesian(refined);
+            dest[rindex] = source[pindex];
+        }
+    }
+
+    // *******************************
+    // Wavelet Expansion *************
+    // *******************************
+
+    /// Computes the wavelet coefficients for the given function.
+    pub fn wavelet(&self, source: &[f64], dest: &mut [f64]) {
+        debug_assert!(source.len() == self.refined_support());
+        debug_assert!(dest.len() == self.refined_support());
+
+        // Copies data from the source to noal points on dest.
+        for point in self.nodal_points() {
             dest[point] = source[point];
         }
 
-        self.element.prolong_in_place(dest);
+        self.prolong_in_place(dest);
+
+        // Iterates over the detail coefficients.
+        for point in self.detail_points() {
+            dest[point] -= source[point];
+        }
+    }
+
+    /// Computes the relative error between the wavelet's representation
+    /// and a nodal approximation.
+    pub fn wavelet_rel_error(&self, coefs: &[f64]) -> f64 {
+        let scale = self
+            .nodal_points()
+            .map(|v| coefs[v].abs())
+            .max_by(|a, b| a.total_cmp(b))
+            .unwrap();
+
+        self.wavelet_abs_error(coefs) / scale
+    }
+
+    /// Computes the absolute error between the wavelet's representation
+    /// and a nodal approximation.
+    pub fn wavelet_abs_error(&self, coefs: &[f64]) -> f64 {
+        self.diagonal_points()
+            .map(|v| coefs[v].abs())
+            .max_by(|a, b| a.total_cmp(b))
+            .unwrap()
     }
 }
