@@ -1,11 +1,15 @@
-use faer::{solvers::SpSolver, Mat, MatRef};
+use faer::{solvers::SpSolver, ColRef, Mat, MatRef};
 use std::array;
 
 use aeon_geometry::{AxisMask, IndexSpace};
 
+/// A basis for storing functions on a single element.
 pub trait Basis {
+    /// The vandermonde matrix of the basis
     fn vandermonde(grid: &[f64]) -> Mat<f64>;
+    /// The value of the basis function at a given point
     fn evaluate(&self, point: f64) -> f64;
+    /// Constructs the `n`-th basis function.
     fn degree(degree: usize) -> Self;
 }
 
@@ -34,7 +38,7 @@ pub struct Element<const N: usize> {
     grid: Vec<f64>,
     /// Positions of points within element
     /// after refinement
-    refined_grid: Vec<f64>,
+    grid_refined: Vec<f64>,
     /// Vandermonde matrix on grid.
     vandermonde: Mat<f64>,
     /// Interpolation stencils.
@@ -50,7 +54,7 @@ impl<const N: usize> Element<N> {
             .map(|i| i as f64 * spacing - 1.0)
             .collect::<Vec<_>>();
 
-        let refined_grid = (0..=2 * order)
+        let grid_refined = (0..=2 * order)
             .map(|i| i as f64 * spacing / 2.0 - 1.0)
             .collect::<Vec<_>>();
 
@@ -63,7 +67,7 @@ impl<const N: usize> Element<N> {
         Self {
             order,
             grid,
-            refined_grid,
+            grid_refined,
             vandermonde,
             stencils,
         }
@@ -93,7 +97,7 @@ impl<const N: usize> Element<N> {
     }
 
     /// Number of supports points after the element has been refined.
-    pub fn refined_support(&self) -> usize {
+    pub fn support_refined(&self) -> usize {
         (2 * self.order + 1).pow(N as u32)
     }
 
@@ -107,13 +111,17 @@ impl<const N: usize> Element<N> {
         &self.grid
     }
 
+    pub fn prolong_stencil(&self, target: usize) -> ColRef<f64> {
+        self.stencils.col(target)
+    }
+
     /// Iterates the position of a support point in the element.
     pub fn position(&self, index: [usize; N]) -> [f64; N] {
         array::from_fn(|axis| self.grid[index[axis]])
     }
 
-    pub fn refined_position(&self, index: [usize; N]) -> [f64; N] {
-        array::from_fn(|axis| self.refined_grid[index[axis]])
+    pub fn position_refined(&self, index: [usize; N]) -> [f64; N] {
+        array::from_fn(|axis| self.grid_refined[index[axis]])
     }
 
     /// Retrieves the vandermonde matrix for the basis functions along one axis.
@@ -129,7 +137,7 @@ impl<const N: usize> Element<N> {
         IndexSpace::new([self.order + 1; N])
     }
 
-    pub fn refined_space(&self) -> IndexSpace<N> {
+    pub fn space_refined(&self) -> IndexSpace<N> {
         IndexSpace::new([2 * self.order + 1; N])
     }
 
@@ -199,7 +207,7 @@ impl<const N: usize> Element<N> {
     /// Fills in-between points on dest using interpolation, assuming that nodal
     /// points on dest have been properly filled.
     pub fn prolong_in_place(&self, dest: &mut [f64]) {
-        debug_assert!(dest.len() == self.refined_support());
+        debug_assert!(dest.len() == self.support_refined());
 
         let space = IndexSpace::new([2 * self.order + 1; N]);
 
@@ -225,12 +233,12 @@ impl<const N: usize> Element<N> {
                 point[axis] *= 2;
                 point[axis] += 1;
 
-                let index = space.linear_from_cartesian(point);
-                dest[index] = 0.0;
+                let center = space.linear_from_cartesian(point);
+                dest[center] = 0.0;
 
                 for i in 0..=self.order {
                     point[axis] = 2 * i;
-                    dest[index] += stencil[i] * dest[space.linear_from_cartesian(point)];
+                    dest[center] += stencil[i] * dest[space.linear_from_cartesian(point)];
                 }
             }
         }
@@ -243,7 +251,7 @@ impl<const N: usize> Element<N> {
     /// Performs injection from source to a refined dest.
     pub fn inject(&self, source: &[f64], dest: &mut [f64]) {
         debug_assert!(source.len() == self.support());
-        debug_assert!(dest.len() == self.refined_support());
+        debug_assert!(dest.len() == self.support_refined());
 
         // Perform injection
         let source_space = IndexSpace::new([self.order + 1; N]);
@@ -258,7 +266,7 @@ impl<const N: usize> Element<N> {
 
     /// Restricts refined data from source onto dest.
     pub fn restrict(&self, source: &[f64], dest: &mut [f64]) {
-        debug_assert!(source.len() == self.refined_support());
+        debug_assert!(source.len() == self.support_refined());
         debug_assert!(dest.len() == self.support());
 
         let source_space = IndexSpace::new([2 * self.order + 1; N]);
@@ -277,8 +285,8 @@ impl<const N: usize> Element<N> {
 
     /// Computes the wavelet coefficients for the given function.
     pub fn wavelet(&self, source: &[f64], dest: &mut [f64]) {
-        debug_assert!(source.len() == self.refined_support());
-        debug_assert!(dest.len() == self.refined_support());
+        debug_assert!(source.len() == self.support_refined());
+        debug_assert!(dest.len() == self.support_refined());
 
         // Copies data from the source to noal points on dest.
         for point in self.nodal_points() {
@@ -364,31 +372,30 @@ mod tests {
     fn prolong(h: f64) -> f64 {
         let element = Element::<2>::uniform(4);
 
-        let space = element.refined_space();
+        let space = element.space_refined();
 
-        let mut values = vec![0.0; element.refined_support()];
-        let mut coefs = vec![0.0; element.refined_support()];
+        let mut values = vec![0.0; element.support_refined()];
+        let mut coefs = vec![0.0; element.support_refined()];
 
-        for index in element.nodal_indices() {
+        for index in space.iter() {
+            let [x, y] = element.position_refined(index);
             let point = space.linear_from_cartesian(index);
-
-            let [x, y] = element.refined_position(index);
-            let [x, y] = [x * h, y * h];
-            values[point] = x.sin() * y.sin();
+            values[point] = (x * h).sin() * (y * h).sin();
         }
 
         element.wavelet(&values, &mut coefs);
-        element.wavelet_abs_error(&values)
+        element.wavelet_abs_error(&coefs)
     }
 
     #[test]
     fn convergence() {
-        let error1 = prolong(1.0);
-        let error2 = prolong(0.5);
-        let error4 = prolong(0.25);
+        let error1 = prolong(0.1);
+        let error2 = prolong(0.05);
+        let error4 = prolong(0.025);
+        let error8 = prolong(0.0125);
 
-        dbg!(error1);
-        dbg!(error2);
-        dbg!(error4);
+        assert!(error1 / error2 >= 63.9);
+        assert!(error2 / error4 >= 63.9);
+        assert!(error4 / error8 >= 63.9);
     }
 }
