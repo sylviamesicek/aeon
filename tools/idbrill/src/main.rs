@@ -102,27 +102,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         origin: [0.0, 0.0],
     };
 
-    let size = [16, 16];
-
-    let mut mesh = Mesh::new(bounds, size, 3);
-
-    // for _ in 0..1 {
-    //     let flags = vec![true; mesh.num_cells()];
-    //     mesh.refine(&flags);
-    // }
-
-    for _ in 0..3 {
-        let mut flags = vec![false; mesh.num_cells()];
-        flags[0] = true;
-        mesh.refine(&flags);
-    }
+    let mut mesh = Mesh::new(bounds, 4, 2);
 
     for _ in 0..1 {
         let flags = vec![true; mesh.num_cells()];
         mesh.refine(&flags);
     }
 
-    log::warn!("Min Spacing {}", mesh.min_spacing());
+    // for _ in 0..4 {
+    //     let mut flags = vec![false; mesh.num_cells()];
+    //     flags[0] = true;
+    //     mesh.refine(&flags);
+    // }
 
     if CHOPTUIK {
         std::fs::create_dir_all("output/choptuik")?;
@@ -130,45 +121,50 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         std::fs::create_dir_all("output/garfinkle")?;
     }
 
-    let mut debug = String::new();
-    mesh.write_debug(&mut debug);
+    for r in 0..3 {
+        // let flags = vec![true; mesh.num_cells()];
+        // mesh.refine(&flags);
 
-    std::fs::write("output/mesh.txt", debug).unwrap();
+        log::warn!("Min Spacing {}", mesh.min_spacing());
 
-    println!("Num Blocks: {}", mesh.num_blocks());
-    println!("Num Cells: {}", mesh.num_cells());
+        let mut debug = String::new();
+        mesh.write_debug(&mut debug);
 
-    let mut rinne = SystemVec::with_length(mesh.num_nodes());
-    let mut hamiltonian = vec![0.0; mesh.num_nodes()].into_boxed_slice();
+        std::fs::write("output/mesh.txt", debug).unwrap();
 
-    if CHOPTUIK {
-        choptuik::solve(&mut mesh, 4.0, rinne.as_mut_slice(), &mut hamiltonian)?;
-    } else {
-        garfinkle::solve(&mut mesh, 4.0, rinne.as_mut_slice(), &mut hamiltonian)?;
-    }
+        println!("Num Blocks: {}", mesh.num_blocks());
+        println!("Num Cells: {}", mesh.num_cells());
 
-    mesh.fill_boundary(ORDER, Quadrant, RinneConditions, rinne.as_mut_slice());
-    mesh.fill_boundary(
-        ORDER,
-        Quadrant,
-        HAMILTONIAN_CONDITIONS,
-        hamiltonian.as_mut().into(),
-    );
+        let mut rinne = SystemVec::with_length(mesh.num_nodes());
+        let mut hamiltonian = vec![0.0; mesh.num_nodes()].into_boxed_slice();
 
-    let mut systems = SystemCheckpoint::default();
-    systems.save_system(rinne.as_slice());
-    systems.save_field("hamiltonian", &hamiltonian);
-
-    if CHOPTUIK {
-        mesh.export_vtk(
-            format!("output/choptuik.vtu"),
-            ExportVtkConfig {
-                title: "idbrill".to_string(),
-                ghost: crate::GHOST,
-                systems: systems.clone(),
-            },
+        garfinkle::solve(
+            &mut mesh,
+            1.0,
+            1000 * 2usize.pow(r as u32),
+            rinne.as_mut_slice(),
+            &mut hamiltonian,
         )?;
-    } else {
+
+        mesh.fill_boundary(ORDER, Quadrant, RinneConditions, rinne.as_mut_slice());
+        mesh.fill_boundary(
+            ORDER,
+            Quadrant,
+            HAMILTONIAN_CONDITIONS,
+            hamiltonian.as_mut().into(),
+        );
+
+        let mut flags = vec![false; mesh.num_cells()];
+        println!("Flagging wavelet");
+        mesh.wavelet(Quadrant, 1e-5, rinne.as_slice(), &mut flags);
+        mesh.tree().balance_refine_flags(&mut flags);
+
+        println!("{flags:?}");
+
+        let mut systems = SystemCheckpoint::default();
+        systems.save_system(rinne.as_slice());
+        systems.save_field("hamiltonian", &hamiltonian);
+
         mesh.export_vtk(
             format!("output/garfinkle.vtu"),
             ExportVtkConfig {
@@ -177,10 +173,67 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 systems: systems.clone(),
             },
         )?;
+
+        mesh.refine(&flags);
     }
 
-    log::warn!("Min Spacing {}", mesh.min_spacing());
-    mesh.export_dat("output/idbrill4.0.dat", &systems)?;
+    // let mut debug = String::new();
+    // mesh.write_debug(&mut debug);
+
+    // std::fs::write("output/mesh.txt", debug).unwrap();
+
+    // println!("Num Blocks: {}", mesh.num_blocks());
+    // println!("Num Cells: {}", mesh.num_cells());
+
+    // let mut rinne = SystemVec::with_length(mesh.num_nodes());
+    // let mut hamiltonian = vec![0.0; mesh.num_nodes()].into_boxed_slice();
+
+    // if CHOPTUIK {
+    //     choptuik::solve(&mut mesh, 4.0, rinne.as_mut_slice(), &mut hamiltonian)?;
+    // } else {
+    //     garfinkle::solve(
+    //         &mut mesh,
+    //         4.0,
+    //         50000,
+    //         rinne.as_mut_slice(),
+    //         &mut hamiltonian,
+    //     )?;
+    // }
+
+    // mesh.fill_boundary(ORDER, Quadrant, RinneConditions, rinne.as_mut_slice());
+    // mesh.fill_boundary(
+    //     ORDER,
+    //     Quadrant,
+    //     HAMILTONIAN_CONDITIONS,
+    //     hamiltonian.as_mut().into(),
+    // );
+
+    // let mut systems = SystemCheckpoint::default();
+    // systems.save_system(rinne.as_slice());
+    // systems.save_field("hamiltonian", &hamiltonian);
+
+    // if CHOPTUIK {
+    //     mesh.export_vtk(
+    //         format!("output/choptuik.vtu"),
+    //         ExportVtkConfig {
+    //             title: "idbrill".to_string(),
+    //             ghost: crate::GHOST,
+    //             systems: systems.clone(),
+    //         },
+    //     )?;
+    // } else {
+    //     mesh.export_vtk(
+    //         format!("output/garfinkle.vtu"),
+    //         ExportVtkConfig {
+    //             title: "idbrill".to_string(),
+    //             ghost: crate::GHOST,
+    //             systems: systems.clone(),
+    //         },
+    //     )?;
+    // }
+
+    // log::warn!("Min Spacing {}", mesh.min_spacing());
+    // mesh.export_dat("output/idbrill_amr.dat", &systems)?;
 
     Ok(())
 }

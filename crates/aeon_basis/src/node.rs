@@ -1,8 +1,9 @@
-use crate::fd::boundary::{Boundary, BoundaryKind, Condition};
-use crate::fd::convolution::Convolution;
-use crate::fd::kernel::{Border, CellKernel, Kernel, Value};
-use aeon_geometry::{faces, CartesianIter, Face, IndexSpace, IndexWindow, Rectangle};
+use aeon_geometry::{
+    faces, regions, CartesianIter, Face, IndexSpace, IndexWindow, Rectangle, Region, Side,
+};
 use std::array::{self, from_fn};
+
+use crate::{Border, Boundary, BoundaryKind, CellKernel, Condition, Convolution, Kernel, Value};
 
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
 pub enum Support {
@@ -169,9 +170,7 @@ impl<const N: usize> NodeSpace<N> {
         let mut origin = [0; N];
 
         for axis in 0..N {
-            // if self.domain.kind(Face::negative(axis)).has_ghost() {
             origin[axis] = -(self.ghost as isize);
-            // }
         }
 
         NodeWindow {
@@ -179,6 +178,34 @@ impl<const N: usize> NodeSpace<N> {
             size: self.full_size(),
         }
     }
+
+    pub fn region_window(&self, region: Region<N>) -> NodeWindow<N> {
+        let origin = array::from_fn(|axis| match region.side(axis) {
+            Side::Left => -(self.ghost as isize),
+            Side::Right => self.size[axis] as isize + 1,
+            Side::Middle => 0,
+        });
+
+        let size = array::from_fn(|axis: usize| match region.side(axis) {
+            Side::Left | Side::Right => self.ghost,
+            Side::Middle => self.size[axis] + 1,
+        });
+
+        NodeWindow { origin, size }
+    }
+
+    // pub fn face_window(&self, Face { axis, side }: Face<N>) -> NodeWindow<N> {
+    //     let intercept = if side { self.size[axis] } else { 0 } as isize;
+
+    //     let mut origin = [0; N];
+    //     let mut size: [usize; N] = [0; N];
+    //     size[axis] = self.size[axis] + 1 + 2 * self.ghost;
+
+    //     if side {
+
+    //         origin =
+    //     }
+    // }
 
     pub fn support(
         &self,
@@ -229,8 +256,44 @@ impl<const N: usize> NodeSpace<N> {
 impl<const N: usize> NodeSpace<N> {
     /// Set strongly enforced boundary conditions.
     pub fn fill_boundary(&self, boundary: impl Boundary<N> + Condition<N>, dest: &mut [f64]) {
-        let vertex_size = self.inner_size();
-        let active_window = self.inner_window();
+        // Loop over regions
+        for region in regions::<N>() {
+            if region == Region::CENTRAL {
+                continue;
+            }
+
+            // Nodes to iterate over
+            let window = self.region_window(region);
+
+            // Parity boundary conditions
+            let mut parity = true;
+
+            for face in region.adjacent_faces() {
+                // Flip parity if boundary is antisymmetric
+                parity ^= boundary.kind(face) == BoundaryKind::Parity && !boundary.parity(face);
+            }
+
+            let sign = if parity { 1.0 } else { -1.0 };
+
+            for node in window {
+                let mut source = node;
+
+                for face in region.adjacent_faces() {
+                    if boundary.kind(face) != BoundaryKind::Parity {
+                        continue;
+                    }
+
+                    if face.side {
+                        let dist = node[face.axis] - self.size[face.axis] as isize;
+                        source[face.axis] = self.size[face.axis] as isize - dist;
+                    } else {
+                        source[face.axis] = -node[face.axis];
+                    }
+                }
+
+                dest[self.index_from_node(node)] = sign * dest[self.index_from_node(source)];
+            }
+        }
 
         // Loop over faces
         for face in faces::<N>() {
@@ -238,10 +301,10 @@ impl<const N: usize> NodeSpace<N> {
             let side = face.side;
 
             // As well as strongly enforce any diritchlet boundary conditions on axis.
-            let intercept = if side { vertex_size[axis] - 1 } else { 0 } as isize;
+            let intercept = if side { self.size[axis] } else { 0 } as isize;
 
             // Iterate over face
-            for node in active_window.plane(axis, intercept) {
+            for node in self.full_window().plane(axis, intercept) {
                 if boundary.kind(face) == BoundaryKind::Parity && boundary.parity(face) == false {
                     // For antisymmetric boundaries we set all values on axis to be 0.
                     let index = self.index_from_node(node);
@@ -473,11 +536,10 @@ impl<const N: usize> Iterator for NodePlaneIter<N> {
 
 #[cfg(test)]
 mod tests {
+    use aeon_geometry::Rectangle;
+
     use super::*;
-    use crate::{
-        fd::kernel::{Kernels as _, Order},
-        geometry::Rectangle,
-    };
+    use crate::{Kernels as _, Order};
 
     #[derive(Clone)]
     struct Quadrant;

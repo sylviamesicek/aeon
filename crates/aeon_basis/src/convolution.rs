@@ -1,4 +1,4 @@
-use crate::fd::kernel::{Border, Kernel, Kernels, Value, VertexKernel};
+use crate::kernel::{Border, Kernel, Kernels, Value, VertexKernel};
 use std::marker::PhantomData;
 
 // ************************************

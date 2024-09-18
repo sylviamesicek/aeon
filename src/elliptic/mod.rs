@@ -1,9 +1,9 @@
+use aeon_basis::{Boundary, Kernels};
+use reborrow::{Reborrow, ReborrowMut};
 use std::marker::PhantomData;
 
-use reborrow::{Reborrow, ReborrowMut};
-
 use crate::{
-    fd::{Boundary, Conditions, Engine, Kernels, Mesh, Operator},
+    fd::{Conditions, Engine, Mesh, Operator},
     ode::{Ode, Rk4},
     prelude::Face,
     system::{field_count, Pair, SystemLabel, SystemSlice, SystemSliceMut, SystemValue},
@@ -106,12 +106,12 @@ impl<Label: SystemLabel> HyperRelaxSolver<Label> {
 
             let norm = mesh.norm(system.rb());
 
-            log::trace!(
-                "Time {:.5}/{:.5} Norm {:.5e}",
-                index as f64 * step,
-                self.max_steps as f64 * step,
-                norm
-            );
+            // log::trace!(
+            //     "Time {:.5}/{:.5} Norm {:.5e}",
+            //     index as f64 * step,
+            //     self.max_steps as f64 * step,
+            //     norm
+            // );
 
             if norm <= self.tolerance {
                 log::trace!(

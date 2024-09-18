@@ -1,5 +1,7 @@
+use aeon_basis::{Boundary, BoundaryKind, NodeSpace, NodeWindow};
 use aeon_geometry::{
-    FaceMask, IndexSpace, Rectangle, Tree, TreeBlocks, TreeInterfaces, TreeNeighbors, TreeNodes,
+    faces, FaceMask, IndexSpace, Rectangle, Tree, TreeBlocks, TreeInterfaces, TreeNeighbors,
+    TreeNodes,
 };
 use ron::ser::PrettyConfig;
 use std::{
@@ -20,18 +22,19 @@ use vtkio::{
 
 mod checkpoint;
 mod evaluate;
+mod regrid;
+mod store;
 mod transfer;
 
 pub use checkpoint::{MeshCheckpoint, SystemCheckpoint};
 
+use crate::fd::BlockBoundary;
 use crate::system::{SystemLabel, SystemSlice};
-
-use super::{BlockBoundary, NodeSpace};
 
 #[derive(Debug, Clone)]
 pub struct Mesh<const N: usize> {
     tree: Tree<N>,
-    width: [usize; N],
+    width: usize,
     ghost: usize,
 
     blocks: TreeBlocks<N>,
@@ -39,13 +42,11 @@ pub struct Mesh<const N: usize> {
 
     nodes: TreeNodes<N>,
     interfaces: TreeInterfaces<N>,
-
-    coarse_nodes: TreeNodes<N>,
-    coarse_interfaces: TreeInterfaces<N>,
+    // refine_flags: Vec<bool>,
 }
 
 impl<const N: usize> Mesh<N> {
-    pub fn new(bounds: Rectangle<N>, width: [usize; N], ghost: usize) -> Self {
+    pub fn new(bounds: Rectangle<N>, width: usize, ghost: usize) -> Self {
         let tree = Tree::new(bounds);
 
         let mut result = Self {
@@ -58,9 +59,7 @@ impl<const N: usize> Mesh<N> {
 
             nodes: TreeNodes::default(),
             interfaces: TreeInterfaces::default(),
-
-            coarse_nodes: TreeNodes::default(),
-            coarse_interfaces: TreeInterfaces::default(),
+            // refine_flags: Vec::new(),
         };
 
         result.build();
@@ -72,24 +71,24 @@ impl<const N: usize> Mesh<N> {
         self.blocks.build(&self.tree);
         self.neighbors.build(&self.tree, &self.blocks);
 
-        self.nodes.width = self.width;
+        self.nodes.width = [self.width; N];
         self.nodes.ghost = self.ghost;
         self.nodes.build(&self.blocks);
         self.interfaces
             .build(&self.tree, &self.blocks, &self.neighbors, &self.nodes);
 
-        self.coarse_nodes.width = array::from_fn(|axis| self.width[axis] / 2);
-        self.coarse_nodes.ghost = self.ghost;
-        self.coarse_nodes.build(&self.blocks);
-        self.coarse_interfaces.build(
-            &self.tree,
-            &self.blocks,
-            &self.neighbors,
-            &self.coarse_nodes,
-        );
+        // self.refine_flags.clear();
+        // self.refine_flags.resize(self.tree.num_cells(), false);
+    }
+
+    pub fn tree(&self) -> &Tree<N> {
+        &self.tree
     }
 
     pub fn refine(&mut self, flags: &[bool]) {
+        // self.tree.balance_refine_flags(&mut self.refine_flags);
+        // self.tree.refine(&self.refine_flags);
+
         self.tree.refine(flags);
         self.build();
     }
@@ -110,27 +109,39 @@ impl<const N: usize> Mesh<N> {
         self.nodes.range(block)
     }
 
+    /// Returns the window of nodes in a block corresponding to
+    pub fn element_window(&self, cell: usize) -> NodeWindow<N> {
+        let position = self.blocks.cell_position(cell);
+
+        let size = [2 * self.width + 1; N];
+        let mut origin = [-(self.width as isize) / 2; N];
+
+        for axis in 0..N {
+            origin[axis] += (self.width * position[axis]) as isize
+        }
+
+        NodeWindow { origin, size }
+    }
+
+    pub fn element_coarse_window(&self, cell: usize) -> NodeWindow<N> {
+        let position = self.blocks.cell_position(cell);
+
+        let size = [self.width + 1; N];
+        let mut origin = [0; N];
+
+        for axis in 0..N {
+            origin[axis] += (self.width * position[axis]) as isize
+        }
+
+        NodeWindow { origin, size }
+    }
+
     /// Computes the nodespace corresponding to a block.
     pub fn block_space(&self, block: usize) -> NodeSpace<N> {
         let size = self.blocks.size(block);
         let cell_size = array::from_fn(|axis| size[axis] * self.nodes.width[axis]);
 
         NodeSpace::new(cell_size, self.nodes.ghost)
-    }
-
-    pub fn num_coarse_nodes(&self) -> usize {
-        self.coarse_nodes.len()
-    }
-
-    pub fn block_coarse_nodes(&self, block: usize) -> Range<usize> {
-        self.coarse_nodes.range(block)
-    }
-
-    pub fn block_coarse_space(&self, block: usize) -> NodeSpace<N> {
-        let size = self.blocks.size(block);
-        let cell_size = array::from_fn(|axis| size[axis] * self.coarse_nodes.width[axis]);
-
-        NodeSpace::new(cell_size, self.coarse_nodes.ghost)
     }
 
     pub fn block_bounds(&self, block: usize) -> Rectangle<N> {
@@ -150,6 +161,35 @@ impl<const N: usize> Mesh<N> {
             flags: self.block_boundary_flags(block),
             inner: boundary,
         }
+    }
+
+    /// Returns true if the given cell is on a physical boundary.
+    pub fn is_cell_on_boundary<B: Boundary<N>>(&self, cell: usize, boundary: B) -> bool {
+        let block = self.blocks.cell_block(cell);
+        let block_size = self.blocks.size(block);
+        let block_flags = self.block_boundary_flags(block);
+
+        let position = self.blocks.cell_position(cell);
+
+        for face in faces::<N>() {
+            let on_border = position[face.axis]
+                == if face.side {
+                    block_size[face.axis] - 1
+                } else {
+                    0
+                };
+
+            if matches!(
+                boundary.kind(face),
+                BoundaryKind::Free | BoundaryKind::Radiative
+            ) && block_flags.is_set(face)
+                && on_border
+            {
+                return true;
+            }
+        }
+
+        false
     }
 
     pub fn max_level(&self) -> usize {
@@ -431,7 +471,7 @@ impl<const N: usize> Default for Mesh<N> {
     fn default() -> Self {
         let mut result = Self {
             tree: Tree::new(Rectangle::UNIT),
-            width: [4; N],
+            width: 4,
             ghost: 1,
 
             blocks: TreeBlocks::default(),
@@ -439,9 +479,7 @@ impl<const N: usize> Default for Mesh<N> {
 
             nodes: TreeNodes::default(),
             interfaces: TreeInterfaces::default(),
-
-            coarse_nodes: TreeNodes::default(),
-            coarse_interfaces: TreeInterfaces::default(),
+            // refine_flags: Vec::new(),
         };
 
         result.build();

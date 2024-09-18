@@ -1,51 +1,32 @@
-//! Provides generalized interfaces for expressing various kinds of boundary condition.
-//!
-//! This module uses a combination of trait trickery and type transformers to
-//! create an ergonomic API for working with boundaries.
-
 use crate::{
     geometry::{Face, FaceMask},
     system::{Empty, Pair, Scalar, SystemLabel},
 };
 
-/// Indicates what type of boundary condition is used along a particualr
-/// face of the domain. More specific boundary conditions are provided
-/// by the `Condition` API, but for many funtions, `Boundary` provides
-/// enough information to compute supports and apply stencils.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum BoundaryKind {
-    /// A (anti)symmetric boundary condition. True indicates an even function
-    /// (so function values are reflected across the axis with the same sign)
-    /// and false indicates an odd function.
-    Parity,
-    /// This boundary condition indicates that the ghost nodes have been filled manually via some external
-    /// process. This can be used to implement custom boundary conditions, and is primarily used to
-    /// fill inter-grid boundaries in the adaptive mesh refinement driver.
-    Custom,
-    Radiative,
-    Free,
+use aeon_basis::{Boundary, BoundaryKind, Condition};
+
+/// A transformer for overriding individual boundary faces with `BoundaryKind::Custom`. This
+/// is primarily used internally to ensure interior boundaries between blocks are properly
+/// used.
+#[derive(Debug, Clone)]
+pub struct BlockBoundary<const N: usize, I> {
+    pub inner: I,
+    pub flags: FaceMask<N>,
 }
 
-impl BoundaryKind {
-    pub fn has_ghost(self) -> bool {
-        matches!(self, Self::Custom)
+impl<const N: usize, I> BlockBoundary<N, I> {
+    pub fn new(flags: FaceMask<N>, inner: I) -> Self {
+        Self { inner, flags }
     }
 }
 
-/// Provides information about what kind of boundary is used on each face.
-pub trait Boundary<const N: usize>: Clone {
-    fn kind(&self, face: Face<N>) -> BoundaryKind;
-}
-
-/// Provides specifics for enforcing boundary conditions for
-/// a particular field.
-pub trait Condition<const N: usize>: Clone {
-    fn parity(&self, _face: Face<N>) -> bool {
-        false
-    }
-
-    fn radiative(&self, _position: [f64; N]) -> f64 {
-        0.0
+impl<const N: usize, I: Boundary<N>> Boundary<N> for BlockBoundary<N, I> {
+    fn kind(&self, face: Face<N>) -> BoundaryKind {
+        if self.flags.is_set(face) {
+            self.inner.kind(face)
+        } else {
+            BoundaryKind::Custom
+        }
     }
 }
 
@@ -81,63 +62,6 @@ impl<const N: usize, I: Condition<N>> Conditions<N> for ScalarConditions<I> {
 
     fn radiative(&self, _field: Self::System, position: [f64; N]) -> f64 {
         self.0.radiative(position)
-    }
-}
-
-/// A transformer for overriding individual boundary faces with `BoundaryKind::Custom`. This
-/// is primarily used internally to ensure interior boundaries between blocks are properly
-/// used.
-#[derive(Debug, Clone)]
-pub struct BlockBoundary<const N: usize, I> {
-    pub inner: I,
-    pub flags: FaceMask<N>,
-}
-
-impl<const N: usize, I> BlockBoundary<N, I> {
-    pub fn new(flags: FaceMask<N>, inner: I) -> Self {
-        Self { inner, flags }
-    }
-}
-
-impl<const N: usize, I: Boundary<N>> Boundary<N> for BlockBoundary<N, I> {
-    fn kind(&self, face: Face<N>) -> BoundaryKind {
-        if self.flags.is_set(face) {
-            self.inner.kind(face)
-        } else {
-            BoundaryKind::Custom
-        }
-    }
-}
-
-/// Combines a `Boundary<N>` with a `Condition<N>`.
-#[derive(Clone)]
-pub struct BC<B, C> {
-    pub boundary: B,
-    pub condition: C,
-}
-
-impl<B, C> BC<B, C> {
-    pub fn new(boundary: B, condition: C) -> Self {
-        Self {
-            boundary,
-            condition,
-        }
-    }
-}
-
-impl<const N: usize, B: Boundary<N>, C: Clone> Boundary<N> for BC<B, C> {
-    fn kind(&self, face: Face<N>) -> BoundaryKind {
-        self.boundary.kind(face)
-    }
-}
-
-impl<const N: usize, B: Clone, C: Condition<N>> Condition<N> for BC<B, C> {
-    fn parity(&self, face: Face<N>) -> bool {
-        self.condition.parity(face)
-    }
-
-    fn radiative(&self, position: [f64; N]) -> f64 {
-        self.condition.radiative(position)
     }
 }
 
@@ -194,20 +118,6 @@ impl<const N: usize, S: SystemLabel, B: Clone, C: Conditions<N, System = S>> Con
         self.conditions.radiative(self.field.clone(), position)
     }
 }
-
-// impl<const N: usize, S: SystemLabel, C: Conditions<N, System = S>> Conditions<N>
-//     for SystemBC<S, C>
-// {
-//     type System = Scalar;
-
-//     fn parity(&self, _field: Scalar, face: Face<N>) -> bool {
-//         self.inner.parity(self.field.clone(), face)
-//     }
-
-//     fn radiative(&self, _field: Scalar, position: [f64; N]) -> f64 {
-//         self.inner.radiative(self.field.clone(), position)
-//     }
-// }
 
 impl<const N: usize, S: SystemLabel, B: Boundary<N>, C: Clone> Boundary<N> for SystemBC<S, B, C> {
     fn kind(&self, face: Face<N>) -> BoundaryKind {

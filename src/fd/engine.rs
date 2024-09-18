@@ -1,12 +1,10 @@
-use crate::system::{SystemFields, SystemLabel};
-use crate::{fd::NodeSpace, geometry::Rectangle};
-
-use crate::fd::Boundary;
-
-use super::{
-    convolution::{Convolution, Dissipation},
-    node_from_vertex, Conditions, Gradient, Hessian, Kernels, SystemBC,
+use aeon_basis::{
+    node_from_vertex, Boundary, Convolution, Dissipation, Gradient, Hessian, Kernels, NodeSpace,
 };
+use aeon_geometry::Rectangle;
+
+use crate::fd::{Conditions, SystemBC};
+use crate::system::{SystemFields, SystemLabel};
 
 /// An interface for computing values, gradients, and hessians of fields.
 pub trait Engine<const N: usize, S: SystemLabel> {

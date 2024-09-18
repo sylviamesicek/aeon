@@ -1,8 +1,6 @@
 #![allow(mixed_script_confusables)]
 
-use aeon::fd::{
-    DissipationFunction, ExportVtkConfig, Mesh, Order, SystemCheckpoint, SystemCondition,
-};
+use aeon::fd::{DissipationFunction, ExportVtkConfig, Mesh, SystemCheckpoint, SystemCondition};
 use aeon::prelude::*;
 use aeon::system::field_count;
 use reborrow::{Reborrow, ReborrowMut};

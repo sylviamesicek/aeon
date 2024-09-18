@@ -6,4 +6,5 @@ edition = "2021"
 [dependencies]
 faer.workspace = true
 
+aeon_macros.workspace = true
 aeon_geometry.workspace = true

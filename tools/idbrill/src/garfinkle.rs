@@ -223,6 +223,7 @@ impl Function<2> for RinneFromGarfinkle {
 pub fn solve(
     mesh: &mut Mesh<2>,
     amplitude: f64,
+    max_steps: usize,
     rinne: SystemSliceMut<Rinne>,
     hamiltonian: &mut [f64],
 ) -> Result<(), Box<dyn std::error::Error>> {
@@ -245,7 +246,7 @@ pub fn solve(
 
     let mut solver = HyperRelaxSolver::new();
     solver.tolerance = 1e-9;
-    solver.max_steps = 50000;
+    solver.max_steps = max_steps;
     solver.cfl = 0.5;
     solver.dampening = 0.4;
 

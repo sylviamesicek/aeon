@@ -1,11 +1,12 @@
+use aeon_basis::{Boundary, Kernels};
 use aeon_geometry::{Face, IndexSpace};
 use rayon::iter::{ParallelBridge, ParallelIterator};
 use reborrow::Reborrow as _;
 
 use crate::{
     fd::{
-        kernel::Kernels, Boundary, FdEngine, FdIntEngine, Function, Operator, OperatorAsFunction,
-        Projection, ProjectionAsFunction,
+        FdEngine, FdIntEngine, Function, Operator, OperatorAsFunction, Projection,
+        ProjectionAsFunction,
     },
     system::{SystemFields, SystemFieldsMut, SystemLabel, SystemSlice, SystemSliceMut},
 };

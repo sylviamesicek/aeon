@@ -1,17 +1,13 @@
-use std::array;
-
+use aeon_basis::{Boundary, BoundaryKind, Condition, Kernels};
 use aeon_geometry::{faces, Face, IndexSpace};
 use rayon::iter::{ParallelBridge, ParallelIterator};
 use reborrow::Reborrow as _;
+use std::array;
 
 use crate::{
-    fd::{
-        kernel::Kernels, Boundary, BoundaryKind, Condition, Conditions, Engine, FdEngine, SystemBC,
-    },
+    fd::{Conditions, Engine, FdEngine, Mesh, SystemBC},
     system::{SystemLabel, SystemSlice, SystemSliceMut},
 };
-
-use super::Mesh;
 
 impl<const N: usize> Mesh<N> {
     /// Enforces strong boundary conditions. This includes strong physical boundary conditions, as well
@@ -23,10 +19,12 @@ impl<const N: usize> Mesh<N> {
         conditions: C,
         mut system: SystemSliceMut<'_, C::System>,
     ) {
-        self.fill_physical(&boundary, &conditions, &mut system);
         self.fill_direct(&mut system);
         self.fill_fine(&mut system);
+
+        self.fill_physical(&boundary, &conditions, &mut system);
         self.fill_prolong(order, &boundary, &conditions, &mut system);
+        self.fill_physical(&boundary, &conditions, &mut system);
     }
 
     fn fill_physical<B: Boundary<N> + Sync, C: Conditions<N> + Sync>(
@@ -261,37 +259,6 @@ impl<const N: usize> Mesh<N> {
                         field_derivs[index] = -advection / r + k / (r * r * r);
                         // field_derivs[index] = -advection / r;
                     }
-                }
-            }
-        });
-    }
-
-    pub fn transfer_to_coarse<System: SystemLabel>(
-        &mut self,
-        source: SystemSlice<System>,
-        dest: SystemSliceMut<System>,
-    ) {
-        let source = source.as_range();
-        let dest = dest.as_range();
-
-        (0..self.blocks.len()).par_bridge().for_each(|block| {
-            let source_dofs = self.block_nodes(block);
-            let dest_dofs = self.block_coarse_nodes(block);
-
-            let source = unsafe { source.slice(source_dofs.clone()).fields() };
-            let mut dest = unsafe { dest.slice_mut(dest_dofs.clone()).fields_mut() };
-
-            let source_space = self.block_space(block);
-            let dest_space = self.block_coarse_space(block);
-
-            for dest_node in dest_space.inner_window() {
-                let source_node = array::from_fn(|axis| dest_node[axis] * 2);
-                let source_index = source_space.index_from_node(source_node);
-                let dest_index = dest_space.index_from_node(dest_node);
-
-                for field in System::fields() {
-                    dest.field_mut(field.clone())[dest_index] =
-                        source.field(field.clone())[source_index];
                 }
             }
         });

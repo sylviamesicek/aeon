@@ -551,7 +551,8 @@ mod tests {
     use crate::symbolicc;
 
     use super::{tensor3, HyperbolicSystem};
-    use aeon::{fd::NodeSpace, geometry::Rectangle};
+    use aeon::basis::NodeSpace;
+    use aeon::geometry::Rectangle;
     use rand::prelude::*;
 
     #[test]

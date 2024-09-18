@@ -9,8 +9,7 @@ use crate::system::{SystemLabel, SystemSlice, SystemVec};
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct MeshCheckpoint<const N: usize> {
     tree: Tree<N>,
-    #[serde(with = "aeon_array")]
-    width: [usize; N],
+    width: usize,
     ghost: usize,
 }
 
@@ -34,7 +33,7 @@ impl<const N: usize> Default for MeshCheckpoint<N> {
     fn default() -> Self {
         Self {
             tree: Tree::new(Rectangle::UNIT),
-            width: [4; N],
+            width: 4,
             ghost: 1,
         }
     }

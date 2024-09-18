@@ -49,14 +49,7 @@ impl<const N: usize> Element<N> {
     /// Constructs a reference element with uniformly placed
     /// support points with `order + 1` points along each axis.
     pub fn uniform(order: usize) -> Self {
-        let spacing = 2.0 / order as f64;
-        let grid = (0..=order)
-            .map(|i| i as f64 * spacing - 1.0)
-            .collect::<Vec<_>>();
-
-        let grid_refined = (0..=2 * order)
-            .map(|i| i as f64 * spacing / 2.0 - 1.0)
-            .collect::<Vec<_>>();
+        let (grid, grid_refined) = Self::uniform_grid(order);
 
         let vandermonde = Monomial::vandermonde(&grid);
 
@@ -71,6 +64,20 @@ impl<const N: usize> Element<N> {
             vandermonde,
             stencils,
         }
+    }
+
+    fn uniform_grid(order: usize) -> (Vec<f64>, Vec<f64>) {
+        let spacing = 2.0 / order as f64;
+
+        let grid = (0..=order)
+            .map(|i| i as f64 * spacing - 1.0)
+            .collect::<Vec<_>>();
+
+        let grid_refined = (0..=2 * order)
+            .map(|i| i as f64 * spacing / 2.0 - 1.0)
+            .collect::<Vec<_>>();
+
+        (grid, grid_refined)
     }
 
     fn uniform_rhs<B: Basis>(order: usize) -> Mat<f64> {
@@ -155,6 +162,17 @@ impl<const N: usize> Element<N> {
             .map(|v| array::from_fn(|axis| v[axis] * 2 + 1))
     }
 
+    /// Iterates over diagonal detail coefficients in a wavelet representation on the interior of this element.
+    pub fn diagonal_int_indices(&self) -> impl Iterator<Item = [usize; N]> {
+        let order = self.order;
+
+        debug_assert!(order % 2 == 0);
+
+        IndexSpace::new([order / 2; N])
+            .iter()
+            .map(move |v| array::from_fn(|axis| order / 2 + 2 * v[axis] + 1))
+    }
+
     /// Iterates over all detail coefficients in a wavelet representation on this element.
     pub fn detail_indices(&self) -> impl Iterator<Item = [usize; N]> {
         let cells = IndexSpace::new([self.order; N]).iter();
@@ -185,6 +203,12 @@ impl<const N: usize> Element<N> {
     pub fn diagonal_points(&self) -> impl Iterator<Item = usize> {
         let space = IndexSpace::new([2 * self.order + 1; N]);
         self.diagonal_indices()
+            .map(move |index| space.linear_from_cartesian(index))
+    }
+
+    pub fn diagonal_int_points(&self) -> impl Iterator<Item = usize> {
+        let space = IndexSpace::new([2 * self.order + 1; N]);
+        self.diagonal_int_indices()
             .map(move |index| space.linear_from_cartesian(index))
     }
 

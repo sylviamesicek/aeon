@@ -7,15 +7,15 @@ pub mod lac;
 pub mod ode;
 pub mod system;
 
+pub use aeon_basis as basis;
 pub use aeon_geometry as geometry;
 
 /// Provides common types used for most `aeon` applications.
 pub mod prelude {
     // pub use crate::arena::Arena;
     pub use crate::fd::{
-        Boundary, BoundaryKind, Condition, Conditions, Engine, ExportVtkConfig, Function, Gradient,
-        Hessian, Mesh, MeshCheckpoint, Operator, Order, Projection, ScalarConditions, SystemBC,
-        SystemCheckpoint, Value,
+        Conditions, Engine, ExportVtkConfig, Function, Mesh, MeshCheckpoint, Operator, Projection,
+        ScalarConditions, SystemBC, SystemCheckpoint,
     };
     pub use crate::lac::{BiCGStabConfig, BiCGStabSolver, IdentityMap, LinearMap, LinearSolver};
     pub use crate::ode::{ForwardEuler, Ode, Rk4};
@@ -23,5 +23,6 @@ pub mod prelude {
         Empty, Pair, Scalar, SystemFields, SystemFieldsMut, SystemLabel, SystemSlice,
         SystemSliceMut, SystemValue, SystemVec,
     };
+    pub use aeon_basis::{Boundary, BoundaryKind, Condition, Gradient, Hessian, Order, Value};
     pub use aeon_geometry::{Face, IndexSpace, Rectangle};
 }
