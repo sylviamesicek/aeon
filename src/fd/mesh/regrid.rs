@@ -1,9 +1,5 @@
-use std::cell::RefCell;
-
-use aeon_basis::{Boundary, BoundaryKind, Element, NodeWindow};
-use aeon_geometry::faces;
-use rayon::iter::{ParallelBridge, ParallelIterator};
-use thread_local::ThreadLocal;
+use aeon_basis::{Boundary, Element};
+use std::cell::UnsafeCell;
 
 use crate::{
     fd::Mesh,
@@ -53,34 +49,28 @@ impl<const N: usize> Mesh<N> {
 
         let field = field.as_range();
 
-        let tl = ThreadLocal::new();
+        // Allows interior mutability.
+        let flags = unsafe { &*(flags as *mut [bool] as *const [SyncUnsafeCell<bool>]) };
 
-        (0..self.blocks.len()).for_each(|block| {
-            let boundary = self.block_boundary(block, boundary.clone());
+        self.block_compute(|mesh, store, block| {
+            let boundary = mesh.block_boundary(block, boundary.clone());
 
-            let store = tl.get_or(|| {
-                (
-                    RefCell::new(vec![0.0; support]),
-                    RefCell::new(vec![0.0; support]),
-                )
-            });
+            let imsrc = store.scratch(support);
+            let mut imdest = store.scratch(support);
 
-            let mut imsrc = store.0.borrow_mut();
-            let mut imdest = store.1.borrow_mut();
-
-            let nodes = self.block_nodes(block);
-            let space = self.block_space(block);
+            let nodes = mesh.block_nodes(block);
+            let space = mesh.block_space(block);
 
             let system = unsafe { field.slice(nodes.clone()).fields() };
 
-            for &cell in self.blocks.cells(block) {
-                let is_cell_on_boundary = self.is_cell_on_boundary(cell, boundary.clone());
+            for &cell in mesh.blocks.cells(block) {
+                let is_cell_on_boundary = mesh.is_cell_on_boundary(cell, boundary.clone());
 
                 // Window of nodes on element.
                 let window = if is_cell_on_boundary {
-                    self.element_coarse_window(cell)
+                    mesh.element_coarse_window(cell)
                 } else {
-                    self.element_window(cell)
+                    mesh.element_window(cell)
                 };
 
                 'fields: for field in S::fields() {
@@ -94,7 +84,9 @@ impl<const N: usize> Mesh<N> {
 
                         for point in element_coarse.diagonal_points() {
                             if imdest[point].abs() > tolerance {
-                                flags[cell] = true;
+                                unsafe {
+                                    *flags[cell].get() = true;
+                                }
                                 break 'fields;
                             }
                         }
@@ -103,7 +95,9 @@ impl<const N: usize> Mesh<N> {
 
                         for point in element.diagonal_int_points() {
                             if imdest[point].abs() > tolerance {
-                                flags[cell] = true;
+                                unsafe {
+                                    *flags[cell].get() = true;
+                                }
                                 break 'fields;
                             }
                         }
@@ -111,5 +105,19 @@ impl<const N: usize> Mesh<N> {
                 }
             }
         });
+    }
+}
+
+#[repr(transparent)]
+pub struct SyncUnsafeCell<T: ?Sized> {
+    value: UnsafeCell<T>,
+}
+
+unsafe impl<T: ?Sized + Sync> Sync for SyncUnsafeCell<T> {}
+
+// Identical interface as UnsafeCell:
+impl<T: ?Sized> SyncUnsafeCell<T> {
+    pub const fn get(&self) -> *mut T {
+        self.value.get()
     }
 }

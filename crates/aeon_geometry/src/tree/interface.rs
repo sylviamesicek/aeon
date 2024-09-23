@@ -249,23 +249,37 @@ impl<const N: usize> TreeInterfaces<N> {
         let flags = blocks.boundary_flags(interface.block);
         let block_size = blocks.size(interface.block);
 
+        let kind = InterfaceKind::from_levels(tree.level(a.cell), tree.level(a.neighbor));
+
         for axis in 0..N {
             let right_boundary = flags.is_set(Face::positive(axis));
             let left_boundary = flags.is_set(Face::negative(axis));
 
-            // If the right edge doesn't extend all the way to the right,
-            // shrink by one.
+            // // If the right edge doesn't extend all the way to the right,
+            // // shrink by one.
+            // if b.region.side(axis) == Side::Middle
+            //     && !(bnode[axis] == (block_size[axis] * dofs.width[axis]) as isize
+            //         && right_boundary)
+            // {
+            //     size[axis] -= 1;
+            // }
+
+            // // If we do not extend further left, don't include
+            // if a.region.side(axis) == Side::Middle && anode[axis] == 0 && !left_boundary {
+            //     source[axis] += 1;
+            //     dest[axis] += 1;
+            //     size[axis] -= 1;
+            // }
+
             if b.region.side(axis) == Side::Middle
-                && !(bnode[axis] == (block_size[axis] * dofs.width[axis]) as isize
-                    && right_boundary)
+                && bnode[axis] < (block_size[axis] * dofs.width[axis]) as isize
             {
                 size[axis] -= 1;
             }
 
-            // If we do not extend further left, don't include
-            if a.region.side(axis) == Side::Middle && anode[axis] == 0 && !left_boundary {
-                source[axis] += 1;
-                dest[axis] += 1;
+            if a.region.side(axis) == Side::Left
+                && matches!(kind, InterfaceKind::Fine | InterfaceKind::Direct)
+            {
                 size[axis] -= 1;
             }
         }
@@ -317,7 +331,7 @@ impl<const N: usize> TreeInterfaces<N> {
             }
         }
 
-        // Compute top left corner of B cell
+        // Compute top right corner of B cell
         let mut bnode: [_; N] =
             array::from_fn(|axis| ((bindex[axis] + 1) * dofs.width[axis]) as isize);
 

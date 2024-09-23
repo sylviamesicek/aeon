@@ -5,6 +5,7 @@ pub mod elliptic;
 pub mod fd;
 pub mod lac;
 pub mod ode;
+pub mod shared;
 pub mod system;
 
 pub use aeon_basis as basis;

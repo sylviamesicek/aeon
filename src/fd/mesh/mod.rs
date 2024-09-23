@@ -3,15 +3,18 @@ use aeon_geometry::{
     faces, FaceMask, IndexSpace, Rectangle, Tree, TreeBlocks, TreeInterfaces, TreeNeighbors,
     TreeNodes,
 };
+use rayon::iter::{IntoParallelIterator, ParallelBridge, ParallelIterator};
 use ron::ser::PrettyConfig;
 use std::{
     array,
+    cell::UnsafeCell,
     fmt::Write,
     fs::File,
     io::{self, Read as _, Write as _},
     ops::Range,
     path::Path,
 };
+use thread_local::ThreadLocal;
 use vtkio::{
     model::{
         Attribute, Attributes, ByteOrder, CellType, Cells, DataArrayBase, DataSet, ElementType,
@@ -27,11 +30,12 @@ mod store;
 mod transfer;
 
 pub use checkpoint::{MeshCheckpoint, SystemCheckpoint};
+pub use store::MeshStore;
 
 use crate::fd::BlockBoundary;
 use crate::system::{SystemLabel, SystemSlice};
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct Mesh<const N: usize> {
     tree: Tree<N>,
     width: usize,
@@ -43,6 +47,7 @@ pub struct Mesh<const N: usize> {
     nodes: TreeNodes<N>,
     interfaces: TreeInterfaces<N>,
     // refine_flags: Vec<bool>,
+    stores: ThreadLocal<UnsafeCell<MeshStore>>,
 }
 
 impl<const N: usize> Mesh<N> {
@@ -59,6 +64,8 @@ impl<const N: usize> Mesh<N> {
 
             nodes: TreeNodes::default(),
             interfaces: TreeInterfaces::default(),
+
+            stores: ThreadLocal::new(),
             // refine_flags: Vec::new(),
         };
 
@@ -214,6 +221,17 @@ impl<const N: usize> Mesh<N> {
         .min_by(|a, b| f64::total_cmp(a, b))
         .cloned()
         .unwrap_or(1.0)
+    }
+
+    pub fn block_compute<F: Fn(&Self, &MeshStore, usize) + Sync>(&mut self, f: F) {
+        (0..self.num_blocks())
+            .par_bridge()
+            .into_par_iter()
+            .for_each(|block| {
+                let store = unsafe { &mut *self.stores.get_or_default().get() };
+                f(self, store, block);
+                store.reset();
+            });
     }
 
     /// Computes the maximum l2 norm of all fields in the system.
@@ -467,6 +485,24 @@ impl<const N: usize> Mesh<N> {
     }
 }
 
+impl<const N: usize> Clone for Mesh<N> {
+    fn clone(&self) -> Self {
+        Self {
+            tree: self.tree.clone(),
+            width: self.width,
+            ghost: self.ghost,
+
+            blocks: self.blocks.clone(),
+            neighbors: self.neighbors.clone(),
+
+            nodes: self.nodes.clone(),
+            interfaces: self.interfaces.clone(),
+
+            stores: ThreadLocal::new(),
+        }
+    }
+}
+
 impl<const N: usize> Default for Mesh<N> {
     fn default() -> Self {
         let mut result = Self {
@@ -480,6 +516,7 @@ impl<const N: usize> Default for Mesh<N> {
             nodes: TreeNodes::default(),
             interfaces: TreeInterfaces::default(),
             // refine_flags: Vec::new(),
+            stores: ThreadLocal::new(),
         };
 
         result.build();
