@@ -1,5 +1,5 @@
 use aeon_basis::{Boundary, BoundaryKind, Condition, Kernels};
-use aeon_geometry::{faces, Face, IndexSpace};
+use aeon_geometry::{faces, Face, IndexSpace, Side, TreeBlockNeighbor, TreeCellNeighbor};
 use rayon::iter::{ParallelBridge, ParallelIterator};
 use reborrow::Reborrow as _;
 use std::array;
@@ -8,6 +8,15 @@ use crate::{
     fd::{Conditions, Engine, FdEngine, Mesh, SystemBC},
     system::{SystemLabel, SystemSlice, SystemSliceMut},
 };
+
+struct PaddingAABB<const N: usize> {
+    /// Source node in neighbor block
+    source: [isize; N],
+    /// Size of padding region to fill.
+    size: [usize; N],
+    /// Dest node in this block.
+    dest: [isize; N],
+}
 
 impl<const N: usize> Mesh<N> {
     /// Enforces strong boundary conditions. This includes strong physical boundary conditions, as well
@@ -262,5 +271,169 @@ impl<const N: usize> Mesh<N> {
                 }
             }
         });
+    }
+
+    /// Computes target dofs for ghost node filling routine.
+    fn padding_aabb(&self, neighbor: &TreeBlockNeighbor<N>, extent: usize) -> PaddingAABB<N> {
+        debug_assert!(extent <= self.ghost);
+
+        let a = neighbor.a.clone();
+        let b = neighbor.b.clone();
+
+        // Find ghost region that must be filled
+        let aindex = self.blocks.cell_position(a.cell);
+        let bindex = self.blocks.cell_position(b.cell);
+
+        let block_level = self.tree.level(a.cell);
+        let neighbor_level = self.tree.level(a.neighbor);
+
+        let block_size = self.blocks.size(neighbor.block);
+
+        // ********************************
+        // A node
+
+        // Compute bottom left corner of A cell.
+        let mut anode: [_; N] = array::from_fn(|axis| (aindex[axis] * self.width) as isize);
+
+        if block_level < neighbor_level {
+            let split = self.tree.split(a.neighbor);
+            (0..N)
+                .filter(|&axis| a.region.side(axis) == Side::Middle && split.is_set(axis))
+                .for_each(|axis| anode[axis] += (self.width / 2) as isize);
+        }
+
+        // Offset by appropriate ghost nodes/width
+        for axis in 0..N {
+            match a.region.side(axis) {
+                Side::Left => {
+                    anode[axis] -= extent as isize;
+                }
+                Side::Right => {
+                    anode[axis] += self.width as isize;
+                }
+                Side::Middle => {}
+            }
+        }
+
+        // ***********************************
+        // B Node
+
+        // Compute top right corner of B cell
+        let mut bnode: [_; N] = array::from_fn(|axis| ((bindex[axis] + 1) * self.width) as isize);
+
+        if block_level < neighbor_level {
+            let split = self.tree.split(b.neighbor);
+            (0..N)
+                .filter(|&axis| b.region.side(axis) == Side::Middle && !split.is_set(axis))
+                .for_each(|axis| bnode[axis] -= (self.width / 2) as isize);
+        }
+
+        // Offset by appropriate ghost nodes/width
+        for axis in 0..N {
+            match b.region.side(axis) {
+                Side::Right => {
+                    bnode[axis] += extent as isize;
+                }
+                Side::Left => {
+                    bnode[axis] -= self.width as isize;
+                }
+                Side::Middle => {}
+            }
+        }
+
+        // **************************
+        // Origin
+
+        // Find source node
+        let mut origin: [isize; N] = array::from_fn(|axis| (aindex[axis] * self.width) as isize);
+
+        let level = self.tree.level(a.cell);
+        let nlevel = self.tree.level(a.neighbor);
+
+        if level == nlevel {
+            for axis in 0..N {
+                if a.region.side(axis) == Side::Left {
+                    origin[axis] += (self.width - extent) as isize;
+                }
+            }
+        } else if level > nlevel {
+            // Source is stored in subnodes
+            for axis in 0..N {
+                origin[axis] *= 2;
+            }
+
+            let split = self.tree.split(a.cell);
+
+            for axis in 0..N {
+                if split.is_set(axis) {
+                    match a.region.side(axis) {
+                        Side::Left => origin[axis] += self.width as isize - extent as isize,
+                        Side::Middle => origin[axis] += self.width as isize,
+                        Side::Right => {}
+                    }
+                } else {
+                    match a.region.side(axis) {
+                        Side::Left => origin[axis] += 2 * self.width as isize - extent as isize,
+                        Side::Middle => {}
+                        Side::Right => origin[axis] += self.width as isize,
+                    }
+                }
+            }
+        } else if level < nlevel {
+            // Source is stored in supernodes
+            for axis in 0..N {
+                origin[axis] /= 2;
+            }
+
+            for axis in 0..N {
+                if a.region.side(axis) == Side::Left {
+                    origin[axis] += self.width as isize / 2 - extent as isize;
+                }
+            }
+        }
+
+        for axis in 0..N {
+            if b.region.side(axis) == Side::Middle
+                && bnode[axis] < (block_size[axis] * self.width) as isize
+            {
+                bnode[axis] -= 1;
+            }
+        }
+
+        for axis in 0..N {
+            if b.region.side(axis) == Side::Left {
+                bnode[axis] -= 1;
+            }
+
+            if a.region.side(axis) == Side::Right {
+                anode[axis] += 1;
+                origin[axis] += 1;
+            }
+        }
+
+        let size = array::from_fn(|axis| {
+            if bnode[axis] >= anode[axis] {
+                (bnode[axis] - anode[axis] + 1) as usize
+            } else {
+                0
+            }
+        });
+
+        PaddingAABB {
+            source: origin,
+            size,
+            dest: anode,
+        }
+
+        // if let Some(face) = neighbor.face() {
+        //     if block_level < neighbor_level || (block_level == neighbor_level && !face.side) {
+        //         if face.side {
+        //             anode[face.axis] -= 1;
+        //             origin[face.axis] -= 1;
+        //         } else {
+        //             bnode[face.axis] += 1;
+        //         }
+        //     }
+        // }
     }
 }

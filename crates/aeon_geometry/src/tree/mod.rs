@@ -10,7 +10,9 @@ mod interface;
 mod nodes;
 
 pub use blocks::TreeBlocks;
-pub use interface::{TreeBlockNeighbor, TreeInterface, TreeInterfaces, TreeNeighbors};
+pub use interface::{
+    TreeBlockNeighbor, TreeCellNeighbor, TreeInterface, TreeInterfaces, TreeNeighbors,
+};
 pub use nodes::TreeNodes;
 
 /// Denotes that the cell neighbors the physical boundary of a spatial domain.

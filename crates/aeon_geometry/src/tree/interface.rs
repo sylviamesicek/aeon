@@ -26,6 +26,39 @@ pub struct TreeBlockNeighbor<const N: usize> {
     pub b: TreeCellNeighbor<N>,
 }
 
+impl<const N: usize> TreeBlockNeighbor<N> {
+    /// If this is a face neighbor, return the corresponding face, otherwise return `None`.
+    pub fn face(&self) -> Option<Face<N>> {
+        regions_to_face(self.a.region, self.b.region)
+    }
+}
+
+pub fn regions_to_face<const N: usize>(a: Region<N>, b: Region<N>) -> Option<Face<N>> {
+    let mut adjacency = 0;
+    let mut faxis = 0;
+    let mut fside = false;
+
+    for axis in 0..N {
+        let aside = a.side(axis);
+        let bside = b.side(axis);
+
+        if aside == bside && aside != Side::Middle {
+            adjacency += 1;
+            faxis = axis;
+            fside = aside == Side::Right;
+        }
+    }
+
+    if adjacency == 1 {
+        Some(Face {
+            axis: faxis,
+            side: fside,
+        })
+    } else {
+        None
+    }
+}
+
 /// Stores information about neighbors of blocks and cells.
 #[derive(Default, Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct TreeNeighbors<const N: usize> {
@@ -271,17 +304,17 @@ impl<const N: usize> TreeInterfaces<N> {
             //     size[axis] -= 1;
             // }
 
-            if b.region.side(axis) == Side::Middle
-                && bnode[axis] < (block_size[axis] * dofs.width[axis]) as isize
-            {
-                size[axis] -= 1;
-            }
+            // if b.region.side(axis) == Side::Middle
+            //     && bnode[axis] < (block_size[axis] * dofs.width[axis]) as isize
+            // {
+            //     size[axis] -= 1;
+            // }
 
-            if a.region.side(axis) == Side::Left
-                && matches!(kind, InterfaceKind::Fine | InterfaceKind::Direct)
-            {
-                size[axis] -= 1;
-            }
+            // if a.region.side(axis) == Side::Left
+            //     && matches!(kind, InterfaceKind::Fine | InterfaceKind::Direct)
+            // {
+            //     size[axis] -= 1;
+            // }
         }
 
         TreeInterface {
@@ -460,6 +493,39 @@ mod tests {
     use crate::Rectangle;
 
     use super::*;
+
+    #[test]
+    fn regions_and_faces() {
+        assert_eq!(regions_to_face::<2>(Region::CENTRAL, Region::CENTRAL), None);
+        assert_eq!(
+            regions_to_face(
+                Region::new([Side::Left, Side::Middle]),
+                Region::new([Side::Left, Side::Left])
+            ),
+            Some(Face::negative(0))
+        );
+        assert_eq!(
+            regions_to_face(
+                Region::new([Side::Left, Side::Right]),
+                Region::new([Side::Left, Side::Right])
+            ),
+            None
+        );
+        assert_eq!(
+            regions_to_face(
+                Region::new([Side::Left, Side::Right]),
+                Region::new([Side::Middle, Side::Right])
+            ),
+            Some(Face::positive(1))
+        );
+        assert_eq!(
+            regions_to_face(
+                Region::new([Side::Middle, Side::Right]),
+                Region::new([Side::Middle, Side::Right])
+            ),
+            Some(Face::positive(1))
+        );
+    }
 
     #[test]
     fn neighbors() {

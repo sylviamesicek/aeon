@@ -60,6 +60,38 @@ impl<const N: usize> NodeSpace<N> {
         from_fn(|axis| bounds.size[axis] / self.size[axis] as f64)
     }
 
+    /// Returns true if the node lies outside the interior of the nodespace (i.e. if it is a padding
+    /// node).
+    pub fn is_exterior(&self, node: [isize; N]) -> bool {
+        for axis in 0..N {
+            if node[axis] >= 0 || node[axis] <= self.size[axis] as isize {
+                return false;
+            }
+        }
+
+        true
+    }
+
+    pub fn is_owned_by_face(&self, face: Face<N>, node: [isize; N]) -> bool {
+        if face.side {
+            for axis in 0..face.axis {
+                if node[axis] == 0 || node[axis] == self.size[axis] as isize {
+                    return false;
+                }
+            }
+
+            node[face.axis] == self.size[face.axis] as isize
+        } else {
+            for axis in 0..face.axis {
+                if node[axis] == 0 || node[axis] == self.size[axis] as isize {
+                    return false;
+                }
+            }
+
+            node[face.axis] == 0
+        }
+    }
+
     /// Computes the position of the given vertex.
     pub fn position(&self, node: [isize; N], bounds: Rectangle<N>) -> [f64; N] {
         let spacing: [_; N] = from_fn(|axis| bounds.size[axis] / self.size[axis] as f64);
