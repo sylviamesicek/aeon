@@ -10,7 +10,6 @@ const CHOPTUIK: bool = false;
 const GHOST: bool = false;
 
 const ORDER: Order<4> = Order::<4>;
-
 /// Initial data in Rinne's hyperbolic variables.
 #[derive(Clone, SystemLabel)]
 pub enum Rinne {

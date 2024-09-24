@@ -2,20 +2,21 @@ use aeon_basis::{Boundary, BoundaryKind, Condition, Kernels};
 use aeon_geometry::{faces, Face, IndexSpace, Side, TreeBlockNeighbor, TreeCellNeighbor};
 use rayon::iter::{ParallelBridge, ParallelIterator};
 use reborrow::Reborrow as _;
-use std::array;
+use std::{array, iter};
 
 use crate::{
     fd::{Conditions, Engine, FdEngine, Mesh, SystemBC},
+    shared::SharedSlice,
     system::{SystemLabel, SystemSlice, SystemSliceMut},
 };
 
-struct PaddingAABB<const N: usize> {
-    /// Source node in neighbor block
+struct TransferAABB<const N: usize> {
+    /// Source node in neighbor block.
     source: [isize; N],
-    /// Size of padding region to fill.
-    size: [usize; N],
-    /// Dest node in this block.
+    /// Destination node in target block.
     dest: [isize; N],
+    /// Number of nodes to be filled along each axis.
+    size: [usize; N],
 }
 
 impl<const N: usize> Mesh<N> {
@@ -26,18 +27,30 @@ impl<const N: usize> Mesh<N> {
         order: K,
         boundary: B,
         conditions: C,
+        system: SystemSliceMut<'_, C::System>,
+    ) {
+        self.fill_boundary_to_extent(order, K::MAX_BORDER, boundary, conditions, system);
+    }
+
+    pub fn fill_boundary_to_extent<K: Kernels, B: Boundary<N> + Sync, C: Conditions<N> + Sync>(
+        &mut self,
+        order: K,
+        extent: usize,
+        boundary: B,
+        conditions: C,
         mut system: SystemSliceMut<'_, C::System>,
     ) {
-        self.fill_direct(&mut system);
-        self.fill_fine(&mut system);
+        self.fill_direct(extent, &mut system);
+        self.fill_fine(extent, &mut system);
 
-        self.fill_physical(&boundary, &conditions, &mut system);
-        self.fill_prolong(order, &boundary, &conditions, &mut system);
-        self.fill_physical(&boundary, &conditions, &mut system);
+        self.fill_physical(extent, &boundary, &conditions, &mut system);
+        self.fill_prolong(order, extent, &boundary, &conditions, &mut system);
+        self.fill_physical(extent, &boundary, &conditions, &mut system);
     }
 
     fn fill_physical<B: Boundary<N> + Sync, C: Conditions<N> + Sync>(
         &mut self,
+        extent: usize,
         boundary: &B,
         conditions: &C,
         system: &mut SystemSliceMut<'_, C::System>,
@@ -54,16 +67,20 @@ impl<const N: usize> Mesh<N> {
 
             for field in C::System::fields() {
                 let bcs = SystemBC::new(field.clone(), boundary.clone(), conditions.clone());
-                space.fill_boundary(bcs, block_system.field_mut(field.clone()));
+                space.fill_boundary(extent, bcs, block_system.field_mut(field.clone()));
             }
         });
     }
 
-    fn fill_direct<System: SystemLabel>(&mut self, system: &mut SystemSliceMut<'_, System>) {
+    fn fill_direct<System: SystemLabel>(
+        &mut self,
+        extent: usize,
+        system: &mut SystemSliceMut<'_, System>,
+    ) {
         let system = system.as_range();
 
-        // Fill direct interfaces
-        self.interfaces.direct().par_bridge().for_each(|interface| {
+        // Fill direct neighbors
+        self.neighbors.direct().par_bridge().for_each(|interface| {
             let block_space = self.block_space(interface.block);
             let block_nodes = self.block_nodes(interface.block);
             let neighbor_space = self.block_space(interface.neighbor);
@@ -72,26 +89,32 @@ impl<const N: usize> Mesh<N> {
             let mut block_system = unsafe { system.slice_mut(block_nodes).fields_mut() };
             let neighbor_system = unsafe { system.slice(neighbor_nodes).fields() };
 
-            for node in IndexSpace::new(interface.size).iter() {
-                let block_node = array::from_fn(|axis| node[axis] as isize + interface.dest[axis]);
-                let neighbor_node =
-                    array::from_fn(|axis| node[axis] as isize + interface.source[axis]);
+            for aabb in self.padding_aabbs(interface, extent) {
+                for node in IndexSpace::new(aabb.size).iter() {
+                    let block_node = array::from_fn(|axis| node[axis] as isize + aabb.dest[axis]);
+                    let neighbor_node =
+                        array::from_fn(|axis| node[axis] as isize + aabb.source[axis]);
 
-                let block_index = block_space.index_from_node(block_node);
-                let neighbor_index = neighbor_space.index_from_node(neighbor_node);
+                    let block_index = block_space.index_from_node(block_node);
+                    let neighbor_index = neighbor_space.index_from_node(neighbor_node);
 
-                for field in System::fields() {
-                    let value = neighbor_system.field(field.clone())[neighbor_index];
-                    block_system.field_mut(field.clone())[block_index] = value;
+                    for field in System::fields() {
+                        let value = neighbor_system.field(field.clone())[neighbor_index];
+                        block_system.field_mut(field.clone())[block_index] = value;
+                    }
                 }
             }
         });
     }
 
-    fn fill_fine<System: SystemLabel>(&mut self, system: &mut SystemSliceMut<'_, System>) {
+    fn fill_fine<System: SystemLabel>(
+        &mut self,
+        extent: usize,
+        system: &mut SystemSliceMut<'_, System>,
+    ) {
         let system = system.as_range();
 
-        self.interfaces.fine().par_bridge().for_each(|interface| {
+        self.neighbors.fine().par_bridge().for_each(|interface| {
             let block_space = self.block_space(interface.block);
             let block_nodes = self.block_nodes(interface.block);
             let neighbor_space = self.block_space(interface.neighbor);
@@ -100,17 +123,19 @@ impl<const N: usize> Mesh<N> {
             let mut block_system = unsafe { system.slice_mut(block_nodes).fields_mut() };
             let neighbor_system = unsafe { system.slice(neighbor_nodes).fields() };
 
-            for node in IndexSpace::new(interface.size).iter() {
-                let block_node = array::from_fn(|axis| node[axis] as isize + interface.dest[axis]);
-                let neighbor_node =
-                    array::from_fn(|axis| 2 * (node[axis] as isize + interface.source[axis]));
+            for aabb in self.padding_aabbs(interface, extent) {
+                for node in IndexSpace::new(aabb.size).iter() {
+                    let block_node = array::from_fn(|axis| node[axis] as isize + aabb.dest[axis]);
+                    let neighbor_node =
+                        array::from_fn(|axis| 2 * (node[axis] as isize + aabb.source[axis]));
 
-                let block_index = block_space.index_from_node(block_node);
-                let neighbor_index = neighbor_space.index_from_node(neighbor_node);
+                    let block_index = block_space.index_from_node(block_node);
+                    let neighbor_index = neighbor_space.index_from_node(neighbor_node);
 
-                for field in System::fields() {
-                    let value = neighbor_system.field(field.clone())[neighbor_index];
-                    block_system.field_mut(field.clone())[block_index] = value;
+                    for field in System::fields() {
+                        let value = neighbor_system.field(field.clone())[neighbor_index];
+                        block_system.field_mut(field.clone())[block_index] = value;
+                    }
                 }
             }
         });
@@ -119,12 +144,13 @@ impl<const N: usize> Mesh<N> {
     fn fill_prolong<K: Kernels, B: Boundary<N> + Sync, C: Conditions<N> + Sync>(
         &mut self,
         _order: K,
+        extent: usize,
         boundary: &B,
         conditions: &C,
         system: &mut SystemSliceMut<'_, C::System>,
     ) {
         let system = system.as_range();
-        self.interfaces.coarse().par_bridge().for_each(|interface| {
+        self.neighbors.coarse().par_bridge().for_each(|interface| {
             let block_nodes = self.block_nodes(interface.block);
             let block_space = self.block_space(interface.block);
             let neighbor_nodes = self.block_nodes(interface.neighbor);
@@ -134,25 +160,30 @@ impl<const N: usize> Mesh<N> {
             let mut block_system = unsafe { system.slice_mut(block_nodes).fields_mut() };
             let neighbor_system = unsafe { system.slice(neighbor_nodes).fields() };
 
-            for node in IndexSpace::new(interface.size).iter() {
-                let block_node = array::from_fn(|axis| node[axis] as isize + interface.dest[axis]);
+            for aabb in self.padding_aabbs(interface, extent) {
+                for node in IndexSpace::new(aabb.size).iter() {
+                    let block_node = array::from_fn(|axis| node[axis] as isize + aabb.dest[axis]);
 
-                let neighbor_vertex =
-                    array::from_fn(|axis| (node[axis] as isize + interface.source[axis]) as usize);
+                    let neighbor_vertex =
+                        array::from_fn(|axis| (node[axis] as isize + aabb.source[axis]) as usize);
 
-                let block_index = block_space.index_from_node(block_node);
+                    let block_index = block_space.index_from_node(block_node);
 
-                for field in C::System::fields() {
-                    let bcs =
-                        SystemBC::new(field.clone(), neighbor_boundary.clone(), conditions.clone());
+                    for field in C::System::fields() {
+                        let bcs = SystemBC::new(
+                            field.clone(),
+                            neighbor_boundary.clone(),
+                            conditions.clone(),
+                        );
 
-                    let value = neighbor_space.prolong(
-                        bcs,
-                        K::interpolation().clone(),
-                        neighbor_vertex,
-                        neighbor_system.field(field.clone()),
-                    );
-                    block_system.field_mut(field.clone())[block_index] = value;
+                        let value = neighbor_space.prolong(
+                            bcs,
+                            K::interpolation().clone(),
+                            neighbor_vertex,
+                            neighbor_system.field(field.clone()),
+                        );
+                        block_system.field_mut(field.clone())[block_index] = value;
+                    }
                 }
             }
         });
@@ -273,12 +304,50 @@ impl<const N: usize> Mesh<N> {
         });
     }
 
-    /// Computes target dofs for ghost node filling routine.
-    fn padding_aabb(&self, neighbor: &TreeBlockNeighbor<N>, extent: usize) -> PaddingAABB<N> {
+    pub fn fill_interface_debug_info(&mut self, extent: usize, info: &mut [isize]) {
+        assert!(info.len() == self.num_nodes());
+
+        info.fill(0);
+
+        let info = SharedSlice::new(info);
+
+        self.neighbors
+            .iter()
+            .enumerate()
+            .par_bridge()
+            .for_each(|(i, interface)| {
+                let block_nodes = self.block_nodes(interface.block);
+                let block_space = self.block_space(interface.block);
+
+                for aabb in self.padding_aabbs(interface, extent) {
+                    for node in IndexSpace::new(aabb.size).iter() {
+                        let block_node =
+                            array::from_fn(|axis| node[axis] as isize + aabb.dest[axis]);
+
+                        let block_index = block_space.index_from_node(block_node);
+
+                        unsafe {
+                            *info.get_mut(block_nodes.start + block_index) = i as isize;
+                        }
+                    }
+                }
+            });
+    }
+
+    fn padding_aabbs(
+        &self,
+        interface: &TreeBlockNeighbor<N>,
+        extent: usize,
+    ) -> impl Iterator<Item = TransferAABB<N>> + '_ {
+        iter::once(self.region_aabb(interface, extent)).chain(self.face_aabb(interface))
+    }
+
+    /// Computes transfer aabb for nodes that lie outside the node space.
+    fn region_aabb(&self, interface: &TreeBlockNeighbor<N>, extent: usize) -> TransferAABB<N> {
         debug_assert!(extent <= self.ghost);
 
-        let a = neighbor.a.clone();
-        let b = neighbor.b.clone();
+        let a = interface.a.clone();
+        let b = interface.b.clone();
 
         // Find ghost region that must be filled
         let aindex = self.blocks.cell_position(a.cell);
@@ -287,7 +356,7 @@ impl<const N: usize> Mesh<N> {
         let block_level = self.tree.level(a.cell);
         let neighbor_level = self.tree.level(a.neighbor);
 
-        let block_size = self.blocks.size(neighbor.block);
+        let block_size = self.blocks.size(interface.block);
 
         // ********************************
         // A node
@@ -344,54 +413,9 @@ impl<const N: usize> Mesh<N> {
         // **************************
         // Origin
 
-        // Find source node
-        let mut origin: [isize; N] = array::from_fn(|axis| (aindex[axis] * self.width) as isize);
+        let mut source = self.aabb_source(&a, extent);
 
-        let level = self.tree.level(a.cell);
-        let nlevel = self.tree.level(a.neighbor);
-
-        if level == nlevel {
-            for axis in 0..N {
-                if a.region.side(axis) == Side::Left {
-                    origin[axis] += (self.width - extent) as isize;
-                }
-            }
-        } else if level > nlevel {
-            // Source is stored in subnodes
-            for axis in 0..N {
-                origin[axis] *= 2;
-            }
-
-            let split = self.tree.split(a.cell);
-
-            for axis in 0..N {
-                if split.is_set(axis) {
-                    match a.region.side(axis) {
-                        Side::Left => origin[axis] += self.width as isize - extent as isize,
-                        Side::Middle => origin[axis] += self.width as isize,
-                        Side::Right => {}
-                    }
-                } else {
-                    match a.region.side(axis) {
-                        Side::Left => origin[axis] += 2 * self.width as isize - extent as isize,
-                        Side::Middle => {}
-                        Side::Right => origin[axis] += self.width as isize,
-                    }
-                }
-            }
-        } else if level < nlevel {
-            // Source is stored in supernodes
-            for axis in 0..N {
-                origin[axis] /= 2;
-            }
-
-            for axis in 0..N {
-                if a.region.side(axis) == Side::Left {
-                    origin[axis] += self.width as isize / 2 - extent as isize;
-                }
-            }
-        }
-
+        // Ensure regions are disjoint
         for axis in 0..N {
             if b.region.side(axis) == Side::Middle
                 && bnode[axis] < (block_size[axis] * self.width) as isize
@@ -407,7 +431,7 @@ impl<const N: usize> Mesh<N> {
 
             if a.region.side(axis) == Side::Right {
                 anode[axis] += 1;
-                origin[axis] += 1;
+                source[axis] += 1;
             }
         }
 
@@ -419,21 +443,152 @@ impl<const N: usize> Mesh<N> {
             }
         });
 
-        PaddingAABB {
-            source: origin,
-            size,
+        TransferAABB {
+            source,
             dest: anode,
+            size,
+        }
+    }
+
+    /// Computes transfer aabb for nodes on a face of the node space.
+    fn face_aabb(&self, interface: &TreeBlockNeighbor<N>) -> Option<TransferAABB<N>> {
+        let face = interface.face()?;
+
+        let a = interface.a.clone();
+        let b = interface.b.clone();
+
+        let aindex = self.blocks.cell_position(a.cell);
+        let bindex = self.blocks.cell_position(b.cell);
+
+        let block_size = self.blocks.size(interface.block);
+
+        let block_level = self.tree.level(a.cell);
+        let neighbor_level = self.tree.level(a.neighbor);
+
+        let block_space = self.block_space(interface.block);
+
+        // Destination AABB
+        let mut origin: [_; N] = array::from_fn(|axis| (aindex[axis] * self.width) as isize);
+        if face.side {
+            origin[face.axis] += self.width as isize;
         }
 
-        // if let Some(face) = neighbor.face() {
-        //     if block_level < neighbor_level || (block_level == neighbor_level && !face.side) {
-        //         if face.side {
-        //             anode[face.axis] -= 1;
-        //             origin[face.axis] -= 1;
-        //         } else {
-        //             bnode[face.axis] += 1;
-        //         }
-        //     }
-        // }
+        let mut size: [usize; N] =
+            array::from_fn(|axis| (bindex[axis] - aindex[axis] + 1) * self.width);
+        size[face.axis] = 1;
+
+        // Offset if the neighbor is more fine.
+        if block_level < neighbor_level {
+            let split = self.tree.split(a.neighbor);
+            (0..N)
+                .filter(|&axis| a.region.side(axis) == Side::Middle && split.is_set(axis))
+                .for_each(|axis| {
+                    origin[axis] += (self.width / 2) as isize;
+                    size[axis] -= self.width / 2;
+                });
+
+            let split = self.tree.split(b.neighbor);
+            (0..N)
+                .filter(|&axis| b.region.side(axis) == Side::Middle && !split.is_set(axis))
+                .for_each(|axis| size[axis] -= self.width / 2);
+        }
+
+        let mut source = self.aabb_source(&a, 0);
+
+        // Ensure that all aabbs on a given face don't overlap
+        for axis in 0..N {
+            if b.region.side(axis) == Side::Middle
+                && (origin[axis] + size[axis] as isize) < (block_size[axis] * self.width) as isize
+            {
+                size[axis] -= 1;
+            }
+        }
+
+        // Intersect with disjoint face window.
+        let window = block_space.face_window_disjoint(face);
+
+        for axis in 0..N {
+            if origin[axis] < window.origin[axis] {
+                let diff = window.origin[axis] - origin[axis];
+
+                debug_assert!(diff == 1);
+
+                origin[axis] += diff;
+                source[axis] += diff;
+                size[axis] -= diff as usize;
+            }
+
+            let corner = origin[axis] + size[axis] as isize;
+            let window_corner = window.origin[axis] + window.size[axis] as isize;
+
+            if corner > window_corner {
+                let diff = corner - window_corner;
+
+                debug_assert!(diff == 1);
+
+                size[axis] -= diff as usize;
+            }
+        }
+
+        Some(TransferAABB {
+            source,
+            dest: origin,
+            size,
+        })
+    }
+
+    /// Computes the source node on the neighboring block from which we fill the current block.
+    #[inline]
+    fn aabb_source(&self, a: &TreeCellNeighbor<N>, extent: usize) -> [isize; N] {
+        let block_level = self.tree.level(a.cell);
+        let neighbor_level = self.tree.level(a.neighbor);
+
+        // Find source node
+        let nindex = self.blocks.cell_position(a.neighbor);
+        let mut source: [isize; N] = array::from_fn(|axis| (nindex[axis] * self.width) as isize);
+
+        if block_level == neighbor_level {
+            for axis in 0..N {
+                if a.region.side(axis) == Side::Left {
+                    source[axis] += (self.width - extent) as isize;
+                }
+            }
+        } else if block_level > neighbor_level {
+            // Source is stored in subnodes
+            for axis in 0..N {
+                source[axis] *= 2;
+            }
+
+            let split = self.tree.split(a.cell);
+
+            for axis in 0..N {
+                if split.is_set(axis) {
+                    match a.region.side(axis) {
+                        Side::Left => source[axis] += self.width as isize - extent as isize,
+                        Side::Middle => source[axis] += self.width as isize,
+                        Side::Right => {}
+                    }
+                } else {
+                    match a.region.side(axis) {
+                        Side::Left => source[axis] += 2 * self.width as isize - extent as isize,
+                        Side::Middle => {}
+                        Side::Right => source[axis] += self.width as isize,
+                    }
+                }
+            }
+        } else if block_level < neighbor_level {
+            // Source is stored in supernodes
+            for axis in 0..N {
+                source[axis] /= 2;
+            }
+
+            for axis in 0..N {
+                if a.region.side(axis) == Side::Left {
+                    source[axis] += self.width as isize / 2 - extent as isize;
+                }
+            }
+        }
+
+        source
     }
 }

@@ -83,6 +83,10 @@ impl<const N: usize> TreeNeighbors<N> {
         self.coarse.iter()
     }
 
+    pub fn iter(&self) -> impl Iterator<Item = &TreeBlockNeighbor<N>> {
+        self.fine().chain(self.direct()).chain(self.coarse())
+    }
+
     /// Rebuilds the block interface data.
     pub fn build(&mut self, tree: &Tree<N>, blocks: &TreeBlocks<N>) {
         self.fine.clear();

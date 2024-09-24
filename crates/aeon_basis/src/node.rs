@@ -62,7 +62,7 @@ impl<const N: usize> NodeSpace<N> {
 
     /// Returns true if the node lies outside the interior of the nodespace (i.e. if it is a padding
     /// node).
-    pub fn is_exterior(&self, node: [isize; N]) -> bool {
+    pub fn is_padding(&self, node: [isize; N]) -> bool {
         for axis in 0..N {
             if node[axis] >= 0 || node[axis] <= self.size[axis] as isize {
                 return false;
@@ -72,18 +72,34 @@ impl<const N: usize> NodeSpace<N> {
         true
     }
 
+    /// Returns true of the node lies on the given face.
+    pub fn is_on_face(&self, face: Face<N>, node: [isize; N]) -> bool {
+        let intercept = if face.side { self.size[face.axis] } else { 0 };
+        node[face.axis] == intercept as isize
+    }
+
+    /// Returns true if the node is owned by the given face.
     pub fn is_owned_by_face(&self, face: Face<N>, node: [isize; N]) -> bool {
         if face.side {
+            // Check all negative faces
+            for axis in 0..N {
+                if node[axis] == 0 {
+                    return false;
+                }
+            }
+
+            // Check all lower postive faces
             for axis in 0..face.axis {
-                if node[axis] == 0 || node[axis] == self.size[axis] as isize {
+                if node[axis] == self.size[axis] as isize {
                     return false;
                 }
             }
 
             node[face.axis] == self.size[face.axis] as isize
         } else {
+            // Check all negative faces lower than this face
             for axis in 0..face.axis {
-                if node[axis] == 0 || node[axis] == self.size[axis] as isize {
+                if node[axis] == 0 {
                     return false;
                 }
             }
@@ -211,33 +227,62 @@ impl<const N: usize> NodeSpace<N> {
         }
     }
 
-    pub fn region_window(&self, region: Region<N>) -> NodeWindow<N> {
+    pub fn region_window(&self, extent: usize, region: Region<N>) -> NodeWindow<N> {
+        debug_assert!(extent <= self.ghost);
+
         let origin = array::from_fn(|axis| match region.side(axis) {
-            Side::Left => -(self.ghost as isize),
+            Side::Left => -(extent as isize),
             Side::Right => self.size[axis] as isize + 1,
             Side::Middle => 0,
         });
 
         let size = array::from_fn(|axis: usize| match region.side(axis) {
-            Side::Left | Side::Right => self.ghost,
+            Side::Left | Side::Right => extent,
             Side::Middle => self.size[axis] + 1,
         });
 
         NodeWindow { origin, size }
     }
 
-    // pub fn face_window(&self, Face { axis, side }: Face<N>) -> NodeWindow<N> {
-    //     let intercept = if side { self.size[axis] } else { 0 } as isize;
+    pub fn face_window(&self, Face { axis, side }: Face<N>) -> NodeWindow<N> {
+        let intercept = if side { self.size[axis] } else { 0 } as isize;
 
-    //     let mut origin = [0; N];
-    //     let mut size: [usize; N] = [0; N];
-    //     size[axis] = self.size[axis] + 1 + 2 * self.ghost;
+        let mut origin = [0; N];
+        let mut size = array::from_fn(|axis| self.size[axis] + 1);
 
-    //     if side {
+        origin[axis] = intercept;
+        size[axis] = 1;
 
-    //         origin =
-    //     }
-    // }
+        NodeWindow { origin, size }
+    }
+
+    pub fn face_window_disjoint(&self, face: Face<N>) -> NodeWindow<N> {
+        let intercept = if face.side { self.size[face.axis] } else { 0 } as isize;
+
+        let mut origin = [0; N];
+        let mut size = array::from_fn(|axis| self.size[axis] + 1);
+
+        origin[face.axis] = intercept;
+        size[face.axis] = 1;
+
+        if face.side {
+            for axis in (0..N).filter(|&axis| axis != face.axis) {
+                origin[axis] += 1;
+                size[axis] -= 1;
+            }
+
+            for axis in 0..face.axis {
+                size[axis] -= 1;
+            }
+        } else {
+            for axis in 0..face.axis {
+                origin[axis] += 1;
+                size[axis] -= 1;
+            }
+        }
+
+        NodeWindow { origin, size }
+    }
 
     pub fn support(
         &self,
@@ -287,7 +332,12 @@ impl<const N: usize> NodeSpace<N> {
 
 impl<const N: usize> NodeSpace<N> {
     /// Set strongly enforced boundary conditions.
-    pub fn fill_boundary(&self, boundary: impl Boundary<N> + Condition<N>, dest: &mut [f64]) {
+    pub fn fill_boundary(
+        &self,
+        extent: usize,
+        boundary: impl Boundary<N> + Condition<N>,
+        dest: &mut [f64],
+    ) {
         // Loop over regions
         for region in regions::<N>() {
             if region == Region::CENTRAL {
@@ -295,7 +345,7 @@ impl<const N: usize> NodeSpace<N> {
             }
 
             // Nodes to iterate over
-            let window = self.region_window(region);
+            let window = self.region_window(extent, region);
 
             // Parity boundary conditions
             let mut parity = true;
@@ -329,15 +379,9 @@ impl<const N: usize> NodeSpace<N> {
 
         // Loop over faces
         for face in faces::<N>() {
-            let axis = face.axis;
-            let side = face.side;
-
-            // As well as strongly enforce any diritchlet boundary conditions on axis.
-            let intercept = if side { self.size[axis] } else { 0 } as isize;
-
-            // Iterate over face
-            for node in self.full_window().plane(axis, intercept) {
-                if boundary.kind(face) == BoundaryKind::Parity && boundary.parity(face) == false {
+            if boundary.kind(face) == BoundaryKind::Parity && boundary.parity(face) == false {
+                // Iterate over face
+                for node in self.face_window_disjoint(face) {
                     // For antisymmetric boundaries we set all values on axis to be 0.
                     let index = self.index_from_node(node);
                     dest[index] = 0.0;
@@ -479,7 +523,7 @@ impl<const N: usize> NodeSpace<N> {
 // ****************************
 
 /// Defines a rectagular region of a larger `NodeSpace`.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NodeWindow<const N: usize> {
     pub origin: [isize; N],
     pub size: [usize; N],
@@ -732,5 +776,68 @@ mod tests {
 
         assert!(error16 / error32 >= 32.0);
         assert!(error32 / error64 >= 32.0);
+    }
+
+    #[test]
+    fn windows() {
+        let space = NodeSpace {
+            size: [10; 2],
+            ghost: 2,
+        };
+
+        // Regions
+        assert_eq!(
+            space.region_window(2, Region::new([Side::Left, Side::Right])),
+            NodeWindow {
+                origin: [-2, 11],
+                size: [2, 2],
+            }
+        );
+        assert_eq!(
+            space.region_window(2, Region::new([Side::Middle, Side::Right])),
+            NodeWindow {
+                origin: [0, 11],
+                size: [11, 2]
+            }
+        );
+
+        // Faces
+        assert_eq!(
+            space.face_window(Face::positive(1)),
+            NodeWindow {
+                origin: [0, 10],
+                size: [11, 1]
+            }
+        );
+
+        // Faces disjoint
+        assert_eq!(
+            space.face_window_disjoint(Face::negative(0)),
+            NodeWindow {
+                origin: [0, 0],
+                size: [1, 11],
+            }
+        );
+        assert_eq!(
+            space.face_window_disjoint(Face::negative(1)),
+            NodeWindow {
+                origin: [1, 0],
+                size: [10, 1],
+            }
+        );
+        assert_eq!(
+            space.face_window_disjoint(Face::positive(0)),
+            NodeWindow {
+                origin: [10, 1],
+                size: [1, 10],
+            }
+        );
+        assert_eq!(
+            space.face_window_disjoint(Face::positive(1)),
+            NodeWindow {
+                origin: [1, 10],
+                size: [9, 1],
+            }
+        );
     }
 }

@@ -1,8 +1,8 @@
 use aeon_basis::{Boundary, Element};
-use std::cell::UnsafeCell;
 
 use crate::{
     fd::Mesh,
+    shared::SharedSlice,
     system::{SystemLabel, SystemSlice},
 };
 
@@ -50,7 +50,7 @@ impl<const N: usize> Mesh<N> {
         let field = field.as_range();
 
         // Allows interior mutability.
-        let flags = unsafe { &*(flags as *mut [bool] as *const [SyncUnsafeCell<bool>]) };
+        let flags = SharedSlice::new(flags);
 
         self.block_compute(|mesh, store, block| {
             let boundary = mesh.block_boundary(block, boundary.clone());
@@ -85,7 +85,7 @@ impl<const N: usize> Mesh<N> {
                         for point in element_coarse.diagonal_points() {
                             if imdest[point].abs() > tolerance {
                                 unsafe {
-                                    *flags[cell].get() = true;
+                                    *flags.get_mut(cell) = true;
                                 }
                                 break 'fields;
                             }
@@ -96,7 +96,7 @@ impl<const N: usize> Mesh<N> {
                         for point in element.diagonal_int_points() {
                             if imdest[point].abs() > tolerance {
                                 unsafe {
-                                    *flags[cell].get() = true;
+                                    *flags.get_mut(cell) = true;
                                 }
                                 break 'fields;
                             }
@@ -108,16 +108,16 @@ impl<const N: usize> Mesh<N> {
     }
 }
 
-#[repr(transparent)]
-pub struct SyncUnsafeCell<T: ?Sized> {
-    value: UnsafeCell<T>,
-}
+// #[repr(transparent)]
+// pub struct SyncUnsafeCell<T: ?Sized> {
+//     value: UnsafeCell<T>,
+// }
 
-unsafe impl<T: ?Sized + Sync> Sync for SyncUnsafeCell<T> {}
+// unsafe impl<T: ?Sized + Sync> Sync for SyncUnsafeCell<T> {}
 
-// Identical interface as UnsafeCell:
-impl<T: ?Sized> SyncUnsafeCell<T> {
-    pub const fn get(&self) -> *mut T {
-        self.value.get()
-    }
-}
+// // Identical interface as UnsafeCell:
+// impl<T: ?Sized> SyncUnsafeCell<T> {
+//     pub const fn get(&self) -> *mut T {
+//         self.value.get()
+//     }
+// }
