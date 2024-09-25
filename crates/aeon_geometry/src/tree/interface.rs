@@ -62,33 +62,43 @@ pub fn regions_to_face<const N: usize>(a: Region<N>, b: Region<N>) -> Option<Fac
 /// Stores information about neighbors of blocks and cells.
 #[derive(Default, Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct TreeNeighbors<const N: usize> {
-    fine: Vec<TreeBlockNeighbor<N>>,
-    direct: Vec<TreeBlockNeighbor<N>>,
-    coarse: Vec<TreeBlockNeighbor<N>>,
+    neighbors: Vec<TreeBlockNeighbor<N>>,
+    block_offsets: Vec<usize>,
+    fine: Vec<usize>,
+    direct: Vec<usize>,
+    coarse: Vec<usize>,
 }
 
 impl<const N: usize> TreeNeighbors<N> {
     /// Iterates over all fine `BlockInterface`s.
-    pub fn fine(&self) -> slice::Iter<'_, TreeBlockNeighbor<N>> {
-        self.fine.iter()
+    pub fn fine(&self) -> impl Iterator<Item = &TreeBlockNeighbor<N>> {
+        self.fine.iter().map(|&i| &self.neighbors[i])
     }
 
     /// Iterates over all fine `BlockInterface`s.
-    pub fn direct(&self) -> slice::Iter<'_, TreeBlockNeighbor<N>> {
-        self.direct.iter()
+    pub fn direct(&self) -> impl Iterator<Item = &TreeBlockNeighbor<N>> {
+        self.direct.iter().map(|&i| &self.neighbors[i])
     }
 
     /// Iterates over all fine `BlockInterface`s.
-    pub fn coarse(&self) -> slice::Iter<'_, TreeBlockNeighbor<N>> {
-        self.coarse.iter()
+    pub fn coarse(&self) -> impl Iterator<Item = &TreeBlockNeighbor<N>> {
+        self.coarse.iter().map(|&i| &self.neighbors[i])
     }
 
-    pub fn iter(&self) -> impl Iterator<Item = &TreeBlockNeighbor<N>> {
-        self.fine().chain(self.direct()).chain(self.coarse())
+    /// Iterates over all interfaces in the mesh.
+    pub fn iter(&self) -> slice::Iter<'_, TreeBlockNeighbor<N>> {
+        self.neighbors.iter()
+    }
+
+    /// Iterates over all neighbors of a block.
+    pub fn block(&self, block: usize) -> slice::Iter<'_, TreeBlockNeighbor<N>> {
+        self.neighbors[self.block_offsets[block]..self.block_offsets[block + 1]].iter()
     }
 
     /// Rebuilds the block interface data.
     pub fn build(&mut self, tree: &Tree<N>, blocks: &TreeBlocks<N>) {
+        self.neighbors.clear();
+        self.block_offsets.clear();
         self.fine.clear();
         self.coarse.clear();
         self.direct.clear();
@@ -97,6 +107,8 @@ impl<const N: usize> TreeNeighbors<N> {
         let mut neighbors = Vec::new();
 
         for block in 0..blocks.len() {
+            self.block_offsets.push(self.neighbors.len());
+
             // Build cell neighbors.
             neighbors.clear();
             Self::build_cell_neighbors(tree, blocks, block, &mut neighbors);
@@ -123,13 +135,18 @@ impl<const N: usize> TreeNeighbors<N> {
                     b,
                 };
 
+                let idx = self.neighbors.len();
+                self.neighbors.push(interface);
+
                 match kind {
-                    InterfaceKind::Fine => self.fine.push(interface),
-                    InterfaceKind::Direct => self.direct.push(interface),
-                    InterfaceKind::Coarse => self.coarse.push(interface),
+                    InterfaceKind::Fine => self.fine.push(idx),
+                    InterfaceKind::Direct => self.direct.push(idx),
+                    InterfaceKind::Coarse => self.coarse.push(idx),
                 }
             });
         }
+
+        self.block_offsets.push(self.neighbors.len());
     }
 
     /// Iterates the cell neighbors of a block, and pushes them onto the memory stack.

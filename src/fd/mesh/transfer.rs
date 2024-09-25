@@ -1,5 +1,5 @@
 use aeon_basis::{Boundary, BoundaryKind, Condition, Kernels};
-use aeon_geometry::{faces, Face, IndexSpace, Side, TreeBlockNeighbor, TreeCellNeighbor};
+use aeon_geometry::{faces, Face, IndexSpace, Region, Side, TreeBlockNeighbor, TreeCellNeighbor};
 use rayon::iter::{ParallelBridge, ParallelIterator};
 use reborrow::Reborrow as _;
 use std::{array, iter};
@@ -9,6 +9,22 @@ use crate::{
     shared::SharedSlice,
     system::{SystemLabel, SystemSlice, SystemSliceMut},
 };
+
+#[derive(Clone, Debug)]
+pub(super) struct TreeInterface<const N: usize> {
+    /// Block to be filled
+    block: usize,
+    /// Neighbor block.
+    neighbor: usize,
+    aregion: Region<N>,
+    bregion: Region<N>,
+    /// Source node in neighbor block.
+    source: [isize; N],
+    /// Destination node in target block.
+    dest: [isize; N],
+    /// Number of nodes to be filled along each axis.
+    size: [usize; N],
+}
 
 struct TransferAABB<const N: usize> {
     /// Source node in neighbor block.
@@ -383,18 +399,53 @@ impl<const N: usize> Mesh<N> {
         });
     }
 
-    fn padding_aabbs(
-        &self,
-        interface: &TreeBlockNeighbor<N>,
-        extent: usize,
-    ) -> impl Iterator<Item = TransferAABB<N>> + '_ {
-        iter::once(self.region_aabb(interface, extent)).chain(self.face_aabb(interface))
+    pub(super) fn build_interfaces(&mut self) {
+        self.interfaces.clear();
+        self.interface_node_offsets.clear();
+        self.interface_masks.clear();
+
+        for neighbor in self.neighbors.iter() {
+            let aabb = self.region_aabb(neighbor);
+
+            self.interfaces.push(TreeInterface {
+                block: neighbor.block,
+                neighbor: neighbor.neighbor,
+                aregion: neighbor.a.region.clone(),
+                bregion: neighbor.b.region.clone(),
+                source: aabb.source,
+                dest: aabb.dest,
+                size: aabb.size,
+            });
+        }
+
+        // Compute node offsets
+
+        let mut cursor = 0;
+
+        for interface in self.interfaces.iter() {
+            self.interface_node_offsets.push(cursor);
+
+            cursor += IndexSpace::new(interface.size).index_count();
+        }
+
+        self.interface_node_offsets.push(cursor);
+
+        // Compute interface masks
+
+        // Retrieve index masks
+        let mut interface_masks = std::mem::take(&mut self.interface_masks);
+        self.interface_masks.resize(cursor, false);
+
+        // Construct shared slice
+        let masks = SharedSlice::new(&mut interface_masks);
+
+        self.block_compute(|mesh, store, block| {});
+
+        let _ = std::mem::replace(&mut self.interface_masks, interface_masks);
     }
 
     /// Computes transfer aabb for nodes that lie outside the node space.
-    fn region_aabb(&self, interface: &TreeBlockNeighbor<N>, extent: usize) -> TransferAABB<N> {
-        debug_assert!(extent <= self.ghost);
-
+    fn region_aabb(&self, interface: &TreeBlockNeighbor<N>) -> TransferAABB<N> {
         let a = interface.a.clone();
         let b = interface.b.clone();
 
@@ -424,7 +475,7 @@ impl<const N: usize> Mesh<N> {
         for axis in 0..N {
             match a.region.side(axis) {
                 Side::Left => {
-                    anode[axis] -= extent as isize;
+                    anode[axis] -= self.ghost as isize;
                 }
                 Side::Right => {
                     anode[axis] += self.width as isize;
@@ -450,7 +501,7 @@ impl<const N: usize> Mesh<N> {
         for axis in 0..N {
             match b.region.side(axis) {
                 Side::Right => {
-                    bnode[axis] += extent as isize;
+                    bnode[axis] += self.ghost as isize;
                 }
                 Side::Left => {
                     bnode[axis] -= self.width as isize;
@@ -462,27 +513,27 @@ impl<const N: usize> Mesh<N> {
         // **************************
         // Origin
 
-        let mut source = self.aabb_source(&a, extent);
+        let source = self.aabb_source(&a, self.ghost);
 
-        // Ensure regions are disjoint
-        for axis in 0..N {
-            if b.region.side(axis) == Side::Middle
-                && bnode[axis] < (block_size[axis] * self.width) as isize
-            {
-                bnode[axis] -= 1;
-            }
-        }
+        // // Ensure regions are disjoint
+        // for axis in 0..N {
+        //     if b.region.side(axis) == Side::Middle
+        //         && bnode[axis] < (block_size[axis] * self.width) as isize
+        //     {
+        //         bnode[axis] -= 1;
+        //     }
+        // }
 
-        for axis in 0..N {
-            if b.region.side(axis) == Side::Left {
-                bnode[axis] -= 1;
-            }
+        // for axis in 0..N {
+        //     if b.region.side(axis) == Side::Left {
+        //         bnode[axis] -= 1;
+        //     }
 
-            if a.region.side(axis) == Side::Right {
-                anode[axis] += 1;
-                source[axis] += 1;
-            }
-        }
+        //     if a.region.side(axis) == Side::Right {
+        //         anode[axis] += 1;
+        //         source[axis] += 1;
+        //     }
+        // }
 
         let size = array::from_fn(|axis| {
             if bnode[axis] >= anode[axis] {
@@ -499,103 +550,103 @@ impl<const N: usize> Mesh<N> {
         }
     }
 
-    /// Computes transfer aabb for nodes on a face of the node space.
-    fn face_aabb(&self, interface: &TreeBlockNeighbor<N>) -> Option<TransferAABB<N>> {
-        let face = interface.face()?;
+    // /// Computes transfer aabb for nodes on a face of the node space.
+    // fn face_aabb(&self, interface: &TreeBlockNeighbor<N>) -> Option<TransferAABB<N>> {
+    //     let face = interface.face()?;
 
-        let a = interface.a.clone();
-        let b = interface.b.clone();
+    //     let a = interface.a.clone();
+    //     let b = interface.b.clone();
 
-        let aindex = self.blocks.cell_position(a.cell);
-        let bindex = self.blocks.cell_position(b.cell);
+    //     let aindex = self.blocks.cell_position(a.cell);
+    //     let bindex = self.blocks.cell_position(b.cell);
 
-        let block_size = self.blocks.size(interface.block);
+    //     let block_size = self.blocks.size(interface.block);
 
-        let block_level = self.tree.level(a.cell);
-        let neighbor_level = self.tree.level(a.neighbor);
+    //     let block_level = self.tree.level(a.cell);
+    //     let neighbor_level = self.tree.level(a.neighbor);
 
-        let block_space = self.block_space(interface.block);
+    //     let block_space = self.block_space(interface.block);
 
-        // If coarser, we should not copy nodes from fine
-        if block_level < neighbor_level {
-            return None;
-        }
+    //     // If coarser, we should not copy nodes from fine
+    //     if block_level < neighbor_level {
+    //         return None;
+    //     }
 
-        // If same level, only transfer if neighbor has
-        if block_level == neighbor_level && interface.block < interface.neighbor {
-            return None;
-        }
+    //     // If same level, only transfer if neighbor has
+    //     if block_level == neighbor_level && interface.block < interface.neighbor {
+    //         return None;
+    //     }
 
-        // Destination AABB
-        let mut origin: [_; N] = array::from_fn(|axis| (aindex[axis] * self.width) as isize);
-        if face.side {
-            origin[face.axis] += self.width as isize;
-        }
+    //     // Destination AABB
+    //     let mut origin: [_; N] = array::from_fn(|axis| (aindex[axis] * self.width) as isize);
+    //     if face.side {
+    //         origin[face.axis] += self.width as isize;
+    //     }
 
-        let mut size: [usize; N] =
-            array::from_fn(|axis| (bindex[axis] - aindex[axis] + 1) * self.width + 1);
-        size[face.axis] = 1;
+    //     let mut size: [usize; N] =
+    //         array::from_fn(|axis| (bindex[axis] - aindex[axis] + 1) * self.width + 1);
+    //     size[face.axis] = 1;
 
-        // Offset if the neighbor is more fine.
-        if block_level < neighbor_level {
-            let split = self.tree.split(a.neighbor);
-            (0..N)
-                .filter(|&axis| a.region.side(axis) == Side::Middle && split.is_set(axis))
-                .for_each(|axis| {
-                    origin[axis] += (self.width / 2) as isize;
-                    size[axis] -= self.width / 2;
-                });
+    //     // Offset if the neighbor is more fine.
+    //     if block_level < neighbor_level {
+    //         let split = self.tree.split(a.neighbor);
+    //         (0..N)
+    //             .filter(|&axis| a.region.side(axis) == Side::Middle && split.is_set(axis))
+    //             .for_each(|axis| {
+    //                 origin[axis] += (self.width / 2) as isize;
+    //                 size[axis] -= self.width / 2;
+    //             });
 
-            let split = self.tree.split(b.neighbor);
-            (0..N)
-                .filter(|&axis| b.region.side(axis) == Side::Middle && !split.is_set(axis))
-                .for_each(|axis| size[axis] -= self.width / 2);
-        }
+    //         let split = self.tree.split(b.neighbor);
+    //         (0..N)
+    //             .filter(|&axis| b.region.side(axis) == Side::Middle && !split.is_set(axis))
+    //             .for_each(|axis| size[axis] -= self.width / 2);
+    //     }
 
-        let mut source = self.aabb_source(&a, 0);
+    //     let mut source = self.aabb_source(&a, 0);
 
-        // Ensure that all aabbs on a given face don't overlap
-        for axis in 0..N {
-            if b.region.side(axis) == Side::Middle
-                && (origin[axis] + size[axis] as isize)
-                    < (block_size[axis] * self.width + 1) as isize
-            {
-                size[axis] -= 1;
-            }
-        }
+    //     // Ensure that all aabbs on a given face don't overlap
+    //     for axis in 0..N {
+    //         if b.region.side(axis) == Side::Middle
+    //             && (origin[axis] + size[axis] as isize)
+    //                 < (block_size[axis] * self.width + 1) as isize
+    //         {
+    //             size[axis] -= 1;
+    //         }
+    //     }
 
-        // // Intersect with disjoint face window.
-        // let window = block_space.face_window_disjoint(face);
+    //     // // Intersect with disjoint face window.
+    //     // let window = block_space.face_window_disjoint(face);
 
-        // for axis in 0..N {
-        //     if origin[axis] < window.origin[axis] {
-        //         let diff = window.origin[axis] - origin[axis];
+    //     // for axis in 0..N {
+    //     //     if origin[axis] < window.origin[axis] {
+    //     //         let diff = window.origin[axis] - origin[axis];
 
-        //         debug_assert!(diff == 1);
+    //     //         debug_assert!(diff == 1);
 
-        //         origin[axis] += diff;
-        //         source[axis] += diff;
-        //         size[axis] -= diff as usize;
-        //     }
+    //     //         origin[axis] += diff;
+    //     //         source[axis] += diff;
+    //     //         size[axis] -= diff as usize;
+    //     //     }
 
-        //     let corner = origin[axis] + size[axis] as isize;
-        //     let window_corner = window.origin[axis] + window.size[axis] as isize;
+    //     //     let corner = origin[axis] + size[axis] as isize;
+    //     //     let window_corner = window.origin[axis] + window.size[axis] as isize;
 
-        //     if corner > window_corner {
-        //         let diff = corner - window_corner;
+    //     //     if corner > window_corner {
+    //     //         let diff = corner - window_corner;
 
-        //         debug_assert!(diff == 1);
+    //     //         debug_assert!(diff == 1);
 
-        //         size[axis] -= diff as usize;
-        //     }
-        // }
+    //     //         size[axis] -= diff as usize;
+    //     //     }
+    //     // }
 
-        Some(TransferAABB {
-            source,
-            dest: origin,
-            size,
-        })
-    }
+    //     Some(TransferAABB {
+    //         source,
+    //         dest: origin,
+    //         size,
+    //     })
+    // }
 
     /// Computes the source node on the neighboring block from which we fill the current block.
     #[inline]

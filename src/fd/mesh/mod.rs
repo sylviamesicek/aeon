@@ -1,8 +1,5 @@
 use aeon_basis::{Boundary, BoundaryKind, NodeSpace, NodeWindow};
-use aeon_geometry::{
-    faces, FaceMask, IndexSpace, Rectangle, Tree, TreeBlocks, TreeInterfaces, TreeNeighbors,
-    TreeNodes,
-};
+use aeon_geometry::{faces, FaceMask, IndexSpace, Rectangle, Tree, TreeBlocks, TreeNeighbors};
 use rayon::iter::{IntoParallelIterator, ParallelBridge, ParallelIterator};
 use ron::ser::PrettyConfig;
 use std::{
@@ -32,6 +29,8 @@ mod transfer;
 pub use checkpoint::{MeshCheckpoint, SystemCheckpoint};
 pub use store::MeshStore;
 
+use transfer::TreeInterface;
+
 use crate::fd::BlockBoundary;
 use crate::system::{SystemLabel, SystemSlice};
 
@@ -42,10 +41,14 @@ pub struct Mesh<const N: usize> {
     ghost: usize,
 
     blocks: TreeBlocks<N>,
+    block_node_offsets: Vec<usize>,
+
     neighbors: TreeNeighbors<N>,
 
-    nodes: TreeNodes<N>,
-    interfaces: TreeInterfaces<N>,
+    interfaces: Vec<TreeInterface<N>>,
+    interface_node_offsets: Vec<usize>,
+    interface_masks: Vec<bool>,
+
     // refine_flags: Vec<bool>,
     stores: ThreadLocal<UnsafeCell<MeshStore>>,
 }
@@ -62,8 +65,10 @@ impl<const N: usize> Mesh<N> {
             blocks: TreeBlocks::default(),
             neighbors: TreeNeighbors::default(),
 
-            nodes: TreeNodes::default(),
-            interfaces: TreeInterfaces::default(),
+            block_node_offsets: Vec::default(),
+            interfaces: Vec::default(),
+            interface_node_offsets: Vec::default(),
+            interface_masks: Vec::default(),
 
             stores: ThreadLocal::new(),
             // refine_flags: Vec::new(),
@@ -77,15 +82,27 @@ impl<const N: usize> Mesh<N> {
     pub fn build(&mut self) {
         self.blocks.build(&self.tree);
         self.neighbors.build(&self.tree, &self.blocks);
+        self.build_block_node_offests();
+        self.build_interfaces();
+    }
 
-        self.nodes.width = [self.width; N];
-        self.nodes.ghost = self.ghost;
-        self.nodes.build(&self.blocks);
-        self.interfaces
-            .build(&self.tree, &self.blocks, &self.neighbors, &self.nodes);
+    pub fn build_block_node_offests(&mut self) {
+        let num_blocks = self.num_blocks();
+        self.block_node_offsets.resize(num_blocks + 1, 0);
 
-        // self.refine_flags.clear();
-        // self.refine_flags.resize(self.tree.num_cells(), false);
+        let mut cursor = 0;
+
+        for block in 0..num_blocks {
+            self.block_node_offsets[block] = cursor;
+
+            let size = self.blocks.size(block);
+            cursor += IndexSpace::<N>::new(array::from_fn(|axis| {
+                size[axis] * self.width + 1 + 2 * self.ghost
+            }))
+            .index_count();
+        }
+
+        self.block_node_offsets[num_blocks] = cursor;
     }
 
     pub fn tree(&self) -> &Tree<N> {
@@ -109,11 +126,11 @@ impl<const N: usize> Mesh<N> {
     }
 
     pub fn num_nodes(&self) -> usize {
-        self.nodes.len()
+        *self.block_node_offsets.last().unwrap()
     }
 
     pub fn block_nodes(&self, block: usize) -> Range<usize> {
-        self.nodes.range(block)
+        self.block_node_offsets[block]..self.block_node_offsets[block + 1]
     }
 
     /// Returns the window of nodes in a block corresponding to
@@ -146,9 +163,9 @@ impl<const N: usize> Mesh<N> {
     /// Computes the nodespace corresponding to a block.
     pub fn block_space(&self, block: usize) -> NodeSpace<N> {
         let size = self.blocks.size(block);
-        let cell_size = array::from_fn(|axis| size[axis] * self.nodes.width[axis]);
+        let cell_size = array::from_fn(|axis| size[axis] * self.width);
 
-        NodeSpace::new(cell_size, self.nodes.ghost)
+        NodeSpace::new(cell_size, self.ghost)
     }
 
     pub fn block_bounds(&self, block: usize) -> Rectangle<N> {
@@ -215,7 +232,7 @@ impl<const N: usize> Mesh<N> {
         let domain = self.tree.domain();
 
         array::from_fn::<_, N, _>(|axis| {
-            domain.size[axis] / self.nodes.width[axis] as f64 / 2_f64.powi(max_level as i32)
+            domain.size[axis] / self.width as f64 / 2_f64.powi(max_level as i32)
         })
         .iter()
         .min_by(|a, b| f64::total_cmp(a, b))
@@ -414,74 +431,74 @@ impl<const N: usize> Mesh<N> {
 
         writeln!(result, "// Fine Interfaces").unwrap();
 
-        for interface in self.interfaces.fine() {
-            writeln!(
-                result,
-                "Fine Interface {} -> {}",
-                interface.block, interface.neighbor
-            )
-            .unwrap();
-            writeln!(
-                result,
-                "    Source {}: Origin {:?}, Size {:?}",
-                interface.neighbor, interface.source, interface.size
-            )
-            .unwrap();
-            writeln!(
-                result,
-                "    Dest {}: Origin {:?}, Size {:?}",
-                interface.block, interface.dest, interface.size
-            )
-            .unwrap();
-        }
+        // for interface in self.interfaces.fine() {
+        //     writeln!(
+        //         result,
+        //         "Fine Interface {} -> {}",
+        //         interface.block, interface.neighbor
+        //     )
+        //     .unwrap();
+        //     writeln!(
+        //         result,
+        //         "    Source {}: Origin {:?}, Size {:?}",
+        //         interface.neighbor, interface.source, interface.size
+        //     )
+        //     .unwrap();
+        //     writeln!(
+        //         result,
+        //         "    Dest {}: Origin {:?}, Size {:?}",
+        //         interface.block, interface.dest, interface.size
+        //     )
+        //     .unwrap();
+        // }
 
         writeln!(result, "").unwrap();
         writeln!(result, "// Direct Interfaces").unwrap();
 
-        for interface in self.interfaces.direct() {
-            writeln!(
-                result,
-                "Direct Interface {} -> {}",
-                interface.block, interface.neighbor
-            )
-            .unwrap();
-            writeln!(
-                result,
-                "    Source {}: Origin {:?}, Size {:?}",
-                interface.neighbor, interface.source, interface.size
-            )
-            .unwrap();
-            writeln!(
-                result,
-                "    Dest {}: Origin {:?}, Size {:?}",
-                interface.block, interface.dest, interface.size
-            )
-            .unwrap();
-        }
+        // for interface in self.interfaces.direct() {
+        //     writeln!(
+        //         result,
+        //         "Direct Interface {} -> {}",
+        //         interface.block, interface.neighbor
+        //     )
+        //     .unwrap();
+        //     writeln!(
+        //         result,
+        //         "    Source {}: Origin {:?}, Size {:?}",
+        //         interface.neighbor, interface.source, interface.size
+        //     )
+        //     .unwrap();
+        //     writeln!(
+        //         result,
+        //         "    Dest {}: Origin {:?}, Size {:?}",
+        //         interface.block, interface.dest, interface.size
+        //     )
+        //     .unwrap();
+        // }
 
         writeln!(result, "").unwrap();
         writeln!(result, "// Coarse Interfaces").unwrap();
 
-        for interface in self.interfaces.coarse() {
-            writeln!(
-                result,
-                "Coarse Interface {} -> {}",
-                interface.block, interface.neighbor
-            )
-            .unwrap();
-            writeln!(
-                result,
-                "    Source {}: Origin {:?}, Size {:?}",
-                interface.neighbor, interface.source, interface.size
-            )
-            .unwrap();
-            writeln!(
-                result,
-                "    Dest {}: Origin {:?}, Size {:?}",
-                interface.block, interface.dest, interface.size
-            )
-            .unwrap();
-        }
+        // for interface in self.interfaces.coarse() {
+        //     writeln!(
+        //         result,
+        //         "Coarse Interface {} -> {}",
+        //         interface.block, interface.neighbor
+        //     )
+        //     .unwrap();
+        //     writeln!(
+        //         result,
+        //         "    Source {}: Origin {:?}, Size {:?}",
+        //         interface.neighbor, interface.source, interface.size
+        //     )
+        //     .unwrap();
+        //     writeln!(
+        //         result,
+        //         "    Dest {}: Origin {:?}, Size {:?}",
+        //         interface.block, interface.dest, interface.size
+        //     )
+        //     .unwrap();
+        // }
     }
 }
 
@@ -495,8 +512,11 @@ impl<const N: usize> Clone for Mesh<N> {
             blocks: self.blocks.clone(),
             neighbors: self.neighbors.clone(),
 
-            nodes: self.nodes.clone(),
+            block_node_offsets: self.block_node_offsets.clone(),
+
             interfaces: self.interfaces.clone(),
+            interface_node_offsets: self.interface_node_offsets.clone(),
+            interface_masks: self.interface_masks.clone(),
 
             stores: ThreadLocal::new(),
         }
@@ -511,11 +531,13 @@ impl<const N: usize> Default for Mesh<N> {
             ghost: 1,
 
             blocks: TreeBlocks::default(),
+            block_node_offsets: Vec::default(),
             neighbors: TreeNeighbors::default(),
 
-            nodes: TreeNodes::default(),
-            interfaces: TreeInterfaces::default(),
-            // refine_flags: Vec::new(),
+            interfaces: Vec::default(),
+            interface_node_offsets: Vec::default(),
+            interface_masks: Vec::default(),
+
             stores: ThreadLocal::new(),
         };
 
@@ -734,36 +756,6 @@ impl<const N: usize> Mesh<N> {
 
             attributes.point.push(Attribute::DataArray(DataArrayBase {
                 name: format!("Field::{}", name),
-                elem: ElementType::Scalars {
-                    num_comp: 1,
-                    lookup_table: None,
-                },
-                data: IOBuffer::new(data),
-            }));
-        }
-
-        for (name, system) in config.systems.int_fields.iter() {
-            let mut data = Vec::new();
-
-            for block in 0..self.blocks.len() {
-                let space = self.block_space(block);
-                let nodes = self.block_nodes(block);
-
-                let window = if config.ghost {
-                    space.full_window()
-                } else {
-                    space.inner_window()
-                };
-
-                for node in window {
-                    let index = space.index_from_node(node);
-                    let value = system[nodes.start + index];
-                    data.push(value);
-                }
-            }
-
-            attributes.point.push(Attribute::DataArray(DataArrayBase {
-                name: format!("FieldInt::{}", name),
                 elem: ElementType::Scalars {
                     num_comp: 1,
                     lookup_table: None,
