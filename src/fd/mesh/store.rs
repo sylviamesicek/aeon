@@ -7,7 +7,7 @@ pub struct MeshStore {
 
 impl MeshStore {
     /// Allocates scratch data for use by the current thread.
-    pub fn scratch(&self, len: usize) -> &mut [f64] {
+    pub fn scratch<T: Default>(&self, len: usize) -> &mut [T] {
         self.arena.alloc_slice_fill_default(len)
     }
 

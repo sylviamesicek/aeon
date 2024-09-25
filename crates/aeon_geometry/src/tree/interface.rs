@@ -1,5 +1,6 @@
 use crate::{regions, IndexSpace, Region, NULL};
 use crate::{Face, Side, Tree, TreeBlocks, TreeNodes};
+use std::ops::Range;
 use std::{array, slice};
 
 /// Stores neighbor of a cell on a tree.
@@ -93,6 +94,15 @@ impl<const N: usize> TreeNeighbors<N> {
     /// Iterates over all neighbors of a block.
     pub fn block(&self, block: usize) -> slice::Iter<'_, TreeBlockNeighbor<N>> {
         self.neighbors[self.block_offsets[block]..self.block_offsets[block + 1]].iter()
+    }
+
+    /// Returns the range of neighbor indices belonging to a given block.
+    pub fn block_range(&self, block: usize) -> Range<usize> {
+        self.block_offsets[block]..self.block_offsets[block + 1]
+    }
+
+    pub fn neighbor(&self, idx: usize) -> &TreeBlockNeighbor<N> {
+        &self.neighbors[idx]
     }
 
     /// Rebuilds the block interface data.

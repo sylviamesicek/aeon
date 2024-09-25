@@ -418,6 +418,7 @@ impl<const N: usize> Mesh<N> {
             });
         }
 
+        // ************************
         // Compute node offsets
 
         let mut cursor = 0;
@@ -430,6 +431,7 @@ impl<const N: usize> Mesh<N> {
 
         self.interface_node_offsets.push(cursor);
 
+        // **************************
         // Compute interface masks
 
         // Retrieve index masks
@@ -439,8 +441,18 @@ impl<const N: usize> Mesh<N> {
         // Construct shared slice
         let masks = SharedSlice::new(&mut interface_masks);
 
-        self.block_compute(|mesh, store, block| {});
+        self.block_compute(|mesh, store, block| {
+            let block_space = mesh.block_space(block);
 
+            let mut indices = store.scratch(block_space.num_nodes());
+            indices.fill(usize::MAX);
+
+            for idx in mesh.neighbors.block_range(block) {
+                let interface = &mesh.interfaces[idx];
+            }
+        });
+
+        // Now replace interface masks in mesh.
         let _ = std::mem::replace(&mut self.interface_masks, interface_masks);
     }
 
