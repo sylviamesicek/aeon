@@ -80,7 +80,7 @@ impl<const N: usize> Mesh<N> {
         let system = system.as_range();
 
         // Fill direct neighbors
-        self.neighbors.direct().par_bridge().for_each(|interface| {
+        self.neighbors.direct().for_each(|interface| {
             let block_space = self.block_space(interface.block);
             let block_nodes = self.block_nodes(interface.block);
             let neighbor_space = self.block_space(interface.neighbor);
@@ -114,7 +114,7 @@ impl<const N: usize> Mesh<N> {
     ) {
         let system = system.as_range();
 
-        self.neighbors.fine().par_bridge().for_each(|interface| {
+        self.neighbors.fine().for_each(|interface| {
             let block_space = self.block_space(interface.block);
             let block_nodes = self.block_nodes(interface.block);
             let neighbor_space = self.block_space(interface.neighbor);
@@ -150,7 +150,7 @@ impl<const N: usize> Mesh<N> {
         system: &mut SystemSliceMut<'_, C::System>,
     ) {
         let system = system.as_range();
-        self.neighbors.coarse().par_bridge().for_each(|interface| {
+        self.neighbors.coarse().for_each(|interface| {
             let block_nodes = self.block_nodes(interface.block);
             let block_space = self.block_space(interface.block);
             let neighbor_nodes = self.block_nodes(interface.neighbor);
@@ -304,8 +304,9 @@ impl<const N: usize> Mesh<N> {
         });
     }
 
-    pub fn fill_interface_debug_info(&mut self, extent: usize, info: &mut [isize]) {
+    pub fn interface_indices(&mut self, extent: usize, info: &mut [i64]) {
         assert!(info.len() == self.num_nodes());
+        assert!(extent <= self.ghost);
 
         info.fill(0);
 
@@ -327,11 +328,59 @@ impl<const N: usize> Mesh<N> {
                         let block_index = block_space.index_from_node(block_node);
 
                         unsafe {
-                            *info.get_mut(block_nodes.start + block_index) = i as isize;
+                            *info.get_mut(block_nodes.start + block_index) = i as i64;
                         }
                     }
                 }
             });
+    }
+
+    pub fn block_interface_indices(&mut self, extent: usize, info: &mut [i64]) {
+        assert!(info.len() == self.num_nodes());
+        assert!(extent <= self.ghost);
+
+        info.fill(0);
+
+        let info = SharedSlice::new(info);
+
+        self.neighbors
+            .iter()
+            .enumerate()
+            .par_bridge()
+            .for_each(|(i, interface)| {
+                let block_nodes = self.block_nodes(interface.block);
+                let block_space = self.block_space(interface.block);
+
+                for aabb in self.padding_aabbs(interface, extent) {
+                    for node in IndexSpace::new(aabb.size).iter() {
+                        let block_node =
+                            array::from_fn(|axis| node[axis] as isize + aabb.dest[axis]);
+
+                        let block_index = block_space.index_from_node(block_node);
+
+                        unsafe {
+                            *info.get_mut(block_nodes.start + block_index) =
+                                interface.neighbor as i64;
+                        }
+                    }
+                }
+            });
+    }
+
+    pub fn block_debug(&mut self, debug: &mut [i64]) {
+        assert!(debug.len() == self.num_nodes());
+
+        let debug = SharedSlice::new(debug);
+
+        self.block_compute(|mesh, store, block| {
+            let block_nodes = mesh.block_nodes(block);
+
+            for node in block_nodes {
+                unsafe {
+                    *debug.get_mut(node) = block as i64;
+                }
+            }
+        });
     }
 
     fn padding_aabbs(
@@ -467,6 +516,16 @@ impl<const N: usize> Mesh<N> {
 
         let block_space = self.block_space(interface.block);
 
+        // If coarser, we should not copy nodes from fine
+        if block_level < neighbor_level {
+            return None;
+        }
+
+        // If same level, only transfer if neighbor has
+        if block_level == neighbor_level && interface.block < interface.neighbor {
+            return None;
+        }
+
         // Destination AABB
         let mut origin: [_; N] = array::from_fn(|axis| (aindex[axis] * self.width) as isize);
         if face.side {
@@ -474,7 +533,7 @@ impl<const N: usize> Mesh<N> {
         }
 
         let mut size: [usize; N] =
-            array::from_fn(|axis| (bindex[axis] - aindex[axis] + 1) * self.width);
+            array::from_fn(|axis| (bindex[axis] - aindex[axis] + 1) * self.width + 1);
         size[face.axis] = 1;
 
         // Offset if the neighbor is more fine.
@@ -498,37 +557,38 @@ impl<const N: usize> Mesh<N> {
         // Ensure that all aabbs on a given face don't overlap
         for axis in 0..N {
             if b.region.side(axis) == Side::Middle
-                && (origin[axis] + size[axis] as isize) < (block_size[axis] * self.width) as isize
+                && (origin[axis] + size[axis] as isize)
+                    < (block_size[axis] * self.width + 1) as isize
             {
                 size[axis] -= 1;
             }
         }
 
-        // Intersect with disjoint face window.
-        let window = block_space.face_window_disjoint(face);
+        // // Intersect with disjoint face window.
+        // let window = block_space.face_window_disjoint(face);
 
-        for axis in 0..N {
-            if origin[axis] < window.origin[axis] {
-                let diff = window.origin[axis] - origin[axis];
+        // for axis in 0..N {
+        //     if origin[axis] < window.origin[axis] {
+        //         let diff = window.origin[axis] - origin[axis];
 
-                debug_assert!(diff == 1);
+        //         debug_assert!(diff == 1);
 
-                origin[axis] += diff;
-                source[axis] += diff;
-                size[axis] -= diff as usize;
-            }
+        //         origin[axis] += diff;
+        //         source[axis] += diff;
+        //         size[axis] -= diff as usize;
+        //     }
 
-            let corner = origin[axis] + size[axis] as isize;
-            let window_corner = window.origin[axis] + window.size[axis] as isize;
+        //     let corner = origin[axis] + size[axis] as isize;
+        //     let window_corner = window.origin[axis] + window.size[axis] as isize;
 
-            if corner > window_corner {
-                let diff = corner - window_corner;
+        //     if corner > window_corner {
+        //         let diff = corner - window_corner;
 
-                debug_assert!(diff == 1);
+        //         debug_assert!(diff == 1);
 
-                size[axis] -= diff as usize;
-            }
-        }
+        //         size[axis] -= diff as usize;
+        //     }
+        // }
 
         Some(TransferAABB {
             source,

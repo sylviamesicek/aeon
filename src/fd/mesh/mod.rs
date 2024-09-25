@@ -742,6 +742,36 @@ impl<const N: usize> Mesh<N> {
             }));
         }
 
+        for (name, system) in config.systems.int_fields.iter() {
+            let mut data = Vec::new();
+
+            for block in 0..self.blocks.len() {
+                let space = self.block_space(block);
+                let nodes = self.block_nodes(block);
+
+                let window = if config.ghost {
+                    space.full_window()
+                } else {
+                    space.inner_window()
+                };
+
+                for node in window {
+                    let index = space.index_from_node(node);
+                    let value = system[nodes.start + index];
+                    data.push(value);
+                }
+            }
+
+            attributes.point.push(Attribute::DataArray(DataArrayBase {
+                name: format!("FieldInt::{}", name),
+                elem: ElementType::Scalars {
+                    num_comp: 1,
+                    lookup_table: None,
+                },
+                data: IOBuffer::new(data),
+            }));
+        }
+
         let piece = UnstructuredGridPiece {
             points,
             cells,

@@ -7,7 +7,7 @@ mod choptuik;
 mod garfinkle;
 
 const CHOPTUIK: bool = false;
-const GHOST: bool = false;
+const GHOST: bool = true;
 
 const ORDER: Order<4> = Order::<4>;
 /// Initial data in Rinne's hyperbolic variables.
@@ -160,9 +160,21 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         println!("{flags:?}");
 
+        let mut indices = vec![0i64; mesh.num_nodes()];
+        mesh.interface_indices(2, &mut indices);
+
+        let mut block_indices = vec![0i64; mesh.num_nodes()];
+        mesh.block_interface_indices(2, &mut block_indices);
+
+        let mut blocks = vec![0; mesh.num_nodes()];
+        mesh.block_debug(&mut blocks);
+
         let mut systems = SystemCheckpoint::default();
         systems.save_system(rinne.as_slice());
         systems.save_field("hamiltonian", &hamiltonian);
+        systems.save_int_field("interface", &indices);
+        systems.save_int_field("block_interface", &block_indices);
+        systems.save_int_field("blocks", &blocks);
 
         mesh.export_vtk(
             format!("output/garfinkle.vtu"),

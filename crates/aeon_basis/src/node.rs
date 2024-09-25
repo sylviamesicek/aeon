@@ -213,6 +213,12 @@ impl<const N: usize> NodeSpace<N> {
         }
     }
 
+    // pub fn active_window(&self, boundary: &impl Boundary<N>) -> NodeWindow<N> {
+    //     let mut origin = [0; N];
+
+    //     mat
+    // }
+
     /// Returns the window which encompasses the whole node space
     pub fn full_window(&self) -> NodeWindow<N> {
         let mut origin = [0; N];
@@ -260,7 +266,7 @@ impl<const N: usize> NodeSpace<N> {
         let intercept = if face.side { self.size[face.axis] } else { 0 } as isize;
 
         let mut origin = [0; N];
-        let mut size = array::from_fn(|axis| self.size[axis] + 1);
+        let mut size = self.inner_size();
 
         origin[face.axis] = intercept;
         size[face.axis] = 1;

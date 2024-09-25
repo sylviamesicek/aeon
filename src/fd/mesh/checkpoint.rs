@@ -43,6 +43,7 @@ impl<const N: usize> Default for MeshCheckpoint<N> {
 pub struct SystemCheckpoint {
     pub(crate) systems: HashMap<String, SystemMeta>,
     pub(crate) fields: HashMap<String, Vec<f64>>,
+    pub(crate) int_fields: HashMap<String, Vec<i64>>,
 }
 
 impl SystemCheckpoint {
@@ -82,6 +83,15 @@ impl SystemCheckpoint {
     /// Reads a field from the model.
     pub fn load_field(&self, name: &str, data: &mut Vec<f64>) {
         data.clone_from_slice(self.fields.get(name).unwrap());
+    }
+
+    pub fn save_int_field(&mut self, name: &str, data: &[i64]) {
+        assert!(!self.int_fields.contains_key(name));
+        self.int_fields.insert(name.to_string(), data.to_vec());
+    }
+
+    pub fn load_int_field(&self, name: &str, data: &mut Vec<i64>) {
+        data.clone_from_slice(self.int_fields.get(name).unwrap());
     }
 }
 
