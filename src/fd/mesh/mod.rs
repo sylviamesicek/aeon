@@ -87,22 +87,24 @@ impl<const N: usize> Mesh<N> {
     }
 
     pub fn build_block_node_offests(&mut self) {
-        let num_blocks = self.num_blocks();
-        self.block_node_offsets.resize(num_blocks + 1, 0);
+        // Reset offsets
+        self.block_node_offsets.clear();
 
         let mut cursor = 0;
 
-        for block in 0..num_blocks {
-            self.block_node_offsets[block] = cursor;
+        for block in 0..self.num_blocks() {
+            self.block_node_offsets.push(cursor);
 
             let size = self.blocks.size(block);
-            cursor += IndexSpace::<N>::new(array::from_fn(|axis| {
-                size[axis] * self.width + 1 + 2 * self.ghost
-            }))
-            .index_count();
+
+            let nodes_in_block =
+                NodeSpace::<N>::new(array::from_fn(|axis| size[axis] * self.width), self.ghost)
+                    .num_nodes();
+
+            cursor += nodes_in_block;
         }
 
-        self.block_node_offsets[num_blocks] = cursor;
+        self.block_node_offsets.push(cursor);
     }
 
     pub fn tree(&self) -> &Tree<N> {
@@ -185,6 +187,10 @@ impl<const N: usize> Mesh<N> {
             flags: self.block_boundary_flags(block),
             inner: boundary,
         }
+    }
+
+    pub fn block_level(&self, block: usize) -> usize {
+        self.tree.level(self.blocks.cells(block)[0])
     }
 
     /// Returns true if the given cell is on a physical boundary.
@@ -756,6 +762,36 @@ impl<const N: usize> Mesh<N> {
 
             attributes.point.push(Attribute::DataArray(DataArrayBase {
                 name: format!("Field::{}", name),
+                elem: ElementType::Scalars {
+                    num_comp: 1,
+                    lookup_table: None,
+                },
+                data: IOBuffer::new(data),
+            }));
+        }
+
+        for (name, system) in config.systems.int_fields.iter() {
+            let mut data = Vec::new();
+
+            for block in 0..self.blocks.len() {
+                let space = self.block_space(block);
+                let nodes = self.block_nodes(block);
+
+                let window = if config.ghost {
+                    space.full_window()
+                } else {
+                    space.inner_window()
+                };
+
+                for node in window {
+                    let index = space.index_from_node(node);
+                    let value = system[nodes.start + index];
+                    data.push(value);
+                }
+            }
+
+            attributes.point.push(Attribute::DataArray(DataArrayBase {
+                name: format!("IntField::{}", name),
                 elem: ElementType::Scalars {
                     num_comp: 1,
                     lookup_table: None,

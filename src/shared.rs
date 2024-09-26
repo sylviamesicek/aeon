@@ -1,4 +1,4 @@
-use std::cell::UnsafeCell;
+use std::{cell::UnsafeCell, slice};
 
 /// Represents a reference to a slice which may be shared among threads. This uses `UnsafeCell` to
 /// Uphold rust's immutability gaurentees, but it is the responsibility of the user that the values
@@ -9,7 +9,13 @@ pub struct SharedSlice<'a, T>(&'a [SyncUnsafeCell<T>]);
 
 impl<'a, T> SharedSlice<'a, T> {
     pub fn new(data: &'a mut [T]) -> Self {
-        Self(unsafe { &*(data as *mut [T] as *const [SyncUnsafeCell<T>]) })
+        Self(unsafe {
+            slice::from_raw_parts(data.as_ptr() as *const SyncUnsafeCell<T>, data.len())
+        })
+    }
+
+    pub fn len(self) -> usize {
+        self.0.len()
     }
 
     pub unsafe fn get(self, index: usize) -> &'a T {

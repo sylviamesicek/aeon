@@ -131,8 +131,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         std::fs::write("output/mesh.txt", debug).unwrap();
 
-        println!("Num Blocks: {}", mesh.num_blocks());
-        println!("Num Cells: {}", mesh.num_cells());
+        log::info!("Num Blocks: {}", mesh.num_blocks());
+        log::info!("Num Cells: {}", mesh.num_cells());
+        log::info!("Num Nodes: {}", mesh.num_nodes());
 
         let mut rinne = SystemVec::with_length(mesh.num_nodes());
         let mut hamiltonian = vec![0.0; mesh.num_nodes()].into_boxed_slice();
@@ -160,11 +161,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         println!("{flags:?}");
 
-        let mut indices = vec![0i64; mesh.num_nodes()];
-        mesh.interface_indices(2, &mut indices);
+        let mut interfaces = vec![0i64; mesh.num_nodes()];
+        mesh.interface_debug(2, &mut interfaces);
 
-        let mut block_indices = vec![0i64; mesh.num_nodes()];
-        mesh.block_interface_indices(2, &mut block_indices);
+        // let mut block_indices = vec![0i64; mesh.num_nodes()];
+        // mesh.block_interface_indices(2, &mut block_indices);
 
         let mut blocks = vec![0; mesh.num_nodes()];
         mesh.block_debug(&mut blocks);
@@ -172,8 +173,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let mut systems = SystemCheckpoint::default();
         systems.save_system(rinne.as_slice());
         systems.save_field("hamiltonian", &hamiltonian);
-        systems.save_int_field("interface", &indices);
-        systems.save_int_field("block_interface", &block_indices);
+        systems.save_int_field("interface", &interfaces);
+        // systems.save_int_field("block_interface", &block_indices);
         systems.save_int_field("blocks", &blocks);
 
         mesh.export_vtk(

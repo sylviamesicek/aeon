@@ -91,6 +91,18 @@ impl<const N: usize> TreeNeighbors<N> {
         self.neighbors.iter()
     }
 
+    pub fn fine_indices(&self) -> impl Iterator<Item = usize> + '_ {
+        self.fine.iter().copied()
+    }
+
+    pub fn direct_indices(&self) -> impl Iterator<Item = usize> + '_ {
+        self.direct.iter().copied()
+    }
+
+    pub fn coarse_indices(&self) -> impl Iterator<Item = usize> + '_ {
+        self.coarse.iter().copied()
+    }
+
     /// Iterates over all neighbors of a block.
     pub fn block(&self, block: usize) -> slice::Iter<'_, TreeBlockNeighbor<N>> {
         self.neighbors[self.block_offsets[block]..self.block_offsets[block + 1]].iter()
