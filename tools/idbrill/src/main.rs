@@ -162,7 +162,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         println!("{flags:?}");
 
         let mut interfaces = vec![0i64; mesh.num_nodes()];
-        mesh.interface_debug(2, &mut interfaces);
+        mesh.interface_index_debug(2, &mut interfaces);
+
+        let mut interface_neighbors = vec![0i64; mesh.num_nodes()];
+        mesh.interface_neighbor_debug(2, &mut interface_neighbors);
 
         // let mut block_indices = vec![0i64; mesh.num_nodes()];
         // mesh.block_interface_indices(2, &mut block_indices);
@@ -174,7 +177,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         systems.save_system(rinne.as_slice());
         systems.save_field("hamiltonian", &hamiltonian);
         systems.save_int_field("interface", &interfaces);
-        // systems.save_int_field("block_interface", &block_indices);
+        systems.save_int_field("interface_neighbors", &interface_neighbors);
         systems.save_int_field("blocks", &blocks);
 
         mesh.export_vtk(

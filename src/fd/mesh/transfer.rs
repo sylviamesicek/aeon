@@ -365,38 +365,6 @@ impl<const N: usize> Mesh<N> {
         });
     }
 
-    // pub fn block_interface_indices(&mut self, extent: usize, info: &mut [i64]) {
-    //     assert!(info.len() == self.num_nodes());
-    //     assert!(extent <= self.ghost);
-
-    //     info.fill(0);
-
-    //     let info = SharedSlice::new(info);
-
-    //     self.neighbors
-    //         .iter()
-    //         .enumerate()
-    //         .par_bridge()
-    //         .for_each(|(i, interface)| {
-    //             let block_nodes = self.block_nodes(interface.block);
-    //             let block_space = self.block_space(interface.block);
-
-    //             for aabb in self.padding_aabbs(interface, extent) {
-    //                 for node in IndexSpace::new(aabb.size).iter() {
-    //                     let block_node =
-    //                         array::from_fn(|axis| node[axis] as isize + aabb.dest[axis]);
-
-    //                     let block_index = block_space.index_from_node(block_node);
-
-    //                     unsafe {
-    //                         *info.get_mut(block_nodes.start + block_index) =
-    //                             interface.neighbor as i64;
-    //                     }
-    //                 }
-    //             }
-    //         });
-    // }
-
     /// Stores the index of the block which owns each individual node in a debug vector.
     pub fn block_debug(&mut self, debug: &mut [i64]) {
         assert!(debug.len() == self.num_nodes());
@@ -414,7 +382,30 @@ impl<const N: usize> Mesh<N> {
         });
     }
 
-    pub fn interface_debug(&mut self, extent: usize, debug: &mut [i64]) {
+    pub fn interface_neighbor_debug(&mut self, extent: usize, debug: &mut [i64]) {
+        debug.fill(-1);
+
+        let debug = SharedSlice::new(debug);
+
+        self.interfaces
+            .iter()
+            .enumerate()
+            .for_each(|(iidx, interface)| {
+                let block_nodes = self.block_nodes(interface.block);
+                let block_space = self.block_space(interface.block);
+
+                for offset in self.interface_nodes_active(iidx, extent) {
+                    let node = array::from_fn(|axis| interface.dest[axis] + offset[axis] as isize);
+                    let index = block_space.index_from_node(node);
+
+                    unsafe {
+                        *debug.get_mut(block_nodes.start + index) = interface.neighbor as i64;
+                    }
+                }
+            });
+    }
+
+    pub fn interface_index_debug(&mut self, extent: usize, debug: &mut [i64]) {
         debug.fill(-1);
 
         let debug = SharedSlice::new(debug);
