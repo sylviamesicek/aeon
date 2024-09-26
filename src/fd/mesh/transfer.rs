@@ -1,8 +1,8 @@
 use aeon_basis::{Boundary, BoundaryKind, Condition, Kernels};
-use aeon_geometry::{faces, Face, IndexSpace, Region, Side, TreeBlockNeighbor, TreeCellNeighbor};
-use rayon::iter::{ParallelBridge, ParallelIterator};
+use aeon_geometry::{faces, Face, IndexSpace, Side, TreeBlockNeighbor, TreeCellNeighbor};
+// use rayon::iter::{ParallelBridge, ParallelIterator};
 use reborrow::Reborrow as _;
-use std::{array, iter, ops::Range};
+use std::{array, ops::Range};
 
 use crate::{
     fd::{Conditions, Engine, FdEngine, Mesh, SystemBC},
@@ -16,8 +16,6 @@ pub(super) struct TreeInterface<const N: usize> {
     block: usize,
     /// Neighbor block.
     neighbor: usize,
-    aregion: Region<N>,
-    bregion: Region<N>,
     /// Source node in neighbor block.
     source: [isize; N],
     /// Destination node in target block.
@@ -42,7 +40,7 @@ impl<const N: usize> Mesh<N> {
     }
 
     /// Returns the total number of interface nodes.
-    fn num_interface_nodes(&self) -> usize {
+    fn _num_interface_nodes(&self) -> usize {
         *self.interface_node_offsets.last().unwrap()
     }
 
@@ -110,7 +108,31 @@ impl<const N: usize> Mesh<N> {
         self.fill_physical(extent, &boundary, &conditions, &mut system);
     }
 
-    fn fill_physical<B: Boundary<N> + Sync, C: Conditions<N> + Sync>(
+    pub fn fill_boundary_zeros<S: SystemLabel>(&mut self, system: SystemSliceMut<'_, S>) {
+        let system = system.as_range();
+
+        (0..self.interfaces.len()).for_each(|interface| {
+            let info = self.interface(interface);
+
+            let block_space = self.block_space(info.block);
+            let block_nodes = self.block_nodes(info.block);
+
+            let dest = info.dest;
+
+            let mut block_system = unsafe { system.slice_mut(block_nodes).fields_mut() };
+
+            for node in self.interface_nodes_active(interface, self.ghost) {
+                let block_node = array::from_fn(|axis| node[axis] as isize + dest[axis]);
+                let block_index = block_space.index_from_node(block_node);
+
+                for field in S::fields() {
+                    block_system.field_mut(field.clone())[block_index] = 0.0;
+                }
+            }
+        });
+    }
+
+    pub fn fill_physical<B: Boundary<N> + Sync, C: Conditions<N> + Sync>(
         &mut self,
         extent: usize,
         boundary: &B,
@@ -134,7 +156,7 @@ impl<const N: usize> Mesh<N> {
         });
     }
 
-    fn fill_direct<System: SystemLabel>(
+    pub fn fill_direct<System: SystemLabel>(
         &mut self,
         extent: usize,
         system: &mut SystemSliceMut<'_, System>,
@@ -171,7 +193,7 @@ impl<const N: usize> Mesh<N> {
         });
     }
 
-    fn fill_fine<System: SystemLabel>(
+    pub fn fill_fine<System: SystemLabel>(
         &mut self,
         extent: usize,
         system: &mut SystemSliceMut<'_, System>,
@@ -205,7 +227,7 @@ impl<const N: usize> Mesh<N> {
         });
     }
 
-    fn fill_prolong<K: Kernels, B: Boundary<N> + Sync, C: Conditions<N> + Sync>(
+    pub fn fill_prolong<K: Kernels, B: Boundary<N> + Sync, C: Conditions<N> + Sync>(
         &mut self,
         _order: K,
         extent: usize,
@@ -439,8 +461,6 @@ impl<const N: usize> Mesh<N> {
             self.interfaces.push(TreeInterface {
                 block: neighbor.block,
                 neighbor: neighbor.neighbor,
-                aregion: neighbor.a.region.clone(),
-                bregion: neighbor.b.region.clone(),
                 source: aabb.source,
                 dest: aabb.dest,
                 size: aabb.size,
@@ -479,7 +499,7 @@ impl<const N: usize> Mesh<N> {
             // Fill buffer
             for iidx in mesh.neighbors.block_range(block) {
                 let interface = &mesh.interfaces[iidx];
-                let interface_level = mesh.block_level(block);
+                let interface_level = mesh.block_level(interface.neighbor);
 
                 for offset in IndexSpace::new(interface.size).iter() {
                     let node = array::from_fn(|axis| interface.dest[axis] + offset[axis] as isize);
@@ -492,7 +512,7 @@ impl<const N: usize> Mesh<N> {
 
                     let other_interface = &mesh.interfaces[buffer[index]];
                     let other_neighbor = other_interface.neighbor;
-                    let other_level = mesh.block_level(other_interface.block);
+                    let other_level = mesh.block_level(other_neighbor);
 
                     // If new interface is coarser than old interface, prefer it
                     if interface_level < other_level {

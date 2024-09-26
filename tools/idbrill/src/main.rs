@@ -7,7 +7,7 @@ mod choptuik;
 mod garfinkle;
 
 const CHOPTUIK: bool = false;
-const GHOST: bool = true;
+const GHOST: bool = false;
 
 const ORDER: Order<4> = Order::<4>;
 /// Initial data in Rinne's hyperbolic variables.
@@ -120,7 +120,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         std::fs::create_dir_all("output/garfinkle")?;
     }
 
-    for r in 0..3 {
+    for r in 0..4 {
         // let flags = vec![true; mesh.num_cells()];
         // mesh.refine(&flags);
 
@@ -141,18 +141,70 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         garfinkle::solve(
             &mut mesh,
             1.0,
-            1000 * 2usize.pow(r as u32),
+            2000 * 2usize.pow(r as u32),
             rinne.as_mut_slice(),
             &mut hamiltonian,
         )?;
 
         mesh.fill_boundary(ORDER, Quadrant, RinneConditions, rinne.as_mut_slice());
+
+        mesh.fill_boundary_zeros(hamiltonian.as_mut().into());
+
         mesh.fill_boundary(
             ORDER,
             Quadrant,
             HAMILTONIAN_CONDITIONS,
             hamiltonian.as_mut().into(),
         );
+
+        // let mut hamiltonian1 = hamiltonian.clone();
+
+        // mesh.fill_physical(
+        //     2,
+        //     &Quadrant,
+        //     &HAMILTONIAN_CONDITIONS,
+        //     &mut SystemSliceMut::from_contiguous(&mut hamiltonian1),
+        // );
+
+        // let mut hamiltonian2 = hamiltonian1.clone();
+
+        // mesh.fill_fine(
+        //     2,
+        //     &mut SystemSliceMut::<Scalar>::from_contiguous(&mut hamiltonian2),
+        // );
+
+        // let mut hamiltonian3 = hamiltonian2.clone();
+
+        // mesh.fill_direct(
+        //     2,
+        //     &mut SystemSliceMut::<Scalar>::from_contiguous(&mut hamiltonian3),
+        // );
+
+        // let mut hamiltonian4 = hamiltonian3.clone();
+
+        // mesh.fill_prolong(
+        //     ORDER,
+        //     2,
+        //     &Quadrant,
+        //     &HAMILTONIAN_CONDITIONS,
+        //     &mut SystemSliceMut::<Scalar>::from_contiguous(&mut hamiltonian4),
+        // );
+
+        // let mut hamiltonian5 = hamiltonian4.clone();
+
+        // mesh.fill_physical(
+        //     2,
+        //     &Quadrant,
+        //     &HAMILTONIAN_CONDITIONS,
+        //     &mut SystemSliceMut::from_contiguous(&mut hamiltonian5),
+        // );
+
+        // mesh.fill_boundary(
+        //     ORDER,
+        //     Quadrant,
+        //     HAMILTONIAN_CONDITIONS,
+        //     hamiltonian.as_mut().into(),
+        // );
 
         let mut flags = vec![false; mesh.num_cells()];
         println!("Flagging wavelet");
@@ -167,15 +219,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let mut interface_neighbors = vec![0i64; mesh.num_nodes()];
         mesh.interface_neighbor_debug(2, &mut interface_neighbors);
 
-        // let mut block_indices = vec![0i64; mesh.num_nodes()];
-        // mesh.block_interface_indices(2, &mut block_indices);
-
         let mut blocks = vec![0; mesh.num_nodes()];
         mesh.block_debug(&mut blocks);
 
         let mut systems = SystemCheckpoint::default();
         systems.save_system(rinne.as_slice());
         systems.save_field("hamiltonian", &hamiltonian);
+        // systems.save_field("hamiltonian1", &hamiltonian1);
+        // systems.save_field("hamiltonian2", &hamiltonian2);
+        // systems.save_field("hamiltonian3", &hamiltonian3);
+        // systems.save_field("hamiltonian4", &hamiltonian4);
+        // systems.save_field("hamiltonian5", &hamiltonian5);
+
         systems.save_int_field("interface", &interfaces);
         systems.save_int_field("interface_neighbors", &interface_neighbors);
         systems.save_int_field("blocks", &blocks);
