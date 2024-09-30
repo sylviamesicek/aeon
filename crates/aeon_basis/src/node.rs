@@ -517,7 +517,9 @@ impl<const N: usize> NodeSpace<N> {
             match support[axis] {
                 Support::Interior => node[axis] as isize - kernel.border_width() as isize,
                 Support::Negative(_) => 0,
-                Support::Positive(_) => (self.size[axis] + 1 - stencils[axis].len()) as isize,
+                Support::Positive(_) => {
+                    self.size[axis] as isize + 1 - stencils[axis].len() as isize
+                }
             }
         });
         self.apply(corner, stencils, field) * scale

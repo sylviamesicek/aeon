@@ -205,9 +205,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         //     hamiltonian.as_mut().into(),
         // );
 
-        let mut flags = vec![false; mesh.num_cells()];
         println!("Flagging wavelet");
-        mesh.wavelet(Quadrant, 1e-5, rinne.as_slice());
+        mesh.wavelet(1e-5, Quadrant, rinne.as_slice());
         mesh.balance_flags();
 
         // println!("{:?}");

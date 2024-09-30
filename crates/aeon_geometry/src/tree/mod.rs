@@ -214,6 +214,10 @@ impl<const N: usize> Tree<N> {
                 neighbor_coarse = true;
                 neighbor_fine = false;
             } else if nlevel > level {
+                if nlevel != level + 1 {
+                    println!("Cell {cell}, {level}; Neighbor {nneighbor}, {nlevel}");
+                }
+
                 debug_assert!(nlevel == level + 1);
                 debug_assert!(!neighbor_coarse);
                 neighbor_fine = true;

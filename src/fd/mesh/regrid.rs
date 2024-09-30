@@ -1,4 +1,7 @@
+use std::array;
+
 use aeon_basis::{Boundary, Element};
+use aeon_geometry::IndexSpace;
 
 use crate::{
     fd::Mesh,
@@ -10,8 +13,8 @@ impl<const N: usize> Mesh<N> {
     /// Flags cells for refinement using a wavelet criterion.
     pub fn wavelet<S: SystemLabel, B: Boundary<N> + Sync>(
         &mut self,
-        boundary: B,
         tolerance: f64,
+        boundary: B,
         field: SystemSlice<S>,
     ) {
         let element = Element::<N>::uniform(self.width);
@@ -83,6 +86,34 @@ impl<const N: usize> Mesh<N> {
         });
 
         let _ = std::mem::replace(&mut self.refine_flags, vflags);
+    }
+
+    pub fn flags_debug(&mut self, debug: &mut [i64]) {
+        assert!(debug.len() == self.num_nodes());
+
+        let debug = SharedSlice::new(debug);
+
+        self.block_compute(|mesh, _, block| {
+            let block_nodes = mesh.block_nodes(block);
+            let block_space = mesh.block_space(block);
+            let block_size = mesh.blocks.size(block);
+            let cells = mesh.blocks.cells(block);
+
+            for (i, position) in IndexSpace::new(block_size).iter().enumerate() {
+                let cell = cells[i];
+                let origin: [_; N] = array::from_fn(|axis| (position[axis] * mesh.width) as isize);
+
+                for offset in IndexSpace::new([mesh.width + 1; N]).iter() {
+                    let node = array::from_fn(|axis| origin[axis] + offset[axis] as isize);
+
+                    let idx = block_nodes.start + block_space.index_from_node(node);
+
+                    unsafe {
+                        *debug.get_mut(idx) = mesh.refine_flags[cell] as i64;
+                    }
+                }
+            }
+        });
     }
 }
 

@@ -141,15 +141,19 @@ impl<const N: usize> Mesh<N> {
         &self.tree
     }
 
-    pub fn balance_flags(&mut self) {
-        // Refinement has priority over coarsening.
-        for cell in 0..self.num_cells() {
-            if self.refine_flags[cell] {
-                self.coarsen_flags[cell] = false;
-            }
-        }
+    pub fn refine_flags(&self) -> &[bool] {
+        self.refine_flags.as_slice()
+    }
 
+    pub fn balance_flags(&mut self) {
         self.tree.balance_refine_flags(&mut self.refine_flags);
+
+        // // Refinement has priority over coarsening.
+        // for cell in 0..self.num_cells() {
+        //     if self.refine_flags[cell] {
+        //         self.coarsen_flags[cell] = false;
+        //     }
+        // }
     }
 
     pub fn refine(&mut self) {
@@ -158,6 +162,13 @@ impl<const N: usize> Mesh<N> {
         self.tree.refine(&self.refine_flags);
         self.build();
     }
+
+    // pub fn refine_just_blocks(&mut self) {
+    //     // self.tree.balance_refine_flags(&mut self.refine_flags);
+
+    //     self.tree.refine(&self.refine_flags);
+    //     self.blocks.build(&self.tree);
+    // }
 
     pub fn refine_global(&mut self) {
         self.refine_flags.fill(true);
