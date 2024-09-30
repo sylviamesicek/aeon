@@ -36,25 +36,43 @@ use crate::system::{SystemLabel, SystemSlice};
 
 #[derive(Debug)]
 pub struct Mesh<const N: usize> {
+    /// Underlying Tree on which the mesh is built.
     tree: Tree<N>,
+    /// The width of a cell on the mesh (i.e. how many subcells are in that cell).
     width: usize,
+    /// The number of ghost cells used to facilitate inter-block communication.
     ghost: usize,
 
+    /// Block structure induced by the tree.
     blocks: TreeBlocks<N>,
+    /// Offsets linking each block to a range of nodes.
     block_node_offsets: Vec<usize>,
 
+    /// Neighbors of each block.
     neighbors: TreeNeighbors<N>,
 
+    /// Interfaces build from neighbors.
     interfaces: Vec<TreeInterface<N>>,
+    /// Offsets linking each interface to a range of ghost/face nodes.
     interface_node_offsets: Vec<usize>,
     interface_masks: Vec<bool>,
 
-    // refine_flags: Vec<bool>,
+    /// Refinement flags for each cell on the mesh.
+    refine_flags: Vec<bool>,
+    /// Coarsening flags for each cell on the mesh.
+    coarsen_flags: Vec<bool>,
+
+    /// Thread-local stores used for allocation.
     stores: ThreadLocal<UnsafeCell<MeshStore>>,
 }
 
 impl<const N: usize> Mesh<N> {
+    /// Constructs a new `Mesh` covering the domain, with a number of nodes
+    /// defined by `width` and `ghost`.
     pub fn new(bounds: Rectangle<N>, width: usize, ghost: usize) -> Self {
+        assert!(width % 2 == 0);
+        assert!(ghost >= width / 2);
+
         let tree = Tree::new(bounds);
 
         let mut result = Self {
@@ -63,15 +81,18 @@ impl<const N: usize> Mesh<N> {
             ghost,
 
             blocks: TreeBlocks::default(),
+            block_node_offsets: Vec::default(),
+
             neighbors: TreeNeighbors::default(),
 
-            block_node_offsets: Vec::default(),
             interfaces: Vec::default(),
             interface_node_offsets: Vec::default(),
             interface_masks: Vec::default(),
 
+            refine_flags: Vec::new(),
+            coarsen_flags: Vec::new(),
+
             stores: ThreadLocal::new(),
-            // refine_flags: Vec::new(),
         };
 
         result.build();
@@ -84,9 +105,10 @@ impl<const N: usize> Mesh<N> {
         self.neighbors.build(&self.tree, &self.blocks);
         self.build_block_node_offests();
         self.build_interfaces();
+        self.build_flags();
     }
 
-    pub fn build_block_node_offests(&mut self) {
+    fn build_block_node_offests(&mut self) {
         // Reset offsets
         self.block_node_offsets.clear();
 
@@ -107,16 +129,39 @@ impl<const N: usize> Mesh<N> {
         self.block_node_offsets.push(cursor);
     }
 
+    fn build_flags(&mut self) {
+        self.refine_flags.clear();
+        self.coarsen_flags.clear();
+
+        self.refine_flags.resize(self.num_cells(), false);
+        self.coarsen_flags.resize(self.num_cells(), false);
+    }
+
     pub fn tree(&self) -> &Tree<N> {
         &self.tree
     }
 
-    pub fn refine(&mut self, flags: &[bool]) {
-        // self.tree.balance_refine_flags(&mut self.refine_flags);
-        // self.tree.refine(&self.refine_flags);
+    pub fn balance_flags(&mut self) {
+        // Refinement has priority over coarsening.
+        for cell in 0..self.num_cells() {
+            if self.refine_flags[cell] {
+                self.coarsen_flags[cell] = false;
+            }
+        }
 
-        self.tree.refine(flags);
+        self.tree.balance_refine_flags(&mut self.refine_flags);
+    }
+
+    pub fn refine(&mut self) {
+        // self.tree.balance_refine_flags(&mut self.refine_flags);
+
+        self.tree.refine(&self.refine_flags);
         self.build();
+    }
+
+    pub fn refine_global(&mut self) {
+        self.refine_flags.fill(true);
+        self.refine();
     }
 
     pub fn num_blocks(&self) -> usize {
@@ -220,6 +265,14 @@ impl<const N: usize> Mesh<N> {
         }
 
         false
+    }
+
+    pub fn set_refine_flag(&mut self, cell: usize) {
+        self.refine_flags[cell] = true
+    }
+
+    pub fn set_coarsen_flag(&mut self, cell: usize) {
+        self.coarsen_flags[cell] = true
     }
 
     pub fn max_level(&self) -> usize {
@@ -524,6 +577,9 @@ impl<const N: usize> Clone for Mesh<N> {
             interface_node_offsets: self.interface_node_offsets.clone(),
             interface_masks: self.interface_masks.clone(),
 
+            refine_flags: self.refine_flags.clone(),
+            coarsen_flags: self.coarsen_flags.clone(),
+
             stores: ThreadLocal::new(),
         }
     }
@@ -543,6 +599,9 @@ impl<const N: usize> Default for Mesh<N> {
             interfaces: Vec::default(),
             interface_node_offsets: Vec::default(),
             interface_masks: Vec::default(),
+
+            refine_flags: Vec::default(),
+            coarsen_flags: Vec::default(),
 
             stores: ThreadLocal::new(),
         };

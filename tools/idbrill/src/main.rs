@@ -104,8 +104,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut mesh = Mesh::new(bounds, 4, 2);
 
     for _ in 0..1 {
-        let flags = vec![true; mesh.num_cells()];
-        mesh.refine(&flags);
+        mesh.refine_global();
     }
 
     // for _ in 0..4 {
@@ -208,10 +207,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         let mut flags = vec![false; mesh.num_cells()];
         println!("Flagging wavelet");
-        mesh.wavelet(Quadrant, 1e-5, rinne.as_slice(), &mut flags);
-        mesh.tree().balance_refine_flags(&mut flags);
+        mesh.wavelet(Quadrant, 1e-5, rinne.as_slice());
+        mesh.balance_flags();
 
-        println!("{flags:?}");
+        // println!("{:?}");
 
         let mut interfaces = vec![0i64; mesh.num_nodes()];
         mesh.interface_index_debug(2, &mut interfaces);
@@ -244,7 +243,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             },
         )?;
 
-        mesh.refine(&flags);
+        mesh.refine();
     }
 
     // let mut debug = String::new();

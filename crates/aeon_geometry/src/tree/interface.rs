@@ -1,7 +1,7 @@
 use crate::{regions, IndexSpace, Region, NULL};
-use crate::{Face, Side, Tree, TreeBlocks, TreeNodes};
+use crate::{Face, Side, Tree, TreeBlocks};
 use std::ops::Range;
-use std::{array, slice};
+use std::slice;
 
 /// Stores neighbor of a cell on a tree.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -254,265 +254,6 @@ pub struct TreeInterface<const N: usize> {
     pub size: [usize; N],
 }
 
-#[derive(Default, Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct TreeInterfaces<const N: usize> {
-    fine: Vec<TreeInterface<N>>,
-    direct: Vec<TreeInterface<N>>,
-    coarse: Vec<TreeInterface<N>>,
-}
-
-impl<const N: usize> TreeInterfaces<N> {
-    /// Iterates over all fine `BlockInterface`s.
-    pub fn fine(&self) -> slice::Iter<'_, TreeInterface<N>> {
-        self.fine.iter()
-    }
-
-    /// Iterates over all fine `BlockInterface`s.
-    pub fn direct(&self) -> slice::Iter<'_, TreeInterface<N>> {
-        self.direct.iter()
-    }
-
-    /// Iterates over all fine `BlockInterface`s.
-    pub fn coarse(&self) -> slice::Iter<'_, TreeInterface<N>> {
-        self.coarse.iter()
-    }
-
-    /// Constructs interfaces from neighbors and vertices.
-    pub fn build(
-        &mut self,
-        tree: &Tree<N>,
-        blocks: &TreeBlocks<N>,
-        neighbors: &TreeNeighbors<N>,
-        dofs: &TreeNodes<N>,
-    ) {
-        self.fine.clear();
-        self.direct.clear();
-        self.coarse.clear();
-
-        for fine in neighbors.fine() {
-            self.fine
-                .push(Self::interface_from_neighbor(tree, blocks, dofs, fine));
-        }
-
-        for direct in neighbors.direct() {
-            self.direct
-                .push(Self::interface_from_neighbor(tree, blocks, dofs, direct));
-        }
-
-        for coarse in neighbors.coarse() {
-            self.coarse
-                .push(Self::interface_from_neighbor(tree, blocks, dofs, coarse));
-        }
-    }
-
-    fn interface_from_neighbor(
-        tree: &Tree<N>,
-        blocks: &TreeBlocks<N>,
-        dofs: &TreeNodes<N>,
-        interface: &TreeBlockNeighbor<N>,
-    ) -> TreeInterface<N> {
-        let a = interface.a.clone();
-        let b = interface.b.clone();
-
-        // Find active region.
-        let (anode, bnode) = Self::block_ghost_aabb(tree, blocks, dofs, interface);
-        let mut source = Self::neighbor_origin(tree, blocks, dofs, a.clone());
-        let (mut dest, mut size) = Self::space_from_aabb(anode, bnode);
-
-        // Avoid overlaps between aabbs on this block.
-        // let aorigin = blocks.cell_index(a.cell);
-        // let borigin = blocks.cell_index(b.cell);
-        let flags = blocks.boundary_flags(interface.block);
-        let block_size = blocks.size(interface.block);
-
-        let kind = InterfaceKind::from_levels(tree.level(a.cell), tree.level(a.neighbor));
-
-        for axis in 0..N {
-            let right_boundary = flags.is_set(Face::positive(axis));
-            let left_boundary = flags.is_set(Face::negative(axis));
-
-            // // If the right edge doesn't extend all the way to the right,
-            // // shrink by one.
-            // if b.region.side(axis) == Side::Middle
-            //     && !(bnode[axis] == (block_size[axis] * dofs.width[axis]) as isize
-            //         && right_boundary)
-            // {
-            //     size[axis] -= 1;
-            // }
-
-            // // If we do not extend further left, don't include
-            // if a.region.side(axis) == Side::Middle && anode[axis] == 0 && !left_boundary {
-            //     source[axis] += 1;
-            //     dest[axis] += 1;
-            //     size[axis] -= 1;
-            // }
-
-            // if b.region.side(axis) == Side::Middle
-            //     && bnode[axis] < (block_size[axis] * dofs.width[axis]) as isize
-            // {
-            //     size[axis] -= 1;
-            // }
-
-            // if a.region.side(axis) == Side::Left
-            //     && matches!(kind, InterfaceKind::Fine | InterfaceKind::Direct)
-            // {
-            //     size[axis] -= 1;
-            // }
-        }
-
-        TreeInterface {
-            block: interface.block,
-            neighbor: interface.neighbor,
-            source,
-            dest,
-            size,
-        }
-    }
-
-    /// Computes the nodes that ghost nodes adjacent to the AABB of cells
-    /// defined by A and B.
-    fn block_ghost_aabb(
-        tree: &Tree<N>,
-        blocks: &TreeBlocks<N>,
-        dofs: &TreeNodes<N>,
-        interface: &TreeBlockNeighbor<N>,
-    ) -> ([isize; N], [isize; N]) {
-        let a = interface.a.clone();
-        let b = interface.b.clone();
-
-        // Find ghost region that must be filled
-        let aindex = blocks.cell_position(a.cell);
-        let bindex = blocks.cell_position(b.cell);
-
-        // Compute bottom left corner of A cell.
-        let mut anode: [_; N] = array::from_fn(|axis| (aindex[axis] * dofs.width[axis]) as isize);
-
-        if tree.level(a.cell) < tree.level(a.neighbor) {
-            let split = tree.split(a.neighbor);
-            (0..N)
-                .filter(|&axis| a.region.side(axis) == Side::Middle && split.is_set(axis))
-                .for_each(|axis| anode[axis] += (dofs.width[axis] / 2) as isize);
-        }
-
-        // Offset by appropriate ghost nodes/width
-        for axis in 0..N {
-            match a.region.side(axis) {
-                Side::Left => {
-                    anode[axis] -= dofs.ghost as isize;
-                }
-                Side::Right => {
-                    anode[axis] += dofs.width[axis] as isize;
-                }
-                Side::Middle => {}
-            }
-        }
-
-        // Compute top right corner of B cell
-        let mut bnode: [_; N] =
-            array::from_fn(|axis| ((bindex[axis] + 1) * dofs.width[axis]) as isize);
-
-        if tree.level(b.cell) < tree.level(b.neighbor) {
-            let split = tree.split(b.neighbor);
-            (0..N)
-                .filter(|&axis| b.region.side(axis) == Side::Middle && !split.is_set(axis))
-                .for_each(|axis| bnode[axis] -= (dofs.width[axis] / 2) as isize);
-        }
-
-        // Offset by appropriate ghost nodes/width
-        for axis in 0..N {
-            match b.region.side(axis) {
-                Side::Right => {
-                    bnode[axis] += dofs.ghost as isize;
-                }
-                Side::Left => {
-                    bnode[axis] -= dofs.width[axis] as isize;
-                }
-                Side::Middle => {}
-            }
-        }
-
-        (anode, bnode)
-    }
-
-    /// Converts a window stored in aabb format to a window stored as an origin and a size.
-    fn space_from_aabb(a: [isize; N], b: [isize; N]) -> ([isize; N], [usize; N]) {
-        // Origin is just the bottom left corner of A.
-        let dest = a;
-        // Size is inclusive.
-        let size = array::from_fn(|axis| (b[axis] - a[axis] + 1) as usize);
-
-        (dest, size)
-    }
-
-    fn neighbor_origin(
-        tree: &Tree<N>,
-        blocks: &TreeBlocks<N>,
-        nodes: &TreeNodes<N>,
-        a: TreeCellNeighbor<N>,
-    ) -> [isize; N] {
-        // Compute this boundary interface.
-        let interface = InterfaceKind::from_levels(tree.level(a.cell), tree.level(a.neighbor));
-
-        // Find source node
-        let index = blocks.cell_position(a.neighbor);
-        let mut source: [isize; N] =
-            array::from_fn(|axis| (index[axis] * nodes.width[axis]) as isize);
-
-        match interface {
-            InterfaceKind::Direct => {
-                for axis in 0..N {
-                    if a.region.side(axis) == Side::Left {
-                        source[axis] += (nodes.width[axis] - nodes.ghost) as isize;
-                    }
-                }
-            }
-            InterfaceKind::Coarse => {
-                // Source is stored in subnodes
-                for axis in 0..N {
-                    source[axis] *= 2;
-                }
-
-                let split = tree.split(a.cell);
-
-                for axis in 0..N {
-                    if split.is_set(axis) {
-                        match a.region.side(axis) {
-                            Side::Left => {
-                                source[axis] += nodes.width[axis] as isize - nodes.ghost as isize
-                            }
-                            Side::Middle => source[axis] += nodes.width[axis] as isize,
-                            Side::Right => {}
-                        }
-                    } else {
-                        match a.region.side(axis) {
-                            Side::Left => {
-                                source[axis] +=
-                                    2 * nodes.width[axis] as isize - nodes.ghost as isize
-                            }
-                            Side::Middle => {}
-                            Side::Right => source[axis] += nodes.width[axis] as isize,
-                        }
-                    }
-                }
-            }
-            InterfaceKind::Fine => {
-                // Source is stored in supernodes
-                for axis in 0..N {
-                    source[axis] /= 2;
-                }
-
-                for axis in 0..N {
-                    if a.region.side(axis) == Side::Left {
-                        source[axis] += nodes.width[axis] as isize / 2 - nodes.ghost as isize;
-                    }
-                }
-            }
-        }
-
-        source
-    }
-}
-
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 enum InterfaceKind {
     Coarse,
@@ -620,96 +361,97 @@ mod tests {
         assert_eq!(coarse.next(), None);
     }
 
-    #[test]
-    fn interfaces() {
-        let mut tree = Tree::new(Rectangle::<2>::UNIT);
-        let mut blocks = TreeBlocks::default();
-        let mut dofs = TreeNodes::new([4; 2], 2);
-        let mut neighbors = TreeNeighbors::default();
-        let mut interfaces = TreeInterfaces::default();
+    // #[ignore = "Outdated interface test."]
+    // #[test]
+    // fn interfaces() {
+    //     let mut tree = Tree::new(Rectangle::<2>::UNIT);
+    //     let mut blocks = TreeBlocks::default();
+    //     let mut dofs = TreeNodes::new([4; 2], 2);
+    //     let mut neighbors = TreeNeighbors::default();
+    //     let mut interfaces = TreeInterfaces::default();
 
-        tree.refine(&[true, false, false, false]);
-        blocks.build(&tree);
-        dofs.build(&blocks);
-        neighbors.build(&tree, &blocks);
-        interfaces.build(&tree, &blocks, &neighbors, &dofs);
+    //     tree.refine(&[true, false, false, false]);
+    //     blocks.build(&tree);
+    //     dofs.build(&blocks);
+    //     neighbors.build(&tree, &blocks);
+    //     interfaces.build(&tree, &blocks, &neighbors, &dofs);
 
-        let mut coarse = interfaces.coarse();
+    //     let mut coarse = interfaces.coarse();
 
-        assert_eq!(
-            coarse.next(),
-            Some(&TreeInterface {
-                block: 0,
-                neighbor: 1,
-                source: [0, 0],
-                dest: [8, 0],
-                size: [3, 11],
-            })
-        );
+    //     assert_eq!(
+    //         coarse.next(),
+    //         Some(&TreeInterface {
+    //             block: 0,
+    //             neighbor: 1,
+    //             source: [0, 0],
+    //             dest: [8, 0],
+    //             size: [3, 11],
+    //         })
+    //     );
 
-        assert_eq!(
-            coarse.next(),
-            Some(&TreeInterface {
-                block: 0,
-                neighbor: 2,
-                source: [0, 0],
-                dest: [0, 8],
-                size: [8, 3],
-            })
-        );
+    //     assert_eq!(
+    //         coarse.next(),
+    //         Some(&TreeInterface {
+    //             block: 0,
+    //             neighbor: 2,
+    //             source: [0, 0],
+    //             dest: [0, 8],
+    //             size: [8, 3],
+    //         })
+    //     );
 
-        assert_eq!(coarse.next(), None);
+    //     assert_eq!(coarse.next(), None);
 
-        let mut fine = interfaces.fine();
+    //     let mut fine = interfaces.fine();
 
-        assert_eq!(
-            fine.next(),
-            Some(&TreeInterface {
-                block: 1,
-                neighbor: 0,
-                source: [2, 0],
-                dest: [-2, 0],
-                size: [3, 4],
-            })
-        );
+    //     assert_eq!(
+    //         fine.next(),
+    //         Some(&TreeInterface {
+    //             block: 1,
+    //             neighbor: 0,
+    //             source: [2, 0],
+    //             dest: [-2, 0],
+    //             size: [3, 4],
+    //         })
+    //     );
 
-        assert_eq!(
-            fine.next(),
-            Some(&TreeInterface {
-                block: 2,
-                neighbor: 0,
-                source: [0, 2],
-                dest: [0, -2],
-                size: [4, 3],
-            })
-        );
+    //     assert_eq!(
+    //         fine.next(),
+    //         Some(&TreeInterface {
+    //             block: 2,
+    //             neighbor: 0,
+    //             source: [0, 2],
+    //             dest: [0, -2],
+    //             size: [4, 3],
+    //         })
+    //     );
 
-        assert_eq!(fine.next(), None);
+    //     assert_eq!(fine.next(), None);
 
-        let mut direct = interfaces.direct();
+    //     let mut direct = interfaces.direct();
 
-        assert_eq!(
-            direct.next(),
-            Some(&TreeInterface {
-                block: 1,
-                neighbor: 2,
-                source: [2, 0],
-                dest: [-2, 4],
-                size: [3, 5],
-            })
-        );
+    //     assert_eq!(
+    //         direct.next(),
+    //         Some(&TreeInterface {
+    //             block: 1,
+    //             neighbor: 2,
+    //             source: [2, 0],
+    //             dest: [-2, 4],
+    //             size: [3, 5],
+    //         })
+    //     );
 
-        assert_eq!(
-            direct.next(),
-            Some(&TreeInterface {
-                block: 2,
-                neighbor: 1,
-                source: [0, 2],
-                dest: [4, -2],
-                size: [3, 7],
-            })
-        );
+    //     assert_eq!(
+    //         direct.next(),
+    //         Some(&TreeInterface {
+    //             block: 2,
+    //             neighbor: 1,
+    //             source: [0, 2],
+    //             dest: [4, -2],
+    //             size: [3, 7],
+    //         })
+    //     );
 
-        assert_eq!(direct.next(), None);
-    }
+    //     assert_eq!(direct.next(), None);
+    // }
 }

@@ -1,5 +1,7 @@
 use bumpalo::Bump;
 
+/// A per-thread store that contains memory pools and caches for multi-threaded
+/// workloads.
 #[derive(Debug, Default)]
 pub struct MeshStore {
     arena: Bump,

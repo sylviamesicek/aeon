@@ -7,12 +7,12 @@ use crate::{
 };
 
 impl<const N: usize> Mesh<N> {
+    /// Flags cells for refinement using a wavelet criterion.
     pub fn wavelet<S: SystemLabel, B: Boundary<N> + Sync>(
         &mut self,
         boundary: B,
         tolerance: f64,
         field: SystemSlice<S>,
-        flags: &mut [bool],
     ) {
         let element = Element::<N>::uniform(self.width);
         let element_coarse = Element::<N>::uniform(self.width / 2);
@@ -20,8 +20,10 @@ impl<const N: usize> Mesh<N> {
 
         let field = field.as_range();
 
+        let mut vflags = std::mem::take(&mut self.refine_flags);
+
         // Allows interior mutability.
-        let flags = SharedSlice::new(flags);
+        let flags = SharedSlice::new(&mut vflags);
 
         self.block_compute(|mesh, store, block| {
             let boundary = mesh.block_boundary(block, boundary.clone());
@@ -79,19 +81,42 @@ impl<const N: usize> Mesh<N> {
                 }
             }
         });
+
+        let _ = std::mem::replace(&mut self.refine_flags, vflags);
     }
 }
 
-// #[repr(transparent)]
-// pub struct SyncUnsafeCell<T: ?Sized> {
-//     value: UnsafeCell<T>,
-// }
+#[cfg(test)]
+mod tests {
+    use crate::fd::Mesh;
+    use aeon_basis::{Boundary, BoundaryKind};
+    use aeon_geometry::{Face, Rectangle};
 
-// unsafe impl<T: ?Sized + Sync> Sync for SyncUnsafeCell<T> {}
+    #[derive(Debug, Clone, Copy)]
+    pub struct Quadrant;
 
-// // Identical interface as UnsafeCell:
-// impl<T: ?Sized> SyncUnsafeCell<T> {
-//     pub const fn get(&self) -> *mut T {
-//         self.value.get()
-//     }
-// }
+    impl Boundary<2> for Quadrant {
+        fn kind(&self, face: Face<2>) -> BoundaryKind {
+            if face.side {
+                BoundaryKind::Free
+            } else {
+                BoundaryKind::Parity
+            }
+        }
+    }
+
+    #[test]
+    fn element_windows() {
+        let mut mesh = Mesh::new(Rectangle::UNIT, 4, 2);
+        mesh.set_refine_flag(0);
+        mesh.refine();
+
+        assert_eq!(mesh.is_cell_on_boundary(0, Quadrant), false);
+        assert_eq!(mesh.is_cell_on_boundary(1, Quadrant), false);
+        assert_eq!(mesh.is_cell_on_boundary(2, Quadrant), false);
+        assert_eq!(mesh.is_cell_on_boundary(3, Quadrant), false);
+        assert_eq!(mesh.is_cell_on_boundary(4, Quadrant), true);
+        assert_eq!(mesh.is_cell_on_boundary(5, Quadrant), true);
+        assert_eq!(mesh.is_cell_on_boundary(6, Quadrant), true);
+    }
+}
