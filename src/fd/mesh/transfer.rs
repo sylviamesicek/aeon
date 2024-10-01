@@ -404,6 +404,34 @@ impl<const N: usize> Mesh<N> {
         });
     }
 
+    pub fn cell_debug(&mut self, debug: &mut [i64]) {
+        assert!(debug.len() == self.num_nodes());
+
+        let debug = SharedSlice::new(debug);
+
+        self.block_compute(|mesh, _, block| {
+            let block_nodes = mesh.block_nodes(block);
+            let block_space = mesh.block_space(block);
+            let block_size = mesh.blocks.size(block);
+            let cells = mesh.blocks.cells(block);
+
+            for (i, position) in IndexSpace::new(block_size).iter().enumerate() {
+                let cell = cells[i];
+                let origin: [_; N] = array::from_fn(|axis| (position[axis] * mesh.width) as isize);
+
+                for offset in IndexSpace::new([mesh.width + 1; N]).iter() {
+                    let node = array::from_fn(|axis| origin[axis] + offset[axis] as isize);
+
+                    let idx = block_nodes.start + block_space.index_from_node(node);
+
+                    unsafe {
+                        *debug.get_mut(idx) = cell as i64;
+                    }
+                }
+            }
+        });
+    }
+
     pub fn interface_neighbor_debug(&mut self, extent: usize, debug: &mut [i64]) {
         debug.fill(-1);
 

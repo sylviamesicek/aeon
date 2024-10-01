@@ -1,6 +1,7 @@
 use std::f64::consts::PI;
 
 use aeon::prelude::*;
+use aeon_geometry::{AxisMask, Region, Side};
 
 #[derive(Clone)]
 pub struct Quadrant;
@@ -65,7 +66,7 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut mesh = Mesh::new(domain, 4, 2);
 
-    for i in 0..7 {
+    for i in 0..10 {
         log::info!(
             "Computing {}th iteration with {} nodes.",
             i,
@@ -79,20 +80,48 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
         mesh.wavelet(1e-9, Quadrant, system.as_slice());
         mesh.balance_flags();
 
-        // if mesh.num_cells() > 454 {
-        //     println!()
+        // if mesh.num_cells() > 96 {
+        //     let region = Region::new([Side::Right, Side::Right]);
+        //     let neighbor = mesh.tree().neighbor_in_region(96, region);
+
+        //     let n1 = mesh.tree().neighbor_after_refinement(
+        //         96,
+        //         AxisMask::pack([true, true]),
+        //         Face::positive(0),
+        //     );
+
+        //     let n1o = mesh.tree().neighbor(96, Face::positive(0));
+
+        //     dbg!(n1, n1o);
+
+        //     let n2 = mesh.tree().neighbor_after_refinement(
+        //         n1,
+        //         AxisMask::pack([false, true]),
+        //         Face::positive(1),
+        //     );
+
+        //     dbg!(n2);
+
+        //     for face in region.adjacent_faces() {
+        //         dbg!(face);
+        //     }
+
+        //     dbg!(neighbor);
         // }
 
         let mut flag_debug = vec![0; mesh.num_nodes()];
         let mut block_debug = vec![0; mesh.num_nodes()];
+        let mut cell_debug = vec![0; mesh.num_nodes()];
 
         mesh.flags_debug(&mut flag_debug);
         mesh.block_debug(&mut block_debug);
+        mesh.cell_debug(&mut cell_debug);
 
         let mut systems = SystemCheckpoint::default();
         systems.save_system(system.as_slice());
         systems.save_int_field("Flags", &flag_debug);
         systems.save_int_field("Blocks", &block_debug);
+        systems.save_int_field("Cell", &cell_debug);
 
         mesh.export_vtk(
             format!("output/wavelet/wamr{i}.vtu"),

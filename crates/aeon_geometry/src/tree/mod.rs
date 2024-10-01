@@ -385,7 +385,7 @@ impl<const N: usize> Tree<N> {
         assert!(self.num_cells() == flags.len());
         assert!(self.check_refine_flags(flags));
 
-        let num_flags = flags.iter().filter(|&&p| p).count();
+        let num_flags = flags.iter().copied().filter(|&p| p).count();
         let total_blocks = self.num_cells() + (AxisMask::<N>::COUNT - 1) * num_flags;
 
         // ****************************************
@@ -414,6 +414,8 @@ impl<const N: usize> Tree<N> {
         offsets.push(0);
 
         for cell in 0..self.num_cells() {
+            let level = self.level(cell);
+
             if flags[cell] {
                 let parent = bounds.len();
                 // Loop over subdivisions
@@ -437,7 +439,6 @@ impl<const N: usize> Tree<N> {
                                 continue;
                             }
 
-                            let level = self.level(cell);
                             let neighbor_level = self.level(neighbor);
 
                             let neighbor =
@@ -495,12 +496,23 @@ impl<const N: usize> Tree<N> {
                         continue;
                     }
 
+                    let neighbor_level = self.level(neighbor);
+
                     // Is the neighbor along this face being refined?
                     if flags[neighbor] {
-                        // Find an adjacent split across face.
-                        neighbors.push(
-                            update_map[neighbor] + face.reversed().adjacent_split().to_linear(),
-                        );
+                        debug_assert!(neighbor_level <= level);
+
+                        if neighbor_level < level {
+                            let mut split = self.split(cell);
+                            split.toggle(face.axis);
+
+                            neighbors.push(update_map[neighbor] + split.to_linear());
+                        } else {
+                            // Find an adjacent split across face.
+                            neighbors.push(
+                                update_map[neighbor] + face.reversed().adjacent_split().to_linear(),
+                            );
+                        }
                     } else {
                         neighbors.push(update_map[neighbor])
                     }
