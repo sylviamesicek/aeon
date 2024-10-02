@@ -62,6 +62,12 @@ pub struct Mesh<const N: usize> {
     /// Coarsening flags for each cell on the mesh.
     coarsen_flags: Vec<bool>,
 
+    /// Map from previous version of mesh to refined version.
+    refine_map: Vec<usize>,
+
+    old_blocks: TreeBlocks<N>,
+    old_block_node_offsets: Vec<usize>,
+
     /// Thread-local stores used for allocation.
     stores: ThreadLocal<UnsafeCell<MeshStore>>,
 }
@@ -91,6 +97,10 @@ impl<const N: usize> Mesh<N> {
 
             refine_flags: Vec::new(),
             coarsen_flags: Vec::new(),
+
+            refine_map: Vec::default(),
+            old_blocks: TreeBlocks::default(),
+            old_block_node_offsets: Vec::default(),
 
             stores: ThreadLocal::new(),
         };
@@ -157,18 +167,22 @@ impl<const N: usize> Mesh<N> {
     }
 
     pub fn refine(&mut self) {
-        // self.tree.balance_refine_flags(&mut self.refine_flags);
+        self.refine_map.clear();
 
+        // Save old information
+        self.old_blocks.clone_from(&self.blocks);
+        self.old_block_node_offsets
+            .clone_from(&self.block_node_offsets);
+
+        self.refine_map.resize(self.tree.num_cells(), 0);
+        self.tree
+            .refine_index_map(&self.refine_flags, &mut self.refine_map);
+
+        // Refine tree
         self.tree.refine(&self.refine_flags);
+        // Rebuild mesh
         self.build();
     }
-
-    // pub fn refine_just_blocks(&mut self) {
-    //     // self.tree.balance_refine_flags(&mut self.refine_flags);
-
-    //     self.tree.refine(&self.refine_flags);
-    //     self.blocks.build(&self.tree);
-    // }
 
     pub fn refine_global(&mut self) {
         self.refine_flags.fill(true);
@@ -179,6 +193,10 @@ impl<const N: usize> Mesh<N> {
         self.blocks.len()
     }
 
+    pub(crate) fn num_old_blocks(&self) -> usize {
+        self.old_blocks.len()
+    }
+
     pub fn num_cells(&self) -> usize {
         self.tree.num_cells()
     }
@@ -187,8 +205,16 @@ impl<const N: usize> Mesh<N> {
         *self.block_node_offsets.last().unwrap()
     }
 
+    pub(crate) fn num_old_nodes(&self) -> usize {
+        *self.old_block_node_offsets.last().unwrap_or(&0)
+    }
+
     pub fn block_nodes(&self, block: usize) -> Range<usize> {
         self.block_node_offsets[block]..self.block_node_offsets[block + 1]
+    }
+
+    pub(crate) fn old_block_nodes(&self, block: usize) -> Range<usize> {
+        self.old_block_node_offsets[block]..self.old_block_node_offsets[block + 1]
     }
 
     /// Returns the window of nodes in a block corresponding to
@@ -226,6 +252,13 @@ impl<const N: usize> Mesh<N> {
         NodeSpace::new(cell_size, self.ghost)
     }
 
+    pub(crate) fn old_block_space(&self, block: usize) -> NodeSpace<N> {
+        let size = self.old_blocks.size(block);
+        let cell_size = array::from_fn(|axis| size[axis] * self.width);
+
+        NodeSpace::new(cell_size, self.ghost)
+    }
+
     pub fn block_bounds(&self, block: usize) -> Rectangle<N> {
         self.blocks.bounds(block)
     }
@@ -245,8 +278,19 @@ impl<const N: usize> Mesh<N> {
         }
     }
 
+    pub(crate) fn old_block_boundary<B>(&self, block: usize, boundary: B) -> BlockBoundary<N, B> {
+        BlockBoundary {
+            flags: self.old_blocks.boundary_flags(block),
+            inner: boundary,
+        }
+    }
+
     pub fn block_level(&self, block: usize) -> usize {
-        self.tree.level(self.blocks.cells(block)[0])
+        self.blocks.level(block)
+    }
+
+    pub fn old_block_level(&self, block: usize) -> usize {
+        self.old_blocks.level(block)
     }
 
     /// Returns true if the given cell is on a physical boundary.
@@ -312,6 +356,17 @@ impl<const N: usize> Mesh<N> {
 
     pub fn block_compute<F: Fn(&Self, &MeshStore, usize) + Sync>(&mut self, f: F) {
         (0..self.num_blocks())
+            .par_bridge()
+            .into_par_iter()
+            .for_each(|block| {
+                let store = unsafe { &mut *self.stores.get_or_default().get() };
+                f(self, store, block);
+                store.reset();
+            });
+    }
+
+    pub fn old_block_compute<F: Fn(&Self, &MeshStore, usize) + Sync>(&mut self, f: F) {
+        (0..self.num_old_blocks())
             .par_bridge()
             .into_par_iter()
             .for_each(|block| {
@@ -591,6 +646,10 @@ impl<const N: usize> Clone for Mesh<N> {
             refine_flags: self.refine_flags.clone(),
             coarsen_flags: self.coarsen_flags.clone(),
 
+            refine_map: self.refine_map.clone(),
+            old_blocks: self.old_blocks.clone(),
+            old_block_node_offsets: self.old_block_node_offsets.clone(),
+
             stores: ThreadLocal::new(),
         }
     }
@@ -613,6 +672,10 @@ impl<const N: usize> Default for Mesh<N> {
 
             refine_flags: Vec::default(),
             coarsen_flags: Vec::default(),
+
+            refine_map: Vec::default(),
+            old_blocks: TreeBlocks::default(),
+            old_block_node_offsets: Vec::default(),
 
             stores: ThreadLocal::new(),
         };

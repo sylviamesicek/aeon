@@ -398,7 +398,7 @@ impl<const N: usize> NodeSpace<N> {
 
     fn stencils<'a, C: Convolution<N>>(
         &self,
-        boundary: impl Boundary<N> + Condition<N>,
+        boundary: impl Boundary<N>,
         support: [Support; N],
         convolution: &'a C,
     ) -> [&'a [f64]; N] {
@@ -417,13 +417,12 @@ impl<const N: usize> NodeSpace<N> {
             };
 
             let kind = boundary.kind(face);
-            let parity = boundary.parity(face);
 
-            match (kind, parity) {
-                (BoundaryKind::Parity, false) => convolution.antisymmetric(border, axis),
-                (BoundaryKind::Parity, true) => convolution.symmetric(border, axis),
-                (BoundaryKind::Custom, _) => convolution.interior(axis),
-                (BoundaryKind::Free | BoundaryKind::Radiative, _) => convolution.free(border, axis),
+            match kind {
+                // (BoundaryKind::Parity, false) => convolution.antisymmetric(border, axis),
+                // (BoundaryKind::Parity, true) => convolution.symmetric(border, axis),
+                BoundaryKind::Custom | BoundaryKind::Parity => convolution.interior(axis),
+                BoundaryKind::Free | BoundaryKind::Radiative => convolution.free(border, axis),
             }
         })
     }
@@ -431,7 +430,7 @@ impl<const N: usize> NodeSpace<N> {
     /// Evaluates the operation of a convolution at a given vertex, assuming the given boundary conditions.
     pub fn evaluate(
         &self,
-        boundary: impl Boundary<N> + Condition<N>,
+        boundary: impl Boundary<N>,
         convolution: impl Convolution<N>,
         bounds: Rectangle<N>,
         vertex: [usize; N],
@@ -456,7 +455,7 @@ impl<const N: usize> NodeSpace<N> {
 
     pub fn prolong(
         &self,
-        boundary: impl Boundary<N> + Condition<N>,
+        boundary: impl Boundary<N>,
         kernel: impl CellKernel,
         supervertex: [usize; N],
         field: &[f64],
@@ -499,13 +498,12 @@ impl<const N: usize> NodeSpace<N> {
             };
 
             let kind = boundary.kind(face);
-            let parity = boundary.parity(face);
 
-            match (kind, parity) {
-                (BoundaryKind::Parity, false) => kernel.antisymmetric(border),
-                (BoundaryKind::Parity, true) => kernel.symmetric(border),
-                (BoundaryKind::Custom, _) => kernel.interior(),
-                (BoundaryKind::Free | BoundaryKind::Radiative, _) => kernel.free(border),
+            match kind {
+                // (BoundaryKind::Parity, false) => kernel.antisymmetric(border),
+                // (BoundaryKind::Parity, true) => kernel.symmetric(border),
+                BoundaryKind::Custom | BoundaryKind::Parity => kernel.interior(),
+                BoundaryKind::Free | BoundaryKind::Radiative => kernel.free(border),
             }
         });
 

@@ -1,7 +1,6 @@
 use std::f64::consts::PI;
 
 use aeon::prelude::*;
-use aeon_geometry::{AxisMask, Region, Side};
 
 #[derive(Clone)]
 pub struct Quadrant;

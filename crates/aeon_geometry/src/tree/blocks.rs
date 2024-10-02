@@ -17,6 +17,7 @@ pub struct TreeBlocks<const N: usize> {
     block_cell_offsets: Vec<usize>,
     /// The physical bounds of each block.
     block_bounds: Vec<Rectangle<N>>,
+    block_levels: Vec<usize>,
     /// Stores whether block face is on physical boundary.
     boundaries: BitVec,
 }
@@ -32,6 +33,7 @@ impl<const N: usize> Default for TreeBlocks<N> {
             block_cell_offsets: Vec::new(),
 
             block_bounds: Vec::new(),
+            block_levels: Vec::new(),
 
             boundaries: BitVec::new(),
         }
@@ -45,6 +47,7 @@ impl<const N: usize> TreeBlocks<N> {
         self.build_blocks(tree);
         self.build_bounds(tree);
         self.build_boundaries(tree);
+        self.build_levels(tree);
     }
 
     // Number of blocks in the mesh.
@@ -73,6 +76,10 @@ impl<const N: usize> TreeBlocks<N> {
     /// Returns the bounds of the given block.
     pub fn bounds(&self, block: usize) -> Rectangle<N> {
         self.block_bounds[block].clone()
+    }
+
+    pub fn level(&self, block: usize) -> usize {
+        self.block_levels[block]
     }
 
     /// Returns boundary flags for a block.
@@ -212,6 +219,14 @@ impl<const N: usize> TreeBlocks<N> {
                 let neighbor = tree.neighbor(cell, face);
                 self.boundaries.push(neighbor == NULL);
             }
+        }
+    }
+
+    fn build_levels(&mut self, tree: &Tree<N>) {
+        self.block_levels.resize(self.len(), 0);
+        for block in 0..self.len() {
+            let cell = self.cells(block)[0];
+            self.block_levels[block] = tree.level(cell);
         }
     }
 }

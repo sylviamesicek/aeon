@@ -1,5 +1,5 @@
 use aeon_basis::{Boundary, BoundaryKind, Condition, Kernels};
-use aeon_geometry::{faces, Face, IndexSpace, Side, TreeBlockNeighbor, TreeCellNeighbor};
+use aeon_geometry::{faces, AxisMask, Face, IndexSpace, Side, TreeBlockNeighbor, TreeCellNeighbor};
 // use rayon::iter::{ParallelBridge, ParallelIterator};
 use reborrow::Reborrow as _;
 use std::{array, ops::Range};
@@ -67,14 +67,126 @@ impl<const N: usize> Mesh<N> {
         let space = self.interface_space(interface);
         let mask = self.interface_mask(interface);
 
-        // let mut origin = [0; N];
-        // let mut size = space.size();
-
-        // let
-
         space
             .iter()
             .filter(move |&offset| mask[space.linear_from_cartesian(offset)])
+    }
+
+    /// Transfers data from an old version of the mesh to the new refined version.
+    pub fn transfer_system<K: Kernels, B: Boundary<N> + Sync, System: SystemLabel>(
+        &mut self,
+        _order: K,
+        boundary: B,
+        source: SystemSlice<'_, System>,
+        dest: SystemSliceMut<'_, System>,
+    ) {
+        assert!(self.num_nodes() == dest.len());
+        assert!(self.num_old_nodes() == source.len());
+
+        let source = source.as_range();
+        let dest = dest.as_range();
+
+        self.old_block_compute(|mesh, _store, block| {
+            let size = mesh.old_blocks.size(block);
+            let level = mesh.old_block_level(block);
+            let nodes = mesh.old_block_nodes(block);
+            let space = mesh.old_block_space(block);
+            let boundary = mesh.old_block_boundary(block, boundary.clone());
+
+            let source = unsafe { source.slice(nodes.clone()).fields() };
+
+            for (i, offset) in IndexSpace::new(size).iter().enumerate() {
+                let cell = mesh.old_blocks.cells(block)[i];
+                let cell_origin: [_; N] = array::from_fn(|axis| offset[axis] * mesh.width);
+
+                let new_cell = mesh.refine_map[cell];
+                let new_level = mesh.tree.level(new_cell);
+
+                if new_level > level {
+                    for child in AxisMask::<N>::enumerate() {
+                        let new_cell = new_cell + child.to_linear();
+
+                        let new_block = mesh.blocks.cell_block(new_cell);
+                        let new_offset = mesh.blocks.cell_position(new_cell);
+                        let new_size = mesh.blocks.size(new_block);
+                        let new_nodes = mesh.block_nodes(new_block);
+                        let new_space = mesh.block_space(new_block);
+
+                        let mut dest = unsafe { dest.slice_mut(new_nodes.clone()).fields_mut() };
+
+                        let mut cell_origin: [_; N] = array::from_fn(|axis| 2 * cell_origin[axis]);
+
+                        for axis in 0..N {
+                            if child.is_set(axis) {
+                                cell_origin[axis] += mesh.width;
+                            }
+                        }
+
+                        let mut node_size = [mesh.width; N];
+
+                        for axis in 0..N {
+                            if new_offset[axis] == new_size[axis] - 1 {
+                                node_size[axis] += 1;
+                            }
+                        }
+
+                        let new_cell_origin: [_; N] =
+                            array::from_fn(|axis| new_offset[axis] * mesh.width);
+
+                        for node_offset in IndexSpace::new(node_size).iter() {
+                            let source_vertex =
+                                array::from_fn(|axis| cell_origin[axis] + node_offset[axis]);
+                            let dest_node = array::from_fn(|axis| {
+                                (new_cell_origin[axis] + node_offset[axis]) as isize
+                            });
+
+                            for field in System::fields() {
+                                let v = space.prolong(
+                                    boundary.clone(),
+                                    K::interpolation().clone(),
+                                    source_vertex,
+                                    source.field(field.clone()),
+                                );
+                                dest.field_mut(field.clone())
+                                    [new_space.index_from_node(dest_node)] = v;
+                            }
+                        }
+                    }
+                } else if new_level == level {
+                    let new_block = mesh.blocks.cell_block(new_cell);
+                    let new_offset = mesh.blocks.cell_position(new_cell);
+                    let new_size = mesh.blocks.size(new_block);
+                    let new_nodes = mesh.block_nodes(new_block);
+                    let new_space = mesh.block_space(new_block);
+
+                    let mut dest = unsafe { dest.slice_mut(new_nodes.clone()).fields_mut() };
+
+                    let mut node_size = [mesh.width; N];
+
+                    for axis in 0..N {
+                        if new_offset[axis] == new_size[axis] - 1 {
+                            node_size[axis] += 1;
+                        }
+                    }
+
+                    let new_cell_origin: [_; N] =
+                        array::from_fn(|axis| new_offset[axis] * mesh.width);
+
+                    for node_offset in IndexSpace::new(node_size).iter() {
+                        let source_node =
+                            array::from_fn(|axis| (cell_origin[axis] + node_offset[axis]) as isize);
+                        let dest_node = array::from_fn(|axis| {
+                            (new_cell_origin[axis] + node_offset[axis]) as isize
+                        });
+
+                        for field in System::fields() {
+                            let v = source.field(field.clone())[space.index_from_node(source_node)];
+                            dest.field_mut(field.clone())[new_space.index_from_node(dest_node)] = v;
+                        }
+                    }
+                }
+            }
+        });
     }
 
     /// Enforces strong boundary conditions. This includes strong physical boundary conditions, as well
@@ -97,14 +209,11 @@ impl<const N: usize> Mesh<N> {
         conditions: C,
         mut system: SystemSliceMut<'_, C::System>,
     ) {
-        self.fill_physical(extent, &boundary, &conditions, &mut system);
-
         self.fill_fine(extent, &mut system);
         self.fill_direct(extent, &mut system);
+
+        self.fill_physical(extent, &boundary, &conditions, &mut system);
         self.fill_prolong(order, extent, &boundary, &conditions, &mut system);
-
-        // self.fill_direct(extent, &mut system);
-
         self.fill_physical(extent, &boundary, &conditions, &mut system);
     }
 

@@ -25,7 +25,7 @@ pub enum BoundaryKind {
 
 impl BoundaryKind {
     pub fn has_ghost(self) -> bool {
-        matches!(self, Self::Custom)
+        matches!(self, Self::Custom | Self::Parity)
     }
 }
 
