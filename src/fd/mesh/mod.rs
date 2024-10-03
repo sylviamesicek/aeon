@@ -55,6 +55,7 @@ pub struct Mesh<const N: usize> {
     interfaces: Vec<TreeInterface<N>>,
     /// Offsets linking each interface to a range of ghost/face nodes.
     interface_node_offsets: Vec<usize>,
+    /// Mask that keeps different interfaces disjoint.sda
     interface_masks: Vec<bool>,
 
     /// Refinement flags for each cell on the mesh.
@@ -62,10 +63,12 @@ pub struct Mesh<const N: usize> {
     /// Coarsening flags for each cell on the mesh.
     coarsen_flags: Vec<bool>,
 
-    /// Map from previous version of mesh to refined version.
+    /// Map from cells before refinement to current cells.
     refine_map: Vec<usize>,
 
+    /// Blocks before most recent refinement.
     old_blocks: TreeBlocks<N>,
+    /// Block node offsets from before most recent refinement.
     old_block_node_offsets: Vec<usize>,
 
     /// Thread-local stores used for allocation.
@@ -110,7 +113,8 @@ impl<const N: usize> Mesh<N> {
         result
     }
 
-    pub fn build(&mut self) {
+    /// Rebuilds mesh from current tree.
+    fn build(&mut self) {
         self.blocks.build(&self.tree);
         self.neighbors.build(&self.tree, &self.blocks);
         self.build_block_node_offests();
@@ -118,6 +122,7 @@ impl<const N: usize> Mesh<N> {
         self.build_flags();
     }
 
+    /// Computes block node offests, assuming blocks have already been built.
     fn build_block_node_offests(&mut self) {
         // Reset offsets
         self.block_node_offsets.clear();
@@ -139,6 +144,7 @@ impl<const N: usize> Mesh<N> {
         self.block_node_offsets.push(cursor);
     }
 
+    /// Allocates requisite space for refinement and coarsening flags.
     fn build_flags(&mut self) {
         self.refine_flags.clear();
         self.coarsen_flags.clear();
@@ -147,6 +153,7 @@ impl<const N: usize> Mesh<N> {
         self.coarsen_flags.resize(self.num_cells(), false);
     }
 
+    /// Retrieves the Quadtree this mesh is built on top of.
     pub fn tree(&self) -> &Tree<N> {
         &self.tree
     }
@@ -166,6 +173,7 @@ impl<const N: usize> Mesh<N> {
         // }
     }
 
+    /// Refines the mesh using currently set flags.
     pub fn refine(&mut self) {
         self.refine_map.clear();
 
@@ -184,40 +192,49 @@ impl<const N: usize> Mesh<N> {
         self.build();
     }
 
+    /// Flags every cell for refinement, then performs the operation.
     pub fn refine_global(&mut self) {
         self.refine_flags.fill(true);
         self.refine();
     }
 
+    /// Returns the total number of blocks on the mesh.
     pub fn num_blocks(&self) -> usize {
         self.blocks.len()
     }
 
+    /// Returns the total number of blocks on the mesh before the most recent refinement.
     pub(crate) fn num_old_blocks(&self) -> usize {
         self.old_blocks.len()
     }
 
+    /// Returns the total number of cells on the mesh.
     pub fn num_cells(&self) -> usize {
         self.tree.num_cells()
     }
 
+    /// Returns the total number of nodes on the mesh.
     pub fn num_nodes(&self) -> usize {
         *self.block_node_offsets.last().unwrap()
     }
 
+    /// Returns the total number of nodes on the mesh before the most recent refinement.
     pub(crate) fn num_old_nodes(&self) -> usize {
         *self.old_block_node_offsets.last().unwrap_or(&0)
     }
 
+    /// The range of nodes assigned to a given block.
     pub fn block_nodes(&self, block: usize) -> Range<usize> {
         self.block_node_offsets[block]..self.block_node_offsets[block + 1]
     }
 
+    /// The range of nodes assigned to a given block on the mesh before the most recent refinement.
     pub(crate) fn old_block_nodes(&self, block: usize) -> Range<usize> {
         self.old_block_node_offsets[block]..self.old_block_node_offsets[block + 1]
     }
 
-    /// Returns the window of nodes in a block corresponding to
+    /// Returns the window of nodes in a block corresponding to a given cell,
+    /// including `self.width/2` of padding along each face.
     pub fn element_window(&self, cell: usize) -> NodeWindow<N> {
         let position = self.blocks.cell_position(cell);
 
@@ -231,6 +248,8 @@ impl<const N: usize> Mesh<N> {
         NodeWindow { origin, size }
     }
 
+    /// Returns the window of nodes in a block corresponding to a given cell, including
+    /// no padding.
     pub fn element_coarse_window(&self, cell: usize) -> NodeWindow<N> {
         let position = self.blocks.cell_position(cell);
 
@@ -252,6 +271,7 @@ impl<const N: usize> Mesh<N> {
         NodeSpace::new(cell_size, self.ghost)
     }
 
+    /// Computes the nodespace corresponding to a block on the mesh before the most recent refinement.
     pub(crate) fn old_block_space(&self, block: usize) -> NodeSpace<N> {
         let size = self.old_blocks.size(block);
         let cell_size = array::from_fn(|axis| size[axis] * self.width);
@@ -259,6 +279,7 @@ impl<const N: usize> Mesh<N> {
         NodeSpace::new(cell_size, self.ghost)
     }
 
+    /// The bounds of a block.
     pub fn block_bounds(&self, block: usize) -> Rectangle<N> {
         self.blocks.bounds(block)
     }
@@ -278,6 +299,7 @@ impl<const N: usize> Mesh<N> {
         }
     }
 
+    /// Produces a block boundary for the mesh before its most recent refinement.
     pub(crate) fn old_block_boundary<B>(&self, block: usize, boundary: B) -> BlockBoundary<N, B> {
         BlockBoundary {
             flags: self.old_blocks.boundary_flags(block),
@@ -285,11 +307,13 @@ impl<const N: usize> Mesh<N> {
         }
     }
 
+    /// The level of a given block.
     pub fn block_level(&self, block: usize) -> usize {
         self.blocks.level(block)
     }
 
-    pub fn old_block_level(&self, block: usize) -> usize {
+    /// The level of a block before the most recent refinement.
+    pub(crate) fn old_block_level(&self, block: usize) -> usize {
         self.old_blocks.level(block)
     }
 

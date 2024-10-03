@@ -651,9 +651,9 @@ mod tests {
         const BORDER: usize = 3;
 
         let supports = [
-            Support::Negative(0),
-            Support::Negative(1),
-            Support::Negative(2),
+            Support::Interior,
+            Support::Interior,
+            Support::Interior,
             Support::Interior,
             Support::Interior,
             Support::Interior,
@@ -677,9 +677,9 @@ mod tests {
         const BORDER: usize = 3;
 
         let supports = [
-            Support::Negative(0),
-            Support::Negative(1),
-            Support::Negative(2),
+            Support::Interior,
+            Support::Interior,
+            Support::Interior,
             Support::Interior,
             Support::Interior,
             Support::Positive(2),

@@ -20,7 +20,7 @@ pub const NULL: usize = usize::MAX;
 /// Only leaves are stored by this tree, and its hierarchical structure is implied.
 /// To enable various optimisations, and avoid certain checks, the tree always contains
 /// at least one level of refinement.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Tree<const N: usize> {
     /// Domain of the full tree
     domain: Rectangle<N>,
@@ -296,6 +296,7 @@ impl<const N: usize> Tree<N> {
     /// Computes the level of a cell.
     pub fn level(&self, cell: usize) -> usize {
         debug_assert!(cell != NULL);
+        debug_assert!(cell < self.num_cells());
         self.offsets[cell + 1] - self.offsets[cell]
     }
 
@@ -515,12 +516,137 @@ impl<const N: usize> Tree<N> {
             }
         }
 
-        self.bounds = bounds;
-        self.neighbors = neighbors;
-        self.indices = indices;
-        self.offsets = offsets;
+        self.bounds.clone_from(&bounds);
+        self.neighbors.clone_from(&neighbors);
+        self.indices.clone_from(&indices);
+        self.offsets.clone_from(&offsets);
     }
 
+    /// Checks that the given coarsening flags are balanced and valid.
+    pub fn check_coarsen_flags(&self, flags: &[bool]) -> bool {
+        assert!(flags.len() == self.num_cells());
+
+        // Short circuit if this mesh only has two levels.
+        if flags.len() == AxisMask::<N>::COUNT {
+            return flags.iter().all(|&b| !b);
+        }
+
+        // First if any flagging would break 2:1 border, unmark it
+        for cell in 0..self.num_cells() {
+            if !flags[cell] {
+                for neighbor in self.neighborhood_coarse(cell) {
+                    // Set any coarser cells to not be coarsened further.
+                    if flags[neighbor] {
+                        return false;
+                    }
+                }
+            }
+        }
+
+        // Make sure only cells that can be coarsened are coarsened. And that every single child of such a cell
+        // is flagged.
+        let mut cell = 0;
+
+        while cell < self.num_cells() {
+            if !flags[cell] {
+                cell += 1;
+                continue;
+            }
+
+            // if flags[cell] {
+            let level = self.level(cell);
+            let split = self.split(cell);
+
+            if split != AxisMask::<N>::empty() {
+                return false;
+            }
+
+            for offset in 0..AxisMask::<N>::COUNT {
+                if self.level(cell + offset) != level {
+                    return false;
+                }
+            }
+
+            if !flags[cell..cell + AxisMask::<N>::COUNT].iter().all(|&b| b) {
+                return false;
+            }
+            // Skip forwards. We have considered all cases.
+            cell += AxisMask::<N>::COUNT;
+        }
+
+        true
+    }
+
+    /// Balances the given coarsening flags
+    pub fn balance_coarsen_flags(&self, flags: &mut [bool]) {
+        assert!(flags.len() == self.num_cells());
+
+        // Short circuit if this mesh only has two levels.
+        if flags.len() == AxisMask::<N>::COUNT {
+            flags.fill(false);
+        }
+
+        loop {
+            let mut is_balanced = true;
+
+            // First if any flagging would break 2:1 border, unmark it
+            for cell in 0..self.num_cells() {
+                if !flags[cell] {
+                    for neighbor in self.neighborhood_coarse(cell) {
+                        // Set any coarser cells to not be coarsened further.
+                        if flags[neighbor] {
+                            is_balanced = false;
+                        }
+                        flags[neighbor] = false;
+                    }
+                }
+            }
+
+            // Make sure only cells that can be coarsened are coarsened. And that every single child of such a cell
+            // is flagged.
+            let mut cell = 0;
+
+            while cell < self.num_cells() {
+                if !flags[cell] {
+                    cell += 1;
+                    continue;
+                }
+
+                // if flags[cell] {
+                let level = self.level(cell);
+                let split = self.split(cell);
+
+                if split != AxisMask::<N>::empty() {
+                    flags[cell] = false;
+                    is_balanced = false;
+                    cell += 1;
+                    continue;
+                }
+
+                for offset in 0..AxisMask::<N>::COUNT {
+                    if self.level(cell + offset) != level {
+                        flags[cell] = false;
+                        is_balanced = false;
+                        cell += 1;
+                        continue;
+                    }
+                }
+
+                if !flags[cell..cell + AxisMask::<N>::COUNT].iter().all(|&b| b) {
+                    flags[cell..cell + AxisMask::<N>::COUNT].fill(false);
+                    is_balanced = false;
+                }
+                // Skip forwards. We have considered all cases.
+                cell += AxisMask::<N>::COUNT;
+            }
+
+            if is_balanced {
+                break;
+            }
+        }
+    }
+
+    /// Maps current cells to indices after coarsening is performed.
     pub fn coarsen_index_map(&self, flags: &[bool], map: &mut [usize]) {
         assert!(flags.len() == self.num_cells());
         assert!(map.len() == self.num_cells());
@@ -541,14 +667,101 @@ impl<const N: usize> Tree<N> {
         }
     }
 
+    /// Coarsens the tree.
     pub fn coarsen(&mut self, flags: &[bool]) {
         assert!(flags.len() == self.num_cells());
+        assert!(self.check_coarsen_flags(flags));
 
+        // Compute number of cells after coarsening
         let num_flags = flags.iter().copied().filter(|&p| p).count();
-        let total_cells = flags.len() - (AxisMask::<N>::COUNT - 1) * num_flags;
+        debug_assert!(num_flags % AxisMask::<N>::COUNT == 0);
+        let total_cells = flags.len() - num_flags / AxisMask::<N>::COUNT;
 
+        // Update index map
         let mut update_map = vec![0; self.num_cells()];
         self.coarsen_index_map(flags, &mut update_map);
+
+        // New bounds and neighbors
+        let mut bounds = Vec::with_capacity(total_cells);
+        let mut neighbors = Vec::with_capacity(total_cells * 2 * N);
+        let mut indices = from_fn(|_| BitVec::with_capacity(total_cells));
+        let mut offsets = Vec::with_capacity(total_cells + 1);
+        offsets.push(0);
+
+        // Loop over cells
+        let mut cell = 0;
+
+        while cell < self.num_cells() {
+            // This cell (and therefore the following `AxisMask::<N>::COUNT` cells) are to be refined.
+            if flags[cell] {
+                // Get level of the cell.
+                let level = self.level(cell);
+
+                debug_assert!(self.split(cell) == AxisMask::empty());
+
+                // Compute new bounds
+                bounds.push({
+                    let mut result = self.bounds(cell);
+
+                    for axis in 0..N {
+                        result.size[axis] *= 2.0;
+                    }
+
+                    result
+                });
+
+                // Update neighbors
+                for face in faces::<N>() {
+                    let split = face.adjacent_split();
+
+                    let neighbor = self.neighbor(cell + split.to_linear(), face);
+
+                    if neighbor == NULL {
+                        neighbors.push(NULL);
+                    } else {
+                        neighbors.push(update_map[neighbor]);
+                    }
+                }
+
+                for axis in 0..N {
+                    indices[axis].extend_from_bitslice(&self.index_slice(cell, axis)[1..]);
+                }
+
+                let previous = offsets[offsets.len() - 1];
+                offsets.push(previous + level - 1);
+
+                // Skip remaining cells that were refined in this action.
+                cell += AxisMask::<N>::COUNT;
+            } else {
+                // Use same bounds on new tree.
+                bounds.push(self.bounds(cell));
+
+                // Update neighbors
+                for face in faces::<N>() {
+                    let neighbor = self.neighbor(cell, face);
+                    if neighbor == NULL {
+                        neighbors.push(NULL);
+                        continue;
+                    } else {
+                        neighbors.push(update_map[neighbor]);
+                    }
+                }
+
+                for axis in 0..N {
+                    indices[axis].extend_from_bitslice(self.index_slice(cell, axis));
+                }
+
+                let previous = offsets[offsets.len() - 1];
+                offsets.push(previous + self.level(cell));
+
+                cell += 1;
+            }
+        }
+
+        self.bounds.clone_from(&bounds);
+        self.neighbors.clone_from(&neighbors);
+        self.indices.clone_from(&indices);
+        self.offsets.clone_from(&offsets);
     }
 
     /// Returns the z index for
@@ -563,7 +776,7 @@ mod tests {
     use crate::{regions, FaceMask};
 
     #[test]
-    fn balancing() {
+    fn refine_balancing() {
         let mut tree = Tree::new(Rectangle::<2>::UNIT);
         tree.refine(&[true, false, false, false]);
 
@@ -766,5 +979,30 @@ mod tests {
 
         assert_eq!(blocks.size(4), [1, 1]);
         assert_eq!(blocks.cells(4), &[8]);
+    }
+
+    #[test]
+    fn refinement_and_coarsening() {
+        let mut tree = Tree::<2>::new(Rectangle::UNIT);
+        // Make initially asymmetric.
+        tree.refine(&[true, false, false, false]);
+
+        for _ in 0..1 {
+            let mut flags = vec![true; tree.num_cells()];
+            tree.balance_refine_flags(&mut flags);
+            tree.refine(&flags);
+        }
+
+        for _ in 0..2 {
+            let mut flags = vec![true; tree.num_cells()];
+            tree.balance_coarsen_flags(&mut flags);
+            let mut coarsen_map = vec![0; tree.num_cells()];
+            tree.coarsen_index_map(&flags, &mut coarsen_map);
+            dbg!(&coarsen_map);
+            dbg!(&flags);
+            tree.coarsen(&flags);
+        }
+
+        assert_eq!(tree, Tree::<2>::new(Rectangle::UNIT));
     }
 }
