@@ -391,21 +391,9 @@ impl<const N: usize> Tree<N> {
         // ****************************************
         // Prepass to deteremine updated indices **
 
-        // Maps current cell indices to new cell indices. If a cell is refined, this will point
-        // to
-        let mut update_map = Vec::with_capacity(self.num_cells());
-
-        let mut cursor = 0;
-
-        for &flag in flags.iter() {
-            update_map.push(cursor);
-
-            if flag {
-                cursor += AxisMask::<N>::COUNT;
-            } else {
-                cursor += 1;
-            }
-        }
+        // Maps current cell indices to new cell indices.
+        let mut update_map = vec![0; self.num_cells()];
+        self.refine_index_map(flags, &mut update_map);
 
         let mut bounds = Vec::with_capacity(total_blocks);
         let mut neighbors = Vec::with_capacity(total_blocks * 2 * N);
@@ -531,6 +519,36 @@ impl<const N: usize> Tree<N> {
         self.neighbors = neighbors;
         self.indices = indices;
         self.offsets = offsets;
+    }
+
+    pub fn coarsen_index_map(&self, flags: &[bool], map: &mut [usize]) {
+        assert!(flags.len() == self.num_cells());
+        assert!(map.len() == self.num_cells());
+
+        let mut cursor = 0;
+        let mut cell = 0;
+
+        while cell < self.num_cells() {
+            if flags[cell] {
+                map[cell..cell + AxisMask::<N>::COUNT].fill(cursor);
+                cell += AxisMask::<N>::COUNT;
+            } else {
+                map[cell] = cursor;
+                cell += 1;
+            }
+
+            cursor += 1;
+        }
+    }
+
+    pub fn coarsen(&mut self, flags: &[bool]) {
+        assert!(flags.len() == self.num_cells());
+
+        let num_flags = flags.iter().copied().filter(|&p| p).count();
+        let total_cells = flags.len() - (AxisMask::<N>::COUNT - 1) * num_flags;
+
+        let mut update_map = vec![0; self.num_cells()];
+        self.coarsen_index_map(flags, &mut update_map);
     }
 
     /// Returns the z index for
