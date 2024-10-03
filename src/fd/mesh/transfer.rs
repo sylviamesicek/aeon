@@ -99,7 +99,7 @@ impl<const N: usize> Mesh<N> {
                 let cell = mesh.old_blocks.cells(block)[i];
                 let cell_origin: [_; N] = array::from_fn(|axis| offset[axis] * mesh.width);
 
-                let new_cell = mesh.refine_map[cell];
+                let new_cell = mesh.regrid_map[cell];
                 let new_level = mesh.tree.level(new_cell);
 
                 if new_level > level {
@@ -175,6 +175,49 @@ impl<const N: usize> Mesh<N> {
                     for node_offset in IndexSpace::new(node_size).iter() {
                         let source_node =
                             array::from_fn(|axis| (cell_origin[axis] + node_offset[axis]) as isize);
+                        let dest_node = array::from_fn(|axis| {
+                            (new_cell_origin[axis] + node_offset[axis]) as isize
+                        });
+
+                        for field in System::fields() {
+                            let v = source.field(field.clone())[space.index_from_node(source_node)];
+                            dest.field_mut(field.clone())[new_space.index_from_node(dest_node)] = v;
+                        }
+                    }
+                } else {
+                    let split = mesh.tree.split(cell);
+
+                    let new_block = mesh.blocks.cell_block(new_cell);
+                    let new_offset = mesh.blocks.cell_position(new_cell);
+                    let new_size = mesh.blocks.size(new_block);
+                    let new_nodes = mesh.block_nodes(new_block);
+                    let new_space = mesh.block_space(new_block);
+
+                    let mut dest = unsafe { dest.slice_mut(new_nodes.clone()).fields_mut() };
+
+                    let cell_origin: [_; N] = array::from_fn(|axis| cell_origin[axis] / 2);
+
+                    let mut node_size = [mesh.width / 2; N];
+
+                    for axis in 0..N {
+                        if new_offset[axis] == new_size[axis] - 1 && split.is_set(axis) {
+                            node_size[axis] += 1;
+                        }
+                    }
+
+                    let mut new_cell_origin: [_; N] =
+                        array::from_fn(|axis| new_offset[axis] * mesh.width);
+
+                    for axis in 0..N {
+                        if split.is_set(axis) {
+                            new_cell_origin[axis] += mesh.width / 2;
+                        }
+                    }
+
+                    for node_offset in IndexSpace::new(node_size).iter() {
+                        let source_node = array::from_fn(|axis| {
+                            2 * (cell_origin[axis] + node_offset[axis]) as isize
+                        });
                         let dest_node = array::from_fn(|axis| {
                             (new_cell_origin[axis] + node_offset[axis]) as isize
                         });

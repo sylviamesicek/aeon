@@ -1,6 +1,6 @@
 #![allow(clippy::needless_range_loop)]
 
-use crate::{faces, AxisMask, Face, Rectangle, Region, Side};
+use crate::{faces, regions, AxisMask, Face, Rectangle, Region, Side};
 use bitvec::prelude::*;
 use std::array::from_fn;
 use std::iter::once;
@@ -269,7 +269,12 @@ impl<const N: usize> Tree<N> {
     //         .flat_map(move |region| self.neighbors_in_region(cell, region))
     // }
 
-    /// Returns all coarse cells that neighbor the given cells, including on
+    /// Returns all cells that neighbor the given cell including the cell itself.
+    pub fn neighborhood(&self, cell: usize) -> impl Iterator<Item = usize> + '_ {
+        regions::<N>().flat_map(move |region| self.neighbors_in_region(cell, region))
+    }
+
+    /// Returns all coarse cells that neighbor the given cell, including on
     /// corners.
     pub fn neighborhood_coarse(&self, cell: usize) -> impl Iterator<Item = usize> + '_ {
         let split = self.split(cell);

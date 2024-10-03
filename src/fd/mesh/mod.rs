@@ -64,7 +64,7 @@ pub struct Mesh<const N: usize> {
     coarsen_flags: Vec<bool>,
 
     /// Map from cells before refinement to current cells.
-    refine_map: Vec<usize>,
+    regrid_map: Vec<usize>,
 
     /// Blocks before most recent refinement.
     old_blocks: TreeBlocks<N>,
@@ -101,7 +101,7 @@ impl<const N: usize> Mesh<N> {
             refine_flags: Vec::new(),
             coarsen_flags: Vec::new(),
 
-            refine_map: Vec::default(),
+            regrid_map: Vec::default(),
             old_blocks: TreeBlocks::default(),
             old_block_node_offsets: Vec::default(),
 
@@ -163,31 +163,59 @@ impl<const N: usize> Mesh<N> {
     }
 
     pub fn balance_flags(&mut self) {
+        // Propogate refinement flags outwards.
         self.tree.balance_refine_flags(&mut self.refine_flags);
-
-        // // Refinement has priority over coarsening.
-        // for cell in 0..self.num_cells() {
-        //     if self.refine_flags[cell] {
-        //         self.coarsen_flags[cell] = false;
-        //     }
-        // }
+        // Refinement has priority over coarsening. Ensure that there is never a cell marked
+        // for refinement next to a equal or coarser cell marked for coarsening.
+        for cell in 0..self.num_cells() {
+            if self.refine_flags[cell] {
+                let level = self.tree.level(cell);
+                for neighbor in self.tree.neighborhood(cell) {
+                    let nlevel = self.tree.level(neighbor);
+                    if nlevel <= level {
+                        self.coarsen_flags[neighbor] = false;
+                    }
+                }
+            }
+        }
+        // Unmark coarsening flags as necessary.
+        self.tree.balance_coarsen_flags(&mut self.coarsen_flags);
     }
 
     /// Refines the mesh using currently set flags.
     pub fn refine(&mut self) {
-        self.refine_map.clear();
+        self.regrid_map.clear();
 
         // Save old information
         self.old_blocks.clone_from(&self.blocks);
         self.old_block_node_offsets
             .clone_from(&self.block_node_offsets);
 
-        self.refine_map.resize(self.tree.num_cells(), 0);
-        self.tree
-            .refine_index_map(&self.refine_flags, &mut self.refine_map);
+        // Perform regriding
+        self.regrid_map.resize(self.tree.num_cells(), 0);
 
-        // Refine tree
-        self.tree.refine(&self.refine_flags);
+        let mut coarsen_map = vec![0; self.tree.num_cells()];
+        self.tree
+            .coarsen_index_map(&self.coarsen_flags, &mut coarsen_map);
+        self.tree.coarsen(&self.coarsen_flags);
+
+        let mut refine_map = vec![0; self.tree.num_cells()];
+        let mut flags = vec![false; self.tree.num_cells()];
+
+        for (old, &new) in coarsen_map.iter().enumerate() {
+            flags[new] = self.refine_flags[old];
+        }
+
+        self.tree.refine_index_map(&flags, &mut refine_map);
+        self.tree.refine(&flags);
+
+        self.tree
+            .refine_index_map(&self.refine_flags, &mut self.regrid_map);
+
+        for i in 0..self.regrid_map.len() {
+            self.regrid_map[i] = refine_map[coarsen_map[i]];
+        }
+
         // Rebuild mesh
         self.build();
     }
@@ -670,7 +698,7 @@ impl<const N: usize> Clone for Mesh<N> {
             refine_flags: self.refine_flags.clone(),
             coarsen_flags: self.coarsen_flags.clone(),
 
-            refine_map: self.refine_map.clone(),
+            regrid_map: self.regrid_map.clone(),
             old_blocks: self.old_blocks.clone(),
             old_block_node_offsets: self.old_block_node_offsets.clone(),
 
@@ -697,7 +725,7 @@ impl<const N: usize> Default for Mesh<N> {
             refine_flags: Vec::default(),
             coarsen_flags: Vec::default(),
 
-            refine_map: Vec::default(),
+            regrid_map: Vec::default(),
             old_blocks: TreeBlocks::default(),
             old_block_node_offsets: Vec::default(),
 
