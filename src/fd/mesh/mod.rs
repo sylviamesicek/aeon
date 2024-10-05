@@ -183,7 +183,7 @@ impl<const N: usize> Mesh<N> {
     }
 
     /// Refines the mesh using currently set flags.
-    pub fn refine(&mut self) {
+    pub fn regrid(&mut self) {
         self.regrid_map.clear();
 
         // Save old information
@@ -209,9 +209,6 @@ impl<const N: usize> Mesh<N> {
         self.tree.refine_index_map(&flags, &mut refine_map);
         self.tree.refine(&flags);
 
-        self.tree
-            .refine_index_map(&self.refine_flags, &mut self.regrid_map);
-
         for i in 0..self.regrid_map.len() {
             self.regrid_map[i] = refine_map[coarsen_map[i]];
         }
@@ -223,7 +220,7 @@ impl<const N: usize> Mesh<N> {
     /// Flags every cell for refinement, then performs the operation.
     pub fn refine_global(&mut self) {
         self.refine_flags.fill(true);
-        self.refine();
+        self.regrid();
     }
 
     /// Returns the total number of blocks on the mesh.
@@ -343,6 +340,29 @@ impl<const N: usize> Mesh<N> {
     /// The level of a block before the most recent refinement.
     pub(crate) fn old_block_level(&self, block: usize) -> usize {
         self.old_blocks.level(block)
+    }
+
+    /// Retrieves the number of nodes along each axis of a cell.
+    /// This defaults to `[self.width; N]` but is increased by one
+    /// if the cell lies along a block boundary for a given axis.
+    pub fn cell_node_size(&self, cell: usize) -> [usize; N] {
+        let block = self.blocks.cell_block(cell);
+        let size = self.blocks.size(block);
+        let position = self.blocks.cell_position(cell);
+
+        array::from_fn(|axis| {
+            if position[axis] == size[axis] - 1 {
+                self.width + 1
+            } else {
+                self.width
+            }
+        })
+    }
+
+    /// Returns the origin of a cell in its block's `NodeSpace<N>`.
+    pub fn cell_node_origin(&self, cell: usize) -> [usize; N] {
+        let position = self.blocks.cell_position(cell);
+        array::from_fn(|axis| position[axis] * self.width)
     }
 
     /// Returns true if the given cell is on a physical boundary.

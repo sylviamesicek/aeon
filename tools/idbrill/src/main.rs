@@ -206,7 +206,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         // );
 
         println!("Flagging wavelet");
-        mesh.wavelet(1e-5, Quadrant, rinne.as_slice());
+        mesh.flag_wavelets(0.0, 1e-5, Quadrant, rinne.as_slice());
         mesh.balance_flags();
 
         // println!("{:?}");
@@ -242,7 +242,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             },
         )?;
 
-        mesh.refine();
+        mesh.regrid();
     }
 
     // let mut debug = String::new();

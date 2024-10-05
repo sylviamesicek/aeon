@@ -10,10 +10,12 @@ use crate::{
 };
 
 impl<const N: usize> Mesh<N> {
-    /// Flags cells for refinement using a wavelet criterion.
-    pub fn wavelet<S: SystemLabel, B: Boundary<N> + Sync>(
+    /// Flags cells for refinement using a wavelet criterion. The system must have filled
+    /// boundaries.
+    pub fn flag_wavelets<S: SystemLabel, B: Boundary<N> + Sync>(
         &mut self,
-        tolerance: f64,
+        lower: f64,
+        upper: f64,
         boundary: B,
         field: SystemSlice<S>,
     ) {
@@ -23,10 +25,12 @@ impl<const N: usize> Mesh<N> {
 
         let field = field.as_range();
 
-        let mut vflags = std::mem::take(&mut self.refine_flags);
+        let mut rflags_buf = std::mem::take(&mut self.refine_flags);
+        let mut cflags_buf = std::mem::take(&mut self.coarsen_flags);
 
         // Allows interior mutability.
-        let flags = SharedSlice::new(&mut vflags);
+        let rflags = SharedSlice::new(&mut rflags_buf);
+        let cflags = SharedSlice::new(&mut cflags_buf);
 
         self.block_compute(|mesh, store, block| {
             let boundary = mesh.block_boundary(block, boundary.clone());
@@ -62,9 +66,16 @@ impl<const N: usize> Mesh<N> {
                         element_coarse.wavelet(src, dst);
 
                         for point in element_coarse.diagonal_points() {
-                            if dst[point].abs() > tolerance {
+                            if dst[point].abs() >= upper {
                                 unsafe {
-                                    *flags.get_mut(cell) = true;
+                                    *rflags.get_mut(cell) = true;
+                                }
+                                break 'fields;
+                            }
+
+                            if dst[point].abs() <= lower {
+                                unsafe {
+                                    *cflags.get_mut(cell) = true;
                                 }
                                 break 'fields;
                             }
@@ -73,9 +84,16 @@ impl<const N: usize> Mesh<N> {
                         element.wavelet(&imsrc, &mut imdest);
 
                         for point in element.diagonal_int_points() {
-                            if imdest[point].abs() > tolerance {
+                            if imdest[point].abs() >= upper {
                                 unsafe {
-                                    *flags.get_mut(cell) = true;
+                                    *rflags.get_mut(cell) = true;
+                                }
+                                break 'fields;
+                            }
+
+                            if imdest[point].abs() <= lower {
+                                unsafe {
+                                    *cflags.get_mut(cell) = true;
                                 }
                                 break 'fields;
                             }
@@ -85,7 +103,8 @@ impl<const N: usize> Mesh<N> {
             }
         });
 
-        let _ = std::mem::replace(&mut self.refine_flags, vflags);
+        let _ = std::mem::replace(&mut self.refine_flags, rflags_buf);
+        let _ = std::mem::replace(&mut self.coarsen_flags, cflags_buf);
     }
 
     pub fn flags_debug(&mut self, debug: &mut [i64]) {
@@ -140,7 +159,7 @@ mod tests {
     fn element_windows() {
         let mut mesh = Mesh::new(Rectangle::UNIT, 4, 2);
         mesh.set_refine_flag(0);
-        mesh.refine();
+        mesh.regrid();
 
         assert_eq!(mesh.is_cell_on_boundary(0, Quadrant), false);
         assert_eq!(mesh.is_cell_on_boundary(1, Quadrant), false);

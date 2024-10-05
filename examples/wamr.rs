@@ -63,7 +63,19 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     log::info!("Building Base Mesh.");
 
+    // Create mesh
     let mut mesh = Mesh::new(domain, 4, 2);
+
+    // Store system from previous iteration.
+    let mut system_prev = SystemVec::with_length(mesh.num_nodes());
+    mesh.project(
+        Order::<4>,
+        Quadrant,
+        SeedProjection,
+        system_prev.as_mut_slice(),
+    );
+
+    let mut errors = Vec::new();
 
     for i in 0..10 {
         log::info!(
@@ -76,37 +88,10 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
         mesh.project(Order::<4>, Quadrant, SeedProjection, system.as_mut_slice());
         mesh.fill_boundary(Order::<4>, Quadrant, SeedConditions, system.as_mut_slice());
 
-        mesh.wavelet(1e-9, Quadrant, system.as_slice());
+        mesh.flag_wavelets(1e-13, 1e-9, Quadrant, system.as_slice());
         mesh.balance_flags();
 
-        // if mesh.num_cells() > 96 {
-        //     let region = Region::new([Side::Right, Side::Right]);
-        //     let neighbor = mesh.tree().neighbor_in_region(96, region);
-
-        //     let n1 = mesh.tree().neighbor_after_refinement(
-        //         96,
-        //         AxisMask::pack([true, true]),
-        //         Face::positive(0),
-        //     );
-
-        //     let n1o = mesh.tree().neighbor(96, Face::positive(0));
-
-        //     dbg!(n1, n1o);
-
-        //     let n2 = mesh.tree().neighbor_after_refinement(
-        //         n1,
-        //         AxisMask::pack([false, true]),
-        //         Face::positive(1),
-        //     );
-
-        //     dbg!(n2);
-
-        //     for face in region.adjacent_faces() {
-        //         dbg!(face);
-        //     }
-
-        //     dbg!(neighbor);
-        // }
+        // Output
 
         let mut flag_debug = vec![0; mesh.num_nodes()];
         let mut block_debug = vec![0; mesh.num_nodes()];
@@ -116,8 +101,23 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
         mesh.block_debug(&mut block_debug);
         mesh.cell_debug(&mut cell_debug);
 
+        let diff = system
+            .field(Scalar)
+            .iter()
+            .zip(system_prev.field(Scalar).iter())
+            .map(|(i, j)| i - j)
+            .collect::<Vec<_>>();
+
+        let norm = mesh.norm(diff.as_slice().into());
+
+        if norm.abs() >= 1e-20 {
+            errors.push((i, norm));
+        }
+
         let mut systems = SystemCheckpoint::default();
-        systems.save_system(system.as_slice());
+        systems.save_field("Seed", system.field(Scalar));
+        systems.save_field("SeedInterpolated", system_prev.field(Scalar));
+        systems.save_field("SeedDiff", &diff);
         systems.save_int_field("Flags", &flag_debug);
         systems.save_int_field("Blocks", &block_debug);
         systems.save_int_field("Cell", &cell_debug);
@@ -131,18 +131,28 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
             },
         )?;
 
-        // mesh.refine_just_blocks();
+        mesh.regrid();
 
-        let mut debug = String::new();
-        mesh.write_debug(&mut debug);
+        // Prolong data from previous system.
+        system_prev = SystemVec::with_length(mesh.num_nodes());
+        mesh.transfer_system(
+            Order::<4>,
+            Quadrant,
+            system.as_slice(),
+            system_prev.as_mut_slice(),
+        );
+    }
 
-        std::fs::write("output/mesh.txt", debug).unwrap();
+    for i in 0..errors.len() - 1 {
+        let original = errors[i];
+        let dest = errors[i + 1];
 
-        // for cell in 0..mesh.num_cells() {
-        //     println!("Cell {:?} Flag {}", cell, mesh.refine_flags()[cell])
-        // }
-
-        mesh.refine();
+        log::info!(
+            "Ratio between {} and {} iteration is {}",
+            original.0,
+            dest.0,
+            original.1 / dest.1
+        );
     }
 
     Ok(())

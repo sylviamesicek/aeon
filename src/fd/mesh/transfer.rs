@@ -103,12 +103,12 @@ impl<const N: usize> Mesh<N> {
                 let new_level = mesh.tree.level(new_cell);
 
                 if new_level > level {
+                    // Loop over every child of the recently refined cell.
                     for child in AxisMask::<N>::enumerate() {
+                        // Retrieves new cell.
                         let new_cell = new_cell + child.to_linear();
 
                         let new_block = mesh.blocks.cell_block(new_cell);
-                        let new_offset = mesh.blocks.cell_position(new_cell);
-                        let new_size = mesh.blocks.size(new_block);
                         let new_nodes = mesh.block_nodes(new_block);
                         let new_space = mesh.block_space(new_block);
 
@@ -122,22 +122,14 @@ impl<const N: usize> Mesh<N> {
                             }
                         }
 
-                        let mut node_size = [mesh.width; N];
-
-                        for axis in 0..N {
-                            if new_offset[axis] == new_size[axis] - 1 {
-                                node_size[axis] += 1;
-                            }
-                        }
-
-                        let new_cell_origin: [_; N] =
-                            array::from_fn(|axis| new_offset[axis] * mesh.width);
+                        let node_size = mesh.cell_node_size(new_cell);
+                        let node_origin = mesh.cell_node_origin(new_cell);
 
                         for node_offset in IndexSpace::new(node_size).iter() {
                             let source_vertex =
                                 array::from_fn(|axis| cell_origin[axis] + node_offset[axis]);
                             let dest_node = array::from_fn(|axis| {
-                                (new_cell_origin[axis] + node_offset[axis]) as isize
+                                (node_origin[axis] + node_offset[axis]) as isize
                             });
 
                             for field in System::fields() {
@@ -154,30 +146,19 @@ impl<const N: usize> Mesh<N> {
                     }
                 } else if new_level == level {
                     let new_block = mesh.blocks.cell_block(new_cell);
-                    let new_offset = mesh.blocks.cell_position(new_cell);
-                    let new_size = mesh.blocks.size(new_block);
                     let new_nodes = mesh.block_nodes(new_block);
                     let new_space = mesh.block_space(new_block);
 
                     let mut dest = unsafe { dest.slice_mut(new_nodes.clone()).fields_mut() };
 
-                    let mut node_size = [mesh.width; N];
-
-                    for axis in 0..N {
-                        if new_offset[axis] == new_size[axis] - 1 {
-                            node_size[axis] += 1;
-                        }
-                    }
-
-                    let new_cell_origin: [_; N] =
-                        array::from_fn(|axis| new_offset[axis] * mesh.width);
+                    let node_size = mesh.cell_node_size(new_cell);
+                    let node_origin = mesh.cell_node_origin(new_cell);
 
                     for node_offset in IndexSpace::new(node_size).iter() {
                         let source_node =
                             array::from_fn(|axis| (cell_origin[axis] + node_offset[axis]) as isize);
-                        let dest_node = array::from_fn(|axis| {
-                            (new_cell_origin[axis] + node_offset[axis]) as isize
-                        });
+                        let dest_node =
+                            array::from_fn(|axis| (node_origin[axis] + node_offset[axis]) as isize);
 
                         for field in System::fields() {
                             let v = source.field(field.clone())[space.index_from_node(source_node)];
@@ -205,12 +186,12 @@ impl<const N: usize> Mesh<N> {
                         }
                     }
 
-                    let mut new_cell_origin: [_; N] =
+                    let mut node_origin: [_; N] =
                         array::from_fn(|axis| new_offset[axis] * mesh.width);
 
                     for axis in 0..N {
                         if split.is_set(axis) {
-                            new_cell_origin[axis] += mesh.width / 2;
+                            node_origin[axis] += mesh.width / 2;
                         }
                     }
 
@@ -218,9 +199,8 @@ impl<const N: usize> Mesh<N> {
                         let source_node = array::from_fn(|axis| {
                             2 * (cell_origin[axis] + node_offset[axis]) as isize
                         });
-                        let dest_node = array::from_fn(|axis| {
-                            (new_cell_origin[axis] + node_offset[axis]) as isize
-                        });
+                        let dest_node =
+                            array::from_fn(|axis| (node_origin[axis] + node_offset[axis]) as isize);
 
                         for field in System::fields() {
                             let v = source.field(field.clone())[space.index_from_node(source_node)];
