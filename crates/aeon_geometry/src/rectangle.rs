@@ -1,4 +1,4 @@
-use std::array::from_fn;
+use std::array;
 
 use crate::AxisMask;
 
@@ -20,9 +20,15 @@ impl<const N: usize> Rectangle<N> {
         origin: [0.0; N],
     };
 
+    /// Constructs a rectangle from an aabb.
+    pub fn from_aabb(aa: [f64; N], bb: [f64; N]) -> Self {
+        let size = array::from_fn(|axis| (bb[axis] - aa[axis]).max(0.0));
+        Self { size, origin: aa }
+    }
+
     /// Computes the center of the rectangle.
     pub fn center(&self) -> [f64; N] {
-        from_fn(|i| self.origin[i] + self.size[i] / 2.0)
+        array::from_fn(|i| self.origin[i] + self.size[i] / 2.0)
     }
 
     /// Returns true if the rectangle contains a point.
@@ -39,8 +45,8 @@ impl<const N: usize> Rectangle<N> {
 
     /// Subdivides the rectangle.
     pub fn split(&self, mask: AxisMask<N>) -> Self {
-        let size = from_fn(|i| self.size[i] / 2.0);
-        let origin = from_fn(|i| {
+        let size = array::from_fn(|i| self.size[i] / 2.0);
+        let origin = array::from_fn(|i| {
             if mask.is_set(i) {
                 self.origin[i] + self.size[i] / 2.0
             } else {

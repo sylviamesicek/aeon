@@ -43,6 +43,9 @@ pub struct Mesh<const N: usize> {
     /// The number of ghost cells used to facilitate inter-block communication.
     ghost: usize,
 
+    /// Maximum level of cell on the mesh.
+    max_level: usize,
+
     /// Block structure induced by the tree.
     blocks: TreeBlocks<N>,
     /// Offsets linking each block to a range of nodes.
@@ -89,6 +92,8 @@ impl<const N: usize> Mesh<N> {
             width,
             ghost,
 
+            max_level: 0,
+
             blocks: TreeBlocks::default(),
             block_node_offsets: Vec::default(),
 
@@ -116,6 +121,13 @@ impl<const N: usize> Mesh<N> {
     /// Rebuilds mesh from current tree.
     fn build(&mut self) {
         self.blocks.build(&self.tree);
+
+        self.max_level = 0;
+        for block in 0..self.blocks.len() {
+            let cell = self.blocks.cells(block)[0];
+            self.max_level = self.max_level.max(self.tree.level(cell))
+        }
+
         self.neighbors.build(&self.tree, &self.blocks);
         self.build_block_node_offests();
         self.build_interfaces();
@@ -160,6 +172,10 @@ impl<const N: usize> Mesh<N> {
 
     pub fn refine_flags(&self) -> &[bool] {
         self.refine_flags.as_slice()
+    }
+
+    pub fn coarsen_flags(&self) -> &[bool] {
+        self.coarsen_flags.as_slice()
     }
 
     pub fn balance_flags(&mut self) {
@@ -394,23 +410,56 @@ impl<const N: usize> Mesh<N> {
         false
     }
 
+    /// Manually marks a cell for refinement.
     pub fn set_refine_flag(&mut self, cell: usize) {
         self.refine_flags[cell] = true
     }
 
+    /// Manually marks a cell for coarsening.
     pub fn set_coarsen_flag(&mut self, cell: usize) {
         self.coarsen_flags[cell] = true
     }
 
-    pub fn max_level(&self) -> usize {
-        let mut level = 1;
+    /// Mark `count` cells around each currently tagged cell for refinement.
+    // pub fn buffer_refine_flags(&mut self, count: usize) {
+    //     for _ in 0..count {
+    //         for cell in 0..self.num_cells() {
+    //             if !self.refine_flags[cell] {
+    //                 continue;
+    //             }
 
-        for block in 0..self.blocks.len() {
-            let cell = self.blocks.cells(block)[0];
-            level = level.max(self.tree.level(cell))
+    //             for neighbor in self.tree.neighborhood(cell) {
+    //                 self.refine_flags[neighbor] = true;
+    //             }
+    //         }
+    //     }
+    // }
+
+    /// Sets the maximum level that can be marked for refinement.
+    pub fn set_refine_level_limit(&mut self, max_level: usize) {
+        for cell in 0..self.num_cells() {
+            if self.tree.level(cell) > max_level {
+                self.refine_flags[cell] = false;
+            }
         }
+    }
 
-        level
+    /// Returns true if the mesh requires regridding.
+    pub fn requires_regridding(&self) -> bool {
+        self.refine_flags.iter().any(|&b| b) || self.coarsen_flags.iter().any(|&b| b)
+    }
+
+    pub fn num_refine_cells(&self) -> usize {
+        self.refine_flags.iter().filter(|&&b| b).count()
+    }
+
+    pub fn num_coarsen_cells(&self) -> usize {
+        self.coarsen_flags.iter().filter(|&&b| b).count()
+    }
+
+    /// Returns the maximum level of cell on the mesh.
+    pub fn max_level(&self) -> usize {
+        self.max_level
     }
 
     pub fn min_spacing(&self) -> f64 {
@@ -706,6 +755,8 @@ impl<const N: usize> Clone for Mesh<N> {
             width: self.width,
             ghost: self.ghost,
 
+            max_level: self.max_level.clone(),
+
             blocks: self.blocks.clone(),
             neighbors: self.neighbors.clone(),
 
@@ -733,6 +784,8 @@ impl<const N: usize> Default for Mesh<N> {
             tree: Tree::new(Rectangle::UNIT),
             width: 4,
             ghost: 1,
+
+            max_level: 0,
 
             blocks: TreeBlocks::default(),
             block_node_offsets: Vec::default(),

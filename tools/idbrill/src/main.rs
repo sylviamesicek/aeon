@@ -107,12 +107,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         mesh.refine_global();
     }
 
-    // for _ in 0..4 {
-    //     let mut flags = vec![false; mesh.num_cells()];
-    //     flags[0] = true;
-    //     mesh.refine(&flags);
-    // }
-
     if CHOPTUIK {
         std::fs::create_dir_all("output/choptuik")?;
     } else {
@@ -120,9 +114,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     for r in 0..4 {
-        // let flags = vec![true; mesh.num_cells()];
-        // mesh.refine(&flags);
-
         log::warn!("Min Spacing {}", mesh.min_spacing());
 
         let mut debug = String::new();
@@ -137,13 +128,23 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let mut rinne = SystemVec::with_length(mesh.num_nodes());
         let mut hamiltonian = vec![0.0; mesh.num_nodes()].into_boxed_slice();
 
-        garfinkle::solve(
-            &mut mesh,
-            1.0,
-            2000 * 2usize.pow(r as u32),
-            rinne.as_mut_slice(),
-            &mut hamiltonian,
-        )?;
+        if CHOPTUIK {
+            choptuik::solve(
+                &mut mesh,
+                1.0,
+                2000 * 2usize.pow(r as u32),
+                rinne.as_mut_slice(),
+                &mut hamiltonian,
+            )?;
+        } else {
+            garfinkle::solve(
+                &mut mesh,
+                1.0,
+                2000 * 2usize.pow(r as u32),
+                rinne.as_mut_slice(),
+                &mut hamiltonian,
+            )?;
+        }
 
         mesh.fill_boundary(ORDER, Quadrant, RinneConditions, rinne.as_mut_slice());
 

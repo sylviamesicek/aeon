@@ -993,7 +993,7 @@ mod tests {
         tree.refine(&[true, false, false, false]);
 
         for _ in 0..1 {
-            let mut flags = vec![true; tree.num_cells()];
+            let mut flags: Vec<bool> = vec![true; tree.num_cells()];
             tree.balance_refine_flags(&mut flags);
             tree.refine(&flags);
         }

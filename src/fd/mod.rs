@@ -4,6 +4,8 @@ mod boundary;
 mod engine;
 mod mesh;
 
+use std::array;
+
 pub use boundary::{
     BlockBoundary, Conditions, EmptyConditions, PairConditions, ScalarConditions, SystemBC,
     SystemCondition,
@@ -11,7 +13,7 @@ pub use boundary::{
 pub use engine::{Engine, FdEngine, FdIntEngine};
 pub use mesh::{ExportVtkConfig, Mesh, MeshCheckpoint, SystemCheckpoint};
 
-use crate::system::{Empty, Pair, SystemLabel, SystemSlice, SystemValue};
+use crate::system::{Empty, Pair, Scalar, SystemLabel, SystemSlice, SystemValue};
 
 /// A function maps one set of scalar fields to another.
 pub trait Function<const N: usize>: Clone {
@@ -112,5 +114,25 @@ impl<const N: usize, C: Conditions<N>> Function<N> for DissipationFunction<C> {
 
     fn evaluate(&self, engine: &impl Engine<N, Self::Input>) -> SystemValue<Self::Output> {
         SystemValue::from_fn(|field: C::System| engine.dissipation(field))
+    }
+}
+
+/// A Gaussian projection centered on a given point, with an amplitude and a sigma.
+#[derive(Clone, Copy)]
+pub struct Gaussian<const N: usize> {
+    pub amplitude: f64,
+    pub sigma: f64,
+    pub center: [f64; N],
+}
+
+impl<const N: usize> Projection<N> for Gaussian<N> {
+    type Output = Scalar;
+
+    fn project(&self, position: [f64; N]) -> SystemValue<Self::Output> {
+        let offset: [_; N] = array::from_fn(|axis| position[axis] - self.center[axis]);
+        let r2: f64 = offset.map(|v| v * v).iter().sum();
+        let s2 = self.sigma * self.sigma;
+
+        SystemValue::new([self.amplitude * (-r2 / s2).exp()])
     }
 }

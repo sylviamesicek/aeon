@@ -29,6 +29,11 @@ impl<Label: SystemLabel> SystemVec<Label> {
         }
     }
 
+    /// Resizes the system to store the given number of nodes.
+    pub fn resize(&mut self, length: usize) {
+        self.data.resize(length * field_count::<Label>(), 0.0);
+    }
+
     /// Constructs a new system vector from the given data. `data.len()` must be divisible by `field_count::<Label>()`.
     pub fn from_contiguous(data: Vec<f64>) -> Self {
         Self {

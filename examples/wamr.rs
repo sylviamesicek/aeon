@@ -1,7 +1,10 @@
-use std::f64::consts::PI;
+//! An example of using wavelet adaptive mesh refinement to
+//! compress a function and generate appropriate grids.
 
 use aeon::prelude::*;
+use std::f64::consts::PI;
 
+/// The quadrant domain the function is being projected on.
 #[derive(Clone)]
 pub struct Quadrant;
 
@@ -30,14 +33,6 @@ impl Conditions<2> for SeedConditions {
     }
 }
 
-impl Conditions<2> for Quadrant {
-    type System = Scalar;
-
-    fn parity(&self, _field: Self::System, _face: Face<2>) -> bool {
-        false
-    }
-}
-
 #[derive(Clone)]
 struct SeedProjection;
 
@@ -54,7 +49,7 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
         .filter_level(log::LevelFilter::Trace)
         .init();
 
-    std::fs::create_dir_all("output/wavelet")?;
+    std::fs::create_dir_all("output/wamr")?;
 
     let domain = Rectangle {
         origin: [0., 0.],
@@ -123,7 +118,7 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
         systems.save_int_field("Cell", &cell_debug);
 
         mesh.export_vtk(
-            format!("output/wavelet/wamr{i}.vtu"),
+            format!("output/wamr/wamr{i}.vtu"),
             ExportVtkConfig {
                 title: "WAMR".to_string(),
                 ghost: false,
