@@ -1,3 +1,5 @@
+use std::array;
+
 use aeon::{
     fd::{DissipationFunction, Gaussian},
     prelude::*,
@@ -5,13 +7,15 @@ use aeon::{
 };
 use reborrow::{Reborrow, ReborrowMut};
 
-const STEPS: usize = 500;
+const MAX_TIME: f64 = 1.0;
+const MAX_STEPS: usize = 1000;
+
 const CFL: f64 = 0.1;
 const ORDER: Order<4> = Order::<4>;
 const DISS_ORDER: Order<6> = Order::<6>;
 
-const OUTPUT_SKIP: usize = 10;
-// const REGRID_SKIP: usize = 10;
+const SAVE_CHECKPOINT: f64 = 0.01;
+const REGRID_SKIP: usize = 10;
 
 const LOWER: f64 = 1e-10;
 const UPPER: f64 = 1e-6;
@@ -19,7 +23,7 @@ const SPEED: [f64; 2] = [1.0, 0.0];
 
 /// The quadrant domain the function is being projected on.
 #[derive(Clone)]
-pub struct Quadrant;
+struct Quadrant;
 
 impl Boundary<2> for Quadrant {
     fn kind(&self, _face: Face<2>) -> BoundaryKind {
@@ -28,7 +32,7 @@ impl Boundary<2> for Quadrant {
 }
 
 #[derive(Clone)]
-pub struct WaveConditions;
+struct WaveConditions;
 
 impl Conditions<2> for WaveConditions {
     type System = Scalar;
@@ -39,7 +43,7 @@ impl Conditions<2> for WaveConditions {
 }
 
 #[derive(Clone)]
-pub struct WaveEquation {
+struct WaveEquation {
     speed: [f64; 2],
 }
 
@@ -57,6 +61,23 @@ impl Function<2> for WaveEquation {
         let dr = engine.derivative(Scalar, 0);
         let dz = engine.derivative(Scalar, 0);
         SystemValue::new([-dr * self.speed[0] - dz * self.speed[1]])
+    }
+}
+
+#[derive(Clone)]
+struct AnalyticSolution {
+    speed: [f64; 2],
+    time: f64,
+}
+
+impl Projection<2> for AnalyticSolution {
+    type Output = Scalar;
+
+    fn project(&self, position: [f64; 2]) -> SystemValue<Self::Output> {
+        let origin: [_; 2] = array::from_fn(|axis| self.speed[axis] * self.time);
+        let offset: [_; 2] = array::from_fn(|axis| position[axis] - origin[axis]);
+        let r2: f64 = offset.map(|v| v * v).iter().sum();
+        SystemValue::new([(-r2).exp()])
     }
 }
 
@@ -164,34 +185,99 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     // Allocate vectors
-    let mut update = SystemVec::<Scalar>::with_length(mesh.num_nodes());
-    let mut dissipation = SystemVec::with_length(mesh.num_nodes());
+    let mut tmp = SystemVec::new();
+    let mut update = SystemVec::<Scalar>::new();
+    let mut dissipation = SystemVec::new();
+    let mut exact = SystemVec::new();
+    let mut error = SystemVec::<Scalar>::new();
 
     // Integrate
     let mut integrator = Rk4::new();
+    let mut time = 0.0;
+    let mut step = 0;
 
-    for i in 0..STEPS {
-        // Fill ghost nodes of system
+    let mut time_since_save = 0.0;
+    let mut save_step = 0;
+
+    let mut steps_since_regrid = 0;
+    let mut regrid_save_step = 0;
+
+    while step < MAX_STEPS && time < MAX_TIME {
+        // Get step size
+        let h = mesh.min_spacing() * CFL;
+
+        // Resize vectors
+        tmp.resize(mesh.num_nodes());
+        update.resize(mesh.num_nodes());
+        dissipation.resize(mesh.num_nodes());
+        exact.resize(mesh.num_nodes());
+        error.resize(mesh.num_nodes());
+
+        mesh.project(
+            ORDER,
+            Quadrant,
+            AnalyticSolution { speed: SPEED, time },
+            exact.as_mut_slice(),
+        );
+
+        for i in 0..mesh.num_nodes() {
+            error.contigious_mut()[i] = exact.contigious()[i] - system.contigious()[i];
+        }
+
+        // Fill boundaries
         mesh.fill_boundary(ORDER, Quadrant, WaveConditions, system.as_mut_slice());
 
-        if i % OUTPUT_SKIP == 0 {
-            log::info!("Output step: {i}");
+        if steps_since_regrid > REGRID_SKIP {
+            steps_since_regrid = 0;
+
+            log::info!("Regridding Mesh at time: {time}");
+            mesh.fill_boundary(ORDER, Quadrant, WaveConditions, system.as_mut_slice());
+            mesh.flag_wavelets(LOWER, UPPER, Quadrant, system.as_slice());
+            mesh.set_refine_level_limit(10);
+
             // Output current system to disk
             let mut systems = SystemCheckpoint::default();
             systems.save_field("Wave", system.contigious());
+            systems.save_field("Analytic", exact.contigious());
+            systems.save_field("Error", error.contigious());
+
+            let mut flags = vec![0; mesh.num_nodes()];
+            mesh.flags_debug(&mut flags);
+
+            mesh.balance_flags();
+
+            let mut bflags = vec![0; mesh.num_nodes()];
+            mesh.flags_debug(&mut bflags);
+
+            systems.save_int_field("Flags", &mut flags);
+            systems.save_int_field("Balanced Flags", &mut bflags);
+
+            let mut blocks = vec![0; mesh.num_nodes()];
+            mesh.block_debug(&mut blocks);
+            systems.save_int_field("Blocks", &mut blocks);
 
             mesh.export_vtk(
-                format!("output/waves/evolution{}.vtu", i / OUTPUT_SKIP),
+                format!("output/waves/regrid{regrid_save_step}.vtu"),
                 ExportVtkConfig {
-                    title: "evbrill".to_string(),
+                    title: "Rergrid Wave".to_string(),
                     ghost: false,
                     systems,
                 },
             )
             .unwrap();
-        }
 
-        let h = CFL * mesh.min_spacing();
+            regrid_save_step += 1;
+
+            mesh.regrid();
+
+            // Copy system into tmp.
+            tmp.contigious_mut().copy_from_slice(system.contigious());
+
+            system.resize(mesh.num_nodes());
+            mesh.transfer_system(ORDER, Quadrant, tmp.as_slice(), system.as_mut_slice());
+
+            continue;
+        }
 
         // Compute step
         integrator.step(
@@ -214,6 +300,33 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
         for i in 0..system.contigious().len() {
             system.contigious_mut()[i] +=
                 update.contigious()[i] + 0.5 * dissipation.contigious()[i];
+        }
+
+        step += 1;
+        steps_since_regrid += 1;
+
+        time += h;
+        time_since_save += h;
+
+        if time_since_save >= SAVE_CHECKPOINT {
+            time_since_save = 0.0;
+
+            log::info!("Saving Checkpoint at time: {time}");
+            // Output current system to disk
+            let mut systems = SystemCheckpoint::default();
+            systems.save_field("Wave", system.contigious());
+
+            mesh.export_vtk(
+                format!("output/waves/evolution{save_step}.vtu"),
+                ExportVtkConfig {
+                    title: "evbrill".to_string(),
+                    ghost: false,
+                    systems,
+                },
+            )
+            .unwrap();
+
+            save_step += 1;
         }
     }
 
