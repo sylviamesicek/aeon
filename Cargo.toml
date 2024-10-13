@@ -70,3 +70,7 @@ path = "examples/wamr.rs"
 [[example]]
 name = "wave"
 path = "examples/wave.rs"
+
+[[example]]
+name = "transfer"
+path = "examples/transfer.rs"
