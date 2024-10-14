@@ -262,6 +262,11 @@ mod tests {
         assert_eq!(plane.next(), Some([0, 2, 5]));
         assert_eq!(plane.next(), Some([1, 2, 5]));
         assert_eq!(plane.next(), None);
+
+        let space = IndexSpace::new([2, 3, 4]);
+        for (i, index) in space.iter().enumerate() {
+            assert_eq!(i, space.linear_from_cartesian(index));
+        }
     }
 
     #[test]

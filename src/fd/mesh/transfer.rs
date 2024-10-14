@@ -2,7 +2,7 @@ use aeon_basis::{Boundary, BoundaryKind, Condition, Kernels};
 use aeon_geometry::{faces, AxisMask, Face, IndexSpace, Side, TreeBlockNeighbor, TreeCellNeighbor};
 // use rayon::iter::{ParallelBridge, ParallelIterator};
 use reborrow::Reborrow as _;
-use std::{array, ops::Range};
+use std::{array, ops::Range, process::id};
 
 use crate::{
     fd::{Conditions, Engine, FdEngine, Mesh, SystemBC},
@@ -271,6 +271,8 @@ impl<const N: usize> Mesh<N> {
         conditions: &C,
         system: &mut SystemSliceMut<'_, C::System>,
     ) {
+        debug_assert!(system.len() == self.num_nodes());
+
         let system = system.as_range();
 
         (0..self.blocks.len()).for_each(|block| {
@@ -652,6 +654,8 @@ impl<const N: usize> Mesh<N> {
 
         self.block_compute(|mesh, store, block| {
             let block_space = mesh.block_space(block);
+            let block_size = mesh.blocks.size(block);
+            let block_level = mesh.block_level(block);
 
             let buffer = store.scratch(block_space.num_nodes());
             buffer.fill(usize::MAX);
@@ -660,6 +664,8 @@ impl<const N: usize> Mesh<N> {
             for iidx in mesh.neighbors.block_range(block) {
                 let interface = &mesh.interfaces[iidx];
                 let interface_level = mesh.block_level(interface.neighbor);
+
+                debug_assert!(interface.block == block);
 
                 for offset in IndexSpace::new(interface.size).iter() {
                     let node = array::from_fn(|axis| interface.dest[axis] + offset[axis] as isize);
@@ -672,6 +678,9 @@ impl<const N: usize> Mesh<N> {
 
                     let other_interface = &mesh.interfaces[buffer[index]];
                     let other_neighbor = other_interface.neighbor;
+
+                    debug_assert!(other_interface.block == interface.block);
+
                     let other_level = mesh.block_level(other_neighbor);
 
                     // If new interface is coarser than old interface, prefer it
@@ -690,15 +699,34 @@ impl<const N: usize> Mesh<N> {
             // Now compute masks
             for iidx in mesh.neighbors.block_range(block) {
                 let interface = &mesh.interfaces[iidx];
+                let interface_level = mesh.block_level(interface.neighbor);
+
+                debug_assert!(interface.block == block);
+
                 let interface_mask_offset = mesh.interface_node_offsets[iidx];
 
                 for (dst, offset) in IndexSpace::new(interface.size).iter().enumerate() {
                     let node = array::from_fn(|axis| interface.dest[axis] + offset[axis] as isize);
                     let src = block_space.index_from_node(node);
 
+                    let is_node_in_block = [0; N]
+                        .map(|axis| node[axis] >= 0 && node[axis] < block_size[axis] as isize)
+                        .iter()
+                        .all(|&b| b);
+
+                    // Only fill if this point belongs to interface.
+                    let mut mask = buffer[src] == iidx;
+
+                    // if interface_level == block_level
+                    //     && interface.block <= interface.neighbor
+                    //     && is_node_in_block
+                    // {
+                    //     mask = false;
+                    // }
+
                     // Set mask value
                     unsafe {
-                        *masks.get_mut(interface_mask_offset + dst) = buffer[src] == iidx;
+                        *masks.get_mut(interface_mask_offset + dst) = mask;
                     }
                 }
             }
@@ -736,11 +764,14 @@ impl<const N: usize> Mesh<N> {
         // }
 
         for axis in 0..N {
-            if b.region.side(axis) == Side::Left && block_level <= neighbor_level {
+            if b.region.side(axis) == Side::Left && block_level < neighbor_level {
+                debug_assert!(a.region.side(axis) == Side::Left);
                 bnode[axis] -= 1;
             }
 
             if a.region.side(axis) == Side::Right && block_level < neighbor_level {
+                debug_assert!(b.region.side(axis) == Side::Right);
+
                 anode[axis] += 1;
                 source[axis] += 1;
             }

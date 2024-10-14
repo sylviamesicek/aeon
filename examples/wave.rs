@@ -15,6 +15,7 @@ const ORDER: Order<4> = Order::<4>;
 const DISS_ORDER: Order<6> = Order::<6>;
 
 const SAVE_CHECKPOINT: f64 = 0.01;
+const FORCE_SAVE: bool = true;
 const REGRID_SKIP: usize = 10;
 
 const LOWER: f64 = 1e-10;
@@ -184,6 +185,8 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
+    log::info!("Evolving wave forwards");
+
     // Allocate vectors
     let mut tmp = SystemVec::new();
     let mut update = SystemVec::<Scalar>::new();
@@ -203,6 +206,8 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut regrid_save_step = 0;
 
     while step < MAX_STEPS && time < MAX_TIME {
+        assert!(system.len() == mesh.num_nodes());
+
         // Get step size
         let h = mesh.min_spacing() * CFL;
 
@@ -220,12 +225,13 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
             exact.as_mut_slice(),
         );
 
+        // Fill boundaries
+        mesh.fill_boundary(ORDER, Quadrant, WaveConditions, system.as_mut_slice());
+        mesh.fill_boundary(ORDER, Quadrant, WaveConditions, exact.as_mut_slice());
+
         for i in 0..mesh.num_nodes() {
             error.contigious_mut()[i] = exact.contigious()[i] - system.contigious()[i];
         }
-
-        // Fill boundaries
-        mesh.fill_boundary(ORDER, Quadrant, WaveConditions, system.as_mut_slice());
 
         if steps_since_regrid > REGRID_SKIP {
             steps_since_regrid = 0;
@@ -279,6 +285,39 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
             continue;
         }
 
+        mesh.fill_boundary(ORDER, Quadrant, WaveConditions, system.as_mut_slice());
+
+        if time_since_save >= SAVE_CHECKPOINT || FORCE_SAVE {
+            time_since_save = 0.0;
+
+            log::info!("Saving Checkpoint at time: {time}");
+            // Output current system to disk
+            let mut systems = SystemCheckpoint::default();
+            systems.save_field("Wave", system.contigious());
+            systems.save_field("Analytic", exact.contigious());
+            systems.save_field("Error", error.contigious());
+
+            let mut blocks = vec![0; mesh.num_nodes()];
+            mesh.block_debug(&mut blocks);
+            systems.save_int_field("Blocks", &mut blocks);
+
+            let mut interfaces = vec![0; mesh.num_nodes()];
+            mesh.interface_index_debug(3, &mut interfaces);
+            systems.save_int_field("Interfaces", &mut interfaces);
+
+            mesh.export_vtk(
+                format!("output/waves/evolution{save_step}.vtu"),
+                ExportVtkConfig {
+                    title: "evbrill".to_string(),
+                    ghost: false,
+                    systems,
+                },
+            )
+            .unwrap();
+
+            save_step += 1;
+        }
+
         // Compute step
         integrator.step(
             h,
@@ -307,27 +346,6 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         time += h;
         time_since_save += h;
-
-        if time_since_save >= SAVE_CHECKPOINT {
-            time_since_save = 0.0;
-
-            log::info!("Saving Checkpoint at time: {time}");
-            // Output current system to disk
-            let mut systems = SystemCheckpoint::default();
-            systems.save_field("Wave", system.contigious());
-
-            mesh.export_vtk(
-                format!("output/waves/evolution{save_step}.vtu"),
-                ExportVtkConfig {
-                    title: "evbrill".to_string(),
-                    ghost: false,
-                    systems,
-                },
-            )
-            .unwrap();
-
-            save_step += 1;
-        }
     }
 
     Ok(())
