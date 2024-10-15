@@ -709,20 +709,15 @@ impl<const N: usize> Mesh<N> {
                     let node = array::from_fn(|axis| interface.dest[axis] + offset[axis] as isize);
                     let src = block_space.index_from_node(node);
 
-                    let is_node_in_block = [0; N]
-                        .map(|axis| node[axis] >= 0 && node[axis] < block_size[axis] as isize)
-                        .iter()
-                        .all(|&b| b);
-
                     // Only fill if this point belongs to interface.
                     let mut mask = buffer[src] == iidx;
 
-                    // if interface_level == block_level
-                    //     && interface.block <= interface.neighbor
-                    //     && is_node_in_block
-                    // {
-                    //     mask = false;
-                    // }
+                    if interface_level == block_level
+                        && interface.block <= interface.neighbor
+                        && block_space.is_interior(node)
+                    {
+                        mask = false;
+                    }
 
                     // Set mask value
                     unsafe {

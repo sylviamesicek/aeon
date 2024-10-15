@@ -172,6 +172,11 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
             },
         )?;
 
+        if i == 14 {
+            log::info!("Failed to regrid completely within 15 iterations.");
+            break;
+        }
+
         if mesh.requires_regridding() {
             let refine = mesh.num_refine_cells();
             let coarsen = mesh.num_coarsen_cells();

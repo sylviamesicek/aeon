@@ -60,16 +60,12 @@ impl<const N: usize> NodeSpace<N> {
         from_fn(|axis| bounds.size[axis] / self.size[axis] as f64)
     }
 
-    /// Returns true if the node lies outside the interior of the nodespace (i.e. if it is a padding
-    /// node).
-    pub fn is_padding(&self, node: [isize; N]) -> bool {
-        for axis in 0..N {
-            if node[axis] >= 0 || node[axis] <= self.size[axis] as isize {
-                return false;
-            }
-        }
-
-        true
+    /// Returns true if the node lies inside the interior of the nodespace (i.e. it is not a padding or ghost node).
+    pub fn is_interior(&self, node: [isize; N]) -> bool {
+        (0..N)
+            .into_iter()
+            .map(|axis| node[axis] >= 0 && node[axis] < self.size[axis] as isize)
+            .all(|b| b)
     }
 
     /// Returns true of the node lies on the given face.
