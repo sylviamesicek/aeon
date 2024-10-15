@@ -11,7 +11,7 @@ pub use boundary::{
     SystemCondition,
 };
 pub use engine::{Engine, FdEngine, FdIntEngine};
-pub use mesh::{ExportVtkConfig, Mesh, MeshCheckpoint, SystemCheckpoint};
+pub use mesh::{ExportVtuConfig, Mesh, MeshCheckpoint, SystemCheckpoint};
 
 use crate::system::{Empty, Pair, Scalar, SystemLabel, SystemSlice, SystemValue};
 

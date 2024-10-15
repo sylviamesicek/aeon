@@ -149,7 +149,7 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
         mesh.fill_boundary(ORDER, Quadrant, WaveConditions, system.as_mut_slice());
 
         mesh.flag_wavelets(LOWER, UPPER, Quadrant, system.as_slice());
-        mesh.set_refine_level_limit(10);
+        mesh.set_regrid_level_limit(10);
 
         mesh.balance_flags();
 
@@ -163,9 +163,9 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
         systems.save_int_field("Flags", &flags);
 
         let path = format!("output/waves/initial{i}.vtu");
-        mesh.export_vtk(
+        mesh.export_vtu(
             path.as_str(),
-            ExportVtkConfig {
+            ExportVtuConfig {
                 title: "Initial Wave Mesh".to_string(),
                 ghost: false,
                 systems,
@@ -244,7 +244,7 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
             log::info!("Regridding Mesh at time: {time}");
             mesh.fill_boundary(ORDER, Quadrant, WaveConditions, system.as_mut_slice());
             mesh.flag_wavelets(LOWER, UPPER, Quadrant, system.as_slice());
-            mesh.set_refine_level_limit(10);
+            mesh.set_regrid_level_limit(10);
 
             // Output current system to disk
             let mut systems = SystemCheckpoint::default();
@@ -267,9 +267,9 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
             mesh.block_debug(&mut blocks);
             systems.save_int_field("Blocks", &mut blocks);
 
-            mesh.export_vtk(
+            mesh.export_vtu(
                 format!("output/waves/regrid{regrid_save_step}.vtu"),
-                ExportVtkConfig {
+                ExportVtuConfig {
                     title: "Rergrid Wave".to_string(),
                     ghost: false,
                     systems,
@@ -310,9 +310,9 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
             mesh.interface_index_debug(3, &mut interfaces);
             systems.save_int_field("Interfaces", &mut interfaces);
 
-            mesh.export_vtk(
+            mesh.export_vtu(
                 format!("output/waves/evolution{save_step}.vtu"),
-                ExportVtkConfig {
+                ExportVtuConfig {
                     title: "evbrill".to_string(),
                     ghost: false,
                     systems,

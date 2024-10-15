@@ -2,7 +2,7 @@ use aeon_basis::{Boundary, BoundaryKind, Condition, Kernels};
 use aeon_geometry::{faces, AxisMask, Face, IndexSpace, Side, TreeBlockNeighbor, TreeCellNeighbor};
 // use rayon::iter::{ParallelBridge, ParallelIterator};
 use reborrow::Reborrow as _;
-use std::{array, ops::Range, process::id};
+use std::{array, ops::Range};
 
 use crate::{
     fd::{Conditions, Engine, FdEngine, Mesh, SystemBC},
@@ -654,7 +654,6 @@ impl<const N: usize> Mesh<N> {
 
         self.block_compute(|mesh, store, block| {
             let block_space = mesh.block_space(block);
-            let block_size = mesh.blocks.size(block);
             let block_level = mesh.block_level(block);
 
             let buffer = store.scratch(block_space.num_nodes());

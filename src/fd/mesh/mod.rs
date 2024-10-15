@@ -1,3 +1,10 @@
+//! Module containing the `Mesh` API, the main datastructure through which one
+//! writes finite difference programs.
+//!
+//! `Mesh`s are the central driver of all finite difference codes, and provide many methods
+//! for discretizing domains, approximating differential operators, applying boundary conditions,
+//! filling interior interfaces, and adaptively regridding a domain based on various error heuristics.
+
 use aeon_basis::{Boundary, BoundaryKind, NodeSpace, NodeWindow};
 use aeon_geometry::{faces, FaceMask, IndexSpace, Rectangle, Tree, TreeBlocks, TreeNeighbors};
 use rayon::iter::{IntoParallelIterator, ParallelBridge, ParallelIterator};
@@ -34,6 +41,13 @@ use transfer::TreeInterface;
 use crate::fd::BlockBoundary;
 use crate::system::{SystemLabel, SystemSlice};
 
+/// A discretization of a rectangular axis aligned grid into a collection of uniform grids of nodes
+/// with different spacings. A `Mesh` is built on top of a Quadtree, allowing one to selectively
+/// refine areas of interest without wasting computational power on smoother regions of the domain.
+///
+/// This abstraction also handles multithread dispatch and sharing nodes between threads in a
+/// an effecient manner. This allows the user to write generic, sequential, and straighforward code
+/// on the main thread, while still maximising performance and fully utilizing computational resources.
 #[derive(Debug)]
 pub struct Mesh<const N: usize> {
     /// Underlying Tree on which the mesh is built.
@@ -178,6 +192,9 @@ impl<const N: usize> Mesh<N> {
         self.coarsen_flags.as_slice()
     }
 
+    /// After cells have been tagged, the refinement/coarsening flags
+    /// must be balanced to ensure that the 2:1 balance across faces and vertices
+    /// is still maintained.
     pub fn balance_flags(&mut self) {
         // Propogate refinement flags outwards.
         self.tree.balance_refine_flags(&mut self.refine_flags);
@@ -435,8 +452,8 @@ impl<const N: usize> Mesh<N> {
     //     }
     // }
 
-    /// Sets the maximum level that can be marked for refinement.
-    pub fn set_refine_level_limit(&mut self, max_level: usize) {
+    /// Sets the maximum level that the mesh can attain after regridding.
+    pub fn set_regrid_level_limit(&mut self, max_level: usize) {
         for cell in 0..self.num_cells() {
             if self.tree.level(cell) > max_level {
                 self.refine_flags[cell] = false;
@@ -444,15 +461,18 @@ impl<const N: usize> Mesh<N> {
         }
     }
 
-    /// Returns true if the mesh requires regridding.
+    /// Returns true if the mesh requires regridding (i.e. any cells are tagged for either refinement
+    /// or coarsening).
     pub fn requires_regridding(&self) -> bool {
         self.refine_flags.iter().any(|&b| b) || self.coarsen_flags.iter().any(|&b| b)
     }
 
+    /// The number of cell that are marked for refinement.
     pub fn num_refine_cells(&self) -> usize {
         self.refine_flags.iter().filter(|&&b| b).count()
     }
 
+    /// The number of cells that are marked for coarsening.
     pub fn num_coarsen_cells(&self) -> usize {
         self.coarsen_flags.iter().filter(|&&b| b).count()
     }
@@ -462,6 +482,9 @@ impl<const N: usize> Mesh<N> {
         self.max_level
     }
 
+    /// Returns the minimum spatial distance between any
+    /// two nodes on the mesh. Commonly used in conjunction
+    /// with a CFL factor to determine time step.
     pub fn min_spacing(&self) -> f64 {
         let max_level = self.max_level();
         let domain = self.tree.domain();
@@ -475,6 +498,8 @@ impl<const N: usize> Mesh<N> {
         .unwrap_or(1.0)
     }
 
+    /// Runs a computation in parallel on every single block in the mesh, providing
+    /// a `MeshStore` object for allocating scratch data.
     pub fn block_compute<F: Fn(&Self, &MeshStore, usize) + Sync>(&mut self, f: F) {
         (0..self.num_blocks())
             .par_bridge()
@@ -486,7 +511,9 @@ impl<const N: usize> Mesh<N> {
             });
     }
 
-    pub fn old_block_compute<F: Fn(&Self, &MeshStore, usize) + Sync>(&mut self, f: F) {
+    /// Runs a computation in parallel on every single old block in the mesh, providing
+    /// a `MeshStore` object for allocating scratch data.
+    pub(crate) fn old_block_compute<F: Fn(&Self, &MeshStore, usize) + Sync>(&mut self, f: F) {
         (0..self.num_old_blocks())
             .par_bridge()
             .into_par_iter()
@@ -506,6 +533,7 @@ impl<const N: usize> Mesh<N> {
             .unwrap()
     }
 
+    /// Computes the l2 norm of a field on the mesh.
     fn norm_scalar(&mut self, src: &[f64]) -> f64 {
         let mut result = 0.0;
 
@@ -541,6 +569,9 @@ impl<const N: usize> Mesh<N> {
         result.sqrt()
     }
 
+    /// Writes a textual summary of the Mesh to a sink. This is pimrarily used to
+    /// debug features of the mesh that can't be easily represented graphically (i.e in
+    /// .vtu files).
     pub fn write_debug(&self, mut result: impl Write) {
         writeln!(result, "// **********************").unwrap();
         writeln!(result, "// Cells ****************").unwrap();
@@ -812,13 +843,13 @@ impl<const N: usize> Default for Mesh<N> {
 }
 
 #[derive(Clone, Debug)]
-pub struct ExportVtkConfig {
+pub struct ExportVtuConfig {
     pub title: String,
     pub ghost: bool,
     pub systems: SystemCheckpoint,
 }
 
-impl Default for ExportVtkConfig {
+impl Default for ExportVtuConfig {
     fn default() -> Self {
         Self {
             ghost: false,
@@ -829,6 +860,7 @@ impl Default for ExportVtkConfig {
 }
 
 impl<const N: usize> Mesh<N> {
+    /// Exports a copy of the mesh and associated fields to disk, stored as a dat file.
     pub fn export_dat(&self, path: impl AsRef<Path>, systems: &SystemCheckpoint) -> io::Result<()> {
         let mut checkpoint = MeshCheckpoint::default();
         checkpoint.save_mesh(self);
@@ -842,6 +874,7 @@ impl<const N: usize> Mesh<N> {
         file.write_all(data.as_bytes())
     }
 
+    /// Loads the mesh and any additional data from disk.
     pub fn import_dat(
         &mut self,
         path: impl AsRef<Path>,
@@ -860,9 +893,11 @@ impl<const N: usize> Mesh<N> {
         Ok(())
     }
 
-    pub fn export_vtk(&self, path: impl AsRef<Path>, config: ExportVtkConfig) -> io::Result<()> {
+    /// Exports the mesh and additional field data to a .vtu files, for visualisation in applications like
+    /// Paraview.
+    pub fn export_vtu(&self, path: impl AsRef<Path>, config: ExportVtuConfig) -> io::Result<()> {
         const {
-            assert!(N > 0 && N <= 2, "Vtk Output only supported for 0 < N ≤ 2");
+            assert!(N > 0 && N <= 2, "Vtu Output only supported for 0 < N ≤ 2");
         }
 
         // Generate Cells

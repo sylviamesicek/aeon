@@ -3,7 +3,7 @@ use crate::{Quadrant, HAMILTONIAN_CONDITIONS, ORDER};
 use super::Rinne;
 use aeon::{
     elliptic::HyperRelaxSolver,
-    fd::{ExportVtkConfig, Mesh, SystemCondition},
+    fd::{ExportVtuConfig, Mesh, SystemCondition},
     prelude::*,
 };
 
@@ -154,9 +154,9 @@ impl Operator<2> for PsiOperator {
             systems.save_field("psi", choptuik.field(Choptuik::Psi));
             systems.save_field("hamiltonian", &hamiltonian);
 
-            mesh.export_vtk(
+            mesh.export_vtu(
                 format!("output/choptuik/iter{}.vtu", { index / 25 }),
-                ExportVtkConfig {
+                ExportVtuConfig {
                     title: "choptuik".to_string(),
                     ghost: crate::GHOST,
                     systems,

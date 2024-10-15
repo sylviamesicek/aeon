@@ -1,5 +1,5 @@
 use aeon::{
-    fd::{ExportVtkConfig, Mesh, SystemCondition},
+    fd::{ExportVtuConfig, Mesh, SystemCondition},
     prelude::*,
 };
 
@@ -234,9 +234,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         systems.save_int_field("interface_neighbors", &interface_neighbors);
         systems.save_int_field("blocks", &blocks);
 
-        mesh.export_vtk(
+        mesh.export_vtu(
             format!("output/garfinkle.vtu"),
-            ExportVtkConfig {
+            ExportVtuConfig {
                 title: "idbrill".to_string(),
                 ghost: crate::GHOST,
                 systems: systems.clone(),

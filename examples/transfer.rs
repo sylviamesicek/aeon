@@ -63,7 +63,7 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
         mesh.fill_boundary(ORDER, Quadrant, WaveConditions, system.as_mut_slice());
 
         mesh.flag_wavelets(LOWER, UPPER, Quadrant, system.as_slice());
-        mesh.set_refine_level_limit(10);
+        mesh.set_regrid_level_limit(10);
 
         mesh.balance_flags();
 
@@ -86,9 +86,9 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
 
         let path = format!("output/transfer/iteration{i}.vtu");
-        mesh.export_vtk(
+        mesh.export_vtu(
             path.as_str(),
-            ExportVtkConfig {
+            ExportVtuConfig {
                 title: "Initial Wave Mesh".to_string(),
                 ghost: false,
                 systems,

@@ -1,6 +1,6 @@
 #![allow(mixed_script_confusables)]
 
-use aeon::fd::{DissipationFunction, ExportVtkConfig, Mesh, SystemCheckpoint, SystemCondition};
+use aeon::fd::{DissipationFunction, ExportVtuConfig, Mesh, SystemCheckpoint, SystemCondition};
 use aeon::prelude::*;
 use aeon::system::field_count;
 use reborrow::{Reborrow, ReborrowMut};
@@ -372,9 +372,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let mut systems = SystemCheckpoint::default();
             systems.save_system(dynamic.as_slice());
 
-            mesh.export_vtk(
+            mesh.export_vtu(
                 format!("output/evbrill/iterultra{}.vtu", i / 1),
-                ExportVtkConfig {
+                ExportVtuConfig {
                     title: "evbrill".to_string(),
                     ghost: false,
                     systems,

@@ -117,9 +117,9 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
         systems.save_int_field("Blocks", &block_debug);
         systems.save_int_field("Cell", &cell_debug);
 
-        mesh.export_vtk(
+        mesh.export_vtu(
             format!("output/wamr/wamr{i}.vtu"),
-            ExportVtkConfig {
+            ExportVtuConfig {
                 title: "WAMR".to_string(),
                 ghost: false,
                 systems,

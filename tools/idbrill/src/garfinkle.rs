@@ -3,7 +3,7 @@ use crate::HAMILTONIAN_CONDITIONS;
 use super::{Quadrant, Rinne, ORDER};
 use aeon::{
     elliptic::HyperRelaxSolver,
-    fd::{ExportVtkConfig, Mesh, SystemCondition},
+    fd::{ExportVtuConfig, Mesh, SystemCondition},
     prelude::*,
 };
 
@@ -143,9 +143,9 @@ impl Operator<2> for PsiOperator {
             systems.save_field("psi", garfinkle.field(Garfinkle::Psi));
             systems.save_field("hamiltonian", &hamiltonian);
 
-            mesh.export_vtk(
+            mesh.export_vtu(
                 format!("output/garfinkle/iter{}.vtu", { index / 25 }),
-                ExportVtkConfig {
+                ExportVtuConfig {
                     title: "garfinkle".to_string(),
                     ghost: crate::GHOST,
                     systems,

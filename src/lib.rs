@@ -15,7 +15,7 @@ pub use aeon_geometry as geometry;
 pub mod prelude {
     // pub use crate::arena::Arena;
     pub use crate::fd::{
-        Conditions, Engine, ExportVtkConfig, Function, Mesh, MeshCheckpoint, Operator, Projection,
+        Conditions, Engine, ExportVtuConfig, Function, Mesh, MeshCheckpoint, Operator, Projection,
         ScalarConditions, SystemBC, SystemCheckpoint,
     };
     pub use crate::lac::{BiCGStabConfig, BiCGStabSolver, IdentityMap, LinearMap, LinearSolver};
