@@ -1,6 +1,6 @@
 use crate::{
-    Static, Tensor, Tensor0, Tensor1, Tensor2, Tensor3, Tensor4, TensorFieldC1, TensorFieldC2,
-    TensorIndex, TensorProd, TensorRank,
+    lie_derivative, Space, Static, Tensor, Tensor0, Tensor1, Tensor2, Tensor3, Tensor4,
+    TensorFieldC1, TensorFieldC2, TensorIndex, TensorProd, TensorRank,
 };
 
 #[derive(Default)]
@@ -24,6 +24,8 @@ pub struct Metric<const N: usize> {
 
 impl Metric<2> {
     pub fn new(g: TensorFieldC2<2, Static<2>>) -> Self {
+        let space = Space::<2>;
+
         // Compute determinant and its derivatives.
         let gdet = g.value[[0, 0]] * g.value[[1, 1]] - g.value[[0, 1]] * g.value[[1, 0]];
         let gdet_derivs = Tensor1::from_fn(|[i]| {
@@ -73,20 +75,23 @@ impl Metric<2> {
         result.ginv_derivs = ginv_derivs;
 
         // Compute christoffel symbols of the first kind.
-        result.gamma = Tensor3::from_fn(|[i, j, k]| {
+        result.gamma = space.tensor(|[i, j, k]| {
             0.5 * (g.derivs[[i, j, k]] + g.derivs[[k, i, j]] - g.derivs[[j, k, i]])
         });
-        result.gamma_derivs = Tensor4::from_fn(|[i, j, k, l]| {
+        result.gamma_derivs = space.tensor(|[i, j, k, l]| {
             g.second_derivs[[i, j, k, l]] + g.second_derivs[[k, i, j, l]]
                 - g.second_derivs[[j, k, i, l]]
         });
 
         // Compute christoffel symbolcs of the second kind.
-        result.gamma_2nd =
-            Tensor3::from_contract(|[i, j, k], [m]| result.ginv[[i, m]] * result.gamma[[m, j, k]]);
-        result.gamma_2nd_derivs = Tensor4::from_contract(|[i, j, k, l], [m]| {
-            result.ginv[[i, m]] * result.gamma_derivs[[m, j, k, l]]
-                + result.ginv_derivs[[i, m, l]] * result.gamma[[m, j, k]]
+        result.gamma_2nd = space
+            .tensor(|[i, j, k]| space.sum(|[m]| result.ginv[[i, m]] * result.gamma[[m, j, k]]));
+
+        result.gamma_2nd_derivs = space.tensor(|[i, j, k, l]| {
+            space.sum(|[m]| {
+                result.ginv[[i, m]] * result.gamma_derivs[[m, j, k, l]]
+                    + result.ginv_derivs[[i, m, l]] * result.gamma[[m, j, k]]
+            })
         });
 
         result
@@ -110,8 +115,33 @@ impl<const N: usize> Metric<N> {
         &self.ginv
     }
 
+    pub fn inv_derivs(&self) -> &Tensor3<N> {
+        &self.ginv_derivs
+    }
+
     pub fn det(&self) -> f64 {
         self.gdet
+    }
+
+    pub fn det_derivs(&self) -> &Tensor1<N> {
+        &self.gdet_derivs
+    }
+
+    /// Returns christoffel symbols of the first kind.
+    pub fn christoffel(&self) -> &Tensor3<N> {
+        &self.gamma
+    }
+
+    // Computes killing's equation for the given vector field.
+    pub fn killing(&self, vector: TensorFieldC1<N, Static<1>>) -> Tensor2<N> {
+        lie_derivative(
+            vector,
+            TensorFieldC2 {
+                value: self.g.clone(),
+                derivs: self.g_derivs.clone(),
+                second_derivs: self.g_second_derivs.clone(),
+            },
+        )
     }
 
     /// Computes the ricci tensor for the given metric.
@@ -187,120 +217,26 @@ impl<const N: usize> Metric<N> {
     pub fn trace(&self, tensor: Tensor<N, Static<2>>) -> f64 {
         Tensor0::<N>::from_contract(|[], [i, j]| self.ginv[[i, j]] * tensor[[i, j]]).into_storage()
     }
-}
 
-pub struct AxisymmetricScale {
-    lam_regular_co: Tensor1<2>,
-    lam_regular_con: Tensor1<2>,
-    lam_hess: Tensor2<2>,
-    on_axis: bool,
-}
-
-impl AxisymmetricScale {
-    pub fn new(seed: TensorFieldC2<2, Static<0>>, metric: &Metric<2>, pos: [f64; 2]) -> Self {
-        let on_axis = pos[0].abs() <= 10e-10;
-
-        let s = seed.value[[]];
-        let s_derivs = seed.derivs;
-        let s_second_derivs = seed.second_derivs;
-
-        // Plus 1/r on axis for r component
-        let mut lam_reg_co = Tensor::zeros();
-        // Plus 1/(r * grr) on axis for r component
-        let mut lam_reg_con = Tensor::zeros();
-        // Fully regular
-        let mut lam_hess = Tensor::zeros();
-
-        {
-            let g_derivs_term =
-                Tensor1::<2>::from_fn(|[i]| metric.g_derivs[[0, 0, i]] / metric.g[[0, 0]]);
-
-            let g_second_derivs_term = Tensor2::<2>::from_fn(|[i, j]| {
-                metric.second_derivs()[[0, 0, i, j]] / metric.value()[[0, 0]]
-                    - metric.derivs()[[0, 0, i]] * metric.derivs()[[0, 0, j]]
-                        / (metric.value()[[0, 0]] * metric.value()[[0, 0]])
-            });
-
-            // Decompose lam_r into a regular part and an Order(1/r) part.
-            let lam_r = s + pos[0] * s_derivs[[0]] + 0.5 * g_derivs_term[[0]]; // + 1.0 / pos[0]
-            let lam_z = pos[0] * s_derivs[[1]] + 0.5 * g_derivs_term[[1]];
-
-            lam_reg_co[[0]] = lam_r;
-            lam_reg_co[[1]] = lam_z;
-
-            lam_reg_con[[0]] = metric.inv()[[0, 0]] * lam_r + metric.inv()[[0, 1]] * lam_z;
-            lam_reg_con[[1]] = metric.inv()[[1, 0]] * lam_r + metric.inv()[[1, 1]] * lam_z;
-
-            if !on_axis {
-                lam_reg_co[[0]] += 1.0 / pos[0];
-
-                lam_reg_con[[0]] += metric.inv()[[0, 0]] / pos[0];
-                lam_reg_con[[1]] += metric.inv()[[1, 0]] / pos[0];
-            } else {
-                lam_reg_con[[1]] += -metric.derivs()[[0, 1, 0]] / metric.det();
-            }
-
-            let mut gamma_regular = Tensor2::<2>::from_contract(|[i, j], [m]| {
-                lam_reg_con[[m]] * metric.gamma[[m, i, j]]
-            });
-
-            if on_axis {
-                gamma_regular[[0, 0]] +=
-                    0.5 * metric.second_derivs()[[0, 0, 0, 0]] / metric.value()[[0, 0]];
-                gamma_regular[[0, 1]] += 0.0; // + 0.5 * g_par[0][0][1] / (pos[0] * g[0][0])
-                gamma_regular[[1, 1]] += 0.5
-                    * (2.0 * metric.second_derivs()[[0, 1, 0, 1]]
-                        - metric.second_derivs()[[1, 1, 0, 0]])
-                    / metric.value()[[0, 0]];
-            }
-
-            let lam_rr = {
-                // Plus a -1/r^2 term that gets cancelled by lam_r * lam_r
-                let term1 = 2.0 * s_derivs[[0]]
-                    + pos[0] * s_second_derivs[[0, 0]]
-                    + 0.5 * g_second_derivs_term[[0, 0]]; // -1.0 / pos[0].powi(2)
-                let term2 = lam_r * lam_r; // + 1.0 / pos[0].powi(2)
-                let term3 = if on_axis {
-                    // Use lhopital's rule to compute on axis lam_r / r and lam_z / r on axis.
-                    let lam_r_lhopital = 2.0 * s_derivs[[0]]
-                        + 0.5 * metric.second_derivs()[[0, 0, 0, 0]] / metric.value()[[0, 0]];
-                    2.0 * lam_r_lhopital
-                } else {
-                    2.0 * lam_r / pos[0]
-                };
-
-                term1 + term2 + term3 - gamma_regular[[0, 0]]
-            };
-
-            let lam_rz = {
-                let term1: f64 = s_derivs[[1]]
-                    + pos[0] * s_second_derivs[[0, 1]]
-                    + 0.5 * g_second_derivs_term[[0, 1]];
-                let term2 = lam_r * lam_z;
-                let term3 = if on_axis {
-                    s_derivs[[1]] // + 0.5 * g_par[0][0][1] / (g[0][0] * pos[0]);
-                } else {
-                    lam_z / pos[0]
-                };
-                term1 + term2 + term3 - gamma_regular[[0, 1]]
-            };
-
-            let lam_zz = pos[0] * s_second_derivs[[1, 1]]
-                + 0.5 * g_second_derivs_term[[1, 1]]
-                + lam_z * lam_z
-                - gamma_regular[[1, 1]];
-
-            lam_hess[[0, 0]] = lam_rr;
-            lam_hess[[0, 1]] = lam_rz;
-            lam_hess[[1, 0]] = lam_rz;
-            lam_hess[[1, 1]] = lam_zz;
+    /// Raises the first index of the given tensor.
+    pub fn raise<R: TensorRank<N>>(&self, tensor: Tensor<N, R>) -> Tensor<N, R> {
+        const {
+            assert!(R::Idx::RANK > 0);
         }
 
-        Self {
-            lam_regular_co: lam_reg_co,
-            lam_regular_con: lam_reg_con,
-            lam_hess,
-            on_axis,
+        let mut result = Tensor::zeros();
+
+        for findex in R::Idx::enumerate() {
+            let i = findex.as_ref()[0];
+
+            for m in 0..N {
+                let mut index = findex;
+                index.as_mut()[0] = m;
+
+                result[findex] += self.inv()[[i, m]] * tensor[index]
+            }
         }
+
+        result
     }
 }

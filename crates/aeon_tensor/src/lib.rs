@@ -3,14 +3,15 @@ extern crate self as aeon_tensor;
 use paste::paste;
 use std::{
     iter::once,
-    ops::{Add, Index, IndexMut, Mul},
+    ops::{Add, Index, IndexMut, Mul, Sub},
 };
 
+pub mod axi;
 mod field;
 mod metric;
 
 pub use field::{lie_derivative, TensorFieldC0, TensorFieldC1, TensorFieldC2};
-pub use metric::{AxisymmetricScale, Metric};
+pub use metric::Metric;
 
 /// An index that can be used for a tensor. Essentially types of the form `[usize; R]` for some rank
 /// `R`.
@@ -132,6 +133,14 @@ impl<const N: usize, R: TensorRank<N>> Add<Tensor<N, R>> for Tensor<N, R> {
 
     fn add(self, rhs: Tensor<N, R>) -> Self::Output {
         Tensor::from_fn(|indices| self[indices] + rhs[indices])
+    }
+}
+
+impl<const N: usize, R: TensorRank<N>> Sub<Tensor<N, R>> for Tensor<N, R> {
+    type Output = Tensor<N, R>;
+
+    fn sub(self, rhs: Tensor<N, R>) -> Self::Output {
+        Tensor::from_fn(|indices| self[indices] - rhs[indices])
     }
 }
 
@@ -349,6 +358,30 @@ impl<const N: usize, R: TensorRank<N>> Tensor<N, R> {
 
             result
         })
+    }
+}
+
+pub struct Space<const N: usize>;
+
+impl<const N: usize> Space<N> {
+    pub fn tensor<const R: usize>(&self, f: impl Fn([usize; R]) -> f64) -> Tensor<N, Static<R>>
+    where
+        Static<R>: TensorRank<N, Idx = [usize; R]>,
+    {
+        Tensor::from_fn(|index| f(index))
+    }
+
+    pub fn vector(&self, f: impl Fn(usize) -> f64) -> Tensor<N, Static<1>> {
+        Tensor::from_fn(|[i]: [usize; 1]| f(i))
+    }
+
+    pub fn sum<const R: usize>(&self, f: impl Fn([usize; R]) -> f64) -> f64 {
+        let mut result = 0.0;
+
+        for i in <[usize; R] as TensorIndex<N>>::enumerate() {
+            result += f(i);
+        }
+        result
     }
 }
 

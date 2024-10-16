@@ -28,6 +28,12 @@ where
     }
 }
 
+impl<const N: usize> TensorFieldC0<N, Static<0>> {
+    pub fn scalar(&self) -> f64 {
+        self.value.clone().into_storage()
+    }
+}
+
 #[derive(Clone)]
 pub struct TensorFieldC1<const N: usize, R: TensorRank<N>>
 where
@@ -50,6 +56,12 @@ where
     }
 }
 
+impl<const N: usize> TensorFieldC1<N, Static<0>> {
+    pub fn scalar(&self) -> f64 {
+        self.value.clone().into_storage()
+    }
+}
+
 #[derive(Clone)]
 pub struct TensorFieldC2<const N: usize, R: TensorRank<N>>
 where
@@ -62,14 +74,22 @@ where
         Tensor<N, <<R as TensorProd<N, Static<1>>>::Result as TensorProd<N, Static<1>>>::Result>,
 }
 
+impl<const N: usize> TensorFieldC2<N, Static<0>> {
+    pub fn scalar(&self) -> f64 {
+        self.value.clone().into_storage()
+    }
+}
+
 /// Computes the lie derivative along a vector of a given tensor field.
 pub fn lie_derivative<const N: usize, T>(
     direction: TensorFieldC1<N, Static<1>>,
-    tensor: TensorFieldC1<N, T>,
+    tensor: impl Into<TensorFieldC1<N, T>>,
 ) -> Tensor<N, T>
 where
     T: TensorRank<N> + TensorProd<N, Static<1>>,
 {
+    let tensor = tensor.into();
+
     let mut result = Tensor::zeros();
 
     for index in T::Idx::enumerate() {
