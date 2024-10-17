@@ -6,7 +6,7 @@ use std::{
     ops::{Add, Index, IndexMut, Mul, Sub},
 };
 
-pub mod axi;
+pub mod axisymmetry;
 mod field;
 mod metric;
 

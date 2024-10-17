@@ -135,7 +135,7 @@ impl Twist {
 }
 
 pub struct System {
-    pub g: TensorFieldC2<2, Static<2>>,
+    pub metric: Metric<2>,
     pub seed: TensorFieldC2<2, Static<0>>,
 
     pub k: TensorFieldC1<2, Static<2>>,
@@ -147,10 +147,31 @@ pub struct System {
     pub lapse: TensorFieldC2<2, Static<0>>,
     pub shift: TensorFieldC1<2, Static<1>>,
 
-    pub angular: f64,
-    pub density: f64,
-    pub shear: Tensor1<2>,
-    pub energy: Tensor2<2>,
+    pub source: StressEnergy,
+}
+
+/// A decomposition of the stress energy tensor in axisymmetric units.
+pub struct StressEnergy {
+    pub energy: f64,
+    pub momentum: Tensor1<2>,
+    pub stress: Tensor2<2>,
+
+    pub angular_momentum: f64,
+    pub angular_shear: Tensor1<2>,
+    pub angular_stress: f64,
+}
+
+impl StressEnergy {
+    pub fn vacuum() -> Self {
+        Self {
+            energy: 0.0,
+            momentum: Tensor::zeros(),
+            stress: Tensor::zeros(),
+            angular_momentum: 0.0,
+            angular_shear: Tensor::zeros(),
+            angular_stress: 0.0,
+        }
+    }
 }
 
 pub struct Evolution {
@@ -184,10 +205,7 @@ pub struct Decomposition {
     pub lapse: TensorFieldC2<2, Static<0>>,
     pub shift: TensorFieldC1<2, Static<1>>,
 
-    pub angular: f64,
-    pub density: f64,
-    pub shear: Tensor1<2>,
-    pub energy: Tensor2<2>,
+    pub source: StressEnergy,
 
     y: f64,
 }
@@ -196,7 +214,7 @@ impl Decomposition {
     pub fn new(
         pos: [f64; 2],
         System {
-            g,
+            metric,
             seed,
             k,
             y,
@@ -204,13 +222,9 @@ impl Decomposition {
             z,
             lapse,
             shift,
-            angular,
-            density,
-            shear,
-            energy,
+            source,
         }: System,
     ) -> Self {
-        let metric = Metric::new(g);
         let twist = Twist::new(&metric, pos, seed);
 
         // Build l from y and k
@@ -243,10 +257,7 @@ impl Decomposition {
             z,
             lapse,
             shift,
-            angular,
-            density,
-            shear,
-            energy,
+            source,
         }
     }
 
@@ -266,10 +277,15 @@ impl Decomposition {
             z,
             lapse,
             shift,
-            angular,
-            density,
-            shear,
-            energy,
+            source:
+                StressEnergy {
+                    energy,
+                    momentum: _,
+                    stress,
+                    angular_momentum: _,
+                    angular_shear: _,
+                    angular_stress,
+                },
         }: &Self,
     ) -> Evolution {
         let on_axis = pos[0].abs() <= ON_AXIS;
@@ -301,19 +317,18 @@ impl Decomposition {
         let lapse_grad = metric.gradiant(lapse.clone().into());
         let lapse_hess = metric.hessian(lapse.clone());
 
-        let energy_trace = metric.trace(energy.clone());
+        let stress_trace = metric.trace(stress.clone());
 
         // *********************************
         // Hamiltonian *********************
         // *********************************
 
         let hamiltonian = {
-            let term1 =
-                0.5 * (ricci_trace + k_trace * k_trace) + k_trace * l.value.clone().into_storage();
+            let term1 = 0.5 * (ricci_trace + k_trace * k_trace) + k_trace * l.scalar();
             let term2 = -0.5 * s.sum(|[i, j]| k.value[[i, j]] * k_con[[i, j]]);
             let term3 = -s.sum(|[i, j]| twist.hess()[[i, j]] * metric.inv()[[i, j]]);
 
-            term1 + term2 + term3 - KAPPA * density
+            term1 + term2 + term3 - KAPPA * energy
         };
 
         // **********************************
@@ -376,8 +391,8 @@ impl Decomposition {
 
             let term5 = -lapse.scalar()
                 * KAPPA
-                * (energy.clone()
-                    + 0.5 * (density - energy_trace - angular) * metric.value().clone());
+                * (stress.clone()
+                    + 0.5 * (energy - stress_trace - angular_stress) * metric.value().clone());
 
             term1 + term2 + term3 + term4 + term5 + k_lie_shift
         };
@@ -385,7 +400,7 @@ impl Decomposition {
         let l_t = {
             let term1 = lapse.scalar() * l.scalar() * (k_trace + l.scalar() - 2.0 * theta.scalar());
             let term2 = -lapse.scalar() * metric.trace(twist.hess().clone());
-            let term3 = s.sum(|[m]| shift.value[[m]] * l.derivs[[m]]);
+            let term3 = s.sum(|m| shift.value[m] * l.derivs[m]);
 
             let mut regular = s.sum(|[m]| {
                 twist.regular_con()[[m]] * (2.0 * lapse.scalar() * z.value[[m]] - lapse_grad[[m]])
@@ -396,7 +411,7 @@ impl Decomposition {
                     / metric.value()[[0, 0]];
             };
 
-            let term4 = -0.5 * lapse.scalar() * KAPPA * (density - energy_trace + angular);
+            let term4 = -0.5 * lapse.scalar() * KAPPA * (energy - stress_trace + angular_stress);
 
             term1 + term2 + term3 + term4 + regular
         };

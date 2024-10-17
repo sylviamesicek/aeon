@@ -24,8 +24,6 @@ pub struct Metric<const N: usize> {
 
 impl Metric<2> {
     pub fn new(g: TensorFieldC2<2, Static<2>>) -> Self {
-        let space = Space::<2>;
-
         // Compute determinant and its derivatives.
         let gdet = g.value[[0, 0]] * g.value[[1, 1]] - g.value[[0, 1]] * g.value[[1, 0]];
         let gdet_derivs = Tensor1::from_fn(|[i]| {
@@ -74,31 +72,36 @@ impl Metric<2> {
         result.ginv = ginv;
         result.ginv_derivs = ginv_derivs;
 
-        // Compute christoffel symbols of the first kind.
-        result.gamma = space.tensor(|[i, j, k]| {
-            0.5 * (g.derivs[[i, j, k]] + g.derivs[[k, i, j]] - g.derivs[[j, k, i]])
-        });
-        result.gamma_derivs = space.tensor(|[i, j, k, l]| {
-            g.second_derivs[[i, j, k, l]] + g.second_derivs[[k, i, j, l]]
-                - g.second_derivs[[j, k, i, l]]
-        });
-
-        // Compute christoffel symbolcs of the second kind.
-        result.gamma_2nd = space
-            .tensor(|[i, j, k]| space.sum(|[m]| result.ginv[[i, m]] * result.gamma[[m, j, k]]));
-
-        result.gamma_2nd_derivs = space.tensor(|[i, j, k, l]| {
-            space.sum(|[m]| {
-                result.ginv[[i, m]] * result.gamma_derivs[[m, j, k, l]]
-                    + result.ginv_derivs[[i, m, l]] * result.gamma[[m, j, k]]
-            })
-        });
+        result.compute_christoffel();
 
         result
     }
 }
 
 impl<const N: usize> Metric<N> {
+    pub fn compute_christoffel(&mut self) {
+        let space = Space::<N>;
+        // Compute christoffel symbols of the first kind.
+        self.gamma = space.tensor(|[i, j, k]| {
+            0.5 * (self.g_derivs[[i, j, k]] + self.g_derivs[[k, i, j]] - self.g_derivs[[j, k, i]])
+        });
+        self.gamma_derivs = space.tensor(|[i, j, k, l]| {
+            self.g_second_derivs[[i, j, k, l]] + self.g_second_derivs[[k, i, j, l]]
+                - self.g_second_derivs[[j, k, i, l]]
+        });
+
+        // Compute christoffel symbolcs of the second kind.
+        self.gamma_2nd =
+            space.tensor(|[i, j, k]| space.sum(|[m]| self.ginv[[i, m]] * self.gamma[[m, j, k]]));
+
+        self.gamma_2nd_derivs = space.tensor(|[i, j, k, l]| {
+            space.sum(|[m]| {
+                self.ginv[[i, m]] * self.gamma_derivs[[m, j, k, l]]
+                    + self.ginv_derivs[[i, m, l]] * self.gamma[[m, j, k]]
+            })
+        });
+    }
+
     pub fn value(&self) -> &Tensor2<N> {
         &self.g
     }

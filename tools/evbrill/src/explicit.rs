@@ -1,5 +1,10 @@
 #![allow(unused_assignments)]
 
+use aeon_tensor::{
+    axisymmetry::{Decomposition, StressEnergy, System},
+    Metric, Tensor, TensorFieldC1, TensorFieldC2,
+};
+
 // A very useful function
 use crate::types::*;
 use std::array::from_fn;
@@ -542,6 +547,94 @@ pub fn geometric(sys: HyperbolicSystem, _pos: [f64; 2]) -> Geometric {
         gamma_zrr: gamma_2nd[1][0][0],
         gamma_zrz: gamma_2nd[1][0][1],
         gamma_zzz: gamma_2nd[1][1][1],
+    }
+}
+
+pub fn hyperbolc_new(sys: HyperbolicSystem, pos: [f64; 2]) -> HyperbolicDerivs {
+    let g = TensorFieldC2 {
+        value: Tensor::from_storage(sys.metric()),
+        derivs: Tensor::from_storage(sys.metric_par()),
+        second_derivs: Tensor::from_storage(sys.metric_par2()),
+    };
+
+    let seed = TensorFieldC2 {
+        value: Tensor::from_storage(sys.seed()),
+        derivs: Tensor::from_storage(sys.seed_par()),
+        second_derivs: Tensor::from_storage(sys.seed_par2()),
+    };
+
+    let k = TensorFieldC1 {
+        value: Tensor::from_storage(sys.extrinsic()),
+        derivs: Tensor::from_storage(sys.extrinsic_par()),
+    };
+
+    let y = TensorFieldC1 {
+        value: Tensor::from_storage(sys.y),
+        derivs: Tensor::from_storage([sys.y_r, sys.y_z]),
+    };
+
+    let theta = TensorFieldC1 {
+        value: Tensor::from_storage(sys.theta),
+        derivs: Tensor::from_storage([sys.theta_r, sys.theta_z]),
+    };
+
+    let z = TensorFieldC1 {
+        value: Tensor::from_storage([sys.zr, sys.zz]),
+        derivs: Tensor::from_storage([[sys.zr_r, sys.zr_z], [sys.zz_r, sys.zz_z]]),
+    };
+
+    let lapse = TensorFieldC2 {
+        value: Tensor::from_storage(sys.lapse),
+        derivs: Tensor::from_storage([sys.lapse_r, sys.lapse_z]),
+        second_derivs: Tensor::from_storage([
+            [sys.lapse_rr, sys.lapse_rz],
+            [sys.lapse_rz, sys.lapse_zz],
+        ]),
+    };
+
+    let shift = TensorFieldC1 {
+        value: Tensor::from_storage([sys.shiftr, sys.shiftz]),
+        derivs: Tensor::from_storage([[sys.shiftr_r, sys.shiftr_z], [sys.shiftz_r, sys.shiftz_z]]),
+    };
+
+    let metric = Metric::new(g);
+
+    let decomp = Decomposition::new(
+        pos,
+        System {
+            metric,
+            seed,
+            k,
+            y,
+            z,
+            theta,
+            lapse,
+            shift,
+            source: StressEnergy::vacuum(),
+        },
+    );
+
+    let evolve = Decomposition::evolution(&decomp);
+    let gauge = Decomposition::gauge(&decomp);
+
+    HyperbolicDerivs {
+        grr_t: evolve.g[[0, 0]],
+        grz_t: evolve.g[[0, 1]],
+        gzz_t: evolve.g[[1, 1]],
+        s_t: evolve.seed,
+
+        krr_t: evolve.k[[0, 0]],
+        krz_t: evolve.k[[0, 1]],
+        kzz_t: evolve.k[[1, 1]],
+        y_t: evolve.y,
+
+        theta_t: evolve.theta,
+        zr_t: evolve.z[[0]],
+        zz_t: evolve.z[[1]],
+
+        lapse_t: gauge.lapse,
+        shiftr_t: gauge.shift[[0]],
+        shiftz_t: gauge.shift[[1]],
     }
 }
 
