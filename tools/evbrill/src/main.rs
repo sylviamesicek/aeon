@@ -7,17 +7,27 @@ use reborrow::{Reborrow, ReborrowMut};
 
 // mod eqs;
 pub mod explicit;
+pub mod shared;
 pub mod symbolicc;
-pub mod types;
 
-use types::HyperbolicSystem;
+use shared::HyperbolicSystem;
 
-const STEPS: usize = 5000;
+const SYMBOLIC: bool = false;
+
+const MAX_TIME: f64 = 1.0;
+const MAX_STEPS: usize = 1000;
+const MAX_LEVEL: usize = 7;
+
 const CFL: f64 = 0.1;
 const ORDER: Order<4> = Order::<4>;
 const DISS_ORDER: Order<6> = Order::<6>;
 
-const SYMBOLIC: bool = false;
+const SAVE_CHECKPOINT: f64 = 0.01;
+const FORCE_SAVE: bool = true;
+const REGRID_SKIP: usize = 10;
+
+const LOWER: f64 = 1e-10;
+const UPPER: f64 = 1e-6;
 
 /// Initial data in Rinne's hyperbolic variables.
 #[derive(Clone, SystemLabel)]
@@ -281,7 +291,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut mesh = Mesh::default();
     let mut systems = SystemCheckpoint::default();
 
-    mesh.import_dat("output/idbrill4.0.dat", &mut systems)
+    mesh.import_dat("output/idbrill.dat", &mut systems)
         .expect("Unable to load initial data");
 
     // Read initial data
@@ -318,45 +328,176 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     dynamic.field_mut(Dynamic::Shiftr).fill(0.0);
     dynamic.field_mut(Dynamic::Shiftz).fill(0.0);
 
+    let max_level = MAX_LEVEL.max(mesh.max_level());
+
     // Fill ghost nodes
     mesh.fill_boundary(ORDER, Quadrant, DynamicConditions, dynamic.as_mut_slice());
 
-    // Begin integration
-    let h = CFL * mesh.min_spacing();
-    println!("Spacing {}", mesh.min_spacing());
-    println!("Step Size {}", h);
+    // // Begin integration
+    // let h = CFL * mesh.min_spacing();
+    // println!("Spacing {}", mesh.min_spacing());
+    // println!("Step Size {}", h);
 
     // Allocate vectors
-    let mut derivs = SystemVec::with_length(mesh.num_nodes());
-    let mut update = SystemVec::<Dynamic>::with_length(mesh.num_nodes());
-    let mut dissipation = SystemVec::with_length(mesh.num_nodes());
+    // let mut derivs = SystemVec::<Dynamic>::new();
+    let mut update = SystemVec::<Dynamic>::new();
+    let mut dissipation = SystemVec::new();
+
+    // // Integrate
+    // let mut integrator = Rk4::new();
+
+    // for i in 0..STEPS {
+    //     // Fill ghost nodes of system
+    //     mesh.fill_boundary(ORDER, Quadrant, DynamicConditions, dynamic.as_mut_slice());
+
+    //     mesh.evaluate(
+    //         ORDER,
+    //         Quadrant,
+    //         DynamicDerivs,
+    //         dynamic.as_slice(),
+    //         derivs.as_mut_slice(),
+    //     );
+
+    //     // Output debugging data
+    //     let norm = mesh.norm(dynamic.field(Dynamic::Theta).into());
+    //     println!("Step {i}, Time {:.5} Norm {:.5e}", i as f64 * h, norm);
+
+    //     if i % 1 == 0 {
+    //         // Output current system to disk
+    //         let mut systems = SystemCheckpoint::default();
+    //         systems.save_system(dynamic.as_slice());
+
+    //         mesh.export_vtu(
+    //             format!("output/evbrill/iterultra{}.vtu", i / 1),
+    //             ExportVtuConfig {
+    //                 title: "evbrill".to_string(),
+    //                 ghost: false,
+    //                 systems,
+    //             },
+    //         )
+    //         .unwrap();
+    //     }
+
+    //     // Compute step
+    //     integrator.step(
+    //         h,
+    //         &mut DynamicOde { mesh: &mut mesh },
+    //         dynamic.contigious(),
+    //         update.contigious_mut(),
+    //     );
+
+    //     // Compute dissipation
+    //     mesh.evaluate(
+    //         DISS_ORDER,
+    //         Quadrant,
+    //         DissipationFunction(DynamicConditions),
+    //         dynamic.as_slice(),
+    //         dissipation.as_mut_slice(),
+    //     );
+
+    //     // Add everything together
+    //     for i in 0..dynamic.contigious().len() {
+    //         dynamic.contigious_mut()[i] +=
+    //             update.contigious()[i] + 0.5 * dissipation.contigious()[i];
+    //     }
+    // }
 
     // Integrate
     let mut integrator = Rk4::new();
+    let mut time = 0.0;
+    let mut step = 0;
 
-    for i in 0..STEPS {
-        // Fill ghost nodes of system
+    let mut time_since_save = 0.0;
+    let mut save_step = 0;
+
+    let mut steps_since_regrid = 0;
+    let mut regrid_save_step = 0;
+
+    while step < MAX_STEPS && time < MAX_TIME {
+        assert!(dynamic.len() == mesh.num_nodes());
+
+        // Get step size
+        let h = mesh.min_spacing() * CFL;
+
+        // Resize vectors
+        update.resize(mesh.num_nodes());
+        dissipation.resize(mesh.num_nodes());
+
+        // Fill boundaries
         mesh.fill_boundary(ORDER, Quadrant, DynamicConditions, dynamic.as_mut_slice());
 
-        mesh.evaluate(
-            ORDER,
-            Quadrant,
-            DynamicDerivs,
-            dynamic.as_slice(),
-            derivs.as_mut_slice(),
-        );
+        if steps_since_regrid > REGRID_SKIP {
+            steps_since_regrid = 0;
 
-        // Output debugging data
-        let norm = mesh.norm(dynamic.field(Dynamic::Theta).into());
-        println!("Step {i}, Time {:.5} Norm {:.5e}", i as f64 * h, norm);
+            log::info!("Regridding Mesh at time: {time}");
+            mesh.fill_boundary(ORDER, Quadrant, DynamicConditions, dynamic.as_mut_slice());
+            mesh.flag_wavelets(LOWER, UPPER, Quadrant, dynamic.as_slice());
+            mesh.set_regrid_level_limit(max_level);
 
-        if i % 1 == 0 {
             // Output current system to disk
             let mut systems = SystemCheckpoint::default();
             systems.save_system(dynamic.as_slice());
 
+            let mut flags = vec![0; mesh.num_nodes()];
+            mesh.flags_debug(&mut flags);
+
+            mesh.balance_flags();
+
+            let mut bflags = vec![0; mesh.num_nodes()];
+            mesh.flags_debug(&mut bflags);
+
+            systems.save_int_field("Flags", &mut flags);
+            systems.save_int_field("Balanced Flags", &mut bflags);
+
+            let mut blocks = vec![0; mesh.num_nodes()];
+            mesh.block_debug(&mut blocks);
+            systems.save_int_field("Blocks", &mut blocks);
+
             mesh.export_vtu(
-                format!("output/evbrill/iterultra{}.vtu", i / 1),
+                format!("output/evbrill/regrid{regrid_save_step}.vtu"),
+                ExportVtuConfig {
+                    title: "Rergrid Wave".to_string(),
+                    ghost: false,
+                    systems,
+                },
+            )
+            .unwrap();
+
+            regrid_save_step += 1;
+
+            mesh.regrid();
+
+            // Copy system into tmp scratch space (provieded by dissipation).
+            dissipation
+                .contigious_mut()
+                .copy_from_slice(dynamic.contigious());
+            dynamic.resize(mesh.num_nodes());
+            mesh.transfer_system(
+                ORDER,
+                Quadrant,
+                dissipation.as_slice(),
+                dynamic.as_mut_slice(),
+            );
+
+            continue;
+        }
+
+        mesh.fill_boundary(ORDER, Quadrant, DynamicConditions, dynamic.as_mut_slice());
+
+        if time_since_save >= SAVE_CHECKPOINT || FORCE_SAVE {
+            time_since_save = 0.0;
+
+            log::info!("Saving Checkpoint at time: {time}");
+            // Output current system to disk
+            let mut systems = SystemCheckpoint::default();
+            systems.save_system(dynamic.as_slice());
+
+            let mut blocks = vec![0; mesh.num_nodes()];
+            mesh.block_debug(&mut blocks);
+            systems.save_int_field("Blocks", &mut blocks);
+
+            mesh.export_vtu(
+                format!("output/evbrill/evolution{save_step}.vtu"),
                 ExportVtuConfig {
                     title: "evbrill".to_string(),
                     ghost: false,
@@ -364,6 +505,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 },
             )
             .unwrap();
+
+            save_step += 1;
         }
 
         // Compute step
@@ -388,6 +531,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             dynamic.contigious_mut()[i] +=
                 update.contigious()[i] + 0.5 * dissipation.contigious()[i];
         }
+
+        step += 1;
+        steps_since_regrid += 1;
+
+        time += h;
+        time_since_save += h;
     }
 
     Ok(())

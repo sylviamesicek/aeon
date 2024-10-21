@@ -2,6 +2,7 @@ extern crate self as aeon_tensor;
 
 use paste::paste;
 use std::{
+    fmt::Debug,
     iter::once,
     ops::{Add, Index, IndexMut, Mul, Sub},
 };
@@ -39,11 +40,21 @@ impl<const N: usize, const RANK: usize> TensorIndex<N> for [usize; RANK] {
 
                 let cursor = self.cursor;
 
-                for rank in 0..RANK {
-                    if self.cursor[rank] >= N {
-                        self.cursor[rank] = 0;
-                    } else {
-                        self.cursor[rank] += 1;
+                let mut increment = [false; RANK];
+                increment[0] = true;
+
+                for i in 0..RANK {
+                    if increment[i] {
+                        // If we need to increment this axis, we add to the cursor value
+                        self.cursor[i] += 1;
+                        // If the cursor is equal to size, we wrap.
+                        // However, if we have reached the final axis,
+                        // this indicates we are at the end of iteration,
+                        // and will return None on the next call of next().
+                        if self.cursor[i] >= N && i < RANK - 1 {
+                            self.cursor[i] = 0;
+                            increment[i + 1] = true;
+                        }
                     }
                 }
 
@@ -87,6 +98,15 @@ pub struct Tensor<const N: usize, R: TensorRank<N>>(R::Storage);
 impl<const N: usize, R: TensorRank<N>> Clone for Tensor<N, R> {
     fn clone(&self) -> Self {
         Self::from_storage(self.0.clone())
+    }
+}
+
+impl<const N: usize, R: TensorRank<N>> Debug for Tensor<N, R>
+where
+    R::Storage: Debug,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.0.fmt(f)
     }
 }
 

@@ -1,3 +1,5 @@
+//! Explictly enumerated einstien field equations in axisymmetry.
+
 #![allow(unused_assignments)]
 
 use aeon_tensor::{
@@ -5,8 +7,8 @@ use aeon_tensor::{
     Metric, Tensor, TensorFieldC1, TensorFieldC2,
 };
 
+use crate::shared::*;
 // A very useful function
-use crate::types::*;
 use std::array::from_fn;
 
 // *********************************
@@ -159,16 +161,16 @@ pub fn hyperbolic(sys: HyperbolicSystem, pos: [f64; 2]) -> HyperbolicDerivs {
 
     // Metric
     let g = sys.metric();
-    let g_par = sys.metric_par();
-    let g_par2 = sys.metric_par2();
+    let g_par = sys.metric_derivs();
+    let g_par2 = sys.metric_second_derivs();
 
     let s = sys.seed();
-    let s_par = sys.seed_par();
-    let s_par2 = sys.seed_par2();
+    let s_par = sys.seed_derivs();
+    let s_par2 = sys.seed_second_derivs();
 
     // Extrinsic curvature
     let k = sys.extrinsic();
-    let k_par = sys.extrinsic_par();
+    let k_par = sys.extrinsic_derivs();
 
     let y = sys.y;
     let y_par = [sys.y_r, sys.y_z];
@@ -502,8 +504,8 @@ pub fn geometric(sys: HyperbolicSystem, _pos: [f64; 2]) -> Geometric {
 
     // Metric
     let g = sys.metric();
-    let g_par = sys.metric_par();
-    let g_par2 = sys.metric_par2();
+    let g_par = sys.metric_derivs();
+    let g_par2 = sys.metric_second_derivs();
 
     // **************************************
     // Geometry *****************************
@@ -553,19 +555,19 @@ pub fn geometric(sys: HyperbolicSystem, _pos: [f64; 2]) -> Geometric {
 pub fn hyperbolc_new(sys: HyperbolicSystem, pos: [f64; 2]) -> HyperbolicDerivs {
     let g = TensorFieldC2 {
         value: Tensor::from_storage(sys.metric()),
-        derivs: Tensor::from_storage(sys.metric_par()),
-        second_derivs: Tensor::from_storage(sys.metric_par2()),
+        derivs: Tensor::from_storage(sys.metric_derivs()),
+        second_derivs: Tensor::from_storage(sys.metric_second_derivs()),
     };
 
     let seed = TensorFieldC2 {
         value: Tensor::from_storage(sys.seed()),
-        derivs: Tensor::from_storage(sys.seed_par()),
-        second_derivs: Tensor::from_storage(sys.seed_par2()),
+        derivs: Tensor::from_storage(sys.seed_derivs()),
+        second_derivs: Tensor::from_storage(sys.seed_second_derivs()),
     };
 
     let k = TensorFieldC1 {
         value: Tensor::from_storage(sys.extrinsic()),
-        derivs: Tensor::from_storage(sys.extrinsic_par()),
+        derivs: Tensor::from_storage(sys.extrinsic_derivs()),
     };
 
     let y = TensorFieldC1 {
@@ -891,8 +893,9 @@ mod tests {
         }
     }
 
+    /// Performs fuzzy testing against symboliccally generated c code.
     #[test]
-    fn fuzzing() {
+    fn fuzz_against_symbolicc() {
         let mut rng = rand::thread_rng();
 
         macro_rules! assert_almost_eq {
@@ -994,6 +997,68 @@ mod tests {
             assert_almost_eq!(explicit.theta_t, symbolic.theta_t, "Theta does not match");
             assert_almost_eq!(explicit.zr_t, symbolic.zr_t, "Zr does not match");
             assert_almost_eq!(explicit.zz_t, symbolic.zz_t, "Zz does not match");
+        }
+    }
+
+    /// Performs fuzzy testing against results of 'aeon_tensor::axisymmetry'.
+    #[test]
+    fn fuzz_against_tensor() {
+        use aeon_tensor::axisymmetry as axi;
+
+        let mut rng = rand::thread_rng();
+
+        macro_rules! assert_almost_eq {
+            ($val:expr, $target:expr) => {
+                assert!(($val - $target).abs() <= 1e-10 * $val.abs().max($target.abs()))
+            };
+            ($val:expr, $target:expr, $extra:tt) => {
+                if ($val - $target).abs() > 1e-10 * $val.abs().max($target.abs()) {
+                    panic!(
+                        "{}, value {:e}, difference: {:e}",
+                        $extra,
+                        $val,
+                        ($val - $target).abs()
+                    );
+                }
+            };
+        }
+
+        for trial in 0..10000 {
+            println!("Running trial {trial}");
+
+            let system = HyperbolicSystem::fuzzy(&mut rng);
+
+            let rho = rng.gen_range(0.0..=10.0);
+            let z = rng.gen_range(-10.0..=10.0);
+
+            let det = system.det();
+
+            if det.abs() <= 1e-3 {
+                continue;
+            }
+
+            let explicit = explicit::hyperbolic(system.clone(), [rho, z]);
+            let decomp = axi::Decomposition::new([rho, z], system.axisymmetric_system());
+            let evolve = axi::Decomposition::evolution(&decomp);
+            let gauge = axi::Decomposition::gauge(&decomp);
+
+            assert_almost_eq!(explicit.grr_t, evolve.g[[0, 0]], "Grr does not match");
+            assert_almost_eq!(explicit.grz_t, evolve.g[[0, 1]], "Grz does not match");
+            assert_almost_eq!(explicit.gzz_t, evolve.g[[1, 1]], "Gzz does not match");
+            assert_almost_eq!(explicit.s_t, evolve.seed, "S does not match");
+
+            assert_almost_eq!(explicit.krr_t, evolve.k[[0, 0]], "Krr does not match");
+            assert_almost_eq!(explicit.krz_t, evolve.k[[0, 1]], "Krz does not match");
+            assert_almost_eq!(explicit.kzz_t, evolve.k[[1, 1]], "Kzz does not match");
+            assert_almost_eq!(explicit.y_t, evolve.y, "Y does not match");
+
+            assert_almost_eq!(explicit.lapse_t, gauge.lapse, "Lapse does not match");
+            assert_almost_eq!(explicit.shiftr_t, gauge.shift[[0]], "Shiftr does not match");
+            assert_almost_eq!(explicit.shiftz_t, gauge.shift[[1]], "Shiftz does not match");
+
+            assert_almost_eq!(explicit.theta_t, evolve.theta, "Theta does not match");
+            assert_almost_eq!(explicit.zr_t, evolve.z[[0]], "Zr does not match");
+            assert_almost_eq!(explicit.zz_t, evolve.z[[1]], "Zz does not match");
         }
     }
 }

@@ -229,7 +229,7 @@ pub fn solve(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let num_nodes = mesh.num_nodes();
 
-    log::info!("Solving Garfinkle with {}", num_nodes);
+    log::info!("Solving Garfinkle with {} nodes", num_nodes);
 
     let mut garfinkle = vec![0.0; num_nodes * 2];
     let (psi, seed) = garfinkle.split_at_mut(num_nodes);
@@ -245,7 +245,7 @@ pub fn solve(
     log::info!("Running Hyperbolic Relaxation");
 
     let mut solver = HyperRelaxSolver::new();
-    solver.tolerance = 1e-9;
+    solver.tolerance = 1e-6;
     solver.max_steps = max_steps;
     solver.cfl = 0.5;
     solver.dampening = 0.4;

@@ -86,8 +86,8 @@ impl<const N: usize> Metric<N> {
             0.5 * (self.g_derivs[[i, j, k]] + self.g_derivs[[k, i, j]] - self.g_derivs[[j, k, i]])
         });
         self.gamma_derivs = space.tensor(|[i, j, k, l]| {
-            self.g_second_derivs[[i, j, k, l]] + self.g_second_derivs[[k, i, j, l]]
-                - self.g_second_derivs[[j, k, i, l]]
+            0.5 * (self.g_second_derivs[[i, j, k, l]] + self.g_second_derivs[[k, i, j, l]]
+                - self.g_second_derivs[[j, k, i, l]])
         });
 
         // Compute christoffel symbolcs of the second kind.

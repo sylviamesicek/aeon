@@ -1,5 +1,6 @@
 use std::ops::Range;
 
+use aeon_tensor::axisymmetry as axi;
 use rand::Rng;
 
 pub type Rank1 = [f64; 2];
@@ -154,6 +155,59 @@ impl HyperbolicSystem {
         system
     }
 
+    pub fn axisymmetric_system(&self) -> axi::System {
+        use aeon_tensor::*;
+
+        let metric = Metric::new(TensorFieldC2 {
+            value: Tensor::from_storage(self.metric()),
+            derivs: Tensor::from_storage(self.metric_derivs()),
+            second_derivs: Tensor::from_storage(self.metric_second_derivs()),
+        });
+
+        let seed = TensorFieldC2 {
+            value: Tensor::from_storage(self.seed()),
+            derivs: Tensor::from_storage(self.seed_derivs()),
+            second_derivs: Tensor::from_storage(self.seed_second_derivs()),
+        };
+
+        axi::System {
+            metric,
+            seed,
+            k: TensorFieldC1 {
+                value: Tensor::from_storage(self.extrinsic()),
+                derivs: Tensor::from_storage(self.extrinsic_derivs()),
+            },
+            y: TensorFieldC1 {
+                value: Tensor::from_storage(self.y),
+                derivs: Tensor::from_storage([self.y_r, self.y_z]),
+            },
+            theta: TensorFieldC1 {
+                value: Tensor::from_storage(self.theta),
+                derivs: Tensor::from_storage([self.theta_r, self.theta_z]),
+            },
+            z: TensorFieldC1 {
+                value: Tensor::from_storage([self.zr, self.zz]),
+                derivs: Tensor::from_storage([[self.zr_r, self.zr_z], [self.zz_r, self.zz_z]]),
+            },
+            lapse: TensorFieldC2 {
+                value: Tensor::from_storage(self.lapse),
+                derivs: Tensor::from_storage([self.lapse_r, self.lapse_z]),
+                second_derivs: Tensor::from_storage([
+                    [self.lapse_rr, self.lapse_rz],
+                    [self.lapse_rz, self.lapse_zz],
+                ]),
+            },
+            shift: TensorFieldC1 {
+                value: Tensor::from_storage([self.shiftr, self.shiftz]),
+                derivs: Tensor::from_storage([
+                    [self.shiftr_r, self.shiftr_z],
+                    [self.shiftz_r, self.shiftz_z],
+                ]),
+            },
+            source: axi::StressEnergy::vacuum(),
+        }
+    }
+
     pub fn det(&self) -> f64 {
         self.grr * self.gzz - self.grz * self.grz
     }
@@ -162,7 +216,7 @@ impl HyperbolicSystem {
         [[self.grr, self.grz], [self.grz, self.gzz]]
     }
 
-    pub fn metric_par(&self) -> Rank3 {
+    pub fn metric_derivs(&self) -> Rank3 {
         let grr_par = [self.grr_r, self.grr_z];
         let grz_par = [self.grz_r, self.grz_z];
         let gzz_par = [self.gzz_r, self.gzz_z];
@@ -170,7 +224,7 @@ impl HyperbolicSystem {
         [[grr_par, grz_par], [grz_par, gzz_par]]
     }
 
-    pub fn metric_par2(&self) -> Rank4 {
+    pub fn metric_second_derivs(&self) -> Rank4 {
         let grr_par2 = [[self.grr_rr, self.grr_rz], [self.grr_rz, self.grr_zz]];
         let grz_par2 = [[self.grz_rr, self.grz_rz], [self.grz_rz, self.grz_zz]];
         let gzz_par2 = [[self.gzz_rr, self.gzz_rz], [self.gzz_rz, self.gzz_zz]];
@@ -182,11 +236,11 @@ impl HyperbolicSystem {
         self.s
     }
 
-    pub fn seed_par(&self) -> Rank1 {
+    pub fn seed_derivs(&self) -> Rank1 {
         [self.s_r, self.s_z]
     }
 
-    pub fn seed_par2(&self) -> Rank2 {
+    pub fn seed_second_derivs(&self) -> Rank2 {
         [[self.s_rr, self.s_rz], [self.s_rz, self.s_zz]]
     }
 
@@ -194,7 +248,7 @@ impl HyperbolicSystem {
         [[self.krr, self.krz], [self.krz, self.kzz]]
     }
 
-    pub fn extrinsic_par(&self) -> Rank3 {
+    pub fn extrinsic_derivs(&self) -> Rank3 {
         let krr_par = [self.krr_r, self.krr_z];
         let krz_par = [self.krz_r, self.krz_z];
         let kzz_par = [self.kzz_r, self.kzz_z];

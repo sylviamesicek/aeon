@@ -1,6 +1,6 @@
 //! Rust bindings to automatiically generated C code.
 
-use crate::types::*;
+use crate::shared::*;
 
 extern "C" {
     fn hyperbolic_sys(vars: HyperbolicSystem, rho: f64, z: f64) -> HyperbolicDerivs;

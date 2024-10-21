@@ -80,6 +80,10 @@ impl<Label: SystemLabel> HyperRelaxSolver<Label> {
         let step = self.cfl * spacing;
 
         for index in 0..self.max_steps {
+            if index % 1000 == 0 {
+                log::info!("Relaxed {}k steps", index / 1000);
+            }
+
             {
                 mesh.fill_boundary(
                     order,

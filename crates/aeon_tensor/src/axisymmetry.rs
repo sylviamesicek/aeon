@@ -234,7 +234,7 @@ impl Decomposition {
             ),
             derivs: {
                 let mut result = Tensor1::from_fn(|[i]| {
-                    pos[i] * y.derivs[[i]] + k.derivs[[0, 0, i]] / metric.value()[[0, 0]]
+                    pos[0] * y.derivs[[i]] + k.derivs[[0, 0, i]] / metric.value()[[0, 0]]
                         - k.value[[0, 0]] / metric.value()[[0, 0]] * metric.derivs()[[0, 0, i]]
                             / metric.value()[[0, 0]]
                 });
@@ -265,8 +265,9 @@ impl Decomposition {
         self.pos[0] <= ON_AXIS
     }
 
-    pub fn evolution(
-        Self {
+    pub fn evolution(&self) -> Evolution {
+        // Destructure self
+        let Self {
             pos,
             metric,
             twist,
@@ -286,8 +287,8 @@ impl Decomposition {
                     angular_shear: _,
                     angular_stress,
                 },
-        }: &Self,
-    ) -> Evolution {
+        } = self;
+
         let on_axis = pos[0].abs() <= ON_AXIS;
 
         let s = Space::<2>;
@@ -384,10 +385,10 @@ impl Decomposition {
                 * s.tensor(|[i, j]| {
                     s.sum(|[m, n]| k.value[[i, m]] * metric.inv()[[m, n]] * k.value[[n, j]])
                 });
-            let term4 = s.tensor(|[i, j]| {
-                lapse.scalar()
-                    * (z_grad[[i, j]] + z_grad[[j, i]] - 2.0 * k.value[[i, j]] * theta.scalar())
-            });
+            let term4 = lapse.scalar()
+                * s.tensor(|[i, j]| {
+                    z_grad[[i, j]] + z_grad[[j, i]] - 2.0 * k.value[[i, j]] * theta.scalar()
+                });
 
             let term5 = -lapse.scalar()
                 * KAPPA

@@ -113,7 +113,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         std::fs::create_dir_all("output/garfinkle")?;
     }
 
-    for r in 0..4 {
+    for r in 0..7 {
         log::warn!("Min Spacing {}", mesh.min_spacing());
 
         let mut debug = String::new();
@@ -147,9 +147,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
 
         mesh.fill_boundary(ORDER, Quadrant, RinneConditions, rinne.as_mut_slice());
-
-        mesh.fill_boundary_zeros(hamiltonian.as_mut().into());
-
         mesh.fill_boundary(
             ORDER,
             Quadrant,
@@ -157,57 +154,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             hamiltonian.as_mut().into(),
         );
 
-        // let mut hamiltonian1 = hamiltonian.clone();
-
-        // mesh.fill_physical(
-        //     2,
-        //     &Quadrant,
-        //     &HAMILTONIAN_CONDITIONS,
-        //     &mut SystemSliceMut::from_contiguous(&mut hamiltonian1),
-        // );
-
-        // let mut hamiltonian2 = hamiltonian1.clone();
-
-        // mesh.fill_fine(
-        //     2,
-        //     &mut SystemSliceMut::<Scalar>::from_contiguous(&mut hamiltonian2),
-        // );
-
-        // let mut hamiltonian3 = hamiltonian2.clone();
-
-        // mesh.fill_direct(
-        //     2,
-        //     &mut SystemSliceMut::<Scalar>::from_contiguous(&mut hamiltonian3),
-        // );
-
-        // let mut hamiltonian4 = hamiltonian3.clone();
-
-        // mesh.fill_prolong(
-        //     ORDER,
-        //     2,
-        //     &Quadrant,
-        //     &HAMILTONIAN_CONDITIONS,
-        //     &mut SystemSliceMut::<Scalar>::from_contiguous(&mut hamiltonian4),
-        // );
-
-        // let mut hamiltonian5 = hamiltonian4.clone();
-
-        // mesh.fill_physical(
-        //     2,
-        //     &Quadrant,
-        //     &HAMILTONIAN_CONDITIONS,
-        //     &mut SystemSliceMut::from_contiguous(&mut hamiltonian5),
-        // );
-
-        // mesh.fill_boundary(
-        //     ORDER,
-        //     Quadrant,
-        //     HAMILTONIAN_CONDITIONS,
-        //     hamiltonian.as_mut().into(),
-        // );
-
         println!("Flagging wavelet");
-        mesh.flag_wavelets(0.0, 1e-5, Quadrant, rinne.as_slice());
+        mesh.flag_wavelets(0.0, 1e-6, Quadrant, rinne.as_slice());
         mesh.balance_flags();
 
         // println!("{:?}");
@@ -224,11 +172,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let mut systems = SystemCheckpoint::default();
         systems.save_system(rinne.as_slice());
         systems.save_field("hamiltonian", &hamiltonian);
-        // systems.save_field("hamiltonian1", &hamiltonian1);
-        // systems.save_field("hamiltonian2", &hamiltonian2);
-        // systems.save_field("hamiltonian3", &hamiltonian3);
-        // systems.save_field("hamiltonian4", &hamiltonian4);
-        // systems.save_field("hamiltonian5", &hamiltonian5);
 
         systems.save_int_field("interface", &interfaces);
         systems.save_int_field("interface_neighbors", &interface_neighbors);
@@ -243,7 +186,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             },
         )?;
 
-        mesh.regrid();
+        mesh.export_dat("output/idbrill.dat", &systems)?;
+
+        if mesh.requires_regridding() {
+            mesh.regrid();
+        } else {
+            break;
+        }
     }
 
     // let mut debug = String::new();
@@ -302,7 +251,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // }
 
     // log::warn!("Min Spacing {}", mesh.min_spacing());
-    // mesh.export_dat("output/idbrill_amr.dat", &systems)?;
 
     Ok(())
 }
