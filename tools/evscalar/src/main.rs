@@ -1,6 +1,6 @@
 #![allow(mixed_script_confusables)]
 
-use aeon::fd::{DissipationFunction, ExportVtuConfig, Mesh, SystemCheckpoint, SystemCondition};
+use aeon::fd::{ExportVtuConfig, Mesh, SystemCheckpoint, SystemCondition};
 use aeon::prelude::*;
 use aeon::system::field_count;
 use reborrow::{Reborrow, ReborrowMut};
@@ -15,8 +15,6 @@ const STEPS: usize = 5000;
 const CFL: f64 = 0.1;
 const ORDER: Order<4> = Order::<4>;
 const DISS_ORDER: Order<6> = Order::<6>;
-
-const SYMBOLIC: bool = false;
 
 /// Initial data in Rinne's hyperbolic variables.
 #[derive(Clone, SystemLabel)]
@@ -97,12 +95,6 @@ pub struct DynamicDerivs;
 impl Function<2> for DynamicDerivs {
     type Input = Dynamic;
     type Output = Dynamic;
-
-    type Conditions = DynamicConditions;
-
-    fn conditions(&self) -> Self::Conditions {
-        DynamicConditions
-    }
 
     fn evaluate(&self, engine: &impl Engine<2, Self::Input>) -> SystemValue<Self::Output> {
         let [rho, z] = engine.position();
@@ -392,10 +384,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         );
 
         // Compute dissipation
-        mesh.evaluate(
+        mesh.dissipation(
             DISS_ORDER,
             Quadrant,
-            DissipationFunction(DynamicConditions),
             dynamic.as_slice(),
             dissipation.as_mut_slice(),
         );

@@ -145,6 +145,7 @@ impl<const N: usize> Mesh<N> {
                         }
                     }
                 } else if new_level == level {
+                    // Direct copy
                     let new_block = mesh.blocks.cell_block(new_cell);
                     let new_nodes = mesh.block_nodes(new_block);
                     let new_space = mesh.block_space(new_block);
@@ -166,7 +167,12 @@ impl<const N: usize> Mesh<N> {
                         }
                     }
                 } else {
-                    let split = mesh.tree.split(cell);
+                    // Coarsening
+                    let split = mesh.old_cell_splits[cell];
+
+                    // if true {
+                    //     todo!("Split must be stored/computed for old cells")
+                    // }
 
                     let new_block = mesh.blocks.cell_block(new_cell);
                     let new_offset = mesh.blocks.cell_position(new_cell);
@@ -221,7 +227,7 @@ impl<const N: usize> Mesh<N> {
         conditions: C,
         system: SystemSliceMut<'_, C::System>,
     ) {
-        self.fill_boundary_to_extent(order, K::MAX_BORDER, boundary, conditions, system);
+        self.fill_boundary_to_extent(order, self.ghost, boundary, conditions, system);
     }
 
     pub fn fill_boundary_to_extent<K: Kernels, B: Boundary<N> + Sync, C: Conditions<N> + Sync>(
@@ -444,7 +450,6 @@ impl<const N: usize> Mesh<N> {
                         fields: block_system.rb(),
                         order,
                         boundary: boundary.clone(),
-                        conditions: conditions.clone(),
                     };
 
                     let position: [f64; N] = engine.position();
@@ -478,7 +483,6 @@ impl<const N: usize> Mesh<N> {
                         fields: block_system.rb(),
                         order,
                         boundary: boundary.clone(),
-                        conditions: conditions.clone(),
                     };
 
                     let inner_position = inner_engine.position();

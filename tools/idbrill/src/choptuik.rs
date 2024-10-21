@@ -174,12 +174,6 @@ impl Function<2> for Hamiltonian {
     type Input = Choptuik;
     type Output = Scalar;
 
-    type Conditions = ChoptuikConditions;
-
-    fn conditions(&self) -> Self::Conditions {
-        ChoptuikConditions
-    }
-
     fn evaluate(&self, engine: &impl Engine<2, Self::Input>) -> SystemValue<Self::Output> {
         let [rho, _z] = engine.position();
         let on_axis = rho.abs() <= 10e-10;
@@ -229,12 +223,6 @@ pub struct RinneFromChoptuik;
 impl Function<2> for RinneFromChoptuik {
     type Input = Choptuik;
     type Output = Rinne;
-
-    type Conditions = ChoptuikConditions;
-
-    fn conditions(&self) -> Self::Conditions {
-        ChoptuikConditions
-    }
 
     fn evaluate(&self, engine: &impl Engine<2, Self::Input>) -> SystemValue<Self::Output> {
         let psi = engine.value(Choptuik::Psi);

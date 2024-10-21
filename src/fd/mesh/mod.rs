@@ -6,7 +6,9 @@
 //! filling interior interfaces, and adaptively regridding a domain based on various error heuristics.
 
 use aeon_basis::{Boundary, BoundaryKind, NodeSpace, NodeWindow};
-use aeon_geometry::{faces, FaceMask, IndexSpace, Rectangle, Tree, TreeBlocks, TreeNeighbors};
+use aeon_geometry::{
+    faces, AxisMask, FaceMask, IndexSpace, Rectangle, Tree, TreeBlocks, TreeNeighbors,
+};
 use rayon::iter::{IntoParallelIterator, ParallelBridge, ParallelIterator};
 use ron::ser::PrettyConfig;
 use std::{
@@ -87,6 +89,10 @@ pub struct Mesh<const N: usize> {
     old_blocks: TreeBlocks<N>,
     /// Block node offsets from before most recent refinement.
     old_block_node_offsets: Vec<usize>,
+    /// Cell splits from before most recent refinement.
+    ///
+    /// May be temporary if I can find a more elegant solution.
+    old_cell_splits: Vec<AxisMask<N>>,
 
     /// Thread-local stores used for allocation.
     stores: ThreadLocal<UnsafeCell<MeshStore>>,
@@ -123,6 +129,7 @@ impl<const N: usize> Mesh<N> {
             regrid_map: Vec::default(),
             old_blocks: TreeBlocks::default(),
             old_block_node_offsets: Vec::default(),
+            old_cell_splits: Vec::default(),
 
             stores: ThreadLocal::new(),
         };
@@ -223,6 +230,10 @@ impl<const N: usize> Mesh<N> {
         self.old_blocks.clone_from(&self.blocks);
         self.old_block_node_offsets
             .clone_from(&self.block_node_offsets);
+
+        self.old_cell_splits.clear();
+        self.old_cell_splits
+            .extend((0..self.tree.num_cells()).map(|cell| self.tree.split(cell)));
 
         // Perform regriding
         self.regrid_map.resize(self.tree.num_cells(), 0);
@@ -803,6 +814,7 @@ impl<const N: usize> Clone for Mesh<N> {
             regrid_map: self.regrid_map.clone(),
             old_blocks: self.old_blocks.clone(),
             old_block_node_offsets: self.old_block_node_offsets.clone(),
+            old_cell_splits: self.old_cell_splits.clone(),
 
             stores: ThreadLocal::new(),
         }
@@ -832,6 +844,7 @@ impl<const N: usize> Default for Mesh<N> {
             regrid_map: Vec::default(),
             old_blocks: TreeBlocks::default(),
             old_block_node_offsets: Vec::default(),
+            old_cell_splits: Vec::default(),
 
             stores: ThreadLocal::new(),
         };

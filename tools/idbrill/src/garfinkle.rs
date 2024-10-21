@@ -163,12 +163,6 @@ impl Function<2> for Hamiltonian {
     type Input = Garfinkle;
     type Output = Scalar;
 
-    type Conditions = GarfinkleConditions;
-
-    fn conditions(&self) -> Self::Conditions {
-        GarfinkleConditions
-    }
-
     fn evaluate(&self, engine: &impl Engine<2, Garfinkle>) -> SystemValue<Self::Output> {
         let [rho, _z] = engine.position();
 
@@ -200,12 +194,6 @@ pub struct RinneFromGarfinkle;
 impl Function<2> for RinneFromGarfinkle {
     type Input = Garfinkle;
     type Output = Rinne;
-
-    type Conditions = GarfinkleConditions;
-
-    fn conditions(&self) -> Self::Conditions {
-        GarfinkleConditions
-    }
 
     fn evaluate(&self, engine: &impl Engine<2, Self::Input>) -> SystemValue<Self::Output> {
         let [rho, _z] = engine.position();

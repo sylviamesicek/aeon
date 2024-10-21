@@ -1,3 +1,5 @@
+use std::marker::PhantomData;
+
 use aeon_basis::{Boundary, Kernels};
 use aeon_geometry::{Face, IndexSpace};
 use rayon::iter::{ParallelBridge, ParallelIterator};
@@ -5,10 +7,12 @@ use reborrow::Reborrow as _;
 
 use crate::{
     fd::{
-        FdEngine, FdIntEngine, Function, Operator, OperatorAsFunction, Projection,
+        Engine, FdEngine, FdIntEngine, Function, Operator, OperatorAsFunction, Projection,
         ProjectionAsFunction,
     },
-    system::{SystemFields, SystemFieldsMut, SystemLabel, SystemSlice, SystemSliceMut},
+    system::{
+        SystemFields, SystemFieldsMut, SystemLabel, SystemSlice, SystemSliceMut, SystemValue,
+    },
 };
 
 use super::Mesh;
@@ -22,9 +26,7 @@ impl<const N: usize> Mesh<N> {
         function: P,
         source: SystemSlice<'_, P::Input>,
         dest: SystemSliceMut<'_, P::Output>,
-    ) where
-        P::Conditions: Sync,
-    {
+    ) {
         let source = source.as_range();
         let dest = dest.as_range();
 
@@ -72,7 +74,6 @@ impl<const N: usize> Mesh<N> {
                     fields: input.rb(),
                     order,
                     boundary: boundary.clone(),
-                    conditions: projection.conditions(),
                 };
 
                 projection.evaluate(&engine)
@@ -157,5 +158,28 @@ impl<const N: usize> Mesh<N> {
                 output,
             );
         });
+    }
+
+    /// Applies the projection to `source`, and stores the result in `dest`.
+    pub fn dissipation<K: Kernels + Sync, B: Boundary<N> + Sync, S: SystemLabel>(
+        &mut self,
+        order: K,
+        boundary: B,
+        source: SystemSlice<'_, S>,
+        dest: SystemSliceMut<'_, S>,
+    ) {
+        #[derive(Clone)]
+        pub struct Dissipation<S: SystemLabel>(PhantomData<S>);
+
+        impl<const N: usize, S: SystemLabel> Function<N> for Dissipation<S> {
+            type Input = S;
+            type Output = S;
+
+            fn evaluate(&self, engine: &impl Engine<N, Self::Input>) -> SystemValue<Self::Output> {
+                SystemValue::from_fn(|field: S| engine.dissipation(field))
+            }
+        }
+
+        self.evaluate(order, boundary, Dissipation(PhantomData), source, dest);
     }
 }

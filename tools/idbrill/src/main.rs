@@ -101,7 +101,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         origin: [0.0, 0.0],
     };
 
-    let mut mesh = Mesh::new(bounds, 4, 2);
+    let mut mesh = Mesh::new(bounds, 4, 3);
 
     for _ in 0..1 {
         mesh.refine_global();

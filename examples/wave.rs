@@ -1,10 +1,6 @@
 use std::array;
 
-use aeon::{
-    fd::{DissipationFunction, Gaussian},
-    prelude::*,
-    system::field_count,
-};
+use aeon::{fd::Gaussian, prelude::*, system::field_count};
 use reborrow::{Reborrow, ReborrowMut};
 
 const MAX_TIME: f64 = 1.0;
@@ -49,14 +45,8 @@ struct WaveEquation {
 }
 
 impl Function<2> for WaveEquation {
-    type Conditions = WaveConditions;
-
     type Input = Scalar;
     type Output = Scalar;
-
-    fn conditions(&self) -> Self::Conditions {
-        WaveConditions
-    }
 
     fn evaluate(&self, engine: &impl Engine<2, Self::Input>) -> SystemValue<Self::Output> {
         let dr = engine.derivative(Scalar, 0);
@@ -332,10 +322,9 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
         );
 
         // Compute dissipation
-        mesh.evaluate(
+        mesh.dissipation(
             DISS_ORDER,
             Quadrant,
-            DissipationFunction(WaveConditions),
             system.as_slice(),
             dissipation.as_mut_slice(),
         );

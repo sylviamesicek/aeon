@@ -1009,10 +1009,12 @@ mod tests {
 
         macro_rules! assert_almost_eq {
             ($val:expr, $target:expr) => {
-                assert!(($val - $target).abs() <= 1e-10 * $val.abs().max($target.abs()))
+                let error = ($val - $target).abs();
+                assert!(error <= 1e-10 * $val.abs().max($target.abs()) || error <= 1e-15)
             };
             ($val:expr, $target:expr, $extra:tt) => {
-                if ($val - $target).abs() > 1e-10 * $val.abs().max($target.abs()) {
+                let error = ($val - $target).abs();
+                if error > 1e-10 * $val.abs().max($target.abs()) && error > 1e-15 {
                     panic!(
                         "{}, value {:e}, difference: {:e}",
                         $extra,

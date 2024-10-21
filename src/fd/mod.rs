@@ -4,7 +4,7 @@ mod boundary;
 mod engine;
 mod mesh;
 
-use std::array;
+use std::{array, marker::PhantomData};
 
 pub use boundary::{
     BlockBoundary, Conditions, EmptyConditions, PairConditions, ScalarConditions, SystemBC,
@@ -19,9 +19,6 @@ use crate::system::{Empty, Pair, Scalar, SystemLabel, SystemSlice, SystemValue};
 pub trait Function<const N: usize>: Clone {
     type Input: SystemLabel;
     type Output: SystemLabel;
-
-    type Conditions: Conditions<N, System = Self::Input>;
-    fn conditions(&self) -> Self::Conditions;
 
     fn evaluate(&self, engine: &impl Engine<N, Self::Input>) -> SystemValue<Self::Output>;
 }
@@ -67,12 +64,6 @@ impl<const N: usize, P: Projection<N>> Function<N> for ProjectionAsFunction<P> {
     type Input = Empty;
     type Output = P::Output;
 
-    type Conditions = EmptyConditions;
-
-    fn conditions(&self) -> Self::Conditions {
-        EmptyConditions
-    }
-
     fn evaluate(&self, engine: &impl Engine<N, Self::Input>) -> SystemValue<Self::Output> {
         self.0.project(engine.position())
     }
@@ -85,35 +76,8 @@ impl<const N: usize, O: Operator<N>> Function<N> for OperatorAsFunction<O> {
     type Input = Pair<O::System, O::Context>;
     type Output = O::System;
 
-    type Conditions = PairConditions<O::SystemConditions, O::ContextConditions>;
-
-    fn conditions(&self) -> Self::Conditions {
-        PairConditions {
-            left: self.0.system_conditions(),
-            right: self.0.context_conditions(),
-        }
-    }
-
     fn evaluate(&self, engine: &impl Engine<N, Self::Input>) -> SystemValue<Self::Output> {
         self.0.apply(engine)
-    }
-}
-
-#[derive(Clone)]
-pub struct DissipationFunction<C>(pub C);
-
-impl<const N: usize, C: Conditions<N>> Function<N> for DissipationFunction<C> {
-    type Input = C::System;
-    type Output = C::System;
-
-    type Conditions = C;
-
-    fn conditions(&self) -> Self::Conditions {
-        self.0.clone()
-    }
-
-    fn evaluate(&self, engine: &impl Engine<N, Self::Input>) -> SystemValue<Self::Output> {
-        SystemValue::from_fn(|field: C::System| engine.dissipation(field))
     }
 }
 
