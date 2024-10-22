@@ -103,7 +103,7 @@ impl<const N: usize> Mesh<N> {
     /// defined by `width` and `ghost`.
     pub fn new(bounds: Rectangle<N>, width: usize, ghost: usize) -> Self {
         assert!(width % 2 == 0);
-        assert!(ghost >= width / 2);
+        assert!(ghost == width / 2);
 
         let tree = Tree::new(bounds);
 

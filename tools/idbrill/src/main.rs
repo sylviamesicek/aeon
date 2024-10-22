@@ -97,23 +97,21 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     log::info!("Allocating Driver and Building Mesh Grid Size {points} Radius {radius}");
 
     let bounds = Rectangle {
-        size: [radius, radius],
+        size: [24.0, 24.0],
         origin: [0.0, 0.0],
     };
 
-    let mut mesh = Mesh::new(bounds, 4, 3);
+    let mut mesh = Mesh::new(bounds, 6, 3);
 
     for _ in 0..1 {
         mesh.refine_global();
     }
 
-    if CHOPTUIK {
-        std::fs::create_dir_all("output/choptuik")?;
-    } else {
-        std::fs::create_dir_all("output/garfinkle")?;
-    }
+    std::fs::create_dir_all("output/idbrill")?;
 
-    for r in 0..7 {
+    let mut transfer = SystemVec::new();
+
+    for r in 0..6 {
         log::warn!("Min Spacing {}", mesh.min_spacing());
 
         let mut debug = String::new();
@@ -155,7 +153,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         );
 
         println!("Flagging wavelet");
-        mesh.flag_wavelets(0.0, 1e-6, Quadrant, rinne.as_slice());
+        mesh.flag_wavelets(4, 0.0, 1e-6, Quadrant, rinne.as_slice());
         mesh.balance_flags();
 
         // println!("{:?}");
@@ -177,19 +175,36 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         systems.save_int_field("interface_neighbors", &interface_neighbors);
         systems.save_int_field("blocks", &blocks);
 
-        mesh.export_vtu(
-            format!("output/garfinkle.vtu"),
-            ExportVtuConfig {
-                title: "idbrill".to_string(),
-                ghost: crate::GHOST,
-                systems: systems.clone(),
-            },
-        )?;
+        if CHOPTUIK {
+            mesh.export_vtu(
+                format!("output/idbrill/choptuik{r}.vtu"),
+                ExportVtuConfig {
+                    title: "idbrill".to_string(),
+                    ghost: crate::GHOST,
+                    systems: systems.clone(),
+                },
+            )?;
+        } else {
+            mesh.export_vtu(
+                format!("output/idbrill/garfinkle{r}.vtu"),
+                ExportVtuConfig {
+                    title: "idbrill".to_string(),
+                    ghost: crate::GHOST,
+                    systems: systems.clone(),
+                },
+            )?;
+        }
 
         mesh.export_dat("output/idbrill.dat", &systems)?;
 
         if mesh.requires_regridding() {
+            transfer.resize(mesh.num_nodes());
+            transfer
+                .contigious_mut()
+                .clone_from_slice(rinne.contigious());
             mesh.regrid();
+            rinne.resize(mesh.num_nodes());
+            mesh.transfer_system(ORDER, Quadrant, transfer.as_slice(), rinne.as_mut_slice());
         } else {
             break;
         }

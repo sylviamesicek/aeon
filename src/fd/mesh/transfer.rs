@@ -170,10 +170,6 @@ impl<const N: usize> Mesh<N> {
                     // Coarsening
                     let split = mesh.old_cell_splits[cell];
 
-                    // if true {
-                    //     todo!("Split must be stored/computed for old cells")
-                    // }
-
                     let new_block = mesh.blocks.cell_block(new_cell);
                     let new_offset = mesh.blocks.cell_position(new_cell);
                     let new_size = mesh.blocks.size(new_block);

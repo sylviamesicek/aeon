@@ -4,7 +4,7 @@ mod boundary;
 mod engine;
 mod mesh;
 
-use std::{array, marker::PhantomData};
+use std::array;
 
 pub use boundary::{
     BlockBoundary, Conditions, EmptyConditions, PairConditions, ScalarConditions, SystemBC,

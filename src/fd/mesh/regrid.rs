@@ -14,16 +14,20 @@ impl<const N: usize> Mesh<N> {
     /// boundaries.
     pub fn flag_wavelets<S: SystemLabel, B: Boundary<N> + Sync>(
         &mut self,
+        order: usize,
         lower: f64,
         upper: f64,
         boundary: B,
-        field: SystemSlice<S>,
+        system: SystemSlice<S>,
     ) {
-        let element = Element::<N>::uniform(self.width);
-        let element_coarse = Element::<N>::uniform(self.width / 2);
+        assert!(order % 2 == 0);
+        assert!(order <= self.width);
+
+        let element = Element::<N>::uniform(self.width, order);
+        let element_coarse = Element::<N>::uniform(self.width / 2, order / 2);
         let support = element.support_refined();
 
-        let field = field.as_range();
+        let field = system.as_range();
 
         let mut rflags_buf = std::mem::take(&mut self.refine_flags);
         let mut cflags_buf = std::mem::take(&mut self.coarsen_flags);
@@ -53,7 +57,10 @@ impl<const N: usize> Mesh<N> {
                     mesh.element_window(cell)
                 };
 
-                'fields: for field in S::fields() {
+                let mut should_refine = false;
+                let mut should_coarsen = None;
+
+                for field in S::fields() {
                     // Unpack data to element
                     for (i, node) in window.iter().enumerate() {
                         imsrc[i] = system.field(field.clone())[space.index_from_node(node)];
@@ -66,38 +73,25 @@ impl<const N: usize> Mesh<N> {
                         element_coarse.wavelet(src, dst);
 
                         for point in element_coarse.diagonal_points() {
-                            if dst[point].abs() >= upper {
-                                unsafe {
-                                    *rflags.get_mut(cell) = true;
-                                }
-                                break 'fields;
-                            }
-
-                            if dst[point].abs() <= lower {
-                                unsafe {
-                                    *cflags.get_mut(cell) = true;
-                                }
-                                break 'fields;
-                            }
+                            should_refine = should_refine || dst[point].abs() >= upper;
+                            should_coarsen = should_coarsen.map(|b| b && dst[point].abs() <= lower);
                         }
                     } else {
                         element.wavelet(&imsrc, &mut imdest);
 
                         for point in element.diagonal_int_points() {
-                            if imdest[point].abs() >= upper {
-                                unsafe {
-                                    *rflags.get_mut(cell) = true;
-                                }
-                                break 'fields;
-                            }
-
-                            if imdest[point].abs() <= lower {
-                                unsafe {
-                                    *cflags.get_mut(cell) = true;
-                                }
-                                break 'fields;
-                            }
+                            should_refine = should_refine || imdest[point].abs() >= upper;
+                            should_coarsen =
+                                should_coarsen.map(|b| b && imdest[point].abs() <= lower);
                         }
+                    }
+
+                    unsafe {
+                        *rflags.get_mut(cell) = should_refine;
+                    }
+
+                    unsafe {
+                        *cflags.get_mut(cell) = should_coarsen.unwrap_or(false);
                     }
                 }
             }

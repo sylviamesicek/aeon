@@ -444,8 +444,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             steps_since_regrid = 0;
 
             log::info!("Regridding Mesh at time: {time}");
-            mesh.fill_boundary(ORDER, Quadrant, DynamicConditions, dynamic.as_mut_slice());
-            mesh.flag_wavelets(LOWER, UPPER, Quadrant, dynamic.as_slice());
+            mesh.flag_wavelets(4, LOWER, UPPER, Quadrant, dynamic.as_slice());
             mesh.set_regrid_level_limit(max_level);
 
             // Output current system to disk
@@ -538,7 +537,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         );
 
         // Add everything together
-        for i in 0..dynamic.contigious().len() {
+        for i in 0..mesh.num_nodes() {
             dynamic.contigious_mut()[i] +=
                 update.contigious()[i] + 0.5 * dissipation.contigious()[i];
         }
