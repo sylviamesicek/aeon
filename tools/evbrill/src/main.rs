@@ -429,7 +429,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         mesh.fill_boundary(ORDER, Quadrant, DynamicConditions, dynamic.as_mut_slice());
 
         // Check Norm
-        if mesh.norm(dynamic.as_slice()).is_nan() {
+        let norm = mesh.norm(dynamic.as_slice());
+        if norm.is_nan() {
             log::warn!("Norm is NaN");
         }
 
@@ -498,7 +499,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         if time_since_save >= SAVE_CHECKPOINT || FORCE_SAVE {
             time_since_save = 0.0;
 
-            log::info!("Saving Checkpoint {save_step} at time: {time}");
+            log::info!("Saving Checkpoint {save_step} at time: {time}, norm {norm}");
             // Output current system to disk
             let mut systems = SystemCheckpoint::default();
             systems.save_system(dynamic.as_slice());

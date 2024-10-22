@@ -111,7 +111,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut transfer = SystemVec::new();
 
-    for r in 0..6 {
+    for r in 0..9 {
         log::warn!("Min Spacing {}", mesh.min_spacing());
 
         let mut debug = String::new();
@@ -195,7 +195,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             )?;
         }
 
-        mesh.export_dat("output/idbrill.dat", &systems)?;
+        mesh.export_dat(format!("output/idbrill/level{r}.dat"), &systems)?;
 
         if mesh.requires_regridding() {
             transfer.resize(mesh.num_nodes());
@@ -206,6 +206,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             rinne.resize(mesh.num_nodes());
             mesh.transfer_system(ORDER, Quadrant, transfer.as_slice(), rinne.as_mut_slice());
         } else {
+            log::info!("Sucessfully refined mesh to prescribed accuracy");
+            mesh.export_dat(format!("output/idbrill.dat"), &systems)?;
             break;
         }
     }

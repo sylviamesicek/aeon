@@ -11,8 +11,8 @@ pub trait Convolution<const N: usize> {
 
     fn interior(&self, axis: usize) -> &[f64];
     fn free(&self, border: Border, axis: usize) -> &[f64];
-    fn symmetric(&self, border: Border, axis: usize) -> &[f64];
-    fn antisymmetric(&self, border: Border, axis: usize) -> &[f64];
+    // fn symmetric(&self, border: Border, axis: usize) -> &[f64];
+    // fn antisymmetric(&self, border: Border, axis: usize) -> &[f64];
 
     fn scale(&self, spacing: [f64; N]) -> f64;
 }
@@ -42,20 +42,20 @@ macro_rules! impl_convolution_for_tuples {
                     }
                 }
 
-                fn symmetric(&self, border: Border, axis: usize) -> &[f64] {
-                    match axis {
-                        $($i => self.$i.symmetric(border),)*
-                        _ => panic!("Invalid Axis")
-                    }
-                }
+                // fn symmetric(&self, border: Border, axis: usize) -> &[f64] {
+                //     match axis {
+                //         $($i => self.$i.symmetric(border),)*
+                //         _ => panic!("Invalid Axis")
+                //     }
+                // }
 
 
-                fn antisymmetric(&self, border: Border, axis: usize) -> &[f64] {
-                    match axis {
-                        $($i => self.$i.antisymmetric(border),)*
-                        _ => panic!("Invalid Axis")
-                    }
-                }
+                // fn antisymmetric(&self, border: Border, axis: usize) -> &[f64] {
+                //     match axis {
+                //         $($i => self.$i.antisymmetric(border),)*
+                //         _ => panic!("Invalid Axis")
+                //     }
+                // }
 
                 fn scale(&self, spacing: [f64; $N]) -> f64 {
                     let mut result = 1.0;
@@ -120,21 +120,21 @@ impl<const N: usize, O: Kernels> Convolution<N> for Gradient<O> {
         }
     }
 
-    fn symmetric(&self, border: Border, axis: usize) -> &[f64] {
-        if axis == self.0 {
-            O::derivative().symmetric(border)
-        } else {
-            Value.symmetric(border)
-        }
-    }
+    // fn symmetric(&self, border: Border, axis: usize) -> &[f64] {
+    //     if axis == self.0 {
+    //         O::derivative().symmetric(border)
+    //     } else {
+    //         Value.symmetric(border)
+    //     }
+    // }
 
-    fn antisymmetric(&self, border: Border, axis: usize) -> &[f64] {
-        if axis == self.0 {
-            O::derivative().antisymmetric(border)
-        } else {
-            Value.antisymmetric(border)
-        }
-    }
+    // fn antisymmetric(&self, border: Border, axis: usize) -> &[f64] {
+    //     if axis == self.0 {
+    //         O::derivative().antisymmetric(border)
+    //     } else {
+    //         Value.antisymmetric(border)
+    //     }
+    // }
 
     fn scale(&self, spacing: [f64; N]) -> f64 {
         1.0 / spacing[self.0]
@@ -192,25 +192,25 @@ impl<const N: usize, O: Kernels> Convolution<N> for Hessian<O> {
         }
     }
 
-    fn symmetric(&self, border: Border, axis: usize) -> &[f64] {
-        if self.is_second(axis) {
-            O::second_derivative().symmetric(border)
-        } else if self.is_first(axis) {
-            O::derivative().symmetric(border)
-        } else {
-            Value.symmetric(border)
-        }
-    }
+    // fn symmetric(&self, border: Border, axis: usize) -> &[f64] {
+    //     if self.is_second(axis) {
+    //         O::second_derivative().symmetric(border)
+    //     } else if self.is_first(axis) {
+    //         O::derivative().symmetric(border)
+    //     } else {
+    //         Value.symmetric(border)
+    //     }
+    // }
 
-    fn antisymmetric(&self, border: Border, axis: usize) -> &[f64] {
-        if self.is_second(axis) {
-            O::second_derivative().antisymmetric(border)
-        } else if self.is_first(axis) {
-            O::derivative().antisymmetric(border)
-        } else {
-            Value.antisymmetric(border)
-        }
-    }
+    // fn antisymmetric(&self, border: Border, axis: usize) -> &[f64] {
+    //     if self.is_second(axis) {
+    //         O::second_derivative().antisymmetric(border)
+    //     } else if self.is_first(axis) {
+    //         O::derivative().antisymmetric(border)
+    //     } else {
+    //         Value.antisymmetric(border)
+    //     }
+    // }
 
     fn scale(&self, spacing: [f64; N]) -> f64 {
         1.0 / (spacing[self.0] * spacing[self.1])
@@ -258,21 +258,21 @@ impl<const N: usize, O: Kernels> Convolution<N> for Dissipation<O> {
         }
     }
 
-    fn symmetric(&self, border: Border, axis: usize) -> &[f64] {
-        if axis == self.0 {
-            O::dissipation().symmetric(border)
-        } else {
-            Value.symmetric(border)
-        }
-    }
+    // fn symmetric(&self, border: Border, axis: usize) -> &[f64] {
+    //     if axis == self.0 {
+    //         O::dissipation().symmetric(border)
+    //     } else {
+    //         Value.symmetric(border)
+    //     }
+    // }
 
-    fn antisymmetric(&self, border: Border, axis: usize) -> &[f64] {
-        if axis == self.0 {
-            O::dissipation().antisymmetric(border)
-        } else {
-            Value.antisymmetric(border)
-        }
-    }
+    // fn antisymmetric(&self, border: Border, axis: usize) -> &[f64] {
+    //     if axis == self.0 {
+    //         O::dissipation().antisymmetric(border)
+    //     } else {
+    //         Value.antisymmetric(border)
+    //     }
+    // }
 
     fn scale(&self, spacing: [f64; N]) -> f64 {
         O::dissipation().scale(spacing[self.0])

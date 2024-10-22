@@ -50,7 +50,9 @@ pub struct Element<const N: usize> {
 impl<const N: usize> Element<N> {
     /// Constructs a reference element with uniformly placed
     /// support points with `order + 1` points along each axis.
-    pub fn uniform(width: usize, order: usize) -> Self {
+    pub fn uniform(width: usize) -> Self {
+        let order = width;
+
         let (grid, grid_refined) = Self::uniform_grid(width);
         debug_assert!(grid.len() == width + 1);
         debug_assert!(grid_refined.len() == 2 * width + 1);
@@ -60,6 +62,9 @@ impl<const N: usize> Element<N> {
         let m = vandermonde.transpose().svd();
         let rhs = Self::uniform_rhs::<Monomial>(width, order);
         let stencils = m.pseudoinverse() * rhs;
+
+        debug_assert!(stencils.nrows() == width + 1);
+        debug_assert!(stencils.ncols() == width);
 
         Self {
             width,
@@ -363,7 +368,7 @@ mod tests {
 
     #[test]
     fn iteration() {
-        let element = Element::<2>::uniform(2, 2);
+        let element = Element::<2>::uniform(2);
 
         let mut nodal = element.nodal_indices();
         assert_eq!(nodal.next(), Some([0, 0]));
@@ -404,7 +409,7 @@ mod tests {
     }
 
     fn prolong(h: f64) -> f64 {
-        let element = Element::<2>::uniform(6, 4);
+        let element = Element::<2>::uniform(4);
 
         let space = element.space_refined();
 
@@ -414,7 +419,7 @@ mod tests {
         for index in space.iter() {
             let [x, y] = element.position_refined(index);
             let point = space.linear_from_cartesian(index);
-            values[point] = (x * h).sin() * (y * h).sin();
+            values[point] = (x * h).sin() * (y * h).exp();
         }
 
         element.wavelet(&values, &mut coefs);
@@ -428,8 +433,12 @@ mod tests {
         let error4 = prolong(0.025);
         let error8 = prolong(0.0125);
 
-        assert!(error1 / error2 >= 63.9);
-        assert!(error2 / error4 >= 63.9);
-        assert!(error4 / error8 >= 63.9);
+        dbg!(error1 / error2);
+        dbg!(error2 / error4);
+        dbg!(error4 / error8);
+
+        assert!(error1 / error2 >= 32.);
+        assert!(error2 / error4 >= 32.);
+        assert!(error4 / error8 >= 32.);
     }
 }

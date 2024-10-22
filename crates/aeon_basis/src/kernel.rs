@@ -26,8 +26,8 @@ pub trait Kernel: Clone {
 
     fn interior(&self) -> &[f64];
     fn free(&self, border: Border) -> &[f64];
-    fn symmetric(&self, border: Border) -> &[f64];
-    fn antisymmetric(&self, border: Border) -> &[f64];
+    // fn symmetric(&self, border: Border) -> &[f64];
+    // fn antisymmetric(&self, border: Border) -> &[f64];
 }
 
 pub trait VertexKernel: Kernel {
@@ -56,13 +56,13 @@ impl Kernel for Value {
         &[1.0]
     }
 
-    fn antisymmetric(&self, _border: Border) -> &[f64] {
-        &[0.0]
-    }
+    // fn antisymmetric(&self, _border: Border) -> &[f64] {
+    //     &[0.0]
+    // }
 
-    fn symmetric(&self, _border: Border) -> &[f64] {
-        &[1.0]
-    }
+    // fn symmetric(&self, _border: Border) -> &[f64] {
+    //     &[1.0]
+    // }
 }
 
 impl VertexKernel for Value {
@@ -87,13 +87,13 @@ impl Kernel for Unimplemented {
         unimplemented!("Kernel is unimplemented for order {}", self.0)
     }
 
-    fn symmetric(&self, _border: Border) -> &[f64] {
-        unimplemented!("Kernel is unimplemented for order {}", self.0)
-    }
+    // fn symmetric(&self, _border: Border) -> &[f64] {
+    //     unimplemented!("Kernel is unimplemented for order {}", self.0)
+    // }
 
-    fn antisymmetric(&self, _border: Border) -> &[f64] {
-        unimplemented!("Kernel is unimplemented for order {}", self.0)
-    }
+    // fn antisymmetric(&self, _border: Border) -> &[f64] {
+    //     unimplemented!("Kernel is unimplemented for order {}", self.0)
+    // }
 }
 
 impl VertexKernel for Unimplemented {
@@ -128,16 +128,16 @@ impl Kernel for Derivative<2> {
         }
     }
 
-    fn symmetric(&self, _border: Border) -> &[f64] {
-        &[0.0]
-    }
+    // fn symmetric(&self, _border: Border) -> &[f64] {
+    //     &[0.0]
+    // }
 
-    fn antisymmetric(&self, border: Border) -> &[f64] {
-        match border {
-            Border::Negative(_) => &[0.0, 1.0],
-            Border::Positive(_) => &[1.0, 0.0],
-        }
-    }
+    // fn antisymmetric(&self, border: Border) -> &[f64] {
+    //     match border {
+    //         Border::Negative(_) => &[0.0, 1.0],
+    //         Border::Positive(_) => &[1.0, 0.0],
+    //     }
+    // }
 }
 
 impl Kernel for Derivative<4> {
@@ -158,31 +158,52 @@ impl Kernel for Derivative<4> {
         }
     }
 
-    fn symmetric(&self, border: Border) -> &[f64] {
-        const NEG_0: &'static [f64] = &[0.0];
-        const NEG_1: &'static [f64] = &[-2.0 / 3.0, 1.0 / 12.0, 2.0 / 3.0, -1.0 / 12.0];
-        const POS_0: &'static [f64] = &[0.0];
-        const POS_1: &'static [f64] = &[1.0 / 12.0, -2.0 / 3.0, -1.0 / 12.0, 2.0 / 3.0];
+    // fn symmetric(&self, border: Border) -> &[f64] {
+    //     const NEG_0: &'static [f64] = &[0.0];
+    //     const NEG_1: &'static [f64] = &[-2.0 / 3.0, 1.0 / 12.0, 2.0 / 3.0, -1.0 / 12.0];
+    //     const POS_0: &'static [f64] = &[0.0];
+    //     const POS_1: &'static [f64] = &[1.0 / 12.0, -2.0 / 3.0, -1.0 / 12.0, 2.0 / 3.0];
 
-        match border {
-            Border::Negative(0) => NEG_0,
-            Border::Negative(_) => NEG_1,
-            Border::Positive(0) => POS_0,
-            Border::Positive(_) => POS_1,
-        }
+    //     match border {
+    //         Border::Negative(0) => NEG_0,
+    //         Border::Negative(_) => NEG_1,
+    //         Border::Positive(0) => POS_0,
+    //         Border::Positive(_) => POS_1,
+    //     }
+    // }
+
+    // fn antisymmetric(&self, border: Border) -> &[f64] {
+    //     const NEG_0: &'static [f64] = &[0.0, 4.0 / 3.0, -2.0 / 12.0];
+    //     const NEG_1: &'static [f64] = &[-2.0 / 3.0, -1.0 / 12.0, 2.0 / 3.0, -1.0 / 12.0];
+    //     const POS_0: &'static [f64] = &[2.0 / 12.0, -4.0 / 3.0, 0.0];
+    //     const POS_1: &'static [f64] = &[1.0 / 12.0, -2.0 / 3.0, 1.0 / 12.0, 2.0 / 3.0];
+
+    //     match border {
+    //         Border::Negative(0) => NEG_0,
+    //         Border::Negative(_) => NEG_1,
+    //         Border::Positive(0) => POS_0,
+    //         Border::Positive(_) => POS_1,
+    //     }
+    // }
+}
+
+impl Kernel for Derivative<6> {
+    fn border_width(&self) -> usize {
+        3
     }
 
-    fn antisymmetric(&self, border: Border) -> &[f64] {
-        const NEG_0: &'static [f64] = &[0.0, 4.0 / 3.0, -2.0 / 12.0];
-        const NEG_1: &'static [f64] = &[-2.0 / 3.0, -1.0 / 12.0, 2.0 / 3.0, -1.0 / 12.0];
-        const POS_0: &'static [f64] = &[2.0 / 12.0, -4.0 / 3.0, 0.0];
-        const POS_1: &'static [f64] = &[1.0 / 12.0, -2.0 / 3.0, 1.0 / 12.0, 2.0 / 3.0];
+    fn interior(&self) -> &[f64] {
+        &derivative!(3, 3, 0)
+    }
 
+    fn free(&self, border: Border) -> &[f64] {
         match border {
-            Border::Negative(0) => NEG_0,
-            Border::Negative(_) => NEG_1,
-            Border::Positive(0) => POS_0,
-            Border::Positive(_) => POS_1,
+            Border::Negative(0) => &derivative!(0, 6, 0),
+            Border::Negative(1) => &derivative!(0, 6, 1),
+            Border::Negative(_) => &derivative!(0, 6, 2),
+            Border::Positive(0) => &derivative!(6, 0, 0),
+            Border::Positive(1) => &derivative!(6, 0, -1),
+            Border::Positive(_) => &derivative!(6, 0, -2),
         }
     }
 }
@@ -216,19 +237,19 @@ impl Kernel for SecondDerivative<2> {
         }
     }
 
-    fn symmetric(&self, border: Border) -> &[f64] {
-        match border {
-            Border::Negative(_) => &[-2.0, 2.0],
-            Border::Positive(_) => &[2.0, -2.0],
-        }
-    }
+    // fn symmetric(&self, border: Border) -> &[f64] {
+    //     match border {
+    //         Border::Negative(_) => &[-2.0, 2.0],
+    //         Border::Positive(_) => &[2.0, -2.0],
+    //     }
+    // }
 
-    fn antisymmetric(&self, border: Border) -> &[f64] {
-        match border {
-            Border::Negative(_) => &[0.0],
-            Border::Positive(_) => &[0.0],
-        }
-    }
+    // fn antisymmetric(&self, border: Border) -> &[f64] {
+    //     match border {
+    //         Border::Negative(_) => &[0.0],
+    //         Border::Positive(_) => &[0.0],
+    //     }
+    // }
 }
 
 impl Kernel for SecondDerivative<4> {
@@ -249,31 +270,52 @@ impl Kernel for SecondDerivative<4> {
         }
     }
 
-    fn symmetric(&self, border: Border) -> &[f64] {
-        const NEG_0: &'static [f64] = &[-5.0 / 2.0, 8.0 / 3.0, -2.0 / 12.0];
-        const NEG_1: &'static [f64] = &[4.0 / 3.0, -5.0 / 2.0 - 1.0 / 12.0, 4.0 / 3.0, -1.0 / 12.0];
-        const POS_0: &'static [f64] = &[-2.0 / 12.0, 8.0 / 3.0, -5.0 / 2.0];
-        const POS_1: &'static [f64] = &[-1.0 / 12.0, 4.0 / 3.0, -5.0 / 2.0 - 1.0 / 12.0, 4.0 / 3.0];
+    // fn symmetric(&self, border: Border) -> &[f64] {
+    //     const NEG_0: &'static [f64] = &[-5.0 / 2.0, 8.0 / 3.0, -2.0 / 12.0];
+    //     const NEG_1: &'static [f64] = &[4.0 / 3.0, -5.0 / 2.0 - 1.0 / 12.0, 4.0 / 3.0, -1.0 / 12.0];
+    //     const POS_0: &'static [f64] = &[-2.0 / 12.0, 8.0 / 3.0, -5.0 / 2.0];
+    //     const POS_1: &'static [f64] = &[-1.0 / 12.0, 4.0 / 3.0, -5.0 / 2.0 - 1.0 / 12.0, 4.0 / 3.0];
 
-        match border {
-            Border::Negative(0) => NEG_0,
-            Border::Negative(_) => NEG_1,
-            Border::Positive(0) => POS_0,
-            Border::Positive(_) => POS_1,
-        }
+    //     match border {
+    //         Border::Negative(0) => NEG_0,
+    //         Border::Negative(_) => NEG_1,
+    //         Border::Positive(0) => POS_0,
+    //         Border::Positive(_) => POS_1,
+    //     }
+    // }
+
+    // fn antisymmetric(&self, border: Border) -> &[f64] {
+    //     const NEG_0: &'static [f64] = &[0.0];
+    //     const NEG_1: &'static [f64] = &[4.0 / 3.0, -5.0 / 2.0 + 1.0 / 12.0, 4.0 / 3.0, -1.0 / 12.0];
+    //     const POS_0: &'static [f64] = &[0.0];
+    //     const POS_1: &'static [f64] = &[-1.0 / 12.0, 4.0 / 3.0, -5.0 / 2.0 + 1.0 / 12.0, 4.0 / 3.0];
+
+    //     match border {
+    //         Border::Negative(0) => NEG_0,
+    //         Border::Negative(_) => NEG_1,
+    //         Border::Positive(0) => POS_0,
+    //         Border::Positive(_) => POS_1,
+    //     }
+    // }
+}
+
+impl Kernel for SecondDerivative<6> {
+    fn border_width(&self) -> usize {
+        3
     }
 
-    fn antisymmetric(&self, border: Border) -> &[f64] {
-        const NEG_0: &'static [f64] = &[0.0];
-        const NEG_1: &'static [f64] = &[4.0 / 3.0, -5.0 / 2.0 + 1.0 / 12.0, 4.0 / 3.0, -1.0 / 12.0];
-        const POS_0: &'static [f64] = &[0.0];
-        const POS_1: &'static [f64] = &[-1.0 / 12.0, 4.0 / 3.0, -5.0 / 2.0 + 1.0 / 12.0, 4.0 / 3.0];
+    fn interior(&self) -> &[f64] {
+        &second_derivative!(3, 3, 0)
+    }
 
+    fn free(&self, border: Border) -> &[f64] {
         match border {
-            Border::Negative(0) => NEG_0,
-            Border::Negative(_) => NEG_1,
-            Border::Positive(0) => POS_0,
-            Border::Positive(_) => POS_1,
+            Border::Negative(0) => &second_derivative!(0, 7, 0),
+            Border::Negative(1) => &second_derivative!(0, 7, 1),
+            Border::Negative(_) => &second_derivative!(0, 7, 2),
+            Border::Positive(0) => &second_derivative!(7, 0, 0),
+            Border::Positive(1) => &second_derivative!(7, 0, -1),
+            Border::Positive(_) => &second_derivative!(7, 0, -2),
         }
     }
 }
@@ -309,23 +351,23 @@ impl Kernel for Dissipation<4> {
         }
     }
 
-    fn symmetric(&self, border: Border) -> &[f64] {
-        match border {
-            Border::Negative(0) => &[6.0, -8.0, 2.0],
-            Border::Negative(_) => &[-4.0, 7.0, -4.0, 1.0],
-            Border::Positive(0) => &[2.0, -8.0, 6.0],
-            Border::Positive(_) => &[1.0, -4.0, 7.0, -4.0],
-        }
-    }
+    // fn symmetric(&self, border: Border) -> &[f64] {
+    //     match border {
+    //         Border::Negative(0) => &[6.0, -8.0, 2.0],
+    //         Border::Negative(_) => &[-4.0, 7.0, -4.0, 1.0],
+    //         Border::Positive(0) => &[2.0, -8.0, 6.0],
+    //         Border::Positive(_) => &[1.0, -4.0, 7.0, -4.0],
+    //     }
+    // }
 
-    fn antisymmetric(&self, border: Border) -> &[f64] {
-        match border {
-            Border::Negative(0) => &[0.0],
-            Border::Negative(_) => &[-4.0, 5.0, -4.0, 1.0],
-            Border::Positive(0) => &[0.0],
-            Border::Positive(_) => &[1.0, -4.0, 5.0, -4.0],
-        }
-    }
+    // fn antisymmetric(&self, border: Border) -> &[f64] {
+    //     match border {
+    //         Border::Negative(0) => &[0.0],
+    //         Border::Negative(_) => &[-4.0, 5.0, -4.0, 1.0],
+    //         Border::Positive(0) => &[0.0],
+    //         Border::Positive(_) => &[1.0, -4.0, 5.0, -4.0],
+    //     }
+    // }
 }
 
 impl VertexKernel for Dissipation<4> {
@@ -354,27 +396,27 @@ impl Kernel for Dissipation<6> {
         }
     }
 
-    fn symmetric(&self, border: Border) -> &[f64] {
-        match border {
-            Border::Negative(0) => &[-20.0, 30.0, -12.0, 2.0],
-            Border::Negative(1) => &[15.0, -26.0, 16.0, -6.0, 1.0],
-            Border::Negative(_) => &[-6.0, 16.0, -20.0, 15.0, -6.0, 1.0],
-            Border::Positive(0) => &[2.0, -12.0, 30.0, -20.0],
-            Border::Positive(1) => &[1.0, -6.0, 16.0, -26.0, 15.0],
-            Border::Positive(_) => &[1.0, -6.0, 15.0, -20.0, 16.0, -6.0],
-        }
-    }
+    // fn symmetric(&self, border: Border) -> &[f64] {
+    //     match border {
+    //         Border::Negative(0) => &[-20.0, 30.0, -12.0, 2.0],
+    //         Border::Negative(1) => &[15.0, -26.0, 16.0, -6.0, 1.0],
+    //         Border::Negative(_) => &[-6.0, 16.0, -20.0, 15.0, -6.0, 1.0],
+    //         Border::Positive(0) => &[2.0, -12.0, 30.0, -20.0],
+    //         Border::Positive(1) => &[1.0, -6.0, 16.0, -26.0, 15.0],
+    //         Border::Positive(_) => &[1.0, -6.0, 15.0, -20.0, 16.0, -6.0],
+    //     }
+    // }
 
-    fn antisymmetric(&self, border: Border) -> &[f64] {
-        match border {
-            Border::Negative(0) => &[0.0],
-            Border::Negative(1) => &[15.0, -14.0, 14.0, -6.0, 1.0],
-            Border::Negative(_) => &[-6.0, 14.0, -20.0, 15.0, -6.0, 1.0],
-            Border::Positive(0) => &[0.0],
-            Border::Positive(1) => &[1.0, -6.0, 14.0, -14.0, 15.0],
-            Border::Positive(_) => &[1.0, -6.0, 15.0, -20.0, 14.0, -6.0],
-        }
-    }
+    // fn antisymmetric(&self, border: Border) -> &[f64] {
+    //     match border {
+    //         Border::Negative(0) => &[0.0],
+    //         Border::Negative(1) => &[15.0, -14.0, 14.0, -6.0, 1.0],
+    //         Border::Negative(_) => &[-6.0, 14.0, -20.0, 15.0, -6.0, 1.0],
+    //         Border::Positive(0) => &[0.0],
+    //         Border::Positive(1) => &[1.0, -6.0, 14.0, -14.0, 15.0],
+    //         Border::Positive(_) => &[1.0, -6.0, 15.0, -20.0, 14.0, -6.0],
+    //     }
+    // }
 }
 
 impl VertexKernel for Dissipation<6> {
@@ -402,19 +444,19 @@ impl Kernel for Interpolation<2> {
         }
     }
 
-    fn symmetric(&self, border: Border) -> &[f64] {
-        match border {
-            Border::Negative(_) => &[9.0, 8.0, -1.0],
-            Border::Positive(_) => &[-1.0, 8.0, 9.0],
-        }
-    }
+    // fn symmetric(&self, border: Border) -> &[f64] {
+    //     match border {
+    //         Border::Negative(_) => &[9.0, 8.0, -1.0],
+    //         Border::Positive(_) => &[-1.0, 8.0, 9.0],
+    //     }
+    // }
 
-    fn antisymmetric(&self, border: Border) -> &[f64] {
-        match border {
-            Border::Negative(_) => &[9.0, 10.0, -1.0],
-            Border::Positive(_) => &[-1.0, 10.0, 9.0],
-        }
-    }
+    // fn antisymmetric(&self, border: Border) -> &[f64] {
+    //     match border {
+    //         Border::Negative(_) => &[9.0, 10.0, -1.0],
+    //         Border::Positive(_) => &[-1.0, 10.0, 9.0],
+    //     }
+    // }
 }
 
 impl CellKernel for Interpolation<2> {
@@ -441,23 +483,23 @@ impl Kernel for Interpolation<4> {
         }
     }
 
-    fn symmetric(&self, border: Border) -> &[f64] {
-        match border {
-            Border::Negative(0) => &[150.0, 125.0, -22.0, 3.0],
-            Border::Negative(_) => &[-25.0, 153.0, 150.0, -25.0, 3.0],
-            Border::Positive(0) => &[3.0, -22.0, 125.0, 150.0],
-            Border::Positive(_) => &[3.0, -25.0, 150.0, 153.0, -25.0],
-        }
-    }
+    // fn symmetric(&self, border: Border) -> &[f64] {
+    //     match border {
+    //         Border::Negative(0) => &[150.0, 125.0, -22.0, 3.0],
+    //         Border::Negative(_) => &[-25.0, 153.0, 150.0, -25.0, 3.0],
+    //         Border::Positive(0) => &[3.0, -22.0, 125.0, 150.0],
+    //         Border::Positive(_) => &[3.0, -25.0, 150.0, 153.0, -25.0],
+    //     }
+    // }
 
-    fn antisymmetric(&self, border: Border) -> &[f64] {
-        match border {
-            Border::Negative(0) => &[150.0, 175.0, -28.0, 3.0],
-            Border::Negative(_) => &[-25.0, 147.0, 150.0, -25.0, 3.0],
-            Border::Positive(0) => &[3.0, -28.0, 175.0, 150.0],
-            Border::Positive(_) => &[3.0, -25.0, 150.0, 147.0, -28.0],
-        }
-    }
+    // fn antisymmetric(&self, border: Border) -> &[f64] {
+    //     match border {
+    //         Border::Negative(0) => &[150.0, 175.0, -28.0, 3.0],
+    //         Border::Negative(_) => &[-25.0, 147.0, 150.0, -25.0, 3.0],
+    //         Border::Positive(0) => &[3.0, -28.0, 175.0, 150.0],
+    //         Border::Positive(_) => &[3.0, -25.0, 150.0, 147.0, -28.0],
+    //     }
+    // }
 }
 
 impl CellKernel for Interpolation<4> {
@@ -540,11 +582,11 @@ impl Kernels for Order<6> {
     const MAX_BORDER: usize = 3;
 
     fn derivative() -> &'static impl VertexKernel {
-        &Unimplemented(6)
+        &Derivative::<6>
     }
 
     fn second_derivative() -> &'static impl VertexKernel {
-        &Unimplemented(6)
+        &SecondDerivative::<6>
     }
 
     fn dissipation() -> &'static impl VertexKernel {

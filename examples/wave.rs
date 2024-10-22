@@ -138,7 +138,7 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
         mesh.project(ORDER, Quadrant, profile, system.as_mut_slice());
         mesh.fill_boundary(ORDER, Quadrant, WaveConditions, system.as_mut_slice());
 
-        mesh.flag_wavelets(LOWER, UPPER, Quadrant, system.as_slice());
+        mesh.flag_wavelets(4, LOWER, UPPER, Quadrant, system.as_slice());
         mesh.set_regrid_level_limit(10);
 
         mesh.balance_flags();
@@ -233,7 +233,7 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
 
             log::info!("Regridding Mesh at time: {time}");
             mesh.fill_boundary(ORDER, Quadrant, WaveConditions, system.as_mut_slice());
-            mesh.flag_wavelets(LOWER, UPPER, Quadrant, system.as_slice());
+            mesh.flag_wavelets(4, LOWER, UPPER, Quadrant, system.as_slice());
             mesh.set_regrid_level_limit(10);
 
             // Output current system to disk

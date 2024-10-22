@@ -22,9 +22,10 @@ impl<const N: usize> Mesh<N> {
     ) {
         assert!(order % 2 == 0);
         assert!(order <= self.width);
+        assert!(order >= self.width / 2);
 
-        let element = Element::<N>::uniform(self.width, order);
-        let element_coarse = Element::<N>::uniform(self.width / 2, order / 2);
+        let element = Element::<N>::uniform(order);
+        let element_coarse = Element::<N>::uniform(self.width / 2);
         let support = element.support_refined();
 
         let field = system.as_range();
@@ -54,7 +55,7 @@ impl<const N: usize> Mesh<N> {
                 let window = if is_cell_on_boundary {
                     mesh.element_coarse_window(cell)
                 } else {
-                    mesh.element_window(cell)
+                    mesh.element_window(cell, order)
                 };
 
                 let mut should_refine = false;
@@ -87,7 +88,9 @@ impl<const N: usize> Mesh<N> {
                     }
 
                     unsafe {
-                        *rflags.get_mut(cell) = should_refine;
+                        if should_refine {
+                            *rflags.get_mut(cell) = true;
+                        }
                     }
 
                     unsafe {
