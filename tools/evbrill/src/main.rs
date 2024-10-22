@@ -24,8 +24,8 @@ pub enum Equations {
 
 const EQUATIONS: Equations = Equations::Explict;
 
-const MAX_TIME: f64 = 1.0;
-const MAX_STEPS: usize = 1000;
+const MAX_TIME: f64 = 5.0;
+const MAX_STEPS: usize = 10000;
 const MAX_LEVEL: usize = 7;
 
 const CFL: f64 = 0.1;
@@ -33,7 +33,7 @@ const ORDER: Order<4> = Order::<4>;
 const DISS_ORDER: Order<6> = Order::<6>;
 
 const SAVE_CHECKPOINT: f64 = 0.01;
-const FORCE_SAVE: bool = true;
+const FORCE_SAVE: bool = false;
 const REGRID_SKIP: usize = 10;
 
 const LOWER: f64 = 1e-10;
@@ -538,7 +538,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         );
 
         // Add everything together
-        for i in 0..mesh.num_nodes() {
+        for i in 0..dynamic.contigious_mut().len() {
             dynamic.contigious_mut()[i] +=
                 update.contigious()[i] + 0.5 * dissipation.contigious()[i];
         }

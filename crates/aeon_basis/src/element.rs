@@ -50,9 +50,7 @@ pub struct Element<const N: usize> {
 impl<const N: usize> Element<N> {
     /// Constructs a reference element with uniformly placed
     /// support points with `order + 1` points along each axis.
-    pub fn uniform(width: usize) -> Self {
-        let order = width;
-
+    pub fn uniform(width: usize, order: usize) -> Self {
         let (grid, grid_refined) = Self::uniform_grid(width);
         debug_assert!(grid.len() == width + 1);
         debug_assert!(grid_refined.len() == 2 * width + 1);
@@ -179,13 +177,12 @@ impl<const N: usize> Element<N> {
 
     /// Iterates over diagonal detail coefficients in a wavelet representation on the interior of this element.
     pub fn diagonal_int_indices(&self) -> impl Iterator<Item = [usize; N]> {
-        let width = self.width;
+        // Relies on truncation.
+        let padding = self.width / 4;
 
-        debug_assert!(width % 2 == 0);
-
-        IndexSpace::new([width / 2; N])
+        IndexSpace::new([self.width - 2 * padding; N])
             .iter()
-            .map(move |v| array::from_fn(|axis| width / 2 + 2 * v[axis] + 1))
+            .map(move |v| array::from_fn(|axis| 2 * (v[axis] + padding) + 1))
     }
 
     /// Iterates over all detail coefficients in a wavelet representation on this element.
@@ -368,7 +365,7 @@ mod tests {
 
     #[test]
     fn iteration() {
-        let element = Element::<2>::uniform(2);
+        let element = Element::<2>::uniform(2, 1);
 
         let mut nodal = element.nodal_indices();
         assert_eq!(nodal.next(), Some([0, 0]));
@@ -389,6 +386,13 @@ mod tests {
         assert_eq!(diagonal.next(), Some([3, 3]));
         assert_eq!(diagonal.next(), None);
 
+        let mut diagonal_int = element.diagonal_int_indices();
+        assert_eq!(diagonal_int.next(), Some([1, 1]));
+        assert_eq!(diagonal_int.next(), Some([3, 1]));
+        assert_eq!(diagonal_int.next(), Some([1, 3]));
+        assert_eq!(diagonal_int.next(), Some([3, 3]));
+        assert_eq!(diagonal_int.next(), None);
+
         let mut detail = element.detail_indices();
         assert_eq!(detail.next(), Some([1, 0]));
         assert_eq!(detail.next(), Some([0, 1]));
@@ -408,8 +412,20 @@ mod tests {
         assert_eq!(detail.next(), None);
     }
 
+    #[test]
+    fn interior_indices() {
+        let element = Element::<1>::uniform(6, 4);
+
+        let mut indices = element.diagonal_int_points();
+        assert_eq!(indices.next(), Some(3));
+        assert_eq!(indices.next(), Some(5));
+        assert_eq!(indices.next(), Some(7));
+        assert_eq!(indices.next(), Some(9));
+        assert_eq!(indices.next(), None);
+    }
+
     fn prolong(h: f64) -> f64 {
-        let element = Element::<2>::uniform(4);
+        let element = Element::<2>::uniform(6, 4);
 
         let space = element.space_refined();
 

@@ -11,7 +11,8 @@ use crate::{
 
 impl<const N: usize> Mesh<N> {
     /// Flags cells for refinement using a wavelet criterion. The system must have filled
-    /// boundaries.
+    /// boundaries. This function tags any cell that is insufficiently refined to approximate
+    /// operators of the given `order` within the range of error.
     pub fn flag_wavelets<S: SystemLabel, B: Boundary<N> + Sync>(
         &mut self,
         order: usize,
@@ -22,10 +23,9 @@ impl<const N: usize> Mesh<N> {
     ) {
         assert!(order % 2 == 0);
         assert!(order <= self.width);
-        assert!(order >= self.width / 2);
 
-        let element = Element::<N>::uniform(order);
-        let element_coarse = Element::<N>::uniform(self.width / 2);
+        let element = Element::<N>::uniform(self.width, order);
+        let element_coarse = Element::<N>::uniform(self.width / 2, order / 2);
         let support = element.support_refined();
 
         let field = system.as_range();
@@ -55,7 +55,7 @@ impl<const N: usize> Mesh<N> {
                 let window = if is_cell_on_boundary {
                     mesh.element_coarse_window(cell)
                 } else {
-                    mesh.element_window(cell, order)
+                    mesh.element_window(cell)
                 };
 
                 let mut should_refine = false;

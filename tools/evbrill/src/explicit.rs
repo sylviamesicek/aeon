@@ -900,10 +900,12 @@ mod tests {
 
         macro_rules! assert_almost_eq {
             ($val:expr, $target:expr) => {
-                assert!(($val - $target).abs() <= 10e-10 * $val.abs().max($target.abs()))
+                let error = ($val - $target).abs();
+                assert!(error <= 1e-10 * $val.abs().max($target.abs()) || error <= 1e-15)
             };
             ($val:expr, $target:expr, $extra:tt) => {
-                if ($val - $target).abs() > 10e-10 * $val.abs().max($target.abs()) {
+                let error = ($val - $target).abs();
+                if error > 1e-10 * $val.abs().max($target.abs()) && error > 1e-15 {
                     panic!(
                         "{}, value {:e}, difference: {:e}",
                         $extra,
@@ -914,9 +916,7 @@ mod tests {
             };
         }
 
-        for trial in 0..10000 {
-            println!("Running trial {trial}");
-
+        for _ in 0..10000 {
             let system = HyperbolicSystem::fuzzy(&mut rng);
 
             let rho = rng.gen_range(0.0..=10.0);
@@ -927,8 +927,6 @@ mod tests {
             if det.abs() <= 1e-3 {
                 continue;
             }
-
-            println!("Det {:e}", det);
 
             let explicit = explicit::geometric(system.clone(), [rho, z]);
             let symbolic = symbolicc::geometric(system.clone(), [rho, z]);
@@ -1025,9 +1023,7 @@ mod tests {
             };
         }
 
-        for trial in 0..10000 {
-            println!("Running trial {trial}");
-
+        for _ in 0..10000 {
             let system = HyperbolicSystem::fuzzy(&mut rng);
 
             let rho = rng.gen_range(0.0..=10.0);
