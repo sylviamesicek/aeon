@@ -24,9 +24,9 @@ pub enum Equations {
 
 const EQUATIONS: Equations = Equations::Explict;
 
-const MAX_TIME: f64 = 5.0;
-const MAX_STEPS: usize = 10000;
-const MAX_LEVEL: usize = 7;
+const MAX_TIME: f64 = 10.0;
+const MAX_STEPS: usize = 50000;
+const MAX_LEVEL: usize = 14;
 
 const CFL: f64 = 0.1;
 const ORDER: Order<4> = Order::<4>;
@@ -301,7 +301,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     log::info!("Importing IdBrill data");
 
-    mesh.import_dat("output/idbrill.dat", &mut systems)
+    mesh.import_dat("output/weak.dat", &mut systems)
         .expect("Unable to load initial data");
 
     // Read initial data
@@ -353,65 +353,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut update = SystemVec::<Dynamic>::new();
     let mut dissipation = SystemVec::new();
 
-    // // Integrate
-    // let mut integrator = Rk4::new();
-
-    // for i in 0..STEPS {
-    //     // Fill ghost nodes of system
-    //     mesh.fill_boundary(ORDER, Quadrant, DynamicConditions, dynamic.as_mut_slice());
-
-    //     mesh.evaluate(
-    //         ORDER,
-    //         Quadrant,
-    //         DynamicDerivs,
-    //         dynamic.as_slice(),
-    //         derivs.as_mut_slice(),
-    //     );
-
-    //     // Output debugging data
-    //     let norm = mesh.norm(dynamic.field(Dynamic::Theta).into());
-    //     println!("Step {i}, Time {:.5} Norm {:.5e}", i as f64 * h, norm);
-
-    //     if i % 1 == 0 {
-    //         // Output current system to disk
-    //         let mut systems = SystemCheckpoint::default();
-    //         systems.save_system(dynamic.as_slice());
-
-    //         mesh.export_vtu(
-    //             format!("output/evbrill/iterultra{}.vtu", i / 1),
-    //             ExportVtuConfig {
-    //                 title: "evbrill".to_string(),
-    //                 ghost: false,
-    //                 systems,
-    //             },
-    //         )
-    //         .unwrap();
-    //     }
-
-    //     // Compute step
-    //     integrator.step(
-    //         h,
-    //         &mut DynamicOde { mesh: &mut mesh },
-    //         dynamic.contigious(),
-    //         update.contigious_mut(),
-    //     );
-
-    //     // Compute dissipation
-    //     mesh.evaluate(
-    //         DISS_ORDER,
-    //         Quadrant,
-    //         DissipationFunction(DynamicConditions),
-    //         dynamic.as_slice(),
-    //         dissipation.as_mut_slice(),
-    //     );
-
-    //     // Add everything together
-    //     for i in 0..dynamic.contigious().len() {
-    //         dynamic.contigious_mut()[i] +=
-    //             update.contigious()[i] + 0.5 * dissipation.contigious()[i];
-    //     }
-    // }
-
     // Integrate
     let mut integrator = Rk4::new();
     let mut time = 0.0;
@@ -432,6 +373,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let norm = mesh.norm(dynamic.as_slice());
         if norm.is_nan() {
             log::warn!("Norm is NaN");
+            break;
         }
 
         // Get step size
@@ -444,7 +386,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         if steps_since_regrid > REGRID_SKIP {
             steps_since_regrid = 0;
 
-            log::info!("Regridding Mesh at time: {time}");
+            log::info!("Regridding Mesh at time: {time:.5}");
             mesh.flag_wavelets(4, LOWER, UPPER, Quadrant, dynamic.as_slice());
             mesh.set_regrid_level_limit(max_level);
 
@@ -499,7 +441,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         if time_since_save >= SAVE_CHECKPOINT || FORCE_SAVE {
             time_since_save = 0.0;
 
-            log::info!("Saving Checkpoint {save_step} at time: {time}, norm {norm}");
+            log::info!(
+                "Saving Checkpoint {save_step} at time: {time:.5}, norm: {norm:.5e}, nodes: {}",
+                mesh.num_nodes()
+            );
             // Output current system to disk
             let mut systems = SystemCheckpoint::default();
             systems.save_system(dynamic.as_slice());
@@ -509,7 +454,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             systems.save_int_field("Blocks", &mut blocks);
 
             mesh.export_vtu(
-                format!("output/evbrill/evolution{save_step}.vtu"),
+                format!("output/evbrill/weakevolution{save_step}.vtu"),
                 ExportVtuConfig {
                     title: "evbrill".to_string(),
                     ghost: false,

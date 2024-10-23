@@ -97,7 +97,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     log::info!("Allocating Driver and Building Mesh Grid Size {points} Radius {radius}");
 
     let bounds = Rectangle {
-        size: [24.0, 24.0],
+        size: [6.0 * 8.0; 2],
         origin: [0.0, 0.0],
     };
 
@@ -111,7 +111,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut transfer = SystemVec::new();
 
-    for r in 0..9 {
+    for r in 0..11 {
         log::warn!("Min Spacing {}", mesh.min_spacing());
 
         let mut debug = String::new();
@@ -207,7 +207,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             mesh.transfer_system(ORDER, Quadrant, transfer.as_slice(), rinne.as_mut_slice());
         } else {
             log::info!("Sucessfully refined mesh to prescribed accuracy");
-            mesh.export_dat(format!("output/idbrill.dat"), &systems)?;
+            mesh.export_dat(format!("output/weak.dat"), &systems)?;
             break;
         }
     }
