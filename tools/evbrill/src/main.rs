@@ -32,7 +32,7 @@ const CFL: f64 = 0.1;
 const ORDER: Order<4> = Order::<4>;
 const DISS_ORDER: Order<6> = Order::<6>;
 
-const SAVE_CHECKPOINT: f64 = 0.01;
+const SAVE_CHECKPOINT: f64 = 0.05;
 const FORCE_SAVE: bool = false;
 const REGRID_SKIP: usize = 10;
 
@@ -389,35 +389,36 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             log::info!("Regridding Mesh at time: {time:.5}");
             mesh.flag_wavelets(4, LOWER, UPPER, Quadrant, dynamic.as_slice());
             mesh.set_regrid_level_limit(max_level);
-
-            // Output current system to disk
-            let mut systems = SystemCheckpoint::default();
-            systems.save_system(dynamic.as_slice());
-
-            let mut flags = vec![0; mesh.num_nodes()];
-            mesh.flags_debug(&mut flags);
-
             mesh.balance_flags();
 
-            let mut bflags = vec![0; mesh.num_nodes()];
-            mesh.flags_debug(&mut bflags);
+            // // Output current system to disk
+            // let mut systems = SystemCheckpoint::default();
+            // systems.save_system(dynamic.as_slice());
 
-            systems.save_int_field("Flags", &mut flags);
-            systems.save_int_field("Balanced Flags", &mut bflags);
+            // let mut flags = vec![0; mesh.num_nodes()];
+            // mesh.flags_debug(&mut flags);
 
-            let mut blocks = vec![0; mesh.num_nodes()];
-            mesh.block_debug(&mut blocks);
-            systems.save_int_field("Blocks", &mut blocks);
+            // mesh.balance_flags();
 
-            mesh.export_vtu(
-                format!("output/evbrill/regrid{regrid_save_step}.vtu"),
-                ExportVtuConfig {
-                    title: "Rergrid Wave".to_string(),
-                    ghost: false,
-                    systems,
-                },
-            )
-            .unwrap();
+            // let mut bflags = vec![0; mesh.num_nodes()];
+            // mesh.flags_debug(&mut bflags);
+
+            // systems.save_int_field("Flags", &mut flags);
+            // systems.save_int_field("Balanced Flags", &mut bflags);
+
+            // let mut blocks = vec![0; mesh.num_nodes()];
+            // mesh.block_debug(&mut blocks);
+            // systems.save_int_field("Blocks", &mut blocks);
+
+            // mesh.export_vtu(
+            //     format!("output/evbrill/regrid{regrid_save_step}.vtu"),
+            //     ExportVtuConfig {
+            //         title: "Rergrid Wave".to_string(),
+            //         ghost: false,
+            //         systems,
+            //     },
+            // )
+            // .unwrap();
 
             regrid_save_step += 1;
 
