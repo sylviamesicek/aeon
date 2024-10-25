@@ -356,7 +356,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         );
 
         // Output debugging data
-        let norm = mesh.norm(dynamic.field(Dynamic::Theta).into());
+        let norm = mesh.l2_norm(dynamic.field(Dynamic::Theta).into());
         println!("Step {i}, Time {:.5} Norm {:.5e}", i as f64 * h, norm);
 
         if i % 1 == 0 {

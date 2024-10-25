@@ -103,7 +103,7 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
             .map(|(i, j)| i - j)
             .collect::<Vec<_>>();
 
-        let norm = mesh.norm(diff.as_slice().into());
+        let norm = mesh.l2_norm(diff.as_slice().into());
 
         if norm.abs() >= 1e-20 {
             errors.push((i, norm));

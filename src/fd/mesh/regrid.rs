@@ -59,7 +59,7 @@ impl<const N: usize> Mesh<N> {
                 };
 
                 let mut should_refine = false;
-                let mut should_coarsen = None;
+                let mut should_coarsen = true;
 
                 for field in S::fields() {
                     // Unpack data to element
@@ -75,15 +75,14 @@ impl<const N: usize> Mesh<N> {
 
                         for point in element_coarse.diagonal_points() {
                             should_refine = should_refine || dst[point].abs() >= upper;
-                            should_coarsen = should_coarsen.map(|b| b && dst[point].abs() <= lower);
+                            should_coarsen = should_coarsen && dst[point].abs() <= lower;
                         }
                     } else {
                         element.wavelet(&imsrc, &mut imdest);
 
                         for point in element.diagonal_int_points() {
                             should_refine = should_refine || imdest[point].abs() >= upper;
-                            should_coarsen =
-                                should_coarsen.map(|b| b && imdest[point].abs() <= lower);
+                            should_coarsen = should_coarsen && imdest[point].abs() <= lower;
                         }
                     }
 
@@ -94,7 +93,7 @@ impl<const N: usize> Mesh<N> {
                     }
 
                     unsafe {
-                        *cflags.get_mut(cell) = should_coarsen.unwrap_or(false);
+                        *cflags.get_mut(cell) = should_coarsen;
                     }
                 }
             }
