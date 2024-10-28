@@ -481,7 +481,7 @@ impl<const N: usize> Mesh<N> {
     /// Sets the maximum level that the mesh can attain after regridding.
     pub fn set_regrid_level_limit(&mut self, max_level: usize) {
         for cell in 0..self.num_cells() {
-            if self.tree.level(cell) > max_level {
+            if self.tree.level(cell) >= max_level {
                 self.refine_flags[cell] = false;
             }
         }
@@ -551,16 +551,24 @@ impl<const N: usize> Mesh<N> {
     }
 
     /// Computes the maximum l2 norm of all fields in the system.
-    pub fn norm<S: SystemLabel>(&mut self, source: SystemSlice<'_, S>) -> f64 {
+    pub fn l2_norm<S: SystemLabel>(&mut self, source: SystemSlice<'_, S>) -> f64 {
         S::fields()
             .into_iter()
-            .map(|label| self.norm_scalar(source.field(label)))
+            .map(|label| self.l2_norm_scalar(source.field(label)))
+            .max_by(|a, b| a.total_cmp(b))
+            .unwrap()
+    }
+
+    pub fn max_norm<S: SystemLabel>(&mut self, source: SystemSlice<'_, S>) -> f64 {
+        S::fields()
+            .into_iter()
+            .map(|label| self.max_norm_scalar(source.field(label)))
             .max_by(|a, b| a.total_cmp(b))
             .unwrap()
     }
 
     /// Computes the l2 norm of a field on the mesh.
-    fn norm_scalar(&mut self, src: &[f64]) -> f64 {
+    fn l2_norm_scalar(&mut self, src: &[f64]) -> f64 {
         let mut result = 0.0;
 
         for block in 0..self.blocks.len() {
@@ -593,6 +601,27 @@ impl<const N: usize> Mesh<N> {
         }
 
         result.sqrt()
+    }
+
+    fn max_norm_scalar(&mut self, src: &[f64]) -> f64 {
+        let mut result = 0.0f64;
+
+        for block in 0..self.blocks.len() {
+            let space = self.block_space(block);
+
+            let data = &src[self.block_nodes(block)];
+
+            let mut block_result = 0.0f64;
+
+            for node in space.inner_window() {
+                let index = space.index_from_node(node);
+                block_result = block_result.max(data[index]);
+            }
+
+            result = result.max(block_result);
+        }
+
+        result
     }
 
     /// Writes a textual summary of the Mesh to a sink. This is pimrarily used to

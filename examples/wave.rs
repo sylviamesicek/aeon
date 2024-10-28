@@ -3,18 +3,18 @@ use std::array;
 use aeon::{fd::Gaussian, prelude::*, system::field_count};
 use reborrow::{Reborrow, ReborrowMut};
 
-const MAX_TIME: f64 = 1.0;
-const MAX_STEPS: usize = 1000;
+const MAX_TIME: f64 = 4.0;
+const MAX_STEPS: usize = 5000;
 
 const CFL: f64 = 0.1;
 const ORDER: Order<4> = Order::<4>;
 const DISS_ORDER: Order<6> = Order::<6>;
 
 const SAVE_CHECKPOINT: f64 = 0.01;
-const FORCE_SAVE: bool = true;
+const FORCE_SAVE: bool = false;
 const REGRID_SKIP: usize = 10;
 
-const LOWER: f64 = 1e-10;
+const LOWER: f64 = 1e-9;
 const UPPER: f64 = 1e-6;
 const SPEED: [f64; 2] = [1.0, 0.0];
 
@@ -117,7 +117,7 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
     log::info!("Intializing Mesh.");
 
     // Generate initial mesh
-    let mut mesh = Mesh::new(Rectangle::from_aabb([-10., -10.], [10., 10.]), 4, 3);
+    let mut mesh = Mesh::new(Rectangle::from_aabb([-10., -10.], [10., 10.]), 6, 3);
     // Allocate space for system
     let mut system = SystemVec::new();
 
@@ -198,7 +198,6 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut save_step = 0;
 
     let mut steps_since_regrid = 0;
-    let mut regrid_save_step = 0;
 
     while step < MAX_STEPS && time < MAX_TIME {
         assert!(system.len() == mesh.num_nodes());
@@ -231,45 +230,54 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
         if steps_since_regrid > REGRID_SKIP {
             steps_since_regrid = 0;
 
-            log::info!("Regridding Mesh at time: {time}");
             mesh.fill_boundary(ORDER, Quadrant, WaveConditions, system.as_mut_slice());
             mesh.flag_wavelets(4, LOWER, UPPER, Quadrant, system.as_slice());
             mesh.set_regrid_level_limit(10);
 
-            // Output current system to disk
-            let mut systems = SystemCheckpoint::default();
-            systems.save_field("Wave", system.contigious());
-            systems.save_field("Analytic", exact.contigious());
-            systems.save_field("Error", error.contigious());
-
-            let mut flags = vec![0; mesh.num_nodes()];
-            mesh.flags_debug(&mut flags);
-
             mesh.balance_flags();
 
-            let mut bflags = vec![0; mesh.num_nodes()];
-            mesh.flags_debug(&mut bflags);
+            // // Output current system to disk
+            // let mut systems = SystemCheckpoint::default();
+            // systems.save_field("Wave", system.contigious());
+            // systems.save_field("Analytic", exact.contigious());
+            // systems.save_field("Error", error.contigious());
 
-            systems.save_int_field("Flags", &mut flags);
-            systems.save_int_field("Balanced Flags", &mut bflags);
+            // let mut flags = vec![0; mesh.num_nodes()];
+            // mesh.flags_debug(&mut flags);
 
-            let mut blocks = vec![0; mesh.num_nodes()];
-            mesh.block_debug(&mut blocks);
-            systems.save_int_field("Blocks", &mut blocks);
+            // mesh.balance_flags();
 
-            mesh.export_vtu(
-                format!("output/waves/regrid{regrid_save_step}.vtu"),
-                ExportVtuConfig {
-                    title: "Rergrid Wave".to_string(),
-                    ghost: false,
-                    systems,
-                },
-            )
-            .unwrap();
+            // let mut bflags = vec![0; mesh.num_nodes()];
+            // mesh.flags_debug(&mut bflags);
 
-            regrid_save_step += 1;
+            // systems.save_int_field("Flags", &mut flags);
+            // systems.save_int_field("Balanced Flags", &mut bflags);
+
+            // let mut blocks = vec![0; mesh.num_nodes()];
+            // mesh.block_debug(&mut blocks);
+            // systems.save_int_field("Blocks", &mut blocks);
+
+            // mesh.export_vtu(
+            //     format!("output/waves/regrid{regrid_save_step}.vtu"),
+            //     ExportVtuConfig {
+            //         title: "Rergrid Wave".to_string(),
+            //         ghost: false,
+            //         systems,
+            //     },
+            // )
+            // .unwrap();
+
+            let num_refine = mesh.num_refine_cells();
+            let num_coarsen = mesh.num_coarsen_cells();
 
             mesh.regrid();
+
+            log::info!(
+                "Regrided Mesh at time: {time:.5}, Max Level {}, {} R, {} C",
+                mesh.max_level(),
+                num_refine,
+                num_coarsen,
+            );
 
             // Copy system into tmp.
             tmp.contigious_mut().copy_from_slice(system.contigious());
@@ -285,7 +293,12 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
         if time_since_save >= SAVE_CHECKPOINT || FORCE_SAVE {
             time_since_save = 0.0;
 
-            log::info!("Saving Checkpoint at time: {time}");
+            log::info!(
+                "Saving Checkpoint {save_step}
+    Time: {time:.5}, Step: {h:.8}
+    Nodes: {}",
+                mesh.num_nodes()
+            );
             // Output current system to disk
             let mut systems = SystemCheckpoint::default();
             systems.save_field("Wave", system.contigious());

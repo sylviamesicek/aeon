@@ -129,16 +129,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         if CHOPTUIK {
             choptuik::solve(
                 &mut mesh,
-                1.0,
-                2000 * 2usize.pow(r as u32),
+                8.0,
+                4000 * 2usize.pow(r as u32),
                 rinne.as_mut_slice(),
                 &mut hamiltonian,
             )?;
         } else {
             garfinkle::solve(
                 &mut mesh,
-                1.0,
-                2000 * 2usize.pow(r as u32),
+                8.0,
+                4000 * 2usize.pow(r as u32),
                 rinne.as_mut_slice(),
                 &mut hamiltonian,
             )?;
@@ -207,7 +207,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             mesh.transfer_system(ORDER, Quadrant, transfer.as_slice(), rinne.as_mut_slice());
         } else {
             log::info!("Sucessfully refined mesh to prescribed accuracy");
-            mesh.export_dat(format!("output/weak.dat"), &systems)?;
+            mesh.export_dat(format!("output/super.dat"), &systems)?;
             break;
         }
     }

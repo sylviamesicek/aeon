@@ -108,7 +108,7 @@ impl<Label: SystemLabel> HyperRelaxSolver<Label> {
                 );
             }
 
-            let norm = mesh.norm(system.rb());
+            let norm = mesh.l2_norm(system.rb());
 
             // log::trace!(
             //     "Time {:.5}/{:.5} Norm {:.5e}",

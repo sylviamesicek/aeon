@@ -388,8 +388,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             break;
         }
 
+<<<<<<< HEAD
         // Get step size
         let h = mesh.min_spacing() * CFL;
+=======
+        // Output debugging data
+        let norm = mesh.l2_norm(dynamic.field(Dynamic::Theta).into());
+        println!("Step {i}, Time {:.5} Norm {:.5e}", i as f64 * h, norm);
+>>>>>>> 93a205f3992438612807087149777b8ae3d7d15d
 
         // Resize vectors
         update.resize(mesh.num_nodes());

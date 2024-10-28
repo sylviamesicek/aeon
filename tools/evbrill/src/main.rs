@@ -1,5 +1,9 @@
 #![allow(mixed_script_confusables)]
 
+use std::fmt::Write;
+use std::fs::File;
+use std::io::Write as _;
+
 use aeon::fd::{ExportVtuConfig, Mesh, SystemCheckpoint, SystemCondition};
 use aeon::prelude::*;
 use aeon::system::field_count;
@@ -24,19 +28,19 @@ pub enum Equations {
 
 const EQUATIONS: Equations = Equations::Explict;
 
-const MAX_TIME: f64 = 10.0;
-const MAX_STEPS: usize = 50000;
-const MAX_LEVEL: usize = 14;
+const MAX_TIME: f64 = 15.0;
+const MAX_STEPS: usize = 100000;
+const MAX_LEVEL: usize = 128;
 
 const CFL: f64 = 0.1;
 const ORDER: Order<4> = Order::<4>;
 const DISS_ORDER: Order<6> = Order::<6>;
 
-const SAVE_CHECKPOINT: f64 = 0.05;
+const SAVE_CHECKPOINT: f64 = 0.02;
 const FORCE_SAVE: bool = false;
-const REGRID_SKIP: usize = 10;
+const REGRID_SKIP: usize = 20;
 
-const LOWER: f64 = 1e-10;
+const LOWER: f64 = 1e-9;
 const UPPER: f64 = 1e-6;
 
 /// Initial data in Rinne's hyperbolic variables.
@@ -338,7 +342,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     dynamic.field_mut(Dynamic::Shiftr).fill(0.0);
     dynamic.field_mut(Dynamic::Shiftz).fill(0.0);
 
-    let max_level = MAX_LEVEL.max(mesh.max_level());
+    // let max_level = MAX_LEVEL.max(mesh.max_level());
 
     // Fill ghost nodes
     mesh.fill_boundary(ORDER, Quadrant, DynamicConditions, dynamic.as_mut_slice());
@@ -362,7 +366,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut save_step = 0;
 
     let mut steps_since_regrid = 0;
-    let mut regrid_save_step = 0;
+    // let mut regrid_save_step = 0;
+
+    let mut errors = Vec::new();
 
     while step < MAX_STEPS && time < MAX_TIME {
         assert!(dynamic.len() == mesh.num_nodes());
@@ -370,9 +376,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         mesh.fill_boundary(ORDER, Quadrant, DynamicConditions, dynamic.as_mut_slice());
 
         // Check Norm
-        let norm = mesh.norm(dynamic.as_slice());
+        let norm = mesh.l2_norm(dynamic.as_slice());
         if norm.is_nan() {
             log::warn!("Norm is NaN");
+            break;
+        }
+
+        if mesh.num_nodes() >= 16_000_000 {
+            log::warn!("To many degrees of freedom used");
             break;
         }
 
@@ -386,9 +397,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         if steps_since_regrid > REGRID_SKIP {
             steps_since_regrid = 0;
 
-            log::info!("Regridding Mesh at time: {time:.5}");
             mesh.flag_wavelets(4, LOWER, UPPER, Quadrant, dynamic.as_slice());
-            mesh.set_regrid_level_limit(max_level);
+            mesh.set_regrid_level_limit(MAX_LEVEL);
             mesh.balance_flags();
 
             // // Output current system to disk
@@ -420,9 +430,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             // )
             // .unwrap();
 
-            regrid_save_step += 1;
+            let num_refine = mesh.num_refine_cells();
+            let num_coarsen = mesh.num_coarsen_cells();
 
             mesh.regrid();
+
+            log::info!(
+                "Regrided Mesh at time: {time:.5}, Max Level {}, {} R, {} C",
+                mesh.max_level(),
+                num_refine,
+                num_coarsen,
+            );
 
             // Copy system into tmp scratch space (provieded by dissipation).
             dissipation
@@ -443,19 +461,22 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             time_since_save = 0.0;
 
             log::info!(
-                "Saving Checkpoint {save_step} at time: {time:.5}, norm: {norm:.5e}, nodes: {}",
+                "Saving Checkpoint {save_step}
+    Time: {time:.5}, Step: {h:.8}
+    Norm: {norm:.5e}
+    Nodes: {}",
                 mesh.num_nodes()
             );
             // Output current system to disk
             let mut systems = SystemCheckpoint::default();
             systems.save_system(dynamic.as_slice());
 
-            let mut blocks = vec![0; mesh.num_nodes()];
-            mesh.block_debug(&mut blocks);
-            systems.save_int_field("Blocks", &mut blocks);
+            // let mut blocks = vec![0; mesh.num_nodes()];
+            // mesh.block_debug(&mut blocks);
+            // systems.save_int_field("Blocks", &mut blocks);
 
             mesh.export_vtu(
-                format!("output/evbrill/weakevolution{save_step}.vtu"),
+                format!("output/evbrill/weak{save_step}.vtu"),
                 ExportVtuConfig {
                     title: "evbrill".to_string(),
                     ghost: false,
@@ -463,6 +484,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 },
             )
             .unwrap();
+
+            let l2_norm = mesh.l2_norm(dynamic.field(Dynamic::Theta).into());
+            let max_norm = mesh.max_norm(dynamic.field(Dynamic::Theta).into());
+
+            let space = mesh.block_space(0);
+            let index = space.index_from_vertex([0; 2]);
+
+            let origin = dynamic.field(Dynamic::Theta)[index];
+
+            errors.push((time, l2_norm, max_norm, origin));
 
             save_step += 1;
         }
@@ -495,6 +526,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         time += h;
         time_since_save += h;
     }
+
+    log::info!("Writing Error CSV");
+
+    let mut error_csv = String::new();
+
+    for (time, l2_norm, max, origin) in errors {
+        error_csv.write_fmt(format_args!("{time}, {l2_norm}, {max}, {origin},\n"))?;
+    }
+
+    let mut file = File::create("output/weak_errors.txt")?;
+    file.write_all(error_csv.as_bytes())?;
 
     Ok(())
 }
