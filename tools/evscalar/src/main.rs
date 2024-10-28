@@ -6,15 +6,34 @@ use aeon::system::field_count;
 use reborrow::{Reborrow, ReborrowMut};
 
 // mod eqs;
-pub mod explicit;
-pub mod types;
+pub mod shared;
+pub mod tensor;
 
-use types::HyperbolicSystem;
+use shared::HyperbolicSystem;
 
-const STEPS: usize = 5000;
+pub enum Equations {
+    /// Equations using `aeon_tensor` library for tensor manipulation.
+    Tensor,
+}
+
+const EQUATIONS: Equations = Equations::Tensor;
+
+const MAX_TIME: f64 = 10.0;
+const MAX_STEPS: usize = 50000;
+const MAX_LEVEL: usize = 14;
+
 const CFL: f64 = 0.1;
 const ORDER: Order<4> = Order::<4>;
 const DISS_ORDER: Order<6> = Order::<6>;
+
+const SAVE_CHECKPOINT: f64 = 0.05;
+const FORCE_SAVE: bool = false;
+const REGRID_SKIP: usize = 10;
+
+const LOWER: f64 = 1e-10;
+const UPPER: f64 = 1e-6;
+
+const MASS: f64 = 0.0;
 
 /// Initial data in Rinne's hyperbolic variables.
 #[derive(Clone, SystemLabel)]
@@ -39,6 +58,7 @@ pub enum Dynamic {
     Lapse,
     Shiftr,
     Shiftz,
+
     Phi,
     Pi,
 }
@@ -146,7 +166,6 @@ impl Function<2> for DynamicDerivs {
         derivatives!(Zz, zz, zz_r, zz_z);
 
         second_derivatives!(Phi, phi, phi_r, phi_z, phi_rr, phi_rz, phi_zz);
-
         derivatives!(Pi, pi, pi_r, pi_z);
 
         let system = HyperbolicSystem {
@@ -218,12 +237,16 @@ impl Function<2> for DynamicDerivs {
             phi_rz: phi_rz,
             phi_zz: phi_zz,
 
-            pi,
-            pi_r,
-            pi_z,
+            pi: pi,
+            pi_r: pi_r,
+            pi_z: pi_z,
+
+            mass: MASS,
         };
 
-        let derivs = explicit::hyperbolic(system, [rho, z]);
+        let derivs = match EQUATIONS {
+            Equations::Tensor => tensor::hyperbolic(system, [rho, z]),
+        };
 
         let mut result = SystemValue::default();
 
@@ -244,9 +267,6 @@ impl Function<2> for DynamicDerivs {
         result.set_field(Dynamic::Lapse, derivs.lapse_t);
         result.set_field(Dynamic::Shiftr, derivs.shiftr_t);
         result.set_field(Dynamic::Shiftz, derivs.shiftz_t);
-
-        result.set_field(Dynamic::Phi, derivs.phi_t);
-        result.set_field(Dynamic::Pi, derivs.pi_t);
 
         result
     }
@@ -283,6 +303,10 @@ impl<'a> Ode for DynamicOde<'a> {
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    env_logger::builder()
+        .filter_level(log::LevelFilter::Trace)
+        .init();
+
     // Create output directory.
     std::fs::create_dir_all("output/evbrill").expect("Unable to create evbrill directory.");
 
@@ -290,7 +314,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut mesh = Mesh::default();
     let mut systems = SystemCheckpoint::default();
 
-    mesh.import_dat("output/idbrill4.0.dat", &mut systems)
+    log::info!("Importing IdBrill data");
+
+    mesh.import_dat("output/weak.dat", &mut systems)
         .expect("Unable to load initial data");
 
     // Read initial data
@@ -330,42 +356,87 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Fill ghost nodes
     mesh.fill_boundary(ORDER, Quadrant, DynamicConditions, dynamic.as_mut_slice());
 
-    // Begin integration
-    let h = CFL * mesh.min_spacing();
-    println!("Spacing {}", mesh.min_spacing());
-    println!("Step Size {}", h);
+    // // Begin integration
+    // let h = CFL * mesh.min_spacing();
+    // println!("Spacing {}", mesh.min_spacing());
+    // println!("Step Size {}", h);
 
     // Allocate vectors
-    let mut derivs = SystemVec::with_length(mesh.num_nodes());
-    let mut update = SystemVec::<Dynamic>::with_length(mesh.num_nodes());
-    let mut dissipation = SystemVec::with_length(mesh.num_nodes());
+    // let mut derivs = SystemVec::<Dynamic>::new();
+    let mut update = SystemVec::<Dynamic>::new();
+    let mut dissipation = SystemVec::new();
 
     // Integrate
     let mut integrator = Rk4::new();
+    let mut time = 0.0;
+    let mut step = 0;
 
-    for i in 0..STEPS {
-        // Fill ghost nodes of system
+    let mut time_since_save = 0.0;
+    let mut save_step = 0;
+
+    let mut steps_since_regrid = 0;
+
+    while step < MAX_STEPS && time < MAX_TIME {
+        assert!(dynamic.len() == mesh.num_nodes());
+        // Fill boundaries
         mesh.fill_boundary(ORDER, Quadrant, DynamicConditions, dynamic.as_mut_slice());
 
-        mesh.evaluate(
-            ORDER,
-            Quadrant,
-            DynamicDerivs,
-            dynamic.as_slice(),
-            derivs.as_mut_slice(),
-        );
+        // Check Norm
+        let norm = mesh.norm(dynamic.as_slice());
+        if norm.is_nan() {
+            log::warn!("Norm is NaN");
+            break;
+        }
 
-        // Output debugging data
-        let norm = mesh.norm(dynamic.field(Dynamic::Theta).into());
-        println!("Step {i}, Time {:.5} Norm {:.5e}", i as f64 * h, norm);
+        // Get step size
+        let h = mesh.min_spacing() * CFL;
 
-        if i % 1 == 0 {
+        // Resize vectors
+        update.resize(mesh.num_nodes());
+        dissipation.resize(mesh.num_nodes());
+
+        if steps_since_regrid > REGRID_SKIP {
+            steps_since_regrid = 0;
+
+            log::info!("Regridding Mesh at time: {time:.5}");
+            mesh.flag_wavelets(4, LOWER, UPPER, Quadrant, dynamic.as_slice());
+            mesh.set_regrid_level_limit(MAX_LEVEL);
+            mesh.balance_flags();
+
+            mesh.regrid();
+
+            // Copy system into tmp scratch space (provieded by dissipation).
+            dissipation
+                .contigious_mut()
+                .copy_from_slice(dynamic.contigious());
+            dynamic.resize(mesh.num_nodes());
+            mesh.transfer_system(
+                ORDER,
+                Quadrant,
+                dissipation.as_slice(),
+                dynamic.as_mut_slice(),
+            );
+
+            continue;
+        }
+
+        if time_since_save >= SAVE_CHECKPOINT || FORCE_SAVE {
+            time_since_save = 0.0;
+
+            log::info!(
+                "Saving Checkpoint {save_step} at time: {time:.5}, norm: {norm:.5e}, nodes: {}",
+                mesh.num_nodes()
+            );
             // Output current system to disk
             let mut systems = SystemCheckpoint::default();
             systems.save_system(dynamic.as_slice());
 
+            let mut blocks = vec![0; mesh.num_nodes()];
+            mesh.block_debug(&mut blocks);
+            systems.save_int_field("Blocks", &mut blocks);
+
             mesh.export_vtu(
-                format!("output/evbrill/iterultra{}.vtu", i / 1),
+                format!("output/evbrill/weakevolution{save_step}.vtu"),
                 ExportVtuConfig {
                     title: "evbrill".to_string(),
                     ghost: false,
@@ -373,6 +444,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 },
             )
             .unwrap();
+
+            save_step += 1;
         }
 
         // Compute step
@@ -392,10 +465,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         );
 
         // Add everything together
-        for i in 0..dynamic.contigious().len() {
+        for i in 0..dynamic.contigious_mut().len() {
             dynamic.contigious_mut()[i] +=
                 update.contigious()[i] + 0.5 * dissipation.contigious()[i];
         }
+
+        step += 1;
+        steps_since_regrid += 1;
+
+        time += h;
+        time_since_save += h;
     }
 
     Ok(())

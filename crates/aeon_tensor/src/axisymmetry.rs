@@ -150,6 +150,12 @@ pub struct System {
     pub source: StressEnergy,
 }
 
+pub struct ScalarFieldSystem {
+    pub phi: TensorFieldC2<2, Static<0>>,
+    pub pi: TensorFieldC1<2, Static<0>>,
+    pub mass: f64,
+}
+
 /// A decomposition of the stress energy tensor in axisymmetric units.
 pub struct StressEnergy {
     pub energy: f64,
@@ -172,6 +178,36 @@ impl StressEnergy {
             angular_stress: 0.0,
         }
     }
+
+    pub fn scalar(
+        metric: &Metric<2>,
+        mass: f64,
+        phi: TensorFieldC1<2, Static<0>>,
+        pi: f64,
+    ) -> Self {
+        let phi_grad = metric.gradiant(phi.clone());
+
+        let angular_stress = -0.5 * (mass * mass) * (phi.scalar() + phi.scalar() * phi.scalar());
+        let angular_shear = Tensor::zeros();
+        let angular_momentum = 0.0;
+
+        let energy = pi * pi + 0.5 * (mass * mass) * (phi.scalar() + phi.scalar() * phi.scalar());
+        let momentum = -pi * phi_grad.clone();
+        let stress = phi_grad.clone() * phi_grad.clone()
+            - metric.value().clone()
+                * 0.5
+                * (mass * mass)
+                * (phi.scalar() + phi.scalar() * phi.scalar());
+
+        Self {
+            energy,
+            momentum,
+            stress,
+            angular_momentum,
+            angular_shear,
+            angular_stress,
+        }
+    }
 }
 
 pub struct Evolution {
@@ -188,6 +224,11 @@ pub struct Evolution {
 pub struct Gauge {
     pub lapse: f64,
     pub shift: Tensor1<2>,
+}
+
+pub struct ScalarField {
+    pub phi: f64,
+    pub pi: f64,
 }
 
 pub struct Decomposition {
@@ -524,6 +565,49 @@ impl Decomposition {
         Gauge {
             lapse: lapse_t,
             shift: shift_t,
+        }
+    }
+
+    pub fn scalar(&self, field: ScalarFieldSystem) -> ScalarField {
+        let s = Space::<2>;
+
+        let Self {
+            metric,
+            twist,
+            k,
+            l,
+            lapse,
+            shift,
+            ..
+        } = self;
+
+        let phi_hess = metric.hessian(field.phi.clone());
+        let phi_grad = metric.gradiant(field.phi.clone().into());
+        let pi_grad = metric.gradiant(field.pi.clone());
+
+        let lapse_grad = metric.gradiant(lapse.clone().into());
+
+        let phi_t =
+            lapse.scalar() * field.pi.scalar() + s.sum(|[i]| phi_grad[[i]] * shift.value[[i]]);
+
+        let pi_t = {
+            let term1 = lapse.scalar() * metric.trace(phi_hess)
+                + lapse.scalar() * field.pi.scalar() * (metric.trace(k.value.clone()) + l.scalar());
+            let term2 = s.sum(|[i, j]| phi_grad[[i]] * metric.inv()[[i, j]] * lapse_grad[[j]]);
+
+            let mut term3 = lapse.scalar() * s.sum(|[i]| phi_grad[[i]] * twist.regular_con()[[i]]);
+            if self.on_axis() {
+                term3 += lapse.scalar() * field.phi.second_derivs[[0, 0]] / metric.value()[[0, 0]];
+            }
+
+            let term4 = s.sum(|[i]| pi_grad[[i]] * shift.value[[i]]);
+
+            term1 + term2 + term3 + term4
+        };
+
+        ScalarField {
+            phi: phi_t,
+            pi: pi_t,
         }
     }
 }

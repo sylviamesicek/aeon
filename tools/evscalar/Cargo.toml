@@ -12,8 +12,6 @@ env_logger.workspace = true
 itertools.workspace = true
 log.workspace = true
 rand.workspace = true
+rayon.workspace = true
 reborrow.workspace = true
 ron.workspace = true
-
-[build-dependencies]
-cc.workspace = true
