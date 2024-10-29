@@ -3,7 +3,7 @@ use crate::{
     TensorFieldC1, TensorFieldC2, TensorIndex, TensorProd, TensorRank,
 };
 
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub struct Metric<const N: usize> {
     g: Tensor2<N>,
     g_derivs: Tensor3<N>,

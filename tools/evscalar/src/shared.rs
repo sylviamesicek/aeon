@@ -197,7 +197,7 @@ impl HyperbolicSystem {
         };
 
         axi::System {
-            metric,
+            metric: metric.clone(),
             seed,
             k: TensorFieldC1 {
                 value: Tensor::from_storage(self.extrinsic()),
@@ -230,7 +230,7 @@ impl HyperbolicSystem {
                     [self.shiftz_r, self.shiftz_z],
                 ]),
             },
-            source: axi::StressEnergy::vacuum(),
+            source: axi::StressEnergy::scalar(&metric, self.scalar_field_system()),
         }
     }
 

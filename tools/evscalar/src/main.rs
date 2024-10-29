@@ -4,6 +4,9 @@ use aeon::fd::{ExportVtuConfig, Mesh, SystemCheckpoint, SystemCondition};
 use aeon::prelude::*;
 use aeon::system::field_count;
 use reborrow::{Reborrow, ReborrowMut};
+use std::fmt::Write as _;
+use std::fs::File;
+use std::io::Write as _;
 
 // mod eqs;
 pub mod shared;
@@ -326,7 +329,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     log::info!("Importing IdScalar data");
 
-    mesh.import_dat("output/ellipticmassless.dat", &mut systems)
+    mesh.import_dat("output/ellipticmasslesssec.dat", &mut systems)
         .expect("Unable to load initial data");
 
     // Read initial data
@@ -392,6 +395,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut steps_since_regrid = 0;
 
+    // let mut errors = Vec::new();
+
     while step < MAX_STEPS && time < MAX_TIME {
         assert!(dynamic.len() == mesh.num_nodes());
         // Fill boundaries
@@ -431,6 +436,25 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 num_coarsen,
             );
 
+            // let l2_norm = mesh.l2_norm(dynamic.field(Dynamic::Theta).into());
+            // let max_norm = mesh.max_norm(dynamic.field(Dynamic::Theta).into());
+
+            // let space = mesh.block_space(0);
+            // let index = space.index_from_vertex([0; 2]);
+
+            // let origin = dynamic.field(Dynamic::Theta)[index];
+
+            // errors.push((time, l2_norm, max_norm, origin));
+
+            // let mut error_csv = String::new();
+
+            // for (time, l2_norm, max, origin) in errors.iter() {
+            //     error_csv.write_fmt(format_args!("{time}, {l2_norm}, {max}, {origin},\n"))?;
+            // }
+
+            // let mut file = File::create("output/massless_errors.txt")?;
+            // file.write_all(error_csv.as_bytes())?;
+
             // Copy system into tmp scratch space (provieded by dissipation).
             dissipation
                 .contigious_mut()
@@ -461,7 +485,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             systems.save_system(dynamic.as_slice());
 
             mesh.export_vtu(
-                format!("output/evscalar/ellipticmassless{save_step}.vtu"),
+                format!("output/evscalar/ellipticmasslesssec{save_step}.vtu"),
                 ExportVtuConfig {
                     title: "evscalar".to_string(),
                     ghost: false,

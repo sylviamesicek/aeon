@@ -158,7 +158,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         systems.save_field("hamiltonian", &hamiltonian);
 
         mesh.export_vtu(
-            format!("output/idscalar/ellipticmassless{r}.vtu"),
+            format!("output/idscalar/ellipticmasslesssec{r}.vtu"),
             ExportVtuConfig {
                 title: "idscalar".to_string(),
                 ghost: crate::GHOST,
@@ -178,7 +178,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             mesh.transfer_system(ORDER, Quadrant, transfer.as_slice(), rinne.as_mut_slice());
         } else {
             log::info!("Sucessfully refined mesh to prescribed accuracy");
-            mesh.export_dat(format!("output/ellipticmassive.dat"), &systems)?;
+            mesh.export_dat(format!("output/ellipticmasslesssec.dat"), &systems)?;
             break;
         }
     }

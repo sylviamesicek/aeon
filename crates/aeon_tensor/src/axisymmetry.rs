@@ -179,25 +179,22 @@ impl StressEnergy {
         }
     }
 
-    pub fn scalar(
-        metric: &Metric<2>,
-        mass: f64,
-        phi: TensorFieldC1<2, Static<0>>,
-        pi: f64,
-    ) -> Self {
-        let phi_grad = metric.gradiant(phi.clone());
+    pub fn scalar(metric: &Metric<2>, field: ScalarFieldSystem) -> Self {
+        let s = Space::<2>;
 
-        let angular_stress = -0.5 * (mass * mass) * (phi.scalar() + phi.scalar() * phi.scalar());
+        let mass = field.mass;
+        let pi = field.pi.scalar();
+        let phi = field.phi.scalar();
+        let phi_grad = metric.gradiant(field.phi.clone().into());
+        let phi_grad_trace = s.sum(|[a, b]| metric.inv()[[a, b]] * phi_grad[[a]] * phi_grad[[b]]);
+
+        let angular_stress = 0.5 * (pi * pi - phi_grad_trace - mass * mass * phi * phi);
         let angular_shear = Tensor::zeros();
         let angular_momentum = 0.0;
 
-        let energy = pi * pi + 0.5 * (mass * mass) * (phi.scalar() + phi.scalar() * phi.scalar());
+        let energy = 0.5 * (pi * pi + phi_grad_trace + mass * mass * phi * phi);
         let momentum = -pi * phi_grad.clone();
-        let stress = phi_grad.clone() * phi_grad.clone()
-            - metric.value().clone()
-                * 0.5
-                * (mass * mass)
-                * (phi.scalar() + phi.scalar() * phi.scalar());
+        let stress = phi_grad.clone() * phi_grad.clone() + metric.value().clone() * angular_stress;
 
         Self {
             energy,
@@ -600,9 +597,10 @@ impl Decomposition {
                 term3 += lapse.scalar() * field.phi.second_derivs[[0, 0]] / metric.value()[[0, 0]];
             }
 
-            let term4 = s.sum(|[i]| pi_grad[[i]] * shift.value[[i]]);
+            let term4 = -field.mass * field.mass * field.phi.scalar();
+            let term5 = s.sum(|[i]| pi_grad[[i]] * shift.value[[i]]);
 
-            term1 + term2 + term3 + term4
+            term1 + term2 + term3 + term4 + term5
         };
 
         ScalarField {

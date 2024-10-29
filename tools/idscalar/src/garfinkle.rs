@@ -108,16 +108,15 @@ impl Operator<2> for PsiOperator {
         };
 
         let phi = engine.value(Pair::Right(Context::Phi));
+        let phi_r = engine.derivative(Pair::Right(Context::Phi), 0);
+        let phi_z = engine.derivative(Pair::Right(Context::Phi), 1);
 
-        let source = 1.0 / 8.0
-            * crate::MASS
-            * crate::MASS
-            * (phi + phi * phi)
-            * (2.0 * rho * seed).exp()
-            * psi.powi(5);
+        let source = 0.5 * (phi_r * phi_r + phi_z * phi_z)
+            + 0.5 * (2.0 * rho * seed).exp() * psi.powi(4) * crate::MASS * crate::MASS * phi * phi;
 
-        let result =
-            laplacian + psi / 4.0 * (rho * seed_rr + 2.0 * seed_r + rho * seed_zz) + source;
+        let result = laplacian
+            + psi / 4.0 * (rho * seed_rr + 2.0 * seed_r + rho * seed_zz)
+            + psi / 4.0 * source;
 
         SystemValue::new([result])
     }
@@ -151,16 +150,15 @@ impl Function<2> for Hamiltonian {
         };
 
         let phi = engine.value(Pair::Right(Context::Phi));
+        let phi_r = engine.derivative(Pair::Right(Context::Phi), 0);
+        let phi_z = engine.derivative(Pair::Right(Context::Phi), 1);
 
-        let source = 1.0 / 8.0
-            * crate::MASS
-            * crate::MASS
-            * (phi + phi * phi)
-            * (2.0 * rho * seed).exp()
-            * psi.powi(5);
+        let source = 0.5 * (phi_r * phi_r + phi_z * phi_z)
+            + 0.5 * (2.0 * rho * seed).exp() * psi.powi(4) * crate::MASS * crate::MASS * phi * phi;
 
-        let result =
-            laplacian + psi / 4.0 * (rho * seed_rr + 2.0 * seed_r + rho * seed_zz) + source;
+        let result = laplacian
+            + psi / 4.0 * (rho * seed_rr + 2.0 * seed_r + rho * seed_zz)
+            + psi / 4.0 * source;
 
         SystemValue::new([result])
     }
