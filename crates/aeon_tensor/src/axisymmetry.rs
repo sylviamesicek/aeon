@@ -322,7 +322,7 @@ impl Decomposition {
             source:
                 StressEnergy {
                     energy,
-                    momentum: _,
+                    momentum,
                     stress,
                     angular_momentum: _,
                     angular_shear: _,
@@ -390,7 +390,7 @@ impl Decomposition {
                 regular += k.derivs[[0, 1, 0]] / metric.value()[[0, 0]];
             }
 
-            term1 + term2 + regular
+            term1 + term2 + regular - KAPPA * momentum[[i]]
         });
 
         // ***********************************

@@ -55,9 +55,12 @@ impl Projection<2> for ContextProjection {
         let mut result = SystemValue::default();
         result.set_field(
             Context::Seed,
-            rho * crate::SEED * (-(rho * rho + z * z)).exp(),
+            rho * crate::SEED * (-(2.0 * rho * rho + z * z)).exp(),
         );
-        result.set_field(Context::Phi, crate::SCALAR * (-(rho * rho + z * z)).exp());
+        result.set_field(
+            Context::Phi,
+            crate::SCALAR * (-(2.0 * rho * rho + z * z)).exp(),
+        );
 
         result
     }

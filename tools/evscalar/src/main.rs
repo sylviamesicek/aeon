@@ -326,7 +326,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     log::info!("Importing IdScalar data");
 
-    mesh.import_dat("output/weakmassless.dat", &mut systems)
+    mesh.import_dat("output/ellipticmassless.dat", &mut systems)
         .expect("Unable to load initial data");
 
     // Read initial data
@@ -461,7 +461,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             systems.save_system(dynamic.as_slice());
 
             mesh.export_vtu(
-                format!("output/evscalar/weakmassless{save_step}.vtu"),
+                format!("output/evscalar/ellipticmassless{save_step}.vtu"),
                 ExportVtuConfig {
                     title: "evscalar".to_string(),
                     ghost: false,
