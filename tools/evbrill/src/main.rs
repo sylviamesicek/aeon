@@ -40,7 +40,7 @@ const SAVE_CHECKPOINT: f64 = 0.02;
 const FORCE_SAVE: bool = false;
 const REGRID_SKIP: usize = 20;
 
-const LOWER: f64 = 1e-9;
+const LOWER: f64 = 1e-8;
 const UPPER: f64 = 1e-6;
 
 /// Initial data in Rinne's hyperbolic variables.
@@ -305,7 +305,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     log::info!("Importing IdBrill data");
 
-    mesh.import_dat("output/weak.dat", &mut systems)
+    mesh.import_dat("output/super.dat", &mut systems)
         .expect("Unable to load initial data");
 
     // Read initial data
@@ -458,7 +458,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
 
         if time_since_save >= SAVE_CHECKPOINT || FORCE_SAVE {
-            time_since_save = 0.0;
+            time_since_save -= SAVE_CHECKPOINT;
 
             log::info!(
                 "Saving Checkpoint {save_step}
@@ -476,7 +476,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             // systems.save_int_field("Blocks", &mut blocks);
 
             mesh.export_vtu(
-                format!("output/evbrill/weak{save_step}.vtu"),
+                format!("output/evbrill/super{save_step}.vtu"),
                 ExportVtuConfig {
                     title: "evbrill".to_string(),
                     ghost: false,
@@ -494,6 +494,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let origin = dynamic.field(Dynamic::Theta)[index];
 
             errors.push((time, l2_norm, max_norm, origin));
+
+            let mut error_csv = String::new();
+
+            for (time, l2_norm, max, origin) in errors.iter() {
+                error_csv.write_fmt(format_args!("{time}, {l2_norm}, {max}, {origin},\n"))?;
+            }
+
+            let mut file = File::create("output/super_errors.txt")?;
+            file.write_all(error_csv.as_bytes())?;
 
             save_step += 1;
         }
@@ -528,15 +537,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     log::info!("Writing Error CSV");
-
-    let mut error_csv = String::new();
-
-    for (time, l2_norm, max, origin) in errors {
-        error_csv.write_fmt(format_args!("{time}, {l2_norm}, {max}, {origin},\n"))?;
-    }
-
-    let mut file = File::create("output/weak_errors.txt")?;
-    file.write_all(error_csv.as_bytes())?;
 
     Ok(())
 }

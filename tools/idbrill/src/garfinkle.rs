@@ -1,5 +1,3 @@
-use crate::HAMILTONIAN_CONDITIONS;
-
 use super::{Quadrant, Rinne, ORDER};
 use aeon::{
     elliptic::HyperRelaxSolver,
@@ -99,61 +97,61 @@ impl Operator<2> for PsiOperator {
         SystemValue::new([result])
     }
 
-    fn callback(
-        &self,
-        mesh: &mut Mesh<2>,
-        system: SystemSlice<Self::System>,
-        context: SystemSlice<Self::Context>,
-        index: usize,
-    ) {
-        if index % 25 == 0 {
-            let mut garfinkle = SystemVec::with_length(mesh.num_nodes());
-            garfinkle
-                .field_mut(Garfinkle::Psi)
-                .copy_from_slice(system.field(Scalar));
-            garfinkle
-                .field_mut(Garfinkle::Seed)
-                .copy_from_slice(context.field(Scalar));
+    // fn callback(
+    //     &self,
+    //     mesh: &mut Mesh<2>,
+    //     system: SystemSlice<Self::System>,
+    //     context: SystemSlice<Self::Context>,
+    //     index: usize,
+    // ) {
+    //     if index % 25 == 0 {
+    //         let mut garfinkle = SystemVec::with_length(mesh.num_nodes());
+    //         garfinkle
+    //             .field_mut(Garfinkle::Psi)
+    //             .copy_from_slice(system.field(Scalar));
+    //         garfinkle
+    //             .field_mut(Garfinkle::Seed)
+    //             .copy_from_slice(context.field(Scalar));
 
-            let mut hamiltonian = vec![0.0; mesh.num_nodes()];
+    //         let mut hamiltonian = vec![0.0; mesh.num_nodes()];
 
-            mesh.fill_boundary(
-                ORDER,
-                Quadrant,
-                GarfinkleConditions,
-                garfinkle.as_mut_slice(),
-            );
+    //         mesh.fill_boundary(
+    //             ORDER,
+    //             Quadrant,
+    //             GarfinkleConditions,
+    //             garfinkle.as_mut_slice(),
+    //         );
 
-            mesh.evaluate(
-                ORDER,
-                Quadrant,
-                Hamiltonian,
-                garfinkle.as_slice(),
-                hamiltonian.as_mut_slice().into(),
-            );
+    //         mesh.evaluate(
+    //             ORDER,
+    //             Quadrant,
+    //             Hamiltonian,
+    //             garfinkle.as_slice(),
+    //             hamiltonian.as_mut_slice().into(),
+    //         );
 
-            mesh.fill_boundary(
-                ORDER,
-                Quadrant,
-                HAMILTONIAN_CONDITIONS,
-                hamiltonian.as_mut_slice().into(),
-            );
+    //         mesh.fill_boundary(
+    //             ORDER,
+    //             Quadrant,
+    //             HAMILTONIAN_CONDITIONS,
+    //             hamiltonian.as_mut_slice().into(),
+    //         );
 
-            // let mut systems = SystemCheckpoint::default();
-            // systems.save_field("psi", garfinkle.field(Garfinkle::Psi));
-            // systems.save_field("hamiltonian", &hamiltonian);
+    //         // let mut systems = SystemCheckpoint::default();
+    //         // systems.save_field("psi", garfinkle.field(Garfinkle::Psi));
+    //         // systems.save_field("hamiltonian", &hamiltonian);
 
-            // mesh.export_vtu(
-            //     format!("output/garfinkle/iter{}.vtu", { index / 25 }),
-            //     ExportVtuConfig {
-            //         title: "garfinkle".to_string(),
-            //         ghost: crate::GHOST,
-            //         systems,
-            //     },
-            // )
-            // .unwrap();
-        }
-    }
+    //         // mesh.export_vtu(
+    //         //     format!("output/garfinkle/iter{}.vtu", { index / 25 }),
+    //         //     ExportVtuConfig {
+    //         //         title: "garfinkle".to_string(),
+    //         //         ghost: crate::GHOST,
+    //         //         systems,
+    //         //     },
+    //         // )
+    //         // .unwrap();
+    //     }
+    // }
 }
 
 #[derive(Clone)]

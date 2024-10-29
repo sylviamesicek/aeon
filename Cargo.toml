@@ -5,6 +5,7 @@ default-members = [
     "crates/aeon_basis",
     "crates/aeon_geometry",
     "tools/idbrill",
+    "tools/idscalar",
     "tools/evbrill",
     "tools/evscalar",
     ".",

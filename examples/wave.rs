@@ -14,7 +14,7 @@ const SAVE_CHECKPOINT: f64 = 0.01;
 const FORCE_SAVE: bool = false;
 const REGRID_SKIP: usize = 10;
 
-const LOWER: f64 = 1e-9;
+const LOWER: f64 = 1e-8;
 const UPPER: f64 = 1e-6;
 const SPEED: [f64; 2] = [1.0, 0.0];
 

@@ -18,7 +18,7 @@ pub enum Equations {
 
 const EQUATIONS: Equations = Equations::Tensor;
 
-const MAX_TIME: f64 = 10.0;
+const MAX_TIME: f64 = 12.0;
 const MAX_STEPS: usize = 50000;
 const MAX_LEVEL: usize = 14;
 
@@ -26,20 +26,19 @@ const CFL: f64 = 0.1;
 const ORDER: Order<4> = Order::<4>;
 const DISS_ORDER: Order<6> = Order::<6>;
 
-const SAVE_CHECKPOINT: f64 = 0.05;
+const SAVE_CHECKPOINT: f64 = 0.04;
 const FORCE_SAVE: bool = false;
 const REGRID_SKIP: usize = 10;
 
-const LOWER: f64 = 1e-10;
+const LOWER: f64 = 1e-9;
 const UPPER: f64 = 1e-6;
-
-const MASS: f64 = 0.0;
 
 /// Initial data in Rinne's hyperbolic variables.
 #[derive(Clone, SystemLabel)]
 pub enum Rinne {
     Conformal,
     Seed,
+    Phi,
 }
 
 #[derive(Clone, SystemLabel)]
@@ -110,7 +109,9 @@ pub fn condition(field: Dynamic) -> SystemCondition<Dynamic, DynamicConditions> 
 }
 
 #[derive(Clone)]
-pub struct DynamicDerivs;
+pub struct DynamicDerivs {
+    pub mass: f64,
+}
 
 impl Function<2> for DynamicDerivs {
     type Input = Dynamic;
@@ -241,7 +242,7 @@ impl Function<2> for DynamicDerivs {
             pi_r: pi_r,
             pi_z: pi_z,
 
-            mass: MASS,
+            mass: self.mass,
         };
 
         let derivs = match EQUATIONS {
@@ -268,12 +269,16 @@ impl Function<2> for DynamicDerivs {
         result.set_field(Dynamic::Shiftr, derivs.shiftr_t);
         result.set_field(Dynamic::Shiftz, derivs.shiftz_t);
 
+        result.set_field(Dynamic::Phi, derivs.phi_t);
+        result.set_field(Dynamic::Pi, derivs.pi_t);
+
         result
     }
 }
 
 pub struct DynamicOde<'a> {
     mesh: &'a mut Mesh<2>,
+    mass: f64,
 }
 
 impl<'a> Ode for DynamicOde<'a> {
@@ -294,8 +299,13 @@ impl<'a> Ode for DynamicOde<'a> {
         let src = SystemSlice::from_contiguous(system);
         let mut dest = SystemSliceMut::from_contiguous(result);
 
-        self.mesh
-            .evaluate(ORDER, Quadrant, DynamicDerivs, src.rb(), dest.rb_mut());
+        self.mesh.evaluate(
+            ORDER,
+            Quadrant,
+            DynamicDerivs { mass: self.mass },
+            src.rb(),
+            dest.rb_mut(),
+        );
 
         self.mesh
             .weak_boundary(ORDER, Quadrant, DynamicConditions, src.rb(), dest.rb_mut());
@@ -308,20 +318,26 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .init();
 
     // Create output directory.
-    std::fs::create_dir_all("output/evbrill").expect("Unable to create evbrill directory.");
+    std::fs::create_dir_all("output/evscalar").expect("Unable to create evscalar directory.");
 
     // Build discretization
     let mut mesh = Mesh::default();
     let mut systems = SystemCheckpoint::default();
 
-    log::info!("Importing IdBrill data");
+    log::info!("Importing IdScalar data");
 
-    mesh.import_dat("output/weak.dat", &mut systems)
+    mesh.import_dat("output/weakmassless.dat", &mut systems)
         .expect("Unable to load initial data");
 
     // Read initial data
     let mut initial = SystemVec::<Rinne>::new();
     systems.load_system(&mut initial);
+
+    let mass: f64 = {
+        let mut result = String::new();
+        systems.load_meta("MASS", &mut result);
+        result.parse().unwrap()
+    };
 
     // Setup dynamic variables
     let mut dynamic = SystemVec::with_length(mesh.num_nodes());
@@ -353,13 +369,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     dynamic.field_mut(Dynamic::Shiftr).fill(0.0);
     dynamic.field_mut(Dynamic::Shiftz).fill(0.0);
 
+    dynamic
+        .field_mut(Dynamic::Phi)
+        .copy_from_slice(initial.field(Rinne::Phi));
+    dynamic.field_mut(Dynamic::Pi).fill(0.0);
+
     // Fill ghost nodes
     mesh.fill_boundary(ORDER, Quadrant, DynamicConditions, dynamic.as_mut_slice());
-
-    // // Begin integration
-    // let h = CFL * mesh.min_spacing();
-    // println!("Spacing {}", mesh.min_spacing());
-    // println!("Step Size {}", h);
 
     // Allocate vectors
     // let mut derivs = SystemVec::<Dynamic>::new();
@@ -382,20 +398,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         mesh.fill_boundary(ORDER, Quadrant, DynamicConditions, dynamic.as_mut_slice());
 
         // Check Norm
-        let norm = mesh.norm(dynamic.as_slice());
+        let norm = mesh.l2_norm(dynamic.as_slice());
         if norm.is_nan() {
             log::warn!("Norm is NaN");
             break;
         }
 
-<<<<<<< HEAD
         // Get step size
         let h = mesh.min_spacing() * CFL;
-=======
-        // Output debugging data
-        let norm = mesh.l2_norm(dynamic.field(Dynamic::Theta).into());
-        println!("Step {i}, Time {:.5} Norm {:.5e}", i as f64 * h, norm);
->>>>>>> 93a205f3992438612807087149777b8ae3d7d15d
 
         // Resize vectors
         update.resize(mesh.num_nodes());
@@ -409,7 +419,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             mesh.set_regrid_level_limit(MAX_LEVEL);
             mesh.balance_flags();
 
+            let num_refine = mesh.num_refine_cells();
+            let num_coarsen = mesh.num_coarsen_cells();
+
             mesh.regrid();
+
+            log::info!(
+                "Regrided Mesh at time: {time:.5}, Max Level {}, {} R, {} C",
+                mesh.max_level(),
+                num_refine,
+                num_coarsen,
+            );
 
             // Copy system into tmp scratch space (provieded by dissipation).
             dissipation
@@ -427,24 +447,23 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
 
         if time_since_save >= SAVE_CHECKPOINT || FORCE_SAVE {
-            time_since_save = 0.0;
+            time_since_save -= SAVE_CHECKPOINT;
 
             log::info!(
-                "Saving Checkpoint {save_step} at time: {time:.5}, norm: {norm:.5e}, nodes: {}",
+                "Saving Checkpoint {save_step}
+    Time: {time:.5}, Step: {h:.8}
+    Norm: {norm:.5e}
+    Nodes: {}",
                 mesh.num_nodes()
             );
             // Output current system to disk
             let mut systems = SystemCheckpoint::default();
             systems.save_system(dynamic.as_slice());
 
-            let mut blocks = vec![0; mesh.num_nodes()];
-            mesh.block_debug(&mut blocks);
-            systems.save_int_field("Blocks", &mut blocks);
-
             mesh.export_vtu(
-                format!("output/evbrill/weakevolution{save_step}.vtu"),
+                format!("output/evscalar/weakmassless{save_step}.vtu"),
                 ExportVtuConfig {
-                    title: "evbrill".to_string(),
+                    title: "evscalar".to_string(),
                     ghost: false,
                     systems,
                 },
@@ -457,7 +476,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         // Compute step
         integrator.step(
             h,
-            &mut DynamicOde { mesh: &mut mesh },
+            &mut DynamicOde {
+                mesh: &mut mesh,
+                mass,
+            },
             dynamic.contigious(),
             update.contigious_mut(),
         );

@@ -41,6 +41,7 @@ impl<const N: usize> Default for MeshCheckpoint<N> {
 
 #[derive(Default, Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct SystemCheckpoint {
+    pub(crate) meta: HashMap<String, String>,
     pub(crate) systems: HashMap<String, SystemMeta>,
     pub(crate) fields: HashMap<String, Vec<f64>>,
     pub(crate) int_fields: HashMap<String, Vec<i64>>,
@@ -92,6 +93,14 @@ impl SystemCheckpoint {
 
     pub fn load_int_field(&self, name: &str, data: &mut Vec<i64>) {
         data.clone_from_slice(self.int_fields.get(name).unwrap());
+    }
+
+    pub fn save_meta(&mut self, name: &str, data: &str) {
+        let _ = self.meta.insert(name.to_string(), data.to_string());
+    }
+
+    pub fn load_meta(&self, name: &str, data: &mut String) {
+        data.clone_from(self.meta.get(name).unwrap())
     }
 }
 
