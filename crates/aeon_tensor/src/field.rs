@@ -1,125 +1,94 @@
-use crate::{Static, Tensor, TensorIndex, TensorProd, TensorRank};
+use crate::{Matrix, Space, Tensor, Tensor3, Tensor4, Vector};
 
 // ************************
 // Fields *****************
 // ************************
 
-#[derive(Clone)]
-pub struct TensorFieldC0<const N: usize, R: TensorRank<N>> {
-    pub value: Tensor<N, R>,
+#[derive(Clone, Copy)]
+pub struct ScalarFieldC1<const N: usize> {
+    pub value: f64,
+    pub derivs: Vector<N>,
 }
 
-impl<const N: usize, R: TensorRank<N>> From<TensorFieldC1<N, R>> for TensorFieldC0<N, R>
-where
-    R: TensorProd<N, Static<1>>,
-{
-    fn from(other: TensorFieldC1<N, R>) -> Self {
-        Self { value: other.value }
-    }
-}
-
-impl<const N: usize, R: TensorRank<N>> From<TensorFieldC2<N, R>> for TensorFieldC0<N, R>
-where
-    R: TensorProd<N, Static<1>>,
-    <R as TensorProd<N, Static<1>>>::Result: TensorProd<N, Static<1>>,
-{
-    fn from(other: TensorFieldC2<N, R>) -> Self {
-        Self { value: other.value }
-    }
-}
-
-impl<const N: usize> TensorFieldC0<N, Static<0>> {
-    pub fn scalar(&self) -> f64 {
-        self.value.clone().into_storage()
-    }
-}
-
-#[derive(Clone)]
-pub struct TensorFieldC1<const N: usize, R: TensorRank<N>>
-where
-    R: TensorProd<N, Static<1>>,
-{
-    pub value: Tensor<N, R>,
-    pub derivs: Tensor<N, R::Result>,
-}
-
-impl<const N: usize, R: TensorRank<N>> From<TensorFieldC2<N, R>> for TensorFieldC1<N, R>
-where
-    R: TensorProd<N, Static<1>>,
-    <R as TensorProd<N, Static<1>>>::Result: TensorProd<N, Static<1>>,
-{
-    fn from(other: TensorFieldC2<N, R>) -> Self {
-        Self {
-            value: other.value,
-            derivs: other.derivs,
+impl<const N: usize> From<ScalarFieldC2<N>> for ScalarFieldC1<N> {
+    fn from(value: ScalarFieldC2<N>) -> Self {
+        ScalarFieldC1 {
+            value: value.value,
+            derivs: value.derivs,
         }
     }
 }
 
-impl<const N: usize> TensorFieldC1<N, Static<0>> {
-    pub fn scalar(&self) -> f64 {
-        self.value.clone().into_storage()
+impl<const N: usize> ScalarFieldC1<N> {
+    pub fn lie_derivative(&self, direction: VectorFieldC1<N>) -> f64 {
+        (direction.value * self.derivs).trace()
+    }
+}
+
+#[derive(Clone, Copy)]
+pub struct ScalarFieldC2<const N: usize> {
+    pub value: f64,
+    pub derivs: Vector<N>,
+    pub second_derivs: Matrix<N>,
+}
+
+#[derive(Clone)]
+pub struct VectorFieldC1<const N: usize> {
+    pub value: Vector<N>,
+    pub derivs: Matrix<N>,
+}
+
+impl<const N: usize> VectorFieldC1<N> {
+    pub fn lie_derivative(&self, direction: VectorFieldC1<N>) -> Vector<N> {
+        let s = Space::<N>;
+
+        s.vector(|i| {
+            s.sum(|[m]| {
+                direction.value[m] * self.derivs[[i, m]] + self.value[m] * direction.derivs[[m, i]]
+            })
+        })
     }
 }
 
 #[derive(Clone)]
-pub struct TensorFieldC2<const N: usize, R: TensorRank<N>>
-where
-    R: TensorProd<N, Static<1>>,
-    <R as TensorProd<N, Static<1>>>::Result: TensorProd<N, Static<1>>,
-{
-    pub value: Tensor<N, R>,
-    pub derivs: Tensor<N, <R as TensorProd<N, Static<1>>>::Result>,
-    pub second_derivs:
-        Tensor<N, <<R as TensorProd<N, Static<1>>>::Result as TensorProd<N, Static<1>>>::Result>,
+pub struct MatrixFieldC1<const N: usize> {
+    pub value: Matrix<N>,
+    pub derivs: Tensor3<N>,
 }
 
-impl<const N: usize> TensorFieldC2<N, Static<0>> {
-    pub fn scalar(&self) -> f64 {
-        self.value.clone().into_storage()
+impl<const N: usize> MatrixFieldC1<N> {
+    pub fn lie_derivative(&self, direction: VectorFieldC1<N>) -> Matrix<N> {
+        let s = Space::<N>;
+
+        Tensor::from_fn(|[i, j]| {
+            s.sum(|[m]| {
+                direction.value[m] * self.derivs[[i, j, m]]
+                    + self.value[[i, m]] * direction.derivs[[m, j]]
+                    + self.value[[m, j]] * direction.derivs[[m, i]]
+            })
+        })
     }
 }
 
-/// Computes the lie derivative along a vector of a given tensor field.
-pub fn lie_derivative<const N: usize, T>(
-    direction: TensorFieldC1<N, Static<1>>,
-    tensor: impl Into<TensorFieldC1<N, T>>,
-) -> Tensor<N, T>
-where
-    T: TensorRank<N> + TensorProd<N, Static<1>>,
-{
-    let tensor = tensor.into();
+#[derive(Clone)]
+pub struct MatrixFieldC2<const N: usize> {
+    pub value: Matrix<N>,
+    pub derivs: Tensor3<N>,
+    pub second_derivs: Tensor4<N>,
+}
 
-    let mut result = Tensor::zeros();
-
-    for index in T::Idx::enumerate() {
-        for m in 0..N {
-            let findex = T::index_combine(index, [m]);
-            result[index] += direction.value[[m]] * tensor.derivs[findex];
+impl<const N: usize> From<MatrixFieldC2<N>> for MatrixFieldC1<N> {
+    fn from(value: MatrixFieldC2<N>) -> Self {
+        MatrixFieldC1 {
+            value: value.value,
+            derivs: value.derivs,
         }
     }
+}
 
-    if const { <T::Idx as TensorIndex<N>>::RANK == 0 } {
-        return result;
+impl<const N: usize> MatrixFieldC2<N> {
+    pub fn lie_derivative(&self, direction: VectorFieldC1<N>) -> Matrix<N> {
+        let c1: MatrixFieldC1<N> = self.clone().into();
+        c1.lie_derivative(direction)
     }
-
-    for findex in T::Idx::enumerate() {
-        // Loop over every index slot.
-        for r in 0..T::Idx::RANK {
-            // Retrieve 'r'th component of index
-            let i = findex.as_ref()[r];
-
-            // Sum
-            for m in 0..N {
-                // Build mutable version and set 'r'th component to m
-                let mut index = findex;
-                index.as_mut()[r] = m;
-
-                // Add to result
-                result[findex] += direction.derivs[[m, i]] * tensor.value[index];
-            }
-        }
-    }
-
-    result
 }

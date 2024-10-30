@@ -4,11 +4,7 @@ use aeon::fd::{ExportVtuConfig, Mesh, SystemCheckpoint, SystemCondition};
 use aeon::prelude::*;
 use aeon::system::field_count;
 use reborrow::{Reborrow, ReborrowMut};
-use std::fmt::Write as _;
-use std::fs::File;
-use std::io::Write as _;
 
-// mod eqs;
 pub mod shared;
 pub mod tensor;
 
@@ -325,22 +321,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Build discretization
     let mut mesh = Mesh::default();
-    let mut systems = SystemCheckpoint::default();
+    let mut checkpoint = SystemCheckpoint::default();
 
     log::info!("Importing IdScalar data");
 
-    mesh.import_dat("output/ellipticmasslesssec.dat", &mut systems)
+    mesh.import_dat("output/ellipticmasslesssec.dat", &mut checkpoint)
         .expect("Unable to load initial data");
 
     // Read initial data
     let mut initial = SystemVec::<Rinne>::new();
-    systems.load_system(&mut initial);
+    checkpoint.load_system(&mut initial);
 
-    let mass: f64 = {
-        let mut result = String::new();
-        systems.load_meta("MASS", &mut result);
-        result.parse().unwrap()
-    };
+    let mass: f64 = checkpoint.parse_meta("MASS")?;
 
     // Setup dynamic variables
     let mut dynamic = SystemVec::with_length(mesh.num_nodes());
@@ -486,10 +478,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
             mesh.export_vtu(
                 format!("output/evscalar/ellipticmasslesssec{save_step}.vtu"),
+                &systems,
                 ExportVtuConfig {
                     title: "evscalar".to_string(),
                     ghost: false,
-                    systems,
                 },
             )
             .unwrap();

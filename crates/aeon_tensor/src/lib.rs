@@ -2,317 +2,228 @@ extern crate self as aeon_tensor;
 
 use paste::paste;
 use std::{
+    array,
     fmt::Debug,
-    iter::once,
-    ops::{Add, Index, IndexMut, Mul, Sub},
+    ops::{Add, Div, Index, IndexMut, Mul, Sub},
 };
 
 pub mod axisymmetry;
 mod field;
 mod metric;
 
-pub use field::{lie_derivative, TensorFieldC0, TensorFieldC1, TensorFieldC2};
+pub use field::{MatrixFieldC1, MatrixFieldC2, ScalarFieldC1, ScalarFieldC2, VectorFieldC1};
 pub use metric::Metric;
 
-/// An index that can be used for a tensor. Essentially types of the form `[usize; R]` for some rank
-/// `R`.
-pub trait TensorIndex<const N: usize>: AsMut<[usize]> + AsRef<[usize]> + Clone + Copy {
-    const RANK: usize;
+pub fn for_each_index<const N: usize, const RANK: usize>(mut f: impl FnMut([usize; RANK])) {
+    let mut cursor = [0; RANK];
 
-    fn enumerate() -> impl Iterator<Item = Self> + 'static;
-}
+    f(cursor);
 
-impl<const N: usize, const RANK: usize> TensorIndex<N> for [usize; RANK] {
-    const RANK: usize = RANK;
+    'l: loop {
+        for axis in 0..RANK {
+            cursor[axis] += 1;
 
-    fn enumerate() -> impl Iterator<Item = Self> + 'static {
-        struct TensorIndexIter<const N: usize, const RANK: usize> {
-            cursor: [usize; RANK],
-        }
-
-        impl<const N: usize, const RANK: usize> Iterator for TensorIndexIter<N, RANK> {
-            type Item = [usize; RANK];
-
-            fn next(&mut self) -> Option<Self::Item> {
-                if RANK == 0 || self.cursor[RANK - 1] >= N {
-                    return None;
-                }
-
-                let cursor = self.cursor;
-
-                let mut increment = [false; RANK];
-                increment[0] = true;
-
-                for i in 0..RANK {
-                    if increment[i] {
-                        // If we need to increment this axis, we add to the cursor value
-                        self.cursor[i] += 1;
-                        // If the cursor is equal to size, we wrap.
-                        // However, if we have reached the final axis,
-                        // this indicates we are at the end of iteration,
-                        // and will return None on the next call of next().
-                        if self.cursor[i] >= N && i < RANK - 1 {
-                            self.cursor[i] = 0;
-                            increment[i + 1] = true;
-                        }
-                    }
-                }
-
-                Some(cursor)
+            if cursor[axis] < N {
+                f(cursor);
+                continue 'l;
             }
+
+            cursor[axis] = 0;
         }
 
-        if const { RANK == 0 } {
-            once([0; RANK])
-                .skip(0)
-                .chain(TensorIndexIter::<N, RANK> { cursor: [0; RANK] })
-        } else {
-            once([0; RANK])
-                .skip(1)
-                .chain(TensorIndexIter::<N, RANK> { cursor: [0; RANK] })
-        }
+        break;
     }
 }
 
-pub trait TensorRank<const N: usize>: Clone {
-    type Idx: TensorIndex<N>;
-    type Storage: Sized + Clone;
+// *********************************
+// Tensor **************************
+// *********************************
 
-    fn index(storage: &Self::Storage, indices: Self::Idx) -> &f64;
-    fn index_mut(storage: &mut Self::Storage, indices: Self::Idx) -> &mut f64;
+#[derive(Clone, Copy, Debug, Default)]
+pub struct Tensor<const N: usize, const RANK: usize, L>(L);
 
-    fn zeros() -> Self::Storage;
-    fn from_fn<F: Fn(Self::Idx) -> f64>(f: F) -> Self::Storage {
-        let mut storage = Self::zeros();
+// *********************************
+// Tensor Layout *******************
+// *********************************
 
-        for indices in Self::Idx::enumerate() {
-            *Self::index_mut(&mut storage, indices) = f(indices);
-        }
+pub trait TensorLayout<const N: usize, const RANK: usize>: Clone {
+    fn index(&self, indices: [usize; RANK]) -> &f64;
+    fn index_mut(&mut self, indices: [usize; RANK]) -> &mut f64;
 
-        storage
+    fn zeros() -> Self;
+    fn from_fn<F: Fn([usize; RANK]) -> f64>(f: F) -> Self {
+        let mut result = Self::zeros();
+        for_each_index(|index| result = f(index));
+        result
     }
 }
 
-pub struct Tensor<const N: usize, R: TensorRank<N>>(R::Storage);
+impl<const N: usize, const RANK: usize, L: TensorLayout<N, RANK>> Tensor<N, RANK, L> {
+    fn zeros() -> Self {
+        Self(L::zeros())
+    }
 
-impl<const N: usize, R: TensorRank<N>> Clone for Tensor<N, R> {
-    fn clone(&self) -> Self {
-        Self::from_storage(self.0.clone())
+    fn from_fn<F: Fn([usize; RANK]) -> f64>(f: F) -> Self {
+        Self(L::from_fn(f))
     }
 }
 
-impl<const N: usize, R: TensorRank<N>> Debug for Tensor<N, R>
-where
-    R::Storage: Debug,
+impl<const N: usize, const RANK: usize, L: TensorLayout<N, RANK>> From<L> for Tensor<N, RANK, L> {
+    fn from(value: L) -> Self {
+        Tensor(value)
+    }
+}
+
+impl<const N: usize, const RANK: usize, L: TensorLayout<N, RANK>> Index<[usize; RANK]>
+    for Tensor<N, RANK, L>
 {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        self.0.fmt(f)
-    }
-}
-
-impl<const N: usize, R: TensorRank<N>> Default for Tensor<N, R> {
-    fn default() -> Self {
-        Self::zeros()
-    }
-}
-
-impl<const N: usize, R: TensorRank<N>> Tensor<N, R> {
-    pub fn from_storage(storage: R::Storage) -> Self {
-        Tensor(storage)
-    }
-
-    pub fn into_storage(self) -> R::Storage {
-        self.0
-    }
-
-    pub fn zeros() -> Self {
-        Self::from_storage(R::zeros())
-    }
-
-    pub fn from_fn<F: Fn(R::Idx) -> f64>(f: F) -> Self {
-        Self::from_storage(R::from_fn(f))
-    }
-}
-
-impl<const N: usize, R: TensorRank<N>> Index<R::Idx> for Tensor<N, R> {
     type Output = f64;
 
-    fn index(&self, indices: R::Idx) -> &Self::Output {
-        R::index(&self.0, indices)
+    fn index(&self, index: [usize; RANK]) -> &Self::Output {
+        self.0.index(index)
     }
 }
 
-impl<const N: usize, R: TensorRank<N>> IndexMut<R::Idx> for Tensor<N, R> {
-    fn index_mut(&mut self, indices: R::Idx) -> &mut Self::Output {
-        R::index_mut(&mut self.0, indices)
+impl<const N: usize, const RANK: usize, L: TensorLayout<N, RANK>> IndexMut<[usize; RANK]>
+    for Tensor<N, RANK, L>
+{
+    fn index_mut(&mut self, index: [usize; RANK]) -> &mut Self::Output {
+        self.0.index_mut(index)
     }
 }
 
-impl<const N: usize, R: TensorRank<N>> Add<Tensor<N, R>> for Tensor<N, R> {
-    type Output = Tensor<N, R>;
+impl<const N: usize, L: TensorLayout<N, 1>> Index<usize> for Tensor<N, 1, L> {
+    type Output = f64;
 
-    fn add(self, rhs: Tensor<N, R>) -> Self::Output {
-        Tensor::from_fn(|indices| self[indices] + rhs[indices])
+    fn index(&self, index: usize) -> &Self::Output {
+        self.0.index([index])
     }
 }
 
-impl<const N: usize, R: TensorRank<N>> Sub<Tensor<N, R>> for Tensor<N, R> {
-    type Output = Tensor<N, R>;
-
-    fn sub(self, rhs: Tensor<N, R>) -> Self::Output {
-        Tensor::from_fn(|indices| self[indices] - rhs[indices])
+impl<const N: usize, L: TensorLayout<N, 1>> IndexMut<usize> for Tensor<N, 1, L> {
+    fn index_mut(&mut self, index: usize) -> &mut Self::Output {
+        self.0.index_mut([index])
     }
 }
 
-impl<const N: usize, R: TensorRank<N>> Mul<f64> for Tensor<N, R> {
-    type Output = Tensor<N, R>;
+// ***********************************
+// Vector space structure ************
+// ***********************************
+
+impl<const N: usize, const RANK: usize, L: TensorLayout<N, RANK>> Add for Tensor<N, RANK, L> {
+    type Output = Tensor<N, RANK, L>;
+
+    fn add(self, rhs: Tensor<N, RANK, L>) -> Self::Output {
+        Tensor::from_fn(|index| self[index] + rhs[index])
+    }
+}
+
+impl<const N: usize, const RANK: usize, L: TensorLayout<N, RANK>> Sub for Tensor<N, RANK, L> {
+    type Output = Tensor<N, RANK, L>;
+
+    fn sub(self, rhs: Tensor<N, RANK, L>) -> Self::Output {
+        Tensor::from_fn(|index| self[index] - rhs[index])
+    }
+}
+
+impl<const N: usize, const RANK: usize, L: TensorLayout<N, RANK>> Mul<f64> for Tensor<N, RANK, L> {
+    type Output = Tensor<N, RANK, L>;
 
     fn mul(self, rhs: f64) -> Self::Output {
-        Tensor::from_fn(|indices| self[indices] * rhs)
+        Tensor::from_fn(|index| self[index] * rhs)
     }
 }
 
-impl<const N: usize, R: TensorRank<N>> Mul<Tensor<N, R>> for f64 {
-    type Output = Tensor<N, R>;
+impl<const N: usize, const RANK: usize, L: TensorLayout<N, RANK>> Mul<Tensor<N, RANK, L>> for f64 {
+    type Output = Tensor<N, RANK, L>;
 
-    fn mul(self, rhs: Tensor<N, R>) -> Self::Output {
-        Tensor::from_fn(|indices| rhs[indices] * self)
+    fn mul(self, rhs: Tensor<N, RANK, L>) -> Self::Output {
+        Tensor::from_fn(|index| self * rhs[index])
+    }
+}
+
+impl<const N: usize, const RANK: usize, L: TensorLayout<N, RANK>> Div<f64> for Tensor<N, RANK, L> {
+    type Output = Tensor<N, RANK, L>;
+
+    fn div(self, rhs: f64) -> Self::Output {
+        Tensor::from_fn(|index| self[index] / rhs)
     }
 }
 
 // *******************************
-// Tensor Products ***************
+// Full Layout *******************
 // *******************************
 
-pub trait TensorProd<const N: usize, Other: TensorRank<N>>: TensorRank<N> {
-    type Result: TensorRank<N>;
-
-    fn index_split(indices: <Self::Result as TensorRank<N>>::Idx) -> (Self::Idx, Other::Idx);
-    fn index_combine(this: Self::Idx, other: Other::Idx) -> <Self::Result as TensorRank<N>>::Idx;
-}
-
-impl<const N: usize, A: TensorRank<N>, B: TensorRank<N>> Mul<Tensor<N, B>> for Tensor<N, A>
-where
-    A: TensorProd<N, B>,
-{
-    type Output = Tensor<N, A::Result>;
-
-    fn mul(self, rhs: Tensor<N, B>) -> Self::Output {
-        Tensor::from_fn(|indices| {
-            let (l, r) = A::index_split(indices);
-            self[l] * rhs[r]
-        })
-    }
-}
-
-// ************************************
-// Static tensor rank *****************
-// ************************************
-
-#[derive(Clone)]
-pub struct Static<const RANK: usize>;
-
-impl<const N: usize> TensorRank<N> for Static<0> {
-    type Storage = f64;
-    type Idx = [usize; 0];
-
-    fn index(storage: &Self::Storage, _indices: [usize; 0]) -> &f64 {
-        storage
-    }
-
-    fn index_mut(storage: &mut Self::Storage, _indices: [usize; 0]) -> &mut f64 {
-        storage
-    }
-
-    fn zeros() -> Self::Storage {
-        0.0
-    }
-}
-
-macro_rules! StaticStorageTypeRec {
+macro_rules! FullLayoutType {
     ($head:literal $($rest:literal)*) => {
-        [StaticStorageTypeRec!($($rest)*);N]
+        [FullLayoutType!($($rest)*); N]
     };
     () => {
         f64
     };
 }
 
-macro_rules! static_storage_zeros {
+macro_rules! full_layout_zeros {
     ($head:literal $($rest:literal)*) => {
-        [static_storage_zeros!($($rest)*);N]
+        [full_layout_zeros!($($rest)*);N]
     };
     () => {
         0.0
     };
 }
 
-macro_rules! impl_static_rank {
+type Full0<const N: usize> = FullLayoutType!();
+type Full1<const N: usize> = FullLayoutType!(0);
+type Full2<const N: usize> = FullLayoutType!(0 1);
+type Full3<const N: usize> = FullLayoutType!(0 1 2);
+type Full4<const N: usize> = FullLayoutType!(0 1 2 3);
+type Full5<const N: usize> = FullLayoutType!(0 1 2 3 4);
+type Full6<const N: usize> = FullLayoutType!(0 1 2 3 4 5);
+
+macro_rules! impl_full_layout {
     ($rank:literal | $($i:literal)*) => {
-        impl<const N: usize> TensorRank<N> for Static<$rank>  {
-            type Storage = StaticStorageTypeRec!($($i)*);
-            type Idx = [usize; $rank];
-
-
-            fn index(storage: &Self::Storage, indices: [usize; $rank]) -> &f64 {
-                &storage$([indices[$i]])*
+        impl<const N: usize> TensorLayout<N, $rank> for FullLayoutType!($($i)*) {
+            fn index(&self, indices: [usize; $rank]) -> &f64 {
+                &*self$([indices[$i]])*
             }
 
-            fn index_mut(storage: &mut Self::Storage, indices: [usize; $rank]) -> &mut f64 {
-                &mut storage$([indices[$i]])*
+            fn index_mut(&mut self, indices: [usize; $rank]) -> &mut f64 {
+                &mut *self$([indices[$i]])*
             }
 
-            fn zeros() -> Self::Storage {
-                static_storage_zeros! { $($i)* }
+            fn zeros() -> Self {
+                full_layout_zeros!($($i)*)
             }
         }
     };
 }
 
-impl_static_rank! { 1 | 0 }
-impl_static_rank! { 2 | 0 1 }
-impl_static_rank! { 3 | 0 1 2 }
-impl_static_rank! { 4 | 0 1 2 3 }
-impl_static_rank! { 5 | 0 1 2 3 4 }
-impl_static_rank! { 6 | 0 1 2 3 4 5 }
+impl_full_layout! { 0 | }
+impl_full_layout! { 1 | 0 }
+impl_full_layout! { 2 | 0 1 }
+impl_full_layout! { 3 | 0 1 2 }
+impl_full_layout! { 4 | 0 1 2 3 }
+impl_full_layout! { 5 | 0 1 2 3 4 }
 
-impl<const N: usize, Other: TensorRank<N>> TensorProd<N, Other> for Static<0> {
-    type Result = Other;
+// ************************************
+// Tensor Products ********************
+// ************************************
 
-    fn index_split(
-        indices: <Self::Result as TensorRank<N>>::Idx,
-    ) -> (Self::Idx, <Other as TensorRank<N>>::Idx) {
-        ([], indices)
-    }
-
-    fn index_combine(
-        _this: Self::Idx,
-        other: <Other as TensorRank<N>>::Idx,
-    ) -> <Self::Result as TensorRank<N>>::Idx {
-        other
-    }
-}
-
-macro_rules! impl_static_prod {
-    ($($i:literal)+ | $($j:literal)+) => {
-
+macro_rules! impl_full_product {
+    ($lrank:literal $rrank:literal : $($i:literal)* times $($j:literal)*) => {
         paste! {
-            const [<I_RANK_ $($i)+ _ $($j)+>]: usize = ::aeon_tensor::count_repetitions!($($i)+);
-            const [<J_RANK_ $($i)+ _ $($j)+>]: usize = ::aeon_tensor::count_repetitions!($($j)+);
-            const [<K_RANK_ $($i)+ _ $($j)+>]: usize = [<I_RANK_ $($i)+ _ $($j)+>] +  [<J_RANK_ $($i)+ _ $($j)+>];
+            const [<RES_RANK_ $lrank _ $rrank>]: usize = ::aeon_tensor::count_repetitions!($($i)* $($j)*);
 
-            impl<const N: usize> TensorProd<N, Static<[<J_RANK_ $($i)+ _ $($j)+>]>> for Static<[<I_RANK_ $($i)+ _ $($j)+>]> {
-                type Result = Static<[<K_RANK_ $($i)+ _ $($j)+>]>;
+            impl<const N: usize> Mul<Tensor<N, $rrank, FullLayoutType!($($j)*)>> for Tensor<N, $lrank, FullLayoutType!($($i)* $($j)*)> {
+                type Output = Tensor<N, [<RES_RANK_ $lrank _ $rrank>], FullLayoutType!($($i)* $($j)*)>;
 
-                fn index_split(
-                    indices: [usize; [<K_RANK_ $($i)+ _ $($j)+>]],
-                ) -> ([usize; [<I_RANK_ $($i)+ _ $($j)+>]], [usize; [<J_RANK_ $($i)+ _ $($j)+>]]) {
-                    const I_RANK: usize = [<I_RANK_ $($i)+ _ $($j)+>];
-                    ([$(indices[$i],)+], [$(indices[I_RANK + $j],)+])
-                }
+                fn mul(self, rhs: Tensor<N, $rrank, FullLayoutType!($($j)*)>) -> Self::Output {
+                    Tensor::from_fn(|index| {
+                        let lindex: [usize; $lrank] = array::from_fn(|i| index[i]);
+                        let rindex: [usize; $rrank] = array::from_fn(|i| index[$lrank + i]);
 
-                fn index_combine(this: [usize; [<I_RANK_ $($i)+ _ $($j)+>]], other: [usize; [<J_RANK_ $($i)+ _ $($j)+>]]) -> [usize; [<K_RANK_ $($i)+ _ $($j)+>]] {
-                    [$(this[$i],)+ $(other[$j]),+]
+                        self[lindex] * rhs[rindex]
+                    })
                 }
             }
         }
@@ -320,60 +231,89 @@ macro_rules! impl_static_prod {
     };
 }
 
-macro_rules! impl_static_prods {
-    ($($i:literal)+ | $head:literal $($rest:literal)+) => {
-        impl_static_prods! { $($i)+ | $head | $($rest)+ }
+macro_rules! impl_full_products {
+    ($lhead:literal $($llist:literal)+ times $rhead:literal $($rlist:literal)+) => {
+        impl_full_product! { $lhead $rhead : $($llist)+ times $($rlist)+ }
+        impl_full_products! { $lhead $($llist)+ times $($rlist)+ }
     };
-    ($($i:literal)+ | $head:literal) => {
-        impl_static_prod! { $($i)+ | $head }
+    ($lhead:literal $($llist:literal)+ times $rhead:literal) => {
+        impl_full_product! { $lhead $rhead : $($llist)+ times }
     };
-
-    ($($i:literal)+ | $($front:literal)* | $current:literal $($back:literal)+) => {
-        impl_static_prods! { $($i)+ | $($front)* $current | $($back)+}
+    ($lhead:literal times $rhead:literal $($rlist:literal)+) => {
+        impl_full_product! { $lhead $rhead : times $($rlist)+}
     };
-    ($($i:literal)+ | $($front:literal)* | $tail:literal) => {
-        impl_static_prod! { $($i)+ | $($front)+ $tail }
-        impl_static_prods! { $($i)+ | $($front)+ }
+    ($lhead:literal times $rhead:literal) => {
+        impl_full_product! { $lhead $rhead : times }
     };
-    ($($i:literal)+ |)  => {};
 }
 
-impl_static_prods! {0 | 0 1 2 3 4}
-impl_static_prods! {0 1 | 0 1 2 3}
-impl_static_prods! {0 1 2 | 0 1 2}
-impl_static_prods! {0 1 2 3 | 0 1}
-impl_static_prods! {0 1 2 3 4 | 0}
+impl_full_products! { 4 3 2 1 0 times 2 1 0}
+impl_full_products! { 3 2 1 0 times 3 2 1 0}
+impl_full_products! { 2 1 0 times 4 3 2 1 0}
+impl_full_products! { 1 0 times 5 4 3 2 1 0}
+impl_full_products! { 0 times 6 5 4 3 2 1 0}
 
-pub type Tensor0<const N: usize> = Tensor<N, Static<0>>;
-pub type Tensor1<const N: usize> = Tensor<N, Static<1>>;
-pub type Tensor2<const N: usize> = Tensor<N, Static<2>>;
-pub type Tensor3<const N: usize> = Tensor<N, Static<3>>;
-pub type Tensor4<const N: usize> = Tensor<N, Static<4>>;
+// ***************************************
+// Aliases *******************************
+// ***************************************
 
-impl<const N: usize, R: TensorRank<N>> Tensor<N, R> {
-    pub fn contract<Output: TensorRank<N>, const O: usize>(
+pub type Scalar<const N: usize> = Tensor<N, 0, f64>;
+pub type Vector<const N: usize> = Tensor<N, 1, Full1<N>>;
+pub type Matrix<const N: usize> = Tensor<N, 2, Full2<N>>;
+pub type Tensor3<const N: usize> = Tensor<N, 3, Full3<N>>;
+pub type Tensor4<const N: usize> = Tensor<N, 4, Full3<N>>;
+
+impl<const N: usize, L: TensorLayout<N, 2>> Tensor<N, 2, L> {
+    pub fn trace<const ORANK: usize, O: TensorLayout<N, ORANK>>(&self) -> Tensor<N, ORANK, O> {
+        let mut result = 0.0;
+
+        for axis in 0..N {
+            result += self[[axis, axis]]
+        }
+
+        result
+    }
+}
+
+impl<const N: usize, const RANK: usize, L: TensorLayout<N, RANK>> Tensor<N, RANK, L> {
+    pub fn contract<const ORANK: usize, O: TensorLayout<N, ORANK>>(
         &self,
-        f: impl Fn(Output::Idx, [usize; O]) -> R::Idx,
-    ) -> Tensor<N, Output> {
-        Tensor::from_fn(|index| {
+        a: usize,
+        b: usize,
+    ) -> Tensor<N, ORANK, O> {
+        const {
+            assert!(RANK == ORANK + 2);
+        }
+        assert!(a < RANK);
+        assert!(b < RANK);
+        assert!(a != b);
+
+        Tensor::from_fn(|oindex| {
             let mut result = 0.0;
 
-            for sum in <[usize; O] as TensorIndex<N>>::enumerate() {
-                let r = f(index, sum);
-                result += self[r];
+            let mut index = [0; RANK];
+
+            let mut i = 0;
+            while i < a && i < b {
+                index[i] = oindex[i];
+                i += 1;
             }
 
-            result
-        })
-    }
+            while i < a || i < b {
+                index[i + 1] = oindex[i];
+                i += 1;
+            }
 
-    /// Forms a tensor of rank `R` by contracting over indices of the form `[N, O]`.
-    pub fn from_contract<const O: usize>(f: impl Fn(R::Idx, [usize; O]) -> f64) -> Self {
-        Self::from_fn(|index| {
-            let mut result = 0.0;
+            while i < RANK {
+                index[i + 2] = oindex[i];
+                i += 1;
+            }
 
-            for sum in <[usize; O] as TensorIndex<N>>::enumerate() {
-                result += f(index, sum);
+            for axis in 0..N {
+                index[a] = axis;
+                index[b] = axis;
+
+                result += self[index];
             }
 
             result
@@ -384,23 +324,17 @@ impl<const N: usize, R: TensorRank<N>> Tensor<N, R> {
 pub struct Space<const N: usize>;
 
 impl<const N: usize> Space<N> {
-    pub fn tensor<const R: usize>(&self, f: impl Fn([usize; R]) -> f64) -> Tensor<N, Static<R>>
-    where
-        Static<R>: TensorRank<N, Idx = [usize; R]>,
-    {
-        Tensor::from_fn(|index| f(index))
-    }
-
-    pub fn vector(&self, f: impl Fn(usize) -> f64) -> Tensor<N, Static<1>> {
-        Tensor::from_fn(|[i]: [usize; 1]| f(i))
+    pub fn vector(&self, f: impl Fn(usize) -> f64) -> Vector<N> {
+        Vector::from_fn(|[i]: [usize; 1]| f(i))
     }
 
     pub fn sum<const R: usize>(&self, f: impl Fn([usize; R]) -> f64) -> f64 {
         let mut result = 0.0;
 
-        for i in <[usize; R] as TensorIndex<N>>::enumerate() {
+        for_each_index::<N, R>(|i| {
             result += f(i);
-        }
+        });
+
         result
     }
 }
@@ -416,5 +350,26 @@ macro_rules! count_repetitions {
     };
     () => {
         0usize
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn tensor_indices() {
+        let mut indices = Vec::new();
+        for_each_index::<3, 2>(|i| indices.push(i));
+
+        assert_eq!(indices[0], [0, 0]);
+        assert_eq!(indices[1], [1, 0]);
+        assert_eq!(indices[2], [2, 0]);
+        assert_eq!(indices[3], [0, 1]);
+        assert_eq!(indices[4], [1, 1]);
+        assert_eq!(indices[5], [2, 1]);
+        assert_eq!(indices[6], [0, 2]);
+        assert_eq!(indices[7], [1, 2]);
+        assert_eq!(indices[8], [2, 2]);
     }
 }

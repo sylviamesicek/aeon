@@ -148,17 +148,16 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
         let mut flags = vec![0; mesh.num_nodes()];
         mesh.flags_debug(&mut flags);
 
-        let mut systems = SystemCheckpoint::default();
-        systems.save_field("Wave", system.contigious());
-        systems.save_int_field("Flags", &flags);
+        let mut checkpoint = SystemCheckpoint::default();
+        checkpoint.save_field("Wave", system.contigious());
+        checkpoint.save_int_field("Flags", &flags);
 
-        let path = format!("output/waves/initial{i}.vtu");
         mesh.export_vtu(
-            path.as_str(),
+            format!("output/waves/initial{i}.vtu"),
+            &checkpoint,
             ExportVtuConfig {
                 title: "Initial Wave Mesh".to_string(),
                 ghost: false,
-                systems,
             },
         )?;
 
@@ -236,37 +235,6 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
 
             mesh.balance_flags();
 
-            // // Output current system to disk
-            // let mut systems = SystemCheckpoint::default();
-            // systems.save_field("Wave", system.contigious());
-            // systems.save_field("Analytic", exact.contigious());
-            // systems.save_field("Error", error.contigious());
-
-            // let mut flags = vec![0; mesh.num_nodes()];
-            // mesh.flags_debug(&mut flags);
-
-            // mesh.balance_flags();
-
-            // let mut bflags = vec![0; mesh.num_nodes()];
-            // mesh.flags_debug(&mut bflags);
-
-            // systems.save_int_field("Flags", &mut flags);
-            // systems.save_int_field("Balanced Flags", &mut bflags);
-
-            // let mut blocks = vec![0; mesh.num_nodes()];
-            // mesh.block_debug(&mut blocks);
-            // systems.save_int_field("Blocks", &mut blocks);
-
-            // mesh.export_vtu(
-            //     format!("output/waves/regrid{regrid_save_step}.vtu"),
-            //     ExportVtuConfig {
-            //         title: "Rergrid Wave".to_string(),
-            //         ghost: false,
-            //         systems,
-            //     },
-            // )
-            // .unwrap();
-
             let num_refine = mesh.num_refine_cells();
             let num_coarsen = mesh.num_coarsen_cells();
 
@@ -300,25 +268,25 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
                 mesh.num_nodes()
             );
             // Output current system to disk
-            let mut systems = SystemCheckpoint::default();
-            systems.save_field("Wave", system.contigious());
-            systems.save_field("Analytic", exact.contigious());
-            systems.save_field("Error", error.contigious());
+            let mut checkpoint = SystemCheckpoint::default();
+            checkpoint.save_field("Wave", system.contigious());
+            checkpoint.save_field("Analytic", exact.contigious());
+            checkpoint.save_field("Error", error.contigious());
 
             let mut blocks = vec![0; mesh.num_nodes()];
             mesh.block_debug(&mut blocks);
-            systems.save_int_field("Blocks", &mut blocks);
+            checkpoint.save_int_field("Blocks", &mut blocks);
 
             let mut interfaces = vec![0; mesh.num_nodes()];
             mesh.interface_index_debug(3, &mut interfaces);
-            systems.save_int_field("Interfaces", &mut interfaces);
+            checkpoint.save_int_field("Interfaces", &mut interfaces);
 
             mesh.export_vtu(
                 format!("output/waves/evolution{save_step}.vtu"),
+                &checkpoint,
                 ExportVtuConfig {
                     title: "evbrill".to_string(),
                     ghost: false,
-                    systems,
                 },
             )
             .unwrap();

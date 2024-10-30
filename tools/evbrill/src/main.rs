@@ -401,35 +401,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             mesh.set_regrid_level_limit(MAX_LEVEL);
             mesh.balance_flags();
 
-            // // Output current system to disk
-            // let mut systems = SystemCheckpoint::default();
-            // systems.save_system(dynamic.as_slice());
-
-            // let mut flags = vec![0; mesh.num_nodes()];
-            // mesh.flags_debug(&mut flags);
-
-            // mesh.balance_flags();
-
-            // let mut bflags = vec![0; mesh.num_nodes()];
-            // mesh.flags_debug(&mut bflags);
-
-            // systems.save_int_field("Flags", &mut flags);
-            // systems.save_int_field("Balanced Flags", &mut bflags);
-
-            // let mut blocks = vec![0; mesh.num_nodes()];
-            // mesh.block_debug(&mut blocks);
-            // systems.save_int_field("Blocks", &mut blocks);
-
-            // mesh.export_vtu(
-            //     format!("output/evbrill/regrid{regrid_save_step}.vtu"),
-            //     ExportVtuConfig {
-            //         title: "Rergrid Wave".to_string(),
-            //         ghost: false,
-            //         systems,
-            //     },
-            // )
-            // .unwrap();
-
             let num_refine = mesh.num_refine_cells();
             let num_coarsen = mesh.num_coarsen_cells();
 
@@ -471,16 +442,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let mut systems = SystemCheckpoint::default();
             systems.save_system(dynamic.as_slice());
 
-            // let mut blocks = vec![0; mesh.num_nodes()];
-            // mesh.block_debug(&mut blocks);
-            // systems.save_int_field("Blocks", &mut blocks);
-
             mesh.export_vtu(
                 format!("output/evbrill/super{save_step}.vtu"),
+                &systems,
                 ExportVtuConfig {
                     title: "evbrill".to_string(),
                     ghost: false,
-                    systems,
                 },
             )
             .unwrap();

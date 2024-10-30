@@ -167,35 +167,35 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let mut blocks = vec![0; mesh.num_nodes()];
         mesh.block_debug(&mut blocks);
 
-        let mut systems = SystemCheckpoint::default();
-        systems.save_system(rinne.as_slice());
-        systems.save_field("hamiltonian", &hamiltonian);
+        let mut checkpoint = SystemCheckpoint::default();
+        checkpoint.save_system(rinne.as_slice());
+        checkpoint.save_field("hamiltonian", &hamiltonian);
 
-        systems.save_int_field("interface", &interfaces);
-        systems.save_int_field("interface_neighbors", &interface_neighbors);
-        systems.save_int_field("blocks", &blocks);
+        checkpoint.save_int_field("interface", &interfaces);
+        checkpoint.save_int_field("interface_neighbors", &interface_neighbors);
+        checkpoint.save_int_field("blocks", &blocks);
 
         if CHOPTUIK {
             mesh.export_vtu(
                 format!("output/idbrill/choptuik{r}.vtu"),
+                &checkpoint,
                 ExportVtuConfig {
                     title: "idbrill".to_string(),
                     ghost: crate::GHOST,
-                    systems: systems.clone(),
                 },
             )?;
         } else {
             mesh.export_vtu(
                 format!("output/idbrill/garfinkle{r}.vtu"),
+                &checkpoint,
                 ExportVtuConfig {
                     title: "idbrill".to_string(),
                     ghost: crate::GHOST,
-                    systems: systems.clone(),
                 },
             )?;
         }
 
-        mesh.export_dat(format!("output/idbrill/level{r}.dat"), &systems)?;
+        mesh.export_dat(format!("output/idbrill/level{r}.dat"), &checkpoint)?;
 
         if mesh.requires_regridding() {
             transfer.resize(mesh.num_nodes());
@@ -207,67 +207,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             mesh.transfer_system(ORDER, Quadrant, transfer.as_slice(), rinne.as_mut_slice());
         } else {
             log::info!("Sucessfully refined mesh to prescribed accuracy");
-            mesh.export_dat(format!("output/super.dat"), &systems)?;
+            mesh.export_dat(format!("output/super.dat"), &checkpoint)?;
             break;
         }
     }
-
-    // let mut debug = String::new();
-    // mesh.write_debug(&mut debug);
-
-    // std::fs::write("output/mesh.txt", debug).unwrap();
-
-    // println!("Num Blocks: {}", mesh.num_blocks());
-    // println!("Num Cells: {}", mesh.num_cells());
-
-    // let mut rinne = SystemVec::with_length(mesh.num_nodes());
-    // let mut hamiltonian = vec![0.0; mesh.num_nodes()].into_boxed_slice();
-
-    // if CHOPTUIK {
-    //     choptuik::solve(&mut mesh, 4.0, rinne.as_mut_slice(), &mut hamiltonian)?;
-    // } else {
-    //     garfinkle::solve(
-    //         &mut mesh,
-    //         4.0,
-    //         50000,
-    //         rinne.as_mut_slice(),
-    //         &mut hamiltonian,
-    //     )?;
-    // }
-
-    // mesh.fill_boundary(ORDER, Quadrant, RinneConditions, rinne.as_mut_slice());
-    // mesh.fill_boundary(
-    //     ORDER,
-    //     Quadrant,
-    //     HAMILTONIAN_CONDITIONS,
-    //     hamiltonian.as_mut().into(),
-    // );
-
-    // let mut systems = SystemCheckpoint::default();
-    // systems.save_system(rinne.as_slice());
-    // systems.save_field("hamiltonian", &hamiltonian);
-
-    // if CHOPTUIK {
-    //     mesh.export_vtk(
-    //         format!("output/choptuik.vtu"),
-    //         ExportVtkConfig {
-    //             title: "idbrill".to_string(),
-    //             ghost: crate::GHOST,
-    //             systems: systems.clone(),
-    //         },
-    //     )?;
-    // } else {
-    //     mesh.export_vtk(
-    //         format!("output/garfinkle.vtu"),
-    //         ExportVtkConfig {
-    //             title: "idbrill".to_string(),
-    //             ghost: crate::GHOST,
-    //             systems: systems.clone(),
-    //         },
-    //     )?;
-    // }
-
-    // log::warn!("Min Spacing {}", mesh.min_spacing());
 
     Ok(())
 }

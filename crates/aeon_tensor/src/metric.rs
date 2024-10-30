@@ -1,18 +1,15 @@
-use crate::{
-    lie_derivative, Space, Static, Tensor, Tensor0, Tensor1, Tensor2, Tensor3, Tensor4,
-    TensorFieldC1, TensorFieldC2, TensorIndex, TensorProd, TensorRank,
-};
+use crate::{Matrix, MatrixFieldC2, Space, Tensor, Tensor3, Tensor4, Vector, VectorFieldC1};
 
 #[derive(Default, Clone)]
 pub struct Metric<const N: usize> {
-    g: Tensor2<N>,
+    g: Matrix<N>,
     g_derivs: Tensor3<N>,
     g_second_derivs: Tensor4<N>,
 
     gdet: f64,
-    gdet_derivs: Tensor1<N>,
+    gdet_derivs: Vector<N>,
 
-    ginv: Tensor2<N>,
+    ginv: Matrix<N>,
     ginv_derivs: Tensor3<N>,
 
     gamma: Tensor3<N>,
@@ -23,32 +20,32 @@ pub struct Metric<const N: usize> {
 }
 
 impl Metric<2> {
-    pub fn new(g: TensorFieldC2<2, Static<2>>) -> Self {
+    pub fn new(g: MatrixFieldC2<2>) -> Self {
         // Compute determinant and its derivatives.
         let gdet = g.value[[0, 0]] * g.value[[1, 1]] - g.value[[0, 1]] * g.value[[1, 0]];
-        let gdet_derivs = Tensor1::from_fn(|[i]| {
+        let gdet_derivs = Vector::from_fn(|[i]| {
             g.value[[0, 0]] * g.derivs[[1, 1, i]] + g.derivs[[0, 0, i]] * g.value[[1, 1]]
                 - g.derivs[[0, 1, i]] * g.value[[1, 0]]
                 - g.value[[0, 1]] * g.derivs[[1, 0, i]]
         });
 
         // Compute inverse and its derivatives
-        let ginv = Tensor2::from_storage([
+        let ginv = Matrix::from([
             [g.value[[1, 1]] / gdet, -g.value[[1, 0]] / gdet],
             [-g.value[[0, 1]] / gdet, g.value[[0, 0]] / gdet],
         ]);
-        let ginv_derivs = Tensor3::from_storage({
-            let grr_inv_derivs = Tensor1::from_fn(|[i]| {
+        let ginv_derivs = Tensor3::from_fn({
+            let grr_inv_derivs = Vector::from_fn(|[i]| {
                 g.derivs[[1, 1, i]] / gdet - g.value[[1, 1]] / (gdet * gdet) * gdet_derivs[[i]]
             })
             .into_storage();
 
-            let grz_inv_derivs = Tensor1::from_fn(|[i]| {
+            let grz_inv_derivs = Vector::from_fn(|[i]| {
                 -g.derivs[[0, 1, i]] / gdet + g.value[[0, 1]] / (gdet * gdet) * gdet_derivs[[i]]
             })
             .into_storage();
 
-            let gzz_inv_derivs = Tensor1::from_fn(|[i]| {
+            let gzz_inv_derivs = Vector::from_fn(|[i]| {
                 g.derivs[[0, 0, i]] / gdet - g.value[[0, 0]] / (gdet * gdet) * gdet_derivs[[i]]
             })
             .into_storage();
@@ -102,7 +99,7 @@ impl<const N: usize> Metric<N> {
         });
     }
 
-    pub fn value(&self) -> &Tensor2<N> {
+    pub fn value(&self) -> &Matrix<N> {
         &self.g
     }
 
@@ -114,7 +111,7 @@ impl<const N: usize> Metric<N> {
         &self.g_second_derivs
     }
 
-    pub fn inv(&self) -> &Tensor2<N> {
+    pub fn inv(&self) -> &Matrix<N> {
         &self.ginv
     }
 
@@ -126,7 +123,7 @@ impl<const N: usize> Metric<N> {
         self.gdet
     }
 
-    pub fn det_derivs(&self) -> &Tensor1<N> {
+    pub fn det_derivs(&self) -> &Matrix<N> {
         &self.gdet_derivs
     }
 
@@ -136,24 +133,22 @@ impl<const N: usize> Metric<N> {
     }
 
     // Computes killing's equation for the given vector field.
-    pub fn killing(&self, vector: TensorFieldC1<N, Static<1>>) -> Tensor2<N> {
-        lie_derivative(
-            vector,
-            TensorFieldC2 {
-                value: self.g.clone(),
-                derivs: self.g_derivs.clone(),
-                second_derivs: self.g_second_derivs.clone(),
-            },
-        )
+    pub fn killing(&self, vector: VectorFieldC1<N>) -> Matrix<N> {
+        MatrixFieldC2 {
+            value: self.g.clone(),
+            derivs: self.g_derivs.clone(),
+            second_derivs: self.g_second_derivs.clone(),
+        }
+        .lie_derivative(vector)
     }
 
     /// Computes the ricci tensor for the given metric.
-    pub fn ricci(&self) -> Tensor2<N> {
-        let term1 = Tensor2::from_contract(|[i, j], [m]| {
+    pub fn ricci(&self) -> Matrix<N> {
+        let term1 = Matrix::from_contract(|[i, j], [m]| {
             self.gamma_2nd_derivs[[m, i, j, m]] - self.gamma_2nd_derivs[[m, m, i, j]]
         });
 
-        let term2 = Tensor2::from_contract(|[i, j], [m, n]| {
+        let term2 = Matrix::from_contract(|[i, j], [m, n]| {
             self.gamma_2nd[[m, m, n]] * self.gamma_2nd[[n, i, j]]
                 - self.gamma_2nd[[m, i, n]] * self.gamma_2nd[[n, m, j]]
         });

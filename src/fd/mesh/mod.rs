@@ -9,6 +9,7 @@ use aeon_basis::{Boundary, BoundaryKind, NodeSpace, NodeWindow};
 use aeon_geometry::{
     faces, AxisMask, FaceMask, IndexSpace, Rectangle, Tree, TreeBlocks, TreeNeighbors,
 };
+use num_traits::ToPrimitive;
 use rayon::iter::{IntoParallelIterator, ParallelBridge, ParallelIterator};
 use ron::ser::PrettyConfig;
 use std::{
@@ -903,7 +904,6 @@ impl<const N: usize> Default for Mesh<N> {
 pub struct ExportVtuConfig {
     pub title: String,
     pub ghost: bool,
-    pub systems: SystemCheckpoint,
 }
 
 impl Default for ExportVtuConfig {
@@ -911,19 +911,22 @@ impl Default for ExportVtuConfig {
         Self {
             ghost: false,
             title: String::new(),
-            systems: SystemCheckpoint::default(),
         }
     }
 }
 
 impl<const N: usize> Mesh<N> {
     /// Exports a copy of the mesh and associated fields to disk, stored as a dat file.
-    pub fn export_dat(&self, path: impl AsRef<Path>, systems: &SystemCheckpoint) -> io::Result<()> {
-        let mut checkpoint = MeshCheckpoint::default();
-        checkpoint.save_mesh(self);
+    pub fn export_dat(
+        &self,
+        path: impl AsRef<Path>,
+        checkpoint: &SystemCheckpoint,
+    ) -> io::Result<()> {
+        let mut grid = MeshCheckpoint::default();
+        grid.save_mesh(self);
 
         let data = ron::ser::to_string_pretty::<(MeshCheckpoint<N>, SystemCheckpoint)>(
-            &(checkpoint, systems.clone()),
+            &(grid, checkpoint.clone()),
             PrettyConfig::default(),
         )
         .map_err(|err| io::Error::other(err))?;
@@ -941,18 +944,23 @@ impl<const N: usize> Mesh<N> {
         let mut file = File::open(path)?;
         file.read_to_string(&mut contents)?;
 
-        let (mesh, system): (MeshCheckpoint<N>, SystemCheckpoint) =
+        let (grid, checkpoint): (MeshCheckpoint<N>, SystemCheckpoint) =
             ron::from_str(&contents).map_err(io::Error::other)?;
 
-        mesh.load_mesh(self);
-        systems.clone_from(&system);
+        grid.load_mesh(self);
+        systems.clone_from(&checkpoint);
 
         Ok(())
     }
 
     /// Exports the mesh and additional field data to a .vtu files, for visualisation in applications like
     /// Paraview.
-    pub fn export_vtu(&self, path: impl AsRef<Path>, config: ExportVtuConfig) -> io::Result<()> {
+    pub fn export_vtu(
+        &self,
+        path: impl AsRef<Path>,
+        checkpoint: &SystemCheckpoint,
+        config: ExportVtuConfig,
+    ) -> io::Result<()> {
         const {
             assert!(N > 0 && N <= 2, "Vtu Output only supported for 0 < N ≤ 2");
         }
@@ -1054,100 +1062,33 @@ impl<const N: usize> Mesh<N> {
             cell: Vec::new(),
         };
 
-        for (name, system) in config.systems.systems.iter() {
+        for (name, system) in checkpoint.systems.iter() {
             for (idx, field) in system.fields.iter().enumerate() {
                 let start = idx * system.count;
                 let end = idx * system.count + system.count;
 
-                let field_data = &system.data[start..end];
-
-                let mut data = Vec::new();
-
-                for block in 0..self.blocks.len() {
-                    let space = self.block_space(block);
-                    let nodes = self.block_nodes(block);
-                    let window = if config.ghost {
-                        space.full_window()
-                    } else {
-                        space.inner_window()
-                    };
-
-                    for node in window {
-                        let index = space.index_from_node(node);
-                        let value = field_data[nodes.start + index];
-                        data.push(value);
-                    }
-                }
-
-                attributes.point.push(Attribute::DataArray(DataArrayBase {
-                    name: format!("{}::{}", name, field),
-                    elem: ElementType::Scalars {
-                        num_comp: 1,
-                        lookup_table: None,
-                    },
-                    data: IOBuffer::new(data),
-                }));
+                attributes.point.push(self.field_attribute(
+                    format!("{}::{}", name, field),
+                    &system.data[start..end],
+                    config.ghost,
+                ));
             }
         }
 
-        for (name, system) in config.systems.fields.iter() {
-            let mut data = Vec::new();
-
-            for block in 0..self.blocks.len() {
-                let space = self.block_space(block);
-                let nodes = self.block_nodes(block);
-
-                let window = if config.ghost {
-                    space.full_window()
-                } else {
-                    space.inner_window()
-                };
-
-                for node in window {
-                    let index = space.index_from_node(node);
-                    let value = system[nodes.start + index];
-                    data.push(value);
-                }
-            }
-
-            attributes.point.push(Attribute::DataArray(DataArrayBase {
-                name: format!("Field::{}", name),
-                elem: ElementType::Scalars {
-                    num_comp: 1,
-                    lookup_table: None,
-                },
-                data: IOBuffer::new(data),
-            }));
+        for (name, system) in checkpoint.fields.iter() {
+            attributes.point.push(self.field_attribute(
+                format!("Field::{}", name),
+                system,
+                config.ghost,
+            ));
         }
 
-        for (name, system) in config.systems.int_fields.iter() {
-            let mut data = Vec::new();
-
-            for block in 0..self.blocks.len() {
-                let space = self.block_space(block);
-                let nodes = self.block_nodes(block);
-
-                let window = if config.ghost {
-                    space.full_window()
-                } else {
-                    space.inner_window()
-                };
-
-                for node in window {
-                    let index = space.index_from_node(node);
-                    let value = system[nodes.start + index];
-                    data.push(value);
-                }
-            }
-
-            attributes.point.push(Attribute::DataArray(DataArrayBase {
-                name: format!("IntField::{}", name),
-                elem: ElementType::Scalars {
-                    num_comp: 1,
-                    lookup_table: None,
-                },
-                data: IOBuffer::new(data),
-            }));
+        for (name, system) in checkpoint.int_fields.iter() {
+            attributes.point.push(self.field_attribute(
+                format!("IntField::{}", name),
+                system,
+                config.ghost,
+            ));
         }
 
         let piece = UnstructuredGridPiece {
@@ -1173,5 +1114,39 @@ impl<const N: usize> Mesh<N> {
         })?;
 
         Ok(())
+    }
+
+    fn field_attribute<T: ToPrimitive + Copy + 'static>(
+        &self,
+        name: String,
+        data: &[T],
+        ghost: bool,
+    ) -> Attribute {
+        let mut buffer = Vec::new();
+
+        for block in 0..self.blocks.len() {
+            let space = self.block_space(block);
+            let nodes = self.block_nodes(block);
+            let window = if ghost {
+                space.full_window()
+            } else {
+                space.inner_window()
+            };
+
+            for node in window {
+                let index = space.index_from_node(node);
+                let value = data[nodes.start + index];
+                buffer.push(value);
+            }
+        }
+
+        Attribute::DataArray(DataArrayBase {
+            name,
+            elem: ElementType::Scalars {
+                num_comp: 1,
+                lookup_table: None,
+            },
+            data: IOBuffer::new(buffer),
+        })
     }
 }

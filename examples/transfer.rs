@@ -88,10 +88,10 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
         let path = format!("output/transfer/iteration{i}.vtu");
         mesh.export_vtu(
             path.as_str(),
+            &systems,
             ExportVtuConfig {
                 title: "Initial Wave Mesh".to_string(),
                 ghost: false,
-                systems,
             },
         )?;
 

@@ -119,10 +119,10 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         mesh.export_vtu(
             format!("output/wamr/wamr{i}.vtu"),
+            &systems,
             ExportVtuConfig {
                 title: "WAMR".to_string(),
                 ghost: false,
-                systems,
             },
         )?;
 

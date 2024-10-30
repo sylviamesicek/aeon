@@ -152,21 +152,21 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         mesh.flag_wavelets(4, 0.0, 1e-6, Quadrant, rinne.as_slice());
         mesh.balance_flags();
 
-        let mut systems = SystemCheckpoint::default();
-        systems.save_meta("MASS", &MASS.to_string());
-        systems.save_system(rinne.as_slice());
-        systems.save_field("hamiltonian", &hamiltonian);
+        let mut checkpoint = SystemCheckpoint::default();
+        checkpoint.save_meta("MASS", &MASS.to_string());
+        checkpoint.save_system(rinne.as_slice());
+        checkpoint.save_field("hamiltonian", &hamiltonian);
 
         mesh.export_vtu(
             format!("output/idscalar/ellipticmasslesssec{r}.vtu"),
+            &checkpoint,
             ExportVtuConfig {
                 title: "idscalar".to_string(),
                 ghost: crate::GHOST,
-                systems: systems.clone(),
             },
         )?;
 
-        mesh.export_dat(format!("output/idscalar/level{r}.dat"), &systems)?;
+        mesh.export_dat(format!("output/idscalar/level{r}.dat"), &checkpoint)?;
 
         if mesh.requires_regridding() {
             transfer.resize(mesh.num_nodes());
@@ -178,7 +178,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             mesh.transfer_system(ORDER, Quadrant, transfer.as_slice(), rinne.as_mut_slice());
         } else {
             log::info!("Sucessfully refined mesh to prescribed accuracy");
-            mesh.export_dat(format!("output/ellipticmasslesssec.dat"), &systems)?;
+            mesh.export_dat(format!("output/ellipticmasslesssec.dat"), &checkpoint)?;
             break;
         }
     }

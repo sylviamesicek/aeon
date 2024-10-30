@@ -8,18 +8,15 @@ To reach the state of minimum viable product (MVP) the following feature(s) must
 
 - [x] Stencil application.
 - [x] Strong boundary condition API.
-- [ ] Weakly enforced (i.e. outgoing) boundary condition API.
+- [x] Weakly enforced (i.e. outgoing) boundary condition API.
 - [x] SystemSlices and values API with reborrowing and a convenient interface for uncoupled systems.
-- [ ] Refinement and Coarsening API
+- [x] Refinement and Coarsening API
     - [x] Refinement flags and balancing
-    - [ ] Coarsening flags and balancing
-    - [ ] Transfer between amr runs.
+    - [x] Coarsening flags and balancing
+    - [x] Transfer between amr runs.
 - [x] Ghost node filling
     - [x] Copying and injection
     - [x] Prolongation
-- [x] Linear iterative solvers.
-    - [x] BiCGStab
-    - [ ] BiCGStab(l)
 - [x] ODE Integrators.
     - [x] Forward Euler
     - [x] RK4

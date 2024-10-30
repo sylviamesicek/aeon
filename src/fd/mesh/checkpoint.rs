@@ -1,8 +1,17 @@
 use aeon_geometry::{Rectangle, Tree};
 use std::collections::HashMap;
+use thiserror::Error;
 
 use crate::fd::Mesh;
 use crate::system::{SystemLabel, SystemSlice, SystemVec};
+
+#[derive(Debug, Error)]
+pub enum CheckpointParseError {
+    #[error("Invalid key")]
+    InvalidKey,
+    #[error("Failed to parse {0}")]
+    ParseFailed(String),
+}
 
 /// Represents all information nessessary to store and load meshes from
 /// disk.
@@ -101,6 +110,16 @@ impl SystemCheckpoint {
 
     pub fn load_meta(&self, name: &str, data: &mut String) {
         data.clone_from(self.meta.get(name).unwrap())
+    }
+
+    pub fn parse_meta<T: std::str::FromStr>(&self, name: &str) -> Result<T, CheckpointParseError> {
+        let data = self
+            .meta
+            .get(name)
+            .ok_or(CheckpointParseError::InvalidKey)?;
+
+        data.parse()
+            .map_err(|_| CheckpointParseError::ParseFailed(data.clone()))
     }
 }
 

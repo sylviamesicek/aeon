@@ -19,6 +19,7 @@ aeon_geometry = { path = "crates/aeon_geometry" }
 aeon_macros = { path = "crates/aeon_macros" }
 aeon_tensor = { path = "crates/aeon_tensor" }
 
+anyhow = "1.0.91"
 bitvec = { version = "1.0.1", features = ["serde"] }
 bumpalo = "3.16.0"
 cc = "1.0"
@@ -27,12 +28,14 @@ env_logger = "0.11"
 faer = "0.19.3"
 itertools = "0.13.0"
 log = "0.4"
+num-traits = "0.2.19"
 paste = "1.0.15"
 rand = "0.8.5"
 rayon = "1.10.0"
 reborrow = "0.5.5"
 ron = "0.8"
 serde = { version = "1.0.200", features = ["derive"] }
+thiserror = "1.0.65"
 thread_local = "1.1.8"
 
 
@@ -53,10 +56,12 @@ aeon_macros.workspace = true
 bitvec.workspace = true
 bumpalo.workspace = true
 log.workspace = true
+num-traits.workspace = true
 rayon.workspace = true
 reborrow.workspace = true
 ron.workspace = true
 serde.workspace = true
+thiserror.workspace = true
 thread_local.workspace = true
 vtkio = "0.6"
 
