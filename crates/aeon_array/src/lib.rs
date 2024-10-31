@@ -123,17 +123,18 @@ where
                 };
 
                 if let Some(e) = err {
-                    for cur in 0..i {
-                        unsafe { arr[cur].assume_init_drop() };
+                    for item in arr.iter_mut().take(i) {
+                        unsafe {
+                            item.assume_init_drop();
+                        }
                     }
 
                     return Err(e);
                 }
 
-                let ret = unsafe { std::mem::transmute_copy::<_, [T; N]>(&arr) };
-                std::mem::forget(arr);
-
-                Ok(ArrayWrap(ret))
+                Ok(ArrayWrap(unsafe {
+                    std::mem::transmute_copy::<_, [T; N]>(&arr)
+                }))
             }
         }
 

@@ -18,10 +18,22 @@ impl<'a, T> SharedSlice<'a, T> {
         self.0.len()
     }
 
+    pub fn is_empty(self) -> bool {
+        self.len() == 0
+    }
+
+    /// Retrieves a reference to the `index`th element of the slice.
+    ///
+    /// # Safety
+    /// No mutable references to this element may exist when this function is called.
     pub unsafe fn get(self, index: usize) -> &'a T {
         &*self.0[index].get()
     }
 
+    /// Retrieves a mutable reference to the `index`th element of the slice.
+    ///
+    /// # Safety
+    /// No mutable or immutable references to this element may exist when this function is called.
     pub unsafe fn get_mut(self, index: usize) -> &'a mut T {
         &mut *self.0[index].get()
     }

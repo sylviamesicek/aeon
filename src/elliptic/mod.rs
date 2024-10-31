@@ -100,14 +100,14 @@ impl<Label: SystemLabel> HyperRelaxSolver<Label> {
                     order,
                     boundary.clone(),
                     operator.clone(),
-                    SystemSlice::from_contiguous(&mut data[..dimension]),
+                    SystemSlice::from_contiguous(&data[..dimension]),
                     context.rb(),
                     system.rb_mut(),
                 );
 
                 operator.callback(
                     mesh,
-                    SystemSlice::from_contiguous(&mut data[..dimension]),
+                    SystemSlice::from_contiguous(&data[..dimension]),
                     context.rb(),
                     index,
                 );

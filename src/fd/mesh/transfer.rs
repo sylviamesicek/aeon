@@ -2,7 +2,7 @@ use aeon_basis::{Boundary, BoundaryKind, Condition, Kernels};
 use aeon_geometry::{faces, AxisMask, Face, IndexSpace, Side, TreeBlockNeighbor, TreeCellNeighbor};
 // use rayon::iter::{ParallelBridge, ParallelIterator};
 use reborrow::Reborrow as _;
-use std::{array, ops::Range};
+use std::{array, cmp::Ordering, ops::Range};
 
 use crate::{
     fd::{Conditions, Engine, FdEngine, Mesh, SystemBC},
@@ -102,6 +102,7 @@ impl<const N: usize> Mesh<N> {
                 let new_cell = mesh.regrid_map[cell];
                 let new_level = mesh.tree.level(new_cell);
 
+                #[allow(clippy::comparison_chain)]
                 if new_level > level {
                     // Loop over every child of the recently refined cell.
                     for child in AxisMask::<N>::enumerate() {
@@ -687,12 +688,11 @@ impl<const N: usize> Mesh<N> {
                     let other_level = mesh.block_level(other_neighbor);
 
                     // If new interface is coarser than old interface, prefer it
-                    if interface_level < other_level {
-                        buffer[index] = iidx;
-                    }
+                    //
                     // Otherwise if they are the same level, but the other interface
                     // points to a block with a smaller index, prefer it.
-                    else if interface_level == other_level && interface.neighbor < other_neighbor
+                    if interface_level < other_level
+                        || (interface_level == other_level && interface.neighbor < other_neighbor)
                     {
                         buffer[index] = iidx;
                     }
@@ -867,44 +867,50 @@ impl<const N: usize> Mesh<N> {
         let nindex = self.blocks.cell_position(a.neighbor);
         let mut source: [isize; N] = array::from_fn(|axis| (nindex[axis] * self.width) as isize);
 
-        if block_level == neighbor_level {
-            for axis in 0..N {
-                if a.region.side(axis) == Side::Left {
-                    source[axis] += (self.width - self.ghost) as isize;
-                }
-            }
-        } else if block_level > neighbor_level {
-            // Source is stored in subnodes
-            for axis in 0..N {
-                source[axis] *= 2;
-            }
-
-            let split = self.tree.split(a.cell);
-
-            for axis in 0..N {
-                if split.is_set(axis) {
-                    match a.region.side(axis) {
-                        Side::Left => source[axis] += self.width as isize - self.ghost as isize,
-                        Side::Middle => source[axis] += self.width as isize,
-                        Side::Right => {}
-                    }
-                } else {
-                    match a.region.side(axis) {
-                        Side::Left => source[axis] += 2 * self.width as isize - self.ghost as isize,
-                        Side::Middle => {}
-                        Side::Right => source[axis] += self.width as isize,
+        match block_level.cmp(&neighbor_level) {
+            Ordering::Equal => {
+                for axis in 0..N {
+                    if a.region.side(axis) == Side::Left {
+                        source[axis] += (self.width - self.ghost) as isize;
                     }
                 }
             }
-        } else if block_level < neighbor_level {
-            // Source is stored in supernodes
-            for axis in 0..N {
-                source[axis] /= 2;
-            }
+            Ordering::Greater => {
+                // Source is stored in subnodes
+                for axis in 0..N {
+                    source[axis] *= 2;
+                }
 
-            for axis in 0..N {
-                if a.region.side(axis) == Side::Left {
-                    source[axis] += self.width as isize / 2 - self.ghost as isize;
+                let split = self.tree.split(a.cell);
+
+                for axis in 0..N {
+                    if split.is_set(axis) {
+                        match a.region.side(axis) {
+                            Side::Left => source[axis] += self.width as isize - self.ghost as isize,
+                            Side::Middle => source[axis] += self.width as isize,
+                            Side::Right => {}
+                        }
+                    } else {
+                        match a.region.side(axis) {
+                            Side::Left => {
+                                source[axis] += 2 * self.width as isize - self.ghost as isize
+                            }
+                            Side::Middle => {}
+                            Side::Right => source[axis] += self.width as isize,
+                        }
+                    }
+                }
+            }
+            Ordering::Less => {
+                // Source is stored in supernodes
+                for axis in 0..N {
+                    source[axis] /= 2;
+                }
+
+                for axis in 0..N {
+                    if a.region.side(axis) == Side::Left {
+                        source[axis] += self.width as isize / 2 - self.ghost as isize;
+                    }
                 }
             }
         }

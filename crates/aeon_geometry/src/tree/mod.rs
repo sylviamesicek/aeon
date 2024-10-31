@@ -2,8 +2,8 @@
 
 use crate::{faces, regions, AxisMask, Face, Rectangle, Region, Side};
 use bitvec::prelude::*;
-use std::array::from_fn;
 use std::iter::once;
+use std::{array::from_fn, cmp::Ordering};
 
 mod blocks;
 mod interface;
@@ -208,23 +208,27 @@ impl<const N: usize> Tree<N> {
             // Get level of neighbor
             let nlevel = self.level(nneighbor);
 
-            if nlevel < level {
-                debug_assert!(nlevel == level - 1);
-                debug_assert!(!neighbor_fine);
-                neighbor_coarse = true;
-                neighbor_fine = false;
-            } else if nlevel > level {
-                if nlevel != level + 1 {
-                    println!("Cell {cell}, {level}; Neighbor {nneighbor}, {nlevel}");
+            match nlevel.cmp(&level) {
+                Ordering::Less => {
+                    debug_assert!(nlevel == level - 1);
+                    debug_assert!(!neighbor_fine);
+                    neighbor_coarse = true;
+                    neighbor_fine = false;
                 }
+                Ordering::Greater => {
+                    if nlevel != level + 1 {
+                        println!("Cell {cell}, {level}; Neighbor {nneighbor}, {nlevel}");
+                    }
 
-                debug_assert!(nlevel == level + 1);
-                debug_assert!(!neighbor_coarse);
-                neighbor_fine = true;
-                neighbor_coarse = false;
-            } else {
-                neighbor_coarse = false;
-                neighbor_fine = false;
+                    debug_assert!(nlevel == level + 1);
+                    debug_assert!(!neighbor_coarse);
+                    neighbor_fine = true;
+                    neighbor_coarse = false;
+                }
+                Ordering::Equal => {
+                    neighbor_coarse = false;
+                    neighbor_fine = false;
+                }
             }
 
             neighbor = nneighbor;

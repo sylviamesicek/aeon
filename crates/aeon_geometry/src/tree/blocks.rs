@@ -55,6 +55,10 @@ impl<const N: usize> TreeBlocks<N> {
         self.block_sizes.len()
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
     /// Size of a given block, measured in cells.
     pub fn size(&self, block: usize) -> [usize; N] {
         self.block_sizes[block]

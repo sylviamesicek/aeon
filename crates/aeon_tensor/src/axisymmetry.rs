@@ -194,8 +194,8 @@ impl StressEnergy {
         let angular_momentum = 0.0;
 
         let energy = 0.5 * (pi * pi + phi_grad_trace + mass * mass * phi * phi);
-        let momentum = -pi * phi_grad.clone();
-        let stress = phi_grad.clone() * phi_grad.clone() + metric.value().clone() * angular_stress;
+        let momentum = -pi * phi_grad;
+        let stress = phi_grad * phi_grad + *metric.value() * angular_stress;
 
         Self {
             energy,
@@ -331,7 +331,7 @@ impl Decomposition {
         let s = Space::<2>;
 
         let ricci = metric.ricci();
-        let ricci_trace = metric.cotrace(ricci.clone());
+        let ricci_trace = metric.cotrace(ricci);
 
         let k_grad = k.gradient(metric);
         let k_trace = s.sum(|[i, j]| k.value[[i, j]] * metric.inv()[[i, j]]);
@@ -350,12 +350,12 @@ impl Decomposition {
 
         let theta_grad = theta.gradient(metric);
         let z_grad = z.gradient(metric);
-        let z_con = metric.raise(z.value.clone());
+        let z_con = metric.raise(z.value);
 
         let lapse_grad = lapse.gradient(metric);
         let lapse_hess = lapse.hessian(metric);
 
-        let stress_trace = metric.cotrace(stress.clone());
+        let stress_trace = metric.cotrace(*stress);
 
         // *********************************
         // Hamiltonian *********************
@@ -413,10 +413,8 @@ impl Decomposition {
 
         let k_t = {
             let k_lie_shift = k.lie_derivative(shift.clone());
-            let term1 = lapse.value * ricci.clone()
-                - lapse.value * twist.hess().clone()
-                - lapse_hess.clone();
-            let term2 = lapse.value * (k_trace + l.value) * k.value.clone();
+            let term1 = lapse.value * ricci - lapse.value * *twist.hess() - lapse_hess;
+            let term2 = lapse.value * (k_trace + l.value) * k.value;
             let term3 = -2.0
                 * lapse.value
                 * s.matrix(|i, j| {
@@ -429,15 +427,14 @@ impl Decomposition {
 
             let term5 = -lapse.value
                 * KAPPA
-                * (stress.clone()
-                    + 0.5 * (energy - stress_trace - angular_stress) * metric.value().clone());
+                * (*stress + 0.5 * (energy - stress_trace - angular_stress) * (*metric.value()));
 
             term1 + term2 + term3 + term4 + term5 + k_lie_shift
         };
 
         let l_t = {
             let term1 = lapse.value * l.value * (k_trace + l.value - 2.0 * theta.value);
-            let term2 = -lapse.value * metric.cotrace(twist.hess().clone());
+            let term2 = -lapse.value * metric.cotrace(*twist.hess());
             let term3 = s.sum(|m| shift.value[m] * l.derivs[m]);
 
             let mut regular = s.sum(|[m]| {
@@ -585,7 +582,7 @@ impl Decomposition {
 
         let pi_t = {
             let term1 = lapse.value * metric.cotrace(phi_hess)
-                + lapse.value * field.pi.value * (metric.cotrace(k.value.clone()) + l.value);
+                + lapse.value * field.pi.value * (metric.cotrace(k.value) + l.value);
             let term2 = s.sum(|[i, j]| phi_grad[[i]] * metric.inv()[[i, j]] * lapse_grad[[j]]);
 
             let mut term3 = lapse.value * s.sum(|[i]| phi_grad[[i]] * twist.regular_con()[[i]]);

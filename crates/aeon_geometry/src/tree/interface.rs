@@ -199,7 +199,7 @@ impl<const N: usize> TreeNeighbors<N> {
                     neighbors.push(TreeCellNeighbor {
                         cell,
                         neighbor,
-                        region: region,
+                        region,
                     })
                 }
             }

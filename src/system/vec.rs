@@ -70,6 +70,10 @@ impl<Label: SystemLabel> SystemVec<Label> {
         }
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
     /// Caches pointers to each field in the system.
     pub fn fields(&self) -> SystemFields<Label> {
         self.as_slice().fields()
@@ -183,6 +187,10 @@ impl<'a, Label: SystemLabel> SystemSlice<'a, Label> {
     /// Returns the size of the system slice.
     pub fn len(&self) -> usize {
         self.length
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.length == 0
     }
 
     /// Caches immutable pointers to each field in the slice.
@@ -441,6 +449,10 @@ pub struct SystemRange<Label: SystemLabel> {
 }
 
 impl<Label: SystemLabel> SystemRange<Label> {
+    /// Retrieves an immutable reference to a slice of the system.
+    ///
+    /// # Safety
+    /// No other mutable refernces may refer to any element of this slice while it is alive.
     pub unsafe fn slice<R>(&self, range: R) -> SystemSlice<'_, Label>
     where
         R: RangeBounds<usize> + SliceIndex<[f64], Output = [f64]> + Clone,
@@ -456,6 +468,10 @@ impl<Label: SystemLabel> SystemRange<Label> {
         }
     }
 
+    /// Retrieves a mutable reference to a slice of the system.
+    ///
+    /// # Safety
+    /// No other refernces may refer to any element of this slice while it is alive.
     pub unsafe fn slice_mut<R>(&self, range: R) -> SystemSliceMut<'_, Label>
     where
         R: RangeBounds<usize> + SliceIndex<[f64], Output = [f64]> + Clone,
@@ -570,7 +586,7 @@ impl<'long, 'short, Label: SystemLabel> ReborrowMut<'short> for SystemFieldsMut<
 
     fn rb_mut(&'short mut self) -> Self::Target {
         SystemFieldsMut {
-            fields: Label::Array::from_fn(|index| self.fields[index] as *mut f64),
+            fields: Label::Array::from_fn(|index| self.fields[index]),
             length: self.length,
             _marker: PhantomData,
         }

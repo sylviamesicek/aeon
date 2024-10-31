@@ -39,7 +39,7 @@ pub struct ScalarFieldC2<const N: usize> {
 
 impl<const N: usize> ScalarFieldC2<N> {
     pub fn lie_derivative(&self, direction: VectorFieldC1<N>) -> f64 {
-        let c1: ScalarFieldC1<N> = self.clone().into();
+        let c1: ScalarFieldC1<N> = (*self).into();
         c1.lie_derivative(direction)
     }
 

@@ -37,23 +37,20 @@ impl Metric<2> {
             [-g.value[[0, 1]] / gdet, g.value[[0, 0]] / gdet],
         ]);
         let ginv_derivs = Tensor3::from({
-            let grr_inv_derivs = Vector::from_fn(|[i]| {
+            let grr_inv_derivs = *Vector::from_fn(|[i]| {
                 g.derivs[[1, 1, i]] / gdet - g.value[[1, 1]] / (gdet * gdet) * gdet_derivs[[i]]
             })
-            .inner()
-            .clone();
+            .inner();
 
-            let grz_inv_derivs = Vector::from_fn(|[i]| {
+            let grz_inv_derivs = *Vector::from_fn(|[i]| {
                 -g.derivs[[0, 1, i]] / gdet + g.value[[0, 1]] / (gdet * gdet) * gdet_derivs[[i]]
             })
-            .inner()
-            .clone();
+            .inner();
 
-            let gzz_inv_derivs = Vector::from_fn(|[i]| {
+            let gzz_inv_derivs = *Vector::from_fn(|[i]| {
                 g.derivs[[0, 0, i]] / gdet - g.value[[0, 0]] / (gdet * gdet) * gdet_derivs[[i]]
             })
-            .inner()
-            .clone();
+            .inner();
 
             [
                 [grr_inv_derivs, grz_inv_derivs],
@@ -62,17 +59,19 @@ impl Metric<2> {
         });
 
         // Set fields of result
-        let mut result = Self::default();
+        let mut result = Self {
+            g: g.value,
+            g_derivs: g.derivs,
+            g_second_derivs: g.second_derivs,
 
-        result.g = g.value.clone();
-        result.g_derivs = g.derivs.clone();
-        result.g_second_derivs = g.second_derivs.clone();
+            gdet,
+            gdet_derivs,
 
-        result.gdet = gdet;
-        result.gdet_derivs = gdet_derivs;
+            ginv,
+            ginv_derivs,
 
-        result.ginv = ginv;
-        result.ginv_derivs = ginv_derivs;
+            ..Self::default()
+        };
 
         result.compute_christoffel();
 
@@ -144,9 +143,9 @@ impl<const N: usize> Metric<N> {
     // Computes killing's equation for the given vector field.
     pub fn killing(&self, vector: VectorFieldC1<N>) -> Matrix<N> {
         MatrixFieldC2 {
-            value: self.g.clone(),
-            derivs: self.g_derivs.clone(),
-            second_derivs: self.g_second_derivs.clone(),
+            value: self.g,
+            derivs: self.g_derivs,
+            second_derivs: self.g_second_derivs,
         }
         .lie_derivative(vector)
     }

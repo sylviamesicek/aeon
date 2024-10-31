@@ -64,9 +64,7 @@ impl SystemCheckpoint {
         let count = system.len();
         let data = system.to_vec().into_contiguous();
 
-        let fields = Label::fields()
-            .map(|label| label.name())
-            .collect();
+        let fields = Label::fields().map(|label| label.name()).collect();
 
         let meta = SystemMeta {
             count,
@@ -91,7 +89,8 @@ impl SystemCheckpoint {
 
     /// Reads a field from the model.
     pub fn load_field(&self, name: &str, data: &mut Vec<f64>) {
-        data.clone_from_slice(self.fields.get(name).unwrap());
+        data.clear();
+        data.extend_from_slice(self.fields.get(name).unwrap());
     }
 
     /// Attaches an integer field for serialization in the checkpoint.
@@ -102,7 +101,8 @@ impl SystemCheckpoint {
 
     /// Reads an integer field from the checkpoint.
     pub fn load_int_field(&self, name: &str, data: &mut Vec<i64>) {
-        data.clone_from_slice(self.int_fields.get(name).unwrap());
+        data.clear();
+        data.extend_from_slice(self.int_fields.get(name).unwrap());
     }
 
     pub fn save_meta(&mut self, name: &str, data: &str) {
