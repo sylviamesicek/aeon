@@ -20,6 +20,6 @@ fn main() {
         .warnings(false)
         .opt_level(3)
         .include(&eqs_dir)
-        .file(&eqs_dir.join("symc.c"))
+        .file(eqs_dir.join("symc.c"))
         .compile("symbolicc");
 }

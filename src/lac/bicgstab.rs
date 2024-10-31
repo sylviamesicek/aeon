@@ -249,7 +249,7 @@ mod tests {
 
         solver.solve(IdentityMap::new(100), &rhs, &mut solution)?;
 
-        assert_eq!(solution == rhs, true);
+        assert_eq!(solution, rhs);
 
         Ok(())
     }

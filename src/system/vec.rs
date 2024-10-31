@@ -13,6 +13,12 @@ pub struct SystemVec<Label: SystemLabel> {
     pub(crate) _marker: PhantomData<Label>,
 }
 
+impl<Label: SystemLabel> Default for SystemVec<Label> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl<Label: SystemLabel> SystemVec<Label> {
     pub fn new() -> Self {
         Self {
@@ -97,12 +103,12 @@ impl<Label: SystemLabel> SystemVec<Label> {
     }
 
     /// Borrows the vector as a system slice.
-    pub fn as_slice<'s>(&'s self) -> SystemSlice<'s, Label> {
+    pub fn as_slice(&self) -> SystemSlice<'_, Label> {
         self.slice(..)
     }
 
     /// Borrows the vector as a mutable system slice.
-    pub fn as_mut_slice<'s>(&'s mut self) -> SystemSliceMut<'s, Label> {
+    pub fn as_mut_slice(&mut self) -> SystemSliceMut<'_, Label> {
         self.slice_mut(..)
     }
 
@@ -184,15 +190,14 @@ impl<'a, Label: SystemLabel> SystemSlice<'a, Label> {
         if field_count::<Label>() == 0 {
             SystemFields {
                 length: 0,
-                fields: Label::Array::from_fn(|_| std::ptr::null()).into(),
+                fields: Label::Array::from_fn(|_| std::ptr::null()),
                 _marker: PhantomData,
             }
         } else {
             let length = self.data.len() / field_count::<Label>();
             let fields = Label::Array::from_fn(|field| unsafe {
                 self.data.as_ptr().add(field.index() * length + self.offset)
-            })
-            .into();
+            });
 
             SystemFields {
                 length,
@@ -221,7 +226,7 @@ impl<'a, Label: SystemLabel> SystemSlice<'a, Label> {
     }
 
     /// Takes a subslice of the existing slice.
-    pub fn slice<'s, R>(&'s self, range: R) -> SystemSlice<'s, Label>
+    pub fn slice<R>(&self, range: R) -> SystemSlice<'_, Label>
     where
         R: RangeBounds<usize> + SliceIndex<[f64], Output = [f64]> + Clone,
     {
@@ -229,7 +234,7 @@ impl<'a, Label: SystemLabel> SystemSlice<'a, Label> {
         let length = bounds.end - bounds.start;
 
         SystemSlice {
-            data: &*self.data,
+            data: self.data,
             offset: self.offset + bounds.start,
             length,
             _marker: PhantomData,
@@ -301,15 +306,14 @@ impl<'a, Label: SystemLabel> SystemSliceMut<'a, Label> {
         if field_count::<Label>() == 0 {
             SystemFields {
                 length: 0,
-                fields: Label::Array::from_fn(|_| std::ptr::null()).into(),
+                fields: Label::Array::from_fn(|_| std::ptr::null()),
                 _marker: PhantomData,
             }
         } else {
             let length = self.data.len() / field_count::<Label>();
             let fields = Label::Array::from_fn(|field| unsafe {
                 self.data.as_ptr().add(field.index() * length + self.offset)
-            })
-            .into();
+            });
 
             SystemFields {
                 length,
@@ -324,7 +328,7 @@ impl<'a, Label: SystemLabel> SystemSliceMut<'a, Label> {
         if field_count::<Label>() == 0 {
             SystemFieldsMut {
                 length: 0,
-                fields: Label::Array::from_fn(|_| std::ptr::null_mut()).into(),
+                fields: Label::Array::from_fn(|_| std::ptr::null_mut()),
                 _marker: PhantomData,
             }
         } else {
@@ -333,8 +337,7 @@ impl<'a, Label: SystemLabel> SystemSliceMut<'a, Label> {
                 self.data
                     .as_mut_ptr()
                     .add(field.index() * length + self.offset)
-            })
-            .into();
+            });
 
             SystemFieldsMut {
                 length,
@@ -369,7 +372,7 @@ impl<'a, Label: SystemLabel> SystemSliceMut<'a, Label> {
     }
 
     /// Takes a subslice of this slice.
-    pub fn slice<'s, R>(&'s self, range: R) -> SystemSlice<'s, Label>
+    pub fn slice<R>(&self, range: R) -> SystemSlice<'_, Label>
     where
         R: RangeBounds<usize> + SliceIndex<[f64], Output = [f64]> + Clone,
     {
@@ -385,7 +388,7 @@ impl<'a, Label: SystemLabel> SystemSliceMut<'a, Label> {
     }
 
     /// Takes a mutable subslice of this slice.
-    pub fn slice_mut<'s, R>(&'s mut self, range: R) -> SystemSliceMut<'s, Label>
+    pub fn slice_mut<R>(&mut self, range: R) -> SystemSliceMut<'_, Label>
     where
         R: RangeBounds<usize> + SliceIndex<[f64], Output = [f64]> + Clone,
     {
@@ -518,7 +521,7 @@ impl<'long, 'short, Label: SystemLabel> Reborrow<'short> for SystemFields<'long,
 
     fn rb(&'short self) -> Self::Target {
         SystemFields {
-            fields: Label::Array::from_fn(|i| self.fields[i].clone()),
+            fields: Label::Array::from_fn(|i| self.fields[i]),
             length: self.length,
             _marker: PhantomData,
         }
@@ -555,7 +558,7 @@ impl<'long, 'short, Label: SystemLabel> Reborrow<'short> for SystemFieldsMut<'lo
 
     fn rb(&'short self) -> Self::Target {
         SystemFields {
-            fields: Label::Array::from_fn(|index| self.fields[index] as *const f64).into(),
+            fields: Label::Array::from_fn(|index| self.fields[index] as *const f64),
             length: self.length,
             _marker: PhantomData,
         }
@@ -567,7 +570,7 @@ impl<'long, 'short, Label: SystemLabel> ReborrowMut<'short> for SystemFieldsMut<
 
     fn rb_mut(&'short mut self) -> Self::Target {
         SystemFieldsMut {
-            fields: Label::Array::from_fn(|index| self.fields[index] as *mut f64).into(),
+            fields: Label::Array::from_fn(|index| self.fields[index] as *mut f64),
             length: self.length,
             _marker: PhantomData,
         }

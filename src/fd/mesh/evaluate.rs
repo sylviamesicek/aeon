@@ -60,7 +60,7 @@ impl<const N: usize> Mesh<N> {
                 let engine = FdIntEngine {
                     space: space.clone(),
                     vertex,
-                    bounds: bounds.clone(),
+                    bounds,
                     fields: input.rb(),
                     order,
                 };
@@ -70,7 +70,7 @@ impl<const N: usize> Mesh<N> {
                 let engine = FdEngine {
                     space: space.clone(),
                     vertex,
-                    bounds: bounds.clone(),
+                    bounds,
                     fields: input.rb(),
                     order,
                     boundary: boundary.clone(),

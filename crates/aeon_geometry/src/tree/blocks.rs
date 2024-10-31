@@ -75,7 +75,7 @@ impl<const N: usize> TreeBlocks<N> {
 
     /// Returns the bounds of the given block.
     pub fn bounds(&self, block: usize) -> Rectangle<N> {
-        self.block_bounds[block].clone()
+        self.block_bounds[block]
     }
 
     pub fn level(&self, block: usize) -> usize {
@@ -192,7 +192,7 @@ impl<const N: usize> TreeBlocks<N> {
 
         for block in 0..self.len() {
             let size = self.block_sizes[block];
-            let a = self.cells(block).first().unwrap().clone();
+            let a = *self.cells(block).first().unwrap();
 
             let cell_bounds = tree.bounds(a);
 

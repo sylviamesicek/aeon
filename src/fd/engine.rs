@@ -30,7 +30,7 @@ impl<'a, const N: usize, K: Kernels, B: Boundary<N>, S: SystemLabel> FdEngine<'a
         let result = self.space.evaluate(
             self.boundary.clone(),
             convolution,
-            self.bounds.clone(),
+            self.bounds,
             self.vertex,
             self.fields.field(system.clone()),
         );
@@ -43,7 +43,7 @@ impl<'a, const N: usize, K: Kernels, B: Boundary<N>, S: SystemLabel> Engine<N, S
 {
     fn position(&self) -> [f64; N] {
         self.space
-            .position(node_from_vertex(self.vertex), self.bounds.clone())
+            .position(node_from_vertex(self.vertex), self.bounds)
     }
 
     fn vertex(&self) -> [usize; N] {
@@ -87,7 +87,7 @@ impl<'a, const N: usize, K: Kernels, S: SystemLabel> FdIntEngine<'a, N, K, S> {
     fn evaluate(&self, system: S, convolution: impl Convolution<N>) -> f64 {
         let result = self.space.evaluate_interior(
             convolution,
-            self.bounds.clone(),
+            self.bounds,
             self.vertex,
             self.fields.field(system.clone()),
         );
@@ -98,7 +98,7 @@ impl<'a, const N: usize, K: Kernels, S: SystemLabel> FdIntEngine<'a, N, K, S> {
 impl<'a, const N: usize, K: Kernels, S: SystemLabel> Engine<N, S> for FdIntEngine<'a, N, K, S> {
     fn position(&self) -> [f64; N] {
         self.space
-            .position(node_from_vertex(self.vertex), self.bounds.clone())
+            .position(node_from_vertex(self.vertex), self.bounds)
     }
 
     fn vertex(&self) -> [usize; N] {

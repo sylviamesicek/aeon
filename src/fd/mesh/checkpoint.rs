@@ -65,7 +65,6 @@ impl SystemCheckpoint {
         let data = system.to_vec().into_contiguous();
 
         let fields = Label::fields()
-            .into_iter()
             .map(|label| label.name())
             .collect();
 

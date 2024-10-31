@@ -667,7 +667,7 @@ mod tests {
         let space = NodeSpace::new([100, 100], 2);
 
         for node in space.inner_window().iter() {
-            let position = space.position(node, bounds.clone());
+            let position = space.position(node, bounds);
 
             let system = HyperbolicSystem {
                 grr: 1.0,
@@ -770,7 +770,7 @@ mod tests {
         let space = NodeSpace::new([100, 100], 2);
 
         for node in space.inner_window().iter() {
-            let [rho, z] = space.position(node, bounds.clone());
+            let [rho, z] = space.position(node, bounds);
 
             let conformal = z.powi(4);
             let conformal_r = 0.0;

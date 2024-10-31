@@ -41,7 +41,7 @@ impl<const N: usize> Mesh<N> {
             let boundary = mesh.block_boundary(block, boundary.clone());
 
             let imsrc = store.scratch(support);
-            let mut imdest = store.scratch(support);
+            let imdest = store.scratch(support);
 
             let nodes = mesh.block_nodes(block);
             let space = mesh.block_space(block);
@@ -78,7 +78,7 @@ impl<const N: usize> Mesh<N> {
                             should_coarsen = should_coarsen && dst[point].abs() <= lower;
                         }
                     } else {
-                        element.wavelet(&imsrc, &mut imdest);
+                        element.wavelet(imsrc, imdest);
 
                         for point in element.diagonal_int_points() {
                             should_refine = should_refine || imdest[point].abs() >= upper;
@@ -158,12 +158,12 @@ mod tests {
         mesh.set_refine_flag(0);
         mesh.regrid();
 
-        assert_eq!(mesh.is_cell_on_boundary(0, Quadrant), false);
-        assert_eq!(mesh.is_cell_on_boundary(1, Quadrant), false);
-        assert_eq!(mesh.is_cell_on_boundary(2, Quadrant), false);
-        assert_eq!(mesh.is_cell_on_boundary(3, Quadrant), false);
-        assert_eq!(mesh.is_cell_on_boundary(4, Quadrant), true);
-        assert_eq!(mesh.is_cell_on_boundary(5, Quadrant), true);
-        assert_eq!(mesh.is_cell_on_boundary(6, Quadrant), true);
+        assert!(!mesh.is_cell_on_boundary(0, Quadrant));
+        assert!(!mesh.is_cell_on_boundary(1, Quadrant));
+        assert!(!mesh.is_cell_on_boundary(2, Quadrant));
+        assert!(!mesh.is_cell_on_boundary(3, Quadrant));
+        assert!(mesh.is_cell_on_boundary(4, Quadrant));
+        assert!(mesh.is_cell_on_boundary(5, Quadrant));
+        assert!(mesh.is_cell_on_boundary(6, Quadrant));
     }
 }

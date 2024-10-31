@@ -28,7 +28,7 @@ impl<const N: usize> TreeNodes<N> {
 
     /// Returns the total number of nodes in the tree.
     pub fn len(&self) -> usize {
-        self.offsets.last().unwrap().clone()
+        *self.offsets.last().unwrap()
     }
 
     /// The range of dofs associated with the given block.

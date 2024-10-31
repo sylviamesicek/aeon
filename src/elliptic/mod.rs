@@ -18,6 +18,12 @@ pub struct HyperRelaxSolver<Label: SystemLabel> {
     _marker: PhantomData<Label>,
 }
 
+impl<Label: SystemLabel> Default for HyperRelaxSolver<Label> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl<Label: SystemLabel> HyperRelaxSolver<Label> {
     pub fn new() -> Self {
         Self {
@@ -262,7 +268,7 @@ impl<
         );
 
         self.mesh.fill_boundary(
-            self.order.clone(),
+            self.order,
             self.boundary.clone(),
             VConditions {
                 conditions: self.conditions.clone(),
@@ -313,14 +319,14 @@ impl<
 
         // Apply Outer boundary conditions
         self.mesh.weak_boundary(
-            self.order.clone(),
+            self.order,
             self.boundary.clone(),
             self.conditions.clone(),
             u.rb(),
             dudt,
         );
         self.mesh.weak_boundary(
-            self.order.clone(),
+            self.order,
             self.boundary.clone(),
             VConditions {
                 dampening: self.dampening,

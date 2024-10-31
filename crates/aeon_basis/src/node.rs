@@ -63,7 +63,6 @@ impl<const N: usize> NodeSpace<N> {
     /// Returns true if the node lies inside the interior of the nodespace (i.e. it is not a padding or ghost node).
     pub fn is_interior(&self, node: [isize; N]) -> bool {
         (0..N)
-            .into_iter()
             .map(|axis| node[axis] >= 0 && node[axis] < self.size[axis] as isize)
             .all(|b| b)
     }
@@ -315,7 +314,7 @@ impl<const N: usize> NodeSpace<N> {
         axis: usize,
     ) -> Support {
         debug_assert!(self.ghost >= border_width);
-        debug_assert!(cell <= self.size[axis] - 1);
+        debug_assert!(cell < self.size[axis]);
 
         let has_negative = boundary.kind(Face::negative(axis)).has_ghost();
         let has_positive = boundary.kind(Face::positive(axis)).has_ghost();
@@ -381,7 +380,7 @@ impl<const N: usize> NodeSpace<N> {
 
         // Loop over faces
         for face in faces::<N>() {
-            if boundary.kind(face) == BoundaryKind::Parity && boundary.parity(face) == false {
+            if boundary.kind(face) == BoundaryKind::Parity && !boundary.parity(face) {
                 // Iterate over face
                 for node in self.face_window_disjoint(face) {
                     // For antisymmetric boundaries we set all values on axis to be 0.
@@ -696,7 +695,7 @@ mod tests {
 
         for node in space.full_window().iter() {
             let index = space.index_from_node(node);
-            let [x, y] = space.position(node, bounds.clone());
+            let [x, y] = space.position(node, bounds);
             field[index] = x.sin() * y.sin();
         }
 
@@ -711,7 +710,7 @@ mod tests {
                     Order::<4>::derivative().clone(),
                     Order::<4>::derivative().clone(),
                 ),
-                bounds.clone(),
+                bounds,
                 vertex,
                 &field,
             );
@@ -747,7 +746,7 @@ mod tests {
 
         for node in cspace.full_window().iter() {
             let index = cspace.index_from_node(node);
-            let [x, y] = cspace.position(node, bounds.clone());
+            let [x, y] = cspace.position(node, bounds);
             field[index] = x.sin() * y.sin();
         }
 
@@ -755,7 +754,7 @@ mod tests {
 
         for node in rspace.inner_window().iter() {
             let vertex = [node[0] as usize, node[1] as usize];
-            let [x, y] = rspace.position(node, bounds.clone());
+            let [x, y] = rspace.position(node, bounds);
             let numerical = cspace.prolong(
                 Quadrant,
                 Order::<4>::interpolation().clone(),

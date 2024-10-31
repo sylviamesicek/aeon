@@ -307,12 +307,12 @@ impl<const N: usize> Tree<N> {
 
     /// Returns the domain of the full quadtree.
     pub fn domain(&self) -> Rectangle<N> {
-        self.domain.clone()
+        self.domain
     }
 
     /// Returns the bounds of a cell
     pub fn bounds(&self, cell: usize) -> Rectangle<N> {
-        self.bounds[cell].clone()
+        self.bounds[cell]
     }
 
     /// If cell is not root, returns it most recent subdivision.

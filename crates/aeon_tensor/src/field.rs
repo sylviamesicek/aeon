@@ -26,7 +26,7 @@ impl<const N: usize> ScalarFieldC1<N> {
     }
 
     pub fn gradient(&self, _metric: &Metric<N>) -> Vector<N> {
-        self.derivs.clone()
+        self.derivs
     }
 }
 
@@ -44,7 +44,7 @@ impl<const N: usize> ScalarFieldC2<N> {
     }
 
     pub fn gradient(&self, _metric: &Metric<N>) -> Vector<N> {
-        self.derivs.clone()
+        self.derivs
     }
 
     pub fn hessian(&self, metric: &Metric<N>) -> Matrix<N> {

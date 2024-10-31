@@ -199,7 +199,7 @@ impl<const N: usize> TreeNeighbors<N> {
                     neighbors.push(TreeCellNeighbor {
                         cell,
                         neighbor,
-                        region: region.clone(),
+                        region: region,
                     })
                 }
             }
@@ -212,7 +212,7 @@ impl<const N: usize> TreeNeighbors<N> {
         neighbors: &mut [TreeCellNeighbor<N>],
         mut f: impl FnMut(usize, TreeCellNeighbor<N>, TreeCellNeighbor<N>),
     ) {
-        let mut neighbors = neighbors.iter().map(|n| n.clone()).peekable();
+        let mut neighbors = neighbors.iter().cloned().peekable();
 
         while let Some(a) = neighbors.next() {
             let neighbor = blocks.cell_block(a.neighbor);

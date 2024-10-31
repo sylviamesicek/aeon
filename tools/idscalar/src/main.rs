@@ -26,7 +26,7 @@ pub struct Quadrant;
 
 impl Boundary<2> for Quadrant {
     fn kind(&self, face: Face<2>) -> BoundaryKind {
-        if face.side == false {
+        if !face.side {
             BoundaryKind::Parity
         } else {
             BoundaryKind::Radiative
@@ -178,7 +178,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             mesh.transfer_system(ORDER, Quadrant, transfer.as_slice(), rinne.as_mut_slice());
         } else {
             log::info!("Sucessfully refined mesh to prescribed accuracy");
-            mesh.export_dat(format!("output/ellipticmasslesssec.dat"), &checkpoint)?;
+            mesh.export_dat("output/ellipticmasslesssec.dat", &checkpoint)?;
             break;
         }
     }

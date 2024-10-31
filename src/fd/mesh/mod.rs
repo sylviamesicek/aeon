@@ -538,7 +538,6 @@ impl<const N: usize> Mesh<N> {
     /// Computes the maximum l2 norm of all fields in the system.
     pub fn l2_norm<S: SystemLabel>(&mut self, source: SystemSlice<'_, S>) -> f64 {
         S::fields()
-            .into_iter()
             .map(|label| self.l2_norm_scalar(source.field(label)))
             .max_by(|a, b| a.total_cmp(b))
             .unwrap()
@@ -547,7 +546,6 @@ impl<const N: usize> Mesh<N> {
     /// Computes the maximum l-infinity norm of all fields in the system.
     pub fn max_norm<S: SystemLabel>(&mut self, source: SystemSlice<'_, S>) -> f64 {
         S::fields()
-            .into_iter()
             .map(|label| self.max_norm_scalar(source.field(label)))
             .max_by(|a, b| a.total_cmp(b))
             .unwrap()
@@ -579,7 +577,7 @@ impl<const N: usize> Mesh<N> {
                 block_result += value;
             }
 
-            for spacing in space.spacing(bounds.clone()) {
+            for spacing in space.spacing(bounds) {
                 block_result *= spacing;
             }
 
@@ -617,7 +615,7 @@ impl<const N: usize> Mesh<N> {
         writeln!(result, "// **********************").unwrap();
         writeln!(result, "// Cells ****************").unwrap();
         writeln!(result, "// **********************").unwrap();
-        writeln!(result, "").unwrap();
+        writeln!(result).unwrap();
 
         for cell in 0..self.tree.num_cells() {
             writeln!(result, "Cell {cell}").unwrap();
@@ -633,11 +631,11 @@ impl<const N: usize> Mesh<N> {
             writeln!(result, "    Neighbors {:?}", self.tree.neighbor_slice(cell)).unwrap();
         }
 
-        writeln!(result, "").unwrap();
+        writeln!(result).unwrap();
         writeln!(result, "// **********************").unwrap();
         writeln!(result, "// Blocks ***************").unwrap();
         writeln!(result, "// **********************").unwrap();
-        writeln!(result, "").unwrap();
+        writeln!(result).unwrap();
 
         for block in 0..self.blocks.len() {
             writeln!(result, "Block {block}").unwrap();
@@ -658,11 +656,11 @@ impl<const N: usize> Mesh<N> {
             .unwrap();
         }
 
-        writeln!(result, "").unwrap();
+        writeln!(result).unwrap();
         writeln!(result, "// **********************").unwrap();
         writeln!(result, "// Neighbors ************").unwrap();
         writeln!(result, "// **********************").unwrap();
-        writeln!(result, "").unwrap();
+        writeln!(result).unwrap();
 
         writeln!(result, "// Fine Neighbors").unwrap();
 
@@ -689,7 +687,7 @@ impl<const N: usize> Mesh<N> {
             .unwrap();
         }
 
-        writeln!(result, "").unwrap();
+        writeln!(result).unwrap();
         writeln!(result, "// Direct Neighbors").unwrap();
 
         for neighbor in self.neighbors.direct() {
@@ -715,7 +713,7 @@ impl<const N: usize> Mesh<N> {
             .unwrap();
         }
 
-        writeln!(result, "").unwrap();
+        writeln!(result).unwrap();
         writeln!(result, "// Coarse Neighbors").unwrap();
 
         for neighbor in self.neighbors.coarse() {
@@ -741,82 +739,11 @@ impl<const N: usize> Mesh<N> {
             .unwrap();
         }
 
-        writeln!(result, "").unwrap();
+        writeln!(result).unwrap();
         writeln!(result, "// **********************").unwrap();
         writeln!(result, "// Interfaces ***********").unwrap();
         writeln!(result, "// **********************").unwrap();
-        writeln!(result, "").unwrap();
-
-        writeln!(result, "// Fine Interfaces").unwrap();
-
-        // for interface in self.interfaces.fine() {
-        //     writeln!(
-        //         result,
-        //         "Fine Interface {} -> {}",
-        //         interface.block, interface.neighbor
-        //     )
-        //     .unwrap();
-        //     writeln!(
-        //         result,
-        //         "    Source {}: Origin {:?}, Size {:?}",
-        //         interface.neighbor, interface.source, interface.size
-        //     )
-        //     .unwrap();
-        //     writeln!(
-        //         result,
-        //         "    Dest {}: Origin {:?}, Size {:?}",
-        //         interface.block, interface.dest, interface.size
-        //     )
-        //     .unwrap();
-        // }
-
-        writeln!(result, "").unwrap();
-        writeln!(result, "// Direct Interfaces").unwrap();
-
-        // for interface in self.interfaces.direct() {
-        //     writeln!(
-        //         result,
-        //         "Direct Interface {} -> {}",
-        //         interface.block, interface.neighbor
-        //     )
-        //     .unwrap();
-        //     writeln!(
-        //         result,
-        //         "    Source {}: Origin {:?}, Size {:?}",
-        //         interface.neighbor, interface.source, interface.size
-        //     )
-        //     .unwrap();
-        //     writeln!(
-        //         result,
-        //         "    Dest {}: Origin {:?}, Size {:?}",
-        //         interface.block, interface.dest, interface.size
-        //     )
-        //     .unwrap();
-        // }
-
-        writeln!(result, "").unwrap();
-        writeln!(result, "// Coarse Interfaces").unwrap();
-
-        // for interface in self.interfaces.coarse() {
-        //     writeln!(
-        //         result,
-        //         "Coarse Interface {} -> {}",
-        //         interface.block, interface.neighbor
-        //     )
-        //     .unwrap();
-        //     writeln!(
-        //         result,
-        //         "    Source {}: Origin {:?}, Size {:?}",
-        //         interface.neighbor, interface.source, interface.size
-        //     )
-        //     .unwrap();
-        //     writeln!(
-        //         result,
-        //         "    Dest {}: Origin {:?}, Size {:?}",
-        //         interface.block, interface.dest, interface.size
-        //     )
-        //     .unwrap();
-        // }
+        writeln!(result).unwrap();
     }
 }
 
@@ -827,7 +754,7 @@ impl<const N: usize> Clone for Mesh<N> {
             width: self.width,
             ghost: self.ghost,
 
-            max_level: self.max_level.clone(),
+            max_level: self.max_level,
 
             blocks: self.blocks.clone(),
             neighbors: self.neighbors.clone(),
@@ -885,19 +812,10 @@ impl<const N: usize> Default for Mesh<N> {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct ExportVtuConfig {
     pub title: String,
     pub ghost: bool,
-}
-
-impl Default for ExportVtuConfig {
-    fn default() -> Self {
-        Self {
-            ghost: false,
-            title: String::new(),
-        }
-    }
 }
 
 impl<const N: usize> Mesh<N> {
@@ -914,7 +832,7 @@ impl<const N: usize> Mesh<N> {
             &(grid, checkpoint.clone()),
             PrettyConfig::default(),
         )
-        .map_err(|err| io::Error::other(err))?;
+        .map_err(io::Error::other)?;
         let mut file = File::create(path)?;
         file.write_all(data.as_bytes())
     }
@@ -1007,7 +925,7 @@ impl<const N: usize> Mesh<N> {
                 offsets.push(connectivity.len() as u64);
             }
 
-            cell_total += cell_space.index_count() as usize;
+            cell_total += cell_space.index_count();
             vertex_total += vertex_space.index_count() as u64;
         }
 
@@ -1032,7 +950,7 @@ impl<const N: usize> Mesh<N> {
             };
 
             for node in window {
-                let position = space.position(node, bounds.clone());
+                let position = space.position(node, bounds);
                 let mut vertex = [0.0; 3];
                 vertex[..N].copy_from_slice(&position);
                 vertices.extend(vertex);
