@@ -89,7 +89,7 @@ impl HyperbolicSystem {
         const NEAR_ONE: Range<f64> = 0.2..1.8;
         const NEAR_ZERO: Range<f64> = -1.0..1.0;
 
-        let system = HyperbolicSystem {
+        HyperbolicSystem {
             grr: rng.gen_range(NEAR_ONE),
             grr_r: rng.gen_range(NEAR_ZERO),
             grr_z: rng.gen_range(NEAR_ZERO),
@@ -150,9 +150,7 @@ impl HyperbolicSystem {
             zz: rng.gen_range(NEAR_ZERO),
             zz_r: rng.gen_range(NEAR_ZERO),
             zz_z: rng.gen_range(NEAR_ZERO),
-        };
-
-        system
+        }
     }
 
     pub fn axisymmetric_system(&self) -> axi::System {

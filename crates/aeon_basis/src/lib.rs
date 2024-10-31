@@ -1,3 +1,5 @@
+#![allow(clippy::needless_range_loop)]
+
 mod boundary;
 mod convolution;
 mod element;

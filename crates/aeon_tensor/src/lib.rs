@@ -1,3 +1,5 @@
+#![allow(clippy::needless_range_loop)]
+
 extern crate self as aeon_tensor;
 
 use paste::paste;

@@ -1,3 +1,5 @@
+#![allow(clippy::needless_range_loop)]
+
 // Included so we can use custom derive macros from `aeon_macros` within this crate.
 extern crate self as aeon;
 
