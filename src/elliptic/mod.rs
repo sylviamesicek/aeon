@@ -34,19 +34,18 @@ impl<Label: SystemLabel> HyperRelaxSolver<Label> {
         const N: usize,
         K: Kernels + Sync,
         B: Boundary<N> + Sync,
+        C: Conditions<N, System = Label> + Sync,
         O: Operator<N, System = Label> + Sync,
     >(
         &mut self,
         mesh: &mut Mesh<N>,
         order: K,
         boundary: B,
+        conditions: C,
         operator: O,
         context: SystemSlice<'_, O::Context>,
         mut system: SystemSliceMut<'_, Label>,
-    ) where
-        O::SystemConditions: Sync,
-        O::ContextConditions: Sync,
-    {
+    ) {
         // Total number of degreees of freedom in the whole system
         let dimension = field_count::<Label>() * system.len();
 
@@ -88,7 +87,7 @@ impl<Label: SystemLabel> HyperRelaxSolver<Label> {
                 mesh.fill_boundary(
                     order,
                     boundary.clone(),
-                    operator.system_conditions(),
+                    conditions.clone(),
                     SystemSliceMut::from_contiguous(&mut data[..dimension]),
                 );
                 mesh.apply(
@@ -131,6 +130,7 @@ impl<Label: SystemLabel> HyperRelaxSolver<Label> {
                 dampening: self.dampening,
                 order,
                 boundary: boundary.clone(),
+                conditions: conditions.clone(),
                 operator: operator.clone(),
                 context: context.rb(),
             };
@@ -159,24 +159,14 @@ impl<Label: SystemLabel> HyperRelaxSolver<Label> {
 
 /// Wraps the du/dt = v - u * η operation.
 #[derive(Clone)]
-struct UOperator<const N: usize, O> {
+struct UOperator<const N: usize, Label> {
     dampening: f64,
-    operator: O,
+    _marker: PhantomData<Label>,
 }
 
-impl<const N: usize, O: Operator<N>> Operator<N> for UOperator<N, O> {
-    type System = O::System;
-    type Context = O::System;
-
-    type SystemConditions = O::SystemConditions;
-    fn system_conditions(&self) -> Self::SystemConditions {
-        self.operator.system_conditions()
-    }
-
-    type ContextConditions = O::SystemConditions;
-    fn context_conditions(&self) -> Self::ContextConditions {
-        self.operator.system_conditions()
-    }
+impl<const N: usize, Label: SystemLabel> Operator<N> for UOperator<N, Label> {
+    type System = Label;
+    type Context = Label;
 
     fn apply(
         &self,
@@ -193,27 +183,12 @@ impl<const N: usize, O: Operator<N>> Operator<N> for UOperator<N, O> {
 
 #[derive(Clone)]
 struct VOperator<const N: usize, O> {
-    dampening: f64,
     operator: O,
 }
 
 impl<const N: usize, O: Operator<N>> Operator<N> for VOperator<N, O> {
     type System = O::System;
     type Context = O::Context;
-
-    type SystemConditions = VConditions<O::SystemConditions>;
-    type ContextConditions = O::ContextConditions;
-
-    fn system_conditions(&self) -> Self::SystemConditions {
-        VConditions {
-            dampening: self.dampening,
-            conditions: self.operator.system_conditions(),
-        }
-    }
-
-    fn context_conditions(&self) -> Self::ContextConditions {
-        self.operator.context_conditions()
-    }
 
     fn apply(
         &self,
@@ -243,23 +218,34 @@ impl<const N: usize, I: Conditions<N>> Conditions<N> for VConditions<I> {
     }
 }
 
-struct FictitiousOde<'a, const N: usize, K: Kernels, B: Boundary<N>, O: Operator<N>> {
+struct FictitiousOde<
+    'a,
+    const N: usize,
+    K: Kernels,
+    B: Boundary<N>,
+    C: Conditions<N>,
+    O: Operator<N>,
+> {
     mesh: &'a mut Mesh<N>,
     dimension: usize,
     dampening: f64,
 
     order: K,
     boundary: B,
+    conditions: C,
     operator: O,
 
     context: SystemSlice<'a, O::Context>,
 }
 
-impl<'a, const N: usize, K: Kernels + Sync, B: Boundary<N> + Sync, O: Operator<N> + Sync> Ode
-    for FictitiousOde<'a, N, K, B, O>
-where
-    O::SystemConditions: Sync,
-    O::ContextConditions: Sync,
+impl<
+        'a,
+        const N: usize,
+        K: Kernels + Sync,
+        B: Boundary<N> + Sync,
+        C: Conditions<N> + Sync,
+        O: Operator<N, System = C::System> + Sync,
+    > Ode for FictitiousOde<'a, N, K, B, C, O>
 {
     fn dim(&self) -> usize {
         2 * self.dimension
@@ -271,7 +257,7 @@ where
         self.mesh.fill_boundary(
             self.order,
             self.boundary.clone(),
-            self.operator.system_conditions(),
+            self.conditions.clone(),
             SystemSliceMut::from_contiguous(u),
         );
 
@@ -279,7 +265,7 @@ where
             self.order.clone(),
             self.boundary.clone(),
             VConditions {
-                conditions: self.operator.system_conditions(),
+                conditions: self.conditions.clone(),
                 dampening: self.dampening,
             },
             SystemSliceMut::from_contiguous(v),
@@ -305,7 +291,7 @@ where
             self.boundary.clone(),
             UOperator {
                 dampening: self.dampening,
-                operator: self.operator.clone(),
+                _marker: PhantomData,
             },
             u.rb(),
             v.rb(),
@@ -318,7 +304,6 @@ where
             self.order,
             self.boundary.clone(),
             VOperator {
-                dampening: self.dampening,
                 operator: self.operator.clone(),
             },
             u.rb(),
@@ -330,7 +315,7 @@ where
         self.mesh.weak_boundary(
             self.order.clone(),
             self.boundary.clone(),
-            self.operator.system_conditions(),
+            self.conditions.clone(),
             u.rb(),
             dudt,
         );
@@ -339,7 +324,7 @@ where
             self.boundary.clone(),
             VConditions {
                 dampening: self.dampening,
-                conditions: self.operator.system_conditions(),
+                conditions: self.conditions.clone(),
             },
             v,
             dvdt,

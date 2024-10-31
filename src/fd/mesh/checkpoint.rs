@@ -95,11 +95,13 @@ impl SystemCheckpoint {
         data.clone_from_slice(self.fields.get(name).unwrap());
     }
 
+    /// Attaches an integer field for serialization in the checkpoint.
     pub fn save_int_field(&mut self, name: &str, data: &[i64]) {
         assert!(!self.int_fields.contains_key(name));
         self.int_fields.insert(name.to_string(), data.to_vec());
     }
 
+    /// Reads an integer field from the checkpoint.
     pub fn load_int_field(&self, name: &str, data: &mut Vec<i64>) {
         data.clone_from_slice(self.int_fields.get(name).unwrap());
     }
@@ -123,29 +125,10 @@ impl SystemCheckpoint {
     }
 }
 
+/// Metadata required for storing a system.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct SystemMeta {
     pub count: usize,
     pub data: Vec<f64>,
     pub fields: Vec<String>,
 }
-
-// pub fn export_checkpoint<const N: usize>(
-//     path: impl AsRef<Path>,
-//     mesh: &MeshCheckpoint<N>,
-//     systems: &SystemCheckpoint,
-// ) -> io::Result<()> {
-//     let data = ron::ser::to_string_pretty(&(mesh, systems), PrettyConfig::default())
-//         .map_err(|err| io::Error::other(err))?;
-//     let mut file = File::create(path)?;
-//     file.write_all(data.as_bytes())
-// }
-
-// pub fn import_checkpoint<const N: usize>(
-//     path: impl AsRef<Path>,
-// ) -> io::Result<(MeshCheckpoint<N>, SystemCheckpoint)> {
-//     let mut contents: String = String::new();
-//     let mut file = File::open(path)?;
-//     file.read_to_string(&mut contents)?;
-//     ron::from_str(&contents).map_err(io::Error::other)
-// }

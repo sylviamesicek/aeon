@@ -61,17 +61,6 @@ impl Operator<2> for PsiOperator {
     type System = Scalar;
     type Context = Scalar;
 
-    type SystemConditions = ScalarConditions<SystemCondition<Choptuik, ChoptuikConditions>>;
-    type ContextConditions = ScalarConditions<SystemCondition<Choptuik, ChoptuikConditions>>;
-
-    fn system_conditions(&self) -> Self::SystemConditions {
-        PSI_CONDITIONS
-    }
-
-    fn context_conditions(&self) -> Self::ContextConditions {
-        SEED_CONDITIONS
-    }
-
     fn apply(
         &self,
         engine: &impl Engine<2, Pair<Self::System, Self::Context>>,
@@ -116,55 +105,6 @@ impl Operator<2> for PsiOperator {
 
         SystemValue::new([result])
     }
-
-    // fn callback(
-    //     &self,
-    //     mesh: &mut Mesh<2>,
-    //     system: SystemSlice<Self::System>,
-    //     context: SystemSlice<Self::Context>,
-    //     index: usize,
-    // ) {
-    //     if index % 25 == 0 {
-    //         let mut choptuik = SystemVec::with_length(mesh.num_nodes());
-    //         choptuik
-    //             .field_mut(Choptuik::Psi)
-    //             .copy_from_slice(system.field(Scalar));
-    //         choptuik
-    //             .field_mut(Choptuik::Seed)
-    //             .copy_from_slice(context.field(Scalar));
-
-    //         let mut hamiltonian = vec![0.0; mesh.num_nodes()];
-
-    //         mesh.evaluate(
-    //             ORDER,
-    //             Quadrant,
-    //             Hamiltonian,
-    //             choptuik.as_slice(),
-    //             hamiltonian.as_mut_slice().into(),
-    //         );
-
-    //         mesh.fill_boundary(
-    //             ORDER,
-    //             Quadrant,
-    //             HAMILTONIAN_CONDITIONS,
-    //             hamiltonian.as_mut_slice().into(),
-    //         );
-
-    //         let mut systems = SystemCheckpoint::default();
-    //         systems.save_field("psi", choptuik.field(Choptuik::Psi));
-    //         systems.save_field("hamiltonian", &hamiltonian);
-
-    //         mesh.export_vtu(
-    //             format!("output/choptuik/iter{}.vtu", { index / 25 }),
-    //             ExportVtuConfig {
-    //                 title: "choptuik".to_string(),
-    //                 ghost: crate::GHOST,
-    //                 systems,
-    //             },
-    //         )
-    //         .unwrap();
-    //     }
-    // }
 }
 
 #[derive(Clone)]
@@ -264,7 +204,15 @@ pub fn solve(
     solver.cfl = 0.1;
     solver.dampening = 0.4;
 
-    solver.solve(mesh, ORDER, Quadrant, PsiOperator, seed.into(), psi.into());
+    solver.solve(
+        mesh,
+        ORDER,
+        Quadrant,
+        PSI_CONDITIONS,
+        PsiOperator,
+        seed.into(),
+        psi.into(),
+    );
 
     // Fill garkfinkle again.
     mesh.fill_boundary(

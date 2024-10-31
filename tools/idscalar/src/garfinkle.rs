@@ -73,17 +73,6 @@ impl Operator<2> for PsiOperator {
     type System = Psi;
     type Context = Context;
 
-    type SystemConditions = PsiConditions;
-    type ContextConditions = ContextConditions;
-
-    fn system_conditions(&self) -> Self::SystemConditions {
-        PsiConditions
-    }
-
-    fn context_conditions(&self) -> Self::ContextConditions {
-        ContextConditions
-    }
-
     fn apply(
         &self,
         engine: &impl Engine<2, Pair<Self::System, Self::Context>>,
@@ -220,6 +209,7 @@ pub fn solve(
         mesh,
         ORDER,
         Quadrant,
+        PsiConditions,
         PsiOperator,
         context.as_slice(),
         psi.as_mut_slice(),

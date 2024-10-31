@@ -13,7 +13,6 @@ pub use aeon_geometry as geometry;
 
 /// Provides common types used for most `aeon` applications.
 pub mod prelude {
-    // pub use crate::arena::Arena;
     pub use crate::fd::{
         Conditions, Engine, ExportVtuConfig, Function, Mesh, MeshCheckpoint, Operator, Projection,
         ScalarConditions, SystemBC, SystemCheckpoint,

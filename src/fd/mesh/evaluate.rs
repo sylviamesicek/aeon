@@ -131,10 +131,7 @@ impl<const N: usize> Mesh<N> {
         source: SystemSlice<'_, O::System>,
         context: SystemSlice<'_, O::Context>,
         dest: SystemSliceMut<'_, O::System>,
-    ) where
-        O::SystemConditions: Sync,
-        O::ContextConditions: Sync,
-    {
+    ) {
         let source = source.as_range();
         let context = context.as_range();
         let dest = dest.as_range();
@@ -181,5 +178,69 @@ impl<const N: usize> Mesh<N> {
         }
 
         self.evaluate(order, boundary, Dissipation(PhantomData), source, dest);
+    }
+
+    /// Performs a fused-multiply-add operation `a + mb` and then assigns this value to `dest`.
+    pub fn fma<Label: SystemLabel>(
+        &mut self,
+        a: SystemSlice<'_, Label>,
+        m: f64,
+        b: SystemSlice<'_, Label>,
+        dest: SystemSliceMut<'_, Label>,
+    ) {
+        assert!(a.len() == self.num_nodes());
+        assert!(b.len() == self.num_nodes());
+        assert!(dest.len() == self.num_nodes());
+
+        let a = a.as_range();
+        let b = b.as_range();
+        let dest = dest.as_range();
+
+        (0..self.blocks.len()).par_bridge().for_each(|block| {
+            let nodes = self.block_nodes(block);
+
+            let a = unsafe { a.slice(nodes.clone()).fields() };
+            let b = unsafe { b.slice(nodes.clone()).fields() };
+            let mut dest = unsafe { dest.slice_mut(nodes.clone()).fields_mut() };
+
+            for field in Label::fields() {
+                for i in 0..a.len() {
+                    dest.field_mut(field.clone())[i] =
+                        a.field(field.clone())[i] + m * b.field(field.clone())[i];
+                }
+            }
+        });
+    }
+
+    /// Performs a fused-multiply-add operation `a + mb`, and then adds and assigns this value to `dest`.
+    pub fn add_assign_fma<Label: SystemLabel>(
+        &mut self,
+        a: SystemSlice<'_, Label>,
+        m: f64,
+        b: SystemSlice<'_, Label>,
+        dest: SystemSliceMut<'_, Label>,
+    ) {
+        assert!(a.len() == self.num_nodes());
+        assert!(b.len() == self.num_nodes());
+        assert!(dest.len() == self.num_nodes());
+
+        let a = a.as_range();
+        let b = b.as_range();
+        let dest = dest.as_range();
+
+        (0..self.blocks.len()).par_bridge().for_each(|block| {
+            let nodes = self.block_nodes(block);
+
+            let a = unsafe { a.slice(nodes.clone()).fields() };
+            let b = unsafe { b.slice(nodes.clone()).fields() };
+            let mut dest = unsafe { dest.slice_mut(nodes.clone()).fields_mut() };
+
+            for field in Label::fields() {
+                for i in 0..a.len() {
+                    dest.field_mut(field.clone())[i] +=
+                        a.field(field.clone())[i] + m * b.field(field.clone())[i];
+                }
+            }
+        });
     }
 }

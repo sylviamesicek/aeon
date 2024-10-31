@@ -303,23 +303,7 @@ impl<const N: usize> Mesh<N> {
         self.old_block_node_offsets[block]..self.old_block_node_offsets[block + 1]
     }
 
-    /// Returns the window of nodes in a block corresponding to a given cell,
-    /// including `self.width/2` of padding along each face.
-    // pub fn element_window(&self, cell: usize, order: usize) -> NodeWindow<N> {
-    //     debug_assert!(order % 2 == 0);
-    //     debug_assert!(order <= self.width);
-
-    //     let position = self.blocks.cell_position(cell);
-
-    //     let size = [2 * order + 1; N];
-    //     let mut origin = [(self.width as isize) / 2 - order as isize; N];
-
-    //     for axis in 0..N {
-    //         origin[axis] += (self.width * position[axis]) as isize
-    //     }
-
-    //     NodeWindow { origin, size }
-    // }
+    /// Element associated with a given cell.
     pub fn element_window(&self, cell: usize) -> NodeWindow<N> {
         let position = self.blocks.cell_position(cell);
 
@@ -560,6 +544,7 @@ impl<const N: usize> Mesh<N> {
             .unwrap()
     }
 
+    /// Computes the maximum l-infinity norm of all fields in the system.
     pub fn max_norm<S: SystemLabel>(&mut self, source: SystemSlice<'_, S>) -> f64 {
         S::fields()
             .into_iter()

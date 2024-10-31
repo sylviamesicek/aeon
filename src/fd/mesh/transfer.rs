@@ -266,7 +266,7 @@ impl<const N: usize> Mesh<N> {
         });
     }
 
-    pub fn fill_physical<B: Boundary<N> + Sync, C: Conditions<N> + Sync>(
+    fn fill_physical<B: Boundary<N> + Sync, C: Conditions<N> + Sync>(
         &mut self,
         extent: usize,
         boundary: &B,
@@ -292,7 +292,7 @@ impl<const N: usize> Mesh<N> {
         });
     }
 
-    pub fn fill_direct<System: SystemLabel>(
+    fn fill_direct<System: SystemLabel>(
         &mut self,
         extent: usize,
         system: &mut SystemSliceMut<'_, System>,
@@ -329,7 +329,7 @@ impl<const N: usize> Mesh<N> {
         });
     }
 
-    pub fn fill_fine<System: SystemLabel>(
+    fn fill_fine<System: SystemLabel>(
         &mut self,
         extent: usize,
         system: &mut SystemSliceMut<'_, System>,
@@ -363,7 +363,7 @@ impl<const N: usize> Mesh<N> {
         });
     }
 
-    pub fn fill_prolong<K: Kernels, B: Boundary<N> + Sync, C: Conditions<N> + Sync>(
+    fn fill_prolong<K: Kernels, B: Boundary<N> + Sync, C: Conditions<N> + Sync>(
         &mut self,
         _order: K,
         extent: usize,
@@ -408,6 +408,7 @@ impl<const N: usize> Mesh<N> {
         });
     }
 
+    /// Enforce weak boundary conditions on the time derivative of a system.
     pub fn weak_boundary<O: Kernels, B: Boundary<N>, C: Conditions<N>>(
         &mut self,
         order: O,
@@ -538,6 +539,7 @@ impl<const N: usize> Mesh<N> {
         });
     }
 
+    /// Stores the index of the cell which owns each individual node in a debug vector.
     pub fn cell_debug(&mut self, debug: &mut [i64]) {
         assert!(debug.len() == self.num_nodes());
 
@@ -566,6 +568,7 @@ impl<const N: usize> Mesh<N> {
         });
     }
 
+    /// Stores the index of the neighbor along each interface.
     pub fn interface_neighbor_debug(&mut self, extent: usize, debug: &mut [i64]) {
         debug.fill(-1);
 
@@ -589,6 +592,7 @@ impl<const N: usize> Mesh<N> {
             });
     }
 
+    /// Stores the index of each interface for nodes along that interface.
     pub fn interface_index_debug(&mut self, extent: usize, debug: &mut [i64]) {
         debug.fill(-1);
 

@@ -103,6 +103,7 @@ impl<const N: usize> Mesh<N> {
         let _ = std::mem::replace(&mut self.coarsen_flags, cflags_buf);
     }
 
+    /// Store flags for each cell in a debug buffer.
     pub fn flags_debug(&mut self, debug: &mut [i64]) {
         assert!(debug.len() == self.num_nodes());
 

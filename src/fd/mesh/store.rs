@@ -4,6 +4,7 @@ use bumpalo::Bump;
 /// workloads.
 #[derive(Debug, Default)]
 pub struct MeshStore {
+    /// Linear allocator for each thread.
     arena: Bump,
 }
 

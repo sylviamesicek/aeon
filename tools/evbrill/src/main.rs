@@ -342,18 +342,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     dynamic.field_mut(Dynamic::Shiftr).fill(0.0);
     dynamic.field_mut(Dynamic::Shiftz).fill(0.0);
 
-    // let max_level = MAX_LEVEL.max(mesh.max_level());
-
     // Fill ghost nodes
     mesh.fill_boundary(ORDER, Quadrant, DynamicConditions, dynamic.as_mut_slice());
 
-    // // Begin integration
-    // let h = CFL * mesh.min_spacing();
-    // println!("Spacing {}", mesh.min_spacing());
-    // println!("Step Size {}", h);
-
     // Allocate vectors
-    // let mut derivs = SystemVec::<Dynamic>::new();
     let mut update = SystemVec::<Dynamic>::new();
     let mut dissipation = SystemVec::new();
 
@@ -366,7 +358,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut save_step = 0;
 
     let mut steps_since_regrid = 0;
-    // let mut regrid_save_step = 0;
 
     let mut errors = Vec::new();
 
@@ -491,10 +482,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         );
 
         // Add everything together
-        for i in 0..dynamic.contigious_mut().len() {
-            dynamic.contigious_mut()[i] +=
-                update.contigious()[i] + 0.5 * dissipation.contigious()[i];
-        }
+        mesh.add_assign_fma(
+            update.as_slice(),
+            0.5,
+            dissipation.as_slice(),
+            dynamic.as_mut_slice(),
+        );
 
         step += 1;
         steps_since_regrid += 1;

@@ -4,7 +4,7 @@ use aeon::{fd::Gaussian, prelude::*, system::field_count};
 use reborrow::{Reborrow, ReborrowMut};
 
 const MAX_TIME: f64 = 4.0;
-const MAX_STEPS: usize = 5000;
+const MAX_STEPS: usize = 1;
 
 const CFL: f64 = 0.1;
 const ORDER: Order<4> = Order::<4>;

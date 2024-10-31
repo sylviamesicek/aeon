@@ -59,17 +59,6 @@ impl Operator<2> for PsiOperator {
     type System = Scalar;
     type Context = Scalar;
 
-    type SystemConditions = ScalarConditions<SystemCondition<Garfinkle, GarfinkleConditions>>;
-    type ContextConditions = ScalarConditions<SystemCondition<Garfinkle, GarfinkleConditions>>;
-
-    fn system_conditions(&self) -> Self::SystemConditions {
-        PSI_CONDITIONS
-    }
-
-    fn context_conditions(&self) -> Self::ContextConditions {
-        SEED_CONDITIONS
-    }
-
     fn apply(
         &self,
         engine: &impl Engine<2, Pair<Self::System, Self::Context>>,
@@ -236,7 +225,15 @@ pub fn solve(
     solver.cfl = 0.5;
     solver.dampening = 0.4;
 
-    solver.solve(mesh, ORDER, Quadrant, PsiOperator, seed.into(), psi.into());
+    solver.solve(
+        mesh,
+        ORDER,
+        Quadrant,
+        PSI_CONDITIONS,
+        PsiOperator,
+        seed.into(),
+        psi.into(),
+    );
 
     // Fill garkfinkle again.
     mesh.fill_boundary(

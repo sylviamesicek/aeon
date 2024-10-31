@@ -4,6 +4,7 @@ mod boundary;
 mod engine;
 mod mesh;
 
+use crate::system::{Empty, Pair, Scalar, SystemLabel, SystemSlice, SystemValue};
 use std::array;
 
 pub use boundary::{
@@ -12,8 +13,6 @@ pub use boundary::{
 };
 pub use engine::{Engine, FdEngine, FdIntEngine};
 pub use mesh::{ExportVtuConfig, Mesh, MeshCheckpoint, SystemCheckpoint};
-
-use crate::system::{Empty, Pair, Scalar, SystemLabel, SystemSlice, SystemValue};
 
 /// A function maps one set of scalar fields to another.
 pub trait Function<const N: usize>: Clone {
@@ -36,12 +35,6 @@ pub trait Operator<const N: usize>: Clone {
     type System: SystemLabel;
     type Context: SystemLabel;
 
-    type SystemConditions: Conditions<N, System = Self::System>;
-    fn system_conditions(&self) -> Self::SystemConditions;
-
-    type ContextConditions: Conditions<N, System = Self::Context>;
-    fn context_conditions(&self) -> Self::ContextConditions;
-
     fn apply(
         &self,
         engine: &impl Engine<N, Pair<Self::System, Self::Context>>,
@@ -57,6 +50,7 @@ pub trait Operator<const N: usize>: Clone {
     }
 }
 
+/// Transforms a projection into a function.
 #[derive(Clone)]
 pub struct ProjectionAsFunction<P>(pub P);
 
@@ -69,6 +63,7 @@ impl<const N: usize, P: Projection<N>> Function<N> for ProjectionAsFunction<P> {
     }
 }
 
+/// Transforms an operator into a function.
 #[derive(Clone)]
 pub struct OperatorAsFunction<O>(pub O);
 
