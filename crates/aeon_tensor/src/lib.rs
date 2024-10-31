@@ -39,7 +39,7 @@ pub fn for_each_index<const N: usize, const RANK: usize>(mut f: impl FnMut([usiz
 // Tensor **************************
 // *********************************
 
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Copy, Debug)]
 pub struct Tensor<const N: usize, const RANK: usize, L>(L);
 
 // *********************************
@@ -53,17 +53,23 @@ pub trait TensorLayout<const N: usize, const RANK: usize>: Clone {
     fn zeros() -> Self;
     fn from_fn<F: Fn([usize; RANK]) -> f64>(f: F) -> Self {
         let mut result = Self::zeros();
-        for_each_index(|index| result = f(index));
+        for_each_index::<N, RANK>(|index| *result.index_mut(index) = f(index));
         result
     }
 }
 
+impl<const N: usize, const RANK: usize, L> Tensor<N, RANK, L> {
+    pub fn inner(&self) -> &L {
+        &self.0
+    }
+}
+
 impl<const N: usize, const RANK: usize, L: TensorLayout<N, RANK>> Tensor<N, RANK, L> {
-    fn zeros() -> Self {
+    pub fn zeros() -> Self {
         Self(L::zeros())
     }
 
-    fn from_fn<F: Fn([usize; RANK]) -> f64>(f: F) -> Self {
+    pub fn from_fn<F: Fn([usize; RANK]) -> f64>(f: F) -> Self {
         Self(L::from_fn(f))
     }
 }
@@ -71,6 +77,12 @@ impl<const N: usize, const RANK: usize, L: TensorLayout<N, RANK>> Tensor<N, RANK
 impl<const N: usize, const RANK: usize, L: TensorLayout<N, RANK>> From<L> for Tensor<N, RANK, L> {
     fn from(value: L) -> Self {
         Tensor(value)
+    }
+}
+
+impl<const N: usize, const RANK: usize, L: TensorLayout<N, RANK>> Default for Tensor<N, RANK, L> {
+    fn default() -> Self {
+        Self::zeros()
     }
 }
 
@@ -172,23 +184,23 @@ macro_rules! full_layout_zeros {
     };
 }
 
-type Full0<const N: usize> = FullLayoutType!();
-type Full1<const N: usize> = FullLayoutType!(0);
-type Full2<const N: usize> = FullLayoutType!(0 1);
-type Full3<const N: usize> = FullLayoutType!(0 1 2);
-type Full4<const N: usize> = FullLayoutType!(0 1 2 3);
-type Full5<const N: usize> = FullLayoutType!(0 1 2 3 4);
-type Full6<const N: usize> = FullLayoutType!(0 1 2 3 4 5);
+pub type Full0<const N: usize> = FullLayoutType!();
+pub type Full1<const N: usize> = FullLayoutType!(0);
+pub type Full2<const N: usize> = FullLayoutType!(0 1);
+pub type Full3<const N: usize> = FullLayoutType!(0 1 2);
+pub type Full4<const N: usize> = FullLayoutType!(0 1 2 3);
+pub type Full5<const N: usize> = FullLayoutType!(0 1 2 3 4);
+pub type Full6<const N: usize> = FullLayoutType!(0 1 2 3 4 5);
 
 macro_rules! impl_full_layout {
     ($rank:literal | $($i:literal)*) => {
         impl<const N: usize> TensorLayout<N, $rank> for FullLayoutType!($($i)*) {
             fn index(&self, indices: [usize; $rank]) -> &f64 {
-                &*self$([indices[$i]])*
+                &self$([indices[$i]])*
             }
 
             fn index_mut(&mut self, indices: [usize; $rank]) -> &mut f64 {
-                &mut *self$([indices[$i]])*
+                &mut self$([indices[$i]])*
             }
 
             fn zeros() -> Self {
@@ -198,12 +210,26 @@ macro_rules! impl_full_layout {
     };
 }
 
-impl_full_layout! { 0 | }
+impl<const N: usize> TensorLayout<N, 0> for f64 {
+    fn index(&self, _indices: [usize; 0]) -> &f64 {
+        self
+    }
+
+    fn index_mut(&mut self, _indices: [usize; 0]) -> &mut f64 {
+        self
+    }
+
+    fn zeros() -> Self {
+        0.0
+    }
+}
+
 impl_full_layout! { 1 | 0 }
 impl_full_layout! { 2 | 0 1 }
 impl_full_layout! { 3 | 0 1 2 }
 impl_full_layout! { 4 | 0 1 2 3 }
 impl_full_layout! { 5 | 0 1 2 3 4 }
+impl_full_layout! { 6 | 0 1 2 3 4 5 }
 
 // ************************************
 // Tensor Products ********************
@@ -214,7 +240,7 @@ macro_rules! impl_full_product {
         paste! {
             const [<RES_RANK_ $lrank _ $rrank>]: usize = ::aeon_tensor::count_repetitions!($($i)* $($j)*);
 
-            impl<const N: usize> Mul<Tensor<N, $rrank, FullLayoutType!($($j)*)>> for Tensor<N, $lrank, FullLayoutType!($($i)* $($j)*)> {
+            impl<const N: usize> Mul<Tensor<N, $rrank, FullLayoutType!($($j)*)>> for Tensor<N, $lrank, FullLayoutType!($($i)*)> {
                 type Output = Tensor<N, [<RES_RANK_ $lrank _ $rrank>], FullLayoutType!($($i)* $($j)*)>;
 
                 fn mul(self, rhs: Tensor<N, $rrank, FullLayoutType!($($j)*)>) -> Self::Output {
@@ -241,6 +267,8 @@ macro_rules! impl_full_products {
     };
     ($lhead:literal times $rhead:literal $($rlist:literal)+) => {
         impl_full_product! { $lhead $rhead : times $($rlist)+}
+        impl_full_products! { $lhead times $($rlist)+ }
+
     };
     ($lhead:literal times $rhead:literal) => {
         impl_full_product! { $lhead $rhead : times }
@@ -261,10 +289,10 @@ pub type Scalar<const N: usize> = Tensor<N, 0, f64>;
 pub type Vector<const N: usize> = Tensor<N, 1, Full1<N>>;
 pub type Matrix<const N: usize> = Tensor<N, 2, Full2<N>>;
 pub type Tensor3<const N: usize> = Tensor<N, 3, Full3<N>>;
-pub type Tensor4<const N: usize> = Tensor<N, 4, Full3<N>>;
+pub type Tensor4<const N: usize> = Tensor<N, 4, Full4<N>>;
 
 impl<const N: usize, L: TensorLayout<N, 2>> Tensor<N, 2, L> {
-    pub fn trace<const ORANK: usize, O: TensorLayout<N, ORANK>>(&self) -> Tensor<N, ORANK, O> {
+    pub fn trace(&self) -> f64 {
         let mut result = 0.0;
 
         for axis in 0..N {
@@ -326,6 +354,10 @@ pub struct Space<const N: usize>;
 impl<const N: usize> Space<N> {
     pub fn vector(&self, f: impl Fn(usize) -> f64) -> Vector<N> {
         Vector::from_fn(|[i]: [usize; 1]| f(i))
+    }
+
+    pub fn matrix(&self, f: impl Fn(usize, usize) -> f64) -> Matrix<N> {
+        Matrix::from_fn(|[i, j]: [usize; 2]| f(i, j))
     }
 
     pub fn sum<const R: usize>(&self, f: impl Fn([usize; R]) -> f64) -> f64 {

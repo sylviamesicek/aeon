@@ -1,24 +1,26 @@
-use crate::{lie_derivative, Space};
+use crate::Matrix;
 
-use super::{Metric, Static, Tensor, Tensor1, Tensor2, TensorFieldC1, TensorFieldC2};
+use crate::{
+    MatrixFieldC1, Metric, ScalarFieldC1, ScalarFieldC2, Space, Tensor, Vector, VectorFieldC1,
+};
 
 const ON_AXIS: f64 = 1e-10;
 
 const KAPPA: f64 = 1.0;
 
 pub struct Twist {
-    lam_regular_co: Tensor1<2>,
-    lam_regular_con: Tensor1<2>,
-    lam_hess: Tensor2<2>,
+    lam_regular_co: Vector<2>,
+    lam_regular_con: Vector<2>,
+    lam_hess: Matrix<2>,
 }
 
 impl Twist {
-    pub fn new(metric: &Metric<2>, pos: [f64; 2], seed: TensorFieldC2<2, Static<0>>) -> Self {
+    pub fn new(metric: &Metric<2>, pos: [f64; 2], seed: ScalarFieldC2<2>) -> Self {
         let on_axis = pos[0].abs() <= ON_AXIS;
 
         let space = Space::<2>;
 
-        let s = seed.value[[]];
+        let s = seed.value;
         let s_derivs = seed.derivs;
         let s_second_derivs = seed.second_derivs;
 
@@ -31,9 +33,9 @@ impl Twist {
 
         {
             let g_derivs_term =
-                Tensor1::<2>::from_fn(|[i]| metric.derivs()[[0, 0, i]] / metric.value()[[0, 0]]);
+                Vector::<2>::from_fn(|[i]| metric.derivs()[[0, 0, i]] / metric.value()[[0, 0]]);
 
-            let g_second_derivs_term = Tensor2::<2>::from_fn(|[i, j]| {
+            let g_second_derivs_term = Matrix::<2>::from_fn(|[i, j]| {
                 metric.second_derivs()[[0, 0, i, j]] / metric.value()[[0, 0]]
                     - metric.derivs()[[0, 0, i]] * metric.derivs()[[0, 0, j]]
                         / (metric.value()[[0, 0]] * metric.value()[[0, 0]])
@@ -58,9 +60,8 @@ impl Twist {
                 lam_reg_con[[1]] += -metric.derivs()[[0, 1, 0]] / metric.det();
             }
 
-            let mut gamma_regular = space.tensor(|[i, j]| {
-                space.sum(|[m]| lam_reg_con[[m]] * metric.christoffel()[[m, i, j]])
-            });
+            let mut gamma_regular = space
+                .matrix(|i, j| space.sum(|[m]| lam_reg_con[[m]] * metric.christoffel()[[m, i, j]]));
 
             if on_axis {
                 gamma_regular[[0, 0]] +=
@@ -121,49 +122,49 @@ impl Twist {
         }
     }
 
-    pub fn hess(&self) -> &Tensor2<2> {
+    pub fn hess(&self) -> &Matrix<2> {
         &self.lam_hess
     }
 
-    pub fn regular_co(&self) -> &Tensor1<2> {
+    pub fn regular_co(&self) -> &Vector<2> {
         &self.lam_regular_co
     }
 
-    pub fn regular_con(&self) -> &Tensor1<2> {
+    pub fn regular_con(&self) -> &Vector<2> {
         &self.lam_regular_con
     }
 }
 
 pub struct System {
     pub metric: Metric<2>,
-    pub seed: TensorFieldC2<2, Static<0>>,
+    pub seed: ScalarFieldC2<2>,
 
-    pub k: TensorFieldC1<2, Static<2>>,
-    pub y: TensorFieldC1<2, Static<0>>,
+    pub k: MatrixFieldC1<2>,
+    pub y: ScalarFieldC1<2>,
 
-    pub theta: TensorFieldC1<2, Static<0>>,
-    pub z: TensorFieldC1<2, Static<1>>,
+    pub theta: ScalarFieldC1<2>,
+    pub z: VectorFieldC1<2>,
 
-    pub lapse: TensorFieldC2<2, Static<0>>,
-    pub shift: TensorFieldC1<2, Static<1>>,
+    pub lapse: ScalarFieldC2<2>,
+    pub shift: VectorFieldC1<2>,
 
     pub source: StressEnergy,
 }
 
 pub struct ScalarFieldSystem {
-    pub phi: TensorFieldC2<2, Static<0>>,
-    pub pi: TensorFieldC1<2, Static<0>>,
+    pub phi: ScalarFieldC2<2>,
+    pub pi: ScalarFieldC1<2>,
     pub mass: f64,
 }
 
 /// A decomposition of the stress energy tensor in axisymmetric units.
 pub struct StressEnergy {
     pub energy: f64,
-    pub momentum: Tensor1<2>,
-    pub stress: Tensor2<2>,
+    pub momentum: Vector<2>,
+    pub stress: Matrix<2>,
 
     pub angular_momentum: f64,
-    pub angular_shear: Tensor1<2>,
+    pub angular_shear: Vector<2>,
     pub angular_stress: f64,
 }
 
@@ -183,9 +184,9 @@ impl StressEnergy {
         let s = Space::<2>;
 
         let mass = field.mass;
-        let pi = field.pi.scalar();
-        let phi = field.phi.scalar();
-        let phi_grad = metric.gradiant(field.phi.clone().into());
+        let pi = field.pi.value;
+        let phi = field.phi.value;
+        let phi_grad = field.phi.gradient(metric);
         let phi_grad_trace = s.sum(|[a, b]| metric.inv()[[a, b]] * phi_grad[[a]] * phi_grad[[b]]);
 
         let angular_stress = 0.5 * (pi * pi - phi_grad_trace - mass * mass * phi * phi);
@@ -208,19 +209,19 @@ impl StressEnergy {
 }
 
 pub struct Evolution {
-    pub g: Tensor2<2>,
+    pub g: Matrix<2>,
     pub seed: f64,
 
-    pub k: Tensor2<2>,
+    pub k: Matrix<2>,
     pub y: f64,
 
     pub theta: f64,
-    pub z: Tensor1<2>,
+    pub z: Vector<2>,
 }
 
 pub struct Gauge {
     pub lapse: f64,
-    pub shift: Tensor1<2>,
+    pub shift: Vector<2>,
 }
 
 pub struct ScalarField {
@@ -234,14 +235,14 @@ pub struct Decomposition {
     pub metric: Metric<2>,
     pub twist: Twist,
 
-    pub k: TensorFieldC1<2, Static<2>>,
-    pub l: TensorFieldC1<2, Static<0>>,
+    pub k: MatrixFieldC1<2>,
+    pub l: ScalarFieldC1<2>,
 
-    pub theta: TensorFieldC1<2, Static<0>>,
-    pub z: TensorFieldC1<2, Static<1>>,
+    pub theta: ScalarFieldC1<2>,
+    pub z: VectorFieldC1<2>,
 
-    pub lapse: TensorFieldC2<2, Static<0>>,
-    pub shift: TensorFieldC1<2, Static<1>>,
+    pub lapse: ScalarFieldC2<2>,
+    pub shift: VectorFieldC1<2>,
 
     pub source: StressEnergy,
 
@@ -266,19 +267,17 @@ impl Decomposition {
         let twist = Twist::new(&metric, pos, seed);
 
         // Build l from y and k
-        let l = TensorFieldC1::<2, Static<0>> {
-            value: Tensor::from_storage(
-                pos[0] * y.scalar() + k.value[[0, 0]] / metric.value()[[0, 0]],
-            ),
+        let l = ScalarFieldC1::<2> {
+            value: pos[0] * y.value + k.value[[0, 0]] / metric.value()[[0, 0]],
             derivs: {
-                let mut result = Tensor1::from_fn(|[i]| {
+                let mut result = Vector::from_fn(|[i]| {
                     pos[0] * y.derivs[[i]] + k.derivs[[0, 0, i]] / metric.value()[[0, 0]]
                         - k.value[[0, 0]] / metric.value()[[0, 0]] * metric.derivs()[[0, 0, i]]
                             / metric.value()[[0, 0]]
                 });
 
                 // From the rho * y term.
-                result[[0]] += y.scalar();
+                result[[0]] += y.value;
 
                 result
             },
@@ -289,7 +288,7 @@ impl Decomposition {
             metric,
             twist,
             k,
-            y: y.scalar(),
+            y: y.value,
             l,
             theta,
             z,
@@ -332,9 +331,9 @@ impl Decomposition {
         let s = Space::<2>;
 
         let ricci = metric.ricci();
-        let ricci_trace = metric.trace(ricci.clone());
+        let ricci_trace = metric.cotrace(ricci.clone());
 
-        let k_grad = metric.gradiant(k.clone());
+        let k_grad = k.gradient(metric);
         let k_trace = s.sum(|[i, j]| k.value[[i, j]] * metric.inv()[[i, j]]);
         let k_trace_grad = s.vector(|i| {
             s.sum(|[m, n]| {
@@ -343,27 +342,27 @@ impl Decomposition {
             })
         });
 
-        let k_con = s.tensor(|[i, j]| {
+        let k_con = s.matrix(|i, j| {
             s.sum(|[m, n]| metric.inv()[[i, m]] * metric.inv()[[j, n]] * k.value[[m, n]])
         });
 
-        let l_grad = metric.gradiant(l.clone());
+        let l_grad = l.gradient(metric);
 
-        let theta_grad = metric.gradiant(theta.clone());
-        let z_grad = metric.gradiant(z.clone());
+        let theta_grad = theta.gradient(metric);
+        let z_grad = z.gradient(metric);
         let z_con = metric.raise(z.value.clone());
 
-        let lapse_grad = metric.gradiant(lapse.clone().into());
-        let lapse_hess = metric.hessian(lapse.clone());
+        let lapse_grad = lapse.gradient(metric);
+        let lapse_hess = lapse.hessian(metric);
 
-        let stress_trace = metric.trace(stress.clone());
+        let stress_trace = metric.cotrace(stress.clone());
 
         // *********************************
         // Hamiltonian *********************
         // *********************************
 
         let hamiltonian = {
-            let term1 = 0.5 * (ricci_trace + k_trace * k_trace) + k_trace * l.scalar();
+            let term1 = 0.5 * (ricci_trace + k_trace * k_trace) + k_trace * l.value;
             let term2 = -0.5 * s.sum(|[i, j]| k.value[[i, j]] * k_con[[i, j]]);
             let term3 = -s.sum(|[i, j]| twist.hess()[[i, j]] * metric.inv()[[i, j]]);
 
@@ -379,7 +378,7 @@ impl Decomposition {
             let term2 = s.sum(|[m, n]| k_grad[[i, m, n]] * metric.inv()[[m, n]]);
 
             let mut regular = s.sum(|[m]| twist.regular_con()[[m]] * k.value[[m, i]])
-                - twist.regular_co()[[i]] * l.scalar();
+                - twist.regular_co()[[i]] * l.value;
 
             if on_axis && i == 0 {
                 regular += -y;
@@ -395,7 +394,7 @@ impl Decomposition {
         // ***********************************
 
         let g_t = {
-            let term1 = s.tensor(|[i, j]| -2.0 * lapse.scalar() * k.value[[i, j]]);
+            let term1 = s.matrix(|i, j| -2.0 * lapse.value * k.value[[i, j]]);
             let term2 = metric.killing(shift.clone());
 
             term1 + term2
@@ -403,7 +402,7 @@ impl Decomposition {
 
         // (partial_t lambda) / lambda
         let mut lam_lt =
-            -lapse.scalar() * l.scalar() + s.sum(|[i]| twist.regular_co()[[i]] * shift.value[[i]]);
+            -lapse.value * l.value + s.sum(|[i]| twist.regular_co()[[i]] * shift.value[[i]]);
         if on_axis {
             lam_lt += shift.derivs[[0, 0]];
         }
@@ -413,22 +412,22 @@ impl Decomposition {
         // ***********************************
 
         let k_t = {
-            let k_lie_shift = lie_derivative(shift.clone(), k.clone());
-            let term1 = lapse.scalar() * ricci.clone()
-                - lapse.scalar() * twist.hess().clone()
+            let k_lie_shift = k.lie_derivative(shift.clone());
+            let term1 = lapse.value * ricci.clone()
+                - lapse.value * twist.hess().clone()
                 - lapse_hess.clone();
-            let term2 = lapse.scalar() * (k_trace + l.scalar()) * k.value.clone();
+            let term2 = lapse.value * (k_trace + l.value) * k.value.clone();
             let term3 = -2.0
-                * lapse.scalar()
-                * s.tensor(|[i, j]| {
+                * lapse.value
+                * s.matrix(|i, j| {
                     s.sum(|[m, n]| k.value[[i, m]] * metric.inv()[[m, n]] * k.value[[n, j]])
                 });
-            let term4 = lapse.scalar()
-                * s.tensor(|[i, j]| {
-                    z_grad[[i, j]] + z_grad[[j, i]] - 2.0 * k.value[[i, j]] * theta.scalar()
+            let term4 = lapse.value
+                * s.matrix(|i, j| {
+                    z_grad[[i, j]] + z_grad[[j, i]] - 2.0 * k.value[[i, j]] * theta.value
                 });
 
-            let term5 = -lapse.scalar()
+            let term5 = -lapse.value
                 * KAPPA
                 * (stress.clone()
                     + 0.5 * (energy - stress_trace - angular_stress) * metric.value().clone());
@@ -437,20 +436,20 @@ impl Decomposition {
         };
 
         let l_t = {
-            let term1 = lapse.scalar() * l.scalar() * (k_trace + l.scalar() - 2.0 * theta.scalar());
-            let term2 = -lapse.scalar() * metric.trace(twist.hess().clone());
+            let term1 = lapse.value * l.value * (k_trace + l.value - 2.0 * theta.value);
+            let term2 = -lapse.value * metric.cotrace(twist.hess().clone());
             let term3 = s.sum(|m| shift.value[m] * l.derivs[m]);
 
             let mut regular = s.sum(|[m]| {
-                twist.regular_con()[[m]] * (2.0 * lapse.scalar() * z.value[[m]] - lapse_grad[[m]])
+                twist.regular_con()[[m]] * (2.0 * lapse.value * z.value[m] - lapse_grad[m])
             });
 
             if on_axis {
-                regular += (2.0 * lapse.scalar() * z.derivs[[0, 0]] - lapse.second_derivs[[0, 0]])
+                regular += (2.0 * lapse.value * z.derivs[[0, 0]] - lapse.second_derivs[[0, 0]])
                     / metric.value()[[0, 0]];
             };
 
-            let term4 = -0.5 * lapse.scalar() * KAPPA * (energy - stress_trace + angular_stress);
+            let term4 = -0.5 * lapse.value * KAPPA * (energy - stress_trace + angular_stress);
 
             term1 + term2 + term3 + term4 + regular
         };
@@ -460,27 +459,26 @@ impl Decomposition {
         // ************************************
 
         let theta_t = {
-            let term1 = lapse.scalar() * hamiltonian
-                - lapse.scalar() * (k_trace + l.scalar()) * theta.scalar();
-            let term2 = lapse.scalar() * metric.trace(z_grad);
+            let term1 = lapse.value * hamiltonian - lapse.value * (k_trace + l.value) * theta.value;
+            let term2 = lapse.value * metric.cotrace(z_grad);
             let term3 = -s.sum(|i| lapse_grad[i] * z_con[i]);
-            let term4 = s.sum(|[i]| theta.derivs[[i]] * shift.value[[i]]);
+            let term4 = s.sum(|[i]| theta.derivs[i] * shift.value[i]);
 
-            let mut regular = lapse.scalar() * s.sum(|[m]| twist.regular_con()[[m]] * z.value[[m]]);
+            let mut regular = lapse.value * s.sum(|[m]| twist.regular_con()[m] * z.value[[m]]);
             if on_axis {
-                regular += lapse.scalar() * z.derivs[[0, 0]] / metric.value()[[0, 0]];
+                regular += lapse.value * z.derivs[[0, 0]] / metric.value()[[0, 0]];
             }
 
             term1 + term2 + term3 + term4 + regular
         };
 
-        let z_lie_shift = lie_derivative(shift.clone(), z.clone());
+        let z_lie_shift = z.lie_derivative(shift.clone());
 
-        let z_t = s.tensor(|[i]| {
-            let term1 = lapse.scalar() * momentum[[i]];
-            let term2 = -2.0 * lapse.scalar() * s.sum(|[m]| k.value[[i, m]] * z_con[[m]]);
-            let term3 = lapse.scalar() * theta_grad[[i]] - lapse_grad[[i]] * theta.scalar();
-            term1 + term2 + term3 + z_lie_shift[[i]]
+        let z_t = s.vector(|i| {
+            let term1 = lapse.value * momentum[[i]];
+            let term2 = -2.0 * lapse.value * s.sum(|[m]| k.value[[i, m]] * z_con[[m]]);
+            let term3 = lapse.value * theta_grad[i] - lapse_grad[[i]] * theta.value;
+            term1 + term2 + term3 + z_lie_shift[i]
         });
 
         let mut y_t = 0.0;
@@ -530,15 +528,15 @@ impl Decomposition {
         let s = Space::<2>;
 
         let k_trace = s.sum(|[i, j]| k.value[[i, j]] * metric.inv()[[i, j]]);
-        let lapse2 = lapse.scalar() * lapse.scalar();
+        let lapse2 = lapse.value * lapse.value;
 
         let lapse_t = {
-            let term1 = -lapse2 * F * (k_trace + l.scalar() - M * theta.scalar());
+            let term1 = -lapse2 * F * (k_trace + l.value - M * theta.value);
             let term2 = s.sum(|i| shift.value[i] * lapse.derivs[i]);
             term1 + term2
         };
 
-        let shift_t = s.tensor(|[i]| {
+        let shift_t = s.vector(|i| {
             let lamg_term = 0.5 / metric.det()
                 * s.sum(|[m]| metric.inv()[[i, m]] * metric.det_derivs()[[m]])
                 + twist.regular_con()[[i]];
@@ -548,7 +546,7 @@ impl Decomposition {
             let term1 = -lapse2 * MU * g_inv_term;
             let term2 = lapse2 * 2.0 * MU * s.sum(|[m]| metric.inv()[[i, m]] * z.value[[m]]);
 
-            let term3 = -lapse.scalar() * A * s.sum(|[m]| metric.inv()[[i, m]] * lapse.derivs[[m]]);
+            let term3 = -lapse.value * A * s.sum(|[m]| metric.inv()[[i, m]] * lapse.derivs[[m]]);
             let term4 = s.sum(|[m]| shift.value[[m]] * shift.derivs[[i, m]]);
 
             let mut regular = -lapse2 * (2.0 * MU - D) * lamg_term;
@@ -577,27 +575,25 @@ impl Decomposition {
             shift,
             ..
         } = self;
+        let phi_hess = field.phi.hessian(metric);
+        let phi_grad = field.phi.gradient(metric);
+        let pi_grad = field.pi.gradient(metric);
 
-        let phi_hess = metric.hessian(field.phi.clone());
-        let phi_grad = metric.gradiant(field.phi.clone().into());
-        let pi_grad = metric.gradiant(field.pi.clone());
+        let lapse_grad = lapse.gradient(metric);
 
-        let lapse_grad = metric.gradiant(lapse.clone().into());
-
-        let phi_t =
-            lapse.scalar() * field.pi.scalar() + s.sum(|[i]| phi_grad[[i]] * shift.value[[i]]);
+        let phi_t = lapse.value * field.pi.value + s.sum(|[i]| phi_grad[[i]] * shift.value[[i]]);
 
         let pi_t = {
-            let term1 = lapse.scalar() * metric.trace(phi_hess)
-                + lapse.scalar() * field.pi.scalar() * (metric.trace(k.value.clone()) + l.scalar());
+            let term1 = lapse.value * metric.cotrace(phi_hess)
+                + lapse.value * field.pi.value * (metric.cotrace(k.value.clone()) + l.value);
             let term2 = s.sum(|[i, j]| phi_grad[[i]] * metric.inv()[[i, j]] * lapse_grad[[j]]);
 
-            let mut term3 = lapse.scalar() * s.sum(|[i]| phi_grad[[i]] * twist.regular_con()[[i]]);
+            let mut term3 = lapse.value * s.sum(|[i]| phi_grad[[i]] * twist.regular_con()[[i]]);
             if self.on_axis() {
-                term3 += lapse.scalar() * field.phi.second_derivs[[0, 0]] / metric.value()[[0, 0]];
+                term3 += lapse.value * field.phi.second_derivs[[0, 0]] / metric.value()[[0, 0]];
             }
 
-            let term4 = -field.mass * field.mass * field.phi.scalar();
+            let term4 = -field.mass * field.mass * field.phi.value;
             let term5 = s.sum(|[i]| pi_grad[[i]] * shift.value[[i]]);
 
             term1 + term2 + term3 + term4 + term5

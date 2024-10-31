@@ -184,48 +184,48 @@ impl HyperbolicSystem {
     pub fn axisymmetric_system(&self) -> axi::System {
         use aeon_tensor::*;
 
-        let metric = Metric::new(TensorFieldC2 {
-            value: Tensor::from_storage(self.metric()),
-            derivs: Tensor::from_storage(self.metric_derivs()),
-            second_derivs: Tensor::from_storage(self.metric_second_derivs()),
+        let metric = Metric::new(MatrixFieldC2 {
+            value: Tensor::from(self.metric()),
+            derivs: Tensor::from(self.metric_derivs()),
+            second_derivs: Tensor::from(self.metric_second_derivs()),
         });
 
-        let seed = TensorFieldC2 {
-            value: Tensor::from_storage(self.seed()),
-            derivs: Tensor::from_storage(self.seed_derivs()),
-            second_derivs: Tensor::from_storage(self.seed_second_derivs()),
+        let seed = ScalarFieldC2 {
+            value: self.seed(),
+            derivs: Tensor::from(self.seed_derivs()),
+            second_derivs: Tensor::from(self.seed_second_derivs()),
         };
 
         axi::System {
             metric: metric.clone(),
             seed,
-            k: TensorFieldC1 {
-                value: Tensor::from_storage(self.extrinsic()),
-                derivs: Tensor::from_storage(self.extrinsic_derivs()),
+            k: MatrixFieldC1 {
+                value: Tensor::from(self.extrinsic()),
+                derivs: Tensor::from(self.extrinsic_derivs()),
             },
-            y: TensorFieldC1 {
-                value: Tensor::from_storage(self.y),
-                derivs: Tensor::from_storage([self.y_r, self.y_z]),
+            y: ScalarFieldC1 {
+                value: self.y,
+                derivs: Tensor::from([self.y_r, self.y_z]),
             },
-            theta: TensorFieldC1 {
-                value: Tensor::from_storage(self.theta),
-                derivs: Tensor::from_storage([self.theta_r, self.theta_z]),
+            theta: ScalarFieldC1 {
+                value: self.theta,
+                derivs: Tensor::from([self.theta_r, self.theta_z]),
             },
-            z: TensorFieldC1 {
-                value: Tensor::from_storage([self.zr, self.zz]),
-                derivs: Tensor::from_storage([[self.zr_r, self.zr_z], [self.zz_r, self.zz_z]]),
+            z: VectorFieldC1 {
+                value: Tensor::from([self.zr, self.zz]),
+                derivs: Tensor::from([[self.zr_r, self.zr_z], [self.zz_r, self.zz_z]]),
             },
-            lapse: TensorFieldC2 {
-                value: Tensor::from_storage(self.lapse),
-                derivs: Tensor::from_storage([self.lapse_r, self.lapse_z]),
-                second_derivs: Tensor::from_storage([
+            lapse: ScalarFieldC2 {
+                value: self.lapse,
+                derivs: Tensor::from([self.lapse_r, self.lapse_z]),
+                second_derivs: Tensor::from([
                     [self.lapse_rr, self.lapse_rz],
                     [self.lapse_rz, self.lapse_zz],
                 ]),
             },
-            shift: TensorFieldC1 {
-                value: Tensor::from_storage([self.shiftr, self.shiftz]),
-                derivs: Tensor::from_storage([
+            shift: VectorFieldC1 {
+                value: Tensor::from([self.shiftr, self.shiftz]),
+                derivs: Tensor::from([
                     [self.shiftr_r, self.shiftr_z],
                     [self.shiftz_r, self.shiftz_z],
                 ]),
@@ -238,17 +238,17 @@ impl HyperbolicSystem {
         use aeon_tensor::*;
 
         axi::ScalarFieldSystem {
-            phi: TensorFieldC2 {
-                value: Tensor::from_storage(self.phi),
-                derivs: Tensor::from_storage([self.phi_r, self.phi_z]),
-                second_derivs: Tensor::from_storage([
+            phi: ScalarFieldC2 {
+                value: self.phi,
+                derivs: Tensor::from([self.phi_r, self.phi_z]),
+                second_derivs: Tensor::from([
                     [self.phi_rr, self.phi_rz],
                     [self.phi_rz, self.phi_zz],
                 ]),
             },
-            pi: TensorFieldC1 {
-                value: Tensor::from_storage(self.pi),
-                derivs: Tensor::from_storage([self.pi_r, self.pi_z]),
+            pi: ScalarFieldC1 {
+                value: self.pi,
+                derivs: Tensor::from([self.pi_r, self.pi_z]),
             },
             mass: self.mass,
         }

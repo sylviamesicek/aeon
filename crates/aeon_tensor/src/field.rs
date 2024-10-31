@@ -1,4 +1,4 @@
-use crate::{Matrix, Space, Tensor, Tensor3, Tensor4, Vector};
+use crate::{Matrix, Metric, Space, Tensor, Tensor3, Tensor4, Vector};
 
 // ************************
 // Fields *****************
@@ -21,7 +21,12 @@ impl<const N: usize> From<ScalarFieldC2<N>> for ScalarFieldC1<N> {
 
 impl<const N: usize> ScalarFieldC1<N> {
     pub fn lie_derivative(&self, direction: VectorFieldC1<N>) -> f64 {
-        (direction.value * self.derivs).trace()
+        let s = Space::<N>;
+        s.sum(|[m]| direction.value[m] * self.derivs[m])
+    }
+
+    pub fn gradient(&self, _metric: &Metric<N>) -> Vector<N> {
+        self.derivs.clone()
     }
 }
 
@@ -30,6 +35,25 @@ pub struct ScalarFieldC2<const N: usize> {
     pub value: f64,
     pub derivs: Vector<N>,
     pub second_derivs: Matrix<N>,
+}
+
+impl<const N: usize> ScalarFieldC2<N> {
+    pub fn lie_derivative(&self, direction: VectorFieldC1<N>) -> f64 {
+        let c1: ScalarFieldC1<N> = self.clone().into();
+        c1.lie_derivative(direction)
+    }
+
+    pub fn gradient(&self, _metric: &Metric<N>) -> Vector<N> {
+        self.derivs.clone()
+    }
+
+    pub fn hessian(&self, metric: &Metric<N>) -> Matrix<N> {
+        VectorFieldC1 {
+            value: self.derivs,
+            derivs: self.second_derivs,
+        }
+        .gradient(metric)
+    }
 }
 
 #[derive(Clone)]
@@ -46,6 +70,14 @@ impl<const N: usize> VectorFieldC1<N> {
             s.sum(|[m]| {
                 direction.value[m] * self.derivs[[i, m]] + self.value[m] * direction.derivs[[m, i]]
             })
+        })
+    }
+
+    pub fn gradient(&self, metric: &Metric<N>) -> Matrix<N> {
+        let s = Space::<N>;
+
+        Matrix::from_fn(|[i, j]| {
+            self.derivs[[i, j]] - s.sum(|[m]| metric.christoffel_2nd()[[m, i, j]] * self.value[m])
         })
     }
 }
@@ -66,6 +98,19 @@ impl<const N: usize> MatrixFieldC1<N> {
                     + self.value[[i, m]] * direction.derivs[[m, j]]
                     + self.value[[m, j]] * direction.derivs[[m, i]]
             })
+        })
+    }
+
+    pub fn gradient(&self, metric: &Metric<N>) -> Tensor3<N> {
+        let s = Space::<N>;
+
+        Tensor3::from_fn(|[i, j, k]| {
+            let term1 = self.derivs[[i, j, k]];
+            let term2 = s.sum(|[m]| {
+                metric.christoffel_2nd()[[m, i, k]] * self.value[[m, j]]
+                    + metric.christoffel_2nd()[[m, j, k]] * self.value[[i, m]]
+            });
+            term1 - term2
         })
     }
 }
@@ -90,5 +135,10 @@ impl<const N: usize> MatrixFieldC2<N> {
     pub fn lie_derivative(&self, direction: VectorFieldC1<N>) -> Matrix<N> {
         let c1: MatrixFieldC1<N> = self.clone().into();
         c1.lie_derivative(direction)
+    }
+
+    pub fn gradient(&self, metric: &Metric<N>) -> Tensor3<N> {
+        let c1: MatrixFieldC1<N> = self.clone().into();
+        c1.gradient(metric)
     }
 }

@@ -4,7 +4,7 @@
 
 use aeon_tensor::{
     axisymmetry::{Decomposition, StressEnergy, System},
-    Metric, Tensor, TensorFieldC1, TensorFieldC2,
+    MatrixFieldC1, MatrixFieldC2, Metric, ScalarFieldC1, ScalarFieldC2, Tensor, VectorFieldC1,
 };
 
 use crate::shared::*;
@@ -553,50 +553,47 @@ pub fn geometric(sys: HyperbolicSystem, _pos: [f64; 2]) -> Geometric {
 }
 
 pub fn hyperbolc_new(sys: HyperbolicSystem, pos: [f64; 2]) -> HyperbolicDerivs {
-    let g = TensorFieldC2 {
-        value: Tensor::from_storage(sys.metric()),
-        derivs: Tensor::from_storage(sys.metric_derivs()),
-        second_derivs: Tensor::from_storage(sys.metric_second_derivs()),
+    let g = MatrixFieldC2 {
+        value: Tensor::from(sys.metric()),
+        derivs: Tensor::from(sys.metric_derivs()),
+        second_derivs: Tensor::from(sys.metric_second_derivs()),
     };
 
-    let seed = TensorFieldC2 {
-        value: Tensor::from_storage(sys.seed()),
-        derivs: Tensor::from_storage(sys.seed_derivs()),
-        second_derivs: Tensor::from_storage(sys.seed_second_derivs()),
+    let seed = ScalarFieldC2 {
+        value: sys.seed(),
+        derivs: Tensor::from(sys.seed_derivs()),
+        second_derivs: Tensor::from(sys.seed_second_derivs()),
     };
 
-    let k = TensorFieldC1 {
-        value: Tensor::from_storage(sys.extrinsic()),
-        derivs: Tensor::from_storage(sys.extrinsic_derivs()),
+    let k = MatrixFieldC1 {
+        value: Tensor::from(sys.extrinsic()),
+        derivs: Tensor::from(sys.extrinsic_derivs()),
     };
 
-    let y = TensorFieldC1 {
-        value: Tensor::from_storage(sys.y),
-        derivs: Tensor::from_storage([sys.y_r, sys.y_z]),
+    let y = ScalarFieldC1 {
+        value: sys.y,
+        derivs: Tensor::from([sys.y_r, sys.y_z]),
     };
 
-    let theta = TensorFieldC1 {
-        value: Tensor::from_storage(sys.theta),
-        derivs: Tensor::from_storage([sys.theta_r, sys.theta_z]),
+    let theta = ScalarFieldC1 {
+        value: sys.theta,
+        derivs: Tensor::from([sys.theta_r, sys.theta_z]),
     };
 
-    let z = TensorFieldC1 {
-        value: Tensor::from_storage([sys.zr, sys.zz]),
-        derivs: Tensor::from_storage([[sys.zr_r, sys.zr_z], [sys.zz_r, sys.zz_z]]),
+    let z = VectorFieldC1 {
+        value: Tensor::from([sys.zr, sys.zz]),
+        derivs: Tensor::from([[sys.zr_r, sys.zr_z], [sys.zz_r, sys.zz_z]]),
     };
 
-    let lapse = TensorFieldC2 {
-        value: Tensor::from_storage(sys.lapse),
-        derivs: Tensor::from_storage([sys.lapse_r, sys.lapse_z]),
-        second_derivs: Tensor::from_storage([
-            [sys.lapse_rr, sys.lapse_rz],
-            [sys.lapse_rz, sys.lapse_zz],
-        ]),
+    let lapse = ScalarFieldC2 {
+        value: sys.lapse,
+        derivs: Tensor::from([sys.lapse_r, sys.lapse_z]),
+        second_derivs: Tensor::from([[sys.lapse_rr, sys.lapse_rz], [sys.lapse_rz, sys.lapse_zz]]),
     };
 
-    let shift = TensorFieldC1 {
-        value: Tensor::from_storage([sys.shiftr, sys.shiftz]),
-        derivs: Tensor::from_storage([[sys.shiftr_r, sys.shiftr_z], [sys.shiftz_r, sys.shiftz_z]]),
+    let shift = VectorFieldC1 {
+        value: Tensor::from([sys.shiftr, sys.shiftz]),
+        derivs: Tensor::from([[sys.shiftr_r, sys.shiftr_z], [sys.shiftz_r, sys.shiftz_z]]),
     };
 
     let metric = Metric::new(g);
