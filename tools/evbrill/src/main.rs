@@ -4,6 +4,7 @@ use std::fmt::Write;
 use std::fs::File;
 use std::io::Write as _;
 
+use aeon::basis::RadiativeParams;
 use aeon::fd::{ExportVtuConfig, Mesh, SystemCheckpoint, SystemCondition};
 use aeon::prelude::*;
 use aeon::system::field_count;
@@ -100,10 +101,15 @@ impl Conditions<2> for DynamicConditions {
         axes[face.axis]
     }
 
-    fn radiative(&self, field: Self::System, _position: [f64; 2]) -> f64 {
+    fn radiative(
+        &self,
+        field: Self::System,
+        _position: [f64; 2],
+        _spacing: f64,
+    ) -> RadiativeParams {
         match field {
-            Dynamic::Grr | Dynamic::Gzz | Dynamic::Lapse => 1.0,
-            _ => 0.0,
+            Dynamic::Grr | Dynamic::Gzz | Dynamic::Lapse => RadiativeParams::lightlike(1.0),
+            _ => RadiativeParams::lightlike(0.0),
         }
     }
 }

@@ -3,7 +3,7 @@ use crate::{
     system::{Empty, Pair, Scalar, SystemLabel},
 };
 
-use aeon_basis::{Boundary, BoundaryKind, Condition};
+use aeon_basis::{Boundary, BoundaryKind, Condition, RadiativeParams};
 
 /// A transformer for overriding individual boundary faces with `BoundaryKind::Custom`. This
 /// is primarily used internally to ensure interior boundaries between blocks are properly
@@ -38,8 +38,16 @@ pub trait Conditions<const N: usize>: Clone {
         false
     }
 
-    fn radiative(&self, _field: Self::System, _position: [f64; N]) -> f64 {
-        0.0
+    fn radiative(
+        &self,
+        _field: Self::System,
+        _position: [f64; N],
+        _spacing: f64,
+    ) -> RadiativeParams {
+        RadiativeParams {
+            target: 0.0,
+            speed: 1.0,
+        }
     }
 }
 
@@ -60,8 +68,8 @@ impl<const N: usize, I: Condition<N>> Conditions<N> for ScalarConditions<I> {
         self.0.parity(face)
     }
 
-    fn radiative(&self, _field: Self::System, position: [f64; N]) -> f64 {
-        self.0.radiative(position)
+    fn radiative(&self, _field: Self::System, position: [f64; N], spacing: f64) -> RadiativeParams {
+        self.0.radiative(position, spacing)
     }
 }
 
@@ -84,8 +92,9 @@ impl<const N: usize, S: SystemLabel, C: Conditions<N, System = S>> Condition<N>
         self.conditions.parity(self.field.clone(), face)
     }
 
-    fn radiative(&self, position: [f64; N]) -> f64 {
-        self.conditions.radiative(self.field.clone(), position)
+    fn radiative(&self, position: [f64; N], spacing: f64) -> RadiativeParams {
+        self.conditions
+            .radiative(self.field.clone(), position, spacing)
     }
 }
 
@@ -114,8 +123,9 @@ impl<const N: usize, S: SystemLabel, B: Clone, C: Conditions<N, System = S>> Con
         self.conditions.parity(self.field.clone(), face)
     }
 
-    fn radiative(&self, position: [f64; N]) -> f64 {
-        self.conditions.radiative(self.field.clone(), position)
+    fn radiative(&self, position: [f64; N], spacing: f64) -> RadiativeParams {
+        self.conditions
+            .radiative(self.field.clone(), position, spacing)
     }
 }
 
@@ -141,10 +151,10 @@ impl<const N: usize, L: Conditions<N>, R: Conditions<N>> Conditions<N> for PairC
         }
     }
 
-    fn radiative(&self, field: Self::System, position: [f64; N]) -> f64 {
+    fn radiative(&self, field: Self::System, position: [f64; N], spacing: f64) -> RadiativeParams {
         match field {
-            Pair::Left(left) => self.left.radiative(left, position),
-            Pair::Right(right) => self.right.radiative(right, position),
+            Pair::Left(left) => self.left.radiative(left, position, spacing),
+            Pair::Right(right) => self.right.radiative(right, position, spacing),
         }
     }
 }
@@ -159,7 +169,12 @@ impl<const N: usize> Conditions<N> for EmptyConditions {
         unreachable!()
     }
 
-    fn radiative(&self, _field: Self::System, _position: [f64; N]) -> f64 {
+    fn radiative(
+        &self,
+        _field: Self::System,
+        _position: [f64; N],
+        _spacing: f64,
+    ) -> RadiativeParams {
         unreachable!()
     }
 }

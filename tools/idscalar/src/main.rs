@@ -1,4 +1,5 @@
 use aeon::{
+    basis::RadiativeParams,
     fd::{ExportVtuConfig, Mesh, SystemCondition},
     prelude::*,
 };
@@ -47,10 +48,15 @@ impl Conditions<2> for RinneConditions {
         }
     }
 
-    fn radiative(&self, field: Self::System, _position: [f64; 2]) -> f64 {
+    fn radiative(
+        &self,
+        field: Self::System,
+        _position: [f64; 2],
+        _spacing: f64,
+    ) -> RadiativeParams {
         match field {
-            Rinne::Conformal => 1.0,
-            Rinne::Seed | Rinne::Phi => 0.0,
+            Rinne::Conformal => RadiativeParams::lightlike(1.0),
+            Rinne::Seed | Rinne::Phi => RadiativeParams::lightlike(0.0),
         }
     }
 }

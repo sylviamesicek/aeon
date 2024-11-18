@@ -102,8 +102,6 @@ impl HyperbolicSystem {
         const NEAR_ONE: Range<f64> = 0.2..1.8;
         const NEAR_ZERO: Range<f64> = -1.0..1.0;
 
-        
-
         HyperbolicSystem {
             grr: rng.gen_range(NEAR_ONE),
             grr_r: rng.gen_range(NEAR_ZERO),
@@ -185,7 +183,7 @@ impl HyperbolicSystem {
         use aeon_tensor::*;
 
         let metric = Metric::new(MatrixFieldC2 {
-            value: Tensor::from(self.metric()),
+            value: Matrix::from(self.metric()),
             derivs: Tensor::from(self.metric_derivs()),
             second_derivs: Tensor::from(self.metric_second_derivs()),
         });

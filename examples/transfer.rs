@@ -1,4 +1,5 @@
 use aeon::{fd::Gaussian, prelude::*};
+use aeon_basis::RadiativeParams;
 
 const ORDER: Order<4> = Order::<4>;
 // const REGRID_SKIP: usize = 10;
@@ -22,8 +23,13 @@ pub struct WaveConditions;
 impl Conditions<2> for WaveConditions {
     type System = Scalar;
 
-    fn radiative(&self, _field: Self::System, _position: [f64; 2]) -> f64 {
-        0.0
+    fn radiative(
+        &self,
+        _field: Self::System,
+        _position: [f64; 2],
+        _spacing: f64,
+    ) -> RadiativeParams {
+        RadiativeParams::lightlike(0.0)
     }
 }
 

@@ -1,5 +1,5 @@
 use super::{Quadrant, Rinne, ORDER};
-use aeon::{elliptic::HyperRelaxSolver, fd::Mesh, prelude::*};
+use aeon::{basis::RadiativeParams, elliptic::HyperRelaxSolver, fd::Mesh, prelude::*};
 
 #[derive(Clone, SystemLabel)]
 pub struct Psi;
@@ -14,8 +14,13 @@ impl Conditions<2> for PsiConditions {
         [true, true][face.axis]
     }
 
-    fn radiative(&self, _field: Self::System, _position: [f64; 2]) -> f64 {
-        1.0
+    fn radiative(
+        &self,
+        _field: Self::System,
+        _position: [f64; 2],
+        _spacing: f64,
+    ) -> RadiativeParams {
+        RadiativeParams::lightlike(1.0)
     }
 }
 
@@ -38,8 +43,8 @@ impl Conditions<2> for ContextConditions {
         }
     }
 
-    fn radiative(&self, _: Self::System, _position: [f64; 2]) -> f64 {
-        0.0
+    fn radiative(&self, _: Self::System, _position: [f64; 2], _spacing: f64) -> RadiativeParams {
+        RadiativeParams::lightlike(0.0)
     }
 }
 

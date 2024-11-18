@@ -31,7 +31,24 @@ impl BoundaryKind {
 
 /// Provides information about what kind of boundary is used on each face.
 pub trait Boundary<const N: usize>: Clone {
+    /// What type of boundary is associated with the given face?
     fn kind(&self, face: Face<N>) -> BoundaryKind;
+}
+
+/// Describes a radiative boundary condition at a point on the boundary.
+pub struct RadiativeParams {
+    /// Target value for field.
+    pub target: f64,
+    /// Wavespeed of field at boundary.
+    pub speed: f64,
+}
+
+impl RadiativeParams {
+    /// Constructs a boundary condition for a wave asymptotically approaching a given value, travelling
+    /// at the speed of light (c = 1).
+    pub fn lightlike(target: f64) -> Self {
+        Self { target, speed: 1.0 }
+    }
 }
 
 /// Provides specifics for enforcing boundary conditions for
@@ -41,8 +58,11 @@ pub trait Condition<const N: usize>: Clone {
         false
     }
 
-    fn radiative(&self, _position: [f64; N]) -> f64 {
-        0.0
+    fn radiative(&self, _position: [f64; N], _spacing: f64) -> RadiativeParams {
+        RadiativeParams {
+            target: 0.0,
+            speed: 1.0,
+        }
     }
 }
 
@@ -73,7 +93,7 @@ impl<const N: usize, B: Clone, C: Condition<N>> Condition<N> for BC<B, C> {
         self.condition.parity(face)
     }
 
-    fn radiative(&self, position: [f64; N]) -> f64 {
-        self.condition.radiative(position)
+    fn radiative(&self, position: [f64; N], spacing: f64) -> RadiativeParams {
+        self.condition.radiative(position, spacing)
     }
 }

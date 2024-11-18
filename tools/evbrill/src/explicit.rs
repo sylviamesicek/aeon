@@ -4,7 +4,8 @@
 
 use aeon_tensor::{
     axisymmetry::{Decomposition, StressEnergy, System},
-    MatrixFieldC1, MatrixFieldC2, Metric, ScalarFieldC1, ScalarFieldC2, Tensor, VectorFieldC1,
+    MatrixFieldC1, MatrixFieldC2, Metric, ScalarFieldC1, ScalarFieldC2, Tensor, Tensor3, Vector,
+    VectorFieldC1,
 };
 
 use crate::shared::*;
@@ -567,21 +568,21 @@ pub fn hyperbolc_new(sys: HyperbolicSystem, pos: [f64; 2]) -> HyperbolicDerivs {
 
     let k = MatrixFieldC1 {
         value: Tensor::from(sys.extrinsic()),
-        derivs: Tensor::from(sys.extrinsic_derivs()),
+        derivs: Tensor3::from(sys.extrinsic_derivs()),
     };
 
     let y = ScalarFieldC1 {
         value: sys.y,
-        derivs: Tensor::from([sys.y_r, sys.y_z]),
+        derivs: Vector::from([sys.y_r, sys.y_z]),
     };
 
     let theta = ScalarFieldC1 {
         value: sys.theta,
-        derivs: Tensor::from([sys.theta_r, sys.theta_z]),
+        derivs: Vector::from([sys.theta_r, sys.theta_z]),
     };
 
     let z = VectorFieldC1 {
-        value: Tensor::from([sys.zr, sys.zz]),
+        value: Vector::from([sys.zr, sys.zz]),
         derivs: Tensor::from([[sys.zr_r, sys.zr_z], [sys.zz_r, sys.zz_z]]),
     };
 

@@ -1,4 +1,5 @@
 use aeon::{
+    basis::RadiativeParams,
     fd::{ExportVtuConfig, Mesh, SystemCondition},
     prelude::*,
 };
@@ -43,10 +44,15 @@ impl Conditions<2> for RinneConditions {
         }
     }
 
-    fn radiative(&self, field: Self::System, _position: [f64; 2]) -> f64 {
+    fn radiative(
+        &self,
+        field: Self::System,
+        _position: [f64; 2],
+        _spacing: f64,
+    ) -> RadiativeParams {
         match field {
-            Rinne::Conformal => 1.0,
-            Rinne::Seed => 0.0,
+            Rinne::Conformal => RadiativeParams::lightlike(1.0),
+            Rinne::Seed => RadiativeParams::lightlike(0.0),
         }
     }
 }
@@ -112,13 +118,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut transfer = SystemVec::new();
 
     for r in 0..12 {
-        log::warn!("Min Spacing {}", mesh.min_spacing());
-
         let mut debug = String::new();
         mesh.write_debug(&mut debug);
 
         std::fs::write("output/mesh.txt", debug).unwrap();
 
+        log::info!("Min Spacing {}", mesh.min_spacing());
         log::info!("Num Blocks: {}", mesh.num_blocks());
         log::info!("Num Cells: {}", mesh.num_cells());
         log::info!("Num Nodes: {}", mesh.num_nodes());
@@ -129,16 +134,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         if CHOPTUIK {
             choptuik::solve(
                 &mut mesh,
-                8.0,
-                4000 * 2usize.pow(r as u32),
+                3.5,
+                10_000_000,
                 rinne.as_mut_slice(),
                 &mut hamiltonian,
             )?;
         } else {
             garfinkle::solve(
                 &mut mesh,
-                8.0,
-                4000 * 2usize.pow(r as u32),
+                3.5,
+                10_000_000,
                 rinne.as_mut_slice(),
                 &mut hamiltonian,
             )?;
@@ -155,8 +160,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         println!("Flagging wavelet");
         mesh.flag_wavelets(4, 0.0, 1e-6, Quadrant, rinne.as_slice());
         mesh.balance_flags();
-
-        // println!("{:?}");
 
         let mut interfaces = vec![0i64; mesh.num_nodes()];
         mesh.interface_index_debug(2, &mut interfaces);
@@ -207,7 +210,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             mesh.transfer_system(ORDER, Quadrant, transfer.as_slice(), rinne.as_mut_slice());
         } else {
             log::info!("Sucessfully refined mesh to prescribed accuracy");
-            mesh.export_dat("output/super.dat", &checkpoint)?;
+            mesh.export_dat("output/subcritical.dat", &checkpoint)?;
             break;
         }
     }

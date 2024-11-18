@@ -13,6 +13,7 @@ default-members = [
 resolver = "2"
 
 [workspace.dependencies]
+aeon = { path = "." }
 aeon_array = { path = "crates/aeon_array" }
 aeon_basis = { path = "crates/aeon_basis" }
 aeon_geometry = { path = "crates/aeon_geometry" }

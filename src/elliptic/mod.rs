@@ -1,4 +1,4 @@
-use aeon_basis::{Boundary, Kernels};
+use aeon_basis::{Boundary, Kernels, RadiativeParams};
 use reborrow::{Reborrow, ReborrowMut};
 use std::marker::PhantomData;
 
@@ -8,9 +8,10 @@ use crate::{
     prelude::Face,
     system::{field_count, Pair, SystemLabel, SystemSlice, SystemSliceMut, SystemValue},
 };
-
 pub struct HyperRelaxSolver<Label: SystemLabel> {
+    /// Error tolerance (relaxation stops once error goes below this value).
     pub tolerance: f64,
+    /// Maximum number of relaxation steps to perform
     pub max_steps: usize,
     pub dampening: f64,
     pub cfl: f64,
@@ -81,14 +82,10 @@ impl<Label: SystemLabel> HyperRelaxSolver<Label> {
             }
         }
 
-        let spacing: f64 = mesh.min_spacing();
-        let step = self.cfl * spacing;
+        let min_spacing: f64 = mesh.min_spacing();
+        let time_step = self.cfl * min_spacing;
 
         for index in 0..self.max_steps {
-            if index % 1000 == 0 {
-                log::info!("Relaxed {}k steps", index / 1000);
-            }
-
             {
                 mesh.fill_boundary(
                     order,
@@ -115,20 +112,23 @@ impl<Label: SystemLabel> HyperRelaxSolver<Label> {
 
             let norm = mesh.l2_norm(system.rb());
 
-            // log::trace!(
-            //     "Time {:.5}/{:.5} Norm {:.5e}",
-            //     index as f64 * step,
-            //     self.max_steps as f64 * step,
-            //     norm
-            // );
+            if index % 1000 == 0 {
+                log::info!("Relaxed {}k steps, norm: {:.5e}", index / 1000, norm);
+            }
 
             if norm <= self.tolerance {
-                log::trace!(
-                    "Hyperbolic Relaxation converged with error {:.5e}",
-                    self.tolerance
+                log::info!(
+                    "Hyperbolic Relaxation converged with error {:.5e} in {} steps.",
+                    self.tolerance,
+                    index
                 );
                 break;
             }
+
+            // let max_spacing = (0..mesh.num_blocks())
+            //     .map(|block| mesh.block_spacing(block))
+            //     .max_by(|a, b| a.total_cmp(b))
+            //     .unwrap_or(1.0);
 
             let mut ode = FictitiousOde {
                 mesh,
@@ -142,10 +142,18 @@ impl<Label: SystemLabel> HyperRelaxSolver<Label> {
             };
 
             // Take step
-            self.integrator.step(step, &mut ode, &data, &mut update);
+            self.integrator
+                .step(time_step, &mut ode, &data, &mut update);
 
             for i in 0..data.len() {
                 data[i] += update[i];
+            }
+
+            if index == self.max_steps - 1 {
+                log::error!(
+                    "Hyperbolic relaxation failed to converge in {} steps.",
+                    self.max_steps
+                );
             }
         }
 
@@ -160,6 +168,26 @@ impl<Label: SystemLabel> HyperRelaxSolver<Label> {
                     .clone_from_slice(usys.field(field.clone()))
             }
         }
+    }
+}
+
+#[derive(Clone)]
+struct UConditions<C> {
+    conditions: C,
+}
+
+impl<const N: usize, I: Conditions<N>> Conditions<N> for UConditions<I> {
+    type System = I::System;
+
+    fn parity(&self, field: Self::System, face: Face<N>) -> bool {
+        self.conditions.parity(field, face)
+    }
+
+    fn radiative(&self, field: Self::System, position: [f64; N], spacing: f64) -> RadiativeParams {
+        self.conditions.radiative(field, position, spacing)
+        // if ADAPTIVE_WAVESPEED {
+        //     params.speed *= spacing / self.min_spacing;
+        // }
     }
 }
 
@@ -187,23 +215,6 @@ impl<const N: usize, Label: SystemLabel> Operator<N> for UOperator<N, Label> {
     }
 }
 
-#[derive(Clone)]
-struct VOperator<const N: usize, O> {
-    operator: O,
-}
-
-impl<const N: usize, O: Operator<N>> Operator<N> for VOperator<N, O> {
-    type System = O::System;
-    type Context = O::Context;
-
-    fn apply(
-        &self,
-        engine: &impl Engine<N, Pair<Self::System, Self::Context>>,
-    ) -> SystemValue<Self::System> {
-        self.operator.apply(engine)
-    }
-}
-
 /// Provides boundary conditions for v. All strong boundary condition commute with the time derivative
 /// and radiative boundary conditions simply need to be multipled by the dampening.
 #[derive(Clone)]
@@ -219,8 +230,41 @@ impl<const N: usize, I: Conditions<N>> Conditions<N> for VConditions<I> {
         self.conditions.parity(field, face)
     }
 
-    fn radiative(&self, field: Self::System, position: [f64; N]) -> f64 {
-        self.dampening * self.conditions.radiative(field, position)
+    fn radiative(&self, field: Self::System, position: [f64; N], spacing: f64) -> RadiativeParams {
+        let mut params = self.conditions.radiative(field, position, spacing);
+
+        // if ADAPTIVE_WAVESPEED {
+        //     params.speed *= spacing / self.min_spacing;
+        // }
+
+        params.target *= self.dampening;
+        params
+    }
+}
+
+/// Wraps the c^2 * L{u(x)} operation.
+#[derive(Clone)]
+struct VOperator<const N: usize, O> {
+    operator: O,
+}
+
+impl<const N: usize, O: Operator<N>> Operator<N> for VOperator<N, O> {
+    type System = O::System;
+    type Context = O::Context;
+
+    fn apply(
+        &self,
+        engine: &impl Engine<N, Pair<Self::System, Self::Context>>,
+    ) -> SystemValue<Self::System> {
+        // let relax = self.operator.apply(engine);
+        // if ADAPTIVE_WAVESPEED {
+        //     let speed = engine.spacing() / self.min_spacing;
+        //     SystemValue::from_fn(|field| speed * speed * relax.field(field))
+        // } else {
+        //     relax
+        // }
+
+        self.operator.apply(engine)
     }
 }
 
@@ -263,7 +307,9 @@ impl<
         self.mesh.fill_boundary(
             self.order,
             self.boundary.clone(),
-            self.conditions.clone(),
+            UConditions {
+                conditions: self.conditions.clone(),
+            },
             SystemSliceMut::from_contiguous(u),
         );
 
@@ -304,7 +350,7 @@ impl<
             dudt.rb_mut(),
         );
 
-        // dv/dt = Lu
+        // dv/dt = c^2 Lu
 
         self.mesh.apply(
             self.order,
@@ -321,7 +367,9 @@ impl<
         self.mesh.weak_boundary(
             self.order,
             self.boundary.clone(),
-            self.conditions.clone(),
+            UConditions {
+                conditions: self.conditions.clone(),
+            },
             u.rb(),
             dudt,
         );

@@ -1,6 +1,7 @@
 use std::array;
 
 use aeon::{fd::Gaussian, prelude::*, system::field_count};
+use aeon_basis::RadiativeParams;
 use reborrow::{Reborrow, ReborrowMut};
 
 const MAX_TIME: f64 = 4.0;
@@ -34,8 +35,13 @@ struct WaveConditions;
 impl Conditions<2> for WaveConditions {
     type System = Scalar;
 
-    fn radiative(&self, _field: Self::System, _position: [f64; 2]) -> f64 {
-        0.0
+    fn radiative(
+        &self,
+        _field: Self::System,
+        _position: [f64; 2],
+        _spacing: f64,
+    ) -> RadiativeParams {
+        RadiativeParams::lightlike(0.0)
     }
 }
 

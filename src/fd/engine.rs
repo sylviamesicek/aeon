@@ -13,6 +13,7 @@ pub trait Engine<const N: usize, S: SystemLabel> {
     fn derivative(&self, system: S, axis: usize) -> f64;
     fn second_derivative(&self, system: S, i: usize, j: usize) -> f64;
     fn dissipation(&self, system: S) -> f64;
+    fn spacing(&self) -> f64;
 }
 
 /// A finite difference engine of a given order, but potentially bordering a free boundary.
@@ -72,6 +73,15 @@ impl<'a, const N: usize, K: Kernels, B: Boundary<N>, S: SystemLabel> Engine<N, S
 
         result
     }
+
+    fn spacing(&self) -> f64 {
+        let spacing = self.space.spacing(self.bounds);
+        spacing
+            .iter()
+            .min_by(|a, b| a.total_cmp(&b))
+            .cloned()
+            .unwrap_or(1.0)
+    }
 }
 
 /// A finite difference engine that only every relies on interior support (and can thus use better optimized stencils).
@@ -126,5 +136,14 @@ impl<'a, const N: usize, K: Kernels, S: SystemLabel> Engine<N, S> for FdIntEngin
         }
 
         result
+    }
+
+    fn spacing(&self) -> f64 {
+        let spacing = self.space.spacing(self.bounds);
+        spacing
+            .iter()
+            .min_by(|a, b| a.total_cmp(&b))
+            .cloned()
+            .unwrap_or(1.0)
     }
 }

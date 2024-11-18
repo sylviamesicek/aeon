@@ -2,6 +2,7 @@ use crate::{Quadrant, ORDER};
 
 use super::Rinne;
 use aeon::{
+    basis::RadiativeParams,
     elliptic::HyperRelaxSolver,
     fd::{Mesh, SystemCondition},
     prelude::*,
@@ -28,10 +29,15 @@ impl Conditions<2> for ChoptuikConditions {
         }
     }
 
-    fn radiative(&self, field: Self::System, _position: [f64; 2]) -> f64 {
+    fn radiative(
+        &self,
+        field: Self::System,
+        _position: [f64; 2],
+        _spacing: f64,
+    ) -> RadiativeParams {
         match field {
-            Choptuik::Psi => 1.0,
-            Choptuik::Seed => 0.0,
+            Choptuik::Psi => RadiativeParams::lightlike(1.0),
+            Choptuik::Seed => RadiativeParams::lightlike(0.0),
         }
     }
 }

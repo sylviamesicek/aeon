@@ -509,6 +509,18 @@ impl<const N: usize> Mesh<N> {
         .unwrap_or(1.0)
     }
 
+    pub fn block_spacing(&self, block: usize) -> f64 {
+        let bounds = self.block_bounds(block);
+        let space = self.block_space(block);
+
+        space
+            .spacing(bounds)
+            .iter()
+            .min_by(|a, b| f64::total_cmp(a, b))
+            .cloned()
+            .unwrap_or(1.0)
+    }
+
     /// Runs a computation in parallel on every single block in the mesh, providing
     /// a `MeshStore` object for allocating scratch data.
     pub fn block_compute<F: Fn(&Self, &MeshStore, usize) + Sync>(&mut self, f: F) {
@@ -812,7 +824,7 @@ impl<const N: usize> Default for Mesh<N> {
     }
 }
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug)]
 pub struct ExportVtuConfig {
     pub title: String,
     pub ghost: bool,

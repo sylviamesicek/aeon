@@ -2,6 +2,7 @@
 //! compress a function and generate appropriate grids.
 
 use aeon::prelude::*;
+use aeon_basis::RadiativeParams;
 use std::f64::consts::PI;
 
 /// The quadrant domain the function is being projected on.
@@ -28,8 +29,13 @@ impl Conditions<2> for SeedConditions {
         [false, true][face.axis]
     }
 
-    fn radiative(&self, _field: Self::System, _position: [f64; 2]) -> f64 {
-        0.0
+    fn radiative(
+        &self,
+        _field: Self::System,
+        _position: [f64; 2],
+        _spacing: f64,
+    ) -> RadiativeParams {
+        RadiativeParams::lightlike(0.0)
     }
 }
 

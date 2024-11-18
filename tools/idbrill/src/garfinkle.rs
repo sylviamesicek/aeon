@@ -1,5 +1,6 @@
 use super::{Quadrant, Rinne, ORDER};
 use aeon::{
+    basis::RadiativeParams,
     elliptic::HyperRelaxSolver,
     fd::{Mesh, SystemCondition},
     prelude::*,
@@ -26,10 +27,15 @@ impl Conditions<2> for GarfinkleConditions {
         }
     }
 
-    fn radiative(&self, field: Self::System, _position: [f64; 2]) -> f64 {
+    fn radiative(
+        &self,
+        field: Self::System,
+        _position: [f64; 2],
+        _spacing: f64,
+    ) -> RadiativeParams {
         match field {
-            Garfinkle::Psi => 1.0,
-            Garfinkle::Seed => 0.0,
+            Garfinkle::Psi => RadiativeParams::lightlike(1.0),
+            Garfinkle::Seed => RadiativeParams::lightlike(0.0),
         }
     }
 }
@@ -93,53 +99,57 @@ impl Operator<2> for PsiOperator {
     //     context: SystemSlice<Self::Context>,
     //     index: usize,
     // ) {
-    //     if index % 25 == 0 {
-    //         let mut garfinkle = SystemVec::with_length(mesh.num_nodes());
-    //         garfinkle
-    //             .field_mut(Garfinkle::Psi)
-    //             .copy_from_slice(system.field(Scalar));
-    //         garfinkle
-    //             .field_mut(Garfinkle::Seed)
-    //             .copy_from_slice(context.field(Scalar));
+    // if index % 25 == 0 {
+    //     let max_level = mesh.max_level();
 
-    //         let mut hamiltonian = vec![0.0; mesh.num_nodes()];
+    //     let mut garfinkle = SystemVec::with_length(mesh.num_nodes());
+    //     garfinkle
+    //         .field_mut(Garfinkle::Psi)
+    //         .copy_from_slice(system.field(Scalar));
+    //     garfinkle
+    //         .field_mut(Garfinkle::Seed)
+    //         .copy_from_slice(context.field(Scalar));
 
-    //         mesh.fill_boundary(
-    //             ORDER,
-    //             Quadrant,
-    //             GarfinkleConditions,
-    //             garfinkle.as_mut_slice(),
-    //         );
+    //     let mut hamiltonian = vec![0.0; mesh.num_nodes()];
 
-    //         mesh.evaluate(
-    //             ORDER,
-    //             Quadrant,
-    //             Hamiltonian,
-    //             garfinkle.as_slice(),
-    //             hamiltonian.as_mut_slice().into(),
-    //         );
+    //     mesh.fill_boundary(
+    //         ORDER,
+    //         Quadrant,
+    //         GarfinkleConditions,
+    //         garfinkle.as_mut_slice(),
+    //     );
 
-    //         mesh.fill_boundary(
-    //             ORDER,
-    //             Quadrant,
-    //             HAMILTONIAN_CONDITIONS,
-    //             hamiltonian.as_mut_slice().into(),
-    //         );
+    //     mesh.evaluate(
+    //         ORDER,
+    //         Quadrant,
+    //         Hamiltonian,
+    //         garfinkle.as_slice(),
+    //         hamiltonian.as_mut_slice().into(),
+    //     );
 
-    //         // let mut systems = SystemCheckpoint::default();
-    //         // systems.save_field("psi", garfinkle.field(Garfinkle::Psi));
-    //         // systems.save_field("hamiltonian", &hamiltonian);
+    //     mesh.fill_boundary(
+    //         ORDER,
+    //         Quadrant,
+    //         HAMILTONIAN_CONDITIONS,
+    //         hamiltonian.as_mut_slice().into(),
+    //     );
 
-    //         // mesh.export_vtu(
-    //         //     format!("output/garfinkle/iter{}.vtu", { index / 25 }),
-    //         //     ExportVtuConfig {
-    //         //         title: "garfinkle".to_string(),
-    //         //         ghost: crate::GHOST,
-    //         //         systems,
-    //         //     },
-    //         // )
-    //         // .unwrap();
-    //     }
+    //     let mut systems = SystemCheckpoint::default();
+    //     systems.save_field("psi", garfinkle.field(Garfinkle::Psi));
+    //     systems.save_field("hamiltonian", &hamiltonian);
+
+    //     std::fs::create_dir_all(format!("output/idbrill/level{}", max_level)).unwrap();
+
+    //     mesh.export_vtu(
+    //         format!("output/idbrill/level{}/relax{}.vtu", max_level, index / 25),
+    //         &systems,
+    //         ExportVtuConfig {
+    //             title: "garfinkle".to_string(),
+    //             ghost: crate::GHOST,
+    //         },
+    //     )
+    //     .unwrap();
+    // }
     // }
 }
 

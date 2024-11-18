@@ -451,6 +451,7 @@ impl<const N: usize> Mesh<N> {
                     };
 
                     let position: [f64; N] = engine.position();
+                    let spacing = engine.spacing();
                     let r = position.iter().map(|&v| v * v).sum::<f64>().sqrt();
                     let index = space.index_from_vertex(vertex);
 
@@ -492,15 +493,17 @@ impl<const N: usize> Mesh<N> {
                         let bcs =
                             SystemBC::new(field.clone(), boundary.clone(), conditions.clone());
 
-                        let target = Condition::radiative(&bcs, position);
+                        let params = bcs.radiative(position, spacing);
 
                         // Inner R dependence
-                        let mut inner_advection = inner_engine.value(field.clone()) - target;
+                        let mut inner_advection = inner_engine.value(field.clone()) - params.target;
 
                         for axis in 0..N {
                             let derivative = inner_engine.derivative(field.clone(), axis);
                             inner_advection += inner_position[axis] * derivative;
                         }
+
+                        inner_advection *= params.speed;
 
                         let k = inner_r
                             * inner_r
@@ -508,15 +511,16 @@ impl<const N: usize> Mesh<N> {
                             * (field_derivs[inner_index] + inner_advection / inner_r);
 
                         // Vertex
-                        let mut advection = engine.value(field.clone()) - target;
+                        let mut advection = engine.value(field.clone()) - params.target;
 
                         for axis in 0..N {
                             let derivative = engine.derivative(field.clone(), axis);
                             advection += position[axis] * derivative;
                         }
 
+                        advection *= params.speed;
+
                         field_derivs[index] = -advection / r + k / (r * r * r);
-                        // field_derivs[index] = -advection / r;
                     }
                 }
             }
