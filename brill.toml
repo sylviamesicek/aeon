@@ -1,0 +1,17 @@
+name = "brill"
+output_dir = "output/brill"
+logging_level = 4
+
+[domain]
+radius = 48.0
+height = 48.0
+
+[cell]
+subdivisions = 6
+padding = 3
+
+[[instance]]
+type = "brill"
+suffix = "_1.0"
+amplitude = 1.0
+sigma = [1.0, 1.0]

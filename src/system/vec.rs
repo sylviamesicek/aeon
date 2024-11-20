@@ -86,14 +86,14 @@ impl<Label: SystemLabel> SystemVec<Label> {
 
     /// Retrieves an immutable reference to a field located at the given index.
     pub fn field(&self, label: Label) -> &[f64] {
-        let length = self.data.len() / field_count::<Label>();
-        &self.data[length * label.index()..length * (label.index() + 1)]
+        let stride = self.data.len() / field_count::<Label>();
+        &self.data[stride * label.index()..stride * (label.index() + 1)]
     }
 
     /// Retrieves a mutable reference to a field located at the given index.
     pub fn field_mut(&mut self, label: Label) -> &mut [f64] {
-        let length = self.data.len() / field_count::<Label>();
-        &mut self.data[length * label.index()..length * (label.index() + 1)]
+        let stride = self.data.len() / field_count::<Label>();
+        &mut self.data[stride * label.index()..stride * (label.index() + 1)]
     }
 
     pub fn as_range(&self) -> SystemRange<Label> {
@@ -202,13 +202,13 @@ impl<'a, Label: SystemLabel> SystemSlice<'a, Label> {
                 _marker: PhantomData,
             }
         } else {
-            let length = self.data.len() / field_count::<Label>();
+            let stride = self.data.len() / field_count::<Label>();
             let fields = Label::Array::from_fn(|field| unsafe {
-                self.data.as_ptr().add(field.index() * length + self.offset)
+                self.data.as_ptr().add(field.index() * stride + self.offset)
             });
 
             SystemFields {
-                length,
+                length: self.length,
                 fields,
                 _marker: PhantomData,
             }
@@ -318,13 +318,13 @@ impl<'a, Label: SystemLabel> SystemSliceMut<'a, Label> {
                 _marker: PhantomData,
             }
         } else {
-            let length = self.data.len() / field_count::<Label>();
+            let stride = self.data.len() / field_count::<Label>();
             let fields = Label::Array::from_fn(|field| unsafe {
-                self.data.as_ptr().add(field.index() * length + self.offset)
+                self.data.as_ptr().add(field.index() * stride + self.offset)
             });
 
             SystemFields {
-                length,
+                length: self.length,
                 fields,
                 _marker: PhantomData,
             }
@@ -340,15 +340,15 @@ impl<'a, Label: SystemLabel> SystemSliceMut<'a, Label> {
                 _marker: PhantomData,
             }
         } else {
-            let length = self.data.len() / field_count::<Label>();
+            let stride = self.data.len() / field_count::<Label>();
             let fields = Label::Array::from_fn(|field| unsafe {
                 self.data
                     .as_mut_ptr()
-                    .add(field.index() * length + self.offset)
+                    .add(field.index() * stride + self.offset)
             });
 
             SystemFieldsMut {
-                length,
+                length: self.length,
                 fields,
                 _marker: PhantomData,
             }
