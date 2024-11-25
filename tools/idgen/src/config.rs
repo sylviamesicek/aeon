@@ -11,6 +11,8 @@ pub struct Config {
     pub output_dir: Option<String>,
     /// Verbosity of logging.
     pub logging_level: Option<usize>,
+    /// Minimum order of stencils approximations.
+    pub order: usize,
     pub _logging_dir: Option<String>,
     /// Visualize level between each regrid?
     #[serde(default)]
@@ -22,8 +24,10 @@ pub struct Config {
     /// Specifies domain of problem
     #[serde(default)]
     pub domain: Domain,
+
+    /// Specifies paramteres for the initial data solver.
     #[serde(default)]
-    pub cell: Cell,
+    pub solver: Solver,
 
     /// Instances that should be executed.
     pub instance: Vec<Instance>,
@@ -34,6 +38,12 @@ pub struct Config {
 pub struct Domain {
     pub radius: f64,
     pub height: f64,
+
+    #[serde(default)]
+    pub cell: Cell,
+
+    #[serde(default)]
+    pub mesh: Mesh,
 }
 
 impl Default for Domain {
@@ -41,6 +51,9 @@ impl Default for Domain {
         Self {
             radius: 1.0,
             height: 1.0,
+
+            cell: Cell::default(),
+            mesh: Mesh::default(),
         }
     }
 }
@@ -61,17 +74,56 @@ impl Default for Cell {
     }
 }
 
+/// Options for the initial shape of the mesh.
+#[derive(Deserialize)]
+pub struct Mesh {
+    pub refine_global: usize,
+    pub max_level: usize,
+}
+
+impl Default for Mesh {
+    fn default() -> Self {
+        Self {
+            refine_global: 0,
+            max_level: 10,
+        }
+    }
+}
+
+#[derive(Deserialize)]
+pub struct Solver {
+    pub max_steps: usize,
+    pub cfl: f64,
+    pub tolerance: f64,
+    pub dampening: f64,
+}
+
+impl Default for Solver {
+    fn default() -> Self {
+        Self {
+            max_steps: 100000,
+            cfl: 0.5,
+            tolerance: 1e-6,
+            dampening: 0.4,
+        }
+    }
+}
+
 #[derive(Deserialize, Debug)]
 #[serde(tag = "type")]
 pub enum Instance {
     /// Instance generates Brill-type initial data with gunlach seed function.
     #[serde(rename = "brill")]
-    Brill {
-        #[serde(default)]
-        suffix: String,
-        amplitude: f64,
-        sigma: (f64, f64),
-    },
+    Brill(Brill),
+}
+
+/// Describes Brill-type initial data parameters.
+#[derive(Deserialize, Debug)]
+pub struct Brill {
+    #[serde(default)]
+    pub suffix: String,
+    pub amplitude: f64,
+    pub sigma: (f64, f64),
 }
 
 pub fn configure() -> Result<Config> {

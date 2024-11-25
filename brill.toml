@@ -1,14 +1,25 @@
 name = "brill"
-output_dir = "output/brill"
+output_dir = "output/idgen"
 logging_level = 4
+order = 4
 
 [domain]
 radius = 48.0
 height = 48.0
 
-[cell]
+[domain.cell]
 subdivisions = 6
 padding = 3
+
+[domain.mesh]
+refine_global = 1
+max_level = 15
+
+[solver]
+max_steps = 100000
+cfl = 0.5
+dampening = 0.4
+tolerance = 1e-6
 
 [[instance]]
 type = "brill"
