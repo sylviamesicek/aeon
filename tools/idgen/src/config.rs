@@ -109,6 +109,19 @@ impl Default for Solver {
     }
 }
 
+/// Describes initial data for a brill wave.
+#[derive(Deserialize, Debug)]
+pub struct BrillSource {
+    pub amplitude: f64,
+    pub sigma: (f64, f64),
+}
+
+pub struct ScalarField {
+    pub mass: f64,
+    pub amplitude: f64,
+    pub sigma: (f64, f64),
+}
+
 #[derive(Deserialize, Debug)]
 #[serde(tag = "type")]
 pub enum Instance {

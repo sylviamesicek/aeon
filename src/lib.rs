@@ -10,6 +10,7 @@ pub mod lac;
 pub mod ode;
 pub mod shared;
 pub mod system;
+pub mod system2;
 
 pub use aeon_basis as basis;
 pub use aeon_geometry as geometry;

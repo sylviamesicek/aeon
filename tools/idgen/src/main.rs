@@ -84,7 +84,7 @@ fn main() -> Result<()> {
 
 fn run_inst(
     name: &str,
-    output_dir: &Path,
+    _output_dir: &Path,
     order: usize,
     domain: &Domain,
     solver: &Solver,

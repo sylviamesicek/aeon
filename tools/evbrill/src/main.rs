@@ -311,7 +311,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     log::info!("Importing IdBrill data");
 
-    mesh.import_dat("output/super.dat", &mut systems)
+    mesh.import_dat("output/negcritical.dat", &mut systems)
         .expect("Unable to load initial data");
 
     // Read initial data
@@ -440,7 +440,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             systems.save_system(dynamic.as_slice());
 
             mesh.export_vtu(
-                format!("output/evbrill/super{save_step}.vtu"),
+                format!("output/evbrill/negcritical{save_step}.vtu"),
                 &systems,
                 ExportVtuConfig {
                     title: "evbrill".to_string(),
@@ -465,7 +465,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 error_csv.write_fmt(format_args!("{time}, {l2_norm}, {max}, {origin},\n"))?;
             }
 
-            let mut file = File::create("output/super_errors.txt")?;
+            let mut file = File::create("output/negcritical_errors.txt")?;
             file.write_all(error_csv.as_bytes())?;
 
             save_step += 1;

@@ -134,7 +134,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         if CHOPTUIK {
             choptuik::solve(
                 &mut mesh,
-                3.5,
+                -4.0 / 2.0,
                 10_000_000,
                 rinne.as_mut_slice(),
                 &mut hamiltonian,
@@ -142,7 +142,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         } else {
             garfinkle::solve(
                 &mut mesh,
-                3.5,
+                -4.0 / 2.0,
                 10_000_000,
                 rinne.as_mut_slice(),
                 &mut hamiltonian,
@@ -210,7 +210,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             mesh.transfer_system(ORDER, Quadrant, transfer.as_slice(), rinne.as_mut_slice());
         } else {
             log::info!("Sucessfully refined mesh to prescribed accuracy");
-            mesh.export_dat("output/subcritical.dat", &checkpoint)?;
+            mesh.export_dat("output/negcritical.dat", &checkpoint)?;
             break;
         }
     }

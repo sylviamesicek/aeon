@@ -26,3 +26,9 @@ type = "brill"
 suffix = "_1.0"
 amplitude = 1.0
 sigma = [1.0, 1.0]
+
+[[instance]]
+type = "brill"
+suffix = "_2.0"
+amplitude = 2.0
+sigma = [1.0, 1.0]
