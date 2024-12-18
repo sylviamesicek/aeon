@@ -5,7 +5,7 @@ use aeon::{
     prelude::*,
 };
 
-use crate::config::{Brill, Solver};
+use genparams::{Brill, Solver};
 
 /// Quadrant upon which all simulations run.
 #[derive(Clone)]
@@ -242,7 +242,7 @@ pub fn solve_wth_garfinkle<const ORDER: usize>(
     mesh: &mut Mesh<2>,
     solver_con: &Solver,
     brill: &Brill,
-) -> anyhow::Result<()>
+) -> anyhow::Result<SystemVec<Rinne>>
 where
     Order<ORDER>: Kernels,
 {
@@ -314,5 +314,5 @@ where
         hamiltonian.as_mut_slice(),
     );
 
-    Ok(())
+    Ok(rinne)
 }

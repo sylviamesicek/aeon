@@ -1,8 +1,9 @@
-use std::path::Path;
+//! An executable for creating general initial data for numerical relativity simulations in 2D.
 
+use aeon::prelude::*;
 use anyhow::{anyhow, Context, Result};
 use brill::solve_wth_garfinkle;
-use config::{Brill, Domain, Instance, Solver};
+use genparams::{Brill, Source};
 
 mod brill;
 mod config;
@@ -67,43 +68,19 @@ fn main() -> Result<()> {
     // Create output dir.
     std::fs::create_dir_all(&absolute)?;
 
-    // Enumerate instances.
-    for inst in config.instance.iter() {
-        run_inst(
-            &config.name,
-            &absolute,
-            config.order,
-            &config.domain,
-            &config.solver,
-            inst,
-        )?;
-    }
+    anyhow::ensure!(config.source.len() == 1);
 
-    Ok(())
-}
+    let solver = &config.solver;
+    let domain = &config.domain;
+    let source = &config.source[0];
+    let order = config.order;
 
-fn run_inst(
-    name: &str,
-    _output_dir: &Path,
-    order: usize,
-    domain: &Domain,
-    solver: &Solver,
-    inst: &Instance,
-) -> Result<()> {
-    use aeon::prelude::*;
-
-    let mut name = name.to_string();
-
-    match inst {
-        Instance::Brill(Brill {
-            suffix,
-            amplitude,
-            sigma,
-        }) => {
-            // Find name with suffix.
-            name.push_str(&suffix);
-
-            log::info!("Running Instance: {}, Type: Brill Initial Data", name);
+    match source {
+        Source::Brill(Brill { amplitude, sigma }) => {
+            log::info!(
+                "Running Instance: {}, Type: Brill Initial Data",
+                config.name
+            );
             log::info!(
                 "A: {:.5e}, sigma_r: {:.5e}, sigma_z: {:.5e}",
                 amplitude,
@@ -113,6 +90,7 @@ fn run_inst(
         }
     }
 
+    // Run brill simulation
     log::trace!("Building Mesh {} by {}", domain.radius, domain.height);
 
     let mut mesh = Mesh::new(
@@ -130,22 +108,17 @@ fn run_inst(
         mesh.refine_global();
     }
 
-    match (inst, order) {
-        (Instance::Brill(brill), 2) => {
-            solve_wth_garfinkle(Order::<2>, &mut mesh, solver, brill)?;
-        }
-        (Instance::Brill(brill), 4) => {
-            solve_wth_garfinkle(Order::<4>, &mut mesh, solver, brill)?;
-        }
-        (Instance::Brill(brill), 6) => {
-            solve_wth_garfinkle(Order::<6>, &mut mesh, solver, brill)?;
-        }
+    let result = match (source, order) {
+        (Source::Brill(brill), 2) => solve_wth_garfinkle(Order::<2>, &mut mesh, solver, brill)?,
+        (Source::Brill(brill), 4) => solve_wth_garfinkle(Order::<4>, &mut mesh, solver, brill)?,
+        (Source::Brill(brill), 6) => solve_wth_garfinkle(Order::<6>, &mut mesh, solver, brill)?,
         _ => return Err(anyhow::anyhow!("Invalid initial data type and order")),
-    }
+    };
 
-    // while mesh.max_level() < domain.mesh.max_level {
-    //     log::trace!("Adaptively refining mesh via wavelet criteria");
-    // }
+    let mut checkpoint = SystemCheckpoint::default();
+    checkpoint.save_system(result.as_slice());
+
+    mesh.export_dat(absolute.join(format!("{}.dat", config.name)), &checkpoint)?;
 
     Ok(())
 }

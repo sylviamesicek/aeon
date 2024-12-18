@@ -1,18 +1,20 @@
 use anyhow::{anyhow, Context, Result};
 use clap::{Arg, Command};
-use genparams::InitialDataConfig;
 
-pub fn configure() -> Result<InitialDataConfig> {
+use genparams::CritSearchConfig;
+
+pub fn configure() -> Result<CritSearchConfig> {
     let matches = Command::new("idgen")
-        .about("A program for generating initial data for numerical relativity using hyperbolic relaxation.")
+        .about("A program for searching for critical points in a range using idgen and evgen.")
         .author("Lukas Mesicek, lukas.m.mesicek@gmail.com")
         .version("v0.0.1")
         .arg(
             Arg::new("path")
-                .help("Path of config file for generating initial data")
+                .help("Path of config file for searching for critical points")
                 .value_name("PATH")
                 .required(true),
-        ).get_matches();
+        )
+        .get_matches();
 
     // Get path argument
     let path = matches

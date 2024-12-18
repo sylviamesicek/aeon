@@ -4,6 +4,8 @@ members = ["crates/*", "tools/*"]
 default-members = [
     "crates/aeon_basis",
     "crates/aeon_geometry",
+    "tools/critsearch",
+    "tools/genparams",
     "tools/idbrill",
     "tools/idscalar",
     "tools/idgen",
@@ -20,6 +22,8 @@ aeon_basis = { path = "crates/aeon_basis" }
 aeon_geometry = { path = "crates/aeon_geometry" }
 aeon_macros = { path = "crates/aeon_macros" }
 aeon_tensor = { path = "crates/aeon_tensor" }
+
+genparams = { path = "tools/genparams" }
 
 anyhow = "1.0.91"
 bitvec = { version = "1.0.1", features = ["serde"] }
