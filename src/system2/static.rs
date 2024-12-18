@@ -1,10 +1,10 @@
-use std::{array, marker::PhantomData, ops::Range};
+use std::ops::Range;
 
 use reborrow::{Reborrow, ReborrowMut};
 
 use crate::shared::SharedSlice;
 
-use super::{SystemMut, SystemRef, SystemSlice, SystemSliceMut};
+use super::{System, SystemSlice, SystemSliceMut, SystemSliceShared};
 
 #[derive(Clone, Debug)]
 pub struct StaticSystem<const COUNT: usize> {
@@ -66,17 +66,22 @@ impl<'long, 'short, const COUNT: usize> Reborrow<'short> for StaticSystemSlice<'
     }
 }
 
-impl<'a, const COUNT: usize> SystemSlice<'a> for StaticSystemSlice<'a, COUNT> {
+impl<'a, const COUNT: usize> System for StaticSystemSlice<'a, COUNT> {
     type Label = usize;
-
-    type SubSlice<'b> = StaticSystemSlice<'b, COUNT> where Self: 'b;
-    type SystemRef<'b> = StaticSystemRef<'b, COUNT> where Self: 'b;
 
     fn len(&self) -> usize {
         self.range.len()
     }
 
-    fn subslice(&self, range: Range<usize>) -> Self::SubSlice<'_> {
+    fn enumerate(&self) -> impl Iterator<Item = Self::Label> {
+        (0..COUNT).into_iter()
+    }
+}
+
+impl<'a, const COUNT: usize> SystemSlice<'a> for StaticSystemSlice<'a, COUNT> {
+    type Slice<'b> = StaticSystemSlice<'b, COUNT> where Self: 'b;
+
+    fn slice(&self, range: Range<usize>) -> Self::Slice<'_> {
         debug_assert!(range.start <= self.range.len() && range.end <= self.range.len());
 
         Self {
@@ -86,12 +91,8 @@ impl<'a, const COUNT: usize> SystemSlice<'a> for StaticSystemSlice<'a, COUNT> {
         }
     }
 
-    fn as_system_ref(&self) -> Self::SystemRef<'_> {
-        StaticSystemRef {
-            length: self.range.len(),
-            array: array::from_fn(|i| &self.data[i * self.stride] as *const f64),
-            _marker: PhantomData,
-        }
+    fn field(&self, label: Self::Label) -> &[f64] {
+        &self.data[label * self.stride..][self.range.clone()]
     }
 }
 
@@ -138,17 +139,22 @@ impl<'a, const COUNT: usize> StaticSystemSliceMut<'a, COUNT> {
     }
 }
 
-impl<'a, const COUNT: usize> SystemSlice<'a> for StaticSystemSliceMut<'a, COUNT> {
+impl<'a, const COUNT: usize> System for StaticSystemSliceMut<'a, COUNT> {
     type Label = usize;
-
-    type SubSlice<'b> = StaticSystemSliceMut<'b, COUNT> where Self: 'b;
-    type SystemRef<'b> = StaticSystemRef<'b, COUNT> where Self: 'b;
 
     fn len(&self) -> usize {
         self.range.len()
     }
 
-    fn subslice(&self, range: Range<usize>) -> Self::SubSlice<'_> {
+    fn enumerate(&self) -> impl Iterator<Item = Self::Label> {
+        (0..COUNT).into_iter()
+    }
+}
+
+impl<'a, const COUNT: usize> SystemSlice<'a> for StaticSystemSliceMut<'a, COUNT> {
+    type Slice<'b> = StaticSystemSliceMut<'b, COUNT> where Self: 'b;
+
+    fn slice(&self, range: Range<usize>) -> Self::Slice<'_> {
         debug_assert!(range.start <= self.range.len() && range.end <= self.range.len());
 
         Self {
@@ -158,21 +164,19 @@ impl<'a, const COUNT: usize> SystemSlice<'a> for StaticSystemSliceMut<'a, COUNT>
         }
     }
 
-    fn as_system_ref(&self) -> Self::SystemRef<'_> {
-        let stride = self.data.len() / COUNT;
-        StaticSystemRef {
-            length: self.range.len(),
-            array: array::from_fn(|i| unsafe { self.data.get(i * stride) } as *const f64),
-            _marker: PhantomData,
+    fn field(&self, label: usize) -> &[f64] {
+        unsafe {
+            let ptr = self.data.get(label * self.stride + self.range.start) as *const f64;
+            core::slice::from_raw_parts(ptr, self.range.len())
         }
     }
 }
 
 impl<'a, const COUNT: usize> SystemSliceMut<'a> for StaticSystemSliceMut<'a, COUNT> {
-    type SubSliceMut<'b> = StaticSystemSliceMut<'b, COUNT> where Self: 'b;
-    type SystemMut<'b> = StaticSystemMut<'b, COUNT> where Self: 'b;
+    type SliceMut<'b> = StaticSystemSliceMut<'b, COUNT> where Self: 'b;
+    type Shared = StaticSystemSliceMut<'a, COUNT>;
 
-    fn subslice_mut(&mut self, range: Range<usize>) -> Self::SubSliceMut<'_> {
+    fn slice_mut(&mut self, range: Range<usize>) -> Self::SliceMut<'_> {
         debug_assert!(range.start <= self.range.len() && range.end <= self.range.len());
 
         Self {
@@ -182,64 +186,39 @@ impl<'a, const COUNT: usize> SystemSliceMut<'a> for StaticSystemSliceMut<'a, COU
         }
     }
 
-    unsafe fn subslice_unsafe(&self, range: Range<usize>) -> Self::SubSliceMut<'_> {
-        debug_assert!(range.start <= self.range.len() && range.end <= self.range.len());
-
-        Self {
-            data: self.data.clone(),
-            stride: self.stride,
-            range: (self.range.start + range.start)..(self.range.start + range.end),
-        }
-    }
-
-    fn as_system_mut(&mut self) -> Self::SystemMut<'_> {
-        let stride = self.data.len() / COUNT;
-        StaticSystemMut {
-            length: self.range.len(),
-            array: array::from_fn(|i| unsafe { self.data.get_mut(i * stride) } as *mut f64),
-            _marker: PhantomData,
-        }
-    }
-}
-
-pub struct StaticSystemRef<'a, const COUNT: usize> {
-    length: usize,
-    array: [*const f64; COUNT],
-    _marker: PhantomData<&'a [f64]>,
-}
-
-impl<'a, const COUNT: usize> SystemRef<'a> for StaticSystemRef<'a, COUNT> {
-    type Label = usize;
-
-    fn len(&self) -> usize {
-        self.length
-    }
-
-    fn field(&self, label: Self::Label) -> &[f64] {
-        unsafe { core::slice::from_raw_parts(self.array[label], self.length) }
-    }
-}
-
-pub struct StaticSystemMut<'a, const COUNT: usize> {
-    length: usize,
-    array: [*mut f64; COUNT],
-    _marker: PhantomData<&'a mut [f64]>,
-}
-
-impl<'a, const COUNT: usize> SystemRef<'a> for StaticSystemMut<'a, COUNT> {
-    type Label = usize;
-
-    fn len(&self) -> usize {
-        self.length
-    }
-
-    fn field(&self, label: Self::Label) -> &[f64] {
-        unsafe { core::slice::from_raw_parts(self.array[label], self.length) }
-    }
-}
-
-impl<'a, const COUNT: usize> SystemMut<'a> for StaticSystemMut<'a, COUNT> {
     fn field_mut(&mut self, label: Self::Label) -> &mut [f64] {
-        unsafe { core::slice::from_raw_parts_mut(self.array[label], self.length) }
+        unsafe {
+            let ptr = self.data.get_mut(label * self.stride + self.range.start) as *mut f64;
+            core::slice::from_raw_parts_mut(ptr, self.range.len())
+        }
+    }
+
+    fn into_shared(self) -> Self::Shared {
+        self
+    }
+}
+
+unsafe impl<'a, const COUNT: usize> SystemSliceShared<'a> for StaticSystemSliceMut<'a, COUNT> {
+    type Slice<'b> = StaticSystemSliceMut<'b, COUNT> where Self: 'b;
+    type SliceMut<'b> = StaticSystemSliceMut<'b, COUNT> where Self: 'b;
+
+    unsafe fn slice_unsafe(&self, range: Range<usize>) -> Self::Slice<'_> {
+        debug_assert!(range.start <= self.range.len() && range.end <= self.range.len());
+
+        Self {
+            data: self.data.clone(),
+            stride: self.stride,
+            range: (self.range.start + range.start)..(self.range.start + range.end),
+        }
+    }
+
+    unsafe fn slice_unsafe_mut(&self, range: Range<usize>) -> Self::SliceMut<'_> {
+        debug_assert!(range.start <= self.range.len() && range.end <= self.range.len());
+
+        Self {
+            data: self.data.clone(),
+            stride: self.stride,
+            range: (self.range.start + range.start)..(self.range.start + range.end),
+        }
     }
 }
