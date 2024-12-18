@@ -22,8 +22,6 @@ pub fn system_label_impl(input: DeriveInput) -> TokenStream {
             quote! {
                 #[automatically_derived]
                 impl ::aeon::system::SystemLabel for #ident {
-                    const SYSTEM_NAME: &'static str = stringify!(#ident);
-
                     fn name(&self) -> String {
                         stringify!(#ident).to_string()
                     }
@@ -32,16 +30,13 @@ pub fn system_label_impl(input: DeriveInput) -> TokenStream {
                         0
                     }
 
-                    type Array<T> = ::aeon::system::SystemArray<T, 1>;
-
-                    fn fields() -> impl Iterator<Item = Self> {
-                        [Self].into_iter()
-                    }
-
-                    fn field_from_index(_index: usize) -> Self {
+                    fn from_index(_index: usize) -> Self {
                         Self
                     }
 
+                    fn count() -> usize {
+                        1
+                    }
                 }
             }
         }
@@ -74,8 +69,6 @@ pub fn system_label_impl(input: DeriveInput) -> TokenStream {
             quote! {
                 #[automatically_derived]
                 impl ::aeon::system::SystemLabel for #ident {
-                    const SYSTEM_NAME: &'static str = stringify!(#ident);
-
                     fn name(&self) -> String {
                         match self {
                             #field_names
@@ -88,13 +81,11 @@ pub fn system_label_impl(input: DeriveInput) -> TokenStream {
                         }
                     }
 
-                    type Array<T> = ::aeon::system::SystemArray<T, #variant_count>;
-
-                    fn fields() -> impl Iterator<Item = Self> {
-                        [#fields].into_iter()
+                    fn count() -> usize {
+                        #variant_count
                     }
 
-                    fn field_from_index(index: usize) -> Self {
+                    fn from_index(index: usize) -> Self {
                         [#fields][index].clone()
                     }
 

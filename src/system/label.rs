@@ -7,7 +7,7 @@ use super::{
     SystemSliceShared,
 };
 
-pub trait SystemLabel: Clone + Copy {
+pub trait SystemLabel: Clone + Copy + Send + Sync {
     /// Returns a human readable name for a given label.
     fn name(&self) -> String;
     /// Returns an index for a given label.
@@ -18,9 +18,60 @@ pub trait SystemLabel: Clone + Copy {
     fn from_index(i: usize) -> Self;
 }
 
+#[derive(Clone, Copy)]
+pub enum Empty {}
+
+impl SystemLabel for Empty {
+    fn name(&self) -> String {
+        "Empty".to_string()
+    }
+
+    fn index(&self) -> usize {
+        unreachable!()
+    }
+
+    fn count() -> usize {
+        0
+    }
+
+    fn from_index(_i: usize) -> Self {
+        unreachable!()
+    }
+}
+
+#[derive(Clone, Copy)]
+pub struct Scalar;
+
+impl SystemLabel for Scalar {
+    fn name(&self) -> String {
+        "Scalar".to_string()
+    }
+
+    fn index(&self) -> usize {
+        0
+    }
+
+    fn count() -> usize {
+        1
+    }
+
+    fn from_index(_i: usize) -> Self {
+        Self
+    }
+}
+
 pub struct LabelledSystem<L: SystemLabel> {
     inner: DynamicSystem,
     _marker: PhantomData<L>,
+}
+
+impl LabelledSystem<Empty> {
+    pub fn empty() -> Self {
+        Self {
+            inner: DynamicSystem::new(0),
+            _marker: PhantomData,
+        }
+    }
 }
 
 impl<L: SystemLabel> LabelledSystem<L> {
@@ -34,6 +85,22 @@ impl<L: SystemLabel> LabelledSystem<L> {
     pub fn with_length(length: usize) -> Self {
         Self {
             inner: DynamicSystem::with_length(length, L::count()),
+            _marker: PhantomData,
+        }
+    }
+
+    /// Converts a dynamic system into a immutable reference.
+    pub fn as_slice(&self) -> LabelledSystemSlice<'_, L> {
+        LabelledSystemSlice {
+            inner: self.inner.as_slice(),
+            _marker: PhantomData,
+        }
+    }
+
+    /// Converts a dynamic system into a mutable reference.
+    pub fn as_slice_mut(&mut self) -> LabelledSystemSliceMut<'_, L> {
+        LabelledSystemSliceMut {
+            inner: self.inner.as_slice_mut(),
             _marker: PhantomData,
         }
     }

@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use thiserror::Error;
 
 use crate::fd::Mesh;
-use crate::system::{SystemLabel, SystemSlice, SystemVec};
+use crate::system::{SystemLabel, SystemSlice};
 
 #[derive(Debug, Error)]
 pub enum CheckpointParseError {
@@ -58,7 +58,7 @@ pub struct SystemCheckpoint {
 
 impl SystemCheckpoint {
     /// Attaches a system for serialization and deserialization
-    pub fn save_system<Label: SystemLabel>(&mut self, system: SystemSlice<'_, Label>) {
+    pub fn save_system<Label: SystemLabel>(&mut self, name: &str, system: SystemSlice<'_, Label>) {
         assert!(!self.systems.contains_key(Label::SYSTEM_NAME));
 
         let count = system.len();

@@ -1,13 +1,11 @@
 use aeon_basis::{Boundary, BoundaryKind, Condition, Kernels};
 use aeon_geometry::{faces, AxisMask, Face, IndexSpace, Side, TreeBlockNeighbor, TreeCellNeighbor};
-// use rayon::iter::{ParallelBridge, ParallelIterator};
-use reborrow::Reborrow as _;
 use std::{array, cmp::Ordering, ops::Range};
 
 use crate::{
     fd::{Conditions, Engine, FdEngine, Mesh, SystemBC},
     shared::SharedSlice,
-    system::{SystemLabel, SystemSlice, SystemSliceMut},
+    system::{System, SystemSlice, SystemSliceMut, SystemSliceShared},
 };
 
 #[derive(Clone, Debug)]
@@ -73,18 +71,17 @@ impl<const N: usize> Mesh<N> {
     }
 
     /// Transfers data from an old version of the mesh to the new refined version.
-    pub fn transfer_system<K: Kernels, B: Boundary<N> + Sync, System: SystemLabel>(
-        &mut self,
+    pub fn transfer_system<'a, K: Kernels, B: Boundary<N> + Sync, System: Clone>(
+        &'a mut self,
         _order: K,
         boundary: B,
-        source: SystemSlice<'_, System>,
-        dest: SystemSliceMut<'_, System>,
+        source: impl SystemSlice<'a, Label = System>,
+        dest: impl SystemSliceMut<'a, Label = System>,
     ) {
         assert!(self.num_nodes() == dest.len());
         assert!(self.num_old_nodes() == source.len());
 
-        let source = source.as_range();
-        let dest = dest.as_range();
+        let dest = dest.into_shared();
 
         self.old_block_compute(|mesh, _store, block| {
             let size = mesh.old_blocks.size(block);
@@ -93,7 +90,7 @@ impl<const N: usize> Mesh<N> {
             let space = mesh.old_block_space(block);
             let boundary = mesh.old_block_boundary(block, boundary.clone());
 
-            let source = unsafe { source.slice(nodes.clone()).fields() };
+            let source = source.slice(nodes.clone());
 
             for (i, offset) in IndexSpace::new(size).iter().enumerate() {
                 let cell = mesh.old_blocks.cells(block)[i];
@@ -113,7 +110,7 @@ impl<const N: usize> Mesh<N> {
                         let new_nodes = mesh.block_nodes(new_block);
                         let new_space = mesh.block_space(new_block);
 
-                        let mut dest = unsafe { dest.slice_mut(new_nodes.clone()).fields_mut() };
+                        let mut dest = unsafe { dest.slice_unsafe_mut(new_nodes.clone()) };
 
                         let mut cell_origin: [_; N] = array::from_fn(|axis| 2 * cell_origin[axis]);
 
@@ -133,7 +130,7 @@ impl<const N: usize> Mesh<N> {
                                 (node_origin[axis] + node_offset[axis]) as isize
                             });
 
-                            for field in System::fields() {
+                            for field in source.enumerate() {
                                 let v = space.prolong(
                                     boundary.clone(),
                                     K::interpolation().clone(),
@@ -151,7 +148,7 @@ impl<const N: usize> Mesh<N> {
                     let new_nodes = mesh.block_nodes(new_block);
                     let new_space = mesh.block_space(new_block);
 
-                    let mut dest = unsafe { dest.slice_mut(new_nodes.clone()).fields_mut() };
+                    let mut dest = unsafe { dest.slice_unsafe_mut(new_nodes.clone()) };
 
                     let node_size = mesh.cell_node_size(new_cell);
                     let node_origin = mesh.cell_node_origin(new_cell);
@@ -162,7 +159,7 @@ impl<const N: usize> Mesh<N> {
                         let dest_node =
                             array::from_fn(|axis| (node_origin[axis] + node_offset[axis]) as isize);
 
-                        for field in System::fields() {
+                        for field in source.enumerate() {
                             let v = source.field(field.clone())[space.index_from_node(source_node)];
                             dest.field_mut(field.clone())[new_space.index_from_node(dest_node)] = v;
                         }
@@ -177,7 +174,7 @@ impl<const N: usize> Mesh<N> {
                     let new_nodes = mesh.block_nodes(new_block);
                     let new_space = mesh.block_space(new_block);
 
-                    let mut dest = unsafe { dest.slice_mut(new_nodes.clone()).fields_mut() };
+                    let mut dest = unsafe { dest.slice_unsafe_mut(new_nodes.clone()) };
 
                     let cell_origin: [_; N] = array::from_fn(|axis| cell_origin[axis] / 2);
 
@@ -205,7 +202,7 @@ impl<const N: usize> Mesh<N> {
                         let dest_node =
                             array::from_fn(|axis| (node_origin[axis] + node_offset[axis]) as isize);
 
-                        for field in System::fields() {
+                        for field in source.enumerate() {
                             let v = source.field(field.clone())[space.index_from_node(source_node)];
                             dest.field_mut(field.clone())[new_space.index_from_node(dest_node)] = v;
                         }
@@ -217,34 +214,57 @@ impl<const N: usize> Mesh<N> {
 
     /// Enforces strong boundary conditions. This includes strong physical boundary conditions, as well
     /// as handling interior boundaries (same level, coarse-fine, or fine-coarse).
-    pub fn fill_boundary<K: Kernels, B: Boundary<N> + Sync, C: Conditions<N> + Sync>(
-        &mut self,
+    pub fn fill_boundary<'a, K: Kernels, B: Boundary<N> + Sync, C: Conditions<N> + Sync>(
+        &'a mut self,
         order: K,
         boundary: B,
         conditions: C,
-        system: SystemSliceMut<'_, C::System>,
-    ) {
+        system: impl SystemSliceMut<'a, Label = C::Label>,
+    ) where
+        C::Label: Clone,
+    {
         self.fill_boundary_to_extent(order, self.ghost, boundary, conditions, system);
     }
 
-    pub fn fill_boundary_to_extent<K: Kernels, B: Boundary<N> + Sync, C: Conditions<N> + Sync>(
-        &mut self,
+    pub fn fill_boundary_to_extent<'a, K: Kernels, B: Boundary<N> + Sync, C: Conditions<N> + Sync>(
+        &'a mut self,
         order: K,
         extent: usize,
         boundary: B,
         conditions: C,
-        mut system: SystemSliceMut<'_, C::System>,
-    ) {
-        self.fill_fine(extent, &mut system);
-        self.fill_direct(extent, &mut system);
+        mut system: impl SystemSliceMut<'a, Label = C::Label>,
+    ) where
+        C::Label: Clone,
+    {
+        self.fill_fine(extent, system.slice_mut(0..system.len()));
+        self.fill_direct(extent, system.slice_mut(0..system.len()));
 
-        self.fill_physical(extent, &boundary, &conditions, &mut system);
-        self.fill_prolong(order, extent, &boundary, &conditions, &mut system);
-        self.fill_physical(extent, &boundary, &conditions, &mut system);
+        self.fill_physical(
+            extent,
+            &boundary,
+            &conditions,
+            system.slice_mut(0..system.len()),
+        );
+        self.fill_prolong(
+            order,
+            extent,
+            &boundary,
+            &conditions,
+            system.slice_mut(0..system.len()),
+        );
+        self.fill_physical(
+            extent,
+            &boundary,
+            &conditions,
+            system.slice_mut(0..system.len()),
+        );
     }
 
-    pub fn fill_boundary_zeros<S: SystemLabel>(&mut self, system: SystemSliceMut<'_, S>) {
-        let system = system.as_range();
+    pub fn fill_boundary_zeros<'a, S: SystemSliceMut<'a>>(&'a mut self, system: S)
+    where
+        S::Label: Clone,
+    {
+        let system = system.into_shared();
 
         (0..self.interfaces.len()).for_each(|interface| {
             let info = self.interface(interface);
@@ -254,29 +274,31 @@ impl<const N: usize> Mesh<N> {
 
             let dest = info.dest;
 
-            let mut block_system = unsafe { system.slice_mut(block_nodes).fields_mut() };
+            let mut block_system = unsafe { system.slice_unsafe_mut(block_nodes) };
 
             for node in self.interface_nodes_active(interface, self.ghost) {
                 let block_node = array::from_fn(|axis| node[axis] as isize + dest[axis]);
                 let block_index = block_space.index_from_node(block_node);
 
-                for field in S::fields() {
+                for field in system.enumerate() {
                     block_system.field_mut(field.clone())[block_index] = 0.0;
                 }
             }
         });
     }
 
-    fn fill_physical<B: Boundary<N> + Sync, C: Conditions<N> + Sync>(
-        &mut self,
+    fn fill_physical<'a, B: Boundary<N> + Sync, C: Conditions<N> + Sync>(
+        &'a mut self,
         extent: usize,
-        boundary: &B,
-        conditions: &C,
-        system: &mut SystemSliceMut<'_, C::System>,
-    ) {
+        boundary: &'a B,
+        conditions: &'a C,
+        system: impl SystemSliceMut<'a, Label = C::Label>,
+    ) where
+        C::Label: Clone,
+    {
         debug_assert!(system.len() == self.num_nodes());
 
-        let system = system.as_range();
+        let system = system.into_shared();
 
         (0..self.blocks.len()).for_each(|block| {
             // Fill Physical Boundary conditions
@@ -284,21 +306,20 @@ impl<const N: usize> Mesh<N> {
             let space = self.block_space(block);
             let boundary = self.block_boundary(block, boundary.clone());
 
-            let mut block_system = unsafe { system.slice_mut(nodes) };
+            let mut block_system = unsafe { system.slice_unsafe_mut(nodes) };
 
-            for field in C::System::fields() {
+            for field in system.enumerate() {
                 let bcs = SystemBC::new(field.clone(), boundary.clone(), conditions.clone());
                 space.fill_boundary(extent, bcs, block_system.field_mut(field.clone()));
             }
         });
     }
 
-    fn fill_direct<System: SystemLabel>(
-        &mut self,
-        extent: usize,
-        system: &mut SystemSliceMut<'_, System>,
-    ) {
-        let system = system.as_range();
+    fn fill_direct<'a, S: SystemSliceMut<'a>>(&mut self, extent: usize, system: S)
+    where
+        S::Label: Clone,
+    {
+        let system = system.into_shared();
 
         // Fill direct neighbors
         self.neighbors.direct_indices().for_each(|interface| {
@@ -312,8 +333,8 @@ impl<const N: usize> Mesh<N> {
             let dest = info.dest;
             let source = info.source;
 
-            let mut block_system = unsafe { system.slice_mut(block_nodes).fields_mut() };
-            let neighbor_system = unsafe { system.slice(neighbor_nodes).fields() };
+            let mut block_system = unsafe { system.slice_unsafe_mut(block_nodes) };
+            let neighbor_system = unsafe { system.slice_unsafe(neighbor_nodes) };
 
             for node in self.interface_nodes_active(interface, extent) {
                 let block_node = array::from_fn(|axis| node[axis] as isize + dest[axis]);
@@ -322,7 +343,7 @@ impl<const N: usize> Mesh<N> {
                 let block_index = block_space.index_from_node(block_node);
                 let neighbor_index = neighbor_space.index_from_node(neighbor_node);
 
-                for field in System::fields() {
+                for field in system.enumerate() {
                     let value = neighbor_system.field(field.clone())[neighbor_index];
                     block_system.field_mut(field.clone())[block_index] = value;
                 }
@@ -330,12 +351,11 @@ impl<const N: usize> Mesh<N> {
         });
     }
 
-    fn fill_fine<System: SystemLabel>(
-        &mut self,
-        extent: usize,
-        system: &mut SystemSliceMut<'_, System>,
-    ) {
-        let system = system.as_range();
+    fn fill_fine<'a, S: SystemSliceMut<'a>>(&mut self, extent: usize, system: S)
+    where
+        S::Label: Clone,
+    {
+        let system = system.into_shared();
 
         self.neighbors.fine_indices().for_each(|interface| {
             let info = self.interface(interface);
@@ -345,8 +365,8 @@ impl<const N: usize> Mesh<N> {
             let neighbor_space = self.block_space(info.neighbor);
             let neighbor_nodes = self.block_nodes(info.neighbor);
 
-            let mut block_system = unsafe { system.slice_mut(block_nodes).fields_mut() };
-            let neighbor_system = unsafe { system.slice(neighbor_nodes).fields() };
+            let mut block_system = unsafe { system.slice_unsafe_mut(block_nodes) };
+            let neighbor_system = unsafe { system.slice_unsafe(neighbor_nodes) };
 
             for node in self.interface_nodes_active(interface, extent) {
                 let block_node = array::from_fn(|axis| node[axis] as isize + info.dest[axis]);
@@ -356,7 +376,7 @@ impl<const N: usize> Mesh<N> {
                 let block_index = block_space.index_from_node(block_node);
                 let neighbor_index = neighbor_space.index_from_node(neighbor_node);
 
-                for field in System::fields() {
+                for field in system.enumerate() {
                     let value = neighbor_system.field(field.clone())[neighbor_index];
                     block_system.field_mut(field.clone())[block_index] = value;
                 }
@@ -364,15 +384,18 @@ impl<const N: usize> Mesh<N> {
         });
     }
 
-    fn fill_prolong<K: Kernels, B: Boundary<N> + Sync, C: Conditions<N> + Sync>(
-        &mut self,
+    fn fill_prolong<'a, K: Kernels, B: Boundary<N> + Sync, C: Conditions<N> + Sync>(
+        &'a mut self,
         _order: K,
         extent: usize,
-        boundary: &B,
-        conditions: &C,
-        system: &mut SystemSliceMut<'_, C::System>,
-    ) {
-        let system = system.as_range();
+        boundary: &'a B,
+        conditions: &'a C,
+        system: impl SystemSliceMut<'a, Label = C::Label>,
+    ) where
+        C::Label: Clone,
+    {
+        let system = system.into_shared();
+
         self.neighbors.coarse_indices().for_each(|interface| {
             let info = self.interface(interface);
 
@@ -382,8 +405,8 @@ impl<const N: usize> Mesh<N> {
             let neighbor_boundary = self.block_boundary(info.neighbor, boundary.clone());
             let neighbor_space = self.block_space(info.neighbor);
 
-            let mut block_system = unsafe { system.slice_mut(block_nodes).fields_mut() };
-            let neighbor_system = unsafe { system.slice(neighbor_nodes).fields() };
+            let mut block_system = unsafe { system.slice_unsafe_mut(block_nodes) };
+            let neighbor_system = unsafe { system.slice_unsafe(neighbor_nodes) };
 
             for node in self.interface_nodes_active(interface, extent) {
                 let block_node = array::from_fn(|axis| node[axis] as isize + info.dest[axis]);
@@ -393,7 +416,7 @@ impl<const N: usize> Mesh<N> {
 
                 let block_index = block_space.index_from_node(block_node);
 
-                for field in C::System::fields() {
+                for field in system.enumerate() {
                     let bcs =
                         SystemBC::new(field.clone(), neighbor_boundary.clone(), conditions.clone());
 
@@ -410,48 +433,49 @@ impl<const N: usize> Mesh<N> {
     }
 
     /// Enforce weak boundary conditions on the time derivative of a system.
-    pub fn weak_boundary<O: Kernels, B: Boundary<N>, C: Conditions<N>>(
-        &mut self,
+    pub fn weak_boundary<'a, O: Kernels + Sync, B: Boundary<N> + Sync, C: Conditions<N> + Sync>(
+        &'a mut self,
         order: O,
         boundary: B,
         conditions: C,
-        system: SystemSlice<'_, C::System>,
-        deriv: SystemSliceMut<'_, C::System>,
-    ) {
-        let system = system.as_range();
-        let deriv = deriv.as_range();
+        system: impl SystemSlice<'a, Label = C::Label>,
+        deriv: impl SystemSliceMut<'a, Label = C::Label>,
+    ) where
+        C::Label: Clone,
+    {
+        let deriv = deriv.into_shared();
 
-        (0..self.blocks.len()).for_each(|block| {
-            let boundary = self.block_boundary(block, boundary.clone());
-            let bounds = self.blocks.bounds(block);
-            let space = self.block_space(block);
-            let nodes = self.block_nodes(block);
+        self.block_compute(|mesh, store, block| {
+            let boundary = mesh.block_boundary(block, boundary.clone());
+            let bounds = mesh.blocks.bounds(block);
+            let space = mesh.block_space(block);
+            let nodes = mesh.block_nodes(block);
             let vertex_size = space.inner_size();
 
-            let block_system = unsafe { system.slice(nodes.clone()).fields() };
-            let mut block_deriv = unsafe { deriv.slice_mut(nodes.clone()).fields_mut() };
+            let block_system = system.slice(nodes.clone());
+            let mut block_deriv = unsafe { deriv.slice_unsafe_mut(nodes.clone()) };
 
             for face in faces::<N>() {
                 if boundary.kind(face) != BoundaryKind::Radiative {
                     continue;
                 }
 
+                let engine = FdEngine {
+                    space: space.clone(),
+                    bounds,
+                    order,
+                    store,
+                    boundary: boundary.clone(),
+                };
+
+                let spacing = engine.min_spacing();
+
                 // Sommerfeld radiative boundary conditions.
                 for vertex in IndexSpace::new(vertex_size).face(face).iter() {
                     // *************************
                     // At vertex
 
-                    let engine = FdEngine {
-                        space: space.clone(),
-                        vertex,
-                        bounds,
-                        fields: block_system.rb(),
-                        order,
-                        boundary: boundary.clone(),
-                    };
-
-                    let position: [f64; N] = engine.position();
-                    let spacing = engine.spacing();
+                    let position: [f64; N] = engine.position(vertex);
                     let r = position.iter().map(|&v| v * v).sum::<f64>().sqrt();
                     let index = space.index_from_vertex(vertex);
 
@@ -475,31 +499,23 @@ impl<const N: usize> Mesh<N> {
                         }
                     }
 
-                    let inner_engine = FdEngine {
-                        space: space.clone(),
-                        vertex: inner,
-                        bounds,
-                        fields: block_system.rb(),
-                        order,
-                        boundary: boundary.clone(),
-                    };
-
-                    let inner_position = inner_engine.position();
+                    let inner_position = engine.position(inner);
                     let inner_r = inner_position.iter().map(|&v| v * v).sum::<f64>().sqrt();
-                    let inner_index = space.index_from_vertex(inner);
+                    let inner_index = engine.index(inner);
 
-                    for field in C::System::fields() {
+                    for field in deriv.enumerate() {
                         let field_derivs = block_deriv.field_mut(field.clone());
-                        let bcs =
+                        let field_bcs =
                             SystemBC::new(field.clone(), boundary.clone(), conditions.clone());
+                        let field = block_system.field(field.clone());
 
-                        let params = bcs.radiative(position, spacing);
+                        let params = field_bcs.radiative(position, spacing);
 
                         // Inner R dependence
-                        let mut inner_advection = inner_engine.value(field.clone()) - params.target;
+                        let mut inner_advection = engine.value(field, inner) - params.target;
 
                         for axis in 0..N {
-                            let derivative = inner_engine.derivative(field.clone(), axis);
+                            let derivative = engine.derivative(field, axis, inner);
                             inner_advection += inner_position[axis] * derivative;
                         }
 
@@ -511,10 +527,10 @@ impl<const N: usize> Mesh<N> {
                             * (field_derivs[inner_index] + inner_advection / inner_r);
 
                         // Vertex
-                        let mut advection = engine.value(field.clone()) - params.target;
+                        let mut advection = engine.value(field, vertex) - params.target;
 
                         for axis in 0..N {
-                            let derivative = engine.derivative(field.clone(), axis);
+                            let derivative = engine.derivative(field, axis, vertex);
                             advection += position[axis] * derivative;
                         }
 
@@ -524,7 +540,7 @@ impl<const N: usize> Mesh<N> {
                     }
                 }
             }
-        });
+        })
     }
 
     /// Stores the index of the block which owns each individual node in a debug vector.

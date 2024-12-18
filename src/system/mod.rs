@@ -1,171 +1,185 @@
-//! Utilities and classes for working with `System`s.
-//!
-//! Systems are collections of multiple scalar fields that all have the same length, but different data. T
-//! his is used to represent coupled PDEs and ODEs. Each system is defined by a `SystemLabel`, which can be
-//! implemented by hand or using the provided procedural macro.
+#![allow(clippy::len_without_is_empty)]
 
-use aeon_array::ArrayLike;
+use std::ops::Range;
 
-use std::array;
-use std::fmt::Debug;
-use std::ops::{Index, IndexMut};
+mod dynamic;
+mod label;
+mod r#static;
+mod tuple;
 
-mod prim;
-mod vec;
+pub use dynamic::*;
+pub use label::*;
+pub use r#static::*;
+pub use tuple::*;
 
-pub use prim::{Empty, Pair, Scalar};
-pub use vec::{SystemFields, SystemFieldsMut, SystemRange, SystemSlice, SystemSliceMut, SystemVec};
+use crate::shared::SharedSlice;
 
-/// Custom derive macro for the `SystemLabel` trait.
-pub use aeon_macros::SystemLabel;
+pub trait System {
+    /// Label used to index the various fields in the system.
+    type Label;
 
-/// This trait is used to define systems of fields.
-pub trait SystemLabel: Sized + Clone + Send + Sync + 'static {
-    /// Name of the system (used for debugging and when serializing a system).
-    const SYSTEM_NAME: &'static str;
+    /// The number of DoFs in this system
+    fn len(&self) -> usize;
 
-    /// Retrieves the name of an individual field.
-    fn name(&self) -> String;
-
-    /// Retrieves the index of an individual field.
-    fn index(&self) -> usize;
-
-    /// Array type with same length as number of fields
-    type Array<T>: ArrayLike<Self, Elem = T>;
-
-    /// Returns an array of all possible system labels.
-    fn fields() -> impl Iterator<Item = Self>;
-
-    /// Creates a field from an index.
-    fn field_from_index(index: usize) -> Self;
+    /// Enumerates over fields in the system.
+    fn enumerate(&self) -> impl Iterator<Item = Self::Label>;
 }
 
-/// Number of fields in a given system.
-pub const fn field_count<Label: SystemLabel>() -> usize {
-    Label::Array::<()>::LEN
+/// Represents a collection of slices of the same length that together form a system. This data is stored in SoA style and thus more cache friendly. These
+/// can be used to store system vectors, tensor fields, etc.
+pub trait SystemSlice<'a>: System + Sync {
+    /// Result of taking a subslice of this slice.
+    type Slice<'b>: SystemSlice<'b, Label = Self::Label>
+    where
+        Self: 'b;
+
+    /// Takes an immutable subslice of the current slice.
+    fn slice(&self, range: Range<usize>) -> Self::Slice<'_>;
+
+    /// Returns a reference to a
+    fn field(&self, label: Self::Label) -> &[f64];
 }
 
-/// A wrapper around [T; L] to allow indexing them by a system label.
-pub struct SystemArray<T, const L: usize>(pub [T; L]);
+/// A collection of mutable slices of the same length that together form a system.
+pub trait SystemSliceMut<'a>: SystemSlice<'a> + Send {
+    /// Result of taking a mutable slice of the system.
+    type SliceMut<'b>: SystemSliceMut<'b, Label = Self::Label>
+    where
+        Self: 'b;
 
-impl<T, const L: usize> From<[T; L]> for SystemArray<T, L> {
-    fn from(value: [T; L]) -> Self {
-        SystemArray(value)
-    }
+    /// Result of transforming the system into a shared slice.
+    type Shared: SystemSliceShared<'a, Label = Self::Label>;
+
+    /// Takes a mutable slice of the current slice.
+    fn slice_mut(&mut self, range: Range<usize>) -> Self::SliceMut<'_>;
+
+    /// Returns a mutable reference to the given field of the system.
+    fn field_mut(&mut self, label: Self::Label) -> &mut [f64];
+
+    /// Converts a mutable reference to a slice into a shared slice that can be
+    /// disjointly borrowed.
+    fn into_shared(self) -> Self::Shared;
 }
 
-impl<T, const L: usize, S: SystemLabel<Array<T> = SystemArray<T, L>>> Index<S>
-    for SystemArray<T, L>
-{
-    type Output = T;
-    fn index(&self, index: S) -> &Self::Output {
-        let index = index.index();
-        self.0.index(index)
-    }
+pub unsafe trait SystemSliceShared<'a>: System + Sync {
+    type Slice<'b>: SystemSlice<'b, Label = Self::Label>
+    where
+        Self: 'b;
+
+    type SliceMut<'b>: SystemSliceMut<'b, Label = Self::Label>
+    where
+        Self: 'b;
+
+    unsafe fn slice_unsafe(&self, range: Range<usize>) -> Self::Slice<'_>;
+    unsafe fn slice_unsafe_mut(&self, range: Range<usize>) -> Self::SliceMut<'_>;
 }
 
-impl<T, const L: usize, S: SystemLabel<Array<T> = SystemArray<T, L>>> IndexMut<S>
-    for SystemArray<T, L>
-{
-    fn index_mut(&mut self, index: S) -> &mut Self::Output {
-        let index = index.index();
-        self.0.index_mut(index)
-    }
-}
+impl<'a> System for &'a [f64] {
+    type Label = Scalar;
 
-impl<T, const L: usize, S: SystemLabel<Array<T> = SystemArray<T, L>>> ArrayLike<S>
-    for SystemArray<T, L>
-{
-    const LEN: usize = L;
-    type Elem = T;
-
-    fn from_fn<F: FnMut(S) -> Self::Elem>(mut cb: F) -> Self {
-        Self(array::from_fn(|index| cb(S::field_from_index(index))))
-    }
-}
-
-/// Represents the values of a coupled system at a single point.
-#[derive(Debug, Clone)]
-pub struct SystemValue<Label: SystemLabel>(Label::Array<f64>);
-
-impl<Label: SystemLabel> SystemValue<Label> {
-    /// Constructs a new system value by wrapping an array of values.
-    pub fn new(values: impl Into<Label::Array<f64>>) -> Self {
-        Self(values.into())
+    fn enumerate(&self) -> impl Iterator<Item = Self::Label> {
+        std::iter::once(Scalar)
     }
 
-    /// Constructs the SystemVal by calling a function for each field
-    pub fn from_fn<F: FnMut(Label) -> f64>(f: F) -> Self {
-        Self(Label::Array::<f64>::from_fn(f))
-    }
-
-    /// Retrieves the value of the given field
-    pub fn field(&self, label: Label) -> f64 {
-        self.0[label]
-    }
-
-    /// Sets the value of the given field.
-    pub fn set_field(&mut self, label: Label, v: f64) {
-        self.0[label] = v
+    fn len(&self) -> usize {
+        <[f64]>::len(self)
     }
 }
 
-impl<Label: SystemLabel> Default for SystemValue<Label> {
-    fn default() -> Self {
-        Self::from_fn(|_| f64::default())
+impl<'a> SystemSlice<'a> for &'a [f64] {
+    type Slice<'b> = &'b [f64] where Self: 'b;
+
+    fn slice(&self, range: Range<usize>) -> Self::Slice<'_> {
+        &self[range]
+    }
+
+    fn field(&self, _: Self::Label) -> &[f64] {
+        self
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+impl<'a> System for &'a mut [f64] {
+    type Label = Scalar;
 
-    #[derive(Clone, PartialEq, Eq, Debug, SystemLabel)]
-    pub enum MySystem {
-        First,
-        Second,
-        Third,
+    fn enumerate(&self) -> impl Iterator<Item = Self::Label> {
+        std::iter::once(Scalar)
     }
 
-    #[test]
-    fn systems() {
-        assert_eq!(MySystem::SYSTEM_NAME, "MySystem");
-        for (a, b) in MySystem::fields().zip([MySystem::First, MySystem::Second, MySystem::Third]) {
-            assert_eq!(a, b)
-        }
-        assert_eq!(MySystem::First.index(), 0);
-        assert_eq!(MySystem::Second.index(), 1);
-        assert_eq!(MySystem::Third.index(), 2);
-        assert_eq!(MySystem::First.name(), "First");
-        assert_eq!(MySystem::Second.name(), "Second");
-        assert_eq!(MySystem::Third.name(), "Third");
-
-        let data = vec![0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0];
-        let owned = SystemSlice::<MySystem>::from_contiguous(data.as_ref()).to_vec();
-
-        assert_eq!(owned.len(), 3);
-        assert_eq!(owned.field(MySystem::First), &[0.0, 1.0, 2.0]);
-        assert_eq!(owned.field(MySystem::Second), &[3.0, 4.0, 5.0]);
-        assert_eq!(owned.field(MySystem::Third), &[6.0, 7.0, 8.0]);
-
-        let slice = owned.slice(1..3);
-        let slice_cast = SystemSlice::<MySystem>::from_contiguous(&data);
-        assert_eq!(
-            slice.field(MySystem::First),
-            &slice_cast.field(MySystem::First)[1..3]
-        );
-        assert_eq!(
-            slice.field(MySystem::Second),
-            &slice_cast.field(MySystem::Second)[1..3]
-        );
-        assert_eq!(
-            slice.field(MySystem::Third),
-            &slice_cast.field(MySystem::Third)[1..3]
-        );
-
-        let fields = owned.as_slice().fields();
-        assert_eq!(fields.field(MySystem::First), &[0.0, 1.0, 2.0]);
-        assert_eq!(fields.field(MySystem::Second), &[3.0, 4.0, 5.0]);
-        assert_eq!(fields.field(MySystem::Third), &[6.0, 7.0, 8.0]);
+    fn len(&self) -> usize {
+        <[f64]>::len(self)
     }
 }
+
+impl<'a> SystemSlice<'a> for &'a mut [f64] {
+    type Slice<'b> = &'b [f64] where Self: 'b;
+
+    fn slice(&self, range: Range<usize>) -> Self::Slice<'_> {
+        &self[range]
+    }
+
+    fn field(&self, _: Self::Label) -> &[f64] {
+        self
+    }
+}
+
+impl<'a> SystemSliceMut<'a> for &'a mut [f64] {
+    type SliceMut<'b> = &'b mut [f64] where Self: 'b;
+    type Shared = SharedSlice<'a, f64>;
+
+    fn slice_mut(&mut self, range: Range<usize>) -> Self::SliceMut<'_> {
+        &mut self[range]
+    }
+
+    fn field_mut(&mut self, _: Self::Label) -> &mut [f64] {
+        self
+    }
+
+    fn into_shared(self) -> Self::Shared {
+        SharedSlice::new(self)
+    }
+}
+
+impl<'a> System for SharedSlice<'a, f64> {
+    type Label = Scalar;
+
+    fn enumerate(&self) -> impl Iterator<Item = Self::Label> {
+        std::iter::once(Scalar)
+    }
+
+    fn len(&self) -> usize {
+        <SharedSlice<f64>>::len(*self)
+    }
+}
+
+unsafe impl<'a> SystemSliceShared<'a> for SharedSlice<'a, f64> {
+    type Slice<'b> = &'b [f64] where Self: 'b;
+    type SliceMut<'b> = &'b mut [f64] where Self: 'b;
+
+    unsafe fn slice_unsafe(&self, range: Range<usize>) -> Self::Slice<'_> {
+        std::slice::from_raw_parts(self.get(range.start), range.len())
+    }
+
+    unsafe fn slice_unsafe_mut(&self, range: Range<usize>) -> Self::SliceMut<'_> {
+        std::slice::from_raw_parts_mut(self.get_mut(range.start), range.len())
+    }
+}
+
+// /// Converts genetic range to a concrete range type.
+// fn bounds_to_range<R>(total: usize, range: R) -> Range<usize>
+// where
+//     R: RangeBounds<usize>,
+// {
+//     let start_inc = match range.start_bound() {
+//         Bound::Included(&i) => i,
+//         Bound::Excluded(&i) => i + 1,
+//         Bound::Unbounded => 0,
+//     };
+
+//     let end_exc = match range.end_bound() {
+//         Bound::Included(&i) => i + 1,
+//         Bound::Excluded(&i) => i,
+//         Bound::Unbounded => total,
+//     };
+
+//     start_inc..end_exc
+// }

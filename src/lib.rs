@@ -10,7 +10,6 @@ pub mod lac;
 pub mod ode;
 pub mod shared;
 pub mod system;
-pub mod system2;
 
 pub use aeon_basis as basis;
 pub use aeon_geometry as geometry;
@@ -24,8 +23,9 @@ pub mod prelude {
     pub use crate::lac::{BiCGStabConfig, BiCGStabSolver, IdentityMap, LinearMap, LinearSolver};
     pub use crate::ode::{ForwardEuler, Ode, Rk4};
     pub use crate::system::{
-        Empty, Pair, Scalar, SystemFields, SystemFieldsMut, SystemLabel, SystemSlice,
-        SystemSliceMut, SystemValue, SystemVec,
+        DynamicSystem, DynamicSystemSlice, DynamicSystemSliceMut, Empty, LabelledSystem,
+        LabelledSystemSlice, LabelledSystemSliceMut, Pair, Scalar, StaticSystem, StaticSystemSlice,
+        StaticSystemSliceMut, SystemLabel, SystemSlice, SystemSliceMut,
     };
     pub use aeon_basis::{Boundary, BoundaryKind, Condition, Gradient, Hessian, Order, Value};
     pub use aeon_geometry::{Face, IndexSpace, Rectangle};

@@ -4,9 +4,10 @@ mod boundary;
 mod engine;
 mod mesh;
 
-use crate::system::{Empty, Pair, Scalar, SystemLabel, SystemSlice, SystemValue};
+use crate::system::{Empty, Pair, Scalar, SystemLabel, SystemSlice, SystemSliceMut};
 use std::array;
 
+use aeon_geometry::IndexSpace;
 pub use boundary::{
     BlockBoundary, Conditions, EmptyConditions, PairConditions, ScalarConditions, SystemBC,
     SystemCondition,
@@ -16,35 +17,41 @@ pub use mesh::{ExportVtuConfig, Mesh, MeshCheckpoint, SystemCheckpoint};
 
 /// A function maps one set of scalar fields to another.
 pub trait Function<const N: usize>: Clone {
-    type Input: SystemLabel;
-    type Output: SystemLabel;
+    type Input;
+    type Output;
 
-    fn evaluate(&self, engine: &impl Engine<N, Self::Input>) -> SystemValue<Self::Output>;
+    fn evaluate<'a>(
+        &'a self,
+        engine: impl Engine<N>,
+        input: impl SystemSlice<'a, Label = Self::Input>,
+        output: impl SystemSliceMut<'a, Label = Self::Output>,
+    );
 }
 
 /// A projection takes in a position and returns a system of values.
 pub trait Projection<const N: usize>: Clone {
-    type Output: SystemLabel;
-
-    fn project(&self, position: [f64; N]) -> SystemValue<Self::Output>;
+    fn project(&self, position: [f64; N]) -> f64;
 }
 
 /// An operator transforms a set of scalar fields, using an additional set of scalar fields
 /// as context.
 pub trait Operator<const N: usize>: Clone {
-    type System: SystemLabel;
-    type Context: SystemLabel;
+    type System;
+    type Context;
 
-    fn apply(
-        &self,
-        engine: &impl Engine<N, Pair<Self::System, Self::Context>>,
-    ) -> SystemValue<Self::System>;
+    fn apply<'a>(
+        &'a self,
+        engine: impl Engine<N>,
+        system: impl SystemSlice<'a, Label = Self::System>,
+        context: impl SystemSlice<'a, Label = Self::Context>,
+        dest: impl SystemSliceMut<'a, Label = Self::System>,
+    );
 
-    fn callback(
-        &self,
-        _mesh: &mut Mesh<N>,
-        _system: SystemSlice<Self::System>,
-        _context: SystemSlice<Self::Context>,
+    fn callback<'a>(
+        &'a self,
+        _mesh: &'a mut Mesh<N>,
+        system: impl SystemSlice<'a, Label = Self::System>,
+        context: impl SystemSlice<'a, Label = Self::Context>,
         _index: usize,
     ) {
     }
@@ -56,10 +63,21 @@ pub struct ProjectionAsFunction<P>(pub P);
 
 impl<const N: usize, P: Projection<N>> Function<N> for ProjectionAsFunction<P> {
     type Input = Empty;
-    type Output = P::Output;
+    type Output = Scalar;
 
-    fn evaluate(&self, engine: &impl Engine<N, Self::Input>) -> SystemValue<Self::Output> {
-        self.0.project(engine.position())
+    fn evaluate<'a>(
+        &'a self,
+        engine: impl Engine<N>,
+        _input: impl SystemSlice<'a, Label = Self::Input>,
+        mut output: impl SystemSliceMut<'a, Label = Self::Output>,
+    ) {
+        let field = output.field_mut(Scalar);
+        for vertex in IndexSpace::new(engine.size()).iter() {
+            let index = engine.index(vertex);
+            let position = engine.position(vertex);
+
+            field[index] = self.0.project(position)
+        }
     }
 }
 
@@ -71,8 +89,20 @@ impl<const N: usize, O: Operator<N>> Function<N> for OperatorAsFunction<O> {
     type Input = Pair<O::System, O::Context>;
     type Output = O::System;
 
-    fn evaluate(&self, engine: &impl Engine<N, Self::Input>) -> SystemValue<Self::Output> {
-        self.0.apply(engine)
+    fn evaluate<'a>(
+        &'a self,
+        engine: impl Engine<N>,
+        input: impl SystemSlice<'a, Label = Self::Input>,
+        mut output: impl SystemSliceMut<'a, Label = Self::Output>,
+    ) {
+        // let field = output.field_mut(Scalar);
+        // for vertex in IndexSpace::new(engine.size()).iter() {
+        //     let index = engine.index(vertex);
+        //     let position = engine.position(vertex);
+
+        //     field[index] = self.0.project(position)
+        // }
+        todo!()
     }
 }
 
@@ -85,13 +115,11 @@ pub struct Gaussian<const N: usize> {
 }
 
 impl<const N: usize> Projection<N> for Gaussian<N> {
-    type Output = Scalar;
-
-    fn project(&self, position: [f64; N]) -> SystemValue<Self::Output> {
+    fn project(&self, position: [f64; N]) -> f64 {
         let offset: [_; N] = array::from_fn(|axis| position[axis] - self.center[axis]);
         let r2: f64 = offset.map(|v| v * v).iter().sum();
         let s2 = self.sigma * self.sigma;
 
-        SystemValue::new([self.amplitude * (-r2 / s2).exp()])
+        self.amplitude * (-r2 / s2).exp()
     }
 }

@@ -1,80 +1,92 @@
-use aeon_basis::{
-    node_from_vertex, Boundary, Convolution, Dissipation, Gradient, Hessian, Kernels, NodeSpace,
-};
+use aeon_basis::{node_from_vertex, Boundary, Kernels, NodeSpace, VertexKernel};
 use aeon_geometry::Rectangle;
 
-use crate::system::{SystemFields, SystemLabel};
+use super::mesh::MeshStore;
 
 /// An interface for computing values, gradients, and hessians of fields.
-pub trait Engine<const N: usize, S: SystemLabel> {
-    fn position(&self) -> [f64; N];
-    fn vertex(&self) -> [usize; N];
-    fn value(&self, system: S) -> f64;
-    fn derivative(&self, system: S, axis: usize) -> f64;
-    fn second_derivative(&self, system: S, i: usize, j: usize) -> f64;
-    fn dissipation(&self, system: S) -> f64;
-    fn spacing(&self) -> f64;
+pub trait Engine<const N: usize> {
+    fn num_nodes(&self) -> usize;
+    fn size(&self) -> [usize; N];
+
+    fn alloc<T: Default>(&self, len: usize) -> &[T];
+
+    fn position(&self, vertex: [usize; N]) -> [f64; N];
+    fn index(&self, vertex: [usize; N]) -> usize;
+    fn min_spacing(&self) -> f64;
+
+    fn value(&self, field: &[f64], vertex: [usize; N]) -> f64;
+    fn derivative(&self, field: &[f64], axis: usize, vertex: [usize; N]) -> f64;
+    fn second_derivative(&self, field: &[f64], axis: usize, vertex: [usize; N]) -> f64;
+    fn dissipation(&self, field: &[f64], axis: usize, vertex: [usize; N]) -> f64;
 }
 
 /// A finite difference engine of a given order, but potentially bordering a free boundary.
-pub struct FdEngine<'a, const N: usize, K: Kernels, B: Boundary<N>, S: SystemLabel> {
+pub struct FdEngine<'store, const N: usize, K: Kernels, B: Boundary<N>> {
     pub space: NodeSpace<N>,
-    pub vertex: [usize; N],
     pub bounds: Rectangle<N>,
-    pub fields: SystemFields<'a, S>,
     pub order: K,
     pub boundary: B,
+    pub store: &'store MeshStore,
 }
 
-impl<'a, const N: usize, K: Kernels, B: Boundary<N>, S: SystemLabel> FdEngine<'a, N, K, B, S> {
-    fn evaluate(&self, system: S, convolution: impl Convolution<N>) -> f64 {
-        let result = self.space.evaluate(
+impl<'store, const N: usize, K: Kernels, B: Boundary<N>> FdEngine<'store, N, K, B> {
+    fn evaluate(
+        &self,
+        field: &[f64],
+        axis: usize,
+        kernel: &impl VertexKernel,
+        vertex: [usize; N],
+    ) -> f64 {
+        self.space.evaluate_axis(
             self.boundary.clone(),
-            convolution,
+            kernel,
             self.bounds,
-            self.vertex,
-            self.fields.field(system.clone()),
-        );
-        result
+            node_from_vertex(vertex),
+            field,
+            axis,
+        )
     }
 }
 
-impl<'a, const N: usize, K: Kernels, B: Boundary<N>, S: SystemLabel> Engine<N, S>
-    for FdEngine<'a, N, K, B, S>
-{
-    fn position(&self) -> [f64; N] {
-        self.space
-            .position(node_from_vertex(self.vertex), self.bounds)
+impl<'store, const N: usize, K: Kernels, B: Boundary<N>> Engine<N> for FdEngine<'store, N, K, B> {
+    fn num_nodes(&self) -> usize {
+        self.space.num_nodes()
     }
 
-    fn vertex(&self) -> [usize; N] {
-        self.vertex
+    fn size(&self) -> [usize; N] {
+        self.space.inner_size()
     }
 
-    fn value(&self, system: S) -> f64 {
-        let index = self.space.index_from_vertex(self.vertex);
-        self.fields.field(system)[index]
+    fn alloc<T: Default>(&self, len: usize) -> &[T] {
+        self.store.scratch(len)
     }
 
-    fn derivative(&self, system: S, axis: usize) -> f64 {
-        self.evaluate(system, Gradient::<K>::new(axis))
+    fn position(&self, vertex: [usize; N]) -> [f64; N] {
+        self.space.position(node_from_vertex(vertex), self.bounds)
     }
 
-    fn second_derivative(&self, system: S, i: usize, j: usize) -> f64 {
-        self.evaluate(system, Hessian::<K>::new(i, j))
+    fn index(&self, vertex: [usize; N]) -> usize {
+        self.space.index_from_vertex(vertex)
     }
 
-    fn dissipation(&self, system: S) -> f64 {
-        let mut result = 0.0;
-
-        for axis in 0..N {
-            result += self.evaluate(system.clone(), Dissipation::<K>::new(axis))
-        }
-
-        result
+    fn value(&self, field: &[f64], vertex: [usize; N]) -> f64 {
+        let index = self.space.index_from_vertex(vertex);
+        field[index]
     }
 
-    fn spacing(&self) -> f64 {
+    fn derivative(&self, field: &[f64], axis: usize, vertex: [usize; N]) -> f64 {
+        self.evaluate(field, axis, K::derivative(), vertex)
+    }
+
+    fn second_derivative(&self, field: &[f64], axis: usize, vertex: [usize; N]) -> f64 {
+        self.evaluate(field, axis, K::second_derivative(), vertex)
+    }
+
+    fn dissipation(&self, field: &[f64], axis: usize, vertex: [usize; N]) -> f64 {
+        self.evaluate(field, axis, K::dissipation(), vertex)
+    }
+
+    fn min_spacing(&self) -> f64 {
         let spacing = self.space.spacing(self.bounds);
         spacing
             .iter()
@@ -85,60 +97,70 @@ impl<'a, const N: usize, K: Kernels, B: Boundary<N>, S: SystemLabel> Engine<N, S
 }
 
 /// A finite difference engine that only every relies on interior support (and can thus use better optimized stencils).
-pub struct FdIntEngine<'a, const N: usize, K: Kernels, S: SystemLabel> {
+pub struct FdIntEngine<'store, const N: usize, K: Kernels> {
     pub space: NodeSpace<N>,
-    pub vertex: [usize; N],
     pub bounds: Rectangle<N>,
-    pub fields: SystemFields<'a, S>,
     pub order: K,
+    pub store: &'store MeshStore,
 }
 
-impl<'a, const N: usize, K: Kernels, S: SystemLabel> FdIntEngine<'a, N, K, S> {
-    fn evaluate(&self, system: S, convolution: impl Convolution<N>) -> f64 {
-        let result = self.space.evaluate_interior(
-            convolution,
+impl<'store, const N: usize, K: Kernels> FdIntEngine<'store, N, K> {
+    fn evaluate(
+        &self,
+        field: &[f64],
+        axis: usize,
+        kernel: &impl VertexKernel,
+        vertex: [usize; N],
+    ) -> f64 {
+        self.space.evaluate_axis_interior(
+            kernel,
             self.bounds,
-            self.vertex,
-            self.fields.field(system.clone()),
-        );
-        result
+            node_from_vertex(vertex),
+            field,
+            axis,
+        )
     }
 }
 
-impl<'a, const N: usize, K: Kernels, S: SystemLabel> Engine<N, S> for FdIntEngine<'a, N, K, S> {
-    fn position(&self) -> [f64; N] {
-        self.space
-            .position(node_from_vertex(self.vertex), self.bounds)
+impl<'store, const N: usize, K: Kernels> Engine<N> for FdIntEngine<'store, N, K> {
+    fn num_nodes(&self) -> usize {
+        self.space.num_nodes()
     }
 
-    fn vertex(&self) -> [usize; N] {
-        self.vertex
+    fn size(&self) -> [usize; N] {
+        self.space.inner_size()
     }
 
-    fn value(&self, system: S) -> f64 {
-        let index = self.space.index_from_vertex(self.vertex);
-        self.fields.field(system)[index]
+    fn alloc<T: Default>(&self, len: usize) -> &[T] {
+        self.store.scratch(len)
     }
 
-    fn derivative(&self, system: S, axis: usize) -> f64 {
-        self.evaluate(system, Gradient::<K>::new(axis))
+    fn position(&self, vertex: [usize; N]) -> [f64; N] {
+        self.space.position(node_from_vertex(vertex), self.bounds)
     }
 
-    fn second_derivative(&self, system: S, i: usize, j: usize) -> f64 {
-        self.evaluate(system, Hessian::<K>::new(i, j))
+    fn index(&self, vertex: [usize; N]) -> usize {
+        self.space.index_from_vertex(vertex)
     }
 
-    fn dissipation(&self, system: S) -> f64 {
-        let mut result = 0.0;
-
-        for axis in 0..N {
-            result += self.evaluate(system.clone(), Dissipation::<K>::new(axis))
-        }
-
-        result
+    fn value(&self, field: &[f64], vertex: [usize; N]) -> f64 {
+        let index = self.space.index_from_vertex(vertex);
+        field[index]
     }
 
-    fn spacing(&self) -> f64 {
+    fn derivative(&self, field: &[f64], axis: usize, vertex: [usize; N]) -> f64 {
+        self.evaluate(field, axis, K::derivative(), vertex)
+    }
+
+    fn second_derivative(&self, field: &[f64], axis: usize, vertex: [usize; N]) -> f64 {
+        self.evaluate(field, axis, K::second_derivative(), vertex)
+    }
+
+    fn dissipation(&self, field: &[f64], axis: usize, vertex: [usize; N]) -> f64 {
+        self.evaluate(field, axis, K::dissipation(), vertex)
+    }
+
+    fn min_spacing(&self) -> f64 {
         let spacing = self.space.spacing(self.bounds);
         spacing
             .iter()

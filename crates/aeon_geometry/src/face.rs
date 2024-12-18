@@ -140,6 +140,14 @@ impl<const N: usize> FaceMask<N> {
         Self([[false; 2]; N])
     }
 
+    pub fn any(&self) -> bool {
+        let mut result = false;
+        for axis in 0..N {
+            result = result || self.0[axis][0] || self.0[axis][1];
+        }
+        result
+    }
+
     /// Constructs a mask where all flags have been set to true.
     pub fn full() -> Self {
         Self([[true; 2]; N])
