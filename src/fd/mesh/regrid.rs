@@ -6,29 +6,29 @@ use aeon_geometry::IndexSpace;
 use crate::{
     fd::Mesh,
     shared::SharedSlice,
-    system::{SystemLabel, SystemSlice},
+    system::{System, SystemSlice},
 };
 
 impl<const N: usize> Mesh<N> {
     /// Flags cells for refinement using a wavelet criterion. The system must have filled
     /// boundaries. This function tags any cell that is insufficiently refined to approximate
     /// operators of the given `order` within the range of error.
-    pub fn flag_wavelets<S: SystemLabel, B: Boundary<N> + Sync>(
+    pub fn flag_wavelets<S: System + Clone + Sync, B: Boundary<N> + Sync>(
         &mut self,
         order: usize,
         lower: f64,
         upper: f64,
         boundary: B,
-        system: SystemSlice<S>,
+        result: SystemSlice<S>,
     ) {
         assert!(order % 2 == 0);
         assert!(order <= self.width);
 
+        let system = result.system().clone();
+
         let element = Element::<N>::uniform(self.width, order);
         let element_coarse = Element::<N>::uniform(self.width / 2, order / 2);
         let support = element.support_refined();
-
-        let field = system.as_range();
 
         let mut rflags_buf = std::mem::take(&mut self.refine_flags);
         let mut cflags_buf = std::mem::take(&mut self.coarsen_flags);
@@ -46,7 +46,7 @@ impl<const N: usize> Mesh<N> {
             let nodes = mesh.block_nodes(block);
             let space = mesh.block_space(block);
 
-            let system = unsafe { field.slice(nodes.clone()).fields() };
+            let block_system = result.slice(nodes.clone());
 
             for &cell in mesh.blocks.cells(block) {
                 let is_cell_on_boundary = mesh.is_cell_on_boundary(cell, boundary.clone());
@@ -61,10 +61,10 @@ impl<const N: usize> Mesh<N> {
                 let mut should_refine = false;
                 let mut should_coarsen = true;
 
-                for field in S::fields() {
+                for field in system.enumerate() {
                     // Unpack data to element
                     for (i, node) in window.iter().enumerate() {
-                        imsrc[i] = system.field(field.clone())[space.index_from_node(node)];
+                        imsrc[i] = block_system.field(field.clone())[space.index_from_node(node)];
                     }
 
                     if is_cell_on_boundary {

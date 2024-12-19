@@ -25,16 +25,11 @@ pub struct SeedConditions;
 impl Conditions<2> for SeedConditions {
     type System = Scalar;
 
-    fn parity(&self, _field: Self::System, face: Face<2>) -> bool {
+    fn parity(&self, _field: (), face: Face<2>) -> bool {
         [false, true][face.axis]
     }
 
-    fn radiative(
-        &self,
-        _field: Self::System,
-        _position: [f64; 2],
-        _spacing: f64,
-    ) -> RadiativeParams {
+    fn radiative(&self, _field: (), _position: [f64; 2], _spacing: f64) -> RadiativeParams {
         RadiativeParams::lightlike(0.0)
     }
 }
@@ -43,10 +38,8 @@ impl Conditions<2> for SeedConditions {
 struct SeedProjection;
 
 impl Projection<2> for SeedProjection {
-    type Output = Scalar;
-
-    fn project(&self, [rho, z]: [f64; 2]) -> SystemValue<Self::Output> {
-        SystemValue::new([rho * (-(rho * rho + z * z)).exp()])
+    fn project(&self, [rho, z]: [f64; 2]) -> f64 {
+        rho * (-(rho * rho + z * z)).exp()
     }
 }
 
@@ -68,12 +61,12 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut mesh = Mesh::new(domain, 4, 2);
 
     // Store system from previous iteration.
-    let mut system_prev = SystemVec::with_length(mesh.num_nodes());
+    let mut system_prev = SystemVec::with_length(mesh.num_nodes(), Scalar);
     mesh.project(
         Order::<4>,
         Quadrant,
         SeedProjection,
-        system_prev.as_mut_slice(),
+        system_prev.field_mut(()),
     );
 
     let mut errors = Vec::new();
@@ -85,8 +78,8 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
             mesh.num_nodes()
         );
 
-        let mut system = SystemVec::with_length(mesh.num_nodes());
-        mesh.project(Order::<4>, Quadrant, SeedProjection, system.as_mut_slice());
+        let mut system = SystemVec::with_length(mesh.num_nodes(), Scalar);
+        mesh.project(Order::<4>, Quadrant, SeedProjection, system.field_mut(()));
         mesh.fill_boundary(Order::<4>, Quadrant, SeedConditions, system.as_mut_slice());
 
         mesh.flag_wavelets(4, 1e-13, 1e-9, Quadrant, system.as_slice());
@@ -103,21 +96,21 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
         mesh.cell_debug(&mut cell_debug);
 
         let diff = system
-            .field(Scalar)
+            .field(())
             .iter()
-            .zip(system_prev.field(Scalar).iter())
+            .zip(system_prev.field(()).iter())
             .map(|(i, j)| i - j)
             .collect::<Vec<_>>();
 
-        let norm = mesh.l2_norm(diff.as_slice().into());
+        let norm = mesh.l2_norm(SystemSlice::from_scalar(diff.as_slice()));
 
         if norm.abs() >= 1e-20 {
             errors.push((i, norm));
         }
 
         let mut systems = SystemCheckpoint::default();
-        systems.save_field("Seed", system.field(Scalar));
-        systems.save_field("SeedInterpolated", system_prev.field(Scalar));
+        systems.save_field("Seed", system.field(()));
+        systems.save_field("SeedInterpolated", system_prev.field(()));
         systems.save_field("SeedDiff", &diff);
         systems.save_int_field("Flags", &flag_debug);
         systems.save_int_field("Blocks", &block_debug);
@@ -135,7 +128,7 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
         mesh.regrid();
 
         // Prolong data from previous system.
-        system_prev = SystemVec::with_length(mesh.num_nodes());
+        system_prev = SystemVec::with_length(mesh.num_nodes(), Scalar);
         mesh.transfer_system(
             Order::<4>,
             Quadrant,

@@ -23,12 +23,7 @@ pub struct WaveConditions;
 impl Conditions<2> for WaveConditions {
     type System = Scalar;
 
-    fn radiative(
-        &self,
-        _field: Self::System,
-        _position: [f64; 2],
-        _spacing: f64,
-    ) -> RadiativeParams {
+    fn radiative(&self, _field: (), _position: [f64; 2], _spacing: f64) -> RadiativeParams {
         RadiativeParams::lightlike(0.0)
     }
 }
@@ -45,11 +40,11 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Generate initial mesh
     let mut mesh = Mesh::new(Rectangle::from_aabb([-10., -10.], [10., 10.]), 4, 3);
     // Allocate space for system
-    let mut system = SystemVec::new();
+    let mut system = SystemVec::default();
 
     // Comparison
-    let mut transfered = SystemVec::new();
-    let mut error = SystemVec::<Scalar>::new();
+    let mut transfered = SystemVec::default();
+    let mut error = SystemVec::<Scalar>::default();
 
     log::info!("Performing Initial Adaptive Mesh Refinement.");
 
@@ -65,7 +60,7 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         system.resize(mesh.num_nodes());
 
-        mesh.project(ORDER, Quadrant, profile, system.as_mut_slice());
+        mesh.project(ORDER, Quadrant, profile, system.field_mut(()));
         mesh.fill_boundary(ORDER, Quadrant, WaveConditions, system.as_mut_slice());
 
         mesh.flag_wavelets(4, LOWER, UPPER, Quadrant, system.as_slice());

@@ -1,6 +1,6 @@
 use crate::{
     geometry::{Face, FaceMask},
-    system::{Empty, Pair, Scalar, SystemLabel},
+    system::{Empty, Pair, Scalar, System},
 };
 
 use aeon_basis::{Boundary, BoundaryKind, Condition, RadiativeParams};
@@ -32,15 +32,15 @@ impl<const N: usize, I: Boundary<N>> Boundary<N> for BlockBoundary<N, I> {
 
 /// A generalization of `Condition<N>` for a coupled systems of scalar fields.
 pub trait Conditions<const N: usize>: Clone {
-    type System: SystemLabel;
+    type System: System;
 
-    fn parity(&self, _field: Self::System, _face: Face<N>) -> bool {
+    fn parity(&self, _label: <Self::System as System>::Label, _face: Face<N>) -> bool {
         false
     }
 
     fn radiative(
         &self,
-        _field: Self::System,
+        _label: <Self::System as System>::Label,
         _position: [f64; N],
         _spacing: f64,
     ) -> RadiativeParams {
@@ -64,50 +64,59 @@ impl<I> ScalarConditions<I> {
 impl<const N: usize, I: Condition<N>> Conditions<N> for ScalarConditions<I> {
     type System = Scalar;
 
-    fn parity(&self, _field: Self::System, face: Face<N>) -> bool {
+    fn parity(&self, _field: (), face: Face<N>) -> bool {
         self.0.parity(face)
     }
 
-    fn radiative(&self, _field: Self::System, position: [f64; N], spacing: f64) -> RadiativeParams {
+    fn radiative(&self, _field: (), position: [f64; N], spacing: f64) -> RadiativeParams {
         self.0.radiative(position, spacing)
     }
 }
 
-#[derive(Clone)]
-pub struct SystemCondition<S, C> {
-    field: S,
-    conditions: C,
-}
+// #[derive(Clone)]
+// pub struct SystemCondition<C> {
+//     field: S::Label,
+//     conditions: C,
+// }
 
-impl<S, C> SystemCondition<S, C> {
-    pub const fn new(field: S, conditions: C) -> Self {
-        Self { field, conditions }
-    }
-}
+// impl<S: System, C> SystemCondition<S, C> {
+//     pub const fn new(field: S::Label, conditions: C) -> Self {
+//         Self { field, conditions }
+//     }
+// }
 
-impl<const N: usize, S: SystemLabel, C: Conditions<N, System = S>> Condition<N>
-    for SystemCondition<S, C>
-{
-    fn parity(&self, face: Face<N>) -> bool {
-        self.conditions.parity(self.field.clone(), face)
-    }
+// impl<const N: usize, S: System + Clone, C: Conditions<N, System = S>> Condition<N>
+//     for SystemCondition<S, C>
+// {
+//     fn parity(&self, face: Face<N>) -> bool {
+//         self.conditions.parity(self.field.clone(), face)
+//     }
 
-    fn radiative(&self, position: [f64; N], spacing: f64) -> RadiativeParams {
-        self.conditions
-            .radiative(self.field.clone(), position, spacing)
-    }
-}
+//     fn radiative(&self, position: [f64; N], spacing: f64) -> RadiativeParams {
+//         self.conditions
+//             .radiative(self.field.clone(), position, spacing)
+//     }
+// }
 
 /// Combines a boundary with a set of conditions, for a specific field.
-#[derive(Clone)]
-pub struct SystemBC<S: SystemLabel, B, C> {
-    field: S,
+pub struct SystemBC<const N: usize, B, C: Conditions<N>> {
     boundary: B,
     conditions: C,
+    field: <C::System as System>::Label,
 }
 
-impl<S: SystemLabel, B, C> SystemBC<S, B, C> {
-    pub const fn new(field: S, boundary: B, conditions: C) -> Self {
+impl<const N: usize, B: Boundary<N>, C: Conditions<N>> Clone for SystemBC<N, B, C> {
+    fn clone(&self) -> Self {
+        Self {
+            boundary: self.boundary.clone(),
+            conditions: self.conditions.clone(),
+            field: self.field,
+        }
+    }
+}
+
+impl<const N: usize, B: Boundary<N>, C: Conditions<N>> SystemBC<N, B, C> {
+    pub const fn new(boundary: B, conditions: C, field: <C::System as System>::Label) -> Self {
         Self {
             field,
             boundary,
@@ -116,9 +125,7 @@ impl<S: SystemLabel, B, C> SystemBC<S, B, C> {
     }
 }
 
-impl<const N: usize, S: SystemLabel, B: Clone, C: Conditions<N, System = S>> Condition<N>
-    for SystemBC<S, B, C>
-{
+impl<const N: usize, B: Boundary<N>, C: Conditions<N>> Condition<N> for SystemBC<N, B, C> {
     fn parity(&self, face: Face<N>) -> bool {
         self.conditions.parity(self.field.clone(), face)
     }
@@ -129,7 +136,7 @@ impl<const N: usize, S: SystemLabel, B: Clone, C: Conditions<N, System = S>> Con
     }
 }
 
-impl<const N: usize, S: SystemLabel, B: Boundary<N>, C: Clone> Boundary<N> for SystemBC<S, B, C> {
+impl<const N: usize, B: Boundary<N>, C: Conditions<N>> Boundary<N> for SystemBC<N, B, C> {
     fn kind(&self, face: Face<N>) -> BoundaryKind {
         self.boundary.kind(face)
     }
@@ -142,19 +149,24 @@ pub struct PairConditions<L, R> {
 }
 
 impl<const N: usize, L: Conditions<N>, R: Conditions<N>> Conditions<N> for PairConditions<L, R> {
-    type System = Pair<L::System, R::System>;
+    type System = (L::System, R::System);
 
-    fn parity(&self, field: Self::System, face: Face<N>) -> bool {
+    fn parity(&self, field: <Self::System as System>::Label, face: Face<N>) -> bool {
         match field {
-            Pair::Left(left) => self.left.parity(left, face),
-            Pair::Right(right) => self.right.parity(right, face),
+            Pair::First(left) => self.left.parity(left, face),
+            Pair::Second(right) => self.right.parity(right, face),
         }
     }
 
-    fn radiative(&self, field: Self::System, position: [f64; N], spacing: f64) -> RadiativeParams {
+    fn radiative(
+        &self,
+        field: <Self::System as System>::Label,
+        position: [f64; N],
+        spacing: f64,
+    ) -> RadiativeParams {
         match field {
-            Pair::Left(left) => self.left.radiative(left, position, spacing),
-            Pair::Right(right) => self.right.radiative(right, position, spacing),
+            Pair::First(left) => self.left.radiative(left, position, spacing),
+            Pair::Second(right) => self.right.radiative(right, position, spacing),
         }
     }
 }
@@ -165,13 +177,13 @@ pub struct EmptyConditions;
 impl<const N: usize> Conditions<N> for EmptyConditions {
     type System = Empty;
 
-    fn parity(&self, _field: Self::System, _face: Face<N>) -> bool {
+    fn parity(&self, _field: <Self::System as System>::Label, _face: Face<N>) -> bool {
         unreachable!()
     }
 
     fn radiative(
         &self,
-        _field: Self::System,
+        _field: <Self::System as System>::Label,
         _position: [f64; N],
         _spacing: f64,
     ) -> RadiativeParams {

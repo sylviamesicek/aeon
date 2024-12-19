@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use thiserror::Error;
 
 use crate::fd::Mesh;
-use crate::system::{SystemLabel, SystemSlice, SystemVec};
+use crate::system::{System, SystemSlice, SystemVec};
 
 #[derive(Debug, Error)]
 pub enum CheckpointParseError {
@@ -58,13 +58,17 @@ pub struct SystemCheckpoint {
 
 impl SystemCheckpoint {
     /// Attaches a system for serialization and deserialization
-    pub fn save_system<Label: SystemLabel>(&mut self, system: SystemSlice<'_, Label>) {
-        assert!(!self.systems.contains_key(Label::SYSTEM_NAME));
+    pub fn save_system<S: System + Clone + Default>(&mut self, system: SystemSlice<S>) {
+        assert!(!self.systems.contains_key(S::NAME));
 
         let count = system.len();
         let data = system.to_vec().into_contiguous();
 
-        let fields = Label::fields().map(|label| label.name()).collect();
+        let fields = system
+            .system()
+            .enumerate()
+            .map(|label| system.system().label_name(label))
+            .collect();
 
         let meta = SystemMeta {
             count,
@@ -72,13 +76,16 @@ impl SystemCheckpoint {
             fields,
         };
 
-        self.systems.insert(Label::SYSTEM_NAME.to_string(), meta);
+        self.systems.insert(S::NAME.to_string(), meta);
     }
 
     /// Reads a system from the model.
-    pub fn load_system<Label: SystemLabel>(&self, vec: &mut SystemVec<Label>) {
-        let meta = self.systems.get(Label::SYSTEM_NAME).unwrap();
-        let _ = std::mem::replace(vec, SystemSlice::from_contiguous(&meta.data).to_vec());
+    pub fn load_system<S: System + Clone + Default>(&self, vec: &mut SystemVec<S>) {
+        let meta = self.systems.get(S::NAME).unwrap();
+        let _ = std::mem::replace(
+            vec,
+            SystemSlice::from_contiguous(&meta.data, &S::default()).to_vec(),
+        );
     }
 
     /// Attaches a field for serialization in the model.

@@ -1,6 +1,6 @@
 use std::array;
 
-use aeon::{fd::Gaussian, prelude::*, system::field_count};
+use aeon::{fd::Gaussian, prelude::*, system::System};
 use aeon_basis::RadiativeParams;
 use reborrow::{Reborrow, ReborrowMut};
 
@@ -35,12 +35,7 @@ struct WaveConditions;
 impl Conditions<2> for WaveConditions {
     type System = Scalar;
 
-    fn radiative(
-        &self,
-        _field: Self::System,
-        _position: [f64; 2],
-        _spacing: f64,
-    ) -> RadiativeParams {
+    fn radiative(&self, _field: (), _position: [f64; 2], _spacing: f64) -> RadiativeParams {
         RadiativeParams::lightlike(0.0)
     }
 }
@@ -54,10 +49,23 @@ impl Function<2> for WaveEquation {
     type Input = Scalar;
     type Output = Scalar;
 
-    fn evaluate(&self, engine: &impl Engine<2, Self::Input>) -> SystemValue<Self::Output> {
-        let dr = engine.derivative(Scalar, 0);
-        let dz = engine.derivative(Scalar, 0);
-        SystemValue::new([-dr * self.speed[0] - dz * self.speed[1]])
+    fn evaluate(
+        &self,
+        engine: impl Engine<2>,
+        input: SystemSlice<Self::Input>,
+        mut output: SystemSliceMut<Self::Output>,
+    ) {
+        let input = input.field(());
+        let output = output.field_mut(());
+
+        for vertex in IndexSpace::new(engine.vertex_size()).iter() {
+            let index = engine.index_from_vertex(vertex);
+
+            let dr = engine.derivative(input, 0, vertex);
+            let dz = engine.derivative(input, 1, vertex);
+
+            output[index] = -dr * self.speed[0] - dz * self.speed[1];
+        }
     }
 }
 
@@ -68,13 +76,11 @@ struct AnalyticSolution {
 }
 
 impl Projection<2> for AnalyticSolution {
-    type Output = Scalar;
-
-    fn project(&self, position: [f64; 2]) -> SystemValue<Self::Output> {
+    fn project(&self, position: [f64; 2]) -> f64 {
         let origin: [_; 2] = array::from_fn(|axis| self.speed[axis] * self.time);
         let offset: [_; 2] = array::from_fn(|axis| position[axis] - origin[axis]);
         let r2: f64 = offset.map(|v| v * v).iter().sum();
-        SystemValue::new([(-r2).exp()])
+        (-r2).exp()
     }
 }
 
@@ -84,7 +90,7 @@ pub struct HyperbolicOde<'a> {
 
 impl<'a> Ode for HyperbolicOde<'a> {
     fn dim(&self) -> usize {
-        field_count::<Scalar>() * self.mesh.num_nodes()
+        Scalar.count() * self.mesh.num_nodes()
     }
 
     fn preprocess(&mut self, system: &mut [f64]) {
@@ -92,13 +98,13 @@ impl<'a> Ode for HyperbolicOde<'a> {
             ORDER,
             Quadrant,
             WaveConditions,
-            SystemSliceMut::from_contiguous(system),
+            SystemSliceMut::from_scalar(system),
         );
     }
 
     fn derivative(&mut self, system: &[f64], result: &mut [f64]) {
-        let src = SystemSlice::from_contiguous(system);
-        let mut dest = SystemSliceMut::from_contiguous(result);
+        let src = SystemSlice::from_scalar(system);
+        let mut dest = SystemSliceMut::from_scalar(result);
 
         self.mesh.evaluate(
             ORDER,
@@ -125,7 +131,7 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Generate initial mesh
     let mut mesh = Mesh::new(Rectangle::from_aabb([-10., -10.], [10., 10.]), 6, 3);
     // Allocate space for system
-    let mut system = SystemVec::new();
+    let mut system = SystemVec::<Scalar>::default();
 
     log::info!("Performing Initial Adaptive Mesh Refinement.");
 
@@ -141,7 +147,7 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         system.resize(mesh.num_nodes());
 
-        mesh.project(ORDER, Quadrant, profile, system.as_mut_slice());
+        mesh.project(ORDER, Quadrant, profile, system.field_mut(()));
         mesh.fill_boundary(ORDER, Quadrant, WaveConditions, system.as_mut_slice());
 
         mesh.flag_wavelets(4, LOWER, UPPER, Quadrant, system.as_slice());
@@ -188,11 +194,11 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
     log::info!("Evolving wave forwards");
 
     // Allocate vectors
-    let mut tmp = SystemVec::new();
-    let mut update = SystemVec::<Scalar>::new();
-    let mut dissipation = SystemVec::new();
-    let mut exact = SystemVec::new();
-    let mut error = SystemVec::<Scalar>::new();
+    let mut tmp = SystemVec::default();
+    let mut update = SystemVec::<Scalar>::default();
+    let mut dissipation = SystemVec::default();
+    let mut exact = SystemVec::default();
+    let mut error = SystemVec::<Scalar>::default();
 
     // Integrate
     let mut integrator = Rk4::new();
@@ -221,7 +227,7 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
             ORDER,
             Quadrant,
             AnalyticSolution { speed: SPEED, time },
-            exact.as_mut_slice(),
+            exact.field_mut(()),
         );
 
         // Fill boundaries

@@ -1,14 +1,17 @@
 use aeon_basis::{Boundary, Kernels, RadiativeParams};
+use aeon_geometry::IndexSpace;
 use reborrow::{Reborrow, ReborrowMut};
 use std::marker::PhantomData;
 
 use crate::{
-    fd::{Conditions, Engine, Mesh, Operator},
+    fd::{Conditions, Engine, Function, Mesh},
     ode::{Ode, Rk4},
     prelude::Face,
-    system::{field_count, Pair, SystemLabel, SystemSlice, SystemSliceMut, SystemValue},
+    system::{Pair, System, SystemSlice, SystemSliceMut},
 };
-pub struct HyperRelaxSolver<Label: SystemLabel> {
+
+#[derive(Clone, Debug)]
+pub struct HyperRelaxSolver {
     /// Error tolerance (relaxation stops once error goes below this value).
     pub tolerance: f64,
     /// Maximum number of relaxation steps to perform
@@ -16,16 +19,15 @@ pub struct HyperRelaxSolver<Label: SystemLabel> {
     pub dampening: f64,
     pub cfl: f64,
     integrator: Rk4,
-    _marker: PhantomData<Label>,
 }
 
-impl<Label: SystemLabel> Default for HyperRelaxSolver<Label> {
+impl Default for HyperRelaxSolver {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl<Label: SystemLabel> HyperRelaxSolver<Label> {
+impl HyperRelaxSolver {
     pub fn new() -> Self {
         Self {
             tolerance: 10e-5,
@@ -33,7 +35,6 @@ impl<Label: SystemLabel> HyperRelaxSolver<Label> {
             dampening: 1.0,
             cfl: 0.1,
             integrator: Rk4::new(),
-            _marker: PhantomData,
         }
     }
 
@@ -41,20 +42,22 @@ impl<Label: SystemLabel> HyperRelaxSolver<Label> {
         const N: usize,
         K: Kernels + Sync,
         B: Boundary<N> + Sync,
-        C: Conditions<N, System = Label> + Sync,
-        O: Operator<N, System = Label> + Sync,
+        C: Conditions<N> + Sync,
+        F: Function<N, Input = C::System, Output = C::System> + Clone + Sync,
     >(
         &mut self,
         mesh: &mut Mesh<N>,
         order: K,
         boundary: B,
         conditions: C,
-        operator: O,
-        context: SystemSlice<'_, O::Context>,
-        mut system: SystemSliceMut<'_, Label>,
-    ) {
+        deriv: F,
+        mut result: SystemSliceMut<C::System>,
+    ) where
+        C::System: Clone + Sync,
+    {
         // Total number of degreees of freedom in the whole system
-        let dimension = field_count::<Label>() * system.len();
+        let dimension = result.total_dofs();
+        let system = result.system().clone();
 
         // Allocate storage
         let mut data = vec![0.0; 2 * dimension].into_boxed_slice();
@@ -63,18 +66,16 @@ impl<Label: SystemLabel> HyperRelaxSolver<Label> {
         // Fill initial guess
         {
             let (u, v) = data.split_at_mut(dimension);
-            let mut usys = SystemSliceMut::<O::System>::from_contiguous(u);
-            let mut vsys = SystemSliceMut::<O::System>::from_contiguous(v);
+            let mut usys = SystemSliceMut::<C::System>::from_contiguous(u, &system);
+            let mut vsys = SystemSliceMut::<C::System>::from_contiguous(v, &system);
 
-            for field in Label::fields() {
-                usys.field_mut(field.clone())
-                    .copy_from_slice(system.field(field.clone()))
+            for field in system.enumerate() {
+                usys.field_mut(field).copy_from_slice(result.field(field))
             }
 
             // Let us assume that du/dt is initially zero
-            for field in Label::fields() {
-                vsys.field_mut(field.clone())
-                    .copy_from_slice(system.field(field.clone()));
+            for field in system.enumerate() {
+                vsys.field_mut(field).copy_from_slice(result.field(field));
 
                 vsys.field_mut(field.clone())
                     .iter_mut()
@@ -91,26 +92,24 @@ impl<Label: SystemLabel> HyperRelaxSolver<Label> {
                     order,
                     boundary.clone(),
                     conditions.clone(),
-                    SystemSliceMut::from_contiguous(&mut data[..dimension]),
+                    SystemSliceMut::from_contiguous(&mut data[..dimension], &system),
                 );
-                mesh.apply(
+                mesh.evaluate(
                     order,
                     boundary.clone(),
-                    operator.clone(),
-                    SystemSlice::from_contiguous(&data[..dimension]),
-                    context.rb(),
-                    system.rb_mut(),
+                    deriv.clone(),
+                    SystemSlice::from_contiguous(&data[..dimension], &system),
+                    result.rb_mut(),
                 );
 
-                operator.callback(
-                    mesh,
-                    SystemSlice::from_contiguous(&data[..dimension]),
-                    context.rb(),
-                    index,
-                );
+                // deriv.callback(
+                //     mesh,
+                //     SystemSlice::from_contiguous(&data[..dimension], system.system()),
+                //     output,
+                // );
             }
 
-            let norm = mesh.l2_norm(system.rb());
+            let norm = mesh.l2_norm(result.rb());
 
             if index % 1000 == 0 {
                 log::info!("Relaxed {}k steps, norm: {:.5e}", index / 1000, norm);
@@ -137,8 +136,8 @@ impl<Label: SystemLabel> HyperRelaxSolver<Label> {
                 order,
                 boundary: boundary.clone(),
                 conditions: conditions.clone(),
-                operator: operator.clone(),
-                context: context.rb(),
+                deriv: &deriv,
+                system: system.clone(),
             };
 
             // Take step
@@ -158,15 +157,11 @@ impl<Label: SystemLabel> HyperRelaxSolver<Label> {
         }
 
         // Copy solution back to system vector
-        {
-            let (u, _v) = data.split_at_mut(dimension);
-            let usys = SystemSlice::from_contiguous(u);
+        let (u, _v) = data.split_at_mut(dimension);
+        let usys = SystemSlice::from_contiguous(u, &system);
 
-            for field in Label::fields() {
-                system
-                    .field_mut(field.clone())
-                    .clone_from_slice(usys.field(field.clone()))
-            }
+        for field in system.enumerate() {
+            result.field_mut(field).clone_from_slice(usys.field(field))
         }
     }
 }
@@ -179,39 +174,51 @@ struct UConditions<C> {
 impl<const N: usize, I: Conditions<N>> Conditions<N> for UConditions<I> {
     type System = I::System;
 
-    fn parity(&self, field: Self::System, face: Face<N>) -> bool {
+    fn parity(&self, field: <Self::System as System>::Label, face: Face<N>) -> bool {
         self.conditions.parity(field, face)
     }
 
-    fn radiative(&self, field: Self::System, position: [f64; N], spacing: f64) -> RadiativeParams {
+    fn radiative(
+        &self,
+        field: <Self::System as System>::Label,
+        position: [f64; N],
+        spacing: f64,
+    ) -> RadiativeParams {
         self.conditions.radiative(field, position, spacing)
-        // if ADAPTIVE_WAVESPEED {
-        //     params.speed *= spacing / self.min_spacing;
-        // }
     }
 }
 
 /// Wraps the du/dt = v - u * η operation.
 #[derive(Clone)]
-struct UOperator<const N: usize, Label> {
+struct UOperator<const N: usize, S> {
     dampening: f64,
-    _marker: PhantomData<Label>,
+    _marker: PhantomData<S>,
 }
 
-impl<const N: usize, Label: SystemLabel> Operator<N> for UOperator<N, Label> {
-    type System = Label;
-    type Context = Label;
+impl<const N: usize, S: System + Clone> Function<N> for UOperator<N, S> {
+    type Input = (S, S);
+    type Output = S;
 
-    fn apply(
+    fn evaluate(
         &self,
-        engine: &impl Engine<N, Pair<Self::System, Self::Context>>,
-    ) -> SystemValue<Self::System> {
-        SystemValue::from_fn(|field: Self::System| {
-            let u = engine.value(Pair::Left(field.clone()));
-            let v = engine.value(Pair::Right(field.clone()));
+        engine: impl Engine<N>,
+        input: SystemSlice<Self::Input>,
+        mut output: SystemSliceMut<Self::Output>,
+    ) {
+        let system = output.system().clone();
 
-            v - u * self.dampening
-        })
+        for field in system.enumerate() {
+            let u = input.field(Pair::First(field));
+            let v = input.field(Pair::Second(field));
+
+            let dest = output.field_mut(field);
+
+            for vertex in IndexSpace::new(engine.vertex_size()).iter() {
+                let index = engine.index_from_vertex(vertex);
+
+                dest[index] = v[index] - u[index] * self.dampening
+            }
+        }
     }
 }
 
@@ -226,17 +233,17 @@ struct VConditions<C> {
 impl<const N: usize, I: Conditions<N>> Conditions<N> for VConditions<I> {
     type System = I::System;
 
-    fn parity(&self, field: Self::System, face: Face<N>) -> bool {
+    fn parity(&self, field: <Self::System as System>::Label, face: Face<N>) -> bool {
         self.conditions.parity(field, face)
     }
 
-    fn radiative(&self, field: Self::System, position: [f64; N], spacing: f64) -> RadiativeParams {
+    fn radiative(
+        &self,
+        field: <Self::System as System>::Label,
+        position: [f64; N],
+        spacing: f64,
+    ) -> RadiativeParams {
         let mut params = self.conditions.radiative(field, position, spacing);
-
-        // if ADAPTIVE_WAVESPEED {
-        //     params.speed *= spacing / self.min_spacing;
-        // }
-
         params.target *= self.dampening;
         params
     }
@@ -244,27 +251,23 @@ impl<const N: usize, I: Conditions<N>> Conditions<N> for VConditions<I> {
 
 /// Wraps the c^2 * L{u(x)} operation.
 #[derive(Clone)]
-struct VOperator<const N: usize, O> {
-    operator: O,
+struct VOperator<'a, const N: usize, F> {
+    function: &'a F,
 }
 
-impl<const N: usize, O: Operator<N>> Operator<N> for VOperator<N, O> {
-    type System = O::System;
-    type Context = O::Context;
+impl<'a, const N: usize, S: System, F: Function<N, Input = S, Output = S>> Function<N>
+    for VOperator<'a, N, F>
+{
+    type Input = S;
+    type Output = S;
 
-    fn apply(
+    fn evaluate(
         &self,
-        engine: &impl Engine<N, Pair<Self::System, Self::Context>>,
-    ) -> SystemValue<Self::System> {
-        // let relax = self.operator.apply(engine);
-        // if ADAPTIVE_WAVESPEED {
-        //     let speed = engine.spacing() / self.min_spacing;
-        //     SystemValue::from_fn(|field| speed * speed * relax.field(field))
-        // } else {
-        //     relax
-        // }
-
-        self.operator.apply(engine)
+        engine: impl Engine<N>,
+        input: SystemSlice<Self::Input>,
+        output: SystemSliceMut<Self::Output>,
+    ) {
+        self.function.evaluate(engine, input, output);
     }
 }
 
@@ -274,8 +277,10 @@ struct FictitiousOde<
     K: Kernels,
     B: Boundary<N>,
     C: Conditions<N>,
-    O: Operator<N>,
-> {
+    F: Function<N, Input = C::System, Output = C::System>,
+> where
+    C::System: Clone,
+{
     mesh: &'a mut Mesh<N>,
     dimension: usize,
     dampening: f64,
@@ -283,9 +288,9 @@ struct FictitiousOde<
     order: K,
     boundary: B,
     conditions: C,
-    operator: O,
+    deriv: &'a F,
 
-    context: SystemSlice<'a, O::Context>,
+    system: C::System,
 }
 
 impl<
@@ -294,8 +299,10 @@ impl<
         K: Kernels + Sync,
         B: Boundary<N> + Sync,
         C: Conditions<N> + Sync,
-        O: Operator<N, System = C::System> + Sync,
-    > Ode for FictitiousOde<'a, N, K, B, C, O>
+        F: Function<N, Input = C::System, Output = C::System> + Sync,
+    > Ode for FictitiousOde<'a, N, K, B, C, F>
+where
+    C::System: Clone + Sync,
 {
     fn dim(&self) -> usize {
         2 * self.dimension
@@ -310,7 +317,7 @@ impl<
             UConditions {
                 conditions: self.conditions.clone(),
             },
-            SystemSliceMut::from_contiguous(u),
+            SystemSliceMut::from_contiguous(u, &self.system),
         );
 
         self.mesh.fill_boundary(
@@ -320,46 +327,46 @@ impl<
                 conditions: self.conditions.clone(),
                 dampening: self.dampening,
             },
-            SystemSliceMut::from_contiguous(v),
+            SystemSliceMut::from_contiguous(v, &self.system),
         );
     }
 
     fn derivative(&mut self, system: &[f64], result: &mut [f64]) {
-        let (udata, vdata) = system.split_at(self.dimension);
-
-        let u = SystemSlice::from_contiguous(udata);
-        let v = SystemSlice::from_contiguous(vdata);
+        let source_pair = &(self.system.clone(), self.system.clone());
+        let source = SystemSlice::from_contiguous(system, source_pair);
 
         let (udata, vdata) = result.split_at_mut(self.dimension);
 
-        let mut dudt = SystemSliceMut::from_contiguous(udata);
-        let mut dvdt = SystemSliceMut::from_contiguous(vdata);
+        let mut dudt = SystemSliceMut::from_contiguous(udata, &self.system);
+        let mut dvdt = SystemSliceMut::from_contiguous(vdata, &self.system);
 
         // Compute derivatives
 
         // Find du/dt from the definition v = du/dt + η u
-        self.mesh.apply(
+        self.mesh.evaluate(
             self.order,
             self.boundary.clone(),
             UOperator {
                 dampening: self.dampening,
                 _marker: PhantomData,
             },
-            u.rb(),
-            v.rb(),
+            source.rb(),
             dudt.rb_mut(),
         );
 
-        // dv/dt = c^2 Lu
+        let (udata, vdata) = system.split_at(self.dimension);
 
-        self.mesh.apply(
+        let u = SystemSlice::from_contiguous(udata, &self.system);
+        let v = SystemSlice::from_contiguous(vdata, &self.system);
+
+        // dv/dt = c^2 Lu
+        self.mesh.evaluate(
             self.order,
             self.boundary.clone(),
             VOperator {
-                operator: self.operator.clone(),
+                function: self.deriv,
             },
             u.rb(),
-            self.context.rb(),
             dvdt.rb_mut(),
         );
 

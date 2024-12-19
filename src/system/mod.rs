@@ -1,171 +1,161 @@
-//! Utilities and classes for working with `System`s.
-//!
-//! Systems are collections of multiple scalar fields that all have the same length, but different data. T
-//! his is used to represent coupled PDEs and ODEs. Each system is defined by a `SystemLabel`, which can be
-//! implemented by hand or using the provided procedural macro.
-
-use aeon_array::ArrayLike;
-
-use std::array;
-use std::fmt::Debug;
-use std::ops::{Index, IndexMut};
-
-mod prim;
 mod vec;
 
-pub use prim::{Empty, Pair, Scalar};
-pub use vec::{SystemFields, SystemFieldsMut, SystemRange, SystemSlice, SystemSliceMut, SystemVec};
+pub use vec::*;
 
-/// Custom derive macro for the `SystemLabel` trait.
-pub use aeon_macros::SystemLabel;
+pub trait System {
+    const NAME: &'static str = "Unknown";
 
-/// This trait is used to define systems of fields.
-pub trait SystemLabel: Sized + Clone + Send + Sync + 'static {
-    /// Name of the system (used for debugging and when serializing a system).
-    const SYSTEM_NAME: &'static str;
+    type Label: Clone + Copy;
 
-    /// Retrieves the name of an individual field.
-    fn name(&self) -> String;
+    fn enumerate(&self) -> impl Iterator<Item = Self::Label>;
+    fn count(&self) -> usize {
+        self.enumerate().count()
+    }
 
-    /// Retrieves the index of an individual field.
-    fn index(&self) -> usize;
-
-    /// Array type with same length as number of fields
-    type Array<T>: ArrayLike<Self, Elem = T>;
-
-    /// Returns an array of all possible system labels.
-    fn fields() -> impl Iterator<Item = Self>;
-
-    /// Creates a field from an index.
-    fn field_from_index(index: usize) -> Self;
-}
-
-/// Number of fields in a given system.
-pub const fn field_count<Label: SystemLabel>() -> usize {
-    Label::Array::<()>::LEN
-}
-
-/// A wrapper around [T; L] to allow indexing them by a system label.
-pub struct SystemArray<T, const L: usize>(pub [T; L]);
-
-impl<T, const L: usize> From<[T; L]> for SystemArray<T, L> {
-    fn from(value: [T; L]) -> Self {
-        SystemArray(value)
+    fn label_index(&self, label: Self::Label) -> usize;
+    fn label_from_index(&self, index: usize) -> Self::Label;
+    fn label_name(&self, _label: Self::Label) -> String {
+        "Unknown".to_string()
     }
 }
 
-impl<T, const L: usize, S: SystemLabel<Array<T> = SystemArray<T, L>>> Index<S>
-    for SystemArray<T, L>
-{
-    type Output = T;
-    fn index(&self, index: S) -> &Self::Output {
-        let index = index.index();
-        self.0.index(index)
+// ****************************
+// Builtin systems ************
+// ****************************
+
+use std::convert::Infallible;
+
+/// A builtin label for systems with no fields (useful for code generation).
+#[derive(Clone, Default)]
+pub struct Empty;
+
+impl System for Empty {
+    const NAME: &'static str = "Empty";
+
+    type Label = Infallible;
+
+    fn enumerate(&self) -> impl Iterator<Item = Self::Label> {
+        [].into_iter()
+    }
+
+    fn count(&self) -> usize {
+        0
+    }
+
+    fn label_from_index(&self, _: usize) -> Self::Label {
+        unreachable!()
+    }
+
+    fn label_index(&self, _: Self::Label) -> usize {
+        unreachable!()
     }
 }
 
-impl<T, const L: usize, S: SystemLabel<Array<T> = SystemArray<T, L>>> IndexMut<S>
-    for SystemArray<T, L>
-{
-    fn index_mut(&mut self, index: S) -> &mut Self::Output {
-        let index = index.index();
-        self.0.index_mut(index)
+/// A builtin label for simple scalar systems.
+#[derive(Clone, Default)]
+pub struct Scalar;
+
+impl System for Scalar {
+    type Label = ();
+
+    fn enumerate(&self) -> impl Iterator<Item = Self::Label> {
+        std::iter::once(())
+    }
+
+    fn count(&self) -> usize {
+        1
+    }
+
+    fn label_index(&self, _: Self::Label) -> usize {
+        0
+    }
+
+    fn label_from_index(&self, _: usize) -> Self::Label {
+        ()
     }
 }
 
-impl<T, const L: usize, S: SystemLabel<Array<T> = SystemArray<T, L>>> ArrayLike<S>
-    for SystemArray<T, L>
-{
-    const LEN: usize = L;
-    type Elem = T;
-
-    fn from_fn<F: FnMut(S) -> Self::Elem>(mut cb: F) -> Self {
-        Self(array::from_fn(|index| cb(S::field_from_index(index))))
-    }
+/// A label for a tuple of systems.
+#[derive(Clone, Copy)]
+pub enum Pair<A, B> {
+    First(A),
+    Second(B),
 }
 
-/// Represents the values of a coupled system at a single point.
-#[derive(Debug, Clone)]
-pub struct SystemValue<Label: SystemLabel>(Label::Array<f64>);
+impl<A: System, B: System> System for (A, B) {
+    type Label = Pair<A::Label, B::Label>;
 
-impl<Label: SystemLabel> SystemValue<Label> {
-    /// Constructs a new system value by wrapping an array of values.
-    pub fn new(values: impl Into<Label::Array<f64>>) -> Self {
-        Self(values.into())
+    fn count(&self) -> usize {
+        self.0.count() + self.1.count()
     }
 
-    /// Constructs the SystemVal by calling a function for each field
-    pub fn from_fn<F: FnMut(Label) -> f64>(f: F) -> Self {
-        Self(Label::Array::<f64>::from_fn(f))
+    fn enumerate(&self) -> impl Iterator<Item = Self::Label> {
+        self.0
+            .enumerate()
+            .map(Pair::First)
+            .chain(self.1.enumerate().map(Pair::Second))
     }
 
-    /// Retrieves the value of the given field
-    pub fn field(&self, label: Label) -> f64 {
-        self.0[label]
-    }
-
-    /// Sets the value of the given field.
-    pub fn set_field(&mut self, label: Label, v: f64) {
-        self.0[label] = v
-    }
-}
-
-impl<Label: SystemLabel> Default for SystemValue<Label> {
-    fn default() -> Self {
-        Self::from_fn(|_| f64::default())
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[derive(Clone, PartialEq, Eq, Debug, SystemLabel)]
-    pub enum MySystem {
-        First,
-        Second,
-        Third,
-    }
-
-    #[test]
-    fn systems() {
-        assert_eq!(MySystem::SYSTEM_NAME, "MySystem");
-        for (a, b) in MySystem::fields().zip([MySystem::First, MySystem::Second, MySystem::Third]) {
-            assert_eq!(a, b)
+    fn label_index(&self, label: Self::Label) -> usize {
+        match label {
+            Pair::First(a) => self.0.label_index(a),
+            Pair::Second(b) => self.1.label_index(b),
         }
-        assert_eq!(MySystem::First.index(), 0);
-        assert_eq!(MySystem::Second.index(), 1);
-        assert_eq!(MySystem::Third.index(), 2);
-        assert_eq!(MySystem::First.name(), "First");
-        assert_eq!(MySystem::Second.name(), "Second");
-        assert_eq!(MySystem::Third.name(), "Third");
+    }
 
-        let data = vec![0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0];
-        let owned = SystemSlice::<MySystem>::from_contiguous(data.as_ref()).to_vec();
+    fn label_from_index(&self, index: usize) -> Self::Label {
+        if index < self.0.count() {
+            Pair::First(self.0.label_from_index(index))
+        } else {
+            Pair::Second(self.1.label_from_index(index - self.0.count()))
+        }
+    }
+}
 
-        assert_eq!(owned.len(), 3);
-        assert_eq!(owned.field(MySystem::First), &[0.0, 1.0, 2.0]);
-        assert_eq!(owned.field(MySystem::Second), &[3.0, 4.0, 5.0]);
-        assert_eq!(owned.field(MySystem::Third), &[6.0, 7.0, 8.0]);
+/// A system with a dynamical number of components choosen at runtime.
+#[derive(Clone, Copy)]
+pub struct Static<const N: usize>();
 
-        let slice = owned.slice(1..3);
-        let slice_cast = SystemSlice::<MySystem>::from_contiguous(&data);
-        assert_eq!(
-            slice.field(MySystem::First),
-            &slice_cast.field(MySystem::First)[1..3]
-        );
-        assert_eq!(
-            slice.field(MySystem::Second),
-            &slice_cast.field(MySystem::Second)[1..3]
-        );
-        assert_eq!(
-            slice.field(MySystem::Third),
-            &slice_cast.field(MySystem::Third)[1..3]
-        );
+impl<const N: usize> System for Static<N> {
+    type Label = usize;
 
-        let fields = owned.as_slice().fields();
-        assert_eq!(fields.field(MySystem::First), &[0.0, 1.0, 2.0]);
-        assert_eq!(fields.field(MySystem::Second), &[3.0, 4.0, 5.0]);
-        assert_eq!(fields.field(MySystem::Third), &[6.0, 7.0, 8.0]);
+    fn count(&self) -> usize {
+        N
+    }
+
+    fn enumerate(&self) -> impl Iterator<Item = Self::Label> {
+        (0..N).into_iter()
+    }
+
+    fn label_index(&self, label: Self::Label) -> usize {
+        label
+    }
+
+    fn label_from_index(&self, index: usize) -> Self::Label {
+        index
+    }
+}
+
+/// A system with a dynamical number of components choosen at runtime.
+#[derive(Clone, Copy)]
+pub struct Dynamic(pub usize);
+
+impl System for Dynamic {
+    type Label = usize;
+
+    fn count(&self) -> usize {
+        self.0
+    }
+
+    fn enumerate(&self) -> impl Iterator<Item = Self::Label> {
+        (0..self.0).into_iter()
+    }
+
+    fn label_index(&self, label: Self::Label) -> usize {
+        label
+    }
+
+    fn label_from_index(&self, index: usize) -> Self::Label {
+        index
     }
 }

@@ -7,7 +7,7 @@ use std::io::Write as _;
 use aeon::basis::RadiativeParams;
 use aeon::fd::{ExportVtuConfig, Mesh, SystemCheckpoint, SystemCondition};
 use aeon::prelude::*;
-use aeon::system::field_count;
+use aeon::system_old::field_count;
 use reborrow::{Reborrow, ReborrowMut};
 
 // mod eqs;

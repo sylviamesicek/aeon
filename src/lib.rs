@@ -10,8 +10,7 @@ pub mod lac;
 pub mod ode;
 pub mod shared;
 pub mod system;
-pub mod system2;
-pub mod system3;
+// pub mod system_old;
 
 pub use aeon_basis as basis;
 pub use aeon_geometry as geometry;
@@ -19,15 +18,12 @@ pub use aeon_geometry as geometry;
 /// Provides common types used for most `aeon` applications.
 pub mod prelude {
     pub use crate::fd::{
-        Conditions, Engine, ExportVtuConfig, Function, Mesh, MeshCheckpoint, Operator, Projection,
+        Conditions, Engine, ExportVtuConfig, Function, Mesh, MeshCheckpoint, Projection,
         ScalarConditions, SystemBC, SystemCheckpoint,
     };
     pub use crate::lac::{BiCGStabConfig, BiCGStabSolver, IdentityMap, LinearMap, LinearSolver};
     pub use crate::ode::{ForwardEuler, Ode, Rk4};
-    pub use crate::system::{
-        Empty, Pair, Scalar, SystemFields, SystemFieldsMut, SystemLabel, SystemSlice,
-        SystemSliceMut, SystemValue, SystemVec,
-    };
+    pub use crate::system::{Empty, Pair, Scalar, SystemSlice, SystemSliceMut, SystemVec};
     pub use aeon_basis::{Boundary, BoundaryKind, Condition, Gradient, Hessian, Order, Value};
     pub use aeon_geometry::{Face, IndexSpace, Rectangle};
 }

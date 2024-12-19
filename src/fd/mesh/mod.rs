@@ -42,7 +42,7 @@ pub use store::MeshStore;
 use transfer::TreeInterface;
 
 use crate::fd::BlockBoundary;
-use crate::system::{SystemLabel, SystemSlice};
+use crate::system::{System, SystemSlice};
 
 /// A discretization of a rectangular axis aligned grid into a collection of uniform grids of nodes
 /// with different spacings. A `Mesh` is built on top of a Quadtree, allowing one to selectively
@@ -548,16 +548,20 @@ impl<const N: usize> Mesh<N> {
     }
 
     /// Computes the maximum l2 norm of all fields in the system.
-    pub fn l2_norm<S: SystemLabel>(&mut self, source: SystemSlice<'_, S>) -> f64 {
-        S::fields()
+    pub fn l2_norm<S: System>(&mut self, source: SystemSlice<S>) -> f64 {
+        source
+            .system()
+            .enumerate()
             .map(|label| self.l2_norm_scalar(source.field(label)))
             .max_by(|a, b| a.total_cmp(b))
             .unwrap()
     }
 
     /// Computes the maximum l-infinity norm of all fields in the system.
-    pub fn max_norm<S: SystemLabel>(&mut self, source: SystemSlice<'_, S>) -> f64 {
-        S::fields()
+    pub fn max_norm<S: System>(&mut self, source: SystemSlice<S>) -> f64 {
+        source
+            .system()
+            .enumerate()
             .map(|label| self.max_norm_scalar(source.field(label)))
             .max_by(|a, b| a.total_cmp(b))
             .unwrap()
