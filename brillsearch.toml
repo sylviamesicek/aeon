@@ -1,6 +1,5 @@
 name = "brill"
 output_dir = "output/search"
-logging_level = 4
 order = 4
 
 start = 1.0

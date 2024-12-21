@@ -62,7 +62,7 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Store system from previous iteration.
     let mut system_prev = SystemVec::with_length(mesh.num_nodes(), Scalar);
-    mesh.project(
+    mesh.project_scalar(
         Order::<4>,
         Quadrant,
         SeedProjection,
@@ -79,7 +79,7 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
         );
 
         let mut system = SystemVec::with_length(mesh.num_nodes(), Scalar);
-        mesh.project(Order::<4>, Quadrant, SeedProjection, system.field_mut(()));
+        mesh.project_scalar(Order::<4>, Quadrant, SeedProjection, system.field_mut(()));
         mesh.fill_boundary(Order::<4>, Quadrant, SeedConditions, system.as_mut_slice());
 
         mesh.flag_wavelets(4, 1e-13, 1e-9, Quadrant, system.as_slice());

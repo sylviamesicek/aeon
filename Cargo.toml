@@ -1,16 +1,16 @@
 # Workspace configuration
 [workspace]
-members = ["crates/*", "tools/*"]
+members = ["crates/*", "tools/critaxi", "tools/sharedaxi", "tools/idaxi"]
 default-members = [
     "crates/aeon_basis",
     "crates/aeon_geometry",
-    "tools/critsearch",
-    "tools/genparams",
-    "tools/idbrill",
-    "tools/idscalar",
-    "tools/idgen",
-    "tools/evbrill",
-    "tools/evscalar",
+    "tools/critaxi",
+    # "tools/idbrill",
+    # "tools/idscalar",
+    "tools/idaxi",
+    # "tools/evbrill",
+    # "tools/evscalar",
+    "tools/sharedaxi",
     ".",
 ]
 resolver = "2"
@@ -23,7 +23,7 @@ aeon_geometry = { path = "crates/aeon_geometry" }
 aeon_macros = { path = "crates/aeon_macros" }
 aeon_tensor = { path = "crates/aeon_tensor" }
 
-genparams = { path = "tools/genparams" }
+sharedaxi = { path = "tools/sharedaxi" }
 
 anyhow = "1.0.91"
 bitvec = { version = "1.0.1", features = ["serde"] }

@@ -56,23 +56,20 @@ impl<const N: usize> Mesh<N> {
         });
     }
 
-    // /// Determines if a vertex is not within `ORDER` of any weakly enforced boundary.
-    // fn is_interior<K: Kernels>(
-    //     boundary: &impl Boundary<N>,
-    //     vertex_size: [usize; N],
-    //     vertex: [usize; N],
-    // ) -> bool {
-    //     let mut result = true;
-
-    //     for axis in 0..N {
-    //         result &=
-    //             boundary.kind(Face::negative(axis)).has_ghost() || vertex[axis] >= K::MAX_BORDER;
-    //         result &= boundary.kind(Face::positive(axis)).has_ghost()
-    //             || vertex[axis] < vertex_size[axis] - K::MAX_BORDER;
-    //     }
-
-    //     result
-    // }
+    pub fn evaluate_scalar<
+        K: Kernels + Sync,
+        B: Boundary<N> + Sync,
+        P: Function<N, Input = Scalar, Output = Scalar> + Sync,
+    >(
+        &mut self,
+        order: K,
+        boundary: B,
+        function: P,
+        source: &[f64],
+        dest: &mut [f64],
+    ) {
+        self.evaluate(order, boundary, function, source.into(), dest.into());
+    }
 
     fn is_interior(boundary: &impl Boundary<N>) -> bool {
         let mut result = true;
@@ -85,7 +82,7 @@ impl<const N: usize> Mesh<N> {
         result
     }
 
-    pub fn project<K: Kernels + Sync, B: Boundary<N> + Sync, P: Projection<N> + Sync>(
+    pub fn project_scalar<K: Kernels + Sync, B: Boundary<N> + Sync, P: Projection<N> + Sync>(
         &mut self,
         order: K,
         boundary: B,
@@ -97,7 +94,7 @@ impl<const N: usize> Mesh<N> {
             boundary,
             ProjectionAsFunction(projection),
             SystemSlice::empty(),
-            SystemSliceMut::from_contiguous(dest, &Scalar),
+            SystemSliceMut::from_scalar(dest),
         );
     }
 

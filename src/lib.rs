@@ -14,6 +14,7 @@ pub mod system;
 
 pub use aeon_basis as basis;
 pub use aeon_geometry as geometry;
+pub use aeon_macros as macros;
 
 /// Provides common types used for most `aeon` applications.
 pub mod prelude {
@@ -26,4 +27,5 @@ pub mod prelude {
     pub use crate::system::{Empty, Pair, Scalar, SystemSlice, SystemSliceMut, SystemVec};
     pub use aeon_basis::{Boundary, BoundaryKind, Condition, Gradient, Hessian, Order, Value};
     pub use aeon_geometry::{Face, IndexSpace, Rectangle};
+    pub use aeon_macros::SystemLabel;
 }

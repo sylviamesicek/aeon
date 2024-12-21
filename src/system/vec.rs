@@ -151,6 +151,16 @@ impl<'a> SystemSlice<'a, Scalar> {
     pub fn from_scalar(data: &'a [f64]) -> Self {
         Self::from_contiguous(data, &Scalar)
     }
+
+    pub fn into_scalar(self) -> &'a [f64] {
+        unsafe { std::slice::from_raw_parts(self.ptr.add(self.offset), self.length) }
+    }
+}
+
+impl<'a> From<&'a [f64]> for SystemSlice<'a, Scalar> {
+    fn from(value: &'a [f64]) -> Self {
+        Self::from_scalar(value)
+    }
 }
 
 impl<'a, S: System> SystemSlice<'a, S> {
@@ -261,6 +271,16 @@ pub struct SystemSliceMut<'a, S> {
 impl<'a> SystemSliceMut<'a, Scalar> {
     pub fn from_scalar(data: &'a mut [f64]) -> Self {
         Self::from_contiguous(data, &Scalar)
+    }
+
+    pub fn into_scalar(self) -> &'a mut [f64] {
+        unsafe { std::slice::from_raw_parts_mut(self.ptr.add(self.offset), self.length) }
+    }
+}
+
+impl<'a> From<&'a mut [f64]> for SystemSliceMut<'a, Scalar> {
+    fn from(value: &'a mut [f64]) -> Self {
+        Self::from_scalar(value)
     }
 }
 

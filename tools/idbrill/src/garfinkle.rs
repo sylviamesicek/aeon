@@ -221,7 +221,7 @@ pub fn solve(
 
     // Compute seed values.
     log::info!("Filling Seed Function");
-    mesh.project(ORDER, Quadrant, SeedProjection(amplitude), seed.into());
+    mesh.project_scalar(ORDER, Quadrant, SeedProjection(amplitude), seed.into());
     mesh.fill_boundary(ORDER, Quadrant, SEED_CONDITIONS, seed.into());
 
     // Initial Guess for Psi

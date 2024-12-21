@@ -1,29 +1,32 @@
+use anyhow::{anyhow, Context, Result};
+use sharedaxi::{import_from_path_arg, Brill, CritConfig, IDConfig, Logging, Solver, Source};
 use std::process::Command;
 
-use anyhow::{anyhow, Context, Result};
-use genparams::{Brill, InitialDataConfig, Solver, Source};
-
-mod config;
-
 fn main() -> Result<()> {
+    let matches = clap::Command::new("critaxi")
+        .about("A program for searching for critical points in a range using idgen and evgen.")
+        .author("Lukas Mesicek, lukas.m.mesicek@gmail.com")
+        .version("v0.0.1")
+        .arg(
+            clap::Arg::new("path")
+                .help("Path of config file for searching for critical points")
+                .value_name("PATH")
+                .required(true),
+        )
+        .get_matches();
+
     // Load configuration
-    let config = config::configure()?;
+    let config = import_from_path_arg::<CritConfig>(&matches)?;
 
     // Load header data and defaults
-    let log_level = config.logging_level.unwrap_or(1);
+    let log_level = config.logging.filter();
     let output = config
         .output_dir
         .clone()
         .unwrap_or_else(|| format!("{}_output", &config.name));
 
     // Compute log filter level.
-    let level = match log_level {
-        0 => log::LevelFilter::Off,
-        1 => log::LevelFilter::Warn,
-        2 => log::LevelFilter::Info,
-        3 => log::LevelFilter::Debug,
-        _ => log::LevelFilter::Trace,
-    };
+    let level = config.logging.filter();
 
     // Build enviornment logger.
     env_logger::builder().filter_level(level).init();
@@ -78,13 +81,12 @@ fn main() -> Result<()> {
         .collect::<Vec<_>>();
 
     for amplitude in subsearches.iter() {
-        let config = InitialDataConfig {
+        let config = IDConfig {
             name: format!("{}_{:?}", config.name, amplitude),
             output_dir: Some(format!("{}/initial", output)),
-            logging_level: None,
+            logging: Logging::default(),
             order: 4,
 
-            _logging_dir: None,
             _visualize_levels: false,
             _visualize_result: false,
 

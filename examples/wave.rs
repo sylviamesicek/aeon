@@ -147,7 +147,7 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         system.resize(mesh.num_nodes());
 
-        mesh.project(ORDER, Quadrant, profile, system.field_mut(()));
+        mesh.project_scalar(ORDER, Quadrant, profile, system.field_mut(()));
         mesh.fill_boundary(ORDER, Quadrant, WaveConditions, system.as_mut_slice());
 
         mesh.flag_wavelets(4, LOWER, UPPER, Quadrant, system.as_slice());
@@ -223,7 +223,7 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
         exact.resize(mesh.num_nodes());
         error.resize(mesh.num_nodes());
 
-        mesh.project(
+        mesh.project_scalar(
             ORDER,
             Quadrant,
             AnalyticSolution { speed: SPEED, time },

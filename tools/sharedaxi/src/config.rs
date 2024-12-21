@@ -1,9 +1,7 @@
-//! This crate contains general configuration and paramter data types used by critsearch, idgen, and evgen.
-
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize)]
-pub struct CritSearchConfig {
+pub struct CritConfig {
     pub name: String,
 
     pub start: f64,
@@ -19,7 +17,8 @@ pub struct CritSearchConfig {
     /// Directory to store output.
     pub output_dir: Option<String>,
     /// Verbosity of logging.
-    pub logging_level: Option<usize>,
+    #[serde(default)]
+    pub logging: Logging,
 }
 
 fn default_subsearches() -> usize {
@@ -28,16 +27,16 @@ fn default_subsearches() -> usize {
 
 /// Configuration format for IdGen.
 #[derive(Serialize, Deserialize)]
-pub struct InitialDataConfig {
+pub struct IDConfig {
     /// Name of process to be executed.
     pub name: String,
     /// Directory to store output.
     pub output_dir: Option<String>,
-    /// Verbosity of logging.
-    pub logging_level: Option<usize>,
+    /// Logging configuration.
+    #[serde(default)]
+    pub logging: Logging,
     /// Minimum order of stencils approximations.
     pub order: usize,
-    pub _logging_dir: Option<String>,
     /// Visualize level between each regrid?
     #[serde(default)]
     pub _visualize_levels: bool,
@@ -55,6 +54,32 @@ pub struct InitialDataConfig {
 
     /// Sources used for simulation
     pub source: Vec<Source>,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct Logging {
+    /// Verbosity of logging
+    level: usize,
+}
+
+impl Logging {
+    /// Converts a logging level to a `log::LevelFilter`.
+    pub fn filter(&self) -> log::LevelFilter {
+        match self.level {
+            0 => log::LevelFilter::Off,
+            1 => log::LevelFilter::Error,
+            2 => log::LevelFilter::Warn,
+            3 => log::LevelFilter::Info,
+            4 => log::LevelFilter::Debug,
+            _ => log::LevelFilter::Trace,
+        }
+    }
+}
+
+impl Default for Logging {
+    fn default() -> Logging {
+        Logging { level: 2 }
+    }
 }
 
 /// Options defining the domain of the problem.

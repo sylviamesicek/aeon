@@ -1,7 +1,9 @@
 name = "brill"
 output_dir = "output/idgen"
-logging_level = 4
 order = 4
+
+[logging]
+level = 4
 
 [domain]
 radius = 48.0

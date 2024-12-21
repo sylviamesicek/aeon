@@ -73,30 +73,31 @@ impl<const N: usize, I: Condition<N>> Conditions<N> for ScalarConditions<I> {
     }
 }
 
-// #[derive(Clone)]
-// pub struct SystemCondition<C> {
-//     field: S::Label,
-//     conditions: C,
-// }
+#[derive(Clone)]
+pub struct SystemCondition<const N: usize, C: Conditions<N>> {
+    conditions: C,
+    field: <C::System as System>::Label,
+}
 
-// impl<S: System, C> SystemCondition<S, C> {
-//     pub const fn new(field: S::Label, conditions: C) -> Self {
-//         Self { field, conditions }
-//     }
-// }
+impl<const N: usize, C: Conditions<N>> SystemCondition<N, C> {
+    pub const fn new(conditions: C, field: <C::System as System>::Label) -> Self {
+        Self { field, conditions }
+    }
+}
 
-// impl<const N: usize, S: System + Clone, C: Conditions<N, System = S>> Condition<N>
-//     for SystemCondition<S, C>
-// {
-//     fn parity(&self, face: Face<N>) -> bool {
-//         self.conditions.parity(self.field.clone(), face)
-//     }
+impl<const N: usize, C: Conditions<N>> Condition<N> for SystemCondition<N, C>
+where
+    C::System: Clone,
+{
+    fn parity(&self, face: Face<N>) -> bool {
+        self.conditions.parity(self.field.clone(), face)
+    }
 
-//     fn radiative(&self, position: [f64; N], spacing: f64) -> RadiativeParams {
-//         self.conditions
-//             .radiative(self.field.clone(), position, spacing)
-//     }
-// }
+    fn radiative(&self, position: [f64; N], spacing: f64) -> RadiativeParams {
+        self.conditions
+            .radiative(self.field.clone(), position, spacing)
+    }
+}
 
 /// Combines a boundary with a set of conditions, for a specific field.
 pub struct SystemBC<const N: usize, B, C: Conditions<N>> {

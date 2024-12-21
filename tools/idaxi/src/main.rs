@@ -2,31 +2,37 @@
 
 use aeon::prelude::*;
 use anyhow::{anyhow, Context, Result};
-use brill::solve_wth_garfinkle;
-use genparams::{Brill, Source};
+use brill::{solve_wth_garfinkle, Rinne};
+use clap::{Arg, Command};
+use sharedaxi::{
+    import_from_path_arg, Brill, Constraint, Field, Fields, Gauge, IDConfig, Metric, Source,
+};
 
 mod brill;
-mod config;
 
 fn main() -> Result<()> {
     // Load configuration
-    let config = config::configure()?;
+    let matches = Command::new("idaxi")
+        .about("A program for generating initial data for numerical relativity using hyperbolic relaxation.")
+        .author("Lukas Mesicek, lukas.m.mesicek@gmail.com")
+        .version("v0.0.1")
+        .arg(
+            Arg::new("path")
+                .help("Path of config file for generating initial data")
+                .value_name("PATH")
+                .required(true),
+        ).get_matches();
+
+    let config = import_from_path_arg::<IDConfig>(&matches)?;
 
     // Load header data and defaults
-    let log_level = config.logging_level.unwrap_or(1);
     let output = config
         .output_dir
         .clone()
         .unwrap_or_else(|| format!("{}_output", &config.name));
 
     // Compute log filter level.
-    let level = match log_level {
-        0 => log::LevelFilter::Off,
-        1 => log::LevelFilter::Warn,
-        2 => log::LevelFilter::Info,
-        3 => log::LevelFilter::Debug,
-        _ => log::LevelFilter::Trace,
-    };
+    let level = config.logging.filter();
 
     // Build enviornment logger.
     env_logger::builder().filter_level(level).init();
@@ -36,7 +42,7 @@ fn main() -> Result<()> {
 
     // Log Header data.
     log::info!("Simulation name: {}", &config.name);
-    log::info!("Logging Level: {} ", log_level);
+    log::info!("Logging Level: {} ", level);
     log::info!(
         "Output Directory: {}",
         absolute
@@ -108,15 +114,47 @@ fn main() -> Result<()> {
         mesh.refine_global();
     }
 
-    let result = match (source, order) {
+    let rinne = match (source, order) {
         (Source::Brill(brill), 2) => solve_wth_garfinkle(Order::<2>, &mut mesh, solver, brill)?,
         (Source::Brill(brill), 4) => solve_wth_garfinkle(Order::<4>, &mut mesh, solver, brill)?,
         (Source::Brill(brill), 6) => solve_wth_garfinkle(Order::<6>, &mut mesh, solver, brill)?,
         _ => return Err(anyhow::anyhow!("Invalid initial data type and order")),
     };
 
+    let mut fields = SystemVec::with_length(mesh.num_nodes(), Fields);
+
+    // Metric
+    fields
+        .field_mut(Field::Metric(Metric::Grr))
+        .copy_from_slice(rinne.field(Rinne::Conformal));
+    fields
+        .field_mut(Field::Metric(Metric::Gzz))
+        .copy_from_slice(rinne.field(Rinne::Conformal));
+    fields.field_mut(Field::Metric(Metric::Grz)).fill(0.0);
+    fields
+        .field_mut(Field::Metric(Metric::S))
+        .copy_from_slice(rinne.field(Rinne::Seed));
+    fields.field_mut(Field::Metric(Metric::Krr)).fill(0.0);
+    fields.field_mut(Field::Metric(Metric::Kzz)).fill(0.0);
+    fields.field_mut(Field::Metric(Metric::Krz)).fill(0.0);
+    fields.field_mut(Field::Metric(Metric::Y)).fill(0.0);
+    // Constraint
+    fields
+        .field_mut(Field::Constraint(Constraint::Theta))
+        .fill(0.0);
+    fields
+        .field_mut(Field::Constraint(Constraint::Zr))
+        .fill(0.0);
+    fields
+        .field_mut(Field::Constraint(Constraint::Zz))
+        .fill(0.0);
+    // Gauge
+    fields.field_mut(Field::Gauge(Gauge::Lapse)).fill(1.0);
+    fields.field_mut(Field::Gauge(Gauge::Shiftr)).fill(0.0);
+    fields.field_mut(Field::Gauge(Gauge::Shiftz)).fill(0.0);
+
     let mut checkpoint = SystemCheckpoint::default();
-    checkpoint.save_system(result.as_slice());
+    checkpoint.save_system(fields.as_slice());
 
     mesh.export_dat(absolute.join(format!("{}.dat", config.name)), &checkpoint)?;
 

@@ -1,13 +1,13 @@
-use aeon_basis::{Boundary, Kernels, RadiativeParams};
+use aeon_basis::{Boundary, Condition, Kernels, RadiativeParams};
 use aeon_geometry::IndexSpace;
 use reborrow::{Reborrow, ReborrowMut};
 use std::marker::PhantomData;
 
 use crate::{
-    fd::{Conditions, Engine, Function, Mesh},
+    fd::{Conditions, Engine, Function, Mesh, ScalarConditions},
     ode::{Ode, Rk4},
     prelude::Face,
-    system::{Pair, System, SystemSlice, SystemSliceMut},
+    system::{Pair, Scalar, System, SystemSlice, SystemSliceMut},
 };
 
 #[derive(Clone, Debug)]
@@ -163,6 +163,31 @@ impl HyperRelaxSolver {
         for field in system.enumerate() {
             result.field_mut(field).clone_from_slice(usys.field(field))
         }
+    }
+
+    pub fn solve_scalar<
+        const N: usize,
+        K: Kernels + Sync,
+        B: Boundary<N> + Sync,
+        C: Condition<N> + Sync,
+        F: Function<N, Input = Scalar, Output = Scalar> + Clone + Sync,
+    >(
+        &mut self,
+        mesh: &mut Mesh<N>,
+        order: K,
+        boundary: B,
+        condition: C,
+        deriv: F,
+        result: &mut [f64],
+    ) {
+        self.solve(
+            mesh,
+            order,
+            boundary,
+            ScalarConditions(condition),
+            deriv,
+            result.into(),
+        );
     }
 }
 

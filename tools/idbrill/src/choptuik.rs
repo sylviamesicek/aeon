@@ -196,7 +196,7 @@ pub fn solve(
     let (psi, seed) = choptuik.split_at_mut(num_nodes);
 
     // Compute seed values.
-    mesh.project(ORDER, Quadrant, SeedProjection(amplitude), seed.into());
+    mesh.project_scalar(ORDER, Quadrant, SeedProjection(amplitude), seed.into());
     mesh.fill_boundary(ORDER, Quadrant, SEED_CONDITIONS, seed.into());
 
     // Initial Guess for Psi

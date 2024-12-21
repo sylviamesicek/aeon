@@ -1,10 +1,10 @@
-use aeon_basis::{Boundary, BoundaryKind, Kernels};
+use aeon_basis::{Boundary, BoundaryKind, Condition, Kernels};
 use aeon_geometry::{faces, AxisMask, Face, IndexSpace, Side, TreeBlockNeighbor, TreeCellNeighbor};
 use reborrow::ReborrowMut;
 use std::{array, cmp::Ordering, ops::Range};
 
 use crate::{
-    fd::{Conditions, Engine, FdEngine, Mesh, SystemBC},
+    fd::{Conditions, Engine, FdEngine, Mesh, ScalarConditions, SystemBC},
     shared::SharedSlice,
     system::{System, SystemSlice, SystemSliceMut},
 };
@@ -225,6 +225,22 @@ impl<const N: usize> Mesh<N> {
         C::System: Clone,
     {
         self.fill_boundary_to_extent(order, self.ghost, boundary, conditions, system);
+    }
+
+    pub fn fill_boundary_scalar<K: Kernels, B: Boundary<N> + Sync, C: Condition<N> + Sync>(
+        &mut self,
+        order: K,
+        boundary: B,
+        condition: C,
+        system: &mut [f64],
+    ) {
+        self.fill_boundary_to_extent(
+            order,
+            self.ghost,
+            boundary,
+            ScalarConditions(condition),
+            system.into(),
+        );
     }
 
     pub fn fill_boundary_to_extent<K: Kernels, B: Boundary<N> + Sync, C: Conditions<N> + Sync>(

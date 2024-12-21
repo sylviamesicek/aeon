@@ -1,4 +1,4 @@
-use proc_macro2::TokenStream;
+use proc_macro2::{Ident, Span, TokenStream};
 use quote::{quote, quote_spanned};
 use syn::{spanned::Spanned, DeriveInput, Fields};
 
@@ -11,6 +11,12 @@ pub fn system_label_impl(input: DeriveInput) -> TokenStream {
         };
     }
 
+    let visibility = &input.vis;
+
+    let mut system_name = ident.to_string();
+    system_name.push_str("System");
+    let system_ident = Ident::new(&system_name, Span::call_site());
+
     match &input.data {
         syn::Data::Struct(syn::DataStruct { fields, .. }) => {
             if !matches!(fields, Fields::Unit) {
@@ -20,28 +26,34 @@ pub fn system_label_impl(input: DeriveInput) -> TokenStream {
             }
 
             quote! {
-                #[automatically_derived]
-                impl ::aeon::system::SystemLabel for #ident {
-                    const SYSTEM_NAME: &'static str = stringify!(#ident);
+                #[derive(Clone, Default)]
+                #visibility struct #system_ident;
 
-                    fn name(&self) -> String {
-                        stringify!(#ident).to_string()
+                #[automatically_derived]
+                impl ::aeon::system::System for #system_ident {
+                    const NAME: &'static str = stringify!(#ident);
+
+                    type Label = #ident;
+
+                    fn count(&self) -> usize {
+                        1
                     }
 
-                    fn index(&self) -> usize {
+                    fn enumerate(&self) -> impl Iterator<Item = #ident> {
+                        ::std::iter::once(#ident)
+                    }
+
+                    fn label_index(&self, _label: #ident) -> usize {
                         0
                     }
 
-                    type Array<T> = ::aeon::system::SystemArray<T, 1>;
-
-                    fn fields() -> impl Iterator<Item = Self> {
-                        [Self].into_iter()
+                    fn label_name(&self, _label: #ident) -> String {
+                        stringify!(#ident).to_string()
                     }
 
-                    fn field_from_index(_index: usize) -> Self {
-                        Self
+                    fn label_from_index(&self, _index: usize) -> #ident {
+                        #ident
                     }
-
                 }
             }
         }
@@ -64,40 +76,46 @@ pub fn system_label_impl(input: DeriveInput) -> TokenStream {
                     };
                 }
 
-                let ident = &variant.ident;
+                let var_ident = &variant.ident;
 
-                fields.extend(quote!(Self::#ident,));
-                field_indices.extend(quote!(Self::#ident => #i,));
-                field_names.extend(quote!(Self::#ident => stringify!(#ident),));
+                fields.extend(quote!(#ident::#var_ident,));
+                field_indices.extend(quote!(#ident::#var_ident => #i,));
+                field_names.extend(quote!(#ident::#var_ident => stringify!(#var_ident),));
             }
 
             quote! {
-                #[automatically_derived]
-                impl ::aeon::system::SystemLabel for #ident {
-                    const SYSTEM_NAME: &'static str = stringify!(#ident);
+                #[derive(Clone, Default)]
+                #visibility struct #system_ident;
 
-                    fn name(&self) -> String {
-                        match self {
-                            #field_names
-                        }.to_string()
+                #[automatically_derived]
+                impl ::aeon::system::System for #system_ident {
+                    const NAME: &'static str = stringify!(#ident);
+
+                    type Label = #ident;
+
+                    fn count(&self) -> usize {
+                        #variant_count
                     }
 
-                    fn index(&self) -> usize {
-                        match self {
+                    fn enumerate(&self) -> impl Iterator<Item = #ident> {
+                        [#fields].into_iter()
+                    }
+
+                    fn label_index(&self, label: #ident) -> usize {
+                        match label {
                             #field_indices
                         }
                     }
 
-                    type Array<T> = ::aeon::system::SystemArray<T, #variant_count>;
-
-                    fn fields() -> impl Iterator<Item = Self> {
-                        [#fields].into_iter()
+                    fn label_name(&self, label: #ident) -> String {
+                        match label {
+                            #field_names
+                        }.to_string()
                     }
 
-                    fn field_from_index(index: usize) -> Self {
-                        [#fields][index].clone()
+                    fn label_from_index(&self, index: usize) -> #ident {
+                        [#fields][index]
                     }
-
                 }
             }
         }
