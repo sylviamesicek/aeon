@@ -126,6 +126,7 @@ impl<S: System> SystemVec<S> {
     }
 }
 
+#[derive(Clone)]
 /// Represents a subslice of an owned system vector.
 pub struct SystemSlice<'a, S> {
     pub(crate) ptr: *const f64,

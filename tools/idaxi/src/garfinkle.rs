@@ -5,7 +5,7 @@ use aeon::{
     prelude::*,
 };
 
-use sharedaxi::{Brill, Solver};
+use sharedaxi::{Solver, Source};
 
 /// Quadrant upon which all simulations run.
 #[derive(Clone)]
@@ -58,22 +58,26 @@ impl Conditions<2> for GarfinkleConditions {
 }
 
 #[derive(Clone)]
-pub struct SeedProjection {
-    amplitude: f64,
-    sigma: (f64, f64),
-}
+pub struct SeedProjection<'a>(&'a [Source]);
 
-impl Projection<2> for SeedProjection {
-    fn project(&self, position: [f64; 2]) -> f64 {
-        let [rho, z] = position;
-
+impl<'a> Projection<2> for SeedProjection<'a> {
+    fn project(&self, [rho, z]: [f64; 2]) -> f64 {
+        let mut result = 0.0;
         let rho2 = rho * rho;
         let z2 = z * z;
 
-        let srho2 = self.sigma.0 * self.sigma.0;
-        let sz2 = self.sigma.1 * self.sigma.1;
+        for source in self.0 {
+            match source {
+                Source::Brill(brill) => {
+                    let srho2 = brill.sigma.0 * brill.sigma.0;
+                    let sz2 = brill.sigma.1 * brill.sigma.1;
 
-        rho * self.amplitude * (-rho2 / srho2 - z2 / sz2).exp()
+                    result += rho * brill.amplitude * (-rho2 / srho2 - z2 / sz2).exp()
+                }
+            }
+        }
+
+        result
     }
 }
 
@@ -148,11 +152,11 @@ impl Function<2> for BrillFromGarfinkle {
     }
 }
 
-pub fn solve_wth_garfinkle<const ORDER: usize>(
+pub fn solve_order<const ORDER: usize>(
     order: Order<ORDER>,
     mesh: &mut Mesh<2>,
     solver_con: &Solver,
-    brill: &Brill,
+    sources: &[Source],
 ) -> anyhow::Result<SystemVec<RinneSystem>>
 where
     Order<ORDER>: Kernels,
@@ -166,15 +170,7 @@ where
 
     // Compute seed values.
     log::trace!("Filling Seed Function");
-    mesh.project_scalar(
-        order,
-        Quadrant,
-        SeedProjection {
-            amplitude: brill.amplitude,
-            sigma: brill.sigma,
-        },
-        seed,
-    );
+    mesh.project_scalar(order, Quadrant, SeedProjection(&sources), seed);
     mesh.fill_boundary_scalar(
         order,
         Quadrant,
@@ -200,7 +196,7 @@ where
         SystemCondition::new(GarfinkleConditions, Garfinkle::Psi),
         Hamiltonian { seed },
         psi,
-    );
+    )?;
 
     mesh.fill_boundary_scalar(
         order,

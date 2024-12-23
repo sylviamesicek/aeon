@@ -307,23 +307,22 @@ impl<const N: usize> NodeSpace<N> {
         NodeWindow { origin, size }
     }
 
-    pub fn support(
+    pub fn support_axis(
         &self,
         boundary: &impl Boundary<N>,
-        vertex: isize,
+        vertex: usize,
         border_width: usize,
         axis: usize,
     ) -> Support {
         debug_assert!(self.ghost >= border_width);
+        debug_assert!(self.size[axis] + 1 >= border_width);
 
         let has_negative = boundary.kind(Face::negative(axis)).has_ghost();
         let has_positive = boundary.kind(Face::positive(axis)).has_ghost();
 
-        if !has_negative && vertex < border_width as isize {
-            debug_assert!(vertex >= 0);
+        if !has_negative && vertex < border_width {
             Support::Negative(vertex as usize)
-        } else if !has_positive && vertex >= (self.size[axis] + 1 - border_width) as isize {
-            debug_assert!(vertex >= 0);
+        } else if !has_positive && vertex >= (self.size[axis] + 1 - border_width) {
             Support::Positive(self.size[axis] - vertex as usize)
         } else {
             Support::Interior
@@ -482,25 +481,28 @@ impl<const N: usize> NodeSpace<N> {
         boundary: impl Boundary<N>,
         convolution: impl Convolution<N>,
         bounds: Rectangle<N>,
-        vertex: [isize; N],
+        node: [isize; N],
         field: &[f64],
     ) -> f64 {
-        // for axis in 0..N {
-        //     debug_assert!(vertex[axis] <= self.size[axis]);
-        // }
-
         let spacing = self.spacing(bounds);
         let support = array::from_fn(|axis| {
-            self.support(
-                &boundary,
-                vertex[axis],
-                convolution.border_width(axis),
-                axis,
-            )
+            if convolution.border_width(axis) > 0 {
+                debug_assert!(node[axis] >= 0);
+                debug_assert!(node[axis] <= self.size[axis] as isize);
+
+                self.support_axis(
+                    &boundary,
+                    node[axis] as usize,
+                    convolution.border_width(axis),
+                    axis,
+                )
+            } else {
+                Support::Interior
+            }
         });
         let stencils = self.stencils(boundary, support, &convolution);
         let corner = array::from_fn(|axis| match support[axis] {
-            Support::Interior => vertex[axis] as isize - convolution.border_width(axis) as isize,
+            Support::Interior => node[axis] as isize - convolution.border_width(axis) as isize,
             Support::Negative(_) => 0,
             Support::Positive(_) => (self.size[axis] + 1) as isize - stencils[axis].len() as isize,
         });
@@ -527,7 +529,8 @@ impl<const N: usize> NodeSpace<N> {
         debug_assert!(node[axis] <= self.size[axis] as isize);
 
         let spacing = self.spacing_axis(bounds, axis);
-        let support = self.support(&boundary, node[axis], kernel.border_width(), axis);
+        let support =
+            self.support_axis(&boundary, node[axis] as usize, kernel.border_width(), axis);
         let stencil = self.stencil_axis(&boundary, support, kernel, axis);
 
         let mut corner = node;
@@ -750,7 +753,7 @@ mod tests {
         ];
 
         for i in 0..9 {
-            assert_eq!(space.support(&Quadrant, i as isize, BORDER, 0), supports[i]);
+            assert_eq!(space.support_axis(&Quadrant, i, BORDER, 0), supports[i]);
         }
     }
 

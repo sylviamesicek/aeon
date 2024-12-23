@@ -4,8 +4,8 @@ use aeon::{fd::Gaussian, prelude::*, system::System};
 use aeon_basis::RadiativeParams;
 use reborrow::{Reborrow, ReborrowMut};
 
-const MAX_TIME: f64 = 4.0;
-const MAX_STEPS: usize = 1;
+const MAX_TIME: f64 = 1.0;
+const MAX_STEPS: usize = 1000;
 
 const CFL: f64 = 0.1;
 const ORDER: Order<4> = Order::<4>;

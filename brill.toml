@@ -3,7 +3,7 @@ output_dir = "output/idgen"
 order = 4
 
 [logging]
-level = 4
+level = 5
 
 [domain]
 radius = 48.0
@@ -23,14 +23,7 @@ cfl = 0.5
 dampening = 0.4
 tolerance = 1e-6
 
-[[instance]]
+[[source]]
 type = "brill"
-suffix = "_1.0"
 amplitude = 1.0
-sigma = [1.0, 1.0]
-
-[[instance]]
-type = "brill"
-suffix = "_2.0"
-amplitude = 2.0
 sigma = [1.0, 1.0]

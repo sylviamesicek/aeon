@@ -1,14 +1,24 @@
 use aeon_basis::{Boundary, Condition, Kernels, RadiativeParams};
 use aeon_geometry::IndexSpace;
 use reborrow::{Reborrow, ReborrowMut};
-use std::marker::PhantomData;
+use thiserror::Error;
 
 use crate::{
-    fd::{Conditions, Engine, Function, Mesh, ScalarConditions},
+    fd::{Conditions, Engine, Function, Mesh, ScalarConditions, SystemCheckpoint},
     ode::{Ode, Rk4},
     prelude::Face,
-    system::{Pair, Scalar, System, SystemSlice, SystemSliceMut},
+    system::{Empty, Scalar, System, SystemSlice, SystemSliceMut},
 };
+
+#[derive(Error, Debug)]
+pub enum HyperRelaxError {
+    #[error("failed to relax below tolerance in allotted number of steps")]
+    FailedToMeetTolerance,
+    #[error("norm diverged to NaN")]
+    Diverged,
+    #[error("failed to create and store visualizations of each iteration")]
+    VisualizeFailed,
+}
 
 #[derive(Clone, Debug)]
 pub struct HyperRelaxSolver {
@@ -18,6 +28,8 @@ pub struct HyperRelaxSolver {
     pub max_steps: usize,
     pub dampening: f64,
     pub cfl: f64,
+
+    // pub visualize: Option<HyperRelaxVisualize>,
     integrator: Rk4,
 }
 
@@ -34,6 +46,7 @@ impl HyperRelaxSolver {
             max_steps: 100000,
             dampening: 1.0,
             cfl: 0.1,
+            // visualize: None,
             integrator: Rk4::new(),
         }
     }
@@ -52,12 +65,13 @@ impl HyperRelaxSolver {
         conditions: C,
         deriv: F,
         mut result: SystemSliceMut<C::System>,
-    ) where
-        C::System: Clone + Sync,
+    ) -> Result<(), HyperRelaxError>
+    where
+        C::System: Default + Clone + Sync,
     {
         // Total number of degreees of freedom in the whole system
-        let dimension = result.total_dofs();
         let system = result.system().clone();
+        let dimension = system.count() * mesh.num_nodes();
 
         // Allocate storage
         let mut data = vec![0.0; 2 * dimension].into_boxed_slice();
@@ -76,8 +90,7 @@ impl HyperRelaxSolver {
             // Let us assume that du/dt is initially zero
             for field in system.enumerate() {
                 vsys.field_mut(field).copy_from_slice(result.field(field));
-
-                vsys.field_mut(field.clone())
+                vsys.field_mut(field)
                     .iter_mut()
                     .for_each(|f| *f *= self.dampening);
             }
@@ -88,19 +101,43 @@ impl HyperRelaxSolver {
 
         for index in 0..self.max_steps {
             {
-                mesh.fill_boundary(
-                    order,
-                    boundary.clone(),
-                    conditions.clone(),
-                    SystemSliceMut::from_contiguous(&mut data[..dimension], &system),
-                );
+                let mut u = SystemSliceMut::from_contiguous(&mut data[..dimension], &system);
+
+                mesh.fill_boundary(order, boundary.clone(), conditions.clone(), u.rb_mut());
                 mesh.evaluate(
                     order,
                     boundary.clone(),
                     deriv.clone(),
-                    SystemSlice::from_contiguous(&data[..dimension], &system),
+                    u.rb(),
                     result.rb_mut(),
                 );
+
+                mesh.weak_boundary(
+                    order,
+                    boundary.clone(),
+                    UConditions {
+                        conditions: conditions.clone(),
+                    },
+                    u.rb(),
+                    result.rb_mut(),
+                );
+
+                let mut systems = SystemCheckpoint::default();
+                systems.save_system(result.rb());
+
+                if mesh
+                    .export_vtu(
+                        format!("output/debug/velax{index}.vtu"),
+                        &systems,
+                        crate::fd::ExportVtuConfig {
+                            title: "debug".to_string(),
+                            ghost: false,
+                        },
+                    )
+                    .is_err()
+                {
+                    return Err(HyperRelaxError::VisualizeFailed);
+                }
 
                 // deriv.callback(
                 //     mesh,
@@ -111,23 +148,22 @@ impl HyperRelaxSolver {
 
             let norm = mesh.l2_norm(result.rb());
 
+            if !norm.is_finite() || norm >= 1e60 {
+                return Err(HyperRelaxError::Diverged);
+            }
+
             if index % 1000 == 0 {
-                log::info!("Relaxed {}k steps, norm: {:.5e}", index / 1000, norm);
+                log::trace!("Relaxed {}k steps, norm: {:.5e}", index / 1000, norm);
             }
 
             if norm <= self.tolerance {
-                log::info!(
+                log::trace!(
                     "Hyperbolic Relaxation converged with error {:.5e} in {} steps.",
                     self.tolerance,
                     index
                 );
                 break;
             }
-
-            // let max_spacing = (0..mesh.num_blocks())
-            //     .map(|block| mesh.block_spacing(block))
-            //     .max_by(|a, b| a.total_cmp(b))
-            //     .unwrap_or(1.0);
 
             let mut ode = FictitiousOde {
                 mesh,
@@ -163,6 +199,8 @@ impl HyperRelaxSolver {
         for field in system.enumerate() {
             result.field_mut(field).clone_from_slice(usys.field(field))
         }
+
+        Ok(())
     }
 
     pub fn solve_scalar<
@@ -179,7 +217,7 @@ impl HyperRelaxSolver {
         condition: C,
         deriv: F,
         result: &mut [f64],
-    ) {
+    ) -> Result<(), HyperRelaxError> {
         self.solve(
             mesh,
             order,
@@ -187,7 +225,7 @@ impl HyperRelaxSolver {
             ScalarConditions(condition),
             deriv,
             result.into(),
-        );
+        )
     }
 }
 
@@ -215,32 +253,33 @@ impl<const N: usize, I: Conditions<N>> Conditions<N> for UConditions<I> {
 
 /// Wraps the du/dt = v - u * η operation.
 #[derive(Clone)]
-struct UOperator<const N: usize, S> {
+struct UDerivs<'a, const N: usize, S> {
     dampening: f64,
-    _marker: PhantomData<S>,
+    u: SystemSlice<'a, S>,
+    v: SystemSlice<'a, S>,
 }
 
-impl<const N: usize, S: System + Clone> Function<N> for UOperator<N, S> {
-    type Input = (S, S);
+impl<'a, const N: usize, S: System + Clone> Function<N> for UDerivs<'a, N, S> {
+    type Input = Empty;
     type Output = S;
 
     fn evaluate(
         &self,
         engine: impl Engine<N>,
-        input: SystemSlice<Self::Input>,
+        _input: SystemSlice<Self::Input>,
         mut output: SystemSliceMut<Self::Output>,
     ) {
+        let node_range = engine.node_range();
         let system = output.system().clone();
 
         for field in system.enumerate() {
-            let u = input.field(Pair::First(field));
-            let v = input.field(Pair::Second(field));
+            let u = &self.u.field(field)[node_range.clone()];
+            let v = &self.v.field(field)[node_range.clone()];
 
             let dest = output.field_mut(field);
 
             for vertex in IndexSpace::new(engine.vertex_size()).iter() {
                 let index = engine.index_from_vertex(vertex);
-
                 dest[index] = v[index] - u[index] * self.dampening
             }
         }
@@ -276,12 +315,12 @@ impl<const N: usize, I: Conditions<N>> Conditions<N> for VConditions<I> {
 
 /// Wraps the c^2 * L{u(x)} operation.
 #[derive(Clone)]
-struct VOperator<'a, const N: usize, F> {
+struct VDerivs<'a, const N: usize, F> {
     function: &'a F,
 }
 
 impl<'a, const N: usize, S: System, F: Function<N, Input = S, Output = S>> Function<N>
-    for VOperator<'a, N, F>
+    for VDerivs<'a, N, F>
 {
     type Input = S;
     type Output = S;
@@ -357,11 +396,11 @@ where
     }
 
     fn derivative(&mut self, system: &[f64], result: &mut [f64]) {
-        let source_pair = &(self.system.clone(), self.system.clone());
-        let source = SystemSlice::from_contiguous(system, source_pair);
+        let (udata, vdata) = system.split_at(self.dimension);
+        let u = SystemSlice::from_contiguous(udata, &self.system);
+        let v = SystemSlice::from_contiguous(vdata, &self.system);
 
         let (udata, vdata) = result.split_at_mut(self.dimension);
-
         let mut dudt = SystemSliceMut::from_contiguous(udata, &self.system);
         let mut dvdt = SystemSliceMut::from_contiguous(vdata, &self.system);
 
@@ -371,24 +410,20 @@ where
         self.mesh.evaluate(
             self.order,
             self.boundary.clone(),
-            UOperator {
+            UDerivs {
                 dampening: self.dampening,
-                _marker: PhantomData,
+                u: u.rb(),
+                v: v.rb(),
             },
-            source.rb(),
+            SystemSlice::empty(),
             dudt.rb_mut(),
         );
-
-        let (udata, vdata) = system.split_at(self.dimension);
-
-        let u = SystemSlice::from_contiguous(udata, &self.system);
-        let v = SystemSlice::from_contiguous(vdata, &self.system);
 
         // dv/dt = c^2 Lu
         self.mesh.evaluate(
             self.order,
             self.boundary.clone(),
-            VOperator {
+            VDerivs {
                 function: self.deriv,
             },
             u.rb(),
@@ -402,9 +437,10 @@ where
             UConditions {
                 conditions: self.conditions.clone(),
             },
-            u.rb(),
+            u,
             dudt,
         );
+
         self.mesh.weak_boundary(
             self.order,
             self.boundary.clone(),

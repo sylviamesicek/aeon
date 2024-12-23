@@ -4,26 +4,26 @@ use std::process::ExitCode;
 
 use aeon::prelude::*;
 use anyhow::{anyhow, Context, Result};
-use brill::{solve_wth_garfinkle, Rinne};
 use clap::{Arg, Command};
+use garfinkle::Rinne;
 use sharedaxi::{
     import_from_path_arg, Brill, Constraint, Field, Fields, Gauge, IDConfig, Metric, Source,
 };
 
-mod brill;
+mod garfinkle;
 
 fn initial_data() -> Result<()> {
     // Load configuration
     let matches = Command::new("idaxi")
-.about("A program for generating initial data for numerical relativity using hyperbolic relaxation.")
-.author("Lukas Mesicek, lukas.m.mesicek@gmail.com")
-.version("v0.0.1")
-.arg(
-    Arg::new("path")
-        .help("Path of config file for generating initial data")
-        .value_name("FILE")
-        .required(true),
-).get_matches();
+        .about("A program for generating initial data for numerical relativity using hyperbolic relaxation.")
+        .author("Lukas Mesicek, lukas.m.mesicek@gmail.com")
+        .version("0.0.1")
+        .arg(
+            Arg::new("path")
+                .help("Path of config file for generating initial data")
+                .value_name("FILE")
+                .required(true),
+        ).get_matches();
 
     let config = import_from_path_arg::<IDConfig>(&matches)?;
 
@@ -80,21 +80,23 @@ fn initial_data() -> Result<()> {
 
     let solver = &config.solver;
     let domain = &config.domain;
-    let source = &config.source[0];
+    let sources = config.source.as_slice();
     let order = config.order;
 
-    match source {
-        Source::Brill(Brill { amplitude, sigma }) => {
-            log::info!(
-                "Running Instance: {}, Type: Brill Initial Data",
-                config.name
-            );
-            log::info!(
-                "A: {:.5e}, sigma_r: {:.5e}, sigma_z: {:.5e}",
-                amplitude,
-                sigma.0,
-                sigma.1
-            );
+    for source in sources {
+        match source {
+            Source::Brill(Brill { amplitude, sigma }) => {
+                log::info!(
+                    "Running Instance: {}, Type: Brill Initial Data",
+                    config.name
+                );
+                log::info!(
+                    "A: {:.5e}, sigma_r: {:.5e}, sigma_z: {:.5e}",
+                    amplitude,
+                    sigma.0,
+                    sigma.1
+                );
+            }
         }
     }
 
@@ -116,10 +118,10 @@ fn initial_data() -> Result<()> {
         mesh.refine_global();
     }
 
-    let rinne = match (source, order) {
-        (Source::Brill(brill), 2) => solve_wth_garfinkle(Order::<2>, &mut mesh, solver, brill)?,
-        (Source::Brill(brill), 4) => solve_wth_garfinkle(Order::<4>, &mut mesh, solver, brill)?,
-        (Source::Brill(brill), 6) => solve_wth_garfinkle(Order::<6>, &mut mesh, solver, brill)?,
+    let rinne = match order {
+        2 => garfinkle::solve_order(Order::<2>, &mut mesh, solver, sources)?,
+        4 => garfinkle::solve_order(Order::<4>, &mut mesh, solver, sources)?,
+        6 => garfinkle::solve_order(Order::<6>, &mut mesh, solver, sources)?,
         _ => return Err(anyhow::anyhow!("Invalid initial data type and order")),
     };
 
@@ -167,7 +169,11 @@ fn main() -> ExitCode {
     match initial_data() {
         Ok(_) => ExitCode::SUCCESS,
         Err(err) => {
-            log::error!("{:?}", err);
+            if log::log_enabled!(log::Level::Error) {
+                log::error!("{:?}", err);
+            } else {
+                eprintln!("{:?}", err);
+            }
             ExitCode::FAILURE
         }
     }

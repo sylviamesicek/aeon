@@ -48,7 +48,7 @@ rayon = "1.10.0"
 reborrow = "0.5.5"
 ron = "0.8"
 serde = { version = "1.0.200", features = ["derive"] }
-thiserror = "1.0.65"
+thiserror = "2.0.9"
 thread_local = "1.1.8"
 toml = "0.8.19"
 
