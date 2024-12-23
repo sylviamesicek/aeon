@@ -4,7 +4,7 @@ use reborrow::{Reborrow, ReborrowMut};
 use thiserror::Error;
 
 use crate::{
-    fd::{Conditions, Engine, Function, Mesh, ScalarConditions, SystemCheckpoint},
+    fd::{Conditions, Engine, Function, Mesh, ScalarConditions},
     ode::{Ode, Rk4},
     prelude::Face,
     system::{Empty, Scalar, System, SystemSlice, SystemSliceMut},
@@ -73,6 +73,8 @@ impl HyperRelaxSolver {
         let system = result.system().clone();
         let dimension = system.count() * mesh.num_nodes();
 
+        assert!(result.len() == dimension);
+
         // Allocate storage
         let mut data = vec![0.0; 2 * dimension].into_boxed_slice();
         let mut update = vec![0.0; 2 * dimension].into_boxed_slice();
@@ -112,32 +114,32 @@ impl HyperRelaxSolver {
                     result.rb_mut(),
                 );
 
-                mesh.weak_boundary(
-                    order,
-                    boundary.clone(),
-                    UConditions {
-                        conditions: conditions.clone(),
-                    },
-                    u.rb(),
-                    result.rb_mut(),
-                );
+                // mesh.weak_boundary(
+                //     order,
+                //     boundary.clone(),
+                //     UConditions {
+                //         conditions: conditions.clone(),
+                //     },
+                //     u.rb(),
+                //     result.rb_mut(),
+                // );
 
-                let mut systems = SystemCheckpoint::default();
-                systems.save_system(result.rb());
+                // let mut systems = SystemCheckpoint::default();
+                // systems.save_system(result.rb());
 
-                if mesh
-                    .export_vtu(
-                        format!("output/debug/velax{index}.vtu"),
-                        &systems,
-                        crate::fd::ExportVtuConfig {
-                            title: "debug".to_string(),
-                            ghost: false,
-                        },
-                    )
-                    .is_err()
-                {
-                    return Err(HyperRelaxError::VisualizeFailed);
-                }
+                // if mesh
+                //     .export_vtu(
+                //         format!("output/debug/velax{index}.vtu"),
+                //         &systems,
+                //         crate::fd::ExportVtuConfig {
+                //             title: "debug".to_string(),
+                //             ghost: false,
+                //         },
+                //     )
+                //     .is_err()
+                // {
+                //     return Err(HyperRelaxError::VisualizeFailed);
+                // }
 
                 // deriv.callback(
                 //     mesh,

@@ -329,7 +329,7 @@ impl<const N: usize> NodeSpace<N> {
         }
     }
 
-    pub fn support_cell(
+    pub fn support_cell_axis(
         &self,
         boundary: &impl Boundary<N>,
         cell: usize,
@@ -565,7 +565,7 @@ impl<const N: usize> NodeSpace<N> {
 
         let support: [_; N] = array::from_fn(|axis| {
             if flags[axis] {
-                self.support_cell(&boundary, node[axis], kernel.border_width(), axis)
+                self.support_cell_axis(&boundary, node[axis], kernel.border_width(), axis)
             } else {
                 Support::Interior
             }
@@ -778,7 +778,10 @@ mod tests {
         ];
 
         for i in 0..8 {
-            assert_eq!(space.support_cell(&Quadrant, i, BORDER, 0), supports[i]);
+            assert_eq!(
+                space.support_cell_axis(&Quadrant, i, BORDER, 0),
+                supports[i]
+            );
         }
     }
 

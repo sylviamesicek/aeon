@@ -112,7 +112,7 @@ fn critical_search() -> Result<()> {
             name: format!("{}_{:?}", config.name, amplitude),
             output_dir: Some(format!("{}/initial", output)),
             logging: Logging {
-                level: Logging::INFO,
+                level: Logging::TRACE,
             },
             order: 4,
 

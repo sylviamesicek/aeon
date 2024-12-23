@@ -62,9 +62,10 @@ pub struct SeedProjection<'a>(&'a [Source]);
 
 impl<'a> Projection<2> for SeedProjection<'a> {
     fn project(&self, [rho, z]: [f64; 2]) -> f64 {
-        let mut result = 0.0;
         let rho2 = rho * rho;
         let z2 = z * z;
+
+        let mut result = 0.0;
 
         for source in self.0 {
             match source {

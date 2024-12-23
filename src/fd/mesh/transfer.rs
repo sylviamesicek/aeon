@@ -512,7 +512,7 @@ impl<const N: usize> Mesh<N> {
                         let k = inner_r
                             * inner_r
                             * inner_r
-                            * (source[inner_index] + inner_advection / inner_r);
+                            * (deriv[inner_index] + inner_advection / inner_r);
 
                         // Vertex
                         let mut advection = engine.value(source, vertex) - params.target;
@@ -523,7 +523,6 @@ impl<const N: usize> Mesh<N> {
                         }
 
                         advection *= params.speed;
-
                         deriv[index] = -advection / r + k / (r * r * r);
                     }
                 }
