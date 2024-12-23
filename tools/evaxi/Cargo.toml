@@ -1,14 +1,17 @@
 [package]
-name = "critaxi"
+name = "evaxi"
 version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+aeon.workspace = true
+aeon_tensor.workspace = true
+
 anyhow.workspace = true
-env_logger.workspace = true
 clap.workspace = true
+env_logger.workspace = true
 log.workspace = true
+rayon.workspace = true
 reborrow.workspace = true
-serde.workspace = true
+ron.workspace = true
 sharedaxi.workspace = true
-toml.workspace = true

@@ -1,6 +1,6 @@
 use std::ops::Range;
 
-use aeon_basis::{node_from_vertex, Boundary, Kernels, NodeSpace, VertexKernel};
+use aeon_basis::{node_from_vertex, Boundary, Hessian, Kernels, NodeSpace, VertexKernel};
 use aeon_geometry::Rectangle;
 
 use super::mesh::MeshStore;
@@ -20,6 +20,7 @@ pub trait Engine<const N: usize> {
     fn value(&self, field: &[f64], vertex: [usize; N]) -> f64;
     fn derivative(&self, field: &[f64], axis: usize, vertex: [usize; N]) -> f64;
     fn second_derivative(&self, field: &[f64], axis: usize, vertex: [usize; N]) -> f64;
+    fn mixed_derivative(&self, field: &[f64], i: usize, j: usize, vertex: [usize; N]) -> f64;
     fn dissipation(&self, field: &[f64], axis: usize, vertex: [usize; N]) -> f64;
 }
 
@@ -34,7 +35,7 @@ pub struct FdEngine<'store, const N: usize, K: Kernels, B: Boundary<N>> {
 }
 
 impl<'store, const N: usize, K: Kernels, B: Boundary<N>> FdEngine<'store, N, K, B> {
-    fn evaluate(
+    fn evaluate_axis(
         &self,
         field: &[f64],
         axis: usize,
@@ -83,15 +84,25 @@ impl<'store, const N: usize, K: Kernels, B: Boundary<N>> Engine<N> for FdEngine<
     }
 
     fn derivative(&self, field: &[f64], axis: usize, vertex: [usize; N]) -> f64 {
-        self.evaluate(field, axis, K::derivative(), vertex)
+        self.evaluate_axis(field, axis, K::derivative(), vertex)
     }
 
     fn second_derivative(&self, field: &[f64], axis: usize, vertex: [usize; N]) -> f64 {
-        self.evaluate(field, axis, K::second_derivative(), vertex)
+        self.evaluate_axis(field, axis, K::second_derivative(), vertex)
+    }
+
+    fn mixed_derivative(&self, field: &[f64], i: usize, j: usize, vertex: [usize; N]) -> f64 {
+        self.space.evaluate(
+            self.boundary.clone(),
+            Hessian::<K>::new(i, j),
+            self.bounds,
+            node_from_vertex(vertex),
+            field,
+        )
     }
 
     fn dissipation(&self, field: &[f64], axis: usize, vertex: [usize; N]) -> f64 {
-        self.evaluate(field, axis, K::dissipation(), vertex)
+        self.evaluate_axis(field, axis, K::dissipation(), vertex)
     }
 
     fn min_spacing(&self) -> f64 {
@@ -167,6 +178,15 @@ impl<'store, const N: usize, K: Kernels> Engine<N> for FdIntEngine<'store, N, K>
 
     fn second_derivative(&self, field: &[f64], axis: usize, vertex: [usize; N]) -> f64 {
         self.evaluate(field, axis, K::second_derivative(), vertex)
+    }
+
+    fn mixed_derivative(&self, field: &[f64], i: usize, j: usize, vertex: [usize; N]) -> f64 {
+        self.space.evaluate_interior(
+            Hessian::<K>::new(i, j),
+            self.bounds,
+            node_from_vertex(vertex),
+            field,
+        )
     }
 
     fn dissipation(&self, field: &[f64], axis: usize, vertex: [usize; N]) -> f64 {

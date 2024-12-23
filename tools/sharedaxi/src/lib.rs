@@ -3,7 +3,7 @@
 
 use std::path::Path;
 
-use aeon::{macros::SystemLabel, system::System};
+use aeon::{basis::RadiativeParams, macros::SystemLabel, prelude::*, system::System};
 use anyhow::{anyhow, Result};
 use clap::ArgMatches;
 use serde::{de::DeserializeOwned, Serialize};
@@ -97,6 +97,48 @@ pub enum Constraint {
     Theta,
     Zr,
     Zz,
+}
+
+#[derive(Clone)]
+pub struct Quadrant;
+
+impl Boundary<2> for Quadrant {
+    fn kind(&self, face: Face<2>) -> BoundaryKind {
+        match face.side {
+            true => BoundaryKind::Radiative,
+            false => BoundaryKind::Parity,
+        }
+    }
+}
+
+#[derive(Clone)]
+pub struct FieldConditions;
+
+impl Conditions<2> for FieldConditions {
+    type System = Fields;
+
+    fn parity(&self, field: Field, face: Face<2>) -> bool {
+        let axes = match field {
+            Field::Metric(Metric::Grr) | Field::Metric(Metric::Krr) => [true, true],
+            Field::Metric(Metric::Grz) | Field::Metric(Metric::Krz) => [false, false],
+            Field::Metric(Metric::Gzz) | Field::Metric(Metric::Kzz) => [true, true],
+            Field::Metric(Metric::S) | Field::Metric(Metric::Y) => [false, true],
+
+            Field::Constraint(Constraint::Theta) | Field::Gauge(Gauge::Lapse) => [true, true],
+            Field::Constraint(Constraint::Zr) | Field::Gauge(Gauge::Shiftr) => [false, true],
+            Field::Constraint(Constraint::Zz) | Field::Gauge(Gauge::Shiftz) => [true, false],
+        };
+        axes[face.axis]
+    }
+
+    fn radiative(&self, field: Field, _position: [f64; 2], _spacing: f64) -> RadiativeParams {
+        match field {
+            Field::Metric(Metric::Grr)
+            | Field::Metric(Metric::Gzz)
+            | Field::Gauge(Gauge::Lapse) => RadiativeParams::lightlike(1.0),
+            _ => RadiativeParams::lightlike(0.0),
+        }
+    }
 }
 
 /// Exports a config structure to a toml file.

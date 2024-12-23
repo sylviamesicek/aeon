@@ -88,6 +88,12 @@ impl SystemCheckpoint {
         );
     }
 
+    pub fn read_system<S: System + Clone + Default>(&self) -> SystemVec<S> {
+        let mut result = SystemVec::default();
+        self.load_system(&mut result);
+        result
+    }
+
     /// Attaches a field for serialization in the model.
     pub fn save_field(&mut self, name: &str, data: &[f64]) {
         assert!(!self.fields.contains_key(name));

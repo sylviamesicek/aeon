@@ -1,10 +1,17 @@
 # Workspace configuration
 [workspace]
-members = ["crates/*", "tools/critaxi", "tools/sharedaxi", "tools/idaxi"]
+members = [
+    "crates/*",
+    "tools/critaxi",
+    "tools/sharedaxi",
+    "tools/idaxi",
+    "tools/evaxi",
+]
 default-members = [
     "crates/aeon_basis",
     "crates/aeon_geometry",
     "tools/critaxi",
+    "tools/evaxi",
     # "tools/idbrill",
     # "tools/idscalar",
     "tools/idaxi",

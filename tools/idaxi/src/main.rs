@@ -19,7 +19,7 @@ fn main() -> Result<()> {
         .arg(
             Arg::new("path")
                 .help("Path of config file for generating initial data")
-                .value_name("PATH")
+                .value_name("FILE")
                 .required(true),
         ).get_matches();
 
