@@ -57,12 +57,52 @@ pub struct IDConfig {
 }
 
 #[derive(Serialize, Deserialize)]
+pub struct EVConfig {
+    /// Logging configuration.
+    #[serde(default)]
+    pub logging: Logging,
+    /// Order of stencils approximations.
+    #[serde(default = "default_order")]
+    pub order: usize,
+    /// Order of disspersion stencils.
+    #[serde(default = "default_diss_order")]
+    pub diss_order: usize,
+
+    pub cfl: f64,
+
+    pub max_time: f64,
+    pub max_steps: usize,
+    pub max_nodes: usize,
+
+    /// Configuration for regridding.
+    pub regrid: Regrid,
+    /// Configuration for visualization (if any)
+    #[serde(default)]
+    pub visualize: Option<Visualize>,
+}
+
+fn default_order() -> usize {
+    4
+}
+
+fn default_diss_order() -> usize {
+    6
+}
+
+#[derive(Serialize, Deserialize)]
 pub struct Logging {
     /// Verbosity of logging
-    level: usize,
+    pub level: usize,
 }
 
 impl Logging {
+    pub const OFF: usize = 0;
+    pub const ERROR: usize = 1;
+    pub const WARN: usize = 2;
+    pub const INFO: usize = 3;
+    pub const DEBUG: usize = 4;
+    pub const TRACE: usize = 5;
+
     /// Converts a logging level to a `log::LevelFilter`.
     pub fn filter(&self) -> log::LevelFilter {
         match self.level {
@@ -171,4 +211,17 @@ pub enum Source {
 pub struct Brill {
     pub amplitude: f64,
     pub sigma: (f64, f64),
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct Regrid {
+    pub coarsen_limit: f64,
+    pub refine_limit: f64,
+    pub flag_interval: usize,
+    pub max_levels: usize,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct Visualize {
+    pub save_interval: f64,
 }

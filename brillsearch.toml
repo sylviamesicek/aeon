@@ -5,6 +5,9 @@ order = 4
 start = 1.0
 end = 2.0
 
+[logging]
+level = 5
+
 [domain]
 radius = 48.0
 height = 48.0

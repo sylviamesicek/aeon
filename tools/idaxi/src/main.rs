@@ -1,5 +1,7 @@
 //! An executable for creating general initial data for numerical relativity simulations in 2D.
 
+use std::process::ExitCode;
+
 use aeon::prelude::*;
 use anyhow::{anyhow, Context, Result};
 use brill::{solve_wth_garfinkle, Rinne};
@@ -10,18 +12,18 @@ use sharedaxi::{
 
 mod brill;
 
-fn main() -> Result<()> {
+fn initial_data() -> Result<()> {
     // Load configuration
     let matches = Command::new("idaxi")
-        .about("A program for generating initial data for numerical relativity using hyperbolic relaxation.")
-        .author("Lukas Mesicek, lukas.m.mesicek@gmail.com")
-        .version("v0.0.1")
-        .arg(
-            Arg::new("path")
-                .help("Path of config file for generating initial data")
-                .value_name("FILE")
-                .required(true),
-        ).get_matches();
+.about("A program for generating initial data for numerical relativity using hyperbolic relaxation.")
+.author("Lukas Mesicek, lukas.m.mesicek@gmail.com")
+.version("v0.0.1")
+.arg(
+    Arg::new("path")
+        .help("Path of config file for generating initial data")
+        .value_name("FILE")
+        .required(true),
+).get_matches();
 
     let config = import_from_path_arg::<IDConfig>(&matches)?;
 
@@ -159,4 +161,14 @@ fn main() -> Result<()> {
     mesh.export_dat(absolute.join(format!("{}.dat", config.name)), &checkpoint)?;
 
     Ok(())
+}
+
+fn main() -> ExitCode {
+    match initial_data() {
+        Ok(_) => ExitCode::SUCCESS,
+        Err(err) => {
+            log::error!("{:?}", err);
+            ExitCode::FAILURE
+        }
+    }
 }

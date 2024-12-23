@@ -7,8 +7,8 @@ edition = "2021"
 aeon.workspace = true
 
 anyhow.workspace = true
-env_logger = "0.11"
 clap.workspace = true
+env_logger.workspace = true
 log.workspace = true
 reborrow.workspace = true
 serde.workspace = true
