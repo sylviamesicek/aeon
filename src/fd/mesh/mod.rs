@@ -403,6 +403,11 @@ impl<const N: usize> Mesh<N> {
         })
     }
 
+    pub fn cell_node_offset(&self, cell: usize) -> [usize; N] {
+        let position = self.blocks.cell_position(cell);
+        array::from_fn(|axis| position[axis] * self.width)
+    }
+
     /// Returns the origin of a cell in its block's `NodeSpace<N>`.
     pub fn cell_node_origin(&self, cell: usize) -> [usize; N] {
         let position = self.blocks.cell_position(cell);

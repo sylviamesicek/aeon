@@ -5,28 +5,9 @@ use aeon::{
     prelude::*,
 };
 
-use sharedaxi::{Solver, Source};
+use sharedaxi::{Quadrant, Solver, Source};
 
-/// Quadrant upon which all simulations run.
-#[derive(Clone)]
-pub struct Quadrant;
-
-impl Boundary<2> for Quadrant {
-    fn kind(&self, face: Face<2>) -> BoundaryKind {
-        if !face.side {
-            BoundaryKind::Parity
-        } else {
-            BoundaryKind::Radiative
-        }
-    }
-}
-
-/// Initial data that Brill waves affects.
-#[derive(Clone, Copy, SystemLabel)]
-pub enum Rinne {
-    Conformal,
-    Seed,
-}
+use crate::{Initial, InitialSystem};
 
 /// Initial data is Garfinkle's variables.
 #[derive(Clone, Copy, SystemLabel)]
@@ -128,11 +109,11 @@ impl<'a> Function<2> for Hamiltonian<'a> {
 }
 
 #[derive(Clone)]
-pub struct BrillFromGarfinkle;
+pub struct InitialFromGarfinkle;
 
-impl Function<2> for BrillFromGarfinkle {
+impl Function<2> for InitialFromGarfinkle {
     type Input = GarfinkleSystem;
-    type Output = RinneSystem;
+    type Output = InitialSystem;
 
     fn evaluate(
         &self,
@@ -147,8 +128,8 @@ impl Function<2> for BrillFromGarfinkle {
             let psi = input.field(Garfinkle::Psi)[index];
             let seed = input.field(Garfinkle::Seed)[index];
 
-            output.field_mut(Rinne::Conformal)[index] = psi.powi(4) * (2.0 * rho * seed).exp();
-            output.field_mut(Rinne::Seed)[index] = -seed;
+            output.field_mut(Initial::Conformal)[index] = psi.powi(4) * (2.0 * rho * seed).exp();
+            output.field_mut(Initial::Seed)[index] = -seed;
         }
     }
 }
@@ -158,7 +139,8 @@ pub fn solve_order<const ORDER: usize>(
     mesh: &mut Mesh<2>,
     solver_con: &Solver,
     sources: &[Source],
-) -> anyhow::Result<SystemVec<RinneSystem>>
+    system: SystemSliceMut<InitialSystem>,
+) -> anyhow::Result<()>
 where
     Order<ORDER>: Kernels,
 {
@@ -189,6 +171,7 @@ where
     solver.max_steps = solver_con.max_steps;
     solver.tolerance = solver_con.tolerance;
     solver.cfl = solver_con.cfl;
+    solver.adaptive = true;
 
     solver.solve_scalar(
         mesh,
@@ -206,18 +189,13 @@ where
         psi,
     );
 
-    let mut rinne = SystemVec::with_length(num_nodes, RinneSystem);
-
     mesh.evaluate(
         order,
         Quadrant,
-        BrillFromGarfinkle,
+        InitialFromGarfinkle,
         SystemSlice::from_contiguous(&garfinkle, &GarfinkleSystem),
-        rinne.as_mut_slice(),
+        system,
     );
 
-    // let mut hamiltonian = SystemVec::with_length(num_nodes, Scalar);
-    // mesh.evaluate_scalar(order, Quadrant, Hamiltonian { seed }, &psi, hamiltonian);
-
-    Ok(rinne)
+    Ok(())
 }

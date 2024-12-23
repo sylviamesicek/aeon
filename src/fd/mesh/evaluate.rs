@@ -1,9 +1,12 @@
+use std::array;
+
 use aeon_basis::{Boundary, Kernels};
-use aeon_geometry::{Face, IndexSpace};
+use aeon_geometry::{faces, Face, FaceMask, IndexSpace, NULL};
 use rayon::iter::{ParallelBridge, ParallelIterator};
 
 use crate::{
     fd::{Engine, FdEngine, FdIntEngine, Function, Projection, ProjectionAsFunction},
+    shared::SharedSlice,
     system::{Scalar, System, SystemSlice, SystemSliceMut},
 };
 
@@ -140,6 +143,72 @@ impl<const N: usize> Mesh<N> {
                 SystemSliceMut::from_scalar(dest.field_mut(field)),
             );
         }
+    }
+
+    /// This function computes the distance between each vertex and its nearest
+    /// neighbor.
+    pub fn min_spacing_per_vertex(&mut self, dest: &mut [f64]) {
+        assert!(dest.len() == self.num_nodes());
+
+        let dest = SharedSlice::new(dest);
+
+        self.block_compute(|mesh, _, block| {
+            let nodes = mesh.block_nodes(block);
+            let space = mesh.block_space(block);
+            let bounds = mesh.block_bounds(block);
+
+            let spacing = space.spacing(bounds);
+            let min_spacing = spacing
+                .iter()
+                .min_by(|a, b| a.total_cmp(&b))
+                .cloned()
+                .unwrap_or(1.0);
+
+            let vertex_size = space.inner_size();
+
+            let block_dest = unsafe { dest.slice_mut(nodes) };
+
+            for &cell in mesh.blocks.cells(block) {
+                let cell_level = mesh.tree.level(cell);
+                let node_size = mesh.cell_node_size(cell);
+                let node_origin = mesh.cell_node_offset(cell);
+
+                let mut flags = FaceMask::empty();
+
+                for face in faces() {
+                    let neighbor = mesh.tree.neighbor(cell, face);
+
+                    if neighbor == NULL {
+                        continue;
+                    }
+
+                    let neighbor_level = mesh.tree.level(neighbor);
+
+                    if neighbor_level > cell_level {
+                        flags.set(face);
+                    }
+                }
+
+                for offset in IndexSpace::new(node_size).iter() {
+                    let vertex: [_; N] = array::from_fn(|axis| node_origin[axis] + offset[axis]);
+                    let index = space.index_from_vertex(vertex);
+
+                    let mut refined = false;
+
+                    for axis in 0..N {
+                        refined |= vertex[axis] == 0 && flags.is_set(Face::negative(axis));
+                        refined |= vertex[axis] == vertex_size[axis] - 1
+                            && flags.is_set(Face::positive(axis));
+                    }
+
+                    if refined {
+                        block_dest[index] = min_spacing / 2.0;
+                    } else {
+                        block_dest[index] = min_spacing;
+                    }
+                }
+            }
+        });
     }
 
     /// Performs a fused-multiply-add operation `a + mb` and then assigns this value to `dest`.

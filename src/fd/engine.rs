@@ -24,6 +24,56 @@ pub trait Engine<const N: usize> {
     fn dissipation(&self, field: &[f64], axis: usize, vertex: [usize; N]) -> f64;
 }
 
+impl<'a, const N: usize, E: Engine<N>> Engine<N> for &'a E {
+    fn num_nodes(&self) -> usize {
+        (&**self).num_nodes()
+    }
+
+    fn node_range(&self) -> Range<usize> {
+        (&**self).node_range()
+    }
+
+    fn vertex_size(&self) -> [usize; N] {
+        (&**self).vertex_size()
+    }
+
+    fn alloc<T: Default>(&self, len: usize) -> &[T] {
+        (&**self).alloc(len)
+    }
+
+    fn position(&self, vertex: [usize; N]) -> [f64; N] {
+        (&**self).position(vertex)
+    }
+
+    fn index_from_vertex(&self, vertex: [usize; N]) -> usize {
+        (&**self).index_from_vertex(vertex)
+    }
+
+    fn min_spacing(&self) -> f64 {
+        (&**self).min_spacing()
+    }
+
+    fn value(&self, field: &[f64], vertex: [usize; N]) -> f64 {
+        (&**self).value(field, vertex)
+    }
+
+    fn derivative(&self, field: &[f64], axis: usize, vertex: [usize; N]) -> f64 {
+        (&**self).derivative(field, axis, vertex)
+    }
+
+    fn second_derivative(&self, field: &[f64], axis: usize, vertex: [usize; N]) -> f64 {
+        (&**self).second_derivative(field, axis, vertex)
+    }
+
+    fn mixed_derivative(&self, field: &[f64], i: usize, j: usize, vertex: [usize; N]) -> f64 {
+        (&**self).mixed_derivative(field, i, j, vertex)
+    }
+
+    fn dissipation(&self, field: &[f64], axis: usize, vertex: [usize; N]) -> f64 {
+        (&**self).dissipation(field, axis, vertex)
+    }
+}
+
 /// A finite difference engine of a given order, but potentially bordering a free boundary.
 pub struct FdEngine<'store, const N: usize, K: Kernels, B: Boundary<N>> {
     pub space: NodeSpace<N>,

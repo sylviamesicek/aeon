@@ -500,7 +500,7 @@ impl<const N: usize> Mesh<N> {
                         let params = conditions.radiative(field, position, spacing);
 
                         // Inner R dependence
-                        let mut inner_advection = engine.value(source, inner) - params.target;
+                        let mut inner_advection = source[inner_index] - params.target;
 
                         for axis in 0..N {
                             let derivative = engine.derivative(source, axis, inner);
@@ -515,7 +515,7 @@ impl<const N: usize> Mesh<N> {
                             * (deriv[inner_index] + inner_advection / inner_r);
 
                         // Vertex
-                        let mut advection = engine.value(source, vertex) - params.target;
+                        let mut advection = source[index] - params.target;
 
                         for axis in 0..N {
                             let derivative = engine.derivative(source, axis, vertex);

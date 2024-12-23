@@ -2,15 +2,42 @@
 
 use std::process::ExitCode;
 
-use aeon::prelude::*;
+use aeon::{basis::RadiativeParams, prelude::*};
 use anyhow::{anyhow, Context, Result};
 use clap::{Arg, Command};
-use garfinkle::Rinne;
 use sharedaxi::{
-    import_from_path_arg, Brill, Constraint, Field, Fields, Gauge, IDConfig, Metric, Source,
+    import_from_path_arg, Brill, Constraint, Field, Fields, Gauge, IDConfig, Metric, Quadrant,
+    Source,
 };
 
 mod garfinkle;
+
+#[derive(Clone, Copy, SystemLabel)]
+pub enum Initial {
+    Conformal,
+    Seed,
+}
+
+#[derive(Clone)]
+pub struct InitialConditions;
+
+impl Conditions<2> for InitialConditions {
+    type System = InitialSystem;
+
+    fn parity(&self, field: Initial, face: Face<2>) -> bool {
+        match field {
+            Initial::Conformal => [true, true][face.axis],
+            Initial::Seed => [false, true][face.axis],
+        }
+    }
+
+    fn radiative(&self, field: Initial, _position: [f64; 2], _spacing: f64) -> RadiativeParams {
+        match field {
+            Initial::Conformal => RadiativeParams::lightlike(1.0),
+            Initial::Seed => RadiativeParams::lightlike(0.0),
+        }
+    }
+}
 
 fn initial_data() -> Result<()> {
     // Load configuration
@@ -76,8 +103,6 @@ fn initial_data() -> Result<()> {
     // Create output dir.
     std::fs::create_dir_all(&absolute)?;
 
-    anyhow::ensure!(config.source.len() == 1);
-
     let solver = &config.solver;
     let domain = &config.domain;
     let sources = config.source.as_slice();
@@ -118,26 +143,149 @@ fn initial_data() -> Result<()> {
         mesh.refine_global();
     }
 
-    let rinne = match order {
-        2 => garfinkle::solve_order(Order::<2>, &mut mesh, solver, sources)?,
-        4 => garfinkle::solve_order(Order::<4>, &mut mesh, solver, sources)?,
-        6 => garfinkle::solve_order(Order::<6>, &mut mesh, solver, sources)?,
-        _ => return Err(anyhow::anyhow!("Invalid initial data type and order")),
-    };
+    let mut transfer = SystemVec::default();
+    let mut system = SystemVec::default();
+    system.resize(mesh.num_nodes());
+
+    loop {
+        match order {
+            2 => {
+                garfinkle::solve_order(
+                    Order::<2>,
+                    &mut mesh,
+                    solver,
+                    sources,
+                    system.as_mut_slice(),
+                )?;
+                mesh.fill_boundary(
+                    Order::<2>,
+                    Quadrant,
+                    InitialConditions,
+                    system.as_mut_slice(),
+                );
+            }
+            4 => {
+                garfinkle::solve_order(
+                    Order::<4>,
+                    &mut mesh,
+                    solver,
+                    sources,
+                    system.as_mut_slice(),
+                )?;
+                mesh.fill_boundary(
+                    Order::<4>,
+                    Quadrant,
+                    InitialConditions,
+                    system.as_mut_slice(),
+                );
+            }
+            6 => {
+                garfinkle::solve_order(
+                    Order::<6>,
+                    &mut mesh,
+                    solver,
+                    sources,
+                    system.as_mut_slice(),
+                )?;
+                mesh.fill_boundary(
+                    Order::<6>,
+                    Quadrant,
+                    InitialConditions,
+                    system.as_mut_slice(),
+                );
+            }
+            _ => return Err(anyhow!("Invalid initial data type and order")),
+        };
+
+        if config.visualize_levels {
+            let mut checkpoint = SystemCheckpoint::default();
+            checkpoint.save_system(system.as_slice());
+
+            mesh.export_vtu(
+                absolute.join(format!("{}_level{}.vtu", &config.name, mesh.max_level())),
+                &checkpoint,
+                ExportVtuConfig {
+                    title: config.name.clone(),
+                    ghost: false,
+                },
+            )?;
+        }
+
+        if mesh.max_level() >= config.max_level || mesh.num_nodes() >= config.max_nodes {
+            log::error!(
+                "Failed to solve initial data, level: {}, nodes: {}",
+                mesh.max_level(),
+                mesh.num_nodes()
+            );
+            return Err(anyhow!("failed to refine within perscribed limits"));
+        }
+
+        mesh.flag_wavelets(
+            config.order,
+            0.0,
+            config.max_error,
+            Quadrant,
+            system.as_slice(),
+        );
+        mesh.balance_flags();
+
+        if mesh.requires_regridding() {
+            log::trace!(
+                "Regridding mesh from level {} to {}",
+                mesh.max_level(),
+                mesh.max_level() + 1
+            );
+
+            transfer.resize(mesh.num_nodes());
+            transfer
+                .contigious_mut()
+                .clone_from_slice(system.contigious());
+            mesh.regrid();
+            system.resize(mesh.num_nodes());
+
+            match order {
+                2 => mesh.transfer_system(
+                    Order::<2>,
+                    Quadrant,
+                    transfer.as_slice(),
+                    system.as_mut_slice(),
+                ),
+                4 => mesh.transfer_system(
+                    Order::<4>,
+                    Quadrant,
+                    transfer.as_slice(),
+                    system.as_mut_slice(),
+                ),
+                6 => mesh.transfer_system(
+                    Order::<6>,
+                    Quadrant,
+                    transfer.as_slice(),
+                    system.as_mut_slice(),
+                ),
+                _ => {}
+            };
+        } else {
+            log::trace!(
+                "Sucessfully refined mesh to give accuracy: {:.5e}",
+                config.max_error
+            );
+            break;
+        }
+    }
 
     let mut fields = SystemVec::with_length(mesh.num_nodes(), Fields);
 
     // Metric
     fields
         .field_mut(Field::Metric(Metric::Grr))
-        .copy_from_slice(rinne.field(Rinne::Conformal));
+        .copy_from_slice(system.field(Initial::Conformal));
     fields
         .field_mut(Field::Metric(Metric::Gzz))
-        .copy_from_slice(rinne.field(Rinne::Conformal));
+        .copy_from_slice(system.field(Initial::Conformal));
     fields.field_mut(Field::Metric(Metric::Grz)).fill(0.0);
     fields
         .field_mut(Field::Metric(Metric::S))
-        .copy_from_slice(rinne.field(Rinne::Seed));
+        .copy_from_slice(system.field(Initial::Seed));
     fields.field_mut(Field::Metric(Metric::Krr)).fill(0.0);
     fields.field_mut(Field::Metric(Metric::Kzz)).fill(0.0);
     fields.field_mut(Field::Metric(Metric::Krz)).fill(0.0);
@@ -156,6 +304,20 @@ fn initial_data() -> Result<()> {
     fields.field_mut(Field::Gauge(Gauge::Lapse)).fill(1.0);
     fields.field_mut(Field::Gauge(Gauge::Shiftr)).fill(0.0);
     fields.field_mut(Field::Gauge(Gauge::Shiftz)).fill(0.0);
+
+    if config.visualize_result {
+        let mut checkpoint = SystemCheckpoint::default();
+        checkpoint.save_system(fields.as_slice());
+
+        mesh.export_vtu(
+            absolute.join(format!("{}.vtu", &config.name)),
+            &checkpoint,
+            ExportVtuConfig {
+                title: config.name.clone(),
+                ghost: false,
+            },
+        )?;
+    }
 
     let mut checkpoint = SystemCheckpoint::default();
     checkpoint.save_system(fields.as_slice());

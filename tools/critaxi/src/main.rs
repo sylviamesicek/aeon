@@ -87,8 +87,8 @@ fn critical_search() -> Result<()> {
             max_steps: 100000,
             max_nodes: 16_000_000,
             regrid: Regrid {
-                coarsen_limit: 1e-8,
-                refine_limit: 1e-6,
+                coarsen_tolerance: 1e-8,
+                refine_tolerance: 1e-6,
                 flag_interval: 20,
                 max_levels: 20,
             },
@@ -116,8 +116,13 @@ fn critical_search() -> Result<()> {
             },
             order: 4,
 
-            _visualize_levels: false,
-            _visualize_result: false,
+            visualize_levels: false,
+            visualize_result: false,
+            _visualize_relax: false,
+
+            max_level: 10,
+            max_nodes: 16_000_000,
+            max_error: 1e-6,
 
             domain: config.domain.clone(),
             source: vec![Source::Brill(Brill {

@@ -27,7 +27,12 @@ pub struct HyperRelaxSolver {
     /// Maximum number of relaxation steps to perform
     pub max_steps: usize,
     pub dampening: f64,
+    /// CFL factor for ficticuous time step.
     pub cfl: f64,
+    /// If set, the relax solver uses larger time steps for
+    /// vertices in less refined regions (subject to the CFL condition
+    /// of course).
+    pub adaptive: bool,
 
     // pub visualize: Option<HyperRelaxVisualize>,
     integrator: Rk4,
@@ -46,6 +51,7 @@ impl HyperRelaxSolver {
             max_steps: 100000,
             dampening: 1.0,
             cfl: 0.1,
+            adaptive: false,
             // visualize: None,
             integrator: Rk4::new(),
         }
@@ -79,6 +85,17 @@ impl HyperRelaxSolver {
         let mut data = vec![0.0; 2 * dimension].into_boxed_slice();
         let mut update = vec![0.0; 2 * dimension].into_boxed_slice();
 
+        // Compute minimum spacing and spacing per vertex.
+        let min_spacing = mesh.min_spacing();
+
+        let mut spacing_per_vertex = vec![min_spacing; mesh.num_nodes()];
+        if self.adaptive {
+            mesh.min_spacing_per_vertex(&mut spacing_per_vertex);
+        }
+
+        // Use CFL factor to compute time_step
+        let time_step = self.cfl * min_spacing;
+
         // Fill initial guess
         {
             let (u, v) = data.split_at_mut(dimension);
@@ -97,9 +114,6 @@ impl HyperRelaxSolver {
                     .for_each(|f| *f *= self.dampening);
             }
         }
-
-        let min_spacing: f64 = mesh.min_spacing();
-        let time_step = self.cfl * min_spacing;
 
         for index in 0..self.max_steps {
             {
@@ -175,6 +189,8 @@ impl HyperRelaxSolver {
                 boundary: boundary.clone(),
                 conditions: conditions.clone(),
                 deriv: &deriv,
+                spacing_per_vertex: &spacing_per_vertex,
+                min_spacing,
                 system: system.clone(),
             };
 
@@ -259,6 +275,9 @@ struct UDerivs<'a, const N: usize, S> {
     dampening: f64,
     u: SystemSlice<'a, S>,
     v: SystemSlice<'a, S>,
+
+    spacing_per_vertex: &'a [f64],
+    min_spacing: f64,
 }
 
 impl<'a, const N: usize, S: System + Clone> Function<N> for UDerivs<'a, N, S> {
@@ -274,6 +293,9 @@ impl<'a, const N: usize, S: System + Clone> Function<N> for UDerivs<'a, N, S> {
         let node_range = engine.node_range();
         let system = output.system().clone();
 
+        let spacing_per_vertex = &self.spacing_per_vertex[node_range.clone()];
+        let min_spacing = self.min_spacing;
+
         for field in system.enumerate() {
             let u = &self.u.field(field)[node_range.clone()];
             let v = &self.v.field(field)[node_range.clone()];
@@ -282,7 +304,8 @@ impl<'a, const N: usize, S: System + Clone> Function<N> for UDerivs<'a, N, S> {
 
             for vertex in IndexSpace::new(engine.vertex_size()).iter() {
                 let index = engine.index_from_vertex(vertex);
-                dest[index] = v[index] - u[index] * self.dampening
+                let adaptive = spacing_per_vertex[index] / min_spacing;
+                dest[index] = adaptive * (v[index] - u[index] * self.dampening);
             }
         }
     }
@@ -319,9 +342,12 @@ impl<const N: usize, I: Conditions<N>> Conditions<N> for VConditions<I> {
 #[derive(Clone)]
 struct VDerivs<'a, const N: usize, F> {
     function: &'a F,
+
+    spacing_per_vertex: &'a [f64],
+    min_spacing: f64,
 }
 
-impl<'a, const N: usize, S: System, F: Function<N, Input = S, Output = S>> Function<N>
+impl<'a, const N: usize, S: System + Clone, F: Function<N, Input = S, Output = S>> Function<N>
     for VDerivs<'a, N, F>
 {
     type Input = S;
@@ -331,9 +357,27 @@ impl<'a, const N: usize, S: System, F: Function<N, Input = S, Output = S>> Funct
         &self,
         engine: impl Engine<N>,
         input: SystemSlice<Self::Input>,
-        output: SystemSliceMut<Self::Output>,
+        mut output: SystemSliceMut<Self::Output>,
     ) {
-        self.function.evaluate(engine, input, output);
+        let node_range = engine.node_range();
+        let vertex_size = engine.vertex_size();
+
+        let system = output.system().clone();
+
+        let spacing_per_vertex = &self.spacing_per_vertex[node_range.clone()];
+        let min_spacing = self.min_spacing;
+
+        self.function.evaluate(&engine, input, output.rb_mut());
+
+        for field in system.enumerate() {
+            let output = output.field_mut(field);
+
+            for vertex in IndexSpace::new(vertex_size).iter() {
+                let index = engine.index_from_vertex(vertex);
+
+                output[index] *= spacing_per_vertex[index] / min_spacing;
+            }
+        }
     }
 }
 
@@ -355,6 +399,9 @@ struct FictitiousOde<
     boundary: B,
     conditions: C,
     deriv: &'a F,
+
+    spacing_per_vertex: &'a [f64],
+    min_spacing: f64,
 
     system: C::System,
 }
@@ -416,6 +463,8 @@ where
                 dampening: self.dampening,
                 u: u.rb(),
                 v: v.rb(),
+                spacing_per_vertex: &self.spacing_per_vertex,
+                min_spacing: self.min_spacing,
             },
             SystemSlice::empty(),
             dudt.rb_mut(),
@@ -427,6 +476,8 @@ where
             self.boundary.clone(),
             VDerivs {
                 function: self.deriv,
+                spacing_per_vertex: &self.spacing_per_vertex,
+                min_spacing: self.min_spacing,
             },
             u.rb(),
             dvdt.rb_mut(),

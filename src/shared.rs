@@ -1,4 +1,4 @@
-use std::{cell::UnsafeCell, slice};
+use std::{cell::UnsafeCell, ops::Range, slice};
 
 /// Represents a reference to a slice which may be shared among threads. This uses `UnsafeCell` to
 /// Uphold rust's immutability gaurentees, but it is the responsibility of the user that the values
@@ -36,6 +36,28 @@ impl<'a, T> SharedSlice<'a, T> {
     /// No mutable or immutable references to this element may exist when this function is called.
     pub unsafe fn get_mut(self, index: usize) -> &'a mut T {
         &mut *self.0[index].get()
+    }
+
+    pub unsafe fn slice(self, range: Range<usize>) -> &'a [T] {
+        debug_assert!(range.start <= self.0.len());
+        debug_assert!(range.end <= self.0.len());
+
+        if range.start >= range.end {
+            return &[];
+        }
+
+        core::slice::from_raw_parts(self.get(range.start), range.end - range.start)
+    }
+
+    pub unsafe fn slice_mut(self, range: Range<usize>) -> &'a mut [T] {
+        debug_assert!(range.start <= self.0.len());
+        debug_assert!(range.end <= self.0.len());
+
+        if range.start >= range.end {
+            return &mut [];
+        }
+
+        core::slice::from_raw_parts_mut(self.get_mut(range.start), range.end - range.start)
     }
 }
 

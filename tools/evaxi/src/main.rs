@@ -273,8 +273,8 @@ pub fn evolution() -> Result<bool> {
     let max_time = config.max_time;
     let cfl = config.cfl;
     let regrid_steps = config.regrid.flag_interval;
-    let lower = config.regrid.coarsen_limit;
-    let upper = config.regrid.refine_limit;
+    let lower = config.regrid.coarsen_tolerance;
+    let upper = config.regrid.refine_tolerance;
     let max_level = config.regrid.max_levels;
 
     let mut time_since_save = 0.0;

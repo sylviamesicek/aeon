@@ -39,10 +39,17 @@ pub struct IDConfig {
     pub order: usize,
     /// Visualize level between each regrid?
     #[serde(default)]
-    pub _visualize_levels: bool,
+    pub visualize_levels: bool,
     /// Visualize each instance once complete?
     #[serde(default)]
-    pub _visualize_result: bool,
+    pub visualize_result: bool,
+    #[serde(default)]
+    /// Visualize the relaxation process?
+    pub _visualize_relax: bool,
+
+    pub max_level: usize,
+    pub max_nodes: usize,
+    pub max_error: f64,
 
     /// Specifies domain of problem
     #[serde(default)]
@@ -215,8 +222,8 @@ pub struct Brill {
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Regrid {
-    pub coarsen_limit: f64,
-    pub refine_limit: f64,
+    pub coarsen_tolerance: f64,
+    pub refine_tolerance: f64,
     pub flag_interval: usize,
     pub max_levels: usize,
 }

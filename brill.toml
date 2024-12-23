@@ -1,6 +1,13 @@
 name = "brill"
-output_dir = "output/idgen"
+output_dir = "output/idaxi"
 order = 4
+
+visualize_levels = true
+visualize_result = true
+
+max_error = 1e-6
+max_level = 15
+max_nodes = 16000000
 
 [logging]
 level = 5
