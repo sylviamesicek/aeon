@@ -168,8 +168,8 @@ impl HyperRelaxSolver {
                 return Err(HyperRelaxError::Diverged);
             }
 
-            if index % 1000 == 0 {
-                log::trace!("Relaxed {}k steps, norm: {:.5e}", index / 1000, norm);
+            if index % 10000 == 0 {
+                log::trace!("Relaxed {}0k steps, norm: {:.5e}", index / 10000, norm);
             }
 
             if norm <= self.tolerance {

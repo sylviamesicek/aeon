@@ -3,10 +3,12 @@ output_dir = "output/brillcrit"
 order = 4
 
 start = 1.0
-end = 2.0
+end = 4.0
 
 cache_initial = true
 cache_evolve = false
+
+bifurcations = 2
 
 [logging]
 level = 5

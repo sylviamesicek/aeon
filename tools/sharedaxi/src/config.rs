@@ -15,6 +15,8 @@ pub struct CritConfig {
     #[serde(default = "default_subsearches")]
     pub subsearches: usize,
 
+    pub bifurcations: usize,
+
     /// Specifies domain of problem
     #[serde(default)]
     pub domain: Domain,

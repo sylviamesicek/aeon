@@ -342,6 +342,15 @@ pub fn evolution() -> Result<bool> {
             ));
         }
 
+        if mesh.max_level() >= config.regrid.max_levels {
+            log::trace!(
+                "Evolution collapses, Reached maximum allowed level of refinement: {}",
+                mesh.max_level()
+            );
+            does_disperse = false;
+            break;
+        }
+
         // Get step size
         let h = mesh.min_spacing() * cfl;
 
@@ -356,17 +365,17 @@ pub fn evolution() -> Result<bool> {
             mesh.set_regrid_level_limit(max_level);
             mesh.balance_flags();
 
-            let num_refine = mesh.num_refine_cells();
-            let num_coarsen = mesh.num_coarsen_cells();
+            // let num_refine = mesh.num_refine_cells();
+            // let num_coarsen = mesh.num_coarsen_cells();
 
             mesh.regrid();
 
-            log::trace!(
-                "Regrided Mesh at time: {time:.5}, Max Level {}, {} R, {} C",
-                mesh.max_level(),
-                num_refine,
-                num_coarsen,
-            );
+            // log::trace!(
+            //     "Regrided Mesh at time: {time:.5}, Max Level {}, {} R, {} C",
+            //     mesh.max_level(),
+            //     num_refine,
+            //     num_coarsen,
+            // );
 
             // Copy system into tmp scratch space (provieded by dissipation).
             dissipation
@@ -386,11 +395,16 @@ pub fn evolution() -> Result<bool> {
         if time_since_save >= save_interval {
             time_since_save -= save_interval;
 
+            //         log::trace!(
+            //             "Saving Checkpoint {save_step}
+            // Time: {time:.5}, Step: {h:.8}
+            // Norm: {norm:.5e}
+            // Nodes: {}",
+            //             mesh.num_nodes()
+            //         );
+
             log::trace!(
-                "Saving Checkpoint {save_step}
-    Time: {time:.5}, Step: {h:.8}
-    Norm: {norm:.5e}
-    Nodes: {}",
+                "Saving Checkpoint {save_step}, Time: {time:.5}, Step: {h:.8}, Norm: {norm:.5e}, Nodes: {}",
                 mesh.num_nodes()
             );
             // Output current system to disk
@@ -462,7 +476,7 @@ pub fn evolution() -> Result<bool> {
         time_since_save += h;
     }
 
-    log::info!("Writing Error CSV");
+    // log::info!("Writing Error CSV");
 
     Ok(does_disperse)
 }

@@ -114,185 +114,233 @@ fn critical_search() -> Result<()> {
             .unwrap_or(EvolutionCache::default());
     }
 
-    let range = config.start..config.end;
+    let mut range = config.start..config.end;
 
-    // loop {
-    let diff = range.end - range.start;
+    for _ in 0..config.bifurcations {
+        let diff = range.end - range.start;
+        let step = diff / (config.subsearches - 1) as f64;
 
-    let step = diff / (config.subsearches - 1) as f64;
+        let subsearches = (0..config.subsearches)
+            .map(|i| range.start + step * i as f64)
+            .collect::<Vec<_>>();
 
-    let subsearches = (0..config.subsearches)
-        .map(|i| range.start + step * i as f64)
-        .collect::<Vec<_>>();
-
-    for amplitude in subsearches.iter() {
-        let config = IDConfig {
-            name: format!("{}_{:?}", name, amplitude),
-            output_dir: Some(
-                absolute
-                    .join("initial")
-                    .as_os_str()
-                    .to_string_lossy()
-                    .into_owned(),
-            ),
-            logging: Logging {
-                level: Logging::TRACE,
-            },
-            order: 4,
-
-            visualize_levels: false,
-            visualize_result: true,
-            _visualize_relax: false,
-
-            max_level: 15,
-            max_nodes: 16_000_000,
-            max_error: 1e-6,
-
-            refine_global: 1,
-
-            domain: config.domain.clone(),
-            source: vec![Source::Brill(Brill {
-                amplitude: *amplitude,
-                sigma: (1.0, 1.0),
-            })],
-
-            solver: Solver {
-                max_steps: 100000,
-                cfl: 0.5,
-                tolerance: 1e-6,
-                dampening: 0.4,
-            },
-        };
-
-        let config_path = absolute
-            .join("config")
-            .join(format!("initial_{:?}.toml", amplitude));
-
-        std::fs::write(config_path, toml::to_string_pretty(&config)?)?;
-
-        let config = EVConfig {
-            name: "evolve".to_string(),
-            output_dir: Some(
-                absolute
-                    .join("evolve")
-                    .join(format!("{}_{:?}", name, amplitude))
-                    .as_os_str()
-                    .to_string_lossy()
-                    .into_owned(),
-            ),
-            order: 4,
-            diss_order: 6,
-            logging: Logging {
-                level: Logging::TRACE,
-            },
-            cfl: 0.1,
-            max_time: 10.0,
-            max_steps: 100000,
-            max_nodes: 16_000_000,
-            regrid: Regrid {
-                coarsen_tolerance: 1e-8,
-                refine_tolerance: 1e-6,
-                flag_interval: 20,
-                max_levels: 20,
-            },
-            visualize: Some(Visualize { save_interval: 0.1 }),
-        };
-
-        let config_path = absolute
-            .join("config")
-            .join(format!("evolve_{:?}.toml", amplitude));
-
-        std::fs::write(config_path, toml::to_string_pretty(&config)?)?;
-    }
-
-    for amplitude in subsearches.iter() {
-        if initial_cache.contains_key(&float_to_string(*amplitude)) {
-            log::trace!("Using cached initial data for amplitude: {:?}", amplitude);
-            continue;
-        }
-        log::trace!(
-            "Launching initial data solver for amplitude: {:?}",
-            amplitude
+        log::info!(
+            "Bifurcating range {} to {} with {} subsearches",
+            range.start,
+            range.end,
+            config.subsearches
         );
 
-        let config_path = absolute
-            .join("config")
-            .join(format!("initial_{:?}.toml", amplitude));
-        let status = execute_idaxi(config_path.as_ref())?;
+        for amplitude in subsearches.iter() {
+            let config = IDConfig {
+                name: format!("{}_{:?}", name, amplitude),
+                output_dir: Some(
+                    absolute
+                        .join("initial")
+                        .as_os_str()
+                        .to_string_lossy()
+                        .into_owned(),
+                ),
+                logging: Logging {
+                    level: Logging::TRACE,
+                },
+                order: 4,
 
-        if status.success() {
-            log::info!(
-                "Successfully generated initial data for amplitude: {:?}",
-                amplitude
-            );
-            initial_cache.insert(float_to_string(*amplitude), InitialStatus::Success);
-        } else {
-            log::error!(
-                "Failed to generate initial data for amplitude: {}",
-                amplitude
-            );
-            initial_cache.insert(float_to_string(*amplitude), InitialStatus::Failure);
+                visualize_levels: false,
+                visualize_result: true,
+                _visualize_relax: false,
+
+                max_level: 20,
+                max_nodes: 16_000_000,
+                max_error: 1e-6,
+
+                refine_global: 1,
+
+                domain: config.domain.clone(),
+                source: vec![Source::Brill(Brill {
+                    amplitude: *amplitude,
+                    sigma: (1.0, 1.0),
+                })],
+
+                solver: Solver {
+                    max_steps: 100_000,
+                    cfl: 0.5,
+                    tolerance: 1e-6,
+                    dampening: 0.4,
+                },
+            };
+
+            let config_path = absolute
+                .join("config")
+                .join(format!("initial_{:?}.toml", amplitude));
+
+            std::fs::write(config_path, toml::to_string_pretty(&config)?)?;
+
+            let config = EVConfig {
+                name: "evolve".to_string(),
+                output_dir: Some(
+                    absolute
+                        .join("evolve")
+                        .join(format!("{}_{:?}", name, amplitude))
+                        .as_os_str()
+                        .to_string_lossy()
+                        .into_owned(),
+                ),
+                order: 4,
+                diss_order: 6,
+                logging: Logging {
+                    level: Logging::TRACE,
+                },
+                cfl: 0.1,
+                max_time: 4.0,
+                max_steps: 100000,
+                max_nodes: 16_000_000,
+                regrid: Regrid {
+                    coarsen_tolerance: 1e-8,
+                    refine_tolerance: 1e-6,
+                    flag_interval: 20,
+                    max_levels: 20,
+                },
+                visualize: Some(Visualize { save_interval: 0.1 }),
+            };
+
+            let config_path = absolute
+                .join("config")
+                .join(format!("evolve_{:?}.toml", amplitude));
+
+            std::fs::write(config_path, toml::to_string_pretty(&config)?)?;
         }
-    }
 
-    std::fs::write(
-        absolute.join("initial_cache.toml"),
-        toml::to_string_pretty(&initial_cache)?,
-    )?;
-
-    for amplitude in subsearches.iter() {
-        if evolution_cache.contains_key(&float_to_string(*amplitude)) {
-            log::trace!("Using cached evolution data for amplitude: {:?}", amplitude);
-            continue;
-        }
-
-        log::trace!("Launching evolution for amplitude: {}", amplitude);
-
-        let path = absolute
-            .join("initial")
-            .join(format!("{}_{:?}.dat", config.name, amplitude));
-        let config = absolute
-            .join("config")
-            .join(format!("evolve_{:?}.toml", amplitude));
-
-        let status = execute_evaxi(config.as_ref(), path.as_ref())?;
-
-        let Some(code) = status.code() else {
-            log::error!(
-                "Failed to load exit code for evolution with amplitude {}",
+        for amplitude in subsearches.iter() {
+            if initial_cache.contains_key(&float_to_string(*amplitude)) {
+                log::trace!("Using cached initial data for amplitude: {:?}", amplitude);
+                continue;
+            }
+            log::trace!(
+                "Launching initial data solver for amplitude: {:?}",
                 amplitude
             );
-            continue;
-        };
 
-        match code {
-            0 => {
-                log::info!("Amplitude: {} dispersed", amplitude);
-                evolution_cache.insert(float_to_string(*amplitude), EvolutionStatus::Disperse);
-            }
-            2 => {
-                log::info!("Amplitude: {} collapsed", amplitude);
-                evolution_cache.insert(float_to_string(*amplitude), EvolutionStatus::Collapse);
-            }
-            1 => {
-                log::error!("Error occured in evolution for amplitude {}", amplitude);
+            let config_path = absolute
+                .join("config")
+                .join(format!("initial_{:?}.toml", amplitude));
+            let status = execute_idaxi(config_path.as_ref())?;
 
-                evolution_cache.insert(float_to_string(*amplitude), EvolutionStatus::Failure);
-            }
-            _ => {
-                log::error!(
-                    "Unknown error occured in evolution for amplitude {}",
+            if status.success() {
+                log::info!(
+                    "Successfully generated initial data for amplitude: {:?}",
                     amplitude
                 );
-                evolution_cache.insert(amplitude.to_string(), EvolutionStatus::Failure);
+                initial_cache.insert(float_to_string(*amplitude), InitialStatus::Success);
+            } else {
+                log::error!(
+                    "Failed to generate initial data for amplitude: {}",
+                    amplitude
+                );
+                initial_cache.insert(float_to_string(*amplitude), InitialStatus::Failure);
             }
         }
-    }
 
-    std::fs::write(
-        absolute.join("evolution_cache.toml"),
-        toml::to_string_pretty(&evolution_cache)?,
-    )?;
+        std::fs::write(
+            absolute.join("initial_cache.toml"),
+            toml::to_string_pretty(&initial_cache)?,
+        )?;
+
+        for amplitude in subsearches.iter() {
+            if let Some(InitialStatus::Failure) = initial_cache.get(&float_to_string(*amplitude)) {
+                return Err(anyhow!(
+                    "initial data generation failed for amplitude: {}",
+                    amplitude
+                ));
+            }
+        }
+
+        for amplitude in subsearches.iter() {
+            if evolution_cache.contains_key(&float_to_string(*amplitude)) {
+                log::trace!("Using cached evolution data for amplitude: {:?}", amplitude);
+                continue;
+            }
+            log::trace!("Launching evolution for amplitude: {}", amplitude);
+
+            let path = absolute
+                .join("initial")
+                .join(format!("{}_{:?}.dat", config.name, amplitude));
+            let config = absolute
+                .join("config")
+                .join(format!("evolve_{:?}.toml", amplitude));
+
+            let status = execute_evaxi(config.as_ref(), path.as_ref())?;
+
+            let Some(code) = status.code() else {
+                log::error!(
+                    "Failed to load exit code for evolution with amplitude {}",
+                    amplitude
+                );
+                continue;
+            };
+
+            match code {
+                0 => {
+                    log::info!("Amplitude: {} dispersed", amplitude);
+                    evolution_cache.insert(float_to_string(*amplitude), EvolutionStatus::Disperse);
+                }
+                2 => {
+                    log::info!("Amplitude: {} collapsed", amplitude);
+                    evolution_cache.insert(float_to_string(*amplitude), EvolutionStatus::Collapse);
+                }
+                1 => {
+                    log::error!("Error occured in evolution for amplitude {}", amplitude);
+
+                    evolution_cache.insert(float_to_string(*amplitude), EvolutionStatus::Failure);
+                }
+                _ => {
+                    log::error!(
+                        "Unknown error occured in evolution for amplitude {}",
+                        amplitude
+                    );
+                    evolution_cache.insert(amplitude.to_string(), EvolutionStatus::Failure);
+                }
+            }
+        }
+
+        std::fs::write(
+            absolute.join("evolution_cache.toml"),
+            toml::to_string_pretty(&evolution_cache)?,
+        )?;
+
+        for amplitude in subsearches.iter() {
+            if let Some(EvolutionStatus::Failure) =
+                evolution_cache.get(&float_to_string(*amplitude))
+            {
+                return Err(anyhow!("evolution failed for amplitude: {}", amplitude));
+            }
+        }
+
+        let mut dispersion = 0;
+        for (i, amplitude) in subsearches.iter().enumerate() {
+            match evolution_cache.get(&float_to_string(*amplitude)) {
+                Some(EvolutionStatus::Disperse) => dispersion = i,
+                Some(EvolutionStatus::Collapse) => break,
+                _ => return Err(anyhow!("evolution failed for amplitude: {}", amplitude)),
+            }
+        }
+
+        let mut collapse = subsearches.len() - 1;
+        for (i, amplitude) in subsearches.iter().enumerate().rev() {
+            match evolution_cache.get(&float_to_string(*amplitude)) {
+                Some(EvolutionStatus::Disperse) => break,
+                Some(EvolutionStatus::Collapse) => collapse = i,
+                _ => return Err(anyhow!("evolution failed for amplitude: {}", amplitude)),
+            }
+        }
+
+        if dispersion + 1 != collapse {
+            return Err(anyhow!("multiple critical points detected"));
+        }
+
+        range.start = subsearches[dispersion];
+        range.end = subsearches[collapse];
+    }
 
     Ok(())
 }
