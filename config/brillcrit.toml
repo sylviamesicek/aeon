@@ -1,13 +1,12 @@
 name = "brill"
-output_dir = "output/idaxi"
+output_dir = "output/brillcrit"
 order = 4
 
-visualize_levels = true
-visualize_result = true
+start = 1.0
+end = 2.0
 
-max_error = 1e-6
-max_level = 15
-max_nodes = 16000000
+cache_initial = true
+cache_evolve = false
 
 [logging]
 level = 5
@@ -29,8 +28,3 @@ max_steps = 100000
 cfl = 0.5
 dampening = 0.4
 tolerance = 1e-6
-
-[[source]]
-type = "brill"
-amplitude = 1.0
-sigma = [1.0, 1.0]

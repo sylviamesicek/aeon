@@ -1,6 +1,6 @@
 //! An executable for creating general initial data for numerical relativity simulations in 2D.
 
-use std::process::ExitCode;
+use std::{path::PathBuf, process::ExitCode};
 
 use aeon::{basis::RadiativeParams, prelude::*};
 use anyhow::{anyhow, Context, Result};
@@ -44,7 +44,7 @@ fn initial_data() -> Result<()> {
     let matches = Command::new("idaxi")
         .about("A program for generating initial data for numerical relativity using hyperbolic relaxation.")
         .author("Lukas Mesicek, lukas.m.mesicek@gmail.com")
-        .version("0.0.1")
+        .version("0.1.0")
         .arg(
             Arg::new("path")
                 .help("Path of config file for generating initial data")
@@ -55,10 +55,12 @@ fn initial_data() -> Result<()> {
     let config = import_from_path_arg::<IDConfig>(&matches)?;
 
     // Load header data and defaults
-    let output = config
-        .output_dir
-        .clone()
-        .unwrap_or_else(|| format!("{}_output", &config.name));
+    let output = PathBuf::from(
+        config
+            .output_dir
+            .clone()
+            .unwrap_or_else(|| format!("{}_output", &config.name)),
+    );
 
     // Compute log filter level.
     let level = config.logging.filter();
@@ -67,7 +69,11 @@ fn initial_data() -> Result<()> {
     env_logger::builder().filter_level(level).init();
     // Find currect working directory
     let dir = std::env::current_dir().context("Failed to find current working directory")?;
-    let absolute = dir.join(&output);
+    let absolute = if output.is_absolute() {
+        output
+    } else {
+        dir.join(output)
+    };
 
     // Log Header data.
     log::info!("Simulation name: {}", &config.name);
@@ -96,7 +102,7 @@ fn initial_data() -> Result<()> {
     );
 
     anyhow::ensure!(
-        config.domain.mesh.refine_global <= config.domain.mesh.max_level,
+        config.refine_global <= config.max_level,
         "Mesh global refinements must be <= mesh max_level"
     );
 
@@ -137,9 +143,9 @@ fn initial_data() -> Result<()> {
         domain.cell.padding,
     );
 
-    log::trace!("Refining mesh globally {} times", domain.mesh.refine_global);
+    log::trace!("Refining mesh globally {} times", config.refine_global);
 
-    for _ in 0..domain.mesh.refine_global {
+    for _ in 0..config.refine_global {
         mesh.refine_global();
     }
 

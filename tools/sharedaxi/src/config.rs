@@ -7,6 +7,11 @@ pub struct CritConfig {
     pub start: f64,
     pub end: f64,
 
+    #[serde(default)]
+    pub cache_initial: bool,
+    #[serde(default)]
+    pub cache_evolve: bool,
+
     #[serde(default = "default_subsearches")]
     pub subsearches: usize,
 
@@ -51,6 +56,8 @@ pub struct IDConfig {
     pub max_nodes: usize,
     pub max_error: f64,
 
+    pub refine_global: usize,
+
     /// Specifies domain of problem
     #[serde(default)]
     pub domain: Domain,
@@ -65,6 +72,10 @@ pub struct IDConfig {
 
 #[derive(Serialize, Deserialize)]
 pub struct EVConfig {
+    /// Name of process to be executed.
+    pub name: String,
+    /// Directory to store output.
+    pub output_dir: Option<String>,
     /// Logging configuration.
     #[serde(default)]
     pub logging: Logging,
@@ -137,9 +148,6 @@ pub struct Domain {
 
     #[serde(default)]
     pub cell: Cell,
-
-    #[serde(default)]
-    pub mesh: Mesh,
 }
 
 impl Default for Domain {
@@ -149,7 +157,6 @@ impl Default for Domain {
             height: 1.0,
 
             cell: Cell::default(),
-            mesh: Mesh::default(),
         }
     }
 }
@@ -166,22 +173,6 @@ impl Default for Cell {
         Self {
             subdivisions: 6,
             padding: 3,
-        }
-    }
-}
-
-/// Options for the initial shape of the mesh.
-#[derive(Serialize, Deserialize, Clone)]
-pub struct Mesh {
-    pub refine_global: usize,
-    pub max_level: usize,
-}
-
-impl Default for Mesh {
-    fn default() -> Self {
-        Self {
-            refine_global: 0,
-            max_level: 10,
         }
     }
 }

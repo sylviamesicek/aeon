@@ -1,0 +1,21 @@
+name = "brillev"
+output_dir = "output/brillev"
+order = 4
+diss_order = 6
+cfl = 0.1
+
+max_time = 10.0
+max_steps = 100_000
+max_nodes = 16_000_000
+
+[regrid]
+coarsen_tolerance = 0.00000001
+refine_tolerance = 0.000001
+flag_interval = 20
+max_levels = 20
+
+[visualize]
+save_interval = 0.05
+
+[logging]
+level = 5

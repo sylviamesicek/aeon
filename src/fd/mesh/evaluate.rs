@@ -128,8 +128,9 @@ impl<const N: usize> Mesh<N> {
                 for vertex in IndexSpace::new(engine.vertex_size()).iter() {
                     let index = engine.index_from_vertex(vertex);
 
+                    output[index] = 0.0;
                     for axis in 0..N {
-                        output[index] = engine.dissipation(input, axis, vertex);
+                        output[index] += engine.dissipation(input, axis, vertex);
                     }
                 }
             }

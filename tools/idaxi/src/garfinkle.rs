@@ -152,7 +152,6 @@ where
     let (psi, seed) = garfinkle.split_at_mut(num_nodes);
 
     // Compute seed values.
-    log::trace!("Filling Seed Function");
     mesh.project_scalar(order, Quadrant, SeedProjection(&sources), seed);
     mesh.fill_boundary_scalar(
         order,
@@ -164,7 +163,7 @@ where
     // Initial Guess for Psi
     psi.fill(1.0);
 
-    log::trace!("Running Hyperbolic Relaxation");
+    log::trace!("Running Hyperbolic Relaxation. Nodes: {}", mesh.num_nodes());
 
     let mut solver = HyperRelaxSolver::new();
     solver.dampening = solver_con.dampening;

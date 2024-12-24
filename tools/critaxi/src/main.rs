@@ -1,18 +1,41 @@
 use anyhow::{anyhow, Context, Result};
+use serde::{Deserialize, Serialize};
 use sharedaxi::{
-    import_from_path_arg, Brill, CritConfig, EVConfig, IDConfig, Logging, Regrid, Solver, Source,
-    Visualize,
+    import_from_path_arg, import_from_toml, Brill, CritConfig, EVConfig, IDConfig, Logging, Regrid,
+    Solver, Source, Visualize,
 };
 use std::{
+    collections::HashMap,
     ffi::OsStr,
+    path::PathBuf,
     process::{Command, ExitCode, ExitStatus},
 };
+
+#[derive(Serialize, Deserialize)]
+enum InitialStatus {
+    Success,
+    Failure,
+}
+
+#[derive(Serialize, Deserialize)]
+enum EvolutionStatus {
+    Disperse,
+    Collapse,
+    Failure,
+}
+
+type InitialCache = HashMap<String, InitialStatus>;
+type EvolutionCache = HashMap<String, EvolutionStatus>;
+
+fn float_to_string(value: f64) -> String {
+    format!("{:?}", value)
+}
 
 fn critical_search() -> Result<()> {
     let matches = clap::Command::new("critaxi")
         .about("A program for searching for critical points in a range using idgen and evgen.")
         .author("Lukas Mesicek, lukas.m.mesicek@gmail.com")
-        .version("v0.0.1")
+        .version("v0.1.0")
         .arg(
             clap::Arg::new("path")
                 .help("Path of config file for searching for critical points")
@@ -25,11 +48,13 @@ fn critical_search() -> Result<()> {
     let config = import_from_path_arg::<CritConfig>(&matches)?;
 
     // Load header data and defaults
-    let log_level = config.logging.filter();
-    let output = config
-        .output_dir
-        .clone()
-        .unwrap_or_else(|| format!("{}_output", &config.name));
+    let output = PathBuf::from(
+        config
+            .output_dir
+            .clone()
+            .unwrap_or_else(|| format!("{}_output", &config.name)),
+    );
+    let name = config.name.clone();
 
     // Compute log filter level.
     let level = config.logging.filter();
@@ -38,11 +63,15 @@ fn critical_search() -> Result<()> {
     env_logger::builder().filter_level(level).init();
     // Find currect working directory
     let dir = std::env::current_dir().context("Failed to find current working directory")?;
-    let absolute = dir.join(&output);
+    let absolute = if output.is_absolute() {
+        output
+    } else {
+        dir.join(output)
+    };
 
     // Log Header data.
     log::info!("Running Critical Search: {}", &config.name);
-    log::info!("Logging Level: {} ", log_level);
+    log::info!("Logging Level: {} ", level);
     log::info!(
         "Output Directory: {}",
         absolute
@@ -66,35 +95,24 @@ fn critical_search() -> Result<()> {
         "Domain cell nodes must be >= 2 * padding"
     );
 
-    anyhow::ensure!(
-        config.domain.mesh.refine_global <= config.domain.mesh.max_level,
-        "Mesh global refinements must be <= mesh max_level"
-    );
-
     anyhow::ensure!(config.start < config.end);
     std::fs::create_dir_all(&absolute)?;
     std::fs::create_dir_all(&absolute.join("config"))?;
+    std::fs::create_dir_all(&absolute.join("evolve"))?;
+    std::fs::create_dir_all(&absolute.join("initial"))?;
 
-    // Write evolution config.
-    std::fs::write(
-        absolute.join("config").join("evolution.toml"),
-        toml::to_string_pretty(&EVConfig {
-            order: 4,
-            diss_order: 6,
-            logging: Logging::default(),
-            cfl: 0.1,
-            max_time: 10.0,
-            max_steps: 100000,
-            max_nodes: 16_000_000,
-            regrid: Regrid {
-                coarsen_tolerance: 1e-8,
-                refine_tolerance: 1e-6,
-                flag_interval: 20,
-                max_levels: 20,
-            },
-            visualize: Some(Visualize { save_interval: 0.1 }),
-        })?,
-    )?;
+    let mut initial_cache = InitialCache::default();
+    let mut evolution_cache = EvolutionCache::default();
+
+    if config.cache_initial {
+        initial_cache = import_from_toml::<InitialCache>(absolute.join("initial_cache.toml"))
+            .unwrap_or(InitialCache::default());
+    }
+
+    if config.cache_evolve {
+        evolution_cache = import_from_toml::<EvolutionCache>(absolute.join("evolution_cache.toml"))
+            .unwrap_or(EvolutionCache::default());
+    }
 
     let range = config.start..config.end;
 
@@ -109,20 +127,28 @@ fn critical_search() -> Result<()> {
 
     for amplitude in subsearches.iter() {
         let config = IDConfig {
-            name: format!("{}_{:?}", config.name, amplitude),
-            output_dir: Some(format!("{}/initial", output)),
+            name: format!("{}_{:?}", name, amplitude),
+            output_dir: Some(
+                absolute
+                    .join("initial")
+                    .as_os_str()
+                    .to_string_lossy()
+                    .into_owned(),
+            ),
             logging: Logging {
                 level: Logging::TRACE,
             },
             order: 4,
 
             visualize_levels: false,
-            visualize_result: false,
+            visualize_result: true,
             _visualize_relax: false,
 
-            max_level: 10,
+            max_level: 15,
             max_nodes: 16_000_000,
             max_error: 1e-6,
+
+            refine_global: 1,
 
             domain: config.domain.clone(),
             source: vec![Source::Brill(Brill {
@@ -132,7 +158,7 @@ fn critical_search() -> Result<()> {
 
             solver: Solver {
                 max_steps: 100000,
-                cfl: 0.1,
+                cfl: 0.5,
                 tolerance: 1e-6,
                 dampening: 0.4,
             },
@@ -143,26 +169,130 @@ fn critical_search() -> Result<()> {
             .join(format!("initial_{:?}.toml", amplitude));
 
         std::fs::write(config_path, toml::to_string_pretty(&config)?)?;
+
+        let config = EVConfig {
+            name: "evolve".to_string(),
+            output_dir: Some(
+                absolute
+                    .join("evolve")
+                    .join(format!("{}_{:?}", name, amplitude))
+                    .as_os_str()
+                    .to_string_lossy()
+                    .into_owned(),
+            ),
+            order: 4,
+            diss_order: 6,
+            logging: Logging {
+                level: Logging::TRACE,
+            },
+            cfl: 0.1,
+            max_time: 10.0,
+            max_steps: 100000,
+            max_nodes: 16_000_000,
+            regrid: Regrid {
+                coarsen_tolerance: 1e-8,
+                refine_tolerance: 1e-6,
+                flag_interval: 20,
+                max_levels: 20,
+            },
+            visualize: Some(Visualize { save_interval: 0.1 }),
+        };
+
+        let config_path = absolute
+            .join("config")
+            .join(format!("evolve_{:?}.toml", amplitude));
+
+        std::fs::write(config_path, toml::to_string_pretty(&config)?)?;
     }
 
     for amplitude in subsearches.iter() {
-        log::trace!("Launching initial data solver for amplitude: {}", amplitude);
+        if initial_cache.contains_key(&float_to_string(*amplitude)) {
+            log::trace!("Using cached initial data for amplitude: {:?}", amplitude);
+            continue;
+        }
+        log::trace!(
+            "Launching initial data solver for amplitude: {:?}",
+            amplitude
+        );
 
-        let config_path = format!("{}/config/initial_{:?}.toml", output, amplitude);
+        let config_path = absolute
+            .join("config")
+            .join(format!("initial_{:?}.toml", amplitude));
         let status = execute_idaxi(config_path.as_ref())?;
 
         if status.success() {
             log::info!(
-                "Successfully generated initial data for amplitude: {}",
+                "Successfully generated initial data for amplitude: {:?}",
                 amplitude
-            )
+            );
+            initial_cache.insert(float_to_string(*amplitude), InitialStatus::Success);
         } else {
             log::error!(
                 "Failed to generate initial data for amplitude: {}",
                 amplitude
             );
+            initial_cache.insert(float_to_string(*amplitude), InitialStatus::Failure);
         }
     }
+
+    std::fs::write(
+        absolute.join("initial_cache.toml"),
+        toml::to_string_pretty(&initial_cache)?,
+    )?;
+
+    for amplitude in subsearches.iter() {
+        if evolution_cache.contains_key(&float_to_string(*amplitude)) {
+            log::trace!("Using cached evolution data for amplitude: {:?}", amplitude);
+            continue;
+        }
+
+        log::trace!("Launching evolution for amplitude: {}", amplitude);
+
+        let path = absolute
+            .join("initial")
+            .join(format!("{}_{:?}.dat", config.name, amplitude));
+        let config = absolute
+            .join("config")
+            .join(format!("evolve_{:?}.toml", amplitude));
+
+        let status = execute_evaxi(config.as_ref(), path.as_ref())?;
+
+        let Some(code) = status.code() else {
+            log::error!(
+                "Failed to load exit code for evolution with amplitude {}",
+                amplitude
+            );
+            continue;
+        };
+
+        match code {
+            0 => {
+                log::info!("Amplitude: {} dispersed", amplitude);
+                evolution_cache.insert(float_to_string(*amplitude), EvolutionStatus::Disperse);
+            }
+            2 => {
+                log::info!("Amplitude: {} collapsed", amplitude);
+                evolution_cache.insert(float_to_string(*amplitude), EvolutionStatus::Collapse);
+            }
+            1 => {
+                log::error!("Error occured in evolution for amplitude {}", amplitude);
+
+                evolution_cache.insert(float_to_string(*amplitude), EvolutionStatus::Failure);
+            }
+            _ => {
+                log::error!(
+                    "Unknown error occured in evolution for amplitude {}",
+                    amplitude
+                );
+                evolution_cache.insert(amplitude.to_string(), EvolutionStatus::Failure);
+            }
+        }
+    }
+
+    std::fs::write(
+        absolute.join("evolution_cache.toml"),
+        toml::to_string_pretty(&evolution_cache)?,
+    )?;
 
     Ok(())
 }
@@ -189,11 +319,52 @@ fn execute_idaxi(config: &OsStr) -> Result<ExitStatus> {
     Err(anyhow!("Failed to find idaxi executable"))
 }
 
+fn execute_evaxi(config: &OsStr, path: &OsStr) -> Result<ExitStatus> {
+    let current_dir = std::env::current_dir()?;
+
+    if let Ok(status) = Command::new(current_dir.join("evaxi"))
+        .arg("--config")
+        .arg(config)
+        .arg(path)
+        .status()
+    {
+        return Ok(status);
+    }
+
+    let mut current_exe = std::env::current_exe()?;
+
+    if current_exe.pop() {
+        if let Ok(status) = Command::new(current_exe.join("evaxi"))
+            .arg("--config")
+            .arg(config)
+            .arg(path)
+            .status()
+        {
+            return Ok(status);
+        }
+    }
+
+    if let Ok(status) = Command::new("evaxi")
+        .arg("--config")
+        .arg(config)
+        .arg(path)
+        .status()
+    {
+        return Ok(status);
+    }
+
+    Err(anyhow!("Failed to find evaxi executable"))
+}
+
 fn main() -> ExitCode {
     match critical_search() {
         Ok(_) => ExitCode::SUCCESS,
         Err(err) => {
-            log::error!("{:?}", err);
+            if log::log_enabled!(log::Level::Error) {
+                log::error!("{:?}", err);
+            } else {
+                eprintln!("{:?}", err);
+            }
             ExitCode::FAILURE
         }
     }
