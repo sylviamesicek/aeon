@@ -140,6 +140,14 @@ impl<const N: usize> Mesh<N> {
         result
     }
 
+    pub fn width(&self) -> usize {
+        self.width
+    }
+
+    pub fn ghost(&self) -> usize {
+        self.ghost
+    }
+
     /// Rebuilds mesh from current tree.
     fn build(&mut self) {
         self.blocks.build(&self.tree);
@@ -837,6 +845,17 @@ impl<const N: usize> Default for Mesh<N> {
 pub struct ExportVtuConfig {
     pub title: String,
     pub ghost: bool,
+    pub stride: usize,
+}
+
+impl Default for ExportVtuConfig {
+    fn default() -> Self {
+        Self {
+            title: "Title".to_string(),
+            ghost: false,
+            stride: 1,
+        }
+    }
 }
 
 impl<const N: usize> Mesh<N> {
@@ -889,6 +908,19 @@ impl<const N: usize> Mesh<N> {
             assert!(N > 0 && N <= 2, "Vtu Output only supported for 0 < N ≤ 2");
         }
 
+        let mut stride = config.stride;
+
+        if config.stride == 0 {
+            stride = self.width;
+        }
+
+        assert!(self.width % stride == 0);
+        assert!(stride <= self.width);
+
+        if config.ghost {
+            assert!(self.ghost % stride == 0);
+        }
+
         // Generate Cells
         let mut connectivity = Vec::new();
         let mut offsets = Vec::new();
@@ -907,6 +939,14 @@ impl<const N: usize> Mesh<N> {
                     cell_size[axis] += 2 * space.ghost();
                     vertex_size[axis] += 2 * space.ghost();
                 }
+            }
+
+            for axis in 0..N {
+                debug_assert!(cell_size[axis] % stride == 0);
+                debug_assert!((vertex_size[axis] - 1) % stride == 0);
+
+                cell_size[axis] = cell_size[axis] / stride;
+                vertex_size[axis] = (vertex_size[axis] - 1) / stride + 1;
             }
 
             let cell_space = IndexSpace::new(cell_size);
@@ -970,7 +1010,13 @@ impl<const N: usize> Mesh<N> {
                 space.inner_window()
             };
 
-            for node in window {
+            'window: for node in window {
+                for axis in 0..N {
+                    if node[axis] % (stride as isize) != 0 {
+                        continue 'window;
+                    }
+                }
+
                 let position = space.position(node, bounds);
                 let mut vertex = [0.0; 3];
                 vertex[..N].copy_from_slice(&position);
@@ -995,6 +1041,7 @@ impl<const N: usize> Mesh<N> {
                     format!("{}::{}", name, field),
                     &system.data[start..end],
                     config.ghost,
+                    config.stride,
                 ));
             }
         }
@@ -1004,6 +1051,7 @@ impl<const N: usize> Mesh<N> {
                 format!("Field::{}", name),
                 system,
                 config.ghost,
+                config.stride,
             ));
         }
 
@@ -1012,6 +1060,7 @@ impl<const N: usize> Mesh<N> {
                 format!("IntField::{}", name),
                 system,
                 config.ghost,
+                config.stride,
             ));
         }
 
@@ -1045,6 +1094,7 @@ impl<const N: usize> Mesh<N> {
         name: String,
         data: &[T],
         ghost: bool,
+        stride: usize,
     ) -> Attribute {
         let mut buffer = Vec::new();
 
@@ -1057,7 +1107,13 @@ impl<const N: usize> Mesh<N> {
                 space.inner_window()
             };
 
-            for node in window {
+            'window: for node in window {
+                for axis in 0..N {
+                    if node[axis] % (stride as isize) != 0 {
+                        continue 'window;
+                    }
+                }
+
                 let index = space.index_from_node(node);
                 let value = data[nodes.start + index];
                 buffer.push(value);

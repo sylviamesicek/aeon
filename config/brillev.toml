@@ -16,6 +16,7 @@ max_levels = 20
 
 [visualize]
 save_interval = 0.05
+stride = 6
 
 [logging]
 level = 5

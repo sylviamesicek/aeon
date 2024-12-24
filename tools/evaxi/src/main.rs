@@ -301,10 +301,12 @@ pub fn evolution() -> Result<bool> {
 
     let mut time_since_save = 0.0;
     let mut save_interval = f64::MAX;
+    let mut visualize_stride = 1;
 
     if let Some(vis @ Visualize { .. }) = config.visualize {
         save_interval = vis.save_interval;
         time_since_save = save_interval;
+        visualize_stride = vis.stride;
     }
 
     let mut does_disperse = true;
@@ -417,6 +419,7 @@ pub fn evolution() -> Result<bool> {
                 ExportVtuConfig {
                     title: "evbrill".to_string(),
                     ghost: false,
+                    stride: visualize_stride,
                 },
             )?;
 

@@ -93,6 +93,7 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
             ExportVtuConfig {
                 title: "Initial Wave Mesh".to_string(),
                 ghost: false,
+                stride: 1,
             },
         )?;
 

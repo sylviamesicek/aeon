@@ -4,6 +4,7 @@ order = 4
 
 visualize_levels = true
 visualize_result = true
+visualize_stride = 6
 
 max_error = 1e-6
 max_level = 15

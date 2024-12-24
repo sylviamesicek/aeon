@@ -95,6 +95,8 @@ fn critical_search() -> Result<()> {
         "Domain cell nodes must be >= 2 * padding"
     );
 
+    let stride = config.domain.cell.subdivisions;
+
     anyhow::ensure!(config.start < config.end);
     std::fs::create_dir_all(&absolute)?;
     std::fs::create_dir_all(&absolute.join("config"))?;
@@ -105,13 +107,15 @@ fn critical_search() -> Result<()> {
     let mut evolution_cache = EvolutionCache::default();
 
     if config.cache_initial {
-        initial_cache = import_from_toml::<InitialCache>(absolute.join("initial_cache.toml"))
-            .unwrap_or(InitialCache::default());
+        initial_cache =
+            import_from_toml::<InitialCache>(absolute.join("initial").join("cache.toml"))
+                .unwrap_or(InitialCache::default());
     }
 
     if config.cache_evolve {
-        evolution_cache = import_from_toml::<EvolutionCache>(absolute.join("evolution_cache.toml"))
-            .unwrap_or(EvolutionCache::default());
+        evolution_cache =
+            import_from_toml::<EvolutionCache>(absolute.join("evolution").join("cache.toml"))
+                .unwrap_or(EvolutionCache::default());
     }
 
     let mut range = config.start..config.end;
@@ -133,10 +137,11 @@ fn critical_search() -> Result<()> {
 
         for amplitude in subsearches.iter() {
             let config = IDConfig {
-                name: format!("{}_{:?}", name, amplitude),
+                name: "initial".to_string(),
                 output_dir: Some(
                     absolute
                         .join("initial")
+                        .join(format!("{}_{:?}", name, amplitude))
                         .as_os_str()
                         .to_string_lossy()
                         .into_owned(),
@@ -149,6 +154,7 @@ fn critical_search() -> Result<()> {
                 visualize_levels: false,
                 visualize_result: true,
                 _visualize_relax: false,
+                visualize_stride: stride,
 
                 max_level: 20,
                 max_nodes: 16_000_000,
@@ -193,7 +199,7 @@ fn critical_search() -> Result<()> {
                 },
                 cfl: 0.1,
                 max_time: 4.0,
-                max_steps: 100000,
+                max_steps: 1_000_000,
                 max_nodes: 16_000_000,
                 regrid: Regrid {
                     coarsen_tolerance: 1e-8,
@@ -201,7 +207,10 @@ fn critical_search() -> Result<()> {
                     flag_interval: 20,
                     max_levels: 20,
                 },
-                visualize: Some(Visualize { save_interval: 0.1 }),
+                visualize: Some(Visualize {
+                    save_interval: 0.1,
+                    stride,
+                }),
             };
 
             let config_path = absolute
@@ -242,7 +251,7 @@ fn critical_search() -> Result<()> {
         }
 
         std::fs::write(
-            absolute.join("initial_cache.toml"),
+            absolute.join("initial").join("cache.toml"),
             toml::to_string_pretty(&initial_cache)?,
         )?;
 
@@ -264,7 +273,8 @@ fn critical_search() -> Result<()> {
 
             let path = absolute
                 .join("initial")
-                .join(format!("{}_{:?}.dat", config.name, amplitude));
+                .join(format!("{}_{:?}", config.name, amplitude))
+                .join("initial.dat");
             let config = absolute
                 .join("config")
                 .join(format!("evolve_{:?}.toml", amplitude));
@@ -304,7 +314,7 @@ fn critical_search() -> Result<()> {
         }
 
         std::fs::write(
-            absolute.join("evolution_cache.toml"),
+            absolute.join("evolution").join("cache.toml"),
             toml::to_string_pretty(&evolution_cache)?,
         )?;
 

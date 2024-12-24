@@ -99,6 +99,10 @@ pub enum Constraint {
     Zz,
 }
 
+// pub enum Source {
+//     ScalarField { amplitude: f64, sigma: (f64, f64) },
+// }
+
 #[derive(Clone)]
 pub struct Quadrant;
 

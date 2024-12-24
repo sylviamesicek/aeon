@@ -106,6 +106,8 @@ fn initial_data() -> Result<()> {
         "Mesh global refinements must be <= mesh max_level"
     );
 
+    anyhow::ensure!(config.visualize_stride >= 1, "Stride must be >= 1");
+
     // Create output dir.
     std::fs::create_dir_all(&absolute)?;
 
@@ -213,6 +215,7 @@ fn initial_data() -> Result<()> {
                 ExportVtuConfig {
                     title: config.name.clone(),
                     ghost: false,
+                    stride: config.visualize_stride,
                 },
             )?;
         }
@@ -321,6 +324,7 @@ fn initial_data() -> Result<()> {
             ExportVtuConfig {
                 title: config.name.clone(),
                 ghost: false,
+                stride: config.visualize_stride,
             },
         )?;
     }

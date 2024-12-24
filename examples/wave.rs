@@ -170,6 +170,7 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
             ExportVtuConfig {
                 title: "Initial Wave Mesh".to_string(),
                 ghost: false,
+                stride: 6,
             },
         )?;
 
@@ -299,6 +300,7 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
                 ExportVtuConfig {
                     title: "evbrill".to_string(),
                     ghost: false,
+                    stride: 6,
                 },
             )
             .unwrap();

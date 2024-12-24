@@ -53,6 +53,8 @@ pub struct IDConfig {
     #[serde(default)]
     /// Visualize the relaxation process?
     pub _visualize_relax: bool,
+    #[serde(default = "default_stride")]
+    pub visualize_stride: usize,
 
     pub max_level: usize,
     pub max_nodes: usize,
@@ -69,7 +71,12 @@ pub struct IDConfig {
     pub solver: Solver,
 
     /// Sources used for simulation
+    #[serde(default)]
     pub source: Vec<Source>,
+}
+
+fn default_stride() -> usize {
+    1
 }
 
 #[derive(Serialize, Deserialize)]
@@ -224,4 +231,5 @@ pub struct Regrid {
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Visualize {
     pub save_interval: f64,
+    pub stride: usize,
 }
