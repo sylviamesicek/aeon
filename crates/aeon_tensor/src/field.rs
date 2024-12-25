@@ -4,7 +4,7 @@ use crate::{Matrix, Metric, Space, Tensor, Tensor3, Tensor4, Vector};
 // Fields *****************
 // ************************
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Default)]
 pub struct ScalarFieldC1<const N: usize> {
     pub value: f64,
     pub derivs: Vector<N>,
@@ -30,7 +30,7 @@ impl<const N: usize> ScalarFieldC1<N> {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Default)]
 pub struct ScalarFieldC2<const N: usize> {
     pub value: f64,
     pub derivs: Vector<N>,

@@ -13,7 +13,7 @@ impl<const N: usize> Mesh<N> {
     /// Flags cells for refinement using a wavelet criterion. The system must have filled
     /// boundaries. This function tags any cell that is insufficiently refined to approximate
     /// operators of the given `order` within the range of error.
-    pub fn flag_wavelets<S: System + Clone + Sync, B: Boundary<N> + Sync>(
+    pub fn flag_wavelets<S: System + Sync, B: Boundary<N> + Sync>(
         &mut self,
         order: usize,
         lower: f64,
@@ -23,8 +23,6 @@ impl<const N: usize> Mesh<N> {
     ) {
         assert!(order % 2 == 0);
         assert!(order <= self.width);
-
-        let system = result.system().clone();
 
         let element = Element::<N>::uniform(self.width, order);
         let element_coarse = Element::<N>::uniform(self.width / 2, order / 2);
@@ -61,7 +59,7 @@ impl<const N: usize> Mesh<N> {
                 let mut should_refine = false;
                 let mut should_coarsen = true;
 
-                for field in system.enumerate() {
+                for field in result.system().enumerate() {
                     // Unpack data to element
                     for (i, node) in window.iter().enumerate() {
                         imsrc[i] = block_system.field(field.clone())[space.index_from_node(node)];

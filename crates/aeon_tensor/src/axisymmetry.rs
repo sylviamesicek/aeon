@@ -151,6 +151,7 @@ pub struct System {
     pub source: StressEnergy,
 }
 
+#[derive(Default, Clone)]
 pub struct ScalarFieldSystem {
     pub phi: ScalarFieldC2<2>,
     pub pi: ScalarFieldC1<2>,

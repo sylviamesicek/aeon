@@ -213,7 +213,7 @@ impl<const N: usize> Mesh<N> {
     }
 
     /// Performs a fused-multiply-add operation `a + mb` and then assigns this value to `dest`.
-    pub fn fma<S: System + Clone>(
+    pub fn fma<S: System>(
         &mut self,
         a: SystemSlice<'_, S>,
         m: f64,

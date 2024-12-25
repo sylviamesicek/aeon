@@ -68,16 +68,15 @@ impl<const N: usize, P: Projection<N>> Function<N> for ProjectionAsFunction<P> {
 #[derive(Clone, Copy)]
 pub struct Gaussian<const N: usize> {
     pub amplitude: f64,
-    pub sigma: f64,
+    pub sigma: [f64; N],
     pub center: [f64; N],
 }
 
 impl<const N: usize> Projection<N> for Gaussian<N> {
     fn project(&self, position: [f64; N]) -> f64 {
-        let offset: [_; N] = array::from_fn(|axis| position[axis] - self.center[axis]);
+        let offset: [_; N] =
+            array::from_fn(|axis| (position[axis] - self.center[axis]) / self.sigma[axis]);
         let r2: f64 = offset.map(|v| v * v).iter().sum();
-        let s2 = self.sigma * self.sigma;
-
-        self.amplitude * (-r2 / s2).exp()
+        self.amplitude * (-r2).exp()
     }
 }

@@ -210,15 +210,27 @@ impl Default for Solver {
 pub enum Source {
     /// Instance generates Brill-type initial data with gunlach seed function.
     #[serde(rename = "brill")]
-    Brill(Brill),
+    Brill { amplitude: f64, sigma: (f64, f64) },
+    #[serde(rename = "scalar_field")]
+    ScalarField {
+        amplitude: f64,
+        sigma: (f64, f64),
+        mass: f64,
+    },
 }
 
-/// Describes Brill-type initial data parameters.
-#[derive(Serialize, Deserialize, Debug)]
-pub struct Brill {
-    pub amplitude: f64,
-    pub sigma: (f64, f64),
-}
+// /// Describes Brill-type initial data parameters.
+// #[derive(Serialize, Deserialize, Debug)]
+// pub struct Brill {
+//     pub amplitude: f64,
+//     pub sigma: (f64, f64),
+// }
+
+// #[derive(Serialize, Deserialize, Debug)]
+// pub struct ScalarField {
+//     pub amplitude: f64,
+//     pub sigma: (f64, f64),
+// }
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Regrid {

@@ -183,47 +183,47 @@ impl HyperbolicSystem {
     }
 }
 
-#[repr(C)]
-#[derive(Clone, Debug)]
-pub struct HyperbolicDerivs {
-    pub grr_t: f64,
-    pub grz_t: f64,
-    pub gzz_t: f64,
-    pub s_t: f64,
+// #[repr(C)]
+// #[derive(Clone, Debug)]
+// pub struct HyperbolicDerivs {
+//     pub grr_t: f64,
+//     pub grz_t: f64,
+//     pub gzz_t: f64,
+//     pub s_t: f64,
 
-    pub krr_t: f64,
-    pub krz_t: f64,
-    pub kzz_t: f64,
-    pub y_t: f64,
+//     pub krr_t: f64,
+//     pub krz_t: f64,
+//     pub kzz_t: f64,
+//     pub y_t: f64,
 
-    pub lapse_t: f64,
-    pub shiftr_t: f64,
-    pub shiftz_t: f64,
+//     pub lapse_t: f64,
+//     pub shiftr_t: f64,
+//     pub shiftz_t: f64,
 
-    pub theta_t: f64,
-    pub zr_t: f64,
-    pub zz_t: f64,
-}
+//     pub theta_t: f64,
+//     pub zr_t: f64,
+//     pub zz_t: f64,
+// }
 
-pub fn hyperbolic(sys: HyperbolicSystem, pos: [f64; 2]) -> HyperbolicDerivs {
-    let decomp = axi::Decomposition::new(pos, sys.axisymmetric_system());
-    let evolve = axi::Decomposition::evolution(&decomp);
-    let gauge = axi::Decomposition::gauge(&decomp);
+// pub fn hyperbolic(sys: HyperbolicSystem, pos: [f64; 2]) -> HyperbolicDerivs {
+//     let decomp = axi::Decomposition::new(pos, sys.axisymmetric_system());
+//     let evolve = axi::Decomposition::evolution(&decomp);
+//     let gauge = axi::Decomposition::gauge(&decomp);
 
-    HyperbolicDerivs {
-        grr_t: evolve.g[[0, 0]],
-        grz_t: evolve.g[[0, 1]],
-        gzz_t: evolve.g[[1, 1]],
-        s_t: evolve.seed,
-        krr_t: evolve.k[[0, 0]],
-        krz_t: evolve.k[[0, 1]],
-        kzz_t: evolve.k[[1, 1]],
-        y_t: evolve.y,
-        lapse_t: gauge.lapse,
-        shiftr_t: gauge.shift[[0]],
-        shiftz_t: gauge.shift[[1]],
-        theta_t: evolve.theta,
-        zr_t: evolve.z[[0]],
-        zz_t: evolve.z[[1]],
-    }
-}
+//     HyperbolicDerivs {
+//         grr_t: evolve.g[[0, 0]],
+//         grz_t: evolve.g[[0, 1]],
+//         gzz_t: evolve.g[[1, 1]],
+//         s_t: evolve.seed,
+//         krr_t: evolve.k[[0, 0]],
+//         krz_t: evolve.k[[0, 1]],
+//         kzz_t: evolve.k[[1, 1]],
+//         y_t: evolve.y,
+//         lapse_t: gauge.lapse,
+//         shiftr_t: gauge.shift[[0]],
+//         shiftz_t: gauge.shift[[1]],
+//         theta_t: evolve.theta,
+//         zr_t: evolve.z[[0]],
+//         zz_t: evolve.z[[1]],
+//     }
+// }

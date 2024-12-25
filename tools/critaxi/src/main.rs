@@ -1,7 +1,7 @@
 use anyhow::{anyhow, Context, Result};
 use serde::{Deserialize, Serialize};
 use sharedaxi::{
-    import_from_path_arg, import_from_toml, Brill, CritConfig, EVConfig, IDConfig, Logging, Regrid,
+    import_from_path_arg, import_from_toml, CritConfig, EVConfig, IDConfig, Logging, Regrid,
     Solver, Source, Visualize,
 };
 use std::{
@@ -163,10 +163,10 @@ fn critical_search() -> Result<()> {
                 refine_global: 1,
 
                 domain: config.domain.clone(),
-                source: vec![Source::Brill(Brill {
+                source: vec![Source::Brill {
                     amplitude: *amplitude,
                     sigma: (1.0, 1.0),
-                })],
+                }],
 
                 solver: Solver {
                     max_steps: 100_000,

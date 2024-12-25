@@ -221,9 +221,7 @@ impl<const N: usize> Mesh<N> {
         boundary: B,
         conditions: C,
         system: SystemSliceMut<'_, C::System>,
-    ) where
-        C::System: Clone,
-    {
+    ) {
         self.fill_boundary_to_extent(order, self.ghost, boundary, conditions, system);
     }
 
@@ -250,9 +248,7 @@ impl<const N: usize> Mesh<N> {
         boundary: B,
         conditions: C,
         mut system: SystemSliceMut<'_, C::System>,
-    ) where
-        C::System: Clone,
-    {
+    ) {
         self.fill_fine(extent, system.rb_mut());
         self.fill_direct(extent, system.rb_mut());
 
@@ -344,8 +340,7 @@ impl<const N: usize> Mesh<N> {
         });
     }
 
-    fn fill_fine<S: System + Clone>(&mut self, extent: usize, result: SystemSliceMut<S>) {
-        let system = result.system().clone();
+    fn fill_fine<S: System>(&mut self, extent: usize, result: SystemSliceMut<S>) {
         let shared = result.into_shared();
 
         self.neighbors.fine_indices().for_each(|interface| {
@@ -367,7 +362,7 @@ impl<const N: usize> Mesh<N> {
                 let block_index = block_space.index_from_node(block_node);
                 let neighbor_index = neighbor_space.index_from_node(neighbor_node);
 
-                for field in system.enumerate() {
+                for field in shared.system().enumerate() {
                     let value = neighbor_system.field(field)[neighbor_index];
                     block_system.field_mut(field)[block_index] = value;
                 }
@@ -382,10 +377,7 @@ impl<const N: usize> Mesh<N> {
         boundary: &B,
         conditions: &C,
         result: SystemSliceMut<C::System>,
-    ) where
-        C::System: Clone,
-    {
-        let system = result.system().clone();
+    ) {
         let shared = result.into_shared();
 
         self.neighbors.coarse_indices().for_each(|interface| {
@@ -408,7 +400,7 @@ impl<const N: usize> Mesh<N> {
 
                 let block_index = block_space.index_from_node(block_node);
 
-                for field in system.enumerate() {
+                for field in shared.system().enumerate() {
                     let value = neighbor_space.prolong(
                         SystemBC::new(neighbor_boundary.clone(), conditions.clone(), field),
                         K::interpolation().clone(),
@@ -429,10 +421,7 @@ impl<const N: usize> Mesh<N> {
         conditions: C,
         source: SystemSlice<'_, C::System>,
         deriv: SystemSliceMut<'_, C::System>,
-    ) where
-        C::System: Clone + Sync,
-    {
-        let system = deriv.system().clone();
+    ) {
         let deriv = deriv.into_shared();
 
         self.block_compute(|mesh, store, block| {
@@ -493,7 +482,7 @@ impl<const N: usize> Mesh<N> {
                     let inner_r = inner_position.iter().map(|&v| v * v).sum::<f64>().sqrt();
                     let inner_index = engine.index_from_vertex(inner);
 
-                    for field in system.enumerate() {
+                    for field in deriv.system().enumerate() {
                         let source = block_source.field(field);
                         let deriv = block_deriv.field_mut(field);
 

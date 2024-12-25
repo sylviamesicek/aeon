@@ -11,7 +11,7 @@ pub trait Engine<const N: usize> {
     fn node_range(&self) -> Range<usize>;
     fn vertex_size(&self) -> [usize; N];
 
-    fn alloc<T: Default>(&self, len: usize) -> &[T];
+    fn alloc<T: Default>(&self, len: usize) -> &mut [T];
 
     fn position(&self, vertex: [usize; N]) -> [f64; N];
     fn index_from_vertex(&self, vertex: [usize; N]) -> usize;
@@ -37,7 +37,7 @@ impl<'a, const N: usize, E: Engine<N>> Engine<N> for &'a E {
         (&**self).vertex_size()
     }
 
-    fn alloc<T: Default>(&self, len: usize) -> &[T] {
+    fn alloc<T: Default>(&self, len: usize) -> &mut [T] {
         (&**self).alloc(len)
     }
 
@@ -116,7 +116,7 @@ impl<'store, const N: usize, K: Kernels, B: Boundary<N>> Engine<N> for FdEngine<
         self.space.inner_size()
     }
 
-    fn alloc<T: Default>(&self, len: usize) -> &[T] {
+    fn alloc<T: Default>(&self, len: usize) -> &mut [T] {
         self.store.scratch(len)
     }
 
@@ -205,7 +205,7 @@ impl<'store, const N: usize, K: Kernels> Engine<N> for FdIntEngine<'store, N, K>
         self.space.inner_size()
     }
 
-    fn alloc<T: Default>(&self, len: usize) -> &[T] {
+    fn alloc<T: Default>(&self, len: usize) -> &mut [T] {
         self.store.scratch(len)
     }
 

@@ -141,7 +141,7 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         let profile = Gaussian {
             amplitude: 1.0,
-            sigma: 1.0,
+            sigma: [1.0, 1.0],
             center: [0., 0.],
         };
 

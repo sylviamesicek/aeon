@@ -1,5 +1,9 @@
 use aeon_geometry::{Rectangle, Tree};
+use ron::ser::PrettyConfig;
+use serde::de::DeserializeOwned;
+use serde::Serialize;
 use std::collections::HashMap;
+use std::str::FromStr;
 use thiserror::Error;
 
 use crate::fd::Mesh;
@@ -57,41 +61,70 @@ pub struct SystemCheckpoint {
 }
 
 impl SystemCheckpoint {
-    /// Attaches a system for serialization and deserialization
-    pub fn save_system<S: System + Clone + Default>(&mut self, system: SystemSlice<S>) {
+    pub fn save_system_ser<S: System + Serialize>(&mut self, data: SystemSlice<S>) {
         assert!(!self.systems.contains_key(S::NAME));
 
-        let count = system.len();
-        let data = system.to_vec().into_contiguous();
-
-        let fields = system
+        let count = data.len();
+        let buffer = data
             .system()
             .enumerate()
-            .map(|label| system.system().label_name(label))
+            .flat_map(|label| data.field(label).iter().cloned())
             .collect();
 
-        let meta = SystemMeta {
-            count,
-            data,
-            fields,
-        };
+        let fields = data
+            .system()
+            .enumerate()
+            .map(|label| data.system().label_name(label))
+            .collect();
 
-        self.systems.insert(S::NAME.to_string(), meta);
-    }
-
-    /// Reads a system from the model.
-    pub fn load_system<S: System + Clone + Default>(&self, vec: &mut SystemVec<S>) {
-        let meta = self.systems.get(S::NAME).unwrap();
-        let _ = std::mem::replace(
-            vec,
-            SystemSlice::from_contiguous(&meta.data, &S::default()).to_vec(),
+        self.systems.insert(
+            S::NAME.to_string(),
+            SystemMeta {
+                meta: ron::ser::to_string(data.system()).unwrap(),
+                count,
+                buffer,
+                fields,
+            },
         );
     }
 
-    pub fn read_system<S: System + Clone + Default>(&self) -> SystemVec<S> {
-        let mut result = SystemVec::default();
-        self.load_system(&mut result);
-        result
+    pub fn read_system_ser<S: System + DeserializeOwned>(&mut self) -> SystemVec<S> {
+        let data = self.systems.get(S::NAME).unwrap();
+        let system = ron::de::from_str::<S>(&data.meta).unwrap();
+
+        SystemVec::from_contiguous(data.buffer.clone(), system)
+    }
+
+    pub fn save_system_default<S: System + Default>(&mut self, data: SystemSlice<S>) {
+        assert!(!self.systems.contains_key(S::NAME));
+
+        let count = data.len();
+        let buffer = data
+            .system()
+            .enumerate()
+            .flat_map(|label| data.field(label).iter().cloned())
+            .collect();
+
+        let fields = data
+            .system()
+            .enumerate()
+            .map(|label| data.system().label_name(label))
+            .collect();
+
+        self.systems.insert(
+            S::NAME.to_string(),
+            SystemMeta {
+                meta: String::new(),
+                count,
+                buffer,
+                fields,
+            },
+        );
+    }
+
+    pub fn read_system_default<S: System + Default>(&mut self) -> SystemVec<S> {
+        let data = self.systems.get(S::NAME).unwrap();
+        SystemVec::from_contiguous(data.buffer.clone(), S::default())
     }
 
     /// Attaches a field for serialization in the model.
@@ -104,6 +137,13 @@ impl SystemCheckpoint {
     pub fn load_field(&self, name: &str, data: &mut Vec<f64>) {
         data.clear();
         data.extend_from_slice(self.fields.get(name).unwrap());
+    }
+
+    /// Reads a field from the model.
+    pub fn read_field(&self, name: &str) -> Vec<f64> {
+        let mut result = Vec::new();
+        self.load_field(name, &mut result);
+        result
     }
 
     /// Attaches an integer field for serialization in the checkpoint.
@@ -126,7 +166,11 @@ impl SystemCheckpoint {
         data.clone_from(self.meta.get(name).unwrap())
     }
 
-    pub fn parse_meta<T: std::str::FromStr>(&self, name: &str) -> Result<T, CheckpointParseError> {
+    pub fn write_meta<T: ToString>(&mut self, name: &str, data: T) {
+        self.save_meta(name, &data.to_string());
+    }
+
+    pub fn read_meta<T: FromStr>(&self, name: &str) -> Result<T, CheckpointParseError> {
         let data = self
             .meta
             .get(name)
@@ -140,7 +184,8 @@ impl SystemCheckpoint {
 /// Metadata required for storing a system.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct SystemMeta {
+    pub meta: String,
     pub count: usize,
-    pub data: Vec<f64>,
+    pub buffer: Vec<f64>,
     pub fields: Vec<String>,
 }

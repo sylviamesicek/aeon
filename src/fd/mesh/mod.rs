@@ -1039,7 +1039,7 @@ impl<const N: usize> Mesh<N> {
 
                 attributes.point.push(self.field_attribute(
                     format!("{}::{}", name, field),
-                    &system.data[start..end],
+                    &system.buffer[start..end],
                     config.ghost,
                     config.stride,
                 ));

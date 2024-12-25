@@ -2,42 +2,12 @@
 
 use std::{path::PathBuf, process::ExitCode};
 
-use aeon::{basis::RadiativeParams, prelude::*};
+use aeon::prelude::*;
 use anyhow::{anyhow, Context, Result};
 use clap::{Arg, Command};
-use sharedaxi::{
-    import_from_path_arg, Brill, Constraint, Field, Fields, Gauge, IDConfig, Metric, Quadrant,
-    Source,
-};
+use sharedaxi::{import_from_path_arg, Fields, IDConfig, Quadrant, Source};
 
 mod garfinkle;
-
-#[derive(Clone, Copy, SystemLabel)]
-pub enum Initial {
-    Conformal,
-    Seed,
-}
-
-#[derive(Clone)]
-pub struct InitialConditions;
-
-impl Conditions<2> for InitialConditions {
-    type System = InitialSystem;
-
-    fn parity(&self, field: Initial, face: Face<2>) -> bool {
-        match field {
-            Initial::Conformal => [true, true][face.axis],
-            Initial::Seed => [false, true][face.axis],
-        }
-    }
-
-    fn radiative(&self, field: Initial, _position: [f64; 2], _spacing: f64) -> RadiativeParams {
-        match field {
-            Initial::Conformal => RadiativeParams::lightlike(1.0),
-            Initial::Seed => RadiativeParams::lightlike(0.0),
-        }
-    }
-}
 
 fn initial_data() -> Result<()> {
     // Load configuration
@@ -118,7 +88,7 @@ fn initial_data() -> Result<()> {
 
     for source in sources {
         match source {
-            Source::Brill(Brill { amplitude, sigma }) => {
+            Source::Brill { amplitude, sigma } => {
                 log::info!(
                     "Running Instance: {}, Type: Brill Initial Data",
                     config.name
@@ -128,6 +98,23 @@ fn initial_data() -> Result<()> {
                     amplitude,
                     sigma.0,
                     sigma.1
+                );
+            }
+            Source::ScalarField {
+                amplitude,
+                sigma,
+                mass,
+            } => {
+                log::info!(
+                    "Running Instance: {}, Type: Scalar Field Initial Data",
+                    config.name
+                );
+                log::info!(
+                    "A: {:.5e}, sigma_r: {:.5e}, sigma_z: {:.5e}, Mass {:.5e}",
+                    amplitude,
+                    sigma.0,
+                    sigma.1,
+                    mass
                 );
             }
         }
@@ -151,8 +138,22 @@ fn initial_data() -> Result<()> {
         mesh.refine_global();
     }
 
-    let mut transfer = SystemVec::default();
-    let mut system = SystemVec::default();
+    // Build fields from sources.
+    let fields = Fields {
+        scalar_fields: sources
+            .iter()
+            .flat_map(|source| {
+                if let Source::ScalarField { mass, .. } = source {
+                    Some(*mass)
+                } else {
+                    None
+                }
+            })
+            .collect(),
+    };
+
+    let mut transfer = SystemVec::new(fields.clone());
+    let mut system = SystemVec::new(fields.clone());
     system.resize(mesh.num_nodes());
 
     loop {
@@ -165,12 +166,6 @@ fn initial_data() -> Result<()> {
                     sources,
                     system.as_mut_slice(),
                 )?;
-                mesh.fill_boundary(
-                    Order::<2>,
-                    Quadrant,
-                    InitialConditions,
-                    system.as_mut_slice(),
-                );
             }
             4 => {
                 garfinkle::solve_order(
@@ -180,12 +175,6 @@ fn initial_data() -> Result<()> {
                     sources,
                     system.as_mut_slice(),
                 )?;
-                mesh.fill_boundary(
-                    Order::<4>,
-                    Quadrant,
-                    InitialConditions,
-                    system.as_mut_slice(),
-                );
             }
             6 => {
                 garfinkle::solve_order(
@@ -195,19 +184,13 @@ fn initial_data() -> Result<()> {
                     sources,
                     system.as_mut_slice(),
                 )?;
-                mesh.fill_boundary(
-                    Order::<6>,
-                    Quadrant,
-                    InitialConditions,
-                    system.as_mut_slice(),
-                );
             }
             _ => return Err(anyhow!("Invalid initial data type and order")),
         };
 
         if config.visualize_levels {
             let mut checkpoint = SystemCheckpoint::default();
-            checkpoint.save_system(system.as_slice());
+            checkpoint.save_system_ser(system.as_slice());
 
             mesh.export_vtu(
                 absolute.join(format!("{}_level{}.vtu", &config.name, mesh.max_level())),
@@ -282,42 +265,10 @@ fn initial_data() -> Result<()> {
         }
     }
 
-    let mut fields = SystemVec::with_length(mesh.num_nodes(), Fields);
-
-    // Metric
-    fields
-        .field_mut(Field::Metric(Metric::Grr))
-        .copy_from_slice(system.field(Initial::Conformal));
-    fields
-        .field_mut(Field::Metric(Metric::Gzz))
-        .copy_from_slice(system.field(Initial::Conformal));
-    fields.field_mut(Field::Metric(Metric::Grz)).fill(0.0);
-    fields
-        .field_mut(Field::Metric(Metric::S))
-        .copy_from_slice(system.field(Initial::Seed));
-    fields.field_mut(Field::Metric(Metric::Krr)).fill(0.0);
-    fields.field_mut(Field::Metric(Metric::Kzz)).fill(0.0);
-    fields.field_mut(Field::Metric(Metric::Krz)).fill(0.0);
-    fields.field_mut(Field::Metric(Metric::Y)).fill(0.0);
-    // Constraint
-    fields
-        .field_mut(Field::Constraint(Constraint::Theta))
-        .fill(0.0);
-    fields
-        .field_mut(Field::Constraint(Constraint::Zr))
-        .fill(0.0);
-    fields
-        .field_mut(Field::Constraint(Constraint::Zz))
-        .fill(0.0);
-    // Gauge
-    fields.field_mut(Field::Gauge(Gauge::Lapse)).fill(1.0);
-    fields.field_mut(Field::Gauge(Gauge::Shiftr)).fill(0.0);
-    fields.field_mut(Field::Gauge(Gauge::Shiftz)).fill(0.0);
+    let mut checkpoint = SystemCheckpoint::default();
+    checkpoint.save_system_ser(system.as_slice());
 
     if config.visualize_result {
-        let mut checkpoint = SystemCheckpoint::default();
-        checkpoint.save_system(fields.as_slice());
-
         mesh.export_vtu(
             absolute.join(format!("{}.vtu", &config.name)),
             &checkpoint,
@@ -328,9 +279,6 @@ fn initial_data() -> Result<()> {
             },
         )?;
     }
-
-    let mut checkpoint = SystemCheckpoint::default();
-    checkpoint.save_system(fields.as_slice());
 
     mesh.export_dat(absolute.join(format!("{}.dat", config.name)), &checkpoint)?;
 

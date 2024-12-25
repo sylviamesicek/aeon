@@ -192,8 +192,8 @@ impl<'a, S: System> SystemSlice<'a, S> {
         self.length == 0
     }
 
-    pub fn system(&self) -> &S {
-        &self.system
+    pub fn system(&self) -> &'a S {
+        self.system
     }
 
     fn stride(&self) -> usize {
@@ -324,8 +324,8 @@ impl<'a, S: System> SystemSliceMut<'a, S> {
         self.total / self.system.count()
     }
 
-    pub fn system(&self) -> &S {
-        &self.system
+    pub fn system(&self) -> &'a S {
+        self.system
     }
 
     /// Retrieves an immutable slice to the given field.

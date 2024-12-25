@@ -73,11 +73,10 @@ impl HyperRelaxSolver {
         mut result: SystemSliceMut<C::System>,
     ) -> Result<(), HyperRelaxError>
     where
-        C::System: Default + Clone + Sync,
+        C::System: Default + Sync,
     {
         // Total number of degreees of freedom in the whole system
-        let system = result.system().clone();
-        let dimension = system.count() * mesh.num_nodes();
+        let dimension = result.system().count() * mesh.num_nodes();
 
         assert!(result.len() == dimension);
 
@@ -99,15 +98,15 @@ impl HyperRelaxSolver {
         // Fill initial guess
         {
             let (u, v) = data.split_at_mut(dimension);
-            let mut usys = SystemSliceMut::<C::System>::from_contiguous(u, &system);
-            let mut vsys = SystemSliceMut::<C::System>::from_contiguous(v, &system);
+            let mut usys = SystemSliceMut::<C::System>::from_contiguous(u, result.system());
+            let mut vsys = SystemSliceMut::<C::System>::from_contiguous(v, result.system());
 
-            for field in system.enumerate() {
+            for field in result.system().enumerate() {
                 usys.field_mut(field).copy_from_slice(result.field(field))
             }
 
             // Let us assume that du/dt is initially zero
-            for field in system.enumerate() {
+            for field in result.system().enumerate() {
                 vsys.field_mut(field).copy_from_slice(result.field(field));
                 vsys.field_mut(field)
                     .iter_mut()
@@ -117,7 +116,8 @@ impl HyperRelaxSolver {
 
         for index in 0..self.max_steps {
             {
-                let mut u = SystemSliceMut::from_contiguous(&mut data[..dimension], &system);
+                let mut u =
+                    SystemSliceMut::from_contiguous(&mut data[..dimension], result.system());
 
                 mesh.fill_boundary(order, boundary.clone(), conditions.clone(), u.rb_mut());
                 mesh.evaluate(
@@ -191,7 +191,7 @@ impl HyperRelaxSolver {
                 deriv: &deriv,
                 spacing_per_vertex: &spacing_per_vertex,
                 min_spacing,
-                system: system.clone(),
+                system: result.system(),
             };
 
             // Take step
@@ -212,9 +212,9 @@ impl HyperRelaxSolver {
 
         // Copy solution back to system vector
         let (u, _v) = data.split_at_mut(dimension);
-        let usys = SystemSlice::from_contiguous(u, &system);
+        let usys = SystemSlice::from_contiguous(u, result.system());
 
-        for field in system.enumerate() {
+        for field in result.system().enumerate() {
             result.field_mut(field).clone_from_slice(usys.field(field))
         }
 
@@ -280,7 +280,7 @@ struct UDerivs<'a, const N: usize, S> {
     min_spacing: f64,
 }
 
-impl<'a, const N: usize, S: System + Clone> Function<N> for UDerivs<'a, N, S> {
+impl<'a, const N: usize, S: System> Function<N> for UDerivs<'a, N, S> {
     type Input = Empty;
     type Output = S;
 
@@ -291,12 +291,11 @@ impl<'a, const N: usize, S: System + Clone> Function<N> for UDerivs<'a, N, S> {
         mut output: SystemSliceMut<Self::Output>,
     ) {
         let node_range = engine.node_range();
-        let system = output.system().clone();
 
         let spacing_per_vertex = &self.spacing_per_vertex[node_range.clone()];
         let min_spacing = self.min_spacing;
 
-        for field in system.enumerate() {
+        for field in output.system().enumerate() {
             let u = &self.u.field(field)[node_range.clone()];
             let v = &self.v.field(field)[node_range.clone()];
 
@@ -347,7 +346,7 @@ struct VDerivs<'a, const N: usize, F> {
     min_spacing: f64,
 }
 
-impl<'a, const N: usize, S: System + Clone, F: Function<N, Input = S, Output = S>> Function<N>
+impl<'a, const N: usize, S: System, F: Function<N, Input = S, Output = S>> Function<N>
     for VDerivs<'a, N, F>
 {
     type Input = S;
@@ -362,14 +361,12 @@ impl<'a, const N: usize, S: System + Clone, F: Function<N, Input = S, Output = S
         let node_range = engine.node_range();
         let vertex_size = engine.vertex_size();
 
-        let system = output.system().clone();
-
         let spacing_per_vertex = &self.spacing_per_vertex[node_range.clone()];
         let min_spacing = self.min_spacing;
 
         self.function.evaluate(&engine, input, output.rb_mut());
 
-        for field in system.enumerate() {
+        for field in output.system().enumerate() {
             let output = output.field_mut(field);
 
             for vertex in IndexSpace::new(vertex_size).iter() {
@@ -388,9 +385,7 @@ struct FictitiousOde<
     B: Boundary<N>,
     C: Conditions<N>,
     F: Function<N, Input = C::System, Output = C::System>,
-> where
-    C::System: Clone,
-{
+> {
     mesh: &'a mut Mesh<N>,
     dimension: usize,
     dampening: f64,
@@ -403,7 +398,7 @@ struct FictitiousOde<
     spacing_per_vertex: &'a [f64],
     min_spacing: f64,
 
-    system: C::System,
+    system: &'a C::System,
 }
 
 impl<
@@ -414,8 +409,6 @@ impl<
         C: Conditions<N> + Sync,
         F: Function<N, Input = C::System, Output = C::System> + Sync,
     > Ode for FictitiousOde<'a, N, K, B, C, F>
-where
-    C::System: Clone + Sync,
 {
     fn dim(&self) -> usize {
         2 * self.dimension
@@ -446,12 +439,12 @@ where
 
     fn derivative(&mut self, system: &[f64], result: &mut [f64]) {
         let (udata, vdata) = system.split_at(self.dimension);
-        let u = SystemSlice::from_contiguous(udata, &self.system);
-        let v = SystemSlice::from_contiguous(vdata, &self.system);
+        let u = SystemSlice::from_contiguous(udata, self.system);
+        let v = SystemSlice::from_contiguous(vdata, self.system);
 
         let (udata, vdata) = result.split_at_mut(self.dimension);
-        let mut dudt = SystemSliceMut::from_contiguous(udata, &self.system);
-        let mut dvdt = SystemSliceMut::from_contiguous(vdata, &self.system);
+        let mut dudt = SystemSliceMut::from_contiguous(udata, self.system);
+        let mut dvdt = SystemSliceMut::from_contiguous(vdata, self.system);
 
         // Compute derivatives
 
