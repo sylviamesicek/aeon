@@ -454,7 +454,7 @@ impl<const N: usize> Mesh<N> {
 
     /// This function computes the distance between each vertex and its nearest
     /// neighbor.
-    pub fn min_spacing_per_vertex(&mut self, dest: &mut [f64]) {
+    pub fn spacing_per_vertex(&mut self, dest: &mut [f64]) {
         assert!(dest.len() == self.num_nodes());
 
         let dest = SharedSlice::new(dest);

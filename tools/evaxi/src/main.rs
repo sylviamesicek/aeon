@@ -301,9 +301,6 @@ pub fn evolution() -> Result<bool> {
     // Load fields
     let mut fields = checkpoint.read_system_ser::<Fields>();
     let system = fields.system().clone();
-    // Temporary data
-    let mut update = SystemVec::new(system.clone());
-    let mut dissipation = SystemVec::new(system.clone());
 
     // Integrate
     let mut integrator = Rk4::new();
@@ -381,10 +378,6 @@ pub fn evolution() -> Result<bool> {
         // Get step size
         let h = mesh.min_spacing() * cfl;
 
-        // Resize vectors
-        update.resize(mesh.num_nodes());
-        dissipation.resize(mesh.num_nodes());
-
         if steps_since_regrid > regrid_steps {
             steps_since_regrid = 0;
 
@@ -402,6 +395,12 @@ pub fn evolution() -> Result<bool> {
             //     num_refine,
             //     num_coarsen,
             // );
+
+            log::trace!(
+                "Regrided Mesh at time: {time:.5}, Max Level {}, Num Nodes {}",
+                mesh.max_level(),
+                mesh.num_nodes(),
+            );
 
             // Copy system into tmp scratch space (provieded by dissipation).
             integrator.tmp().resize(fields.contigious().len(), 0.0);
@@ -432,6 +431,7 @@ pub fn evolution() -> Result<bool> {
                 "Saving Checkpoint {save_step}, Time: {time:.5}, Step: {h:.8}, Norm: {norm:.5e}, Nodes: {}",
                 mesh.num_nodes()
             );
+
             // Output current system to disk
             let mut systems = SystemCheckpoint::default();
             systems.save_system_ser(fields.as_slice());

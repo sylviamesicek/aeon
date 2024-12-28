@@ -30,5 +30,5 @@ tolerance = 1e-6
 
 [[source]]
 type = "brill"
-amplitude = 1.0
+amplitude = 2.5
 sigma = [1.0, 1.0]

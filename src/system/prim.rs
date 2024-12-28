@@ -153,20 +153,23 @@ impl<A: System, B: System> System for (A, B) {
 
 impl<'a, A: System, B: System> SystemSlice<'a, (A, B)> {
     pub fn split_pair(self) -> (SystemSlice<'a, A>, SystemSlice<'a, B>) {
-        let total = self.total / 2;
+        let stride = self.total / self.system.count();
+        let total1 = stride * self.system.0.count();
+        let total2 = stride * self.system.1.count();
         let ptr1 = self.ptr;
-        let ptr2 = unsafe { self.ptr.add(total) };
+        let ptr2 = unsafe { self.ptr.add(total1) };
 
         (
             SystemSlice {
-                total,
+                total: total1,
                 ptr: ptr1,
                 offset: self.offset,
                 length: self.length,
                 system: &self.system.0,
             },
             SystemSlice {
-                total,
+                total: total2,
+
                 ptr: ptr2,
                 offset: self.offset,
                 length: self.length,
@@ -178,20 +181,22 @@ impl<'a, A: System, B: System> SystemSlice<'a, (A, B)> {
 
 impl<'a, A: System, B: System> SystemSliceMut<'a, (A, B)> {
     pub fn split_pair(self) -> (SystemSliceMut<'a, A>, SystemSliceMut<'a, B>) {
-        let total = self.total / 2;
+        let stride = self.total / self.system.count();
+        let total1 = stride * self.system.0.count();
+        let total2 = stride * self.system.1.count();
         let ptr1 = self.ptr;
-        let ptr2 = unsafe { self.ptr.add(total) };
+        let ptr2 = unsafe { self.ptr.add(total1) };
 
         (
             SystemSliceMut {
-                total,
+                total: total1,
                 ptr: ptr1,
                 offset: self.offset,
                 length: self.length,
                 system: &self.system.0,
             },
             SystemSliceMut {
-                total,
+                total: total2,
                 ptr: ptr2,
                 offset: self.offset,
                 length: self.length,

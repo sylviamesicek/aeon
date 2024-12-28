@@ -522,6 +522,7 @@ impl<const N: usize> Mesh<N> {
         .unwrap_or(1.0)
     }
 
+    /// Computes the spacing on a particular block (albeit not accounting for coarse-fine interfaces).
     pub fn block_spacing(&self, block: usize) -> f64 {
         let bounds = self.block_bounds(block);
         let space = self.block_space(block);
@@ -616,6 +617,7 @@ impl<const N: usize> Mesh<N> {
         result.sqrt()
     }
 
+    /// Computes the l-infinity norm of a field on a mesh.
     fn max_norm_scalar(&mut self, src: &[f64]) -> f64 {
         let mut result = 0.0f64;
 

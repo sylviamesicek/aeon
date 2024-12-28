@@ -4,7 +4,7 @@ use reborrow::{Reborrow, ReborrowMut};
 use thiserror::Error;
 
 use crate::{
-    fd::{Conditions, Engine, Function, Mesh, ScalarConditions},
+    fd::{Conditions, Engine, ExportVtuConfig, Function, Mesh, ScalarConditions, SystemCheckpoint},
     ode::{Ode, Rk4},
     prelude::Face,
     system::{Pair, Scalar, System, SystemSlice, SystemSliceMut},
@@ -87,7 +87,7 @@ impl HyperRelaxSolver {
 
         let mut spacing_per_vertex = vec![min_spacing; mesh.num_nodes()];
         if self.adaptive {
-            mesh.min_spacing_per_vertex(&mut spacing_per_vertex);
+            mesh.spacing_per_vertex(&mut spacing_per_vertex);
         }
 
         // Use CFL factor to compute time_step
@@ -126,22 +126,25 @@ impl HyperRelaxSolver {
                     result.rb_mut(),
                 );
 
-                // let mut systems = SystemCheckpoint::default();
-                // systems.save_system(result.rb());
+                let mut systems = SystemCheckpoint::default();
+                systems.save_system_default(u.rb());
 
-                // if mesh
-                //     .export_vtu(
-                //         format!("output/debug/velax{index}.vtu"),
-                //         &systems,
-                //         crate::fd::ExportVtuConfig {
-                //             title: "debug".to_string(),
-                //             ghost: false,
-                //         },
-                //     )
-                //     .is_err()
-                // {
-                //     return Err(HyperRelaxError::VisualizeFailed);
-                // }
+                if index % 1000 == 0 {
+                    if mesh
+                        .export_vtu(
+                            format!("output/debug/relax{}.vtu", { index / 1000 }),
+                            &systems,
+                            ExportVtuConfig {
+                                title: "debug".to_string(),
+                                ghost: false,
+                                stride: 1,
+                            },
+                        )
+                        .is_err()
+                    {
+                        return Err(HyperRelaxError::VisualizeFailed);
+                    }
+                }
 
                 // deriv.callback(
                 //     mesh,
