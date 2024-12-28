@@ -2,7 +2,6 @@ use std::array;
 
 use aeon::{fd::Gaussian, prelude::*, system::System};
 use aeon_basis::RadiativeParams;
-use reborrow::{Reborrow, ReborrowMut};
 
 const MAX_TIME: f64 = 1.0;
 const MAX_STEPS: usize = 1000;
@@ -93,33 +92,26 @@ impl<'a> Ode for HyperbolicOde<'a> {
         Scalar.count() * self.mesh.num_nodes()
     }
 
-    fn preprocess(&mut self, system: &mut [f64]) {
-        self.mesh.fill_boundary(
+    fn derivative(&mut self, f: &mut [f64]) {
+        self.mesh.fill_boundary_to_extent(
+            Order::<4>,
+            4,
+            Quadrant,
+            WaveConditions,
+            SystemSliceMut::from_scalar(f),
+        );
+
+        self.mesh.apply(
             ORDER,
             Quadrant,
             WaveConditions,
-            SystemSliceMut::from_scalar(system),
-        );
-    }
-
-    fn derivative(&mut self, system: &[f64], result: &mut [f64]) {
-        let src = SystemSlice::from_scalar(system);
-        let mut dest = SystemSliceMut::from_scalar(result);
-
-        self.mesh.evaluate(
-            ORDER,
-            Quadrant,
             WaveEquation { speed: SPEED },
-            src.rb(),
-            dest.rb_mut(),
+            SystemSliceMut::from_scalar(f),
         );
-
-        self.mesh
-            .weak_boundary(ORDER, Quadrant, WaveConditions, src.rb(), dest.rb_mut());
     }
 }
 
-pub fn main() -> Result<(), Box<dyn std::error::Error>> {
+pub fn main() -> anyhow::Result<()> {
     env_logger::builder()
         .filter_level(log::LevelFilter::Trace)
         .init();
@@ -196,8 +188,6 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Allocate vectors
     let mut tmp = SystemVec::default();
-    let mut update = SystemVec::<Scalar>::default();
-    let mut dissipation = SystemVec::default();
     let mut exact = SystemVec::default();
     let mut error = SystemVec::<Scalar>::default();
 
@@ -219,8 +209,6 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         // Resize vectors
         tmp.resize(mesh.num_nodes());
-        update.resize(mesh.num_nodes());
-        dissipation.resize(mesh.num_nodes());
         exact.resize(mesh.num_nodes());
         error.resize(mesh.num_nodes());
 
@@ -286,14 +274,6 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
             checkpoint.save_field("Analytic", exact.contigious());
             checkpoint.save_field("Error", error.contigious());
 
-            let mut blocks = vec![0; mesh.num_nodes()];
-            mesh.block_debug(&mut blocks);
-            checkpoint.save_int_field("Blocks", &mut blocks);
-
-            let mut interfaces = vec![0; mesh.num_nodes()];
-            mesh.interface_index_debug(3, &mut interfaces);
-            checkpoint.save_int_field("Interfaces", &mut interfaces);
-
             mesh.export_vtu(
                 format!("output/waves/evolution{save_step}.vtu"),
                 &checkpoint,
@@ -302,8 +282,7 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
                     ghost: false,
                     stride: 6,
                 },
-            )
-            .unwrap();
+            )?;
 
             save_step += 1;
         }
@@ -312,23 +291,12 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
         integrator.step(
             h,
             &mut HyperbolicOde { mesh: &mut mesh },
-            system.contigious(),
-            update.contigious_mut(),
+            system.contigious_mut(),
         );
 
         // Compute dissipation
-        mesh.dissipation(
-            DISS_ORDER,
-            Quadrant,
-            system.as_slice(),
-            dissipation.as_mut_slice(),
-        );
-
-        // Add everything together
-        for i in 0..system.contigious().len() {
-            system.contigious_mut()[i] +=
-                update.contigious()[i] + 0.5 * dissipation.contigious()[i];
-        }
+        mesh.fill_boundary(ORDER, Quadrant, WaveConditions, system.as_mut_slice());
+        mesh.dissipation(DISS_ORDER, Quadrant, 0.5, system.as_mut_slice());
 
         step += 1;
         steps_since_regrid += 1;

@@ -501,8 +501,8 @@ impl Decomposition {
         }
     }
 
-    pub fn gauge(
-        Self {
+    pub fn gauge(&self) -> Gauge {
+        let Self {
             pos,
             metric,
             twist,
@@ -513,8 +513,8 @@ impl Decomposition {
             lapse,
             shift,
             ..
-        }: &Self,
-    ) -> Gauge {
+        } = self;
+
         let on_axis = pos[0].abs() <= ON_AXIS;
 
         const F: f64 = 1.0;

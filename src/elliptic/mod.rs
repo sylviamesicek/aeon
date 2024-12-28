@@ -7,7 +7,7 @@ use crate::{
     fd::{Conditions, Engine, Function, Mesh, ScalarConditions},
     ode::{Ode, Rk4},
     prelude::Face,
-    system::{Empty, Scalar, System, SystemSlice, SystemSliceMut},
+    system::{Pair, Scalar, System, SystemSlice, SystemSliceMut},
 };
 
 #[derive(Error, Debug)]
@@ -47,7 +47,7 @@ impl Default for HyperRelaxSolver {
 impl HyperRelaxSolver {
     pub fn new() -> Self {
         Self {
-            tolerance: 10e-5,
+            tolerance: 1e-5,
             max_steps: 100000,
             dampening: 1.0,
             cfl: 0.1,
@@ -73,7 +73,7 @@ impl HyperRelaxSolver {
         mut result: SystemSliceMut<C::System>,
     ) -> Result<(), HyperRelaxError>
     where
-        C::System: Default + Sync,
+        C::System: Default + Clone + Sync,
     {
         // Total number of degreees of freedom in the whole system
         let dimension = result.system().count() * mesh.num_nodes();
@@ -82,8 +82,6 @@ impl HyperRelaxSolver {
 
         // Allocate storage
         let mut data = vec![0.0; 2 * dimension].into_boxed_slice();
-        let mut update = vec![0.0; 2 * dimension].into_boxed_slice();
-
         // Compute minimum spacing and spacing per vertex.
         let min_spacing = mesh.min_spacing();
 
@@ -127,16 +125,6 @@ impl HyperRelaxSolver {
                     u.rb(),
                     result.rb_mut(),
                 );
-
-                // mesh.weak_boundary(
-                //     order,
-                //     boundary.clone(),
-                //     UConditions {
-                //         conditions: conditions.clone(),
-                //     },
-                //     u.rb(),
-                //     result.rb_mut(),
-                // );
 
                 // let mut systems = SystemCheckpoint::default();
                 // systems.save_system(result.rb());
@@ -191,16 +179,11 @@ impl HyperRelaxSolver {
                 deriv: &deriv,
                 spacing_per_vertex: &spacing_per_vertex,
                 min_spacing,
-                system: result.system(),
+                system: &(result.system().clone(), result.system().clone()),
             };
 
             // Take step
-            self.integrator
-                .step(time_step, &mut ode, &data, &mut update);
-
-            for i in 0..data.len() {
-                data[i] += update[i];
-            }
+            self.integrator.step(time_step, &mut ode, &mut data);
 
             if index == self.max_steps - 1 {
                 log::error!(
@@ -248,98 +231,41 @@ impl HyperRelaxSolver {
 }
 
 #[derive(Clone)]
-struct UConditions<C> {
+struct FicticuousConditions<C> {
+    dampening: f64,
     conditions: C,
 }
 
-impl<const N: usize, I: Conditions<N>> Conditions<N> for UConditions<I> {
-    type System = I::System;
+impl<const N: usize, C: Conditions<N>> Conditions<N> for FicticuousConditions<C> {
+    type System = (C::System, C::System);
 
-    fn parity(&self, field: <Self::System as System>::Label, face: Face<N>) -> bool {
-        self.conditions.parity(field, face)
+    fn parity(&self, label: <Self::System as System>::Label, face: Face<N>) -> bool {
+        match label {
+            Pair::First(label) => self.conditions.parity(label, face),
+            Pair::Second(label) => self.conditions.parity(label, face),
+        }
     }
 
     fn radiative(
         &self,
-        field: <Self::System as System>::Label,
+        label: <Self::System as System>::Label,
         position: [f64; N],
         spacing: f64,
     ) -> RadiativeParams {
-        self.conditions.radiative(field, position, spacing)
-    }
-}
-
-/// Wraps the du/dt = v - u * η operation.
-#[derive(Clone)]
-struct UDerivs<'a, const N: usize, S> {
-    dampening: f64,
-    u: SystemSlice<'a, S>,
-    v: SystemSlice<'a, S>,
-
-    spacing_per_vertex: &'a [f64],
-    min_spacing: f64,
-}
-
-impl<'a, const N: usize, S: System> Function<N> for UDerivs<'a, N, S> {
-    type Input = Empty;
-    type Output = S;
-
-    fn evaluate(
-        &self,
-        engine: impl Engine<N>,
-        _input: SystemSlice<Self::Input>,
-        mut output: SystemSliceMut<Self::Output>,
-    ) {
-        let node_range = engine.node_range();
-
-        let spacing_per_vertex = &self.spacing_per_vertex[node_range.clone()];
-        let min_spacing = self.min_spacing;
-
-        for field in output.system().enumerate() {
-            let u = &self.u.field(field)[node_range.clone()];
-            let v = &self.v.field(field)[node_range.clone()];
-
-            let dest = output.field_mut(field);
-
-            for vertex in IndexSpace::new(engine.vertex_size()).iter() {
-                let index = engine.index_from_vertex(vertex);
-                let adaptive = spacing_per_vertex[index] / min_spacing;
-                dest[index] = adaptive * (v[index] - u[index] * self.dampening);
+        match label {
+            Pair::First(label) => self.conditions.radiative(label, position, spacing),
+            Pair::Second(label) => {
+                let mut result = self.conditions.radiative(label, position, spacing);
+                result.target *= self.dampening;
+                result
             }
         }
     }
 }
 
-/// Provides boundary conditions for v. All strong boundary condition commute with the time derivative
-/// and radiative boundary conditions simply need to be multipled by the dampening.
 #[derive(Clone)]
-struct VConditions<C> {
+struct FicticuousDerivs<'a, const N: usize, F> {
     dampening: f64,
-    conditions: C,
-}
-
-impl<const N: usize, I: Conditions<N>> Conditions<N> for VConditions<I> {
-    type System = I::System;
-
-    fn parity(&self, field: <Self::System as System>::Label, face: Face<N>) -> bool {
-        self.conditions.parity(field, face)
-    }
-
-    fn radiative(
-        &self,
-        field: <Self::System as System>::Label,
-        position: [f64; N],
-        spacing: f64,
-    ) -> RadiativeParams {
-        let mut params = self.conditions.radiative(field, position, spacing);
-        params.target *= self.dampening;
-        params
-    }
-}
-
-/// Wraps the c^2 * L{u(x)} operation.
-#[derive(Clone)]
-struct VDerivs<'a, const N: usize, F> {
     function: &'a F,
 
     spacing_per_vertex: &'a [f64],
@@ -347,32 +273,47 @@ struct VDerivs<'a, const N: usize, F> {
 }
 
 impl<'a, const N: usize, S: System, F: Function<N, Input = S, Output = S>> Function<N>
-    for VDerivs<'a, N, F>
+    for FicticuousDerivs<'a, N, F>
 {
-    type Input = S;
-    type Output = S;
+    type Input = (S, S);
+    type Output = (S, S);
 
     fn evaluate(
         &self,
         engine: impl Engine<N>,
         input: SystemSlice<Self::Input>,
-        mut output: SystemSliceMut<Self::Output>,
+        output: SystemSliceMut<Self::Output>,
     ) {
-        let node_range = engine.node_range();
-        let vertex_size = engine.vertex_size();
+        let (uin, vin) = input.split_pair();
+        let (mut uout, mut vout) = output.split_pair();
 
-        let spacing_per_vertex = &self.spacing_per_vertex[node_range.clone()];
+        let spacing_per_vertex = &self.spacing_per_vertex[engine.node_range()];
         let min_spacing = self.min_spacing;
 
-        self.function.evaluate(&engine, input, output.rb_mut());
+        // Find du/dt from the definition v = du/dt + η u
+        for field in uin.system().enumerate() {
+            let u = uin.field(field);
+            let v = vin.field(field);
 
-        for field in output.system().enumerate() {
-            let output = output.field_mut(field);
+            let udest = uout.field_mut(field);
 
-            for vertex in IndexSpace::new(vertex_size).iter() {
+            for vertex in IndexSpace::new(engine.vertex_size()).iter() {
                 let index = engine.index_from_vertex(vertex);
+                let adaptive = spacing_per_vertex[index] / min_spacing;
+                udest[index] = adaptive * (v[index] - u[index] * self.dampening);
+            }
+        }
 
-                output[index] *= spacing_per_vertex[index] / min_spacing;
+        // dv/dt = c^2 Lu
+        self.function.evaluate(&engine, uin, vout.rb_mut());
+
+        for field in vout.system().enumerate() {
+            let vdest = vout.field_mut(field);
+
+            for vertex in IndexSpace::new(engine.vertex_size()).iter() {
+                let index = engine.index_from_vertex(vertex);
+                // Todo speed
+                vdest[index] *= spacing_per_vertex[index] / min_spacing;
             }
         }
     }
@@ -398,7 +339,7 @@ struct FictitiousOde<
     spacing_per_vertex: &'a [f64],
     min_spacing: f64,
 
-    system: &'a C::System,
+    system: &'a (C::System, C::System),
 }
 
 impl<
@@ -409,93 +350,42 @@ impl<
         C: Conditions<N> + Sync,
         F: Function<N, Input = C::System, Output = C::System> + Sync,
     > Ode for FictitiousOde<'a, N, K, B, C, F>
+where
+    C::System: Sync,
 {
     fn dim(&self) -> usize {
         2 * self.dimension
     }
 
-    fn preprocess(&mut self, system: &mut [f64]) {
-        let (u, v) = system.split_at_mut(self.dimension);
+    fn derivative(&mut self, f: &mut [f64]) {
+        let mut f = SystemSliceMut::from_contiguous(f, self.system);
 
+        // Fill strong boundary conditions.
         self.mesh.fill_boundary(
             self.order,
             self.boundary.clone(),
-            UConditions {
+            FicticuousConditions {
+                dampening: self.dampening,
                 conditions: self.conditions.clone(),
             },
-            SystemSliceMut::from_contiguous(u, &self.system),
+            f.rb_mut(),
         );
 
-        self.mesh.fill_boundary(
+        // Compute derivative
+        self.mesh.apply(
             self.order,
             self.boundary.clone(),
-            VConditions {
+            FicticuousConditions {
+                dampening: self.dampening,
                 conditions: self.conditions.clone(),
-                dampening: self.dampening,
             },
-            SystemSliceMut::from_contiguous(v, &self.system),
-        );
-    }
-
-    fn derivative(&mut self, system: &[f64], result: &mut [f64]) {
-        let (udata, vdata) = system.split_at(self.dimension);
-        let u = SystemSlice::from_contiguous(udata, self.system);
-        let v = SystemSlice::from_contiguous(vdata, self.system);
-
-        let (udata, vdata) = result.split_at_mut(self.dimension);
-        let mut dudt = SystemSliceMut::from_contiguous(udata, self.system);
-        let mut dvdt = SystemSliceMut::from_contiguous(vdata, self.system);
-
-        // Compute derivatives
-
-        // Find du/dt from the definition v = du/dt + η u
-        self.mesh.evaluate(
-            self.order,
-            self.boundary.clone(),
-            UDerivs {
+            FicticuousDerivs {
                 dampening: self.dampening,
-                u: u.rb(),
-                v: v.rb(),
                 spacing_per_vertex: &self.spacing_per_vertex,
                 min_spacing: self.min_spacing,
-            },
-            SystemSlice::empty(),
-            dudt.rb_mut(),
-        );
-
-        // dv/dt = c^2 Lu
-        self.mesh.evaluate(
-            self.order,
-            self.boundary.clone(),
-            VDerivs {
                 function: self.deriv,
-                spacing_per_vertex: &self.spacing_per_vertex,
-                min_spacing: self.min_spacing,
             },
-            u.rb(),
-            dvdt.rb_mut(),
-        );
-
-        // Apply Outer boundary conditions
-        self.mesh.weak_boundary(
-            self.order,
-            self.boundary.clone(),
-            UConditions {
-                conditions: self.conditions.clone(),
-            },
-            u,
-            dudt,
-        );
-
-        self.mesh.weak_boundary(
-            self.order,
-            self.boundary.clone(),
-            VConditions {
-                dampening: self.dampening,
-                conditions: self.conditions.clone(),
-            },
-            v,
-            dvdt,
+            f,
         );
     }
 }

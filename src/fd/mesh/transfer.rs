@@ -1,10 +1,10 @@
-use aeon_basis::{Boundary, BoundaryKind, Condition, Kernels};
-use aeon_geometry::{faces, AxisMask, Face, IndexSpace, Side, TreeBlockNeighbor, TreeCellNeighbor};
+use aeon_basis::{Boundary, Kernels};
+use aeon_geometry::{AxisMask, IndexSpace, Side, TreeBlockNeighbor, TreeCellNeighbor};
 use reborrow::ReborrowMut;
 use std::{array, cmp::Ordering, ops::Range};
 
 use crate::{
-    fd::{Conditions, Engine, FdEngine, Mesh, ScalarConditions, SystemBC},
+    fd::{Conditions, Mesh, SystemBC},
     shared::SharedSlice,
     system::{System, SystemSlice, SystemSliceMut},
 };
@@ -72,7 +72,7 @@ impl<const N: usize> Mesh<N> {
     }
 
     /// Transfers data from an old version of the mesh to the new refined version.
-    pub fn transfer_system<K: Kernels, B: Boundary<N> + Sync, S: System>(
+    pub fn transfer_system<K: Kernels, B: Boundary<N> + Sync, S: System + Sync>(
         &mut self,
         _order: K,
         boundary: B,
@@ -225,22 +225,9 @@ impl<const N: usize> Mesh<N> {
         self.fill_boundary_to_extent(order, self.ghost, boundary, conditions, system);
     }
 
-    pub fn fill_boundary_scalar<K: Kernels, B: Boundary<N> + Sync, C: Condition<N> + Sync>(
-        &mut self,
-        order: K,
-        boundary: B,
-        condition: C,
-        system: &mut [f64],
-    ) {
-        self.fill_boundary_to_extent(
-            order,
-            self.ghost,
-            boundary,
-            ScalarConditions(condition),
-            system.into(),
-        );
-    }
-
+    /// Enforces strong boundary conditions, only filling ghost nodes if those nodes are within `extent`
+    /// of a physical node. This is useful if one is using Kriss-Olgier dissipation, where dissipation
+    /// and derivatives use different order stencils.
     pub fn fill_boundary_to_extent<K: Kernels, B: Boundary<N> + Sync, C: Conditions<N> + Sync>(
         &mut self,
         order: K,
@@ -411,112 +398,6 @@ impl<const N: usize> Mesh<N> {
                 }
             }
         });
-    }
-
-    /// Enforce weak boundary conditions on the time derivative of a system.
-    pub fn weak_boundary<O: Kernels + Sync, B: Boundary<N> + Sync, C: Conditions<N> + Sync>(
-        &mut self,
-        order: O,
-        boundary: B,
-        conditions: C,
-        source: SystemSlice<'_, C::System>,
-        deriv: SystemSliceMut<'_, C::System>,
-    ) {
-        let deriv = deriv.into_shared();
-
-        self.block_compute(|mesh, store, block| {
-            let boundary = mesh.block_boundary(block, boundary.clone());
-            let bounds = mesh.blocks.bounds(block);
-            let space = mesh.block_space(block);
-            let nodes = mesh.block_nodes(block);
-            let vertex_size = space.inner_size();
-
-            let block_source = source.slice(nodes.clone());
-            let mut block_deriv = unsafe { deriv.slice_mut(nodes.clone()) };
-
-            let engine = FdEngine {
-                space: space.clone(),
-                bounds,
-                order,
-                boundary: boundary.clone(),
-                store,
-                range: nodes.clone(),
-            };
-            let spacing = engine.min_spacing();
-
-            for face in faces::<N>() {
-                if boundary.kind(face) != BoundaryKind::Radiative {
-                    continue;
-                }
-
-                // Sommerfeld radiative boundary conditions.
-                for vertex in IndexSpace::new(vertex_size).face(face).iter() {
-                    // *************************
-                    // At vertex
-
-                    let position: [f64; N] = engine.position(vertex);
-                    let r = position.iter().map(|&v| v * v).sum::<f64>().sqrt();
-                    let index = engine.index_from_vertex(vertex);
-
-                    // *************************
-                    // Inner
-
-                    let mut inner = vertex;
-
-                    // Find innter vertex for approximating higher order r dependence
-                    for axis in 0..N {
-                        if boundary.kind(Face::negative(axis)) == BoundaryKind::Radiative
-                            && vertex[axis] == 0
-                        {
-                            inner[axis] += 1;
-                        }
-
-                        if boundary.kind(Face::positive(axis)) == BoundaryKind::Radiative
-                            && vertex[axis] == vertex_size[axis] - 1
-                        {
-                            inner[axis] -= 1;
-                        }
-                    }
-
-                    let inner_position = engine.position(inner);
-                    let inner_r = inner_position.iter().map(|&v| v * v).sum::<f64>().sqrt();
-                    let inner_index = engine.index_from_vertex(inner);
-
-                    for field in deriv.system().enumerate() {
-                        let source = block_source.field(field);
-                        let deriv = block_deriv.field_mut(field);
-
-                        let params = conditions.radiative(field, position, spacing);
-
-                        // Inner R dependence
-                        let mut inner_advection = source[inner_index] - params.target;
-
-                        for axis in 0..N {
-                            let derivative = engine.derivative(source, axis, inner);
-                            inner_advection += inner_position[axis] * derivative;
-                        }
-
-                        inner_advection *= params.speed;
-
-                        let k = inner_r
-                            * inner_r
-                            * inner_r
-                            * (deriv[inner_index] + inner_advection / inner_r);
-
-                        // Vertex
-                        let mut advection = source[index] - params.target;
-
-                        for axis in 0..N {
-                            let derivative = engine.derivative(source, axis, vertex);
-                            advection += position[axis] * derivative;
-                        }
-
-                        advection *= params.speed;
-                        deriv[index] = -advection / r + k / (r * r * r);
-                    }
-                }
-            }
-        })
     }
 
     /// Stores the index of the block which owns each individual node in a debug vector.

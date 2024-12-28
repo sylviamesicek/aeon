@@ -24,7 +24,7 @@ pub mod prelude {
     };
     pub use crate::lac::{BiCGStabConfig, BiCGStabSolver, IdentityMap, LinearMap, LinearSolver};
     pub use crate::ode::{ForwardEuler, Ode, Rk4};
-    pub use crate::system::{Empty, Pair, Scalar, SystemSlice, SystemSliceMut, SystemVec};
+    pub use crate::system::{Empty, Pair, Scalar, System, SystemSlice, SystemSliceMut, SystemVec};
     pub use aeon_basis::{Boundary, BoundaryKind, Condition, Gradient, Hessian, Order, Value};
     pub use aeon_geometry::{Face, IndexSpace, Rectangle};
     pub use aeon_macros::SystemLabel;

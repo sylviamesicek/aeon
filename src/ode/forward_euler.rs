@@ -3,7 +3,7 @@ use super::Ode;
 /// Standard forward Euler Integrator.
 #[derive(Clone, Debug, Default)]
 pub struct ForwardEuler {
-    k1: Vec<f64>,
+    tmp: Vec<f64>,
 }
 
 impl ForwardEuler {
@@ -11,25 +11,18 @@ impl ForwardEuler {
         Self::default()
     }
 
-    pub fn step<Problem: Ode>(
-        &mut self,
-        h: f64,
-        derivs: &mut Problem,
-        system: &[f64],
-        update: &mut [f64],
-    ) {
-        assert!(system.len() == update.len());
-
+    pub fn step<Problem: Ode>(&mut self, h: f64, derivs: &mut Problem, system: &mut [f64]) {
         let dim = system.len();
-        self.k1.resize(dim, 0.0);
-        // K1
-        update.copy_from_slice(system);
-        derivs.preprocess(update);
-        derivs.derivative(update, &mut self.k1);
+        assert!(system.len() == dim);
 
-        // Compute total step
+        self.tmp.resize(dim, 0.0);
+        // K1
+        derivs.copy_slice(&system, &mut self.tmp);
+        derivs.derivative(&mut self.tmp);
+
+        // Add update to system
         for i in 0..dim {
-            update[i] = h * self.k1[i];
+            system[i] += h * self.tmp[i];
         }
     }
 }

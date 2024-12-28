@@ -136,34 +136,6 @@ pub struct SystemSlice<'a, S> {
     pub(crate) system: &'a S,
 }
 
-impl<'a> SystemSlice<'a, Empty> {
-    pub fn empty() -> Self {
-        Self {
-            ptr: std::ptr::null(),
-            total: 0,
-            offset: 0,
-            length: 0,
-            system: &Empty,
-        }
-    }
-}
-
-impl<'a> SystemSlice<'a, Scalar> {
-    pub fn from_scalar(data: &'a [f64]) -> Self {
-        Self::from_contiguous(data, &Scalar)
-    }
-
-    pub fn into_scalar(self) -> &'a [f64] {
-        unsafe { std::slice::from_raw_parts(self.ptr.add(self.offset), self.length) }
-    }
-}
-
-impl<'a> From<&'a [f64]> for SystemSlice<'a, Scalar> {
-    fn from(value: &'a [f64]) -> Self {
-        Self::from_scalar(value)
-    }
-}
-
 impl<'a, S: System> SystemSlice<'a, S> {
     /// Builds a system slice from a contiguous chunk of data.
     pub fn from_contiguous(data: &'a [f64], system: &'a S) -> Self {
@@ -267,22 +239,6 @@ pub struct SystemSliceMut<'a, S> {
     pub(crate) offset: usize,
     pub(crate) length: usize,
     pub(crate) system: &'a S,
-}
-
-impl<'a> SystemSliceMut<'a, Scalar> {
-    pub fn from_scalar(data: &'a mut [f64]) -> Self {
-        Self::from_contiguous(data, &Scalar)
-    }
-
-    pub fn into_scalar(self) -> &'a mut [f64] {
-        unsafe { std::slice::from_raw_parts_mut(self.ptr.add(self.offset), self.length) }
-    }
-}
-
-impl<'a> From<&'a mut [f64]> for SystemSliceMut<'a, Scalar> {
-    fn from(value: &'a mut [f64]) -> Self {
-        Self::from_scalar(value)
-    }
 }
 
 impl<'a, S: System> SystemSliceMut<'a, S> {
@@ -436,8 +392,8 @@ impl<'long, 'short, S> ReborrowMut<'short> for SystemSliceMut<'long, S> {
     }
 }
 
-unsafe impl<'a, S> Send for SystemSliceMut<'a, S> {}
-unsafe impl<'a, S> Sync for SystemSliceMut<'a, S> {}
+unsafe impl<'a, S: Sync> Send for SystemSliceMut<'a, S> {}
+unsafe impl<'a, S: Sync> Sync for SystemSliceMut<'a, S> {}
 
 /// An unsafe pointer to a range of a system.
 #[derive(Debug, Clone)]
@@ -495,8 +451,8 @@ impl<'a, S: System> SystemSliceShared<'a, S> {
     }
 }
 
-unsafe impl<'a, S> Send for SystemSliceShared<'a, S> {}
-unsafe impl<'a, S> Sync for SystemSliceShared<'a, S> {}
+unsafe impl<'a, S: Sync> Send for SystemSliceShared<'a, S> {}
+unsafe impl<'a, S: Sync> Sync for SystemSliceShared<'a, S> {}
 
 /// Converts genetic range to a concrete range type.
 fn bounds_to_range<R>(total: usize, range: R) -> Range<usize>

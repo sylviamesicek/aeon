@@ -5,6 +5,7 @@ pub type Rank2 = [[f64; 2]; 2];
 pub type Rank3 = [[[f64; 2]; 2]; 2];
 pub type Rank4 = [[[[f64; 2]; 2]; 2]; 2];
 
+/// All degrees of freedom re
 #[repr(C)]
 #[derive(Clone, Debug)]
 pub struct HyperbolicSystem {
@@ -81,7 +82,7 @@ pub struct HyperbolicSystem {
 }
 
 impl HyperbolicSystem {
-    pub fn axisymmetric_system(&self) -> axi::System {
+    pub fn axisymmetric_system(&self, scalar_fields: &[ScalarFieldSystem]) -> axi::System {
         use aeon_tensor::*;
 
         let metric = Metric::new(MatrixFieldC2 {
@@ -95,6 +96,26 @@ impl HyperbolicSystem {
             derivs: Tensor::from(self.seed_derivs()),
             second_derivs: Tensor::from(self.seed_second_derivs()),
         };
+
+        let mut source = axi::StressEnergy::vacuum();
+
+        for sf in scalar_fields {
+            let sf = axi::StressEnergy::scalar(&metric, sf.axisymmetric_system());
+
+            source.energy += sf.energy;
+            source.momentum[0] += sf.momentum[0];
+            source.momentum[1] += sf.momentum[1];
+
+            source.stress[[0, 0]] += sf.stress[[0, 0]];
+            source.stress[[0, 1]] += sf.stress[[0, 1]];
+            source.stress[[1, 1]] += sf.stress[[1, 1]];
+            source.stress[[1, 0]] += sf.stress[[1, 0]];
+
+            source.angular_momentum += sf.angular_momentum;
+            source.angular_shear[[0]] += sf.angular_shear[[0]];
+            source.angular_shear[[1]] += sf.angular_shear[[1]];
+            source.angular_stress += sf.angular_stress;
+        }
 
         axi::System {
             metric,
@@ -183,27 +204,108 @@ impl HyperbolicSystem {
     }
 }
 
-// #[repr(C)]
-// #[derive(Clone, Debug)]
-// pub struct HyperbolicDerivs {
-//     pub grr_t: f64,
-//     pub grz_t: f64,
-//     pub gzz_t: f64,
-//     pub s_t: f64,
+#[repr(C)]
+#[derive(Clone, Default)]
+pub struct ScalarFieldSystem {
+    pub phi: f64,
+    pub phi_r: f64,
+    pub phi_z: f64,
+    pub phi_rr: f64,
+    pub phi_rz: f64,
+    pub phi_zz: f64,
 
-//     pub krr_t: f64,
-//     pub krz_t: f64,
-//     pub kzz_t: f64,
-//     pub y_t: f64,
+    pub pi: f64,
+    pub pi_r: f64,
+    pub pi_z: f64,
 
-//     pub lapse_t: f64,
-//     pub shiftr_t: f64,
-//     pub shiftz_t: f64,
+    pub mass: f64,
+}
 
-//     pub theta_t: f64,
-//     pub zr_t: f64,
-//     pub zz_t: f64,
-// }
+impl ScalarFieldSystem {
+    pub fn axisymmetric_system(&self) -> axi::ScalarFieldSystem {
+        use aeon_tensor::*;
+
+        axi::ScalarFieldSystem {
+            phi: ScalarFieldC2 {
+                value: self.phi,
+                derivs: Tensor::from([self.phi_r, self.phi_z]),
+                second_derivs: Tensor::from([
+                    [self.phi_rr, self.phi_rz],
+                    [self.phi_rz, self.phi_zz],
+                ]),
+            },
+            pi: ScalarFieldC1 {
+                value: self.pi,
+                derivs: Tensor::from([self.pi_r, self.pi_z]),
+            },
+            mass: self.mass,
+        }
+    }
+}
+
+#[repr(C)]
+#[derive(Clone, Debug, Default)]
+pub struct HyperbolicDerivs {
+    pub grr_t: f64,
+    pub grz_t: f64,
+    pub gzz_t: f64,
+    pub s_t: f64,
+
+    pub krr_t: f64,
+    pub krz_t: f64,
+    pub kzz_t: f64,
+    pub y_t: f64,
+
+    pub lapse_t: f64,
+    pub shiftr_t: f64,
+    pub shiftz_t: f64,
+
+    pub theta_t: f64,
+    pub zr_t: f64,
+    pub zz_t: f64,
+}
+
+#[derive(Clone, Default)]
+pub struct ScalarFieldDerivs {
+    pub phi: f64,
+    pub pi: f64,
+}
+
+pub fn hyperbolic(
+    system: HyperbolicSystem,
+    scalar_fields: &[ScalarFieldSystem],
+    pos: [f64; 2],
+    derivs: &mut HyperbolicDerivs,
+    scalar_field_derivs: &mut [ScalarFieldDerivs],
+) {
+    debug_assert!(scalar_fields.len() == scalar_field_derivs.len());
+
+    let decomp = axi::Decomposition::new(pos, system.axisymmetric_system(scalar_fields));
+    let evolve = decomp.evolution();
+    let gauge = decomp.gauge();
+
+    derivs.grr_t = evolve.g[[0, 0]];
+    derivs.grz_t = evolve.g[[0, 1]];
+    derivs.gzz_t = evolve.g[[1, 1]];
+    derivs.s_t = evolve.seed;
+    derivs.krr_t = evolve.k[[0, 0]];
+    derivs.krz_t = evolve.k[[0, 1]];
+    derivs.kzz_t = evolve.k[[1, 1]];
+    derivs.y_t = evolve.y;
+    derivs.lapse_t = gauge.lapse;
+    derivs.shiftr_t = gauge.shift[[0]];
+    derivs.shiftz_t = gauge.shift[[1]];
+    derivs.theta_t = evolve.theta;
+    derivs.zr_t = evolve.z[[0]];
+    derivs.zz_t = evolve.z[[1]];
+
+    for i in 0..scalar_fields.len() {
+        let scalar = decomp.scalar(scalar_fields[i].axisymmetric_system());
+
+        scalar_field_derivs[i].phi = scalar.phi;
+        scalar_field_derivs[i].pi = scalar.pi;
+    }
+}
 
 // pub fn hyperbolic(sys: HyperbolicSystem, pos: [f64; 2]) -> HyperbolicDerivs {
 //     let decomp = axi::Decomposition::new(pos, sys.axisymmetric_system());

@@ -95,7 +95,10 @@ pub struct EVConfig {
     #[serde(default = "default_diss_order")]
     pub diss_order: usize,
 
+    /// CFL factor
     pub cfl: f64,
+    /// Amount of Kriss-Olgier Dissipation to use
+    pub dissipation: f64,
 
     pub max_time: f64,
     pub max_steps: usize,
@@ -219,29 +222,21 @@ pub enum Source {
     },
 }
 
-// /// Describes Brill-type initial data parameters.
-// #[derive(Serialize, Deserialize, Debug)]
-// pub struct Brill {
-//     pub amplitude: f64,
-//     pub sigma: (f64, f64),
-// }
-
-// #[derive(Serialize, Deserialize, Debug)]
-// pub struct ScalarField {
-//     pub amplitude: f64,
-//     pub sigma: (f64, f64),
-// }
-
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Regrid {
+    /// Any cell with error smaller than this will be coarsened.
     pub coarsen_tolerance: f64,
+    /// Any cell with error larger than this will be refined.
     pub refine_tolerance: f64,
+    /// How many steps do we take between checking?
     pub flag_interval: usize,
+    /// Maximum number of levels allowed.
     pub max_levels: usize,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Visualize {
+    /// How often do we save a visualization?
     pub save_interval: f64,
     pub stride: usize,
 }

@@ -1,10 +1,9 @@
 use std::{path::PathBuf, process::ExitCode};
 
-use aeon::{prelude::*, system::System};
-use aeon_tensor::axisymmetry as axi;
+use aeon::prelude::*;
 use anyhow::{anyhow, Context as _, Result};
 use clap::{Arg, Command};
-use reborrow::{Reborrow as _, ReborrowMut as _};
+use reborrow::ReborrowMut as _;
 use sharedaxi::{
     import_from_toml, Constraint, EVConfig, Field, FieldConditions, Fields, Gauge, Metric,
     Quadrant, ScalarField, Visualize,
@@ -12,7 +11,9 @@ use sharedaxi::{
 
 mod tensor;
 
-pub use tensor::HyperbolicSystem;
+pub use tensor::{
+    hyperbolic, HyperbolicDerivs, HyperbolicSystem, ScalarFieldDerivs, ScalarFieldSystem,
+};
 
 const ORDER: Order<4> = Order::<4>;
 const DISS_ORDER: Order<6> = Order::<6>;
@@ -30,8 +31,6 @@ impl Function<2> for FieldDerivs {
         input: SystemSlice<Self::Input>,
         mut output: SystemSliceMut<Self::Output>,
     ) {
-        let num_scalar_fields = output.system().num_scalar_fields();
-
         let grr_f = input.field(Field::Metric(Metric::Grr));
         let grz_f = input.field(Field::Metric(Metric::Grz));
         let gzz_f = input.field(Field::Metric(Metric::Gzz));
@@ -50,8 +49,9 @@ impl Function<2> for FieldDerivs {
         let zr_f = input.field(Field::Constraint(Constraint::Zr));
         let zz_f = input.field(Field::Constraint(Constraint::Zz));
 
-        let sf_sources =
-            engine.alloc::<axi::ScalarFieldSystem>(output.system().num_scalar_fields());
+        let num_scalar_fields = output.system().num_scalar_fields();
+        let scalar_fields = engine.alloc::<ScalarFieldSystem>(num_scalar_fields);
+        let scalar_field_derivs = engine.alloc::<ScalarFieldDerivs>(num_scalar_fields);
 
         for vertex in IndexSpace::new(engine.vertex_size()).iter() {
             let pos = engine.position(vertex);
@@ -107,30 +107,19 @@ impl Function<2> for FieldDerivs {
                 let phi = input.field(Field::ScalarField(ScalarField::Phi, i));
                 let pi = input.field(Field::ScalarField(ScalarField::Pi, i));
 
-                let phi_r = engine.derivative(phi, 0, vertex);
-                let phi_z = engine.derivative(phi, 1, vertex);
+                let scalar_field = &mut scalar_fields[i];
 
-                let phi_rr = engine.second_derivative(phi, 0, vertex);
-                let phi_rz = engine.mixed_derivative(phi, 0, 1, vertex);
-                let phi_zz = engine.second_derivative(phi, 1, vertex);
+                scalar_field.phi = phi[index];
+                scalar_field.phi_r = engine.derivative(phi, 0, vertex);
+                scalar_field.phi_z = engine.derivative(phi, 1, vertex);
+                scalar_field.phi_rr = engine.second_derivative(phi, 0, vertex);
+                scalar_field.phi_rz = engine.mixed_derivative(phi, 0, 1, vertex);
+                scalar_field.phi_zz = engine.second_derivative(phi, 1, vertex);
 
-                let pi_r = engine.derivative(pi, 0, vertex);
-                let pi_z = engine.derivative(pi, 1, vertex);
+                scalar_field.pi_r = engine.derivative(pi, 0, vertex);
+                scalar_field.pi_z = engine.derivative(pi, 1, vertex);
 
-                use aeon_tensor::*;
-
-                sf_sources[i] = axi::ScalarFieldSystem {
-                    phi: ScalarFieldC2 {
-                        value: phi[index],
-                        derivs: Tensor::from([phi_r, phi_z]),
-                        second_derivs: Tensor::from([[phi_rr, phi_rz], [phi_rz, phi_zz]]),
-                    },
-                    pi: ScalarFieldC1 {
-                        value: pi[index],
-                        derivs: Tensor::from([pi_r, pi_z]),
-                    },
-                    mass,
-                };
+                scalar_field.mass = mass;
             }
 
             let system = HyperbolicSystem {
@@ -196,111 +185,31 @@ impl Function<2> for FieldDerivs {
                 shiftz_z,
             };
 
-            let decomp = {
-                use aeon_tensor::*;
+            let mut derivs = HyperbolicDerivs::default();
+            hyperbolic(system, scalar_fields, pos, &mut derivs, scalar_field_derivs);
 
-                let metric = Metric::new(MatrixFieldC2 {
-                    value: Tensor::from(system.metric()),
-                    derivs: Tensor::from(system.metric_derivs()),
-                    second_derivs: Tensor::from(system.metric_second_derivs()),
-                });
+            output.field_mut(Field::Metric(Metric::Grr))[index] = derivs.grr_t;
+            output.field_mut(Field::Metric(Metric::Grz))[index] = derivs.grz_t;
+            output.field_mut(Field::Metric(Metric::Gzz))[index] = derivs.gzz_t;
+            output.field_mut(Field::Metric(Metric::S))[index] = derivs.s_t;
 
-                let seed = ScalarFieldC2 {
-                    value: system.seed(),
-                    derivs: Tensor::from(system.seed_derivs()),
-                    second_derivs: Tensor::from(system.seed_second_derivs()),
-                };
+            output.field_mut(Field::Metric(Metric::Krr))[index] = derivs.krr_t;
+            output.field_mut(Field::Metric(Metric::Krz))[index] = derivs.krz_t;
+            output.field_mut(Field::Metric(Metric::Kzz))[index] = derivs.kzz_t;
+            output.field_mut(Field::Metric(Metric::Y))[index] = derivs.y_t;
 
-                let mut source = axi::StressEnergy::vacuum();
+            output.field_mut(Field::Constraint(Constraint::Theta))[index] = derivs.theta_t;
+            output.field_mut(Field::Constraint(Constraint::Zr))[index] = derivs.zr_t;
+            output.field_mut(Field::Constraint(Constraint::Zz))[index] = derivs.zz_t;
 
-                for i in 0..num_scalar_fields {
-                    let sf = axi::StressEnergy::scalar(&metric, sf_sources[i].clone());
-
-                    source.energy += sf.energy;
-                    source.momentum[0] += sf.momentum[0];
-                    source.momentum[1] += sf.momentum[1];
-
-                    source.stress[[0, 0]] += sf.stress[[0, 0]];
-                    source.stress[[0, 1]] += sf.stress[[0, 1]];
-                    source.stress[[1, 1]] += sf.stress[[1, 1]];
-                    source.stress[[1, 0]] += sf.stress[[1, 0]];
-
-                    source.angular_momentum += sf.angular_momentum;
-                    source.angular_shear[[0]] += sf.angular_shear[[0]];
-                    source.angular_shear[[1]] += sf.angular_shear[[1]];
-                    source.angular_stress += sf.angular_stress;
-                }
-
-                axi::Decomposition::new(
-                    pos,
-                    axi::System {
-                        metric,
-                        seed,
-                        k: MatrixFieldC1 {
-                            value: Tensor::from(system.extrinsic()),
-                            derivs: Tensor::from(system.extrinsic_derivs()),
-                        },
-                        y: ScalarFieldC1 {
-                            value: system.y,
-                            derivs: Tensor::from([system.y_r, system.y_z]),
-                        },
-                        theta: ScalarFieldC1 {
-                            value: system.theta,
-                            derivs: Tensor::from([system.theta_r, system.theta_z]),
-                        },
-                        z: VectorFieldC1 {
-                            value: Tensor::from([system.zr, system.zz]),
-                            derivs: Tensor::from([
-                                [system.zr_r, system.zr_z],
-                                [system.zz_r, system.zz_z],
-                            ]),
-                        },
-                        lapse: ScalarFieldC2 {
-                            value: system.lapse,
-                            derivs: Tensor::from([system.lapse_r, system.lapse_z]),
-                            second_derivs: Tensor::from([
-                                [system.lapse_rr, system.lapse_rz],
-                                [system.lapse_rz, system.lapse_zz],
-                            ]),
-                        },
-                        shift: VectorFieldC1 {
-                            value: Tensor::from([system.shiftr, system.shiftz]),
-                            derivs: Tensor::from([
-                                [system.shiftr_r, system.shiftr_z],
-                                [system.shiftz_r, system.shiftz_z],
-                            ]),
-                        },
-                        source,
-                    },
-                )
-            };
-
-            let evolve = axi::Decomposition::evolution(&decomp);
-            let gauge = axi::Decomposition::gauge(&decomp);
-
-            output.field_mut(Field::Metric(Metric::Grr))[index] = evolve.g[[0, 0]];
-            output.field_mut(Field::Metric(Metric::Grz))[index] = evolve.g[[0, 1]];
-            output.field_mut(Field::Metric(Metric::Gzz))[index] = evolve.g[[1, 1]];
-            output.field_mut(Field::Metric(Metric::S))[index] = evolve.seed;
-
-            output.field_mut(Field::Metric(Metric::Krr))[index] = evolve.k[[0, 0]];
-            output.field_mut(Field::Metric(Metric::Krz))[index] = evolve.k[[0, 1]];
-            output.field_mut(Field::Metric(Metric::Kzz))[index] = evolve.k[[1, 1]];
-            output.field_mut(Field::Metric(Metric::Y))[index] = evolve.y;
-
-            output.field_mut(Field::Constraint(Constraint::Theta))[index] = evolve.theta;
-            output.field_mut(Field::Constraint(Constraint::Zr))[index] = evolve.z[[0]];
-            output.field_mut(Field::Constraint(Constraint::Zz))[index] = evolve.z[[1]];
-
-            output.field_mut(Field::Gauge(Gauge::Lapse))[index] = gauge.lapse;
-            output.field_mut(Field::Gauge(Gauge::Shiftr))[index] = gauge.shift[[0]];
-            output.field_mut(Field::Gauge(Gauge::Shiftz))[index] = gauge.shift[[1]];
+            output.field_mut(Field::Gauge(Gauge::Lapse))[index] = derivs.lapse_t;
+            output.field_mut(Field::Gauge(Gauge::Shiftr))[index] = derivs.shiftr_t;
+            output.field_mut(Field::Gauge(Gauge::Shiftz))[index] = derivs.shiftz_t;
 
             for i in 0..num_scalar_fields {
-                let scalar = axi::Decomposition::scalar(&decomp, sf_sources[i].clone());
-
-                output.field_mut(Field::ScalarField(ScalarField::Phi, i))[index] = scalar.phi;
-                output.field_mut(Field::ScalarField(ScalarField::Pi, i))[index] = scalar.pi;
+                let derivs = &scalar_field_derivs[i];
+                output.field_mut(Field::ScalarField(ScalarField::Phi, i))[index] = derivs.phi;
+                output.field_mut(Field::ScalarField(ScalarField::Pi, i))[index] = derivs.pi;
             }
         }
     }
@@ -316,24 +225,15 @@ impl<'a> Ode for FieldEvolution<'a> {
         self.mesh.num_nodes() * self.system.count()
     }
 
-    fn preprocess(&mut self, data: &mut [f64]) {
-        self.mesh.fill_boundary(
-            ORDER,
-            Quadrant,
-            FieldConditions,
-            SystemSliceMut::from_contiguous(data, &self.system),
-        );
-    }
-
-    fn derivative(&mut self, f: &[f64], df: &mut [f64]) {
-        let src = SystemSlice::from_contiguous(f, self.system);
-        let mut dest = SystemSliceMut::from_contiguous(df, self.system);
-
+    fn derivative(&mut self, f: &mut [f64]) {
+        let mut f = SystemSliceMut::from_contiguous(f, self.system);
+        // Fill ghost nodes
         self.mesh
-            .evaluate(ORDER, Quadrant, FieldDerivs, src.rb(), dest.rb_mut());
+            .fill_boundary_to_extent(ORDER, 4, Quadrant, FieldConditions, f.rb_mut());
 
+        // Apply operator
         self.mesh
-            .weak_boundary(ORDER, Quadrant, FieldConditions, src.rb(), dest.rb_mut());
+            .apply(ORDER, Quadrant, FieldConditions, FieldDerivs, f.rb_mut());
     }
 }
 
@@ -400,9 +300,10 @@ pub fn evolution() -> Result<bool> {
 
     // Load fields
     let mut fields = checkpoint.read_system_ser::<Fields>();
+    let system = fields.system().clone();
     // Temporary data
-    let mut update = SystemVec::new(fields.system().clone());
-    let mut dissipation = SystemVec::new(fields.system().clone());
+    let mut update = SystemVec::new(system.clone());
+    let mut dissipation = SystemVec::new(system.clone());
 
     // Integrate
     let mut integrator = Rk4::new();
@@ -417,6 +318,7 @@ pub fn evolution() -> Result<bool> {
     let max_steps = config.max_steps;
     let max_time = config.max_time;
     let cfl = config.cfl;
+    let diss = config.dissipation;
     let regrid_steps = config.regrid.flag_interval;
     let lower = config.regrid.coarsen_tolerance;
     let upper = config.regrid.refine_tolerance;
@@ -492,7 +394,6 @@ pub fn evolution() -> Result<bool> {
 
             // let num_refine = mesh.num_refine_cells();
             // let num_coarsen = mesh.num_coarsen_cells();
-
             mesh.regrid();
 
             // log::trace!(
@@ -503,14 +404,13 @@ pub fn evolution() -> Result<bool> {
             // );
 
             // Copy system into tmp scratch space (provieded by dissipation).
-            dissipation
-                .contigious_mut()
-                .copy_from_slice(fields.contigious());
+            integrator.tmp().resize(fields.contigious().len(), 0.0);
+            integrator.tmp().copy_from_slice(fields.contigious());
             fields.resize(mesh.num_nodes());
             mesh.transfer_system(
                 ORDER,
                 Quadrant,
-                dissipation.as_slice(),
+                SystemSlice::from_contiguous(integrator.tmp(), &system),
                 fields.as_mut_slice(),
             );
 
@@ -573,27 +473,14 @@ pub fn evolution() -> Result<bool> {
             h,
             &mut FieldEvolution {
                 mesh: &mut mesh,
-                system: fields.system(),
+                system: &system,
             },
-            fields.contigious(),
-            update.contigious_mut(),
+            fields.contigious_mut(),
         );
 
         // Compute dissipation
-        mesh.dissipation(
-            DISS_ORDER,
-            Quadrant,
-            fields.as_slice(),
-            dissipation.as_mut_slice(),
-        );
-
-        // Add everything together
-        mesh.add_assign_fma(
-            update.as_slice(),
-            0.5,
-            dissipation.as_slice(),
-            fields.as_mut_slice(),
-        );
+        mesh.fill_boundary(ORDER, Quadrant, FieldConditions, fields.as_mut_slice());
+        mesh.dissipation(DISS_ORDER, Quadrant, diss, fields.as_mut_slice());
 
         step += 1;
         steps_since_regrid += 1;

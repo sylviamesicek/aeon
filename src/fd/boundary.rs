@@ -73,6 +73,8 @@ impl<const N: usize, I: Condition<N>> Conditions<N> for ScalarConditions<I> {
     }
 }
 
+/// Transfers a set of `Conditions<N>` into a single `Condition<N>` by only applying the set of conditions
+/// to a single field.
 #[derive(Clone)]
 pub struct SystemCondition<const N: usize, C: Conditions<N>> {
     conditions: C,

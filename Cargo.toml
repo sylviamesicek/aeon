@@ -80,6 +80,7 @@ vtkio = "0.6"
 
 [dev-dependencies]
 env_logger.workspace = true
+anyhow.workspace = true
 
 
 [[example]]

@@ -1,11 +1,12 @@
 use std::array;
 
-use aeon_basis::{Boundary, Kernels};
+use aeon_basis::{Boundary, BoundaryKind, Kernels};
 use aeon_geometry::{faces, Face, FaceMask, IndexSpace, NULL};
-use rayon::iter::{ParallelBridge, ParallelIterator};
+// use rayon::iter::{ParallelBridge, ParallelIterator};
+use reborrow::{Reborrow, ReborrowMut as _};
 
 use crate::{
-    fd::{Engine, FdEngine, FdIntEngine, Function, Projection, ProjectionAsFunction},
+    fd::{Conditions, Engine, FdEngine, FdIntEngine, Function, Projection, ProjectionAsFunction},
     shared::SharedSlice,
     system::{Scalar, System, SystemSlice, SystemSliceMut},
 };
@@ -21,7 +22,10 @@ impl<const N: usize> Mesh<N> {
         function: P,
         source: SystemSlice<'_, P::Input>,
         dest: SystemSliceMut<'_, P::Output>,
-    ) {
+    ) where
+        P::Input: Sync,
+        P::Output: Sync,
+    {
         let dest = dest.into_shared();
 
         self.block_compute(|mesh, store, block| {
@@ -59,6 +63,320 @@ impl<const N: usize> Mesh<N> {
         });
     }
 
+    pub(crate) fn is_interior(boundary: &impl Boundary<N>) -> bool {
+        let mut result = true;
+
+        for axis in 0..N {
+            result &= boundary.kind(Face::negative(axis)).has_ghost();
+            result &= boundary.kind(Face::positive(axis)).has_ghost();
+        }
+
+        result
+    }
+
+    /// Evaluates the given function on a system in place.
+    pub fn evaluate_mut<
+        S: System + Sync,
+        K: Kernels + Sync,
+        B: Boundary<N> + Sync,
+        P: Function<N, Input = S, Output = S> + Sync,
+    >(
+        &mut self,
+        order: K,
+        boundary: B,
+        function: P,
+        dest: SystemSliceMut<'_, S>,
+    ) {
+        let dest = dest.into_shared();
+
+        self.block_compute(|mesh, store, block| {
+            let bounds = mesh.block_bounds(block);
+            let space = mesh.block_space(block);
+            let nodes = mesh.block_nodes(block);
+
+            let boundary = mesh.block_boundary(block, boundary.clone());
+
+            let block_dest = unsafe { dest.slice_mut(nodes.clone()) };
+
+            let num_nodes = block_dest.len() * dest.system().count();
+            let mut block_source =
+                SystemSliceMut::from_contiguous(store.scratch(num_nodes), dest.system());
+
+            for field in dest.system().enumerate() {
+                block_source
+                    .field_mut(field)
+                    .copy_from_slice(block_dest.field(field));
+            }
+
+            if Self::is_interior(&boundary) {
+                let engine = FdIntEngine {
+                    space: space.clone(),
+                    bounds,
+                    order,
+                    store,
+                    range: nodes.clone(),
+                };
+
+                function.evaluate(engine, block_source.rb(), block_dest);
+            } else {
+                let engine = FdEngine {
+                    space: space.clone(),
+                    bounds,
+                    order,
+                    store,
+                    boundary,
+                    range: nodes.clone(),
+                };
+
+                function.evaluate(engine, block_source.rb(), block_dest);
+            }
+        });
+    }
+
+    pub fn apply<
+        O: Kernels + Sync,
+        B: Boundary<N> + Sync,
+        C: Conditions<N> + Sync,
+        P: Function<N, Input = C::System, Output = C::System> + Sync,
+    >(
+        &mut self,
+        order: O,
+        boundary: B,
+        conditions: C,
+        op: P,
+        f: SystemSliceMut<'_, C::System>,
+    ) where
+        C::System: Sync,
+    {
+        let f = f.into_shared();
+
+        self.block_compute(|mesh, store, block| {
+            let bounds = mesh.block_bounds(block);
+            let space = mesh.block_space(block);
+            let nodes = mesh.block_nodes(block);
+
+            let block_boundary = mesh.block_boundary(block, boundary.clone());
+
+            let mut block_dest = unsafe { f.slice_mut(nodes.clone()) };
+
+            let num_nodes = block_dest.len() * f.system().count();
+            let mut block_source =
+                SystemSliceMut::from_contiguous(store.scratch(num_nodes), f.system());
+
+            for field in f.system().enumerate() {
+                block_source
+                    .field_mut(field)
+                    .copy_from_slice(block_dest.field(field));
+            }
+
+            if Self::is_interior(&block_boundary) {
+                let engine = FdIntEngine {
+                    space: space.clone(),
+                    bounds,
+                    order,
+                    store,
+                    range: nodes.clone(),
+                };
+
+                op.evaluate(engine, block_source.rb(), block_dest.rb_mut());
+            } else {
+                let engine = FdEngine {
+                    space: space.clone(),
+                    bounds,
+                    order,
+                    store,
+                    boundary: block_boundary,
+                    range: nodes.clone(),
+                };
+
+                op.evaluate(&engine, block_source.rb(), block_dest.rb_mut());
+
+                let spacing = mesh.block_spacing(block);
+
+                // Weak boundary conditions.
+                for face in faces::<N>() {
+                    if boundary.kind(face) != BoundaryKind::Radiative {
+                        continue;
+                    }
+
+                    // Sommerfeld radiative boundary conditions.
+                    for vertex in IndexSpace::new(engine.vertex_size()).face(face).iter() {
+                        // *************************
+                        // At vertex
+
+                        let position: [f64; N] = engine.position(vertex);
+                        let r = position.iter().map(|&v| v * v).sum::<f64>().sqrt();
+                        let index = engine.index_from_vertex(vertex);
+
+                        // *************************
+                        // Inner
+
+                        let mut inner = vertex;
+
+                        // Find innter vertex for approximating higher order r dependence
+                        for axis in 0..N {
+                            if boundary.kind(Face::negative(axis)) == BoundaryKind::Radiative
+                                && vertex[axis] == 0
+                            {
+                                inner[axis] += 1;
+                            }
+
+                            if boundary.kind(Face::positive(axis)) == BoundaryKind::Radiative
+                                && vertex[axis] == engine.vertex_size()[axis] - 1
+                            {
+                                inner[axis] -= 1;
+                            }
+                        }
+
+                        let inner_position = engine.position(inner);
+                        let inner_r = inner_position.iter().map(|&v| v * v).sum::<f64>().sqrt();
+                        let inner_index = engine.index_from_vertex(inner);
+
+                        for field in f.system().enumerate() {
+                            let source = block_source.field(field);
+                            let dest = block_dest.field_mut(field);
+                            // Get condition parameters.
+                            let params = conditions.radiative(field, position, spacing);
+                            // Inner R dependence.
+                            let mut inner_advection = source[inner_index] - params.target;
+
+                            for axis in 0..N {
+                                let derivative = engine.derivative(source, axis, inner);
+                                inner_advection += inner_position[axis] * derivative;
+                            }
+
+                            inner_advection *= params.speed;
+
+                            let k = inner_r
+                                * inner_r
+                                * inner_r
+                                * (dest[inner_index] + inner_advection / inner_r);
+
+                            // Vertex
+                            let mut advection = source[index] - params.target;
+
+                            for axis in 0..N {
+                                let derivative = engine.derivative(source, axis, vertex);
+                                advection += position[axis] * derivative;
+                            }
+
+                            advection *= params.speed;
+                            dest[index] = -advection / r + k / (r * r * r);
+                        }
+                    }
+                }
+            }
+        });
+    }
+
+    /// Enforce weak boundary conditions on the time derivative of a system.
+    pub fn weak_boundary<O: Kernels + Sync, B: Boundary<N> + Sync, C: Conditions<N> + Sync>(
+        &mut self,
+        order: O,
+        boundary: B,
+        conditions: C,
+        source: SystemSlice<'_, C::System>,
+        deriv: SystemSliceMut<'_, C::System>,
+    ) where
+        C::System: Sync,
+    {
+        let deriv = deriv.into_shared();
+
+        self.block_compute(|mesh, store, block| {
+            let boundary = mesh.block_boundary(block, boundary.clone());
+            let bounds = mesh.blocks.bounds(block);
+            let space = mesh.block_space(block);
+            let nodes = mesh.block_nodes(block);
+            let vertex_size = space.inner_size();
+
+            let block_source = source.slice(nodes.clone());
+            let mut block_deriv = unsafe { deriv.slice_mut(nodes.clone()) };
+
+            let engine = FdEngine {
+                space: space.clone(),
+                bounds,
+                order,
+                boundary: boundary.clone(),
+                store,
+                range: nodes.clone(),
+            };
+            let spacing = engine.min_spacing();
+
+            for face in faces::<N>() {
+                if boundary.kind(face) != BoundaryKind::Radiative {
+                    continue;
+                }
+
+                // Sommerfeld radiative boundary conditions.
+                for vertex in IndexSpace::new(vertex_size).face(face).iter() {
+                    // *************************
+                    // At vertex
+
+                    let position: [f64; N] = engine.position(vertex);
+                    let r = position.iter().map(|&v| v * v).sum::<f64>().sqrt();
+                    let index = engine.index_from_vertex(vertex);
+
+                    // *************************
+                    // Inner
+
+                    let mut inner = vertex;
+
+                    // Find innter vertex for approximating higher order r dependence
+                    for axis in 0..N {
+                        if boundary.kind(Face::negative(axis)) == BoundaryKind::Radiative
+                            && vertex[axis] == 0
+                        {
+                            inner[axis] += 1;
+                        }
+
+                        if boundary.kind(Face::positive(axis)) == BoundaryKind::Radiative
+                            && vertex[axis] == vertex_size[axis] - 1
+                        {
+                            inner[axis] -= 1;
+                        }
+                    }
+
+                    let inner_position = engine.position(inner);
+                    let inner_r = inner_position.iter().map(|&v| v * v).sum::<f64>().sqrt();
+                    let inner_index = engine.index_from_vertex(inner);
+
+                    for field in deriv.system().enumerate() {
+                        let source = block_source.field(field);
+                        let deriv = block_deriv.field_mut(field);
+
+                        let params = conditions.radiative(field, position, spacing);
+
+                        // Inner R dependence
+                        let mut inner_advection = source[inner_index] - params.target;
+
+                        for axis in 0..N {
+                            let derivative = engine.derivative(source, axis, inner);
+                            inner_advection += inner_position[axis] * derivative;
+                        }
+
+                        inner_advection *= params.speed;
+
+                        let k = inner_r
+                            * inner_r
+                            * inner_r
+                            * (deriv[inner_index] + inner_advection / inner_r);
+
+                        // Vertex
+                        let mut advection = source[index] - params.target;
+
+                        for axis in 0..N {
+                            let derivative = engine.derivative(source, axis, vertex);
+                            advection += position[axis] * derivative;
+                        }
+
+                        advection *= params.speed;
+                        deriv[index] = -advection / r + k / (r * r * r);
+                    }
+                }
+            }
+        })
+    }
+
     pub fn evaluate_scalar<
         K: Kernels + Sync,
         B: Boundary<N> + Sync,
@@ -72,17 +390,6 @@ impl<const N: usize> Mesh<N> {
         dest: &mut [f64],
     ) {
         self.evaluate(order, boundary, function, source.into(), dest.into());
-    }
-
-    fn is_interior(boundary: &impl Boundary<N>) -> bool {
-        let mut result = true;
-
-        for axis in 0..N {
-            result &= boundary.kind(Face::negative(axis)).has_ghost();
-            result &= boundary.kind(Face::positive(axis)).has_ghost();
-        }
-
-        result
     }
 
     pub fn project_scalar<K: Kernels + Sync, B: Boundary<N> + Sync, P: Projection<N> + Sync>(
@@ -106,11 +413,11 @@ impl<const N: usize> Mesh<N> {
         &mut self,
         order: K,
         boundary: B,
-        source: SystemSlice<S>,
+        amplitude: f64,
         mut dest: SystemSliceMut<S>,
     ) {
         #[derive(Clone)]
-        pub struct Dissipation;
+        struct Dissipation(f64);
 
         impl<const N: usize> Function<N> for Dissipation {
             type Input = Scalar;
@@ -128,19 +435,18 @@ impl<const N: usize> Mesh<N> {
                 for vertex in IndexSpace::new(engine.vertex_size()).iter() {
                     let index = engine.index_from_vertex(vertex);
 
-                    output[index] = 0.0;
                     for axis in 0..N {
-                        output[index] += engine.dissipation(input, axis, vertex);
+                        output[index] += self.0 * engine.dissipation(input, axis, vertex);
                     }
                 }
             }
         }
-        for field in source.system().enumerate() {
-            self.evaluate(
+
+        for field in dest.system().enumerate() {
+            self.evaluate_mut(
                 order,
                 boundary.clone(),
-                Dissipation,
-                SystemSlice::from_scalar(source.field(field)),
+                Dissipation(amplitude),
                 SystemSliceMut::from_scalar(dest.field_mut(field)),
             );
         }
@@ -212,63 +518,63 @@ impl<const N: usize> Mesh<N> {
         });
     }
 
-    /// Performs a fused-multiply-add operation `a + mb` and then assigns this value to `dest`.
-    pub fn fma<S: System>(
-        &mut self,
-        a: SystemSlice<'_, S>,
-        m: f64,
-        b: SystemSlice<'_, S>,
-        dest: SystemSliceMut<'_, S>,
-    ) {
-        assert!(a.len() == self.num_nodes());
-        assert!(b.len() == self.num_nodes());
-        assert!(dest.len() == self.num_nodes());
+    // /// Performs a fused-multiply-add operation `a + mb` and then assigns this value to `dest`.
+    // pub fn fma<S: System + Sync>(
+    //     &mut self,
+    //     a: SystemSlice<'_, S>,
+    //     m: f64,
+    //     b: SystemSlice<'_, S>,
+    //     dest: SystemSliceMut<'_, S>,
+    // ) {
+    //     assert!(a.len() == self.num_nodes());
+    //     assert!(b.len() == self.num_nodes());
+    //     assert!(dest.len() == self.num_nodes());
 
-        let dest = dest.into_shared();
+    //     let dest = dest.into_shared();
 
-        (0..self.blocks.len()).par_bridge().for_each(|block| {
-            let nodes = self.block_nodes(block);
+    //     (0..self.blocks.len()).par_bridge().for_each(|block| {
+    //         let nodes = self.block_nodes(block);
 
-            let a = a.slice(nodes.clone());
-            let b = b.slice(nodes.clone());
-            let mut dest = unsafe { dest.slice_mut(nodes.clone()) };
+    //         let a = a.slice(nodes.clone());
+    //         let b = b.slice(nodes.clone());
+    //         let mut dest = unsafe { dest.slice_mut(nodes.clone()) };
 
-            for field in a.system().enumerate() {
-                for i in 0..a.len() {
-                    dest.field_mut(field.clone())[i] =
-                        a.field(field.clone())[i] + m * b.field(field.clone())[i];
-                }
-            }
-        });
-    }
+    //         for field in a.system().enumerate() {
+    //             for i in 0..a.len() {
+    //                 dest.field_mut(field.clone())[i] =
+    //                     a.field(field.clone())[i] + m * b.field(field.clone())[i];
+    //             }
+    //         }
+    //     });
+    // }
 
-    /// Performs a fused-multiply-add operation `a + mb`, and then adds and assigns this value to `dest`.
-    pub fn add_assign_fma<S: System>(
-        &mut self,
-        a: SystemSlice<'_, S>,
-        m: f64,
-        b: SystemSlice<'_, S>,
-        dest: SystemSliceMut<'_, S>,
-    ) {
-        assert!(a.len() == self.num_nodes());
-        assert!(b.len() == self.num_nodes());
-        assert!(dest.len() == self.num_nodes());
+    // /// Performs a fused-multiply-add operation `a + mb`, and then adds and assigns this value to `dest`.
+    // pub fn add_assign_fma<S: System + Sync>(
+    //     &mut self,
+    //     a: SystemSlice<'_, S>,
+    //     m: f64,
+    //     b: SystemSlice<'_, S>,
+    //     dest: SystemSliceMut<'_, S>,
+    // ) {
+    //     assert!(a.len() == self.num_nodes());
+    //     assert!(b.len() == self.num_nodes());
+    //     assert!(dest.len() == self.num_nodes());
 
-        let dest = dest.into_shared();
+    //     let dest = dest.into_shared();
 
-        (0..self.blocks.len()).par_bridge().for_each(|block| {
-            let nodes = self.block_nodes(block);
+    //     (0..self.blocks.len()).par_bridge().for_each(|block| {
+    //         let nodes = self.block_nodes(block);
 
-            let a = a.slice(nodes.clone());
-            let b = b.slice(nodes.clone());
-            let mut dest = unsafe { dest.slice_mut(nodes.clone()) };
+    //         let a = a.slice(nodes.clone());
+    //         let b = b.slice(nodes.clone());
+    //         let mut dest = unsafe { dest.slice_mut(nodes.clone()) };
 
-            for field in a.system().enumerate() {
-                for i in 0..a.len() {
-                    dest.field_mut(field.clone())[i] +=
-                        a.field(field.clone())[i] + m * b.field(field.clone())[i];
-                }
-            }
-        });
-    }
+    //         for field in a.system().enumerate() {
+    //             for i in 0..a.len() {
+    //                 dest.field_mut(field.clone())[i] +=
+    //                     a.field(field.clone())[i] + m * b.field(field.clone())[i];
+    //             }
+    //         }
+    //     });
+    // }
 }

@@ -198,6 +198,7 @@ fn critical_search() -> Result<()> {
                     level: Logging::TRACE,
                 },
                 cfl: 0.1,
+                dissipation: 0.5,
                 max_time: 4.0,
                 max_steps: 1_000_000,
                 max_nodes: 16_000_000,

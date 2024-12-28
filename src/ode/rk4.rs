@@ -3,10 +3,8 @@ use super::Ode;
 /// RK4 Integrator.
 #[derive(Clone, Debug, Default)]
 pub struct Rk4 {
-    k1: Vec<f64>,
-    k2: Vec<f64>,
-    k3: Vec<f64>,
-    k4: Vec<f64>,
+    tmp: Vec<f64>,
+    update: Vec<f64>,
 }
 
 impl Rk4 {
@@ -15,52 +13,59 @@ impl Rk4 {
         Self::default()
     }
 
-    /// Take one Rk4 step.
-    pub fn step<Problem: Ode>(
-        &mut self,
-        h: f64,
-        derivs: &mut Problem,
-        system: &[f64],
-        update: &mut [f64],
-    ) {
-        assert!(system.len() == update.len());
+    pub fn tmp(&mut self) -> &mut Vec<f64> {
+        &mut self.tmp
+    }
 
+    /// Take one Rk4 step.
+    pub fn step<Problem: Ode>(&mut self, h: f64, derivs: &mut Problem, system: &mut [f64]) {
         let dim = system.len();
 
-        self.k1.resize(dim, 0.0);
-        self.k2.resize(dim, 0.0);
-        self.k3.resize(dim, 0.0);
-        self.k4.resize(dim, 0.0);
+        assert!(system.len() == dim);
+
+        self.tmp.clear();
+        self.update.clear();
+
+        self.tmp.resize(dim, 0.0);
+        self.update.resize(dim, 0.0);
 
         // K1
-        update.copy_from_slice(system);
-        derivs.preprocess(update);
-        derivs.derivative(update, &mut self.k1);
+        self.tmp.copy_from_slice(&system);
+        derivs.derivative(&mut self.tmp);
+        for i in 0..dim {
+            self.update[i] += 1.0 / 6.0 * self.tmp[i];
+        }
 
         // K2
         for i in 0..dim {
-            update[i] = system[i] + h / 2.0 * self.k1[i];
+            self.tmp[i] = system[i] + h / 2.0 * self.tmp[i];
         }
-        derivs.preprocess(update);
-        derivs.derivative(update, &mut self.k2);
+        derivs.derivative(&mut self.tmp);
+        for i in 0..dim {
+            self.update[i] += 1.0 / 3.0 * self.tmp[i];
+        }
 
         // K3
         for i in 0..dim {
-            update[i] = system[i] + h / 2.0 * self.k2[i];
+            self.tmp[i] = system[i] + h / 2.0 * self.tmp[i];
         }
-        derivs.preprocess(update);
-        derivs.derivative(update, &mut self.k3);
+        derivs.derivative(&mut self.tmp);
+        for i in 0..dim {
+            self.update[i] += 1.0 / 3.0 * self.tmp[i];
+        }
 
         // K4
         for i in 0..dim {
-            update[i] = system[i] + h * self.k3[i];
+            self.tmp[i] = system[i] + h * self.tmp[i];
         }
-        derivs.preprocess(update);
-        derivs.derivative(update, &mut self.k4);
-
-        // Compute total step
+        derivs.derivative(&mut self.tmp);
         for i in 0..dim {
-            update[i] = h / 6.0 * (self.k1[i] + 2.0 * self.k2[i] + 2.0 * self.k3[i] + self.k4[i])
+            self.update[i] += 1.0 / 6.0 * self.tmp[i];
+        }
+
+        // Total step
+        for i in 0..dim {
+            system[i] += h * self.update[i];
         }
     }
 }

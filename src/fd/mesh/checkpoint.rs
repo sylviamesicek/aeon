@@ -1,5 +1,4 @@
 use aeon_geometry::{Rectangle, Tree};
-use ron::ser::PrettyConfig;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 use std::collections::HashMap;
