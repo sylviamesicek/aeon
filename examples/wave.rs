@@ -95,7 +95,7 @@ impl<'a> Ode for HyperbolicOde<'a> {
     fn derivative(&mut self, f: &mut [f64]) {
         self.mesh.fill_boundary_to_extent(
             Order::<4>,
-            4,
+            2,
             Quadrant,
             WaveConditions,
             SystemSliceMut::from_scalar(f),
@@ -139,16 +139,21 @@ pub fn main() -> anyhow::Result<()> {
 
         system.resize(mesh.num_nodes());
 
-        mesh.project_scalar(ORDER, Quadrant, profile, system.field_mut(()));
+        log::trace!("Projecting System");
+
+        mesh.project(ORDER, Quadrant, profile, system.field_mut(()));
         mesh.fill_boundary(ORDER, Quadrant, WaveConditions, system.as_mut_slice());
+
+        log::trace!("Flagging Wavelets");
 
         mesh.flag_wavelets(4, LOWER, UPPER, Quadrant, system.as_slice());
         mesh.set_regrid_level_limit(10);
 
+        log::trace!("Balancing Flags");
+
         mesh.balance_flags();
 
         // Save data to file.
-
         let mut flags = vec![0; mesh.num_nodes()];
         mesh.flags_debug(&mut flags);
 
@@ -212,7 +217,7 @@ pub fn main() -> anyhow::Result<()> {
         exact.resize(mesh.num_nodes());
         error.resize(mesh.num_nodes());
 
-        mesh.project_scalar(
+        mesh.project(
             ORDER,
             Quadrant,
             AnalyticSolution { speed: SPEED, time },

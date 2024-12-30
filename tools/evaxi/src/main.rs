@@ -229,7 +229,7 @@ impl<'a> Ode for FieldEvolution<'a> {
         let mut f = SystemSliceMut::from_contiguous(f, self.system);
         // Fill ghost nodes
         self.mesh
-            .fill_boundary_to_extent(ORDER, 4, Quadrant, FieldConditions, f.rb_mut());
+            .fill_boundary_to_extent(ORDER, 2, Quadrant, FieldConditions, f.rb_mut());
 
         // Apply operator
         self.mesh

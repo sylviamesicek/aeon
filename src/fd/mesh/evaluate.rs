@@ -75,7 +75,7 @@ impl<const N: usize> Mesh<N> {
     }
 
     /// Evaluates the given function on a system in place.
-    pub fn evaluate_mut<
+    fn evaluate_mut<
         S: System + Sync,
         K: Kernels + Sync,
         B: Boundary<N> + Sync,
@@ -155,7 +155,7 @@ impl<const N: usize> Mesh<N> {
             let space = mesh.block_space(block);
             let nodes = mesh.block_nodes(block);
 
-            let block_boundary = mesh.block_boundary(block, boundary.clone());
+            let boundary = mesh.block_boundary(block, boundary.clone());
 
             let mut block_dest = unsafe { f.slice_mut(nodes.clone()) };
 
@@ -169,7 +169,7 @@ impl<const N: usize> Mesh<N> {
                     .copy_from_slice(block_dest.field(field));
             }
 
-            if Self::is_interior(&block_boundary) {
+            if Self::is_interior(&boundary) {
                 let engine = FdIntEngine {
                     space: space.clone(),
                     bounds,
@@ -185,7 +185,7 @@ impl<const N: usize> Mesh<N> {
                     bounds,
                     order,
                     store,
-                    boundary: block_boundary,
+                    boundary: boundary.clone(),
                     range: nodes.clone(),
                 };
 
@@ -377,22 +377,14 @@ impl<const N: usize> Mesh<N> {
         })
     }
 
-    pub fn evaluate_scalar<
-        K: Kernels + Sync,
-        B: Boundary<N> + Sync,
-        P: Function<N, Input = Scalar, Output = Scalar> + Sync,
-    >(
-        &mut self,
-        order: K,
-        boundary: B,
-        function: P,
-        source: &[f64],
-        dest: &mut [f64],
-    ) {
-        self.evaluate(order, boundary, function, source.into(), dest.into());
+    /// Copies an immutable src slice into a mutable dest slice.
+    pub fn copy_from_slice<S: System>(&mut self, mut dest: SystemSliceMut<S>, src: SystemSlice<S>) {
+        for label in dest.system().enumerate() {
+            dest.field_mut(label).copy_from_slice(src.field(label));
+        }
     }
 
-    pub fn project_scalar<K: Kernels + Sync, B: Boundary<N> + Sync, P: Projection<N> + Sync>(
+    pub fn project<K: Kernels + Sync, B: Boundary<N> + Sync, P: Projection<N> + Sync>(
         &mut self,
         order: K,
         boundary: B,
@@ -513,6 +505,32 @@ impl<const N: usize> Mesh<N> {
                     } else {
                         block_dest[index] = min_spacing;
                     }
+                }
+            }
+        });
+    }
+
+    pub fn adaptive_cfl<S: System + Sync>(
+        &mut self,
+        spacing_per_vertex: &[f64],
+        dest: SystemSliceMut<S>,
+    ) {
+        let dest = dest.into_shared();
+        let min_spacing = self.min_spacing();
+
+        self.block_compute(|mesh, _, block| {
+            let block_space = mesh.block_space(block);
+            let block_nodes = mesh.block_nodes(block);
+
+            let block_spacings = &spacing_per_vertex[block_nodes.clone()];
+            let mut block_dest = unsafe { dest.slice_mut(block_nodes.clone()) };
+
+            for field in block_dest.system().enumerate() {
+                let block_dest = block_dest.field_mut(field);
+
+                for vertex in IndexSpace::new(block_space.inner_size()).iter() {
+                    let index = block_space.index_from_vertex(vertex);
+                    block_dest[index] *= block_spacings[index] / min_spacing;
                 }
             }
         });

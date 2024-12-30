@@ -8,3 +8,4 @@ faer.workspace = true
 
 aeon_macros.workspace = true
 aeon_geometry.workspace = true
+log.workspace = true

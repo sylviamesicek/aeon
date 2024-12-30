@@ -1,6 +1,6 @@
 use aeon::{
     basis::{Kernels, RadiativeParams},
-    elliptic::HyperRelaxSolver,
+    elliptic2::HyperRelaxSolver,
     fd::{Gaussian, Mesh},
     prelude::*,
     system::System,
@@ -258,7 +258,7 @@ where
     );
 
     // Compute seed values.
-    mesh.project_scalar(
+    mesh.project(
         order,
         Quadrant,
         SeedProjection(sources),
@@ -272,7 +272,7 @@ where
             amplitude, sigma, ..
         } = source
         {
-            mesh.project_scalar(
+            mesh.project(
                 order,
                 Quadrant,
                 Gaussian {
@@ -302,15 +302,15 @@ where
     solver.cfl = solver_con.cfl;
     solver.adaptive = true;
 
-    solver.solve_scalar(
+    solver.solve(
         mesh,
         order,
         Quadrant,
-        PsiCondition,
+        ScalarConditions(PsiCondition),
         Hamiltonian {
             context: context.as_slice(),
         },
-        &mut psi,
+        SystemSliceMut::from_scalar(&mut psi),
     )?;
 
     mesh.evaluate(

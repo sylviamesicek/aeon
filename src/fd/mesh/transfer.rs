@@ -236,6 +236,8 @@ impl<const N: usize> Mesh<N> {
         conditions: C,
         mut system: SystemSliceMut<'_, C::System>,
     ) {
+        assert!(extent <= self.ghost);
+
         self.fill_fine(extent, system.rb_mut());
         self.fill_direct(extent, system.rb_mut());
 

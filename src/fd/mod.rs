@@ -36,6 +36,27 @@ pub trait Function<const N: usize> {
     // }
 }
 
+// pub trait Operator<const N: usize> {
+//     type System: System;
+
+//     fn apply(&self, engine: impl Engine<N>, system: SystemSliceMut<Self::System>);
+// }
+
+// impl<const N: usize, S: System, F: Function<N, Input = S, Output = S>> Operator<N> for F {
+//     type System = S;
+
+//     fn apply(&self, engine: impl Engine<N>, f: SystemSliceMut<Self::System>) {
+//         let num_nodes = f.len() * f.system().count();
+//         let mut source = SystemSliceMut::from_contiguous(engine.alloc(num_nodes), f.system());
+
+//         for field in f.system().enumerate() {
+//             source.field_mut(field).copy_from_slice(f.field(field));
+//         }
+
+//         self.evaluate(&engine, source.rb(), f);
+//     }
+// }
+
 /// A projection takes in a position and returns a system of values.
 pub trait Projection<const N: usize> {
     fn project(&self, position: [f64; N]) -> f64;

@@ -34,3 +34,64 @@ pub trait System {
         "Unknown".to_string()
     }
 }
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A simple test of creating composite (pair) systems, splitting them, and taking various references.
+    #[test]
+    fn pair_slices() {
+        let system = (Dynamic(3), Dynamic(2));
+
+        let mut data = SystemVec::with_length(10, system);
+        assert_eq!(data.len(), 10);
+        data.field_mut(Pair::First(0)).fill(0.0);
+        data.field_mut(Pair::First(1)).fill(1.0);
+        data.field_mut(Pair::First(2)).fill(2.0);
+        data.field_mut(Pair::Second(0)).fill(3.0);
+        data.field_mut(Pair::Second(1)).fill(4.0);
+
+        assert!(data.field(Pair::First(0)).iter().all(|v| *v == 0.0));
+        assert!(data.field(Pair::First(1)).iter().all(|v| *v == 1.0));
+        assert!(data.field(Pair::First(2)).iter().all(|v| *v == 2.0));
+
+        assert!(data.field(Pair::Second(0)).iter().all(|v| *v == 3.0));
+        assert!(data.field(Pair::Second(1)).iter().all(|v| *v == 4.0));
+
+        let mut data = data.into_contiguous();
+
+        let slice = SystemSliceMut::from_contiguous(&mut data, &system);
+
+        assert!(slice.field(Pair::First(0)).iter().all(|v| *v == 0.0));
+        assert!(slice.field(Pair::First(1)).iter().all(|v| *v == 1.0));
+        assert!(slice.field(Pair::First(2)).iter().all(|v| *v == 2.0));
+
+        assert!(slice.field(Pair::Second(0)).iter().all(|v| *v == 3.0));
+        assert!(slice.field(Pair::Second(1)).iter().all(|v| *v == 4.0));
+
+        let (slice1, slice2) = slice.split_pair();
+
+        assert!(slice1.field(0).iter().all(|v| *v == 0.0));
+        assert!(slice1.field(1).iter().all(|v| *v == 1.0));
+        assert!(slice1.field(2).iter().all(|v| *v == 2.0));
+
+        assert!(slice2.field(0).iter().all(|v| *v == 3.0));
+        assert!(slice2.field(1).iter().all(|v| *v == 4.0));
+
+        let mut data = (0..15).map(|i| i as f64).collect::<Vec<_>>();
+        let mut slice = SystemSliceMut::from_contiguous(&mut data, &(Static::<2>, Scalar));
+
+        assert_eq!(slice.field(Pair::First(0)), &[0.0, 1.0, 2.0, 3.0, 4.0]);
+        assert_eq!(slice.field(Pair::First(1)), &[5.0, 6.0, 7.0, 8.0, 9.0]);
+        assert_eq!(
+            slice.field(Pair::Second(())),
+            &[10.0, 11.0, 12.0, 13.0, 14.0]
+        );
+
+        let (slice1, slice2) = slice.slice_mut(2..4).split_pair();
+
+        assert_eq!(slice1.field(0), &[2.0, 3.0]);
+        assert_eq!(slice1.field(1), &[7.0, 8.0]);
+        assert_eq!(slice2.field(()), &[12.0, 13.0]);
+    }
+}

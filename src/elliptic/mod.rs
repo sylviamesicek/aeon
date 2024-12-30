@@ -1,13 +1,13 @@
-use aeon_basis::{Boundary, Condition, Kernels, RadiativeParams};
+use aeon_basis::{Boundary, Kernels, RadiativeParams};
 use aeon_geometry::IndexSpace;
 use reborrow::{Reborrow, ReborrowMut};
 use thiserror::Error;
 
 use crate::{
-    fd::{Conditions, Engine, ExportVtuConfig, Function, Mesh, ScalarConditions, SystemCheckpoint},
+    fd::{Conditions, Engine, ExportVtuConfig, Function, Mesh, SystemCheckpoint},
     ode::{Ode, Rk4},
     prelude::Face,
-    system::{Pair, Scalar, System, SystemSlice, SystemSliceMut},
+    system::{Pair, System, SystemSlice, SystemSliceMut},
 };
 
 #[derive(Error, Debug)]
@@ -80,6 +80,8 @@ impl HyperRelaxSolver {
 
         assert!(result.len() == dimension);
 
+        let system = (result.system().clone(), result.system().clone());
+
         // Allocate storage
         let mut data = vec![0.0; 2 * dimension].into_boxed_slice();
         // Compute minimum spacing and spacing per vertex.
@@ -96,43 +98,53 @@ impl HyperRelaxSolver {
         // Fill initial guess
         {
             let (u, v) = data.split_at_mut(dimension);
-            let mut usys = SystemSliceMut::<C::System>::from_contiguous(u, result.system());
-            let mut vsys = SystemSliceMut::<C::System>::from_contiguous(v, result.system());
-
-            for field in result.system().enumerate() {
-                usys.field_mut(field).copy_from_slice(result.field(field))
-            }
-
+            // u is initial guess
+            mesh.copy_from_slice(
+                SystemSliceMut::from_contiguous(u, result.system()),
+                result.rb(),
+            );
             // Let us assume that du/dt is initially zero
-            for field in result.system().enumerate() {
-                vsys.field_mut(field).copy_from_slice(result.field(field));
-                vsys.field_mut(field)
-                    .iter_mut()
-                    .for_each(|f| *f *= self.dampening);
+            mesh.copy_from_slice(
+                SystemSliceMut::from_contiguous(v, result.system()),
+                result.rb(),
+            );
+            for value in v.iter_mut() {
+                *value *= self.dampening;
             }
         }
 
         for index in 0..self.max_steps {
-            {
-                let mut u =
-                    SystemSliceMut::from_contiguous(&mut data[..dimension], result.system());
+            mesh.fill_boundary(
+                order,
+                boundary.clone(),
+                FicticuousConditions {
+                    dampening: self.dampening,
+                    conditions: conditions.clone(),
+                },
+                SystemSliceMut::from_contiguous(&mut data, &system),
+            );
 
-                mesh.fill_boundary(order, boundary.clone(), conditions.clone(), u.rb_mut());
-                mesh.evaluate(
+            {
+                mesh.copy_from_slice(
+                    result.rb_mut(),
+                    SystemSlice::from_contiguous(&mut data[..dimension], &system.0),
+                );
+
+                mesh.apply(
                     order,
                     boundary.clone(),
+                    conditions.clone(),
                     deriv.clone(),
-                    u.rb(),
                     result.rb_mut(),
                 );
 
-                let mut systems = SystemCheckpoint::default();
-                systems.save_system_default(u.rb());
+                let mut systems: SystemCheckpoint = SystemCheckpoint::default();
+                systems.save_system_default(SystemSlice::from_contiguous(&data, &system));
 
-                if index % 1000 == 0 {
+                if index % 100 == 0 {
                     if mesh
                         .export_vtu(
-                            format!("output/debug/relax{}.vtu", { index / 1000 }),
+                            format!("output/debug/relax{}.vtu", { index / 100 }),
                             &systems,
                             ExportVtuConfig {
                                 title: "debug".to_string(),
@@ -159,8 +171,8 @@ impl HyperRelaxSolver {
                 return Err(HyperRelaxError::Diverged);
             }
 
-            if index % 10000 == 0 {
-                log::trace!("Relaxed {}0k steps, norm: {:.5e}", index / 10000, norm);
+            if index % 1000 == 0 {
+                log::trace!("Relaxed {}k steps, norm: {:.5e}", index / 1000, norm);
             }
 
             if norm <= self.tolerance {
@@ -172,21 +184,22 @@ impl HyperRelaxSolver {
                 break;
             }
 
-            let mut ode = FictitiousOde {
-                mesh,
-                dimension,
-                dampening: self.dampening,
-                order,
-                boundary: boundary.clone(),
-                conditions: conditions.clone(),
-                deriv: &deriv,
-                spacing_per_vertex: &spacing_per_vertex,
-                min_spacing,
-                system: &(result.system().clone(), result.system().clone()),
-            };
-
             // Take step
-            self.integrator.step(time_step, &mut ode, &mut data);
+            self.integrator.step(
+                time_step,
+                &mut FictitiousOde {
+                    mesh,
+                    dimension,
+                    dampening: self.dampening,
+                    order,
+                    boundary: boundary.clone(),
+                    conditions: conditions.clone(),
+                    deriv: &deriv,
+                    spacing_per_vertex: &spacing_per_vertex,
+                    system: &(result.system().clone(), result.system().clone()),
+                },
+                &mut data,
+            );
 
             if index == self.max_steps - 1 {
                 log::error!(
@@ -197,39 +210,13 @@ impl HyperRelaxSolver {
         }
 
         // Copy solution back to system vector
-        let (u, _v) = data.split_at_mut(dimension);
-        let usys = SystemSlice::from_contiguous(u, result.system());
-
-        for field in result.system().enumerate() {
-            result.field_mut(field).clone_from_slice(usys.field(field))
-        }
+        mesh.copy_from_slice(
+            result.rb_mut(),
+            SystemSlice::from_contiguous(&data[..dimension], &system.0),
+        );
+        mesh.fill_boundary(order, boundary.clone(), conditions, result.rb_mut());
 
         Ok(())
-    }
-
-    pub fn solve_scalar<
-        const N: usize,
-        K: Kernels + Sync,
-        B: Boundary<N> + Sync,
-        C: Condition<N> + Sync,
-        F: Function<N, Input = Scalar, Output = Scalar> + Clone + Sync,
-    >(
-        &mut self,
-        mesh: &mut Mesh<N>,
-        order: K,
-        boundary: B,
-        condition: C,
-        deriv: F,
-        result: &mut [f64],
-    ) -> Result<(), HyperRelaxError> {
-        self.solve(
-            mesh,
-            order,
-            boundary,
-            ScalarConditions(condition),
-            deriv,
-            result.into(),
-        )
     }
 }
 
@@ -270,9 +257,6 @@ impl<const N: usize, C: Conditions<N>> Conditions<N> for FicticuousConditions<C>
 struct FicticuousDerivs<'a, const N: usize, F> {
     dampening: f64,
     function: &'a F,
-
-    spacing_per_vertex: &'a [f64],
-    min_spacing: f64,
 }
 
 impl<'a, const N: usize, S: System, F: Function<N, Input = S, Output = S>> Function<N>
@@ -290,9 +274,6 @@ impl<'a, const N: usize, S: System, F: Function<N, Input = S, Output = S>> Funct
         let (uin, vin) = input.split_pair();
         let (mut uout, mut vout) = output.split_pair();
 
-        let spacing_per_vertex = &self.spacing_per_vertex[engine.node_range()];
-        let min_spacing = self.min_spacing;
-
         // Find du/dt from the definition v = du/dt + η u
         for field in uin.system().enumerate() {
             let u = uin.field(field);
@@ -302,23 +283,13 @@ impl<'a, const N: usize, S: System, F: Function<N, Input = S, Output = S>> Funct
 
             for vertex in IndexSpace::new(engine.vertex_size()).iter() {
                 let index = engine.index_from_vertex(vertex);
-                let adaptive = spacing_per_vertex[index] / min_spacing;
-                udest[index] = adaptive * (v[index] - u[index] * self.dampening);
+                udest[index] = v[index] - u[index] * self.dampening;
             }
         }
 
         // dv/dt = c^2 Lu
+        // TODO speed
         self.function.evaluate(&engine, uin, vout.rb_mut());
-
-        for field in vout.system().enumerate() {
-            let vdest = vout.field_mut(field);
-
-            for vertex in IndexSpace::new(engine.vertex_size()).iter() {
-                let index = engine.index_from_vertex(vertex);
-                // Todo speed
-                vdest[index] *= spacing_per_vertex[index] / min_spacing;
-            }
-        }
     }
 }
 
@@ -340,7 +311,6 @@ struct FictitiousOde<
     deriv: &'a F,
 
     spacing_per_vertex: &'a [f64],
-    min_spacing: f64,
 
     system: &'a (C::System, C::System),
 }
@@ -384,11 +354,11 @@ where
             },
             FicticuousDerivs {
                 dampening: self.dampening,
-                spacing_per_vertex: &self.spacing_per_vertex,
-                min_spacing: self.min_spacing,
                 function: self.deriv,
             },
-            f,
+            f.rb_mut(),
         );
+
+        self.mesh.adaptive_cfl(&self.spacing_per_vertex, f.rb_mut());
     }
 }

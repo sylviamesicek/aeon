@@ -98,6 +98,12 @@ impl<'a> From<&'a [f64]> for SystemSlice<'a, Scalar> {
     }
 }
 
+impl<'a> From<&'a Vec<f64>> for SystemSlice<'a, Scalar> {
+    fn from(value: &'a Vec<f64>) -> Self {
+        Self::from_scalar(value)
+    }
+}
+
 impl<'a> SystemSliceMut<'a, Scalar> {
     pub fn from_scalar(data: &'a mut [f64]) -> Self {
         Self::from_contiguous(data, &Scalar)
@@ -114,6 +120,12 @@ impl<'a> From<&'a mut [f64]> for SystemSliceMut<'a, Scalar> {
     }
 }
 
+impl<'a> From<&'a mut Vec<f64>> for SystemSliceMut<'a, Scalar> {
+    fn from(value: &'a mut Vec<f64>) -> Self {
+        Self::from_scalar(value)
+    }
+}
+
 /// A label for a tuple of systems.
 #[derive(Clone, Copy)]
 pub enum Pair<A, B> {
@@ -122,6 +134,8 @@ pub enum Pair<A, B> {
 }
 
 impl<A: System, B: System> System for (A, B) {
+    const NAME: &'static str = "Pair";
+
     type Label = Pair<A::Label, B::Label>;
 
     fn count(&self) -> usize {
@@ -138,7 +152,7 @@ impl<A: System, B: System> System for (A, B) {
     fn label_index(&self, label: Self::Label) -> usize {
         match label {
             Pair::First(a) => self.0.label_index(a),
-            Pair::Second(b) => self.1.label_index(b),
+            Pair::Second(b) => self.0.count() + self.1.label_index(b),
         }
     }
 
@@ -149,6 +163,13 @@ impl<A: System, B: System> System for (A, B) {
             Pair::Second(self.1.label_from_index(index - self.0.count()))
         }
     }
+
+    fn label_name(&self, label: Self::Label) -> String {
+        match label {
+            Pair::First(label) => format!("First({})", self.0.label_name(label)),
+            Pair::Second(label) => format!("Second({})", self.1.label_name(label)),
+        }
+    }
 }
 
 impl<'a, A: System, B: System> SystemSlice<'a, (A, B)> {
@@ -156,6 +177,9 @@ impl<'a, A: System, B: System> SystemSlice<'a, (A, B)> {
         let stride = self.total / self.system.count();
         let total1 = stride * self.system.0.count();
         let total2 = stride * self.system.1.count();
+
+        debug_assert_eq!(self.total, total1 + total2);
+
         let ptr1 = self.ptr;
         let ptr2 = unsafe { self.ptr.add(total1) };
 
@@ -169,7 +193,6 @@ impl<'a, A: System, B: System> SystemSlice<'a, (A, B)> {
             },
             SystemSlice {
                 total: total2,
-
                 ptr: ptr2,
                 offset: self.offset,
                 length: self.length,
@@ -184,6 +207,9 @@ impl<'a, A: System, B: System> SystemSliceMut<'a, (A, B)> {
         let stride = self.total / self.system.count();
         let total1 = stride * self.system.0.count();
         let total2 = stride * self.system.1.count();
+
+        debug_assert_eq!(self.total, total1 + total2);
+
         let ptr1 = self.ptr;
         let ptr2 = unsafe { self.ptr.add(total1) };
 
@@ -208,7 +234,7 @@ impl<'a, A: System, B: System> SystemSliceMut<'a, (A, B)> {
 
 /// A system with a dynamical number of components choosen at runtime.
 #[derive(Clone, Copy)]
-pub struct Static<const N: usize>();
+pub struct Static<const N: usize>;
 
 impl<const N: usize> System for Static<N> {
     type Label = usize;
@@ -235,6 +261,8 @@ impl<const N: usize> System for Static<N> {
 pub struct Dynamic(pub usize);
 
 impl System for Dynamic {
+    const NAME: &'static str = "Dynamic";
+
     type Label = usize;
 
     fn count(&self) -> usize {
@@ -251,5 +279,9 @@ impl System for Dynamic {
 
     fn label_from_index(&self, index: usize) -> Self::Label {
         index
+    }
+
+    fn label_name(&self, label: Self::Label) -> String {
+        label.to_string()
     }
 }
