@@ -28,7 +28,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn integrate_ode() {
+    fn exp_ode() {
         struct ExpOde;
 
         impl Ode for ExpOde {

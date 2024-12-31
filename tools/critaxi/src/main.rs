@@ -156,16 +156,21 @@ fn critical_search() -> Result<()> {
                 _visualize_relax: false,
                 visualize_stride: stride,
 
-                max_level: 20,
-                max_nodes: 16_000_000,
+                max_level: 18,
+                max_nodes: 10_000_000,
                 max_error: 1e-6,
 
                 refine_global: 1,
 
                 domain: config.domain.clone(),
-                source: vec![Source::Brill {
+                // source: vec![Source::Brill {
+                //     amplitude: *amplitude,
+                //     sigma: (1.0, 1.0),
+                // }],
+                source: vec![Source::ScalarField {
                     amplitude: *amplitude,
-                    sigma: (1.0, 1.0),
+                    sigma: (2.0, 1.0),
+                    mass: 0.0,
                 }],
 
                 solver: Solver {
@@ -200,16 +205,16 @@ fn critical_search() -> Result<()> {
                 cfl: 0.1,
                 dissipation: 0.5,
                 max_time: 4.0,
-                max_steps: 1_000_000,
-                max_nodes: 16_000_000,
+                max_steps: 10_000_000,
+                max_nodes: 10_000_000,
                 regrid: Regrid {
                     coarsen_tolerance: 1e-8,
                     refine_tolerance: 1e-6,
                     flag_interval: 20,
-                    max_levels: 20,
+                    max_levels: 18,
                 },
                 visualize: Some(Visualize {
-                    save_interval: 0.1,
+                    save_interval: 0.05,
                     stride,
                 }),
             };
@@ -323,7 +328,8 @@ fn critical_search() -> Result<()> {
             if let Some(EvolutionStatus::Failure) =
                 evolution_cache.get(&float_to_string(*amplitude))
             {
-                return Err(anyhow!("evolution failed for amplitude: {}", amplitude));
+                log::error!("Evolution Failed for amplitude: {}", amplitude);
+                // return Err(anyhow!("evolution failed for amplitude: {}", amplitude));
             }
         }
 
@@ -331,7 +337,7 @@ fn critical_search() -> Result<()> {
         for (i, amplitude) in subsearches.iter().enumerate() {
             match evolution_cache.get(&float_to_string(*amplitude)) {
                 Some(EvolutionStatus::Disperse) => dispersion = i,
-                Some(EvolutionStatus::Collapse) => break,
+                Some(EvolutionStatus::Collapse | EvolutionStatus::Failure) => break,
                 _ => return Err(anyhow!("evolution failed for amplitude: {}", amplitude)),
             }
         }
@@ -340,7 +346,7 @@ fn critical_search() -> Result<()> {
         for (i, amplitude) in subsearches.iter().enumerate().rev() {
             match evolution_cache.get(&float_to_string(*amplitude)) {
                 Some(EvolutionStatus::Disperse) => break,
-                Some(EvolutionStatus::Collapse) => collapse = i,
+                Some(EvolutionStatus::Collapse | EvolutionStatus::Failure) => collapse = i,
                 _ => return Err(anyhow!("evolution failed for amplitude: {}", amplitude)),
             }
         }

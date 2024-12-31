@@ -38,9 +38,38 @@ pub trait System {
 mod tests {
     use super::*;
 
+    #[derive(Clone, Copy, aeon_macros::SystemLabel)]
+    enum Test {
+        First,
+        Second,
+        Third,
+    }
+
+    /// Test of basic system functionality.
+    #[test]
+    fn basic() {
+        let mut fields = SystemVec::with_length(3, TestSystem);
+
+        {
+            let shared = fields.as_mut_slice().into_shared();
+            let mut slice = unsafe { shared.slice_mut(1..2) };
+
+            slice.field_mut(Test::First).fill(1.0);
+            slice.field_mut(Test::Second).fill(2.0);
+            slice.field_mut(Test::Third).fill(3.0);
+        }
+
+        let buffer = fields.into_contiguous();
+
+        assert_eq!(&buffer, &[0.0, 1.0, 0.0, 0.0, 2.0, 0.0, 0.0, 3.0, 0.0]);
+
+        let empty = SystemVec::new(Empty);
+        assert!(empty.is_empty());
+    }
+
     /// A simple test of creating composite (pair) systems, splitting them, and taking various references.
     #[test]
-    fn pair_slices() {
+    fn pair() {
         let system = (Dynamic(3), Dynamic(2));
 
         let mut data = SystemVec::with_length(10, system);

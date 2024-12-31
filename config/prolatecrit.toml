@@ -1,0 +1,32 @@
+name = "prolate"
+output_dir = "output/prolatecrit"
+order = 4
+
+start = 1.0
+end = 4.0
+
+cache_initial = true
+cache_evolve = false
+
+bifurcations = 2
+
+[logging]
+level = 5
+
+[domain]
+radius = 48.0
+height = 48.0
+
+[domain.cell]
+subdivisions = 6
+padding = 3
+
+[domain.mesh]
+refine_global = 1
+max_level = 15
+
+[solver]
+max_steps = 100000
+cfl = 0.5
+dampening = 0.4
+tolerance = 1e-6

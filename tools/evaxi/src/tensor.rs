@@ -151,7 +151,7 @@ impl HyperbolicSystem {
                     [self.shiftz_r, self.shiftz_z],
                 ]),
             },
-            source: axi::StressEnergy::vacuum(),
+            source,
         }
     }
 
