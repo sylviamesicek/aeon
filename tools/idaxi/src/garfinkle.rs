@@ -20,14 +20,17 @@ use sharedaxi::{
 
 #[derive(Clone)]
 pub struct ContextSystem {
+    /// scalar field masses.
     pub scalar_fields: Vec<f64>,
 }
 
 impl ContextSystem {
+    /// Returns the number of scalar fields.
     pub fn num_scalar_fields(&self) -> usize {
         self.scalar_fields.len()
     }
 
+    /// Returns an interator over the scalar fields in this system.
     pub fn scalar_fields(&self) -> impl Iterator<Item = f64> + '_ {
         self.scalar_fields.iter().cloned()
     }
@@ -70,6 +73,7 @@ impl System for ContextSystem {
     }
 }
 
+/// Context system label.
 #[derive(Clone, Copy)]
 pub enum Context {
     Seed,
@@ -80,6 +84,7 @@ pub enum Context {
 // Boundary conditions ***
 // ***********************
 
+/// Boundary conditions for psi.
 #[derive(Clone)]
 pub struct PsiCondition;
 
@@ -93,7 +98,7 @@ impl Condition<2> for PsiCondition {
     }
 }
 
-/// Boundary Conditions for Garfinkle variables.
+/// Boundary Conditions for context variables.
 #[derive(Clone)]
 pub struct ContextConditions;
 
@@ -112,6 +117,7 @@ impl Conditions<2> for ContextConditions {
     }
 }
 
+/// Seed function projections.
 #[derive(Clone)]
 pub struct SeedProjection<'a>(&'a [Source]);
 
@@ -138,6 +144,7 @@ impl<'a> Projection<2> for SeedProjection<'a> {
     }
 }
 
+/// Hamiltonian elliptic equation.
 #[derive(Clone)]
 pub struct Hamiltonian<'a> {
     context: SystemSlice<'a, ContextSystem>,
@@ -204,6 +211,7 @@ impl<'a> Function<2> for Hamiltonian<'a> {
     }
 }
 
+// Implement visualization for hamiltonian.
 impl<'a> SolverCallback<2> for Hamiltonian<'a> {
     fn callback(
         &self,
@@ -244,6 +252,7 @@ impl<'a> SolverCallback<2> for Hamiltonian<'a> {
     }
 }
 
+/// Generate fields from Garfinkle variables.
 #[derive(Clone)]
 pub struct FieldsFromGarfinkle<'a> {
     psi: &'a [f64],
@@ -279,9 +288,13 @@ impl<'a> Function<2> for FieldsFromGarfinkle<'a> {
 
 #[derive(Clone)]
 pub struct VisualizeConfig<'a> {
+    /// Path to output relaxation data.
     pub path: &'a Path,
+    /// Name of simulation.
     pub name: &'a str,
+    /// Output vtu every `every` iterations.
     pub every: usize,
+    /// Stride for outputting nodes on mesh.
     pub stride: usize,
 }
 

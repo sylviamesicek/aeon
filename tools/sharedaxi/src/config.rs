@@ -2,25 +2,28 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize)]
 pub struct CritConfig {
+    /// Name of simulation.
     pub name: String,
 
+    /// Lower bound of amplitudes to search.
     pub start: f64,
+    /// Upper bound of amplitudes to search.
     pub end: f64,
 
+    /// Should we cache initial data?
     #[serde(default)]
     pub cache_initial: bool,
+    /// Should we cache evolution runs?
     #[serde(default)]
     pub cache_evolve: bool,
-
+    /// Number of subsearches to perform.
     #[serde(default = "default_subsearches")]
     pub subsearches: usize,
-
+    /// Depth of subsearches.
     pub bifurcations: usize,
-
     /// Specifies domain of problem
     #[serde(default)]
     pub domain: Domain,
-
     /// Directory to store output.
     pub output_dir: Option<String>,
     /// Verbosity of logging.
@@ -53,13 +56,20 @@ pub struct IDConfig {
     #[serde(default)]
     /// Visualize the relaxation process?
     pub visualize_relax: bool,
+    /// Stride for vtu outputs.
     #[serde(default = "default_stride")]
     pub visualize_stride: usize,
+    /// Produce visualization every certain number of iterations.
+    pub visualize_every: usize,
 
+    /// Maximum allowable level.
     pub max_level: usize,
+    /// Maximum number of nodes.
     pub max_nodes: usize,
+    /// Maximum error on any given cell.
     pub max_error: f64,
 
+    /// Number of global refinements to perform before running the solver.
     pub refine_global: usize,
 
     /// Specifies domain of problem
@@ -100,8 +110,11 @@ pub struct EVConfig {
     /// Amount of Kriss-Olgier Dissipation to use
     pub dissipation: f64,
 
+    /// Maximum amount of time to run.
     pub max_time: f64,
+    /// Maximum number of steps to take before failing.
     pub max_steps: usize,
+    /// Maximum number of nodes allowed for refinement before failing.
     pub max_nodes: usize,
 
     /// Configuration for regridding.
@@ -155,9 +168,11 @@ impl Default for Logging {
 /// Options defining the domain of the problem.
 #[derive(Serialize, Deserialize, Clone)]
 pub struct Domain {
+    /// Size of domain along the ρ axis.
     pub radius: f64,
+    /// Size of domain along the z-axis.
     pub height: f64,
-
+    /// Configuration of nodes per cell.
     #[serde(default)]
     pub cell: Cell,
 }
@@ -177,14 +192,14 @@ impl Default for Domain {
 #[derive(Serialize, Deserialize, Clone)]
 pub struct Cell {
     pub subdivisions: usize,
-    pub padding: usize,
+    pub ghost: usize,
 }
 
 impl Default for Cell {
     fn default() -> Self {
         Self {
             subdivisions: 6,
-            padding: 3,
+            ghost: 3,
         }
     }
 }

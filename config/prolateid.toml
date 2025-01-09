@@ -5,6 +5,7 @@ order = 4
 visualize_levels = true
 visualize_result = true
 visualize_stride = 6
+visualize_every = 1
 visualize_relax = true
 
 max_error = 1e-6
@@ -21,7 +22,7 @@ height = 48.0
 
 [domain.cell]
 subdivisions = 6
-padding = 3
+ghost = 3
 
 [solver]
 max_steps = 10_000_000

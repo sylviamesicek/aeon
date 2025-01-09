@@ -91,7 +91,7 @@ fn critical_search() -> Result<()> {
     );
 
     anyhow::ensure!(
-        config.domain.cell.subdivisions >= 2 * config.domain.cell.padding,
+        config.domain.cell.subdivisions >= 2 * config.domain.cell.ghost,
         "Domain cell nodes must be >= 2 * padding"
     );
 
@@ -154,6 +154,7 @@ fn critical_search() -> Result<()> {
                 visualize_levels: false,
                 visualize_result: true,
                 visualize_relax: false,
+                visualize_every: 1,
                 visualize_stride: stride,
 
                 max_level: 18,
@@ -163,18 +164,14 @@ fn critical_search() -> Result<()> {
                 refine_global: 1,
 
                 domain: config.domain.clone(),
-                // source: vec![Source::Brill {
-                //     amplitude: *amplitude,
-                //     sigma: (1.0, 1.0),
-                // }],
                 source: vec![Source::ScalarField {
                     amplitude: *amplitude,
-                    sigma: (2.0, 1.0),
+                    sigma: (1.0, 2.0),
                     mass: 0.0,
                 }],
 
                 solver: Solver {
-                    max_steps: 100_000,
+                    max_steps: 10_00_000,
                     cfl: 0.5,
                     tolerance: 1e-6,
                     dampening: 0.4,

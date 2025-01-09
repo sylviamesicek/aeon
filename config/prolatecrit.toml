@@ -19,7 +19,7 @@ height = 48.0
 
 [domain.cell]
 subdivisions = 6
-padding = 3
+ghost = 3
 
 [domain.mesh]
 refine_global = 1

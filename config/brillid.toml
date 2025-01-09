@@ -20,7 +20,7 @@ height = 48.0
 
 [domain.cell]
 subdivisions = 6
-padding = 3
+ghost = 3
 
 [solver]
 max_steps = 100000

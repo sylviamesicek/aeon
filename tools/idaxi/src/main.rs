@@ -68,7 +68,7 @@ fn initial_data() -> Result<()> {
     );
 
     anyhow::ensure!(
-        config.domain.cell.subdivisions >= 2 * config.domain.cell.padding,
+        config.domain.cell.subdivisions >= 2 * config.domain.cell.ghost,
         "Domain cell nodes must be >= 2 * padding"
     );
 
@@ -130,7 +130,7 @@ fn initial_data() -> Result<()> {
             origin: [0.0, 0.0],
         },
         domain.cell.subdivisions,
-        domain.cell.padding,
+        domain.cell.ghost,
     );
 
     log::trace!("Refining mesh globally {} times", config.refine_global);
@@ -162,7 +162,7 @@ fn initial_data() -> Result<()> {
             Some(VisualizeConfig {
                 path: &absolute,
                 name: &config.name,
-                every: 250,
+                every: config.visualize_every,
                 stride: config.visualize_stride,
             })
         } else {

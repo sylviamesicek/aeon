@@ -15,6 +15,7 @@ pub use config::*;
 /// System for storing all fields necessary for axisymmetric evolution.
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Fields {
+    /// Scalar field masses.
     pub scalar_fields: Vec<f64>,
 }
 
@@ -119,9 +120,13 @@ impl System for Fields {
 /// Label for indexing fields in `Fields`.
 #[derive(Clone, Copy)]
 pub enum Field {
+    /// Metric and extrinsic curvature.
     Metric(Metric),
+    /// Lapse and shift.
     Gauge(Gauge),
+    /// Constraint violation.
     Constraint(Constraint),
+    /// Scalar field sources.
     ScalarField(ScalarField, usize),
 }
 
@@ -198,12 +203,16 @@ impl System for ScalarFields {
     }
 }
 
+/// Variables for a single scalar field.
 #[derive(Clone, Copy)]
 pub enum ScalarField {
+    /// Scalar field component
     Phi,
+    /// Time derivative of `Phi`.
     Pi,
 }
 
+/// Boundary for system.
 #[derive(Clone)]
 pub struct Quadrant;
 
@@ -216,6 +225,7 @@ impl Boundary<2> for Quadrant {
     }
 }
 
+/// Boundary conditions for various fields.
 #[derive(Clone)]
 pub struct FieldConditions;
 

@@ -53,6 +53,7 @@ impl<const N: usize> Mesh<N> {
         &self.interface_masks[self.interface_nodes(interface)]
     }
 
+    /// Returns an index space corresponding to a given interface.
     fn interface_space(&self, interface: usize) -> IndexSpace<N> {
         IndexSpace::new(self.interfaces[interface].size)
     }
