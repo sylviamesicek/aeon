@@ -26,14 +26,17 @@ pub trait Function<const N: usize> {
         input: SystemSlice<Self::Input>,
         output: SystemSliceMut<Self::Output>,
     );
+}
 
-    // fn callback(
-    //     &self,
-    //     _mesh: &Mesh<N>,
-    //     _input: SystemSlice<Self::Input>,
-    //     _output: SystemSlice<Self::Output>,
-    // ) {
-    // }
+pub trait SolverCallback<const N: usize>: Function<N> {
+    fn callback(
+        &self,
+        _mesh: &Mesh<N>,
+        _input: SystemSlice<Self::Input>,
+        _output: SystemSlice<Self::Output>,
+        _iteration: usize,
+    ) {
+    }
 }
 
 // pub trait Operator<const N: usize> {

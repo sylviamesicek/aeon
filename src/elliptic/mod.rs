@@ -4,7 +4,7 @@ use reborrow::{Reborrow, ReborrowMut};
 use thiserror::Error;
 
 use crate::{
-    fd::{Conditions, Engine, ExportVtuConfig, Function, Mesh, SystemCheckpoint},
+    fd::{Conditions, Engine, Function, Mesh, SolverCallback},
     ode::{Ode, Rk4},
     prelude::Face,
     system::{Pair, System, SystemSlice, SystemSliceMut},
@@ -62,7 +62,7 @@ impl HyperRelaxSolver {
         K: Kernels + Sync,
         B: Boundary<N> + Sync,
         C: Conditions<N> + Sync,
-        F: Function<N, Input = C::System, Output = C::System> + Clone + Sync,
+        F: Function<N, Input = C::System, Output = C::System> + SolverCallback<N> + Clone + Sync,
     >(
         &mut self,
         mesh: &mut Mesh<N>,
@@ -125,10 +125,9 @@ impl HyperRelaxSolver {
             );
 
             {
-                mesh.copy_from_slice(
-                    result.rb_mut(),
-                    SystemSlice::from_contiguous(&mut data[..dimension], &system.0),
-                );
+                let u = SystemSlice::from_contiguous(&mut data[..dimension], &system.0);
+
+                mesh.copy_from_slice(result.rb_mut(), u.rb());
 
                 mesh.apply(
                     order,
@@ -138,31 +137,7 @@ impl HyperRelaxSolver {
                     result.rb_mut(),
                 );
 
-                let mut systems: SystemCheckpoint = SystemCheckpoint::default();
-                systems.save_system_default(SystemSlice::from_contiguous(&data, &system));
-
-                if index % 100 == 0 {
-                    if mesh
-                        .export_vtu(
-                            format!("output/debug/relax{}.vtu", { index / 100 }),
-                            &systems,
-                            ExportVtuConfig {
-                                title: "debug".to_string(),
-                                ghost: false,
-                                stride: 1,
-                            },
-                        )
-                        .is_err()
-                    {
-                        return Err(HyperRelaxError::VisualizeFailed);
-                    }
-                }
-
-                // deriv.callback(
-                //     mesh,
-                //     SystemSlice::from_contiguous(&data[..dimension], system.system()),
-                //     output,
-                // );
+                deriv.callback(mesh, u.rb(), result.rb(), index);
             }
 
             let norm = mesh.l2_norm(result.rb());

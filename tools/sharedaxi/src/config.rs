@@ -52,7 +52,7 @@ pub struct IDConfig {
     pub visualize_result: bool,
     #[serde(default)]
     /// Visualize the relaxation process?
-    pub _visualize_relax: bool,
+    pub visualize_relax: bool,
     #[serde(default = "default_stride")]
     pub visualize_stride: usize,
 

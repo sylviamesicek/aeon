@@ -5,6 +5,7 @@ order = 4
 visualize_levels = true
 visualize_result = true
 visualize_stride = 6
+visualize_relax = true
 
 max_error = 1e-6
 max_level = 15
@@ -23,7 +24,7 @@ subdivisions = 6
 padding = 3
 
 [solver]
-max_steps = 1000000
+max_steps = 10_000_000
 cfl = 0.5
 dampening = 0.4
 tolerance = 1e-6
@@ -31,5 +32,5 @@ tolerance = 1e-6
 [[source]]
 type = "scalar_field"
 mass = 0.0
-amplitude = 2.5
-sigma = [2.0, 1.0]
+amplitude = 4.0
+sigma = [1.0, 2.0]

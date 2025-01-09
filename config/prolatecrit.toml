@@ -26,7 +26,7 @@ refine_global = 1
 max_level = 15
 
 [solver]
-max_steps = 100000
+max_steps = 10_000_000
 cfl = 0.5
 dampening = 0.4
 tolerance = 1e-6

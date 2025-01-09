@@ -1,7 +1,9 @@
+use std::path::{Path, PathBuf};
+
 use aeon::{
     basis::{Kernels, RadiativeParams},
-    elliptic2::HyperRelaxSolver,
-    fd::{Gaussian, Mesh},
+    elliptic::HyperRelaxSolver,
+    fd::{Gaussian, Mesh, SolverCallback},
     prelude::*,
     system::System,
 };
@@ -139,6 +141,7 @@ impl<'a> Projection<2> for SeedProjection<'a> {
 #[derive(Clone)]
 pub struct Hamiltonian<'a> {
     context: SystemSlice<'a, ContextSystem>,
+    visualize: Option<VisualizeConfig<'a>>,
 }
 
 impl<'a> Function<2> for Hamiltonian<'a> {
@@ -188,16 +191,56 @@ impl<'a> Function<2> for Hamiltonian<'a> {
                 let phi_z = engine.derivative(phi, 1, vertex);
 
                 let kinetic = 0.5 * (phi_r * phi_r + phi_z * phi_z);
-                let potentional =
+                let potential =
                     0.5 * (2.0 * rho * seed[index]).exp() * psi[index].powi(4) * mass2 * phi2;
 
-                source += kinetic + potentional;
+                source += kinetic + potential;
             }
 
             dest[index] = laplacian
                 + psi[index] / 4.0 * (rho * seed_rr + 2.0 * seed_r + rho * seed_zz)
                 + psi[index] / 4.0 * source;
         }
+    }
+}
+
+impl<'a> SolverCallback<2> for Hamiltonian<'a> {
+    fn callback(
+        &self,
+        mesh: &Mesh<2>,
+        input: SystemSlice<Self::Input>,
+        output: SystemSlice<Self::Output>,
+        iteration: usize,
+    ) {
+        let Some(ref visualze) = self.visualize else {
+            return;
+        };
+
+        if iteration % visualze.every != 0 {
+            return;
+        }
+
+        let i = iteration / visualze.every;
+
+        let mut checkpoint = SystemCheckpoint::default();
+        checkpoint.save_field("Solution", input.into_scalar());
+        checkpoint.save_field("Derivative", output.into_scalar());
+
+        mesh.export_vtu(
+            PathBuf::from(visualze.path).join(format!(
+                "{}_level_{}_iter_{}.vtu",
+                visualze.name,
+                mesh.max_level(),
+                i
+            )),
+            &checkpoint,
+            ExportVtuConfig {
+                title: visualze.name.to_string(),
+                ghost: false,
+                stride: visualze.stride,
+            },
+        )
+        .unwrap()
     }
 }
 
@@ -234,10 +277,19 @@ impl<'a> Function<2> for FieldsFromGarfinkle<'a> {
     }
 }
 
+#[derive(Clone)]
+pub struct VisualizeConfig<'a> {
+    pub path: &'a Path,
+    pub name: &'a str,
+    pub every: usize,
+    pub stride: usize,
+}
+
 pub fn solve_order<const ORDER: usize>(
     order: Order<ORDER>,
     mesh: &mut Mesh<2>,
     solver_con: &Solver,
+    visualize: Option<VisualizeConfig>,
     sources: &[Source],
     mut system: SystemSliceMut<Fields>,
 ) -> anyhow::Result<()>
@@ -309,6 +361,7 @@ where
         ScalarConditions(PsiCondition),
         Hamiltonian {
             context: context.as_slice(),
+            visualize,
         },
         SystemSliceMut::from_scalar(&mut psi),
     )?;

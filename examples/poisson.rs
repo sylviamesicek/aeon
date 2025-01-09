@@ -1,4 +1,8 @@
-use aeon::{elliptic2::HyperRelaxSolver, fd::Gaussian, prelude::*};
+use aeon::{
+    elliptic::HyperRelaxSolver,
+    fd::{Gaussian, SolverCallback},
+    prelude::*,
+};
 use aeon_basis::RadiativeParams;
 
 const ORDER: Order<4> = Order::<4>;
@@ -57,6 +61,8 @@ impl<'a> Function<2> for PoissonEquation<'a> {
         }
     }
 }
+
+impl<'a> SolverCallback<2> for PoissonEquation<'a> {}
 
 pub fn main() -> anyhow::Result<()> {
     env_logger::builder()

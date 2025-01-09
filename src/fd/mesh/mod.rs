@@ -1085,7 +1085,10 @@ impl<const N: usize> Mesh<N> {
 
         model.export(path).map_err(|i| match i {
             vtkio::Error::IO(io) => io,
-            _ => io::Error::from(io::ErrorKind::Other),
+            v => {
+                log::error!("Encountered error {:?} while exporting vtu", v);
+                io::Error::from(io::ErrorKind::Other)
+            }
         })?;
 
         Ok(())

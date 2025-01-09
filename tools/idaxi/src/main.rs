@@ -5,6 +5,7 @@ use std::{path::PathBuf, process::ExitCode};
 use aeon::prelude::*;
 use anyhow::{anyhow, Context, Result};
 use clap::{Arg, Command};
+use garfinkle::VisualizeConfig;
 use sharedaxi::{import_from_path_arg, Fields, IDConfig, Quadrant, Source};
 
 mod garfinkle;
@@ -157,12 +158,23 @@ fn initial_data() -> Result<()> {
     system.resize(mesh.num_nodes());
 
     loop {
+        let visualize = if config.visualize_relax {
+            Some(VisualizeConfig {
+                path: &absolute,
+                name: &config.name,
+                every: 250,
+                stride: config.visualize_stride,
+            })
+        } else {
+            None
+        };
         match order {
             2 => {
                 garfinkle::solve_order(
                     Order::<2>,
                     &mut mesh,
                     solver,
+                    visualize,
                     sources,
                     system.as_mut_slice(),
                 )?;
@@ -172,6 +184,7 @@ fn initial_data() -> Result<()> {
                     Order::<4>,
                     &mut mesh,
                     solver,
+                    visualize,
                     sources,
                     system.as_mut_slice(),
                 )?;
@@ -181,6 +194,7 @@ fn initial_data() -> Result<()> {
                     Order::<6>,
                     &mut mesh,
                     solver,
+                    visualize,
                     sources,
                     system.as_mut_slice(),
                 )?;

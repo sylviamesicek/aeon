@@ -4,8 +4,8 @@
 // Included so we can use custom derive macros from `aeon_macros` within this crate.
 extern crate self as aeon;
 
-// pub mod elliptic;
-pub mod elliptic2;
+pub mod elliptic;
+// pub mod elliptic2;
 pub mod fd;
 pub mod lac;
 pub mod ode;

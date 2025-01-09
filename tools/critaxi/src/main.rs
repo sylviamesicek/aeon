@@ -153,7 +153,7 @@ fn critical_search() -> Result<()> {
 
                 visualize_levels: false,
                 visualize_result: true,
-                _visualize_relax: false,
+                visualize_relax: false,
                 visualize_stride: stride,
 
                 max_level: 18,

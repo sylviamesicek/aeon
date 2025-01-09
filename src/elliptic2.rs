@@ -4,7 +4,7 @@ use reborrow::{Reborrow, ReborrowMut};
 use thiserror::Error;
 
 use crate::{
-    fd::{Conditions, Engine, Function, Mesh, ScalarConditions, SystemCheckpoint},
+    fd::{Conditions, Engine, Function, Mesh, ScalarConditions, SolverCallback, SystemCheckpoint},
     ode::{Ode, Rk4},
     prelude::Face,
     system::{Empty, Scalar, System, SystemSlice, SystemSliceMut},
@@ -62,7 +62,7 @@ impl HyperRelaxSolver {
         K: Kernels + Sync,
         B: Boundary<N> + Sync,
         C: Conditions<N> + Sync,
-        F: Function<N, Input = C::System, Output = C::System> + Clone + Sync,
+        F: Function<N, Input = C::System, Output = C::System> + SolverCallback<N> + Clone + Sync,
     >(
         &mut self,
         mesh: &mut Mesh<N>,
@@ -82,7 +82,6 @@ impl HyperRelaxSolver {
 
         // Allocate storage
         let mut data = vec![0.0; 2 * dimension].into_boxed_slice();
-        let mut update = vec![0.0; 2 * dimension].into_boxed_slice();
 
         // Compute minimum spacing and spacing per vertex.
         let min_spacing = mesh.min_spacing();
@@ -139,6 +138,8 @@ impl HyperRelaxSolver {
                     u.rb(),
                     result.rb_mut(),
                 );
+
+                deriv.callback(mesh, u.rb(), result.rb(), index);
 
                 let mut systems = SystemCheckpoint::default();
                 systems.save_system_default(SystemSlice::from_contiguous(
@@ -229,7 +230,7 @@ impl HyperRelaxSolver {
         K: Kernels + Sync,
         B: Boundary<N> + Sync,
         C: Condition<N> + Sync,
-        F: Function<N, Input = Scalar, Output = Scalar> + Clone + Sync,
+        F: Function<N, Input = Scalar, Output = Scalar> + SolverCallback<N> + Clone + Sync,
     >(
         &mut self,
         mesh: &mut Mesh<N>,
