@@ -1,6 +1,6 @@
 use std::{path::PathBuf, process::ExitCode};
 
-use aeon::prelude::*;
+use aeon::{prelude::*, system::Dynamic};
 use anyhow::{anyhow, Context as _, Result};
 use clap::{Arg, Command};
 use reborrow::ReborrowMut as _;
@@ -116,6 +116,7 @@ impl Function<2> for FieldDerivs {
                 scalar_field.phi_rz = engine.mixed_derivative(phi, 0, 1, vertex);
                 scalar_field.phi_zz = engine.second_derivative(phi, 1, vertex);
 
+                scalar_field.pi = pi[index];
                 scalar_field.pi_r = engine.derivative(pi, 0, vertex);
                 scalar_field.pi_z = engine.derivative(pi, 1, vertex);
 
@@ -307,6 +308,8 @@ pub fn evolution() -> Result<bool> {
     let mut time = 0.0;
     let mut step = 0;
 
+    let mut dilate_time = 0.0;
+
     let mut save_step = 0;
     let mut steps_since_regrid = 0;
 
@@ -340,6 +343,12 @@ pub fn evolution() -> Result<bool> {
 
         // Check Norm
         let norm = mesh.l2_norm(fields.as_slice());
+
+        if dilate_time > 10.0 {
+            does_disperse = true;
+            log::trace!("Evolution disperses, norm: {}", norm);
+            break;
+        }
 
         if norm.is_nan() || norm >= 1e60 {
             log::trace!("Evolution collapses, norm: {}", norm);
@@ -428,7 +437,7 @@ pub fn evolution() -> Result<bool> {
             //         );
 
             log::trace!(
-                "Saving Checkpoint {save_step}, Time: {time:.5}, Step: {h:.8}, Norm: {norm:.5e}, Nodes: {}",
+                "Saving Checkpoint {save_step}, Time: {time:.5}, Dilated Time: {dilate_time:.5}, Step: {h:.8}, Norm: {norm:.5e}, Nodes: {}",
                 mesh.num_nodes()
             );
 
@@ -482,11 +491,15 @@ pub fn evolution() -> Result<bool> {
         mesh.fill_boundary(ORDER, Quadrant, FieldConditions, fields.as_mut_slice());
         mesh.dissipation(DISS_ORDER, Quadrant, diss, fields.as_mut_slice());
 
+        let lapse = fields.field(Field::Gauge(Gauge::Lapse))[0];
+
         step += 1;
         steps_since_regrid += 1;
 
         time += h;
         time_since_save += h;
+
+        dilate_time += h * lapse;
     }
 
     Ok(does_disperse)

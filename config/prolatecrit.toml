@@ -2,8 +2,8 @@ name = "prolate"
 output_dir = "output/prolatecrit"
 order = 4
 
-start = 1.0
-end = 4.0
+start = 0.0
+end = 2.0
 
 cache_initial = true
 cache_evolve = false

@@ -157,7 +157,7 @@ fn critical_search() -> Result<()> {
                 visualize_every: 1,
                 visualize_stride: stride,
 
-                max_level: 18,
+                max_level: 16,
                 max_nodes: 10_000_000,
                 max_error: 1e-6,
 
@@ -166,7 +166,7 @@ fn critical_search() -> Result<()> {
                 domain: config.domain.clone(),
                 source: vec![Source::ScalarField {
                     amplitude: *amplitude,
-                    sigma: (1.0, 2.0),
+                    sigma: (5.35, 5.35),
                     mass: 0.0,
                 }],
 
@@ -201,14 +201,14 @@ fn critical_search() -> Result<()> {
                 },
                 cfl: 0.1,
                 dissipation: 0.5,
-                max_time: 4.0,
+                max_time: 30.0,
                 max_steps: 10_000_000,
-                max_nodes: 10_000_000,
+                max_nodes: 1_000_000,
                 regrid: Regrid {
                     coarsen_tolerance: 1e-8,
                     refine_tolerance: 1e-6,
                     flag_interval: 20,
-                    max_levels: 18,
+                    max_levels: 16,
                 },
                 visualize: Some(Visualize {
                     save_interval: 0.05,
@@ -317,7 +317,7 @@ fn critical_search() -> Result<()> {
         }
 
         std::fs::write(
-            absolute.join("evolution").join("cache.toml"),
+            absolute.join("evolve").join("cache.toml"),
             toml::to_string_pretty(&evolution_cache)?,
         )?;
 

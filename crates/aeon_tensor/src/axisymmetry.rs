@@ -160,12 +160,17 @@ pub struct ScalarFieldSystem {
 
 /// A decomposition of the stress energy tensor in axisymmetric units.
 pub struct StressEnergy {
+    /// σ
     pub energy: f64,
+    /// Sₐ
     pub momentum: Vector<2>,
+    /// Sₐᵦ
     pub stress: Matrix<2>,
-
+    /// Jᶲ
     pub angular_momentum: f64,
+    /// Jᵃ
     pub angular_shear: Vector<2>,
+    /// τ
     pub angular_stress: f64,
 }
 
@@ -591,7 +596,7 @@ impl Decomposition {
                 term3 += lapse.value * field.phi.second_derivs[[0, 0]] / metric.value()[[0, 0]];
             }
 
-            let term4 = -field.mass * field.mass * field.phi.value;
+            let term4 = -lapse.value * field.mass * field.mass * field.phi.value;
             let term5 = s.sum(|[i]| pi_grad[[i]] * shift.value[[i]]);
 
             term1 + term2 + term3 + term4 + term5
