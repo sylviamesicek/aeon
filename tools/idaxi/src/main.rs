@@ -72,10 +72,10 @@ fn initial_data() -> Result<()> {
         "Domain cell nodes must be >= 2 * padding"
     );
 
-    anyhow::ensure!(
-        config.refine_global <= config.max_level,
-        "Mesh global refinements must be <= mesh max_level"
-    );
+    // anyhow::ensure!(
+    //     config.refine_global <= config.max_level,
+    //     "Mesh global refinements must be <= mesh max_level"
+    // );
 
     anyhow::ensure!(config.visualize_stride >= 1, "Stride must be >= 1");
 
@@ -217,7 +217,7 @@ fn initial_data() -> Result<()> {
             )?;
         }
 
-        if mesh.max_level() >= config.max_level || mesh.num_nodes() >= config.max_nodes {
+        if mesh.max_level() >= config.max_levels || mesh.num_nodes() >= config.max_nodes {
             log::error!(
                 "Failed to solve initial data, level: {}, nodes: {}",
                 mesh.max_level(),

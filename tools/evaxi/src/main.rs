@@ -308,7 +308,7 @@ pub fn evolution() -> Result<bool> {
     let mut time = 0.0;
     let mut step = 0;
 
-    let mut dilate_time = 0.0;
+    let mut proper_time = 0.0;
 
     let mut save_step = 0;
     let mut steps_since_regrid = 0;
@@ -317,6 +317,7 @@ pub fn evolution() -> Result<bool> {
 
     let max_steps = config.max_steps;
     let max_time = config.max_time;
+    let max_proper_time = config.max_proper_time;
     let cfl = config.cfl;
     let diss = config.dissipation;
     let regrid_steps = config.regrid.flag_interval;
@@ -336,19 +337,13 @@ pub fn evolution() -> Result<bool> {
 
     let mut does_disperse = true;
 
-    while time < max_time {
+    while time < max_time && proper_time < max_proper_time {
         assert!(fields.len() == mesh.num_nodes());
         // Fill boundaries
         mesh.fill_boundary(ORDER, Quadrant, FieldConditions, fields.as_mut_slice());
 
         // Check Norm
         let norm = mesh.l2_norm(fields.as_slice());
-
-        if dilate_time > 10.0 {
-            does_disperse = true;
-            log::trace!("Evolution disperses, norm: {}", norm);
-            break;
-        }
 
         if norm.is_nan() || norm >= 1e60 {
             log::trace!("Evolution collapses, norm: {}", norm);
@@ -437,7 +432,7 @@ pub fn evolution() -> Result<bool> {
             //         );
 
             log::trace!(
-                "Saving Checkpoint {save_step}, Time: {time:.5}, Dilated Time: {dilate_time:.5}, Step: {h:.8}, Norm: {norm:.5e}, Nodes: {}",
+                "Saving Checkpoint {save_step}, Time: {time:.5}, Dilated Time: {proper_time:.5}, Step: {h:.8}, Norm: {norm:.5e}, Nodes: {}",
                 mesh.num_nodes()
             );
 
@@ -499,7 +494,7 @@ pub fn evolution() -> Result<bool> {
         time += h;
         time_since_save += h;
 
-        dilate_time += h * lapse;
+        proper_time += h * lapse;
     }
 
     Ok(does_disperse)

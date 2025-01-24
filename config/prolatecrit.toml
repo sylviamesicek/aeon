@@ -21,12 +21,20 @@ height = 48.0
 subdivisions = 6
 ghost = 3
 
-[domain.mesh]
-refine_global = 1
-max_level = 15
-
 [solver]
 max_steps = 10_000_000
 cfl = 0.5
 dampening = 0.4
 tolerance = 1e-6
+
+[regrid]
+coarsen_tolerance = 1e-8
+refine_tolerance = 1e-6
+flag_interval = 20
+max_levels = 15
+
+[limits]
+max_coord_time = 100.0
+max_proper_time = 10.0
+max_nodes = 500_000
+max_steps = 10_000_000

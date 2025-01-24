@@ -1,8 +1,8 @@
 use anyhow::{anyhow, Context, Result};
 use serde::{Deserialize, Serialize};
 use sharedaxi::{
-    import_from_path_arg, import_from_toml, CritConfig, EVConfig, IDConfig, Logging, Regrid,
-    Solver, Source, Visualize,
+    import_from_path_arg, import_from_toml, CritConfig, EVConfig, IDConfig, Logging, Source,
+    Visualize,
 };
 use std::{
     collections::HashMap,
@@ -136,7 +136,7 @@ fn critical_search() -> Result<()> {
         );
 
         for amplitude in subsearches.iter() {
-            let config = IDConfig {
+            let idconfig = IDConfig {
                 name: "initial".to_string(),
                 output_dir: Some(
                     absolute
@@ -157,9 +157,9 @@ fn critical_search() -> Result<()> {
                 visualize_every: 1,
                 visualize_stride: stride,
 
-                max_level: 16,
-                max_nodes: 10_000_000,
-                max_error: 1e-6,
+                max_nodes: config.limits.max_nodes,
+                max_error: config.solver.tolerance,
+                max_levels: config.regrid.max_levels,
 
                 refine_global: 1,
 
@@ -170,21 +170,16 @@ fn critical_search() -> Result<()> {
                     mass: 0.0,
                 }],
 
-                solver: Solver {
-                    max_steps: 10_00_000,
-                    cfl: 0.5,
-                    tolerance: 1e-6,
-                    dampening: 0.4,
-                },
+                solver: config.solver.clone(),
             };
 
             let config_path = absolute
                 .join("config")
                 .join(format!("initial_{:?}.toml", amplitude));
 
-            std::fs::write(config_path, toml::to_string_pretty(&config)?)?;
+            std::fs::write(config_path, toml::to_string_pretty(&idconfig)?)?;
 
-            let config = EVConfig {
+            let evconfig = EVConfig {
                 name: "evolve".to_string(),
                 output_dir: Some(
                     absolute
@@ -201,15 +196,11 @@ fn critical_search() -> Result<()> {
                 },
                 cfl: 0.1,
                 dissipation: 0.5,
-                max_time: 30.0,
-                max_steps: 10_000_000,
-                max_nodes: 1_000_000,
-                regrid: Regrid {
-                    coarsen_tolerance: 1e-8,
-                    refine_tolerance: 1e-6,
-                    flag_interval: 20,
-                    max_levels: 16,
-                },
+                max_time: config.limits.max_coord_time,
+                max_proper_time: config.limits.max_proper_time,
+                max_steps: config.limits.max_steps,
+                max_nodes: config.limits.max_nodes,
+                regrid: config.regrid.clone(),
                 visualize: Some(Visualize {
                     save_interval: 0.05,
                     stride,
@@ -220,7 +211,7 @@ fn critical_search() -> Result<()> {
                 .join("config")
                 .join(format!("evolve_{:?}.toml", amplitude));
 
-            std::fs::write(config_path, toml::to_string_pretty(&config)?)?;
+            std::fs::write(config_path, toml::to_string_pretty(&evconfig)?)?;
         }
 
         for amplitude in subsearches.iter() {

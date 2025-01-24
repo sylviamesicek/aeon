@@ -29,6 +29,15 @@ pub struct CritConfig {
     /// Verbosity of logging.
     #[serde(default)]
     pub logging: Logging,
+
+    /// Specifies paramteres for the initial data solver.
+    pub solver: Solver,
+    /// Configuration for regridding during evolution.
+    pub regrid: Regrid,
+
+    /// Limits to detect disspersion and collapse
+    #[serde(default)]
+    pub limits: Limits,
 }
 
 fn default_subsearches() -> usize {
@@ -62,12 +71,11 @@ pub struct IDConfig {
     /// Produce visualization every certain number of iterations.
     pub visualize_every: usize,
 
-    /// Maximum allowable level.
-    pub max_level: usize,
     /// Maximum number of nodes.
     pub max_nodes: usize,
     /// Maximum error on any given cell.
     pub max_error: f64,
+    pub max_levels: usize,
 
     /// Number of global refinements to perform before running the solver.
     pub refine_global: usize,
@@ -110,8 +118,10 @@ pub struct EVConfig {
     /// Amount of Kriss-Olgier Dissipation to use
     pub dissipation: f64,
 
-    /// Maximum amount of time to run.
+    /// Maximum amount of coordinate time to run (before assuming disspersion).
     pub max_time: f64,
+    /// Maximum amount of proper time to run (before assuming disspersion).
+    pub max_proper_time: f64,
     /// Maximum number of steps to take before failing.
     pub max_steps: usize,
     /// Maximum number of nodes allowed for refinement before failing.
@@ -204,7 +214,7 @@ impl Default for Cell {
     }
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Solver {
     pub max_steps: usize,
     pub cfl: f64,
@@ -223,7 +233,7 @@ impl Default for Solver {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(tag = "type")]
 pub enum Source {
     /// Instance generates Brill-type initial data with gunlach seed function.
@@ -237,7 +247,7 @@ pub enum Source {
     },
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Regrid {
     /// Any cell with error smaller than this will be coarsened.
     pub coarsen_tolerance: f64,
@@ -254,4 +264,23 @@ pub struct Visualize {
     /// How often do we save a visualization?
     pub save_interval: f64,
     pub stride: usize,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct Limits {
+    pub max_coord_time: f64,
+    pub max_proper_time: f64,
+    pub max_nodes: usize,
+    pub max_steps: usize,
+}
+
+impl Default for Limits {
+    fn default() -> Self {
+        Self {
+            max_coord_time: 100.0,
+            max_proper_time: 10.0,
+            max_nodes: 1_000_000,
+            max_steps: 10_000_000,
+        }
+    }
 }
