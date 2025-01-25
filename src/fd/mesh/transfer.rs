@@ -1,12 +1,12 @@
-use aeon_basis::{Boundary, Kernels};
+use crate::{kernel::Kernels, system::SystemCondition};
 use aeon_geometry::{AxisMask, IndexSpace, Side, TreeBlockNeighbor, TreeCellNeighbor};
 use reborrow::ReborrowMut;
 use std::{array, cmp::Ordering, ops::Range};
 
 use crate::{
-    fd::{Conditions, Mesh, SystemBC},
+    fd::Mesh,
     shared::SharedSlice,
-    system::{System, SystemSlice, SystemSliceMut},
+    system::{System, SystemConditions, SystemSlice, SystemSliceMut},
 };
 
 #[derive(Clone, Debug)]
@@ -73,10 +73,9 @@ impl<const N: usize> Mesh<N> {
     }
 
     /// Transfers data from an old version of the mesh to the new refined version.
-    pub fn transfer_system<K: Kernels, B: Boundary<N> + Sync, S: System + Sync>(
+    pub fn transfer_system<K: Kernels, S: System + Sync>(
         &mut self,
         _order: K,
-        boundary: B,
         source: SystemSlice<S>,
         dest: SystemSliceMut<S>,
     ) {
@@ -90,7 +89,6 @@ impl<const N: usize> Mesh<N> {
             let level = mesh.old_block_level(block);
             let nodes = mesh.old_block_nodes(block);
             let space = mesh.old_block_space(block);
-            let boundary = mesh.old_block_boundary(block, boundary.clone());
 
             let block_source = source.slice(nodes.clone());
 
@@ -126,17 +124,17 @@ impl<const N: usize> Mesh<N> {
                         let node_origin = mesh.cell_node_origin(new_cell);
 
                         for node_offset in IndexSpace::new(node_size).iter() {
-                            let source_vertex =
-                                array::from_fn(|axis| cell_origin[axis] + node_offset[axis]);
+                            let source_node = array::from_fn(|axis| {
+                                (cell_origin[axis] + node_offset[axis]) as isize
+                            });
                             let dest_node = array::from_fn(|axis| {
                                 (node_origin[axis] + node_offset[axis]) as isize
                             });
 
                             for field in dest.system().enumerate() {
                                 let v = space.prolong(
-                                    boundary.clone(),
                                     K::interpolation().clone(),
-                                    source_vertex,
+                                    source_node,
                                     block_source.field(field),
                                 );
                                 block_dest.field_mut(field)[new_space.index_from_node(dest_node)] =
@@ -216,24 +214,22 @@ impl<const N: usize> Mesh<N> {
 
     /// Enforces strong boundary conditions. This includes strong physical boundary conditions, as well
     /// as handling interior boundaries (same level, coarse-fine, or fine-coarse).
-    pub fn fill_boundary<K: Kernels, B: Boundary<N> + Sync, C: Conditions<N> + Sync>(
+    pub fn fill_boundary<K: Kernels, C: SystemConditions<N> + Sync>(
         &mut self,
         order: K,
-        boundary: B,
         conditions: C,
         system: SystemSliceMut<'_, C::System>,
     ) {
-        self.fill_boundary_to_extent(order, self.ghost, boundary, conditions, system);
+        self.fill_boundary_to_extent(order, self.ghost, conditions, system);
     }
 
     /// Enforces strong boundary conditions, only filling ghost nodes if those nodes are within `extent`
     /// of a physical node. This is useful if one is using Kriss-Olgier dissipation, where dissipation
     /// and derivatives use different order stencils.
-    pub fn fill_boundary_to_extent<K: Kernels, B: Boundary<N> + Sync, C: Conditions<N> + Sync>(
+    pub fn fill_boundary_to_extent<K: Kernels, C: SystemConditions<N> + Sync>(
         &mut self,
         order: K,
         extent: usize,
-        boundary: B,
         conditions: C,
         mut system: SystemSliceMut<'_, C::System>,
     ) {
@@ -242,9 +238,9 @@ impl<const N: usize> Mesh<N> {
         self.fill_fine(extent, system.rb_mut());
         self.fill_direct(extent, system.rb_mut());
 
-        self.fill_physical(extent, &boundary, &conditions, system.rb_mut());
-        self.fill_prolong(order, extent, &boundary, &conditions, system.rb_mut());
-        self.fill_physical(extent, &boundary, &conditions, system.rb_mut());
+        self.fill_physical(extent, &conditions, system.rb_mut());
+        self.fill_prolong(order, extent, system.rb_mut());
+        self.fill_physical(extent, &conditions, system.rb_mut());
     }
 
     pub fn fill_boundary_zeros<S: System>(&mut self, dest: SystemSliceMut<S>) {
@@ -271,10 +267,9 @@ impl<const N: usize> Mesh<N> {
         });
     }
 
-    fn fill_physical<B: Boundary<N> + Sync, C: Conditions<N> + Sync>(
+    fn fill_physical<C: SystemConditions<N> + Sync>(
         &mut self,
         extent: usize,
-        boundary: &B,
         conditions: &C,
         dest: SystemSliceMut<'_, C::System>,
     ) {
@@ -286,13 +281,12 @@ impl<const N: usize> Mesh<N> {
             // Fill Physical Boundary conditions
             let nodes = self.block_nodes(block);
             let space = self.block_space(block);
-            let boundary = self.block_boundary(block, boundary.clone());
 
             let mut block_system = unsafe { shared.slice_mut(nodes) };
 
             for field in shared.system().enumerate() {
-                let bcs = SystemBC::new(boundary.clone(), conditions.clone(), field);
-                space.fill_boundary(extent, bcs, block_system.field_mut(field));
+                let condition = SystemCondition::new(conditions.clone(), field);
+                space.fill_boundary(extent, condition, block_system.field_mut(field));
             }
         });
     }
@@ -360,13 +354,11 @@ impl<const N: usize> Mesh<N> {
         });
     }
 
-    fn fill_prolong<K: Kernels, B: Boundary<N> + Sync, C: Conditions<N> + Sync>(
+    fn fill_prolong<K: Kernels, S: System>(
         &mut self,
         _order: K,
         extent: usize,
-        boundary: &B,
-        conditions: &C,
-        result: SystemSliceMut<C::System>,
+        result: SystemSliceMut<S>,
     ) {
         let shared = result.into_shared();
 
@@ -376,7 +368,6 @@ impl<const N: usize> Mesh<N> {
             let block_nodes = self.block_nodes(info.block);
             let block_space = self.block_space(info.block);
             let neighbor_nodes = self.block_nodes(info.neighbor);
-            let neighbor_boundary = self.block_boundary(info.neighbor, boundary.clone());
             let neighbor_space = self.block_space(info.neighbor);
 
             let mut block_system = unsafe { shared.slice_mut(block_nodes) };
@@ -385,16 +376,13 @@ impl<const N: usize> Mesh<N> {
             for node in self.interface_nodes_active(interface, extent) {
                 let block_node = array::from_fn(|axis| node[axis] as isize + info.dest[axis]);
 
-                let neighbor_vertex =
-                    array::from_fn(|axis| (node[axis] as isize + info.source[axis]) as usize);
-
+                let neighbor_node = array::from_fn(|axis| node[axis] as isize + info.source[axis]);
                 let block_index = block_space.index_from_node(block_node);
 
                 for field in shared.system().enumerate() {
                     let value = neighbor_space.prolong(
-                        SystemBC::new(neighbor_boundary.clone(), conditions.clone(), field),
                         K::interpolation().clone(),
-                        neighbor_vertex,
+                        neighbor_node,
                         neighbor_system.field(field),
                     );
                     block_system.field_mut(field)[block_index] = value;

@@ -1,6 +1,6 @@
 use std::ops::Range;
 
-use aeon_basis::{node_from_vertex, Boundary, Hessian, Kernels, NodeSpace, VertexKernel};
+use crate::kernel::{node_from_vertex, Hessian, Kernels, NodeSpace, VertexKernel};
 use aeon_geometry::Rectangle;
 
 use super::mesh::MeshStore;
@@ -75,16 +75,15 @@ impl<'a, const N: usize, E: Engine<N>> Engine<N> for &'a E {
 }
 
 /// A finite difference engine of a given order, but potentially bordering a free boundary.
-pub struct FdEngine<'store, const N: usize, K: Kernels, B: Boundary<N>> {
+pub struct FdEngine<'store, const N: usize, K: Kernels> {
     pub space: NodeSpace<N>,
     pub bounds: Rectangle<N>,
     pub order: K,
-    pub boundary: B,
     pub store: &'store MeshStore,
     pub range: Range<usize>,
 }
 
-impl<'store, const N: usize, K: Kernels, B: Boundary<N>> FdEngine<'store, N, K, B> {
+impl<'store, const N: usize, K: Kernels> FdEngine<'store, N, K> {
     fn evaluate_axis(
         &self,
         field: &[f64],
@@ -92,18 +91,12 @@ impl<'store, const N: usize, K: Kernels, B: Boundary<N>> FdEngine<'store, N, K, 
         kernel: &impl VertexKernel,
         vertex: [usize; N],
     ) -> f64 {
-        self.space.evaluate_axis(
-            self.boundary.clone(),
-            kernel,
-            self.bounds,
-            node_from_vertex(vertex),
-            field,
-            axis,
-        )
+        self.space
+            .evaluate_axis(kernel, self.bounds, node_from_vertex(vertex), field, axis)
     }
 }
 
-impl<'store, const N: usize, K: Kernels, B: Boundary<N>> Engine<N> for FdEngine<'store, N, K, B> {
+impl<'store, const N: usize, K: Kernels> Engine<N> for FdEngine<'store, N, K> {
     fn num_nodes(&self) -> usize {
         self.space.num_nodes()
     }
@@ -113,7 +106,7 @@ impl<'store, const N: usize, K: Kernels, B: Boundary<N>> Engine<N> for FdEngine<
     }
 
     fn vertex_size(&self) -> [usize; N] {
-        self.space.inner_size()
+        self.space.vertex_size()
     }
 
     fn alloc<T: Default>(&self, len: usize) -> &mut [T] {
@@ -143,7 +136,6 @@ impl<'store, const N: usize, K: Kernels, B: Boundary<N>> Engine<N> for FdEngine<
 
     fn mixed_derivative(&self, field: &[f64], i: usize, j: usize, vertex: [usize; N]) -> f64 {
         self.space.evaluate(
-            self.boundary.clone(),
             Hessian::<K>::new(i, j),
             self.bounds,
             node_from_vertex(vertex),
@@ -202,7 +194,7 @@ impl<'store, const N: usize, K: Kernels> Engine<N> for FdIntEngine<'store, N, K>
     }
 
     fn vertex_size(&self) -> [usize; N] {
-        self.space.inner_size()
+        self.space.vertex_size()
     }
 
     fn alloc<T: Default>(&self, len: usize) -> &mut [T] {

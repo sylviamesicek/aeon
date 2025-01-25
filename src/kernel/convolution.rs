@@ -217,64 +217,64 @@ impl<const N: usize, O: Kernels> Convolution<N> for Hessian<O> {
     }
 }
 
-/// Computes the gradient along the given axis.
-pub struct Dissipation<O: Kernels>(usize, PhantomData<O>);
+// /// Computes the gradient along the given axis.
+// pub struct Dissipation<O: Kernels>(usize, PhantomData<O>);
 
-impl<O: Kernels> Dissipation<O> {
-    /// Constructs a convolution which computes the derivative along the given axis.
-    pub const fn new(axis: usize) -> Self {
-        Self(axis, PhantomData)
-    }
-}
+// impl<O: Kernels> Dissipation<O> {
+//     /// Constructs a convolution which computes the derivative along the given axis.
+//     pub const fn new(axis: usize) -> Self {
+//         Self(axis, PhantomData)
+//     }
+// }
 
-impl<O: Kernels> Clone for Dissipation<O> {
-    fn clone(&self) -> Self {
-        Self(self.0, PhantomData)
-    }
-}
+// impl<O: Kernels> Clone for Dissipation<O> {
+//     fn clone(&self) -> Self {
+//         Self(self.0, PhantomData)
+//     }
+// }
 
-impl<const N: usize, O: Kernels> Convolution<N> for Dissipation<O> {
-    fn border_width(&self, axis: usize) -> usize {
-        if axis == self.0 {
-            O::dissipation().border_width()
-        } else {
-            Value.border_width()
-        }
-    }
+// impl<const N: usize, O: Kernels> Convolution<N> for Dissipation<O> {
+//     fn border_width(&self, axis: usize) -> usize {
+//         if axis == self.0 {
+//             O::dissipation().border_width()
+//         } else {
+//             Value.border_width()
+//         }
+//     }
 
-    fn interior(&self, axis: usize) -> &[f64] {
-        if axis == self.0 {
-            O::dissipation().interior()
-        } else {
-            Value.interior()
-        }
-    }
+//     fn interior(&self, axis: usize) -> &[f64] {
+//         if axis == self.0 {
+//             O::dissipation().interior()
+//         } else {
+//             Value.interior()
+//         }
+//     }
 
-    fn free(&self, border: Border, axis: usize) -> &[f64] {
-        if axis == self.0 {
-            O::dissipation().free(border)
-        } else {
-            Value.free(border)
-        }
-    }
+//     fn free(&self, border: Border, axis: usize) -> &[f64] {
+//         if axis == self.0 {
+//             O::dissipation().free(border)
+//         } else {
+//             Value.free(border)
+//         }
+//     }
 
-    // fn symmetric(&self, border: Border, axis: usize) -> &[f64] {
-    //     if axis == self.0 {
-    //         O::dissipation().symmetric(border)
-    //     } else {
-    //         Value.symmetric(border)
-    //     }
-    // }
+//     // fn symmetric(&self, border: Border, axis: usize) -> &[f64] {
+//     //     if axis == self.0 {
+//     //         O::dissipation().symmetric(border)
+//     //     } else {
+//     //         Value.symmetric(border)
+//     //     }
+//     // }
 
-    // fn antisymmetric(&self, border: Border, axis: usize) -> &[f64] {
-    //     if axis == self.0 {
-    //         O::dissipation().antisymmetric(border)
-    //     } else {
-    //         Value.antisymmetric(border)
-    //     }
-    // }
+//     // fn antisymmetric(&self, border: Border, axis: usize) -> &[f64] {
+//     //     if axis == self.0 {
+//     //         O::dissipation().antisymmetric(border)
+//     //     } else {
+//     //         Value.antisymmetric(border)
+//     //     }
+//     // }
 
-    fn scale(&self, spacing: [f64; N]) -> f64 {
-        O::dissipation().scale(spacing[self.0])
-    }
-}
+//     fn scale(&self, spacing: [f64; N]) -> f64 {
+//         O::dissipation().scale(spacing[self.0])
+//     }
+// }

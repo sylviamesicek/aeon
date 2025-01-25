@@ -3,7 +3,7 @@
 #SBATCH --account=belz-np
 #SBATCH --partition=belz-shared-np
 #SBATCH --nodes=1
-#SBATCH --ntasks=1
+#SBATCH --ntasks=10
 #SBATCH --job-name=prolatesearch
 #SBATCH -o ./output/prolatesearch.out
 #SBATCH -e ./output/prolatesearch.err

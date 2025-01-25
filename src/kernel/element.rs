@@ -49,7 +49,7 @@ pub struct Element<const N: usize> {
 
 impl<const N: usize> Element<N> {
     /// Constructs a reference element with uniformly placed
-    /// support points with `order + 1` points along each axis.
+    /// support points with `width + 1` points along each axis.
     pub fn uniform(width: usize, order: usize) -> Self {
         let (grid, grid_refined) = Self::uniform_grid(width);
         debug_assert!(grid.len() == width + 1);

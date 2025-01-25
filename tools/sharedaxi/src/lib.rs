@@ -3,7 +3,7 @@
 
 use std::path::Path;
 
-use aeon::{basis::RadiativeParams, macros::SystemLabel, prelude::*, system::System};
+use aeon::{macros::SystemLabel, prelude::*, system::System};
 use anyhow::{anyhow, Result};
 use clap::ArgMatches;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
@@ -212,24 +212,11 @@ pub enum ScalarField {
     Pi,
 }
 
-/// Boundary for system.
-#[derive(Clone)]
-pub struct Quadrant;
-
-impl Boundary<2> for Quadrant {
-    fn kind(&self, face: Face<2>) -> BoundaryKind {
-        match face.side {
-            true => BoundaryKind::Radiative,
-            false => BoundaryKind::Parity,
-        }
-    }
-}
-
 /// Boundary conditions for various fields.
 #[derive(Clone)]
 pub struct FieldConditions;
 
-impl Conditions<2> for FieldConditions {
+impl SystemConditions<2> for FieldConditions {
     type System = Fields;
 
     fn parity(&self, field: Field, face: Face<2>) -> bool {
@@ -248,7 +235,7 @@ impl Conditions<2> for FieldConditions {
         axes[face.axis]
     }
 
-    fn radiative(&self, field: Field, _position: [f64; 2], _spacing: f64) -> RadiativeParams {
+    fn radiative(&self, field: Field, _position: [f64; 2]) -> RadiativeParams {
         match field {
             Field::Metric(Metric::Grr)
             | Field::Metric(Metric::Gzz)

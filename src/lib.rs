@@ -5,28 +5,26 @@
 extern crate self as aeon;
 
 pub mod elliptic;
-// pub mod elliptic2;
 pub mod fd;
-pub mod lac;
+pub mod kernel;
 pub mod ode;
 pub mod shared;
 pub mod system;
-// pub mod system_old;
 
-pub use aeon_basis as basis;
 pub use aeon_geometry as geometry;
 pub use aeon_macros as macros;
 
 /// Provides common types used for most `aeon` applications.
 pub mod prelude {
     pub use crate::fd::{
-        Conditions, Engine, ExportVtuConfig, Function, Mesh, MeshCheckpoint, Projection,
-        ScalarConditions, SystemBC, SystemCheckpoint,
+        Engine, ExportVtuConfig, Function, Mesh, MeshCheckpoint, Projection, SystemCheckpoint,
     };
-    pub use crate::lac::{BiCGStabConfig, BiCGStabSolver, IdentityMap, LinearMap, LinearSolver};
+    pub use crate::kernel::{BoundaryKind, Condition, Order, RadiativeParams};
     pub use crate::ode::{ForwardEuler, Ode, Rk4};
-    pub use crate::system::{Empty, Pair, Scalar, System, SystemSlice, SystemSliceMut, SystemVec};
-    pub use aeon_basis::{Boundary, BoundaryKind, Condition, Gradient, Hessian, Order, Value};
+    pub use crate::system::{
+        Empty, EmptyConditions, Pair, PairConditions, Scalar, ScalarConditions, System,
+        SystemConditions, SystemSlice, SystemSliceMut, SystemVec,
+    };
     pub use aeon_geometry::{Face, IndexSpace, Rectangle};
     pub use aeon_macros::SystemLabel;
 }

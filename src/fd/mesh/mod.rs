@@ -5,9 +5,10 @@
 //! for discretizing domains, approximating differential operators, applying boundary conditions,
 //! filling interior interfaces, and adaptively regridding a domain based on various error heuristics.
 
-use aeon_basis::{Boundary, BoundaryKind, NodeSpace, NodeWindow};
+use crate::kernel::{BoundaryKind, NodeSpace, NodeWindow};
 use aeon_geometry::{
-    faces, AxisMask, FaceMask, IndexSpace, Rectangle, Tree, TreeBlocks, TreeNeighbors,
+    faces, AxisMask, Face, FaceArray, FaceMask, IndexSpace, Rectangle, Tree, TreeBlocks,
+    TreeNeighbors,
 };
 use num_traits::ToPrimitive;
 use rayon::iter::{IntoParallelIterator, ParallelBridge, ParallelIterator};
@@ -41,7 +42,6 @@ pub use store::MeshStore;
 
 use transfer::TreeInterface;
 
-use crate::fd::BlockBoundary;
 use crate::system::{System, SystemSlice};
 
 /// A discretization of a rectangular axis aligned grid into a collection of uniform grids of nodes
@@ -97,6 +97,9 @@ pub struct Mesh<const N: usize> {
 
     /// Thread-local stores used for allocation.
     stores: ThreadLocal<UnsafeCell<MeshStore>>,
+
+    /// Specifies the kind of boundary for each face of the mesh.
+    boundary: FaceArray<N, BoundaryKind>,
 }
 
 impl<const N: usize> Mesh<N> {
@@ -133,6 +136,8 @@ impl<const N: usize> Mesh<N> {
             old_cell_splits: Vec::default(),
 
             stores: ThreadLocal::new(),
+
+            boundary: FaceArray::default(),
         };
 
         result.build();
@@ -146,6 +151,16 @@ impl<const N: usize> Mesh<N> {
 
     pub fn ghost(&self) -> usize {
         self.ghost
+    }
+
+    pub fn set_face_boundary(&mut self, face: Face<N>, kind: BoundaryKind) {
+        self.boundary[face] = kind;
+    }
+
+    pub fn set_boundary(&mut self, kind: BoundaryKind) {
+        for face in faces() {
+            self.boundary[face] = kind;
+        }
     }
 
     /// Rebuilds mesh from current tree.
@@ -176,9 +191,12 @@ impl<const N: usize> Mesh<N> {
 
             let size = self.blocks.size(block);
 
-            let nodes_in_block =
-                NodeSpace::<N>::new(array::from_fn(|axis| size[axis] * self.width), self.ghost)
-                    .num_nodes();
+            let nodes_in_block = NodeSpace::<N> {
+                size: array::from_fn(|axis| size[axis] * self.width),
+                ghost: self.ghost,
+                boundary: FaceArray::default(),
+            }
+            .num_nodes();
 
             cursor += nodes_in_block;
         }
@@ -345,7 +363,11 @@ impl<const N: usize> Mesh<N> {
         let size = self.blocks.size(block);
         let cell_size = array::from_fn(|axis| size[axis] * self.width);
 
-        NodeSpace::new(cell_size, self.ghost)
+        NodeSpace {
+            size: cell_size,
+            ghost: self.ghost,
+            boundary: self.block_boundary(block),
+        }
     }
 
     /// Computes the nodespace corresponding to a block on the mesh before the most recent refinement.
@@ -353,7 +375,11 @@ impl<const N: usize> Mesh<N> {
         let size = self.old_blocks.size(block);
         let cell_size = array::from_fn(|axis| size[axis] * self.width);
 
-        NodeSpace::new(cell_size, self.ghost)
+        NodeSpace {
+            size: cell_size,
+            ghost: self.ghost,
+            boundary: self.old_block_boundary(block),
+        }
     }
 
     /// The bounds of a block.
@@ -369,19 +395,29 @@ impl<const N: usize> Mesh<N> {
 
     /// Produces a block boundary which correctly accounts for
     /// interior interfaces.
-    pub fn block_boundary<B>(&self, block: usize, boundary: B) -> BlockBoundary<N, B> {
-        BlockBoundary {
-            flags: self.block_boundary_flags(block),
-            inner: boundary,
-        }
+    pub fn block_boundary(&self, block: usize) -> FaceArray<N, BoundaryKind> {
+        let flag = self.block_boundary_flags(block);
+
+        FaceArray::from_fn(|face| {
+            if flag.is_set(face) {
+                self.boundary[face]
+            } else {
+                BoundaryKind::Custom
+            }
+        })
     }
 
     /// Produces a block boundary for the mesh before its most recent refinement.
-    pub(crate) fn old_block_boundary<B>(&self, block: usize, boundary: B) -> BlockBoundary<N, B> {
-        BlockBoundary {
-            flags: self.old_blocks.boundary_flags(block),
-            inner: boundary,
-        }
+    pub(crate) fn old_block_boundary(&self, block: usize) -> FaceArray<N, BoundaryKind> {
+        let flag = self.old_blocks.boundary_flags(block);
+
+        FaceArray::from_fn(|face| {
+            if flag.is_set(face) {
+                self.boundary[face]
+            } else {
+                BoundaryKind::Custom
+            }
+        })
     }
 
     /// The level of a given block.
@@ -423,7 +459,7 @@ impl<const N: usize> Mesh<N> {
     }
 
     /// Returns true if the given cell is on a physical boundary.
-    pub fn is_cell_on_boundary<B: Boundary<N>>(&self, cell: usize, boundary: B) -> bool {
+    pub fn is_cell_on_boundary(&self, cell: usize) -> bool {
         let block = self.blocks.cell_block(cell);
         let block_size = self.blocks.size(block);
         let block_flags = self.block_boundary_flags(block);
@@ -439,7 +475,7 @@ impl<const N: usize> Mesh<N> {
                 };
 
             if matches!(
-                boundary.kind(face),
+                self.boundary[face],
                 BoundaryKind::Free | BoundaryKind::Radiative
             ) && block_flags.is_set(face)
                 && on_border
@@ -588,7 +624,7 @@ impl<const N: usize> Mesh<N> {
         for block in 0..self.blocks.len() {
             let bounds = self.blocks.bounds(block);
             let space = self.block_space(block);
-            let size = space.size();
+            let size = space.cell_size();
 
             let data = &src[self.block_nodes(block)];
 
@@ -676,7 +712,7 @@ impl<const N: usize> Mesh<N> {
             writeln!(
                 result,
                 "    Vertices {:?}",
-                self.block_space(block).inner_size()
+                self.block_space(block).cell_size()
             )
             .unwrap();
             writeln!(
@@ -804,6 +840,8 @@ impl<const N: usize> Clone for Mesh<N> {
             old_block_node_offsets: self.old_block_node_offsets.clone(),
             old_cell_splits: self.old_cell_splits.clone(),
 
+            boundary: self.boundary.clone(),
+
             stores: ThreadLocal::new(),
         }
     }
@@ -833,6 +871,8 @@ impl<const N: usize> Default for Mesh<N> {
             old_blocks: TreeBlocks::default(),
             old_block_node_offsets: Vec::default(),
             old_cell_splits: Vec::default(),
+
+            boundary: FaceArray::default(),
 
             stores: ThreadLocal::new(),
         };
@@ -933,8 +973,8 @@ impl<const N: usize> Mesh<N> {
         for block in 0..self.blocks.len() {
             let space = self.block_space(block);
 
-            let mut cell_size = space.size();
-            let mut vertex_size = space.inner_size();
+            let mut cell_size = space.cell_size();
+            let mut vertex_size = space.vertex_size();
 
             if config.ghost {
                 for axis in 0..N {

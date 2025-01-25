@@ -3,30 +3,19 @@ use aeon::{
     fd::{Gaussian, SolverCallback},
     prelude::*,
 };
-use aeon_basis::RadiativeParams;
 
 const ORDER: Order<4> = Order::<4>;
 
 const LOWER: f64 = 1e-8;
 const UPPER: f64 = 1e-6;
 
-/// The quadrant domain the function is being projected on.
 #[derive(Clone)]
-struct Domain;
+struct Conditions;
 
-impl Boundary<2> for Domain {
-    fn kind(&self, _face: Face<2>) -> BoundaryKind {
-        BoundaryKind::Radiative
-    }
-}
-
-#[derive(Clone)]
-struct BoundaryConditions;
-
-impl Conditions<2> for BoundaryConditions {
+impl SystemConditions<2> for Conditions {
     type System = Scalar;
 
-    fn radiative(&self, _field: (), _position: [f64; 2], _spacing: f64) -> RadiativeParams {
+    fn radiative(&self, _field: (), _position: [f64; 2]) -> RadiativeParams {
         RadiativeParams::lightlike(0.0)
     }
 }
@@ -75,6 +64,7 @@ pub fn main() -> anyhow::Result<()> {
 
     // Generate initial mesh
     let mut mesh = Mesh::new(Rectangle::from_aabb([-20., -20.], [20., 20.]), 4, 2);
+    mesh.set_boundary(BoundaryKind::Radiative);
     // Allocate space for system
     let mut source = Vec::new();
     let mut solution = Vec::new();
@@ -90,7 +80,6 @@ pub fn main() -> anyhow::Result<()> {
 
         mesh.project(
             ORDER,
-            Domain,
             Gaussian {
                 amplitude: 1.0,
                 sigma: [1.0, 1.0],
@@ -98,7 +87,7 @@ pub fn main() -> anyhow::Result<()> {
             },
             &mut source,
         );
-        mesh.fill_boundary(ORDER, Domain, BoundaryConditions, (&mut source).into());
+        mesh.fill_boundary(ORDER, Conditions, (&mut source).into());
 
         // Set initial guess
         solution.fill(0.0);
@@ -113,13 +102,12 @@ pub fn main() -> anyhow::Result<()> {
         solver.solve(
             &mut mesh,
             ORDER,
-            Domain,
-            BoundaryConditions,
+            Conditions,
             PoissonEquation { source: &source },
             (&mut solution).into(),
         )?;
 
-        mesh.flag_wavelets(4, LOWER, UPPER, Domain, (&solution).into());
+        mesh.flag_wavelets(4, LOWER, UPPER, (&solution).into());
         mesh.set_regrid_level_limit(10);
 
         mesh.balance_flags();

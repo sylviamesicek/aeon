@@ -3,9 +3,11 @@
 //! The primary abstraction of this module is the `System` trait, which defines
 //! a system of scalar fields to be stored in a SoA format.
 
+mod conditions;
 mod prim;
 mod vec;
 
+pub use conditions::*;
 pub use prim::*;
 pub use vec::*;
 

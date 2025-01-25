@@ -6,7 +6,7 @@ use aeon::prelude::*;
 use anyhow::{anyhow, Context, Result};
 use clap::{Arg, Command};
 use garfinkle::VisualizeConfig;
-use sharedaxi::{import_from_path_arg, Fields, IDConfig, Quadrant, Source};
+use sharedaxi::{import_from_path_arg, Fields, IDConfig, Source};
 
 mod garfinkle;
 
@@ -132,6 +132,10 @@ fn initial_data() -> Result<()> {
         domain.cell.subdivisions,
         domain.cell.ghost,
     );
+    mesh.set_face_boundary(Face::negative(0), BoundaryKind::Parity);
+    mesh.set_face_boundary(Face::negative(1), BoundaryKind::Parity);
+    mesh.set_face_boundary(Face::positive(0), BoundaryKind::Radiative);
+    mesh.set_face_boundary(Face::positive(1), BoundaryKind::Radiative);
 
     log::trace!("Refining mesh globally {} times", config.refine_global);
 
@@ -226,13 +230,7 @@ fn initial_data() -> Result<()> {
             return Err(anyhow!("failed to refine within perscribed limits"));
         }
 
-        mesh.flag_wavelets(
-            config.order,
-            0.0,
-            config.max_error,
-            Quadrant,
-            system.as_slice(),
-        );
+        mesh.flag_wavelets(config.order, 0.0, config.max_error, system.as_slice());
         mesh.balance_flags();
 
         if mesh.requires_regridding() {
@@ -250,24 +248,9 @@ fn initial_data() -> Result<()> {
             system.resize(mesh.num_nodes());
 
             match order {
-                2 => mesh.transfer_system(
-                    Order::<2>,
-                    Quadrant,
-                    transfer.as_slice(),
-                    system.as_mut_slice(),
-                ),
-                4 => mesh.transfer_system(
-                    Order::<4>,
-                    Quadrant,
-                    transfer.as_slice(),
-                    system.as_mut_slice(),
-                ),
-                6 => mesh.transfer_system(
-                    Order::<6>,
-                    Quadrant,
-                    transfer.as_slice(),
-                    system.as_mut_slice(),
-                ),
+                2 => mesh.transfer_system(Order::<2>, transfer.as_slice(), system.as_mut_slice()),
+                4 => mesh.transfer_system(Order::<4>, transfer.as_slice(), system.as_mut_slice()),
+                6 => mesh.transfer_system(Order::<6>, transfer.as_slice(), system.as_mut_slice()),
                 _ => {}
             };
         } else {

@@ -1,12 +1,12 @@
 use std::{path::PathBuf, process::ExitCode};
 
-use aeon::{prelude::*, system::Dynamic};
+use aeon::prelude::*;
 use anyhow::{anyhow, Context as _, Result};
 use clap::{Arg, Command};
 use reborrow::ReborrowMut as _;
 use sharedaxi::{
     import_from_toml, Constraint, EVConfig, Field, FieldConditions, Fields, Gauge, Metric,
-    Quadrant, ScalarField, Visualize,
+    ScalarField, Visualize,
 };
 
 mod tensor;
@@ -230,11 +230,11 @@ impl<'a> Ode for FieldEvolution<'a> {
         let mut f = SystemSliceMut::from_contiguous(f, self.system);
         // Fill ghost nodes
         self.mesh
-            .fill_boundary_to_extent(ORDER, 2, Quadrant, FieldConditions, f.rb_mut());
+            .fill_boundary_to_extent(ORDER, 2, FieldConditions, f.rb_mut());
 
         // Apply operator
         self.mesh
-            .apply(ORDER, Quadrant, FieldConditions, FieldDerivs, f.rb_mut());
+            .apply(ORDER, FieldConditions, FieldDerivs, f.rb_mut());
     }
 }
 
@@ -340,7 +340,7 @@ pub fn evolution() -> Result<bool> {
     while time < max_time && proper_time < max_proper_time {
         assert!(fields.len() == mesh.num_nodes());
         // Fill boundaries
-        mesh.fill_boundary(ORDER, Quadrant, FieldConditions, fields.as_mut_slice());
+        mesh.fill_boundary(ORDER, FieldConditions, fields.as_mut_slice());
 
         // Check Norm
         let norm = mesh.l2_norm(fields.as_slice());
@@ -385,7 +385,7 @@ pub fn evolution() -> Result<bool> {
         if steps_since_regrid > regrid_steps {
             steps_since_regrid = 0;
 
-            mesh.flag_wavelets(4, lower, upper, Quadrant, fields.as_slice());
+            mesh.flag_wavelets(4, lower, upper, fields.as_slice());
             mesh.set_regrid_level_limit(max_level);
             mesh.balance_flags();
 
@@ -412,7 +412,6 @@ pub fn evolution() -> Result<bool> {
             fields.resize(mesh.num_nodes());
             mesh.transfer_system(
                 ORDER,
-                Quadrant,
                 SystemSlice::from_contiguous(integrator.tmp(), &system),
                 fields.as_mut_slice(),
             );
@@ -483,8 +482,8 @@ pub fn evolution() -> Result<bool> {
         );
 
         // Compute dissipation
-        mesh.fill_boundary(ORDER, Quadrant, FieldConditions, fields.as_mut_slice());
-        mesh.dissipation(DISS_ORDER, Quadrant, diss, fields.as_mut_slice());
+        mesh.fill_boundary(ORDER, FieldConditions, fields.as_mut_slice());
+        mesh.dissipation(DISS_ORDER, diss, fields.as_mut_slice());
 
         let lapse = fields.field(Field::Gauge(Gauge::Lapse))[0];
 

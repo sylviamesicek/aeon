@@ -1,3 +1,4 @@
+use crate::kernel::{CellKernel, Kernel, VertexKernel};
 use aeon_macros::{derivative, second_derivative};
 
 /// Distance of a vertex from a boundary.
@@ -20,24 +21,6 @@ impl Border {
 // *********************************
 // Kernel **************************
 // *********************************
-
-pub trait Kernel: Clone {
-    fn border_width(&self) -> usize;
-
-    fn interior(&self) -> &[f64];
-    fn free(&self, border: Border) -> &[f64];
-    // fn symmetric(&self, border: Border) -> &[f64];
-    // fn antisymmetric(&self, border: Border) -> &[f64];
-}
-
-pub trait VertexKernel: Kernel {
-    fn scale(&self, spacing: f64) -> f64;
-}
-
-/// A kernel which is used for prolonging values between levels.
-pub trait CellKernel: Kernel {
-    fn scale(&self) -> f64;
-}
 
 /// Value operation.
 #[derive(Clone)]
@@ -72,7 +55,7 @@ impl VertexKernel for Value {
 }
 
 #[derive(Clone)]
-struct Unimplemented(usize);
+pub struct Unimplemented(pub usize);
 
 impl Kernel for Unimplemented {
     fn border_width(&self) -> usize {
@@ -110,7 +93,7 @@ impl CellKernel for Unimplemented {
 
 /// Derivative operation of a given order.
 #[derive(Clone)]
-struct Derivative<const ORDER: usize>;
+pub struct Derivative<const ORDER: usize>;
 
 impl Kernel for Derivative<2> {
     fn border_width(&self) -> usize {
@@ -219,7 +202,7 @@ where
 
 /// Second derivative operator of a given order.
 #[derive(Clone)]
-struct SecondDerivative<const ORDER: usize>;
+pub struct SecondDerivative<const ORDER: usize>;
 
 impl Kernel for SecondDerivative<2> {
     fn border_width(&self) -> usize {
@@ -331,7 +314,7 @@ where
 
 /// Kriss Olgier dissipation of the given order.
 #[derive(Clone)]
-struct Dissipation<const ORDER: usize>;
+pub struct Dissipation<const ORDER: usize>;
 
 impl Kernel for Dissipation<4> {
     fn border_width(&self) -> usize {
@@ -426,7 +409,7 @@ impl VertexKernel for Dissipation<6> {
 }
 
 #[derive(Clone)]
-struct Interpolation<const ORDER: usize>;
+pub struct Interpolation<const ORDER: usize>;
 
 impl Kernel for Interpolation<2> {
     fn border_width(&self) -> usize {
@@ -505,95 +488,5 @@ impl Kernel for Interpolation<4> {
 impl CellKernel for Interpolation<4> {
     fn scale(&self) -> f64 {
         1.0 / 256.0
-    }
-}
-
-// ************************************
-// Order ******************************
-// ************************************
-
-#[derive(Clone, Copy, Default)]
-pub struct Order<const ORDER: usize>;
-
-mod private {
-    pub trait Sealed {}
-}
-
-impl private::Sealed for Order<2> {}
-impl private::Sealed for Order<4> {}
-impl private::Sealed for Order<6> {}
-
-/// Associates an order with a type. Commonly used to set the order of accuracy for certain
-/// operators or boundary conditions.
-pub trait Kernels: private::Sealed + Clone + Copy + Default + 'static {
-    const ORDER: usize;
-    const MAX_BORDER: usize;
-
-    fn derivative() -> &'static impl VertexKernel;
-    fn second_derivative() -> &'static impl VertexKernel;
-    fn dissipation() -> &'static impl VertexKernel;
-    fn interpolation() -> &'static impl CellKernel;
-}
-
-impl Kernels for Order<2> {
-    const ORDER: usize = 2;
-    const MAX_BORDER: usize = 1;
-
-    fn derivative() -> &'static impl VertexKernel {
-        &Derivative::<2>
-    }
-
-    fn second_derivative() -> &'static impl VertexKernel {
-        &SecondDerivative::<2>
-    }
-
-    fn dissipation() -> &'static impl VertexKernel {
-        &Unimplemented(2)
-    }
-
-    fn interpolation() -> &'static impl CellKernel {
-        &Interpolation::<2>
-    }
-}
-
-impl Kernels for Order<4> {
-    const ORDER: usize = 4;
-    const MAX_BORDER: usize = 2;
-
-    fn derivative() -> &'static impl VertexKernel {
-        &Derivative::<4>
-    }
-
-    fn second_derivative() -> &'static impl VertexKernel {
-        &SecondDerivative::<4>
-    }
-
-    fn dissipation() -> &'static impl VertexKernel {
-        &Dissipation::<4>
-    }
-
-    fn interpolation() -> &'static impl CellKernel {
-        &Interpolation::<4>
-    }
-}
-
-impl Kernels for Order<6> {
-    const ORDER: usize = 6;
-    const MAX_BORDER: usize = 3;
-
-    fn derivative() -> &'static impl VertexKernel {
-        &Derivative::<6>
-    }
-
-    fn second_derivative() -> &'static impl VertexKernel {
-        &SecondDerivative::<6>
-    }
-
-    fn dissipation() -> &'static impl VertexKernel {
-        &Dissipation::<6>
-    }
-
-    fn interpolation() -> &'static impl CellKernel {
-        &Unimplemented(6)
     }
 }

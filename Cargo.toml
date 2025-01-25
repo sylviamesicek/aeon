@@ -8,15 +8,10 @@ members = [
     "tools/evaxi",
 ]
 default-members = [
-    "crates/aeon_basis",
     "crates/aeon_geometry",
     "tools/critaxi",
     "tools/evaxi",
-    # "tools/idbrill",
-    # "tools/idscalar",
     "tools/idaxi",
-    # "tools/evbrill",
-    # "tools/evscalar",
     "tools/sharedaxi",
     ".",
 ]
@@ -25,7 +20,6 @@ resolver = "2"
 [workspace.dependencies]
 aeon = { path = "." }
 aeon_array = { path = "crates/aeon_array" }
-aeon_basis = { path = "crates/aeon_basis" }
 aeon_geometry = { path = "crates/aeon_geometry" }
 aeon_macros = { path = "crates/aeon_macros" }
 aeon_tensor = { path = "crates/aeon_tensor" }
@@ -62,12 +56,12 @@ readme = "README.md"
 
 [dependencies]
 aeon_array.workspace = true
-aeon_basis.workspace = true
 aeon_geometry.workspace = true
 aeon_macros.workspace = true
 
 bitvec.workspace = true
 bumpalo.workspace = true
+faer.workspace = true
 log.workspace = true
 num-traits.workspace = true
 rayon.workspace = true

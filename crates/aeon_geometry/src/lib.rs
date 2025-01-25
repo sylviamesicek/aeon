@@ -12,7 +12,7 @@ mod region;
 mod tree;
 
 pub use axis::AxisMask;
-pub use face::{faces, Face, FaceIter, FaceMask};
+pub use face::{faces, Face, FaceArray, FaceIter, FaceMask};
 pub use index::{CartesianIter, CartesianWindowIter, IndexSpace, IndexWindow};
 pub use rectangle::Rectangle;
 pub use region::{regions, Region, RegionIter, Side};

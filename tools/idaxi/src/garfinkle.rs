@@ -1,17 +1,16 @@
 use std::path::{Path, PathBuf};
 
 use aeon::{
-    basis::{Kernels, RadiativeParams},
     elliptic::HyperRelaxSolver,
     fd::{Gaussian, Mesh, SolverCallback},
+    kernel::Kernels,
     prelude::*,
     system::System,
 };
 
 use reborrow::ReborrowMut;
 use sharedaxi::{
-    Constraint, Field, FieldConditions, Fields, Gauge, Metric, Quadrant, ScalarField, Solver,
-    Source,
+    Constraint, Field, FieldConditions, Fields, Gauge, Metric, ScalarField, Solver, Source,
 };
 
 // *************************
@@ -93,7 +92,7 @@ impl Condition<2> for PsiCondition {
         [true, true][face.axis]
     }
 
-    fn radiative(&self, _position: [f64; 2], _spacing: f64) -> RadiativeParams {
+    fn radiative(&self, _position: [f64; 2]) -> RadiativeParams {
         RadiativeParams::lightlike(1.0)
     }
 }
@@ -102,7 +101,7 @@ impl Condition<2> for PsiCondition {
 #[derive(Clone)]
 pub struct ContextConditions;
 
-impl Conditions<2> for ContextConditions {
+impl SystemConditions<2> for ContextConditions {
     type System = ContextSystem;
 
     fn parity(&self, field: Context, face: Face<2>) -> bool {
@@ -112,7 +111,7 @@ impl Conditions<2> for ContextConditions {
         }
     }
 
-    fn radiative(&self, _field: Context, _position: [f64; 2], _spacing: f64) -> RadiativeParams {
+    fn radiative(&self, _field: Context, _position: [f64; 2]) -> RadiativeParams {
         RadiativeParams::lightlike(0.0)
     }
 }
@@ -325,7 +324,6 @@ where
     // Compute seed values.
     mesh.project(
         order,
-        Quadrant,
         SeedProjection(sources),
         context.field_mut(Context::Seed),
     );
@@ -339,7 +337,6 @@ where
         {
             mesh.project(
                 order,
-                Quadrant,
                 Gaussian {
                     amplitude: *amplitude,
                     sigma: [sigma.0, sigma.1],
@@ -353,7 +350,7 @@ where
     }
 
     // Fill boundary conditions for context fields.
-    mesh.fill_boundary(order, Quadrant, ContextConditions, context.as_mut_slice());
+    mesh.fill_boundary(order, ContextConditions, context.as_mut_slice());
 
     // Initial Guess for Psi
     psi.fill(1.0);
@@ -370,7 +367,6 @@ where
     solver.solve(
         mesh,
         order,
-        Quadrant,
         ScalarConditions(PsiCondition),
         Hamiltonian {
             context: context.as_slice(),
@@ -381,7 +377,6 @@ where
 
     mesh.evaluate(
         order,
-        Quadrant,
         FieldsFromGarfinkle {
             psi: &psi,
             context: context.as_slice(),
@@ -421,7 +416,7 @@ where
     system.field_mut(Field::Gauge(Gauge::Shiftr)).fill(0.0);
     system.field_mut(Field::Gauge(Gauge::Shiftz)).fill(0.0);
 
-    mesh.fill_boundary(order, Quadrant, FieldConditions, system.rb_mut());
+    mesh.fill_boundary(order, FieldConditions, system.rb_mut());
 
     Ok(())
 }

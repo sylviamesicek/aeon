@@ -2,34 +2,19 @@
 //! compress a function and generate appropriate grids.
 
 use aeon::prelude::*;
-use aeon_basis::RadiativeParams;
 use std::f64::consts::PI;
-
-/// The quadrant domain the function is being projected on.
-#[derive(Clone)]
-pub struct Quadrant;
-
-impl Boundary<2> for Quadrant {
-    fn kind(&self, face: Face<2>) -> BoundaryKind {
-        if !face.side {
-            BoundaryKind::Parity
-        } else {
-            BoundaryKind::Radiative
-        }
-    }
-}
 
 #[derive(Clone)]
 pub struct SeedConditions;
 
-impl Conditions<2> for SeedConditions {
+impl SystemConditions<2> for SeedConditions {
     type System = Scalar;
 
     fn parity(&self, _field: (), face: Face<2>) -> bool {
         [false, true][face.axis]
     }
 
-    fn radiative(&self, _field: (), _position: [f64; 2], _spacing: f64) -> RadiativeParams {
+    fn radiative(&self, _field: (), _position: [f64; 2]) -> RadiativeParams {
         RadiativeParams::lightlike(0.0)
     }
 }
@@ -59,15 +44,14 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Create mesh
     let mut mesh = Mesh::new(domain, 4, 2);
+    mesh.set_face_boundary(Face::negative(0), BoundaryKind::Parity);
+    mesh.set_face_boundary(Face::negative(1), BoundaryKind::Parity);
+    mesh.set_face_boundary(Face::positive(0), BoundaryKind::Radiative);
+    mesh.set_face_boundary(Face::positive(1), BoundaryKind::Radiative);
 
     // Store system from previous iteration.
     let mut system_prev = SystemVec::with_length(mesh.num_nodes(), Scalar);
-    mesh.project(
-        Order::<4>,
-        Quadrant,
-        SeedProjection,
-        system_prev.field_mut(()),
-    );
+    mesh.project(Order::<4>, SeedProjection, system_prev.field_mut(()));
 
     let mut errors = Vec::new();
 
@@ -79,10 +63,10 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
         );
 
         let mut system = SystemVec::with_length(mesh.num_nodes(), Scalar);
-        mesh.project(Order::<4>, Quadrant, SeedProjection, system.field_mut(()));
-        mesh.fill_boundary(Order::<4>, Quadrant, SeedConditions, system.as_mut_slice());
+        mesh.project(Order::<4>, SeedProjection, system.field_mut(()));
+        mesh.fill_boundary(Order::<4>, SeedConditions, system.as_mut_slice());
 
-        mesh.flag_wavelets(4, 1e-13, 1e-9, Quadrant, system.as_slice());
+        mesh.flag_wavelets(4, 1e-13, 1e-9, system.as_slice());
         mesh.balance_flags();
 
         // Output
@@ -130,12 +114,7 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         // Prolong data from previous system.
         system_prev = SystemVec::with_length(mesh.num_nodes(), Scalar);
-        mesh.transfer_system(
-            Order::<4>,
-            Quadrant,
-            system.as_slice(),
-            system_prev.as_mut_slice(),
-        );
+        mesh.transfer_system(Order::<4>, system.as_slice(), system_prev.as_mut_slice());
     }
 
     for i in 0..errors.len() - 1 {

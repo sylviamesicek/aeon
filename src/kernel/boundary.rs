@@ -9,7 +9,7 @@ use aeon_geometry::Face;
 /// face of the domain. More specific boundary conditions are provided
 /// by the `Condition` API, but for many funtions, `Boundary` provides
 /// enough information to compute supports and apply stencils.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 pub enum BoundaryKind {
     /// A (anti)symmetric boundary condition. True indicates an even function
     /// (so function values are reflected across the axis with the same sign)
@@ -20,19 +20,15 @@ pub enum BoundaryKind {
     /// fill inter-grid boundaries in the adaptive mesh refinement driver.
     Custom,
     Radiative,
+    #[default]
     Free,
 }
 
 impl BoundaryKind {
+    /// Are ghost nodes are used when enforcing this kind of boundary condition?
     pub fn has_ghost(self) -> bool {
         matches!(self, Self::Custom | Self::Parity)
     }
-}
-
-/// Provides information about what kind of boundary is used on each face.
-pub trait Boundary<const N: usize>: Clone {
-    /// What type of boundary is associated with the given face?
-    fn kind(&self, face: Face<N>) -> BoundaryKind;
 }
 
 /// Describes a radiative boundary condition at a point on the boundary.
@@ -58,42 +54,10 @@ pub trait Condition<const N: usize>: Clone {
         false
     }
 
-    fn radiative(&self, _position: [f64; N], _spacing: f64) -> RadiativeParams {
+    fn radiative(&self, _position: [f64; N]) -> RadiativeParams {
         RadiativeParams {
             target: 0.0,
             speed: 1.0,
         }
-    }
-}
-
-/// Combines a `Boundary<N>` with a `Condition<N>`.
-#[derive(Clone)]
-pub struct BC<B, C> {
-    pub boundary: B,
-    pub condition: C,
-}
-
-impl<B, C> BC<B, C> {
-    pub fn new(boundary: B, condition: C) -> Self {
-        Self {
-            boundary,
-            condition,
-        }
-    }
-}
-
-impl<const N: usize, B: Boundary<N>, C: Clone> Boundary<N> for BC<B, C> {
-    fn kind(&self, face: Face<N>) -> BoundaryKind {
-        self.boundary.kind(face)
-    }
-}
-
-impl<const N: usize, B: Clone, C: Condition<N>> Condition<N> for BC<B, C> {
-    fn parity(&self, face: Face<N>) -> bool {
-        self.condition.parity(face)
-    }
-
-    fn radiative(&self, position: [f64; N], spacing: f64) -> RadiativeParams {
-        self.condition.radiative(position, spacing)
     }
 }

@@ -1,6 +1,5 @@
 #![allow(clippy::needless_range_loop)]
 
-mod boundary;
 mod engine;
 mod mesh;
 
@@ -8,10 +7,6 @@ use crate::system::{Empty, Scalar, System, SystemSlice, SystemSliceMut};
 use std::array;
 
 use aeon_geometry::IndexSpace;
-pub use boundary::{
-    BlockBoundary, Conditions, EmptyConditions, PairConditions, ScalarConditions, SystemBC,
-    SystemCondition,
-};
 pub use engine::{Engine, FdEngine, FdIntEngine};
 pub use mesh::{ExportVtuConfig, Mesh, MeshCheckpoint, SystemCheckpoint};
 

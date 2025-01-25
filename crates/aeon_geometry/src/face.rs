@@ -1,7 +1,10 @@
 use std::{
     array::from_fn,
     fmt::{Display, Write},
+    ops::{Index, IndexMut},
 };
+
+use aeon_array::ArrayWrap;
 
 use super::{index::IndexWindow, AxisMask, Region, Side};
 
@@ -123,6 +126,66 @@ pub fn faces<const N: usize>() -> FaceIter<N> {
     FaceIter {
         axis: 0,
         side: false,
+    }
+}
+
+/// An array storing a value for each `Face<N>` in a N-dimensional space.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct FaceArray<const N: usize, T>([[T; 2]; N]);
+
+impl<const N: usize, T> FaceArray<N, T> {
+    /// Constructs a `FaceArray<N>` by calling `f` for each `Face<N>`.
+    pub fn from_fn<F: FnMut(Face<N>) -> T>(mut f: F) -> Self {
+        Self(core::array::from_fn(|axis| {
+            [f(Face::negative(axis)), f(Face::positive(axis))]
+        }))
+    }
+}
+
+impl<const N: usize, T: serde::Serialize + Clone> serde::Serialize for FaceArray<N, T> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        ArrayWrap(self.0.clone()).serialize(serializer)
+    }
+}
+
+impl<'de, const N: usize, T: serde::de::Deserialize<'de>> serde::de::Deserialize<'de>
+    for FaceArray<N, T>
+where
+    T: serde::de::Deserialize<'de>,
+{
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        Ok(FaceArray(ArrayWrap::deserialize(deserializer)?.0))
+    }
+}
+
+impl<const N: usize, T: Clone> FaceArray<N, T> {
+    /// Constructs a `FaceArray` by filling the whole array with `value`.
+    pub fn splat(value: T) -> Self {
+        Self::from_fn(|_| value.clone())
+    }
+}
+impl<const N: usize, T: Default> Default for FaceArray<N, T> {
+    fn default() -> Self {
+        Self::from_fn(|_| T::default())
+    }
+}
+
+impl<const N: usize, T> Index<Face<N>> for FaceArray<N, T> {
+    type Output = T;
+    fn index(&self, index: Face<N>) -> &Self::Output {
+        &self.0[index.axis][index.side as usize]
+    }
+}
+
+impl<const N: usize, T> IndexMut<Face<N>> for FaceArray<N, T> {
+    fn index_mut(&mut self, index: Face<N>) -> &mut Self::Output {
+        &mut self.0[index.axis][index.side as usize]
     }
 }
 

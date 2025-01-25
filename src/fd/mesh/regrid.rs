@@ -1,6 +1,6 @@
 use std::array;
 
-use aeon_basis::{Boundary, Element};
+use crate::kernel::Element;
 use aeon_geometry::IndexSpace;
 
 use crate::{
@@ -13,12 +13,11 @@ impl<const N: usize> Mesh<N> {
     /// Flags cells for refinement using a wavelet criterion. The system must have filled
     /// boundaries. This function tags any cell that is insufficiently refined to approximate
     /// operators of the given `order` within the range of error.
-    pub fn flag_wavelets<S: System + Sync, B: Boundary<N> + Sync>(
+    pub fn flag_wavelets<S: System + Sync>(
         &mut self,
         order: usize,
         lower: f64,
         upper: f64,
-        boundary: B,
         result: SystemSlice<S>,
     ) {
         assert!(order % 2 == 0);
@@ -36,8 +35,6 @@ impl<const N: usize> Mesh<N> {
         let cflags = SharedSlice::new(&mut cflags_buf);
 
         self.block_compute(|mesh, store, block| {
-            let boundary = mesh.block_boundary(block, boundary.clone());
-
             let imsrc = store.scratch(support);
             let imdest = store.scratch(support);
 
@@ -47,7 +44,7 @@ impl<const N: usize> Mesh<N> {
             let block_system = result.slice(nodes.clone());
 
             for &cell in mesh.blocks.cells(block) {
-                let is_cell_on_boundary = mesh.is_cell_on_boundary(cell, boundary.clone());
+                let is_cell_on_boundary = mesh.is_cell_on_boundary(cell);
 
                 // Window of nodes on element.
                 let window = if is_cell_on_boundary {
@@ -133,35 +130,26 @@ impl<const N: usize> Mesh<N> {
 
 #[cfg(test)]
 mod tests {
-    use crate::fd::Mesh;
-    use aeon_basis::{Boundary, BoundaryKind};
+    use crate::{fd::Mesh, kernel::BoundaryKind};
     use aeon_geometry::{Face, Rectangle};
-
-    #[derive(Debug, Clone, Copy)]
-    pub struct Quadrant;
-
-    impl Boundary<2> for Quadrant {
-        fn kind(&self, face: Face<2>) -> BoundaryKind {
-            if face.side {
-                BoundaryKind::Free
-            } else {
-                BoundaryKind::Parity
-            }
-        }
-    }
 
     #[test]
     fn element_windows() {
-        let mut mesh = Mesh::new(Rectangle::UNIT, 4, 2);
+        let mut mesh: Mesh<2> = Mesh::new(Rectangle::UNIT, 4, 2);
+        mesh.set_face_boundary(Face::negative(0), BoundaryKind::Parity);
+        mesh.set_face_boundary(Face::negative(1), BoundaryKind::Parity);
+        mesh.set_face_boundary(Face::positive(0), BoundaryKind::Free);
+        mesh.set_face_boundary(Face::positive(1), BoundaryKind::Free);
+
         mesh.set_refine_flag(0);
         mesh.regrid();
 
-        assert!(!mesh.is_cell_on_boundary(0, Quadrant));
-        assert!(!mesh.is_cell_on_boundary(1, Quadrant));
-        assert!(!mesh.is_cell_on_boundary(2, Quadrant));
-        assert!(!mesh.is_cell_on_boundary(3, Quadrant));
-        assert!(mesh.is_cell_on_boundary(4, Quadrant));
-        assert!(mesh.is_cell_on_boundary(5, Quadrant));
-        assert!(mesh.is_cell_on_boundary(6, Quadrant));
+        assert!(!mesh.is_cell_on_boundary(0));
+        assert!(!mesh.is_cell_on_boundary(1));
+        assert!(!mesh.is_cell_on_boundary(2));
+        assert!(!mesh.is_cell_on_boundary(3));
+        assert!(mesh.is_cell_on_boundary(4));
+        assert!(mesh.is_cell_on_boundary(5));
+        assert!(mesh.is_cell_on_boundary(6));
     }
 }

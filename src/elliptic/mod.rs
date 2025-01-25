@@ -1,13 +1,13 @@
-use aeon_basis::{Boundary, Kernels, RadiativeParams};
+use crate::kernel::{Kernels, RadiativeParams};
 use aeon_geometry::IndexSpace;
 use reborrow::{Reborrow, ReborrowMut};
 use thiserror::Error;
 
 use crate::{
-    fd::{Conditions, Engine, Function, Mesh, SolverCallback},
+    fd::{Engine, Function, Mesh, SolverCallback},
     ode::{Ode, Rk4},
     prelude::Face,
-    system::{Pair, System, SystemSlice, SystemSliceMut},
+    system::{Pair, System, SystemConditions, SystemSlice, SystemSliceMut},
 };
 
 #[derive(Error, Debug)]
@@ -60,14 +60,12 @@ impl HyperRelaxSolver {
     pub fn solve<
         const N: usize,
         K: Kernels + Sync,
-        B: Boundary<N> + Sync,
-        C: Conditions<N> + Sync,
+        C: SystemConditions<N> + Sync,
         F: Function<N, Input = C::System, Output = C::System> + SolverCallback<N> + Clone + Sync,
     >(
         &mut self,
         mesh: &mut Mesh<N>,
         order: K,
-        boundary: B,
         conditions: C,
         deriv: F,
         mut result: SystemSliceMut<C::System>,
@@ -116,7 +114,6 @@ impl HyperRelaxSolver {
         for index in 0..self.max_steps {
             mesh.fill_boundary(
                 order,
-                boundary.clone(),
                 FicticuousConditions {
                     dampening: self.dampening,
                     conditions: conditions.clone(),
@@ -129,13 +126,7 @@ impl HyperRelaxSolver {
 
                 mesh.copy_from_slice(result.rb_mut(), u.rb());
 
-                mesh.apply(
-                    order,
-                    boundary.clone(),
-                    conditions.clone(),
-                    deriv.clone(),
-                    result.rb_mut(),
-                );
+                mesh.apply(order, conditions.clone(), deriv.clone(), result.rb_mut());
 
                 deriv.callback(mesh, u.rb(), result.rb(), index);
             }
@@ -167,7 +158,6 @@ impl HyperRelaxSolver {
                     dimension,
                     dampening: self.dampening,
                     order,
-                    boundary: boundary.clone(),
                     conditions: conditions.clone(),
                     deriv: &deriv,
                     spacing_per_vertex: &spacing_per_vertex,
@@ -189,7 +179,7 @@ impl HyperRelaxSolver {
             result.rb_mut(),
             SystemSlice::from_contiguous(&data[..dimension], &system.0),
         );
-        mesh.fill_boundary(order, boundary.clone(), conditions, result.rb_mut());
+        mesh.fill_boundary(order, conditions, result.rb_mut());
 
         Ok(())
     }
@@ -201,7 +191,7 @@ struct FicticuousConditions<C> {
     conditions: C,
 }
 
-impl<const N: usize, C: Conditions<N>> Conditions<N> for FicticuousConditions<C> {
+impl<const N: usize, C: SystemConditions<N>> SystemConditions<N> for FicticuousConditions<C> {
     type System = (C::System, C::System);
 
     fn parity(&self, label: <Self::System as System>::Label, face: Face<N>) -> bool {
@@ -215,12 +205,11 @@ impl<const N: usize, C: Conditions<N>> Conditions<N> for FicticuousConditions<C>
         &self,
         label: <Self::System as System>::Label,
         position: [f64; N],
-        spacing: f64,
     ) -> RadiativeParams {
         match label {
-            Pair::First(label) => self.conditions.radiative(label, position, spacing),
+            Pair::First(label) => self.conditions.radiative(label, position),
             Pair::Second(label) => {
-                let mut result = self.conditions.radiative(label, position, spacing);
+                let mut result = self.conditions.radiative(label, position);
                 result.target *= self.dampening;
                 result
             }
@@ -272,8 +261,7 @@ struct FictitiousOde<
     'a,
     const N: usize,
     K: Kernels,
-    B: Boundary<N>,
-    C: Conditions<N>,
+    C: SystemConditions<N>,
     F: Function<N, Input = C::System, Output = C::System>,
 > {
     mesh: &'a mut Mesh<N>,
@@ -281,7 +269,6 @@ struct FictitiousOde<
     dampening: f64,
 
     order: K,
-    boundary: B,
     conditions: C,
     deriv: &'a F,
 
@@ -294,10 +281,9 @@ impl<
         'a,
         const N: usize,
         K: Kernels + Sync,
-        B: Boundary<N> + Sync,
-        C: Conditions<N> + Sync,
+        C: SystemConditions<N> + Sync,
         F: Function<N, Input = C::System, Output = C::System> + Sync,
-    > Ode for FictitiousOde<'a, N, K, B, C, F>
+    > Ode for FictitiousOde<'a, N, K, C, F>
 where
     C::System: Sync,
 {
@@ -311,7 +297,6 @@ where
         // Fill strong boundary conditions.
         self.mesh.fill_boundary(
             self.order,
-            self.boundary.clone(),
             FicticuousConditions {
                 dampening: self.dampening,
                 conditions: self.conditions.clone(),
@@ -322,7 +307,6 @@ where
         // Compute derivative
         self.mesh.apply(
             self.order,
-            self.boundary.clone(),
             FicticuousConditions {
                 dampening: self.dampening,
                 conditions: self.conditions.clone(),

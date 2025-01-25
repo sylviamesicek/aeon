@@ -1,24 +1,23 @@
 use std::array;
 
-use aeon_basis::{Boundary, BoundaryKind, Kernels};
+use crate::kernel::{BoundaryKind, Kernels};
 use aeon_geometry::{faces, Face, FaceMask, IndexSpace, NULL};
 // use rayon::iter::{ParallelBridge, ParallelIterator};
 use reborrow::{Reborrow, ReborrowMut as _};
 
 use crate::{
-    fd::{Conditions, Engine, FdEngine, FdIntEngine, Function, Projection, ProjectionAsFunction},
+    fd::{Engine, FdEngine, FdIntEngine, Function, Projection, ProjectionAsFunction},
     shared::SharedSlice,
-    system::{Scalar, System, SystemSlice, SystemSliceMut},
+    system::{Scalar, System, SystemConditions, SystemSlice, SystemSliceMut},
 };
 
 use super::Mesh;
 
 impl<const N: usize> Mesh<N> {
     /// Applies the projection to `source`, and stores the result in `dest`.
-    pub fn evaluate<K: Kernels + Sync, B: Boundary<N> + Sync, P: Function<N> + Sync>(
+    pub fn evaluate<K: Kernels + Sync, P: Function<N> + Sync>(
         &mut self,
         order: K,
-        boundary: B,
         function: P,
         source: SystemSlice<'_, P::Input>,
         dest: SystemSliceMut<'_, P::Output>,
@@ -33,12 +32,10 @@ impl<const N: usize> Mesh<N> {
             let space = mesh.block_space(block);
             let nodes = mesh.block_nodes(block);
 
-            let boundary = mesh.block_boundary(block, boundary.clone());
-
             let block_source = source.slice(nodes.clone());
             let block_dest = unsafe { dest.slice_mut(nodes.clone()) };
 
-            if Self::is_interior(&boundary) {
+            if mesh.is_block_in_interior(block) {
                 let engine = FdIntEngine {
                     space: space.clone(),
                     bounds,
@@ -54,7 +51,6 @@ impl<const N: usize> Mesh<N> {
                     bounds,
                     order,
                     store,
-                    boundary,
                     range: nodes.clone(),
                 };
 
@@ -63,12 +59,14 @@ impl<const N: usize> Mesh<N> {
         });
     }
 
-    pub(crate) fn is_interior(boundary: &impl Boundary<N>) -> bool {
+    pub(crate) fn is_block_in_interior(&self, block: usize) -> bool {
+        let boundary = self.block_boundary(block);
+
         let mut result = true;
 
         for axis in 0..N {
-            result &= boundary.kind(Face::negative(axis)).has_ghost();
-            result &= boundary.kind(Face::positive(axis)).has_ghost();
+            result &= boundary[Face::negative(axis)].has_ghost();
+            result &= boundary[Face::positive(axis)].has_ghost();
         }
 
         result
@@ -78,12 +76,10 @@ impl<const N: usize> Mesh<N> {
     fn evaluate_mut<
         S: System + Sync,
         K: Kernels + Sync,
-        B: Boundary<N> + Sync,
         P: Function<N, Input = S, Output = S> + Sync,
     >(
         &mut self,
         order: K,
-        boundary: B,
         function: P,
         dest: SystemSliceMut<'_, S>,
     ) {
@@ -93,8 +89,6 @@ impl<const N: usize> Mesh<N> {
             let bounds = mesh.block_bounds(block);
             let space = mesh.block_space(block);
             let nodes = mesh.block_nodes(block);
-
-            let boundary = mesh.block_boundary(block, boundary.clone());
 
             let block_dest = unsafe { dest.slice_mut(nodes.clone()) };
 
@@ -108,7 +102,7 @@ impl<const N: usize> Mesh<N> {
                     .copy_from_slice(block_dest.field(field));
             }
 
-            if Self::is_interior(&boundary) {
+            if mesh.is_block_in_interior(block) {
                 let engine = FdIntEngine {
                     space: space.clone(),
                     bounds,
@@ -124,7 +118,6 @@ impl<const N: usize> Mesh<N> {
                     bounds,
                     order,
                     store,
-                    boundary,
                     range: nodes.clone(),
                 };
 
@@ -135,13 +128,11 @@ impl<const N: usize> Mesh<N> {
 
     pub fn apply<
         O: Kernels + Sync,
-        B: Boundary<N> + Sync,
-        C: Conditions<N> + Sync,
+        C: SystemConditions<N> + Sync,
         P: Function<N, Input = C::System, Output = C::System> + Sync,
     >(
         &mut self,
         order: O,
-        boundary: B,
         conditions: C,
         op: P,
         f: SystemSliceMut<'_, C::System>,
@@ -155,8 +146,6 @@ impl<const N: usize> Mesh<N> {
             let space = mesh.block_space(block);
             let nodes = mesh.block_nodes(block);
 
-            let boundary = mesh.block_boundary(block, boundary.clone());
-
             let mut block_dest = unsafe { f.slice_mut(nodes.clone()) };
 
             let num_nodes = block_dest.len() * f.system().count();
@@ -169,7 +158,7 @@ impl<const N: usize> Mesh<N> {
                     .copy_from_slice(block_dest.field(field));
             }
 
-            if Self::is_interior(&boundary) {
+            if mesh.is_block_in_interior(block) {
                 let engine = FdIntEngine {
                     space: space.clone(),
                     bounds,
@@ -185,17 +174,14 @@ impl<const N: usize> Mesh<N> {
                     bounds,
                     order,
                     store,
-                    boundary: boundary.clone(),
                     range: nodes.clone(),
                 };
 
                 op.evaluate(&engine, block_source.rb(), block_dest.rb_mut());
 
-                let spacing = mesh.block_spacing(block);
-
                 // Weak boundary conditions.
                 for face in faces::<N>() {
-                    if boundary.kind(face) != BoundaryKind::Radiative {
+                    if space.boundary[face] != BoundaryKind::Radiative {
                         continue;
                     }
 
@@ -215,13 +201,13 @@ impl<const N: usize> Mesh<N> {
 
                         // Find innter vertex for approximating higher order r dependence
                         for axis in 0..N {
-                            if boundary.kind(Face::negative(axis)) == BoundaryKind::Radiative
+                            if space.boundary[Face::negative(axis)] == BoundaryKind::Radiative
                                 && vertex[axis] == 0
                             {
                                 inner[axis] += 1;
                             }
 
-                            if boundary.kind(Face::positive(axis)) == BoundaryKind::Radiative
+                            if space.boundary[Face::positive(axis)] == BoundaryKind::Radiative
                                 && vertex[axis] == engine.vertex_size()[axis] - 1
                             {
                                 inner[axis] -= 1;
@@ -236,7 +222,7 @@ impl<const N: usize> Mesh<N> {
                             let source = block_source.field(field);
                             let dest = block_dest.field_mut(field);
                             // Get condition parameters.
-                            let params = conditions.radiative(field, position, spacing);
+                            let params = conditions.radiative(field, position);
                             // Inner R dependence.
                             let mut inner_advection = source[inner_index] - params.target;
 
@@ -270,10 +256,9 @@ impl<const N: usize> Mesh<N> {
     }
 
     /// Enforce weak boundary conditions on the time derivative of a system.
-    pub fn weak_boundary<O: Kernels + Sync, B: Boundary<N> + Sync, C: Conditions<N> + Sync>(
+    pub fn weak_boundary<O: Kernels + Sync, C: SystemConditions<N> + Sync>(
         &mut self,
         order: O,
-        boundary: B,
         conditions: C,
         source: SystemSlice<'_, C::System>,
         deriv: SystemSliceMut<'_, C::System>,
@@ -283,11 +268,10 @@ impl<const N: usize> Mesh<N> {
         let deriv = deriv.into_shared();
 
         self.block_compute(|mesh, store, block| {
-            let boundary = mesh.block_boundary(block, boundary.clone());
             let bounds = mesh.blocks.bounds(block);
             let space = mesh.block_space(block);
             let nodes = mesh.block_nodes(block);
-            let vertex_size = space.inner_size();
+            let vertex_size = space.vertex_size();
 
             let block_source = source.slice(nodes.clone());
             let mut block_deriv = unsafe { deriv.slice_mut(nodes.clone()) };
@@ -296,14 +280,12 @@ impl<const N: usize> Mesh<N> {
                 space: space.clone(),
                 bounds,
                 order,
-                boundary: boundary.clone(),
                 store,
                 range: nodes.clone(),
             };
-            let spacing = engine.min_spacing();
 
             for face in faces::<N>() {
-                if boundary.kind(face) != BoundaryKind::Radiative {
+                if space.boundary[face] != BoundaryKind::Radiative {
                     continue;
                 }
 
@@ -323,13 +305,13 @@ impl<const N: usize> Mesh<N> {
 
                     // Find innter vertex for approximating higher order r dependence
                     for axis in 0..N {
-                        if boundary.kind(Face::negative(axis)) == BoundaryKind::Radiative
+                        if space.boundary[Face::negative(axis)] == BoundaryKind::Radiative
                             && vertex[axis] == 0
                         {
                             inner[axis] += 1;
                         }
 
-                        if boundary.kind(Face::positive(axis)) == BoundaryKind::Radiative
+                        if space.boundary[Face::positive(axis)] == BoundaryKind::Radiative
                             && vertex[axis] == vertex_size[axis] - 1
                         {
                             inner[axis] -= 1;
@@ -344,7 +326,7 @@ impl<const N: usize> Mesh<N> {
                         let source = block_source.field(field);
                         let deriv = block_deriv.field_mut(field);
 
-                        let params = conditions.radiative(field, position, spacing);
+                        let params = conditions.radiative(field, position);
 
                         // Inner R dependence
                         let mut inner_advection = source[inner_index] - params.target;
@@ -384,16 +366,14 @@ impl<const N: usize> Mesh<N> {
         }
     }
 
-    pub fn project<K: Kernels + Sync, B: Boundary<N> + Sync, P: Projection<N> + Sync>(
+    pub fn project<K: Kernels + Sync, P: Projection<N> + Sync>(
         &mut self,
         order: K,
-        boundary: B,
         projection: P,
         dest: &mut [f64],
     ) {
         self.evaluate(
             order,
-            boundary,
             ProjectionAsFunction(projection),
             SystemSlice::empty(),
             SystemSliceMut::from_scalar(dest),
@@ -401,10 +381,9 @@ impl<const N: usize> Mesh<N> {
     }
 
     /// Applies the projection to `source`, and stores the result in `dest`.
-    pub fn dissipation<K: Kernels + Sync, B: Boundary<N> + Sync, S: System>(
+    pub fn dissipation<K: Kernels + Sync, S: System>(
         &mut self,
         order: K,
-        boundary: B,
         amplitude: f64,
         mut dest: SystemSliceMut<S>,
     ) {
@@ -437,7 +416,6 @@ impl<const N: usize> Mesh<N> {
         for field in dest.system().enumerate() {
             self.evaluate_mut(
                 order,
-                boundary.clone(),
                 Dissipation(amplitude),
                 SystemSliceMut::from_scalar(dest.field_mut(field)),
             );
@@ -463,7 +441,7 @@ impl<const N: usize> Mesh<N> {
                 .cloned()
                 .unwrap_or(1.0);
 
-            let vertex_size = space.inner_size();
+            let vertex_size = space.vertex_size();
 
             let block_dest = unsafe { dest.slice_mut(nodes) };
 
@@ -528,71 +506,11 @@ impl<const N: usize> Mesh<N> {
             for field in block_dest.system().enumerate() {
                 let block_dest = block_dest.field_mut(field);
 
-                for vertex in IndexSpace::new(block_space.inner_size()).iter() {
+                for vertex in IndexSpace::new(block_space.vertex_size()).iter() {
                     let index = block_space.index_from_vertex(vertex);
                     block_dest[index] *= block_spacings[index] / min_spacing;
                 }
             }
         });
     }
-
-    // /// Performs a fused-multiply-add operation `a + mb` and then assigns this value to `dest`.
-    // pub fn fma<S: System + Sync>(
-    //     &mut self,
-    //     a: SystemSlice<'_, S>,
-    //     m: f64,
-    //     b: SystemSlice<'_, S>,
-    //     dest: SystemSliceMut<'_, S>,
-    // ) {
-    //     assert!(a.len() == self.num_nodes());
-    //     assert!(b.len() == self.num_nodes());
-    //     assert!(dest.len() == self.num_nodes());
-
-    //     let dest = dest.into_shared();
-
-    //     (0..self.blocks.len()).par_bridge().for_each(|block| {
-    //         let nodes = self.block_nodes(block);
-
-    //         let a = a.slice(nodes.clone());
-    //         let b = b.slice(nodes.clone());
-    //         let mut dest = unsafe { dest.slice_mut(nodes.clone()) };
-
-    //         for field in a.system().enumerate() {
-    //             for i in 0..a.len() {
-    //                 dest.field_mut(field.clone())[i] =
-    //                     a.field(field.clone())[i] + m * b.field(field.clone())[i];
-    //             }
-    //         }
-    //     });
-    // }
-
-    // /// Performs a fused-multiply-add operation `a + mb`, and then adds and assigns this value to `dest`.
-    // pub fn add_assign_fma<S: System + Sync>(
-    //     &mut self,
-    //     a: SystemSlice<'_, S>,
-    //     m: f64,
-    //     b: SystemSlice<'_, S>,
-    //     dest: SystemSliceMut<'_, S>,
-    // ) {
-    //     assert!(a.len() == self.num_nodes());
-    //     assert!(b.len() == self.num_nodes());
-    //     assert!(dest.len() == self.num_nodes());
-
-    //     let dest = dest.into_shared();
-
-    //     (0..self.blocks.len()).par_bridge().for_each(|block| {
-    //         let nodes = self.block_nodes(block);
-
-    //         let a = a.slice(nodes.clone());
-    //         let b = b.slice(nodes.clone());
-    //         let mut dest = unsafe { dest.slice_mut(nodes.clone()) };
-
-    //         for field in a.system().enumerate() {
-    //             for i in 0..a.len() {
-    //                 dest.field_mut(field.clone())[i] +=
-    //                     a.field(field.clone())[i] + m * b.field(field.clone())[i];
-    //             }
-    //         }
-    //     });
-    // }
 }

@@ -1,4 +1,4 @@
-use aeon_geometry::{Rectangle, Tree};
+use aeon_geometry::{FaceArray, Rectangle, Tree};
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 use std::collections::HashMap;
@@ -6,6 +6,7 @@ use std::str::FromStr;
 use thiserror::Error;
 
 use crate::fd::Mesh;
+use crate::kernel::BoundaryKind;
 use crate::system::{System, SystemSlice, SystemVec};
 
 #[derive(Debug, Error)]
@@ -23,6 +24,7 @@ pub struct MeshCheckpoint<const N: usize> {
     tree: Tree<N>,
     width: usize,
     ghost: usize,
+    boundary: FaceArray<N, BoundaryKind>,
 }
 
 impl<const N: usize> MeshCheckpoint<N> {
@@ -30,12 +32,14 @@ impl<const N: usize> MeshCheckpoint<N> {
         self.tree.clone_from(&mesh.tree);
         self.width = mesh.width;
         self.ghost = mesh.ghost;
+        self.boundary = mesh.boundary;
     }
 
     pub fn load_mesh(&self, mesh: &mut Mesh<N>) {
         mesh.tree.clone_from(&self.tree);
         mesh.width = self.width;
         mesh.ghost = self.ghost;
+        mesh.boundary = self.boundary;
 
         mesh.build();
     }
@@ -47,6 +51,7 @@ impl<const N: usize> Default for MeshCheckpoint<N> {
             tree: Tree::new(Rectangle::UNIT),
             width: 4,
             ghost: 1,
+            boundary: FaceArray::from_fn(|_| BoundaryKind::Radiative),
         }
     }
 }

@@ -1,5 +1,4 @@
 use aeon::{fd::Gaussian, prelude::*};
-use aeon_basis::RadiativeParams;
 
 const ORDER: Order<4> = Order::<4>;
 // const REGRID_SKIP: usize = 10;
@@ -7,23 +6,13 @@ const ORDER: Order<4> = Order::<4>;
 const LOWER: f64 = 1e-10;
 const UPPER: f64 = 1e-6;
 
-/// The quadrant domain the function is being projected on.
-#[derive(Clone)]
-pub struct Quadrant;
-
-impl Boundary<2> for Quadrant {
-    fn kind(&self, _face: Face<2>) -> BoundaryKind {
-        BoundaryKind::Radiative
-    }
-}
-
 #[derive(Clone)]
 pub struct WaveConditions;
 
-impl Conditions<2> for WaveConditions {
+impl SystemConditions<2> for WaveConditions {
     type System = Scalar;
 
-    fn radiative(&self, _field: (), _position: [f64; 2], _spacing: f64) -> RadiativeParams {
+    fn radiative(&self, _field: (), _position: [f64; 2]) -> RadiativeParams {
         RadiativeParams::lightlike(0.0)
     }
 }
@@ -39,6 +28,10 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Generate initial mesh
     let mut mesh = Mesh::new(Rectangle::from_aabb([-10., -10.], [10., 10.]), 4, 3);
+    mesh.set_face_boundary(Face::negative(0), BoundaryKind::Radiative);
+    mesh.set_face_boundary(Face::negative(1), BoundaryKind::Radiative);
+    mesh.set_face_boundary(Face::positive(0), BoundaryKind::Radiative);
+    mesh.set_face_boundary(Face::positive(1), BoundaryKind::Radiative);
     // Allocate space for system
     let mut system = SystemVec::default();
 
@@ -60,10 +53,10 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         system.resize(mesh.num_nodes());
 
-        mesh.project(ORDER, Quadrant, profile, system.field_mut(()));
-        mesh.fill_boundary(ORDER, Quadrant, WaveConditions, system.as_mut_slice());
+        mesh.project(ORDER, profile, system.field_mut(()));
+        mesh.fill_boundary(ORDER, WaveConditions, system.as_mut_slice());
 
-        mesh.flag_wavelets(4, LOWER, UPPER, Quadrant, system.as_slice());
+        mesh.flag_wavelets(4, LOWER, UPPER, system.as_slice());
         mesh.set_regrid_level_limit(10);
 
         mesh.balance_flags();
@@ -112,12 +105,7 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
             transfered.resize(mesh.num_nodes());
             error.resize(mesh.num_nodes());
 
-            mesh.transfer_system(
-                ORDER,
-                Quadrant,
-                system.as_slice(),
-                transfered.as_mut_slice(),
-            );
+            mesh.transfer_system(ORDER, system.as_slice(), transfered.as_mut_slice());
 
             continue;
         } else {

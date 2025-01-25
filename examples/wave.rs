@@ -1,7 +1,6 @@
 use std::array;
 
 use aeon::{fd::Gaussian, prelude::*, system::System};
-use aeon_basis::RadiativeParams;
 
 const MAX_TIME: f64 = 1.0;
 const MAX_STEPS: usize = 1000;
@@ -18,23 +17,13 @@ const LOWER: f64 = 1e-8;
 const UPPER: f64 = 1e-6;
 const SPEED: [f64; 2] = [1.0, 0.0];
 
-/// The quadrant domain the function is being projected on.
-#[derive(Clone)]
-struct Quadrant;
-
-impl Boundary<2> for Quadrant {
-    fn kind(&self, _face: Face<2>) -> BoundaryKind {
-        BoundaryKind::Radiative
-    }
-}
-
 #[derive(Clone)]
 struct WaveConditions;
 
-impl Conditions<2> for WaveConditions {
+impl SystemConditions<2> for WaveConditions {
     type System = Scalar;
 
-    fn radiative(&self, _field: (), _position: [f64; 2], _spacing: f64) -> RadiativeParams {
+    fn radiative(&self, _field: (), _position: [f64; 2]) -> RadiativeParams {
         RadiativeParams::lightlike(0.0)
     }
 }
@@ -96,14 +85,12 @@ impl<'a> Ode for HyperbolicOde<'a> {
         self.mesh.fill_boundary_to_extent(
             Order::<4>,
             2,
-            Quadrant,
             WaveConditions,
             SystemSliceMut::from_scalar(f),
         );
 
         self.mesh.apply(
             ORDER,
-            Quadrant,
             WaveConditions,
             WaveEquation { speed: SPEED },
             SystemSliceMut::from_scalar(f),
@@ -122,6 +109,7 @@ pub fn main() -> anyhow::Result<()> {
 
     // Generate initial mesh
     let mut mesh = Mesh::new(Rectangle::from_aabb([-10., -10.], [10., 10.]), 6, 3);
+    mesh.set_boundary(BoundaryKind::Radiative);
     // Allocate space for system
     let mut system = SystemVec::<Scalar>::default();
 
@@ -141,12 +129,12 @@ pub fn main() -> anyhow::Result<()> {
 
         log::trace!("Projecting System");
 
-        mesh.project(ORDER, Quadrant, profile, system.field_mut(()));
-        mesh.fill_boundary(ORDER, Quadrant, WaveConditions, system.as_mut_slice());
+        mesh.project(ORDER, profile, system.field_mut(()));
+        mesh.fill_boundary(ORDER, WaveConditions, system.as_mut_slice());
 
         log::trace!("Flagging Wavelets");
 
-        mesh.flag_wavelets(4, LOWER, UPPER, Quadrant, system.as_slice());
+        mesh.flag_wavelets(4, LOWER, UPPER, system.as_slice());
         mesh.set_regrid_level_limit(10);
 
         log::trace!("Balancing Flags");
@@ -219,14 +207,13 @@ pub fn main() -> anyhow::Result<()> {
 
         mesh.project(
             ORDER,
-            Quadrant,
             AnalyticSolution { speed: SPEED, time },
             exact.field_mut(()),
         );
 
         // Fill boundaries
-        mesh.fill_boundary(ORDER, Quadrant, WaveConditions, system.as_mut_slice());
-        mesh.fill_boundary(ORDER, Quadrant, WaveConditions, exact.as_mut_slice());
+        mesh.fill_boundary(ORDER, WaveConditions, system.as_mut_slice());
+        mesh.fill_boundary(ORDER, WaveConditions, exact.as_mut_slice());
 
         for i in 0..mesh.num_nodes() {
             error.contigious_mut()[i] = exact.contigious()[i] - system.contigious()[i];
@@ -235,8 +222,8 @@ pub fn main() -> anyhow::Result<()> {
         if steps_since_regrid > REGRID_SKIP {
             steps_since_regrid = 0;
 
-            mesh.fill_boundary(ORDER, Quadrant, WaveConditions, system.as_mut_slice());
-            mesh.flag_wavelets(4, LOWER, UPPER, Quadrant, system.as_slice());
+            mesh.fill_boundary(ORDER, WaveConditions, system.as_mut_slice());
+            mesh.flag_wavelets(4, LOWER, UPPER, system.as_slice());
             mesh.set_regrid_level_limit(10);
 
             mesh.balance_flags();
@@ -257,12 +244,12 @@ pub fn main() -> anyhow::Result<()> {
             tmp.contigious_mut().copy_from_slice(system.contigious());
 
             system.resize(mesh.num_nodes());
-            mesh.transfer_system(ORDER, Quadrant, tmp.as_slice(), system.as_mut_slice());
+            mesh.transfer_system(ORDER, tmp.as_slice(), system.as_mut_slice());
 
             continue;
         }
 
-        mesh.fill_boundary(ORDER, Quadrant, WaveConditions, system.as_mut_slice());
+        mesh.fill_boundary(ORDER, WaveConditions, system.as_mut_slice());
 
         if time_since_save >= SAVE_CHECKPOINT || FORCE_SAVE {
             time_since_save = 0.0;
@@ -300,8 +287,8 @@ pub fn main() -> anyhow::Result<()> {
         );
 
         // Compute dissipation
-        mesh.fill_boundary(ORDER, Quadrant, WaveConditions, system.as_mut_slice());
-        mesh.dissipation(DISS_ORDER, Quadrant, 0.5, system.as_mut_slice());
+        mesh.fill_boundary(ORDER, WaveConditions, system.as_mut_slice());
+        mesh.dissipation(DISS_ORDER, 0.5, system.as_mut_slice());
 
         step += 1;
         steps_since_regrid += 1;
