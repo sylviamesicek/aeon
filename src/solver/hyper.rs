@@ -4,11 +4,13 @@ use reborrow::{Reborrow, ReborrowMut};
 use thiserror::Error;
 
 use crate::{
-    fd::{Engine, Function, Mesh, SolverCallback},
+    mesh::{Engine, Function, Mesh},
     ode::{Ode, Rk4},
     prelude::Face,
     system::{Pair, System, SystemConditions, SystemSlice, SystemSliceMut},
 };
+
+use super::SolverCallback;
 
 #[derive(Error, Debug)]
 pub enum HyperRelaxError {

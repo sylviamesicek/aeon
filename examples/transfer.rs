@@ -1,4 +1,4 @@
-use aeon::{fd::Gaussian, prelude::*};
+use aeon::{mesh::Gaussian, prelude::*};
 
 const ORDER: Order<4> = Order::<4>;
 // const REGRID_SKIP: usize = 10;

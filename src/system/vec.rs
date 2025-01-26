@@ -410,6 +410,33 @@ impl<'a, S: System> SystemSliceShared<'a, S> {
         self.system
     }
 
+    fn stride(&self) -> usize {
+        debug_assert!(self.system.count() >= 1);
+        self.total / self.system.count()
+    }
+
+    /// Retrieves an immutable slice to the given field.
+    pub unsafe fn field(&self, label: S::Label) -> &[f64] {
+        unsafe {
+            std::slice::from_raw_parts(
+                self.ptr
+                    .add(self.stride() * self.system.label_index(label) + self.offset),
+                self.length,
+            )
+        }
+    }
+
+    /// Retrieves a mutable slice of the given field.
+    pub unsafe fn field_mut(&self, label: S::Label) -> &mut [f64] {
+        unsafe {
+            std::slice::from_raw_parts_mut(
+                self.ptr
+                    .add(self.stride() * self.system.label_index(label) + self.offset),
+                self.length,
+            )
+        }
+    }
+
     /// Retrieves an immutable reference to a slice of the system.
     ///
     /// # Safety

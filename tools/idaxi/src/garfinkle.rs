@@ -1,10 +1,10 @@
 use std::path::{Path, PathBuf};
 
 use aeon::{
-    elliptic::HyperRelaxSolver,
-    fd::{Gaussian, Mesh, SolverCallback},
     kernel::Kernels,
+    mesh::{Gaussian, Mesh},
     prelude::*,
+    solver::{HyperRelaxSolver, SolverCallback},
     system::System,
 };
 

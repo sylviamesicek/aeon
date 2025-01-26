@@ -114,7 +114,7 @@ fn critical_search() -> Result<()> {
 
     if config.cache_evolve {
         evolution_cache =
-            import_from_toml::<EvolutionCache>(absolute.join("evolution").join("cache.toml"))
+            import_from_toml::<EvolutionCache>(absolute.join("evolve").join("cache.toml"))
                 .unwrap_or(EvolutionCache::default());
     }
 

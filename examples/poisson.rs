@@ -1,7 +1,7 @@
 use aeon::{
-    elliptic::HyperRelaxSolver,
-    fd::{Gaussian, SolverCallback},
+    mesh::{Gaussian, SolverCallback},
     prelude::*,
+    solver::HyperRelaxSolver,
 };
 
 const ORDER: Order<4> = Order::<4>;

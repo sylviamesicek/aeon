@@ -4,11 +4,11 @@
 // Included so we can use custom derive macros from `aeon_macros` within this crate.
 extern crate self as aeon;
 
-pub mod elliptic;
-pub mod fd;
 pub mod kernel;
+pub mod mesh;
 pub mod ode;
 pub mod shared;
+pub mod solver;
 pub mod system;
 
 pub use aeon_geometry as geometry;
@@ -16,10 +16,10 @@ pub use aeon_macros as macros;
 
 /// Provides common types used for most `aeon` applications.
 pub mod prelude {
-    pub use crate::fd::{
+    pub use crate::kernel::{BoundaryKind, Condition, Order, RadiativeParams};
+    pub use crate::mesh::{
         Engine, ExportVtuConfig, Function, Mesh, MeshCheckpoint, Projection, SystemCheckpoint,
     };
-    pub use crate::kernel::{BoundaryKind, Condition, Order, RadiativeParams};
     pub use crate::ode::{ForwardEuler, Ode, Rk4};
     pub use crate::system::{
         Empty, EmptyConditions, Pair, PairConditions, Scalar, ScalarConditions, System,

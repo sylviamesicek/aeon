@@ -1,6 +1,6 @@
 use std::array;
 
-use aeon::{fd::Gaussian, prelude::*, system::System};
+use aeon::{mesh::Gaussian, prelude::*, system::System};
 
 const MAX_TIME: f64 = 1.0;
 const MAX_STEPS: usize = 1000;

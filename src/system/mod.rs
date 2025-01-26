@@ -18,10 +18,10 @@ pub trait System {
     const NAME: &'static str = "Unknown";
 
     /// Label used to index fields.
-    type Label: Clone + Copy;
+    type Label: Clone + Copy + Send + Sync;
 
     /// Enumerates all fields in the system
-    fn enumerate(&self) -> impl Iterator<Item = Self::Label>;
+    fn enumerate(&self) -> impl Iterator<Item = Self::Label> + Send + Sync;
     /// Returns the number of fields in the system
     fn count(&self) -> usize {
         self.enumerate().count()
