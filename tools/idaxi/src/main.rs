@@ -6,9 +6,53 @@ use aeon::prelude::*;
 use anyhow::{anyhow, Context, Result};
 use clap::{Arg, Command};
 use garfinkle::VisualizeConfig;
-use sharedaxi::{import_from_path_arg, Fields, IDConfig, Source};
+use sharedaxi::{import_from_path_arg, Field, FieldConditions, Fields, IDConfig, Source};
 
 mod garfinkle;
+
+struct EnergyDensity;
+
+impl Function<2> for EnergyDensity {
+    type Input = Fields;
+    type Output = Scalar;
+
+    fn evaluate(
+        &self,
+        engine: impl Engine<2>,
+        input: SystemSlice<Self::Input>,
+        output: SystemSliceMut<Self::Output>,
+    ) {
+        let sigma = output.into_scalar();
+
+        let grr = input.field(Field::Metric(sharedaxi::Metric::Grr));
+        let gzz = input.field(Field::Metric(sharedaxi::Metric::Gzz));
+
+        for vertex in IndexSpace::new(engine.vertex_size()).iter() {
+            let index = engine.index_from_vertex(vertex);
+
+            let grr = grr[index];
+            let gzz = gzz[index];
+
+            let mut source = 0.0;
+
+            for (i, mass) in input.system().scalar_fields().enumerate() {
+                let mass2 = mass * mass;
+                let phi = input.field(Field::ScalarField(sharedaxi::ScalarField::Phi, i));
+
+                let phi2 = phi[index] * phi[index];
+                let phi_r = engine.derivative(phi, 0, vertex);
+                let phi_z = engine.derivative(phi, 1, vertex);
+
+                let kinetic = 0.5 * (phi_r * phi_r / grr + phi_z * phi_z / gzz);
+                let potential = 0.5 * mass2 * phi2;
+
+                source += kinetic + potential;
+            }
+
+            sigma[index] = source;
+        }
+    }
+}
 
 fn initial_data() -> Result<()> {
     // Load configuration
@@ -262,8 +306,46 @@ fn initial_data() -> Result<()> {
         }
     }
 
+    let mut sigma = vec![0.0; mesh.num_nodes()];
+
+    match order {
+        2 => {
+            mesh.fill_boundary(Order::<2>, FieldConditions, system.as_mut_slice());
+            mesh.evaluate(
+                Order::<2>,
+                EnergyDensity,
+                system.as_slice(),
+                (&mut sigma).into(),
+            );
+        }
+        4 => {
+            mesh.fill_boundary(Order::<4>, FieldConditions, system.as_mut_slice());
+            mesh.evaluate(
+                Order::<4>,
+                EnergyDensity,
+                system.as_slice(),
+                (&mut sigma).into(),
+            );
+        }
+        6 => {
+            mesh.fill_boundary(Order::<6>, FieldConditions, system.as_mut_slice());
+            mesh.evaluate(
+                Order::<6>,
+                EnergyDensity,
+                system.as_slice(),
+                (&mut sigma).into(),
+            );
+        }
+        _ => {}
+    };
+
+    let l2_norm = mesh.l2_norm(sigma.as_slice().into());
+    let max_norm = mesh.max_norm(sigma.as_slice().into());
+    println!("Energy Density: l2 Norm {l2_norm:.5e}, max Norm {max_norm:.5e}");
+
     let mut checkpoint = SystemCheckpoint::default();
     checkpoint.save_system_ser(system.as_slice());
+    checkpoint.save_field("σ", &sigma);
 
     if config.visualize_result {
         mesh.export_vtu(

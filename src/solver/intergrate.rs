@@ -1,5 +1,5 @@
 use crate::{
-    kernel::Kernels,
+    kernel::{Kernels, Order},
     mesh::{Function, Mesh},
     system::{System, SystemConditions, SystemSlice, SystemSliceMut},
 };
@@ -13,7 +13,7 @@ pub enum Method {
     #[default]
     ForwardEuler,
     RK4,
-    RK4KO6,
+    RK4KO6(f64),
 }
 
 pub struct Integrator {
@@ -35,7 +35,7 @@ impl Integrator {
         const N: usize,
         K: Kernels + Sync,
         C: SystemConditions<N> + Sync,
-        F: Function<N, Input = C::System, Output = C::System> + Sync,
+        F: Function<N, Input = C::System, Output = C::System> + Clone + Sync,
     >(
         &mut self,
         mesh: &mut Mesh<N>,
@@ -70,7 +70,7 @@ impl Integrator {
                 mesh.apply(order, conditions.clone(), deriv, tmp.rb_mut());
                 Self::fused_multiply_add_assign(result, h, tmp.rb());
             }
-            Method::RK4 | Method::RK4KO6 => {
+            Method::RK4 | Method::RK4KO6(..) => {
                 self.tmp.resize(2 * dimension, 0.0);
 
                 let (tmp1, tmp2) = self.tmp.split_at_mut(dimension);
@@ -81,11 +81,34 @@ impl Integrator {
 
                 // K1
                 Self::copy_from(tmp.rb_mut(), result.rb());
-                mesh.apply(order, conditions.clone(), deriv, tmp.rb_mut());
+                mesh.apply(order, conditions.clone(), deriv.clone(), tmp.rb_mut());
                 Self::fused_multiply_add_assign(update.rb_mut(), 1. / 6., tmp.rb());
 
                 // K2
-                // Self::fused_multiply_add(tmp, result.rb(), h / 2.0, tmp.rb());
+                Self::fused_multiply_add_dest(tmp.rb_mut(), result.rb(), h / 2.0);
+                mesh.fill_boundary(order, conditions.clone(), tmp.rb_mut());
+                mesh.apply(order, conditions.clone(), deriv.clone(), tmp.rb_mut());
+                Self::fused_multiply_add_assign(update.rb_mut(), 1. / 3., tmp.rb());
+
+                // K3
+                Self::fused_multiply_add_dest(tmp.rb_mut(), result.rb(), h / 2.0);
+                mesh.fill_boundary(order, conditions.clone(), tmp.rb_mut());
+                mesh.apply(order, conditions.clone(), deriv.clone(), tmp.rb_mut());
+                Self::fused_multiply_add_assign(update.rb_mut(), 1. / 3., tmp.rb());
+
+                // K4
+                Self::fused_multiply_add_dest(tmp.rb_mut(), result.rb(), h);
+                mesh.fill_boundary(order, conditions.clone(), tmp.rb_mut());
+                mesh.apply(order, conditions.clone(), deriv.clone(), tmp.rb_mut());
+                Self::fused_multiply_add_assign(update.rb_mut(), 1. / 6., tmp.rb());
+
+                // Sum everything
+                Self::fused_multiply_add_assign(result.rb_mut(), h, update.rb());
+
+                if let Method::RK4KO6(diss) = self.method {
+                    mesh.fill_boundary(order, conditions.clone(), result.rb_mut());
+                    mesh.dissipation(Order::<6>, diss, result.rb_mut());
+                }
             }
         }
     }
@@ -97,37 +120,54 @@ impl Integrator {
         });
     }
 
+    /// Performs operation `dest = dest + h * b`
     fn fused_multiply_add_assign<S: System + Clone + Sync>(
         dest: SystemSliceMut<S>,
         h: f64,
-        source: SystemSlice<S>,
+        b: SystemSlice<S>,
     ) {
         let shared = dest.into_shared();
-        source.system().enumerate().par_bridge().for_each(|field| {
+        b.system().enumerate().par_bridge().for_each(|field| {
             let dest = unsafe { shared.field_mut(field) };
-            let src = source.field(field);
+            let src = b.field(field);
 
             dest.iter_mut().zip(src).for_each(|(a, b)| *a += h * b);
         });
     }
 
-    fn fused_multiply_add<S: System + Clone + Sync>(
+    // fn fused_multiply_add<S: System + Clone + Sync>(
+    //     dest: SystemSliceMut<S>,
+    //     a: SystemSlice<S>,
+    //     h: f64,
+    //     b: SystemSlice<S>,
+    // ) {
+    //     let shared = dest.into_shared();
+    //     a.system().enumerate().par_bridge().for_each(|field| {
+    //         let dest = unsafe { shared.field_mut(field) };
+    //         let a = a.field(field);
+    //         let b = b.field(field);
+
+    //         dest.iter_mut()
+    //             .zip(a.iter().zip(b))
+    //             .for_each(|(d, (a, b))| {
+    //                 *d = a + h * b;
+    //             });
+    //     });
+    // }
+
+    /// Performs operation `dest = a + h * dest`
+    fn fused_multiply_add_dest<S: System + Clone + Sync>(
         dest: SystemSliceMut<S>,
         a: SystemSlice<S>,
         h: f64,
-        b: SystemSlice<S>,
     ) {
         let shared = dest.into_shared();
         a.system().enumerate().par_bridge().for_each(|field| {
             let dest = unsafe { shared.field_mut(field) };
             let a = a.field(field);
-            let b = b.field(field);
-
-            dest.iter_mut()
-                .zip(a.iter().zip(b))
-                .for_each(|(d, (a, b))| {
-                    *d = a + h * b;
-                });
+            dest.iter_mut().zip(a.iter()).for_each(|(d, a)| {
+                *d = a + h * *d;
+            });
         });
     }
 }

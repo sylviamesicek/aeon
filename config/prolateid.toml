@@ -9,7 +9,7 @@ visualize_every = 500
 visualize_relax = true
 
 max_error = 1e-6
-max_level = 15
+max_levels = 15
 max_nodes = 16_000_000
 refine_global = 1
 
@@ -33,5 +33,5 @@ tolerance = 1e-6
 [[source]]
 type = "scalar_field"
 mass = 0.0
-amplitude = 4.0
-sigma = [1.0, 1.5]
+amplitude = 0.3
+sigma = [5.35, 5.35]

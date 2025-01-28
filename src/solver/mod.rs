@@ -2,6 +2,7 @@ mod hyper;
 mod intergrate;
 
 pub use hyper::{HyperRelaxError, HyperRelaxSolver};
+pub use intergrate::{Integrator, Method};
 
 use crate::{
     mesh::{Function, Mesh},
