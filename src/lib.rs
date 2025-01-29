@@ -6,7 +6,6 @@ extern crate self as aeon;
 
 pub mod kernel;
 pub mod mesh;
-pub mod ode;
 pub mod shared;
 pub mod solver;
 pub mod system;
@@ -20,7 +19,6 @@ pub mod prelude {
     pub use crate::mesh::{
         Engine, ExportVtuConfig, Function, Mesh, MeshCheckpoint, Projection, SystemCheckpoint,
     };
-    pub use crate::ode::{ForwardEuler, Ode, Rk4};
     pub use crate::system::{
         Empty, EmptyConditions, Pair, PairConditions, Scalar, ScalarConditions, System,
         SystemConditions, SystemSlice, SystemSliceMut, SystemVec,

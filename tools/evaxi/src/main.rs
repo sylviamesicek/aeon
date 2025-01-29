@@ -1,9 +1,11 @@
 use std::{path::PathBuf, process::ExitCode};
 
-use aeon::prelude::*;
+use aeon::{
+    prelude::*,
+    solver::{Integrator, Method},
+};
 use anyhow::{anyhow, Context as _, Result};
 use clap::{Arg, Command};
-use reborrow::ReborrowMut as _;
 use sharedaxi::{
     import_from_toml, Constraint, EVConfig, Field, FieldConditions, Fields, Gauge, Metric,
     ScalarField, Visualize,
@@ -216,28 +218,6 @@ impl Function<2> for FieldDerivs {
     }
 }
 
-pub struct FieldEvolution<'a> {
-    mesh: &'a mut Mesh<2>,
-    system: &'a Fields,
-}
-
-impl<'a> Ode for FieldEvolution<'a> {
-    fn dim(&self) -> usize {
-        self.mesh.num_nodes() * self.system.count()
-    }
-
-    fn derivative(&mut self, f: &mut [f64]) {
-        let mut f = SystemSliceMut::from_contiguous(f, self.system);
-        // Fill ghost nodes
-        self.mesh
-            .fill_boundary_to_extent(ORDER, 2, FieldConditions, f.rb_mut());
-
-        // Apply operator
-        self.mesh
-            .apply(ORDER, FieldConditions, FieldDerivs, f.rb_mut());
-    }
-}
-
 pub fn evolution() -> Result<bool> {
     // Load configuration
     let matches = Command::new("evaxi")
@@ -304,7 +284,7 @@ pub fn evolution() -> Result<bool> {
     let system = fields.system().clone();
 
     // Integrate
-    let mut integrator = Rk4::new();
+    let mut integrator = Integrator::new(Method::RK4KO6(0.5));
     let mut time = 0.0;
     let mut step = 0;
 
@@ -407,12 +387,12 @@ pub fn evolution() -> Result<bool> {
             );
 
             // Copy system into tmp scratch space (provieded by dissipation).
-            integrator.tmp().resize(fields.contigious().len(), 0.0);
-            integrator.tmp().copy_from_slice(fields.contigious());
+            let scratch = integrator.scratch(fields.contigious().len());
+            scratch.copy_from_slice(fields.contigious());
             fields.resize(mesh.num_nodes());
             mesh.transfer_system(
                 ORDER,
-                SystemSlice::from_contiguous(integrator.tmp(), &system),
+                SystemSlice::from_contiguous(&scratch, &system),
                 fields.as_mut_slice(),
             );
 
@@ -473,12 +453,12 @@ pub fn evolution() -> Result<bool> {
 
         // Compute step
         integrator.step(
+            &mut mesh,
+            ORDER,
+            FieldConditions,
+            FieldDerivs,
             h,
-            &mut FieldEvolution {
-                mesh: &mut mesh,
-                system: &system,
-            },
-            fields.contigious_mut(),
+            fields.as_mut_slice(),
         );
 
         // Compute dissipation

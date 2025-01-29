@@ -7,7 +7,7 @@ use rayon::iter::{ParallelBridge, ParallelIterator};
 use reborrow::{Reborrow, ReborrowMut};
 
 /// Method to be used for numerical intergration of ODE.
-#[derive(Clone, Copy, Default)]
+#[derive(Clone, Copy, Debug, Default)]
 pub enum Method {
     // First order accurate Euler integration
     #[default]
@@ -16,6 +16,7 @@ pub enum Method {
     RK4KO6(f64),
 }
 
+#[derive(Clone, Debug)]
 pub struct Integrator {
     /// Numerical Method
     pub method: Method,
@@ -169,5 +170,12 @@ impl Integrator {
                 *d = a + h * *d;
             });
         });
+    }
+
+    // Allocates `len` elements using the intergrator's scratch data.
+    pub fn scratch(&mut self, len: usize) -> &mut [f64] {
+        self.tmp.clear();
+        self.tmp.resize(len, 0.0);
+        &mut self.tmp
     }
 }

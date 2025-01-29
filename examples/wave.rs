@@ -1,13 +1,16 @@
 use std::array;
 
-use aeon::{mesh::Gaussian, prelude::*, system::System};
+use aeon::{
+    mesh::Gaussian,
+    prelude::*,
+    solver::{Integrator, Method},
+};
 
 const MAX_TIME: f64 = 1.0;
 const MAX_STEPS: usize = 1000;
 
 const CFL: f64 = 0.1;
 const ORDER: Order<4> = Order::<4>;
-const DISS_ORDER: Order<6> = Order::<6>;
 
 const SAVE_CHECKPOINT: f64 = 0.01;
 const FORCE_SAVE: bool = false;
@@ -69,32 +72,6 @@ impl Projection<2> for AnalyticSolution {
         let offset: [_; 2] = array::from_fn(|axis| position[axis] - origin[axis]);
         let r2: f64 = offset.map(|v| v * v).iter().sum();
         (-r2).exp()
-    }
-}
-
-pub struct HyperbolicOde<'a> {
-    mesh: &'a mut Mesh<2>,
-}
-
-impl<'a> Ode for HyperbolicOde<'a> {
-    fn dim(&self) -> usize {
-        Scalar.count() * self.mesh.num_nodes()
-    }
-
-    fn derivative(&mut self, f: &mut [f64]) {
-        self.mesh.fill_boundary_to_extent(
-            Order::<4>,
-            2,
-            WaveConditions,
-            SystemSliceMut::from_scalar(f),
-        );
-
-        self.mesh.apply(
-            ORDER,
-            WaveConditions,
-            WaveEquation { speed: SPEED },
-            SystemSliceMut::from_scalar(f),
-        );
     }
 }
 
@@ -185,7 +162,7 @@ pub fn main() -> anyhow::Result<()> {
     let mut error = SystemVec::<Scalar>::default();
 
     // Integrate
-    let mut integrator = Rk4::new();
+    let mut integrator = Integrator::new(Method::RK4KO6(0.5));
     let mut time = 0.0;
     let mut step = 0;
 
@@ -279,16 +256,15 @@ pub fn main() -> anyhow::Result<()> {
             save_step += 1;
         }
 
-        // Compute step
+        // Compute step with dissipation
         integrator.step(
+            &mut mesh,
+            ORDER,
+            WaveConditions,
+            WaveEquation { speed: SPEED },
             h,
-            &mut HyperbolicOde { mesh: &mut mesh },
-            system.contigious_mut(),
+            system.as_mut_slice(),
         );
-
-        // Compute dissipation
-        mesh.fill_boundary(ORDER, WaveConditions, system.as_mut_slice());
-        mesh.dissipation(DISS_ORDER, 0.5, system.as_mut_slice());
 
         step += 1;
         steps_since_regrid += 1;

@@ -1,16 +1,22 @@
 use crate::kernel::{Kernels, RadiativeParams};
-use aeon_geometry::IndexSpace;
+use aeon_geometry::{Face, IndexSpace};
 use reborrow::{Reborrow, ReborrowMut};
 use thiserror::Error;
 
 use crate::{
     mesh::{Engine, Function, Mesh},
-    ode::{Ode, Rk4},
-    prelude::Face,
+    solver::{Integrator, Method},
     system::{Pair, System, SystemConditions, SystemSlice, SystemSliceMut},
 };
 
 use super::SolverCallback;
+
+// #[derive(Clone, Copy, Debug, Default)]
+// pub enum Method {
+//     #[default]
+//     ForwardEuler,
+//     RK4,
+// }
 
 #[derive(Error, Debug)]
 pub enum HyperRelaxError {
@@ -36,8 +42,7 @@ pub struct HyperRelaxSolver {
     /// of course).
     pub adaptive: bool,
 
-    // pub visualize: Option<HyperRelaxVisualize>,
-    integrator: Rk4,
+    integrator: Integrator,
 }
 
 impl Default for HyperRelaxSolver {
@@ -55,7 +60,7 @@ impl HyperRelaxSolver {
             cfl: 0.1,
             adaptive: false,
             // visualize: None,
-            integrator: Rk4::new(),
+            integrator: Integrator::new(Method::RK4),
         }
     }
 
@@ -152,20 +157,21 @@ impl HyperRelaxSolver {
                 break;
             }
 
-            // Take step
             self.integrator.step(
-                time_step,
-                &mut FictitiousOde {
-                    mesh,
-                    dimension,
+                mesh,
+                order,
+                FicticuousConditions {
                     dampening: self.dampening,
-                    order,
                     conditions: conditions.clone(),
-                    deriv: &deriv,
-                    spacing_per_vertex: &spacing_per_vertex,
-                    system: &(result.system().clone(), result.system().clone()),
                 },
-                &mut data,
+                FicticuousDerivs {
+                    dampening: self.dampening,
+                    function: &deriv,
+                    spacing_per_vertex: &spacing_per_vertex,
+                    min_spacing,
+                },
+                time_step,
+                SystemSliceMut::from_contiguous(&mut data, &system),
             );
 
             if index == self.max_steps - 1 {
@@ -223,6 +229,8 @@ impl<const N: usize, C: SystemConditions<N>> SystemConditions<N> for FicticuousC
 struct FicticuousDerivs<'a, const N: usize, F> {
     dampening: f64,
     function: &'a F,
+    spacing_per_vertex: &'a [f64],
+    min_spacing: f64,
 }
 
 impl<'a, const N: usize, S: System, F: Function<N, Input = S, Output = S>> Function<N>
@@ -256,70 +264,24 @@ impl<'a, const N: usize, S: System, F: Function<N, Input = S, Output = S>> Funct
         // dv/dt = c^2 Lu
         // TODO speed
         self.function.evaluate(&engine, uin, vout.rb_mut());
-    }
-}
 
-struct FictitiousOde<
-    'a,
-    const N: usize,
-    K: Kernels,
-    C: SystemConditions<N>,
-    F: Function<N, Input = C::System, Output = C::System>,
-> {
-    mesh: &'a mut Mesh<N>,
-    dimension: usize,
-    dampening: f64,
+        // Use adaptive timestep
+        let block_spacing = &self.spacing_per_vertex[engine.node_range()];
 
-    order: K,
-    conditions: C,
-    deriv: &'a F,
+        for field in uout.system().enumerate() {
+            let uout = uout.field_mut(field);
+            for vertex in IndexSpace::new(engine.vertex_size()).iter() {
+                let index = engine.index_from_vertex(vertex);
+                uout[index] *= block_spacing[index] / self.min_spacing;
+            }
+        }
 
-    spacing_per_vertex: &'a [f64],
-
-    system: &'a (C::System, C::System),
-}
-
-impl<
-        'a,
-        const N: usize,
-        K: Kernels + Sync,
-        C: SystemConditions<N> + Sync,
-        F: Function<N, Input = C::System, Output = C::System> + Sync,
-    > Ode for FictitiousOde<'a, N, K, C, F>
-where
-    C::System: Sync,
-{
-    fn dim(&self) -> usize {
-        2 * self.dimension
-    }
-
-    fn derivative(&mut self, f: &mut [f64]) {
-        let mut f = SystemSliceMut::from_contiguous(f, self.system);
-
-        // Fill strong boundary conditions.
-        self.mesh.fill_boundary(
-            self.order,
-            FicticuousConditions {
-                dampening: self.dampening,
-                conditions: self.conditions.clone(),
-            },
-            f.rb_mut(),
-        );
-
-        // Compute derivative
-        self.mesh.apply(
-            self.order,
-            FicticuousConditions {
-                dampening: self.dampening,
-                conditions: self.conditions.clone(),
-            },
-            FicticuousDerivs {
-                dampening: self.dampening,
-                function: self.deriv,
-            },
-            f.rb_mut(),
-        );
-
-        self.mesh.adaptive_cfl(&self.spacing_per_vertex, f.rb_mut());
+        for field in vout.system().enumerate() {
+            let vout = vout.field_mut(field);
+            for vertex in IndexSpace::new(engine.vertex_size()).iter() {
+                let index = engine.index_from_vertex(vertex);
+                vout[index] *= block_spacing[index] / self.min_spacing;
+            }
+        }
     }
 }
