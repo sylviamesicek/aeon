@@ -1,5 +1,5 @@
-name = "prolateev"
-output_dir = "output/prolateev"
+name = "sphereev1"
+output_dir = "output/sphereev1"
 order = 4
 diss_order = 6
 cfl = 0.1

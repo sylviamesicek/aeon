@@ -284,7 +284,7 @@ pub fn evolution() -> Result<bool> {
     let system = fields.system().clone();
 
     // Integrate
-    let mut integrator = Integrator::new(Method::RK4KO6(0.5));
+    let mut integrator = Integrator::new(Method::RK4KO6(config.dissipation));
     let mut time = 0.0;
     let mut step = 0;
 
@@ -316,6 +316,8 @@ pub fn evolution() -> Result<bool> {
     }
 
     let mut does_disperse = true;
+
+    let mut results = Vec::new();
 
     while time < max_time && proper_time < max_proper_time {
         assert!(fields.len() == mesh.num_nodes());
@@ -449,6 +451,10 @@ pub fn evolution() -> Result<bool> {
             // file.write_all(error_csv.as_bytes())?;
 
             save_step += 1;
+
+            let pi = fields.field(Field::ScalarField(ScalarField::Pi, 0))[0];
+
+            results.push((proper_time, pi * pi));
         }
 
         // Compute step
@@ -466,6 +472,17 @@ pub fn evolution() -> Result<bool> {
         mesh.dissipation(DISS_ORDER, diss, fields.as_mut_slice());
 
         let lapse = fields.field(Field::Gauge(Gauge::Lapse))[0];
+
+        if step % 50 == 0 {
+            use std::fmt::Write;
+
+            let mut graph = String::new();
+            for (time, pi) in &results {
+                writeln!(&mut graph, "{} {}", time, pi).unwrap();
+            }
+
+            std::fs::write("output/strong1.4.txt", graph).unwrap();
+        }
 
         step += 1;
         steps_since_regrid += 1;

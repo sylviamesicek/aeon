@@ -2,17 +2,23 @@
 [workspace]
 members = [
     "crates/*",
+
     "tools/critaxi",
     "tools/sharedaxi",
     "tools/idaxi",
     "tools/evaxi",
+
+    "tools/evsphere",
 ]
 default-members = [
     "crates/aeon_geometry",
+
     "tools/critaxi",
     "tools/evaxi",
     "tools/idaxi",
     "tools/sharedaxi",
+
+    "tools/evsphere",
     ".",
 ]
 resolver = "2"

@@ -406,7 +406,7 @@ impl Decomposition {
             term1 + term2
         };
 
-        // (partial_t lambda) / lambda
+        // (∂ₜλ) / λ
         let mut lam_lt =
             -lapse.value * l.value + s.sum(|[i]| twist.regular_co()[[i]] * shift.value[[i]]);
         if on_axis {

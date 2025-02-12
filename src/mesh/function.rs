@@ -3,6 +3,8 @@
 use crate::system::{System, SystemSlice, SystemSliceMut};
 use std::ops::Range;
 
+use super::Mesh;
+
 /// An interface for computing values, gradients, and hessians of fields.
 pub trait Engine<const N: usize> {
     fn num_nodes(&self) -> usize;
@@ -83,6 +85,8 @@ pub trait Function<const N: usize> {
         input: SystemSlice<Self::Input>,
         output: SystemSliceMut<Self::Output>,
     );
+
+    fn preprocess(&self, _mesh: &mut Mesh<N>, _input: SystemSliceMut<Self::Input>) {}
 }
 
 /// A projection takes in a position and returns a system of values.

@@ -1,6 +1,13 @@
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum CritParam {
+    Value(f64),
+    Search { start: f64, end: f64 },
+}
+
+#[derive(Serialize, Deserialize)]
 pub struct CritConfig {
     /// Name of simulation.
     pub name: String,

@@ -1,0 +1,37 @@
+name = "sphereid"
+output_dir = "output/sphereid"
+order = 4
+
+visualize_levels = true
+visualize_result = true
+visualize_stride = 6
+visualize_every = 500
+visualize_relax = true
+
+max_error = 1e-6
+max_levels = 15
+max_nodes = 16_000_000
+refine_global = 1
+
+[logging]
+level = 5
+
+[domain]
+radius = 48.0
+height = 48.0
+
+[domain.cell]
+subdivisions = 6
+ghost = 3
+
+[solver]
+max_steps = 10_000_000
+cfl = 0.5
+dampening = 0.4
+tolerance = 1e-6
+
+[[source]]
+type = "scalar_field"
+mass = 0.0
+amplitude = 1.4
+sigma = [5.35, 5.35]
