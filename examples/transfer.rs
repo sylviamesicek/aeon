@@ -53,7 +53,7 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         system.resize(mesh.num_nodes());
 
-        mesh.project(ORDER, profile, system.field_mut(()));
+        mesh.project(4, profile, system.field_mut(()));
         mesh.fill_boundary(ORDER, WaveConditions, system.as_mut_slice());
 
         mesh.flag_wavelets(4, LOWER, UPPER, system.as_slice());

@@ -73,7 +73,7 @@ pub fn main() -> anyhow::Result<()> {
         solution.resize(mesh.num_nodes(), 0.0);
 
         mesh.project(
-            ORDER,
+            4,
             Gaussian {
                 amplitude: 1.0,
                 sigma: [1.0, 1.0],

@@ -264,7 +264,7 @@ fn generate_initial_scalar_field(mesh: &mut Mesh<1>, amplitude: f64) -> Vec<f64>
     let mut scalar_field = vec![0.0; mesh.num_nodes()];
 
     mesh.project(
-        Order::<4>,
+        4,
         Gaussian {
             amplitude,
             sigma: [SIGMA],
@@ -443,7 +443,7 @@ fn evolve() -> Result<()> {
 
         // Fill system using scalar field.
         mesh.evaluate(
-            Order::<4>,
+            4,
             InitialData,
             (&scalar_field).into(),
             system.as_mut_slice(),

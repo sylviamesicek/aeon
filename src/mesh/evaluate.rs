@@ -1,7 +1,7 @@
 use std::{array, ops::Range};
 
 use crate::{
-    kernel::{node_from_vertex, BoundaryKind, Hessian, Kernels, NodeSpace, VertexKernel},
+    kernel::{node_from_vertex, BoundaryKind, Hessian, Kernels, NodeSpace, Order, VertexKernel},
     system::Empty,
 };
 use aeon_geometry::{faces, Face, FaceMask, IndexSpace, Rectangle, NULL};
@@ -211,9 +211,9 @@ impl<const N: usize, P: Projection<N>> Function<N> for ProjectionAsFunction<P> {
 
 impl<const N: usize> Mesh<N> {
     /// Applies the projection to `source`, and stores the result in `dest`.
-    pub fn evaluate<K: Kernels + Sync, P: Function<N> + Sync>(
+    pub fn evaluate<P: Function<N> + Sync>(
         &mut self,
-        order: K,
+        order: usize,
         function: P,
         source: SystemSlice<'_, P::Input>,
         dest: SystemSliceMut<'_, P::Output>,
@@ -221,6 +221,9 @@ impl<const N: usize> Mesh<N> {
         P::Input: Sync,
         P::Output: Sync,
     {
+        // Make sure order is valid.
+        assert!(matches!(order, 2 | 4 | 6));
+
         let dest = dest.into_shared();
 
         self.block_compute(|mesh, store, block| {
@@ -232,25 +235,51 @@ impl<const N: usize> Mesh<N> {
             let block_dest = unsafe { dest.slice_mut(nodes.clone()) };
 
             if mesh.is_block_in_interior(block) {
-                let engine = FdIntEngine {
-                    space: space.clone(),
-                    bounds,
-                    _order: order,
-                    store,
-                    range: nodes.clone(),
-                };
+                macro_rules! evaluate_int {
+                    ($order:literal) => {
+                        function.evaluate(
+                            FdIntEngine {
+                                space: space.clone(),
+                                bounds,
+                                _order: Order::<$order>,
+                                store,
+                                range: nodes.clone(),
+                            },
+                            block_source,
+                            block_dest,
+                        )
+                    };
+                }
 
-                function.evaluate(engine, block_source, block_dest);
+                match order {
+                    2 => evaluate_int!(2),
+                    4 => evaluate_int!(4),
+                    6 => evaluate_int!(6),
+                    _ => unreachable!(),
+                }
             } else {
-                let engine = FdEngine {
-                    space: space.clone(),
-                    bounds,
-                    _order: order,
-                    store,
-                    range: nodes.clone(),
-                };
+                macro_rules! evaluate {
+                    ($order:literal) => {
+                        function.evaluate(
+                            FdEngine {
+                                space: space.clone(),
+                                bounds,
+                                _order: Order::<$order>,
+                                store,
+                                range: nodes.clone(),
+                            },
+                            block_source,
+                            block_dest,
+                        )
+                    };
+                }
 
-                function.evaluate(engine, block_source, block_dest);
+                match order {
+                    2 => evaluate!(2),
+                    4 => evaluate!(4),
+                    6 => evaluate!(6),
+                    _ => unreachable!(),
+                }
             }
         });
     }
@@ -569,9 +598,9 @@ impl<const N: usize> Mesh<N> {
         }
     }
 
-    pub fn project<K: Kernels + Sync, P: Projection<N> + Sync>(
+    pub fn project<P: Projection<N> + Sync>(
         &mut self,
-        order: K,
+        order: usize,
         projection: P,
         dest: &mut [f64],
     ) {

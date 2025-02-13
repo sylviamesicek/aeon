@@ -106,7 +106,7 @@ pub fn main() -> anyhow::Result<()> {
 
         log::trace!("Projecting System");
 
-        mesh.project(ORDER, profile, system.field_mut(()));
+        mesh.project(4, profile, system.field_mut(()));
         mesh.fill_boundary(ORDER, WaveConditions, system.as_mut_slice());
 
         log::trace!("Flagging Wavelets");
@@ -183,7 +183,7 @@ pub fn main() -> anyhow::Result<()> {
         error.resize(mesh.num_nodes());
 
         mesh.project(
-            ORDER,
+            4,
             AnalyticSolution { speed: SPEED, time },
             exact.field_mut(()),
         );

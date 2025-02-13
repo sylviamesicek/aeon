@@ -51,7 +51,7 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Store system from previous iteration.
     let mut system_prev = SystemVec::with_length(mesh.num_nodes(), Scalar);
-    mesh.project(Order::<4>, SeedProjection, system_prev.field_mut(()));
+    mesh.project(4, SeedProjection, system_prev.field_mut(()));
 
     let mut errors = Vec::new();
 
@@ -63,7 +63,7 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
         );
 
         let mut system = SystemVec::with_length(mesh.num_nodes(), Scalar);
-        mesh.project(Order::<4>, SeedProjection, system.field_mut(()));
+        mesh.project(4, SeedProjection, system.field_mut(()));
         mesh.fill_boundary(Order::<4>, SeedConditions, system.as_mut_slice());
 
         mesh.flag_wavelets(4, 1e-13, 1e-9, system.as_slice());
