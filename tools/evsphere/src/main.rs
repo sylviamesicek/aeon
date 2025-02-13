@@ -4,7 +4,7 @@ use core::f64;
 use std::{path::PathBuf, process::ExitCode};
 
 use aeon::{
-    kernel::{node_from_vertex, Interpolation},
+    kernel::Interpolation,
     mesh::Gaussian,
     prelude::*,
     solver::{Integrator, Method},
@@ -121,21 +121,8 @@ impl Condition<1> for AntiSymCondition {
     }
 }
 
-const MAX_LEVELS: usize = 25;
-const MAX_TIME_STEPS: usize = 300_000;
-const MAX_PROPER_TIME: f64 = 10.0;
-const CELL_WIDTH: usize = 6;
-const GHOST: usize = 3;
-const SIGMA: f64 = 5.35;
-const RADIUS: f64 = 40.0;
-const REFINE_GLOBAL: usize = 2;
-const MAX_NODES: usize = 10_000_000;
-const MAX_ERROR_TOLERANCE: f64 = 1e-7;
-const MIN_ERROR_TOLERANCE: f64 = 1e-10;
-const DISSIPATION: f64 = 0.5;
-const SAVE_INTERVAL: f64 = 0.1;
-const REGRID_FLAG_INTERVAL: usize = 20;
-const CFL: f64 = 0.1;
+mod config;
+use config::*;
 
 fn solve_constraints(mesh: &mut Mesh<1>, system: SystemSliceMut<Fields>) {
     let shared = system.into_shared();

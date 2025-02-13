@@ -1,8 +1,4 @@
-use aeon::{
-    mesh::Gaussian,
-    prelude::*,
-    solver::{HyperRelaxSolver, SolverCallback},
-};
+use aeon::{mesh::Gaussian, prelude::*, solver::HyperRelaxSolver};
 
 const ORDER: Order<4> = Order::<4>;
 
@@ -50,8 +46,6 @@ impl<'a> Function<2> for PoissonEquation<'a> {
         }
     }
 }
-
-impl<'a> SolverCallback<2> for PoissonEquation<'a> {}
 
 pub fn main() -> anyhow::Result<()> {
     env_logger::builder()

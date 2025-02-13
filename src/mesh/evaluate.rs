@@ -322,6 +322,8 @@ impl<const N: usize> Mesh<N> {
         });
     }
 
+    /// Applies an operator to a system in place, enforcing both strong and weak boundary conditions
+    /// and running necessary preprocessing.
     pub fn apply<
         O: Kernels + Sync,
         C: SystemConditions<N> + Sync,
@@ -331,10 +333,15 @@ impl<const N: usize> Mesh<N> {
         order: O,
         conditions: C,
         op: P,
-        f: SystemSliceMut<'_, C::System>,
+        mut f: SystemSliceMut<'_, C::System>,
     ) where
         C::System: Sync,
     {
+        // Strong boundary condition
+        self.fill_boundary(order, conditions.clone(), f.rb_mut());
+        // Preprocess data
+        op.preprocess(self, f.rb_mut());
+
         let f = f.into_shared();
 
         self.block_compute(|mesh, store, block| {

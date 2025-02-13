@@ -147,7 +147,6 @@ impl<'a> Projection<2> for SeedProjection<'a> {
 #[derive(Clone)]
 pub struct Hamiltonian<'a> {
     context: SystemSlice<'a, ContextSystem>,
-    visualize: Option<VisualizeConfig<'a>>,
 }
 
 impl<'a> Function<2> for Hamiltonian<'a> {
@@ -210,13 +209,17 @@ impl<'a> Function<2> for Hamiltonian<'a> {
     }
 }
 
+struct Callback<'a> {
+    visualize: Option<VisualizeConfig<'a>>,
+}
+
 // Implement visualization for hamiltonian.
-impl<'a> SolverCallback<2> for Hamiltonian<'a> {
+impl<'a> SolverCallback<2, Scalar> for Callback<'a> {
     fn callback(
         &self,
         mesh: &Mesh<2>,
-        input: SystemSlice<Self::Input>,
-        output: SystemSlice<Self::Output>,
+        input: SystemSlice<Scalar>,
+        output: SystemSlice<Scalar>,
         iteration: usize,
     ) {
         let Some(ref visualze) = self.visualize else {
@@ -364,14 +367,14 @@ where
     solver.cfl = solver_con.cfl;
     solver.adaptive = true;
 
-    solver.solve(
+    solver.solve_with_callback(
         mesh,
         order,
         ScalarConditions(PsiCondition),
         Hamiltonian {
             context: context.as_slice(),
-            visualize,
         },
+        Callback { visualize },
         SystemSliceMut::from_scalar(&mut psi),
     )?;
 

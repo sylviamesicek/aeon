@@ -11,13 +11,7 @@ use crate::{
 
 use super::SolverCallback;
 
-// #[derive(Clone, Copy, Debug, Default)]
-// pub enum Method {
-//     #[default]
-//     ForwardEuler,
-//     RK4,
-// }
-
+/// Error which may be thrown during hyperbolic relaxation.
 #[derive(Error, Debug)]
 pub enum HyperRelaxError {
     #[error("failed to relax below tolerance in allotted number of steps")]
@@ -28,12 +22,16 @@ pub enum HyperRelaxError {
     VisualizeFailed,
 }
 
+/// A solver which implements the algorithm described in NRPyElliptic. This transforms the elliptic equation
+/// 𝓛{u} = p, into the hyperbolic equation ∂ₜ²u + η∂ₜu = c² (𝓛{u} - p), where c is the speed of the wave, and η is
+/// a dampening term that speeds up convergence.
 #[derive(Clone, Debug)]
 pub struct HyperRelaxSolver {
     /// Error tolerance (relaxation stops once error goes below this value).
     pub tolerance: f64,
     /// Maximum number of relaxation steps to perform
     pub max_steps: usize,
+    /// Dampening term η.
     pub dampening: f64,
     /// CFL factor for ficticuous time step.
     pub cfl: f64,
@@ -52,6 +50,7 @@ impl Default for HyperRelaxSolver {
 }
 
 impl HyperRelaxSolver {
+    /// Constructs a new `HyperRelaxSolver` with default settings.
     pub fn new() -> Self {
         Self {
             tolerance: 1e-5,
@@ -64,17 +63,39 @@ impl HyperRelaxSolver {
         }
     }
 
+    /// Solves a given elliptic system
     pub fn solve<
         const N: usize,
         K: Kernels + Sync,
         C: SystemConditions<N> + Sync,
-        F: Function<N, Input = C::System, Output = C::System> + SolverCallback<N> + Clone + Sync,
+        F: Function<N, Input = C::System, Output = C::System> + Clone + Sync,
     >(
         &mut self,
         mesh: &mut Mesh<N>,
         order: K,
         conditions: C,
         deriv: F,
+        result: SystemSliceMut<C::System>,
+    ) -> Result<(), HyperRelaxError>
+    where
+        C::System: Default + Clone + Sync,
+    {
+        self.solve_with_callback(mesh, order, conditions, deriv, (), result)
+    }
+
+    pub fn solve_with_callback<
+        const N: usize,
+        K: Kernels + Sync,
+        C: SystemConditions<N> + Sync,
+        F: Function<N, Input = C::System, Output = C::System> + Clone + Sync,
+        Call: SolverCallback<N, C::System> + Sync,
+    >(
+        &mut self,
+        mesh: &mut Mesh<N>,
+        order: K,
+        conditions: C,
+        deriv: F,
+        callback: Call,
         mut result: SystemSliceMut<C::System>,
     ) -> Result<(), HyperRelaxError>
     where
@@ -135,7 +156,7 @@ impl HyperRelaxSolver {
 
                 mesh.apply(order, conditions.clone(), deriv.clone(), result.rb_mut());
 
-                deriv.callback(mesh, u.rb(), result.rb(), index);
+                callback.callback(mesh, u.rb(), result.rb(), index);
             }
 
             let norm = mesh.l2_norm(result.rb());
@@ -284,4 +305,117 @@ impl<'a, const N: usize, S: System, F: Function<N, Input = S, Output = S>> Funct
             }
         }
     }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::f64::consts;
+
+    use aeon_geometry::Rectangle;
+    use num_traits::int;
+
+    use super::*;
+    use crate::{
+        kernel::Order,
+        mesh::Projection,
+        system::{Scalar, SystemConditions},
+    };
+
+    #[derive(Clone)]
+    struct PoissonConditions;
+
+    impl SystemConditions<2> for PoissonConditions {
+        type System = Scalar;
+
+        fn parity(&self, _label: <Self::System as System>::Label, _face: Face<2>) -> bool {
+            true
+        }
+    }
+
+    #[derive(Clone)]
+    pub struct PoissonSolution;
+
+    impl Projection<2> for PoissonSolution {
+        fn project(&self, [x, y]: [f64; 2]) -> f64 {
+            (2.0 * consts::PI * x).cos() * (2.0 * consts::PI * y).cos()
+        }
+    }
+
+    #[derive(Clone)]
+    pub struct PoissonEquation;
+
+    impl Function<2> for PoissonEquation {
+        type Input = Scalar;
+        type Output = Scalar;
+
+        fn evaluate(
+            &self,
+            engine: impl Engine<2>,
+            input: SystemSlice<Self::Input>,
+            output: SystemSliceMut<Self::Output>,
+        ) {
+            let input = input.into_scalar();
+            let output = output.into_scalar();
+
+            for vertex in IndexSpace::new(engine.vertex_size()).iter() {
+                let index = engine.index_from_vertex(vertex);
+                let [x, y] = engine.position(vertex);
+
+                let laplacian = engine.second_derivative(input, 0, vertex)
+                    + engine.second_derivative(input, 1, vertex);
+                let source = -8.0
+                    * consts::PI
+                    * consts::PI
+                    * (2.0 * consts::PI * x).cos()
+                    * (2.0 * consts::PI * y).cos();
+
+                output[index] = laplacian - source;
+            }
+        }
+    }
+
+    // #[test]
+    // fn poisson() {
+    //     let mut mesh = Mesh::new(Rectangle::from_aabb([0.0, 0.0], [1.0, 1.0]), 4, 2);
+    //     mesh.refine_global();
+    //     mesh.refine_global();
+
+    //     // Write solution vector
+    //     let mut solution = vec![0.0; mesh.num_nodes()];
+    //     mesh.project(Order::<4>, PoissonSolution, &mut solution);
+
+    //     let mut solver = HyperRelaxSolver::new();
+    //     solver.adaptive = true;
+    //     solver.cfl = 0.5;
+    //     solver.dampening = 0.4;
+    //     solver.max_steps = 1_000_000;
+    //     solver.tolerance = 1e-4;
+
+    //     loop {
+    //         if mesh.max_level() > 11 {
+    //             panic!("Poisson mesh solver exceeded max levels");
+    //         }
+
+    //         let mut result = vec![1.0; mesh.num_nodes()];
+
+    //         solver
+    //             .solve(
+    //                 &mut mesh,
+    //                 Order::<4>,
+    //                 PoissonConditions,
+    //                 PoissonEquation,
+    //                 (&mut result).into(),
+    //             )
+    //             .unwrap();
+
+    //         mesh.flag_wavelets::<Scalar>(4, 0.0, 1e-4, result.as_slice().into());
+    //         mesh.balance_flags();
+
+    //         if mesh.requires_regridding() {
+    //             mesh.regrid();
+    //         } else {
+    //             break;
+    //         }
+    //     }
+    // }
 }

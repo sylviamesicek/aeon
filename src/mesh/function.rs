@@ -79,6 +79,7 @@ pub trait Function<const N: usize> {
     type Input: System;
     type Output: System;
 
+    /// Action of the function on an individual finite different block.
     fn evaluate(
         &self,
         engine: impl Engine<N>,
@@ -86,6 +87,8 @@ pub trait Function<const N: usize> {
         output: SystemSliceMut<Self::Output>,
     );
 
+    /// An (optional) preprocessing step run immediately before a function is applied, after
+    /// boundary conditions have been filled.
     fn preprocess(&self, _mesh: &mut Mesh<N>, _input: SystemSliceMut<Self::Input>) {}
 }
 

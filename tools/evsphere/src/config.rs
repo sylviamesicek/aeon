@@ -1,0 +1,15 @@
+pub const MAX_LEVELS: usize = 25;
+pub const MAX_TIME_STEPS: usize = 300_000;
+pub const MAX_PROPER_TIME: f64 = 10.0;
+pub const CELL_WIDTH: usize = 6;
+pub const GHOST: usize = 3;
+pub const SIGMA: f64 = 5.35;
+pub const RADIUS: f64 = 40.0;
+pub const REFINE_GLOBAL: usize = 2;
+pub const MAX_NODES: usize = 10_000_000;
+pub const MAX_ERROR_TOLERANCE: f64 = 1e-7;
+pub const MIN_ERROR_TOLERANCE: f64 = 1e-10;
+pub const DISSIPATION: f64 = 0.5;
+pub const SAVE_INTERVAL: f64 = 0.1;
+pub const REGRID_FLAG_INTERVAL: usize = 20;
+pub const CFL: f64 = 0.1;

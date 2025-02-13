@@ -25,6 +25,7 @@ pub struct Integrator {
 }
 
 impl Integrator {
+    /// Constructs a new integrator which is set to use the given method.
     pub fn new(method: Method) -> Self {
         Self {
             method,
@@ -32,6 +33,7 @@ impl Integrator {
         }
     }
 
+    /// Step the integrator forwards in time.
     pub fn step<
         const N: usize,
         K: Kernels + Sync,
@@ -55,9 +57,6 @@ impl Integrator {
         // Number of degrees of freedom required to store one system.
         let dimension = system.count() * mesh.num_nodes();
         self.tmp.clear();
-
-        // Fill Result boundary
-        mesh.fill_boundary(order, conditions.clone(), result.rb_mut());
 
         match self.method {
             Method::ForwardEuler => {
@@ -111,7 +110,7 @@ impl Integrator {
                 Self::fused_multiply_add_assign(result.rb_mut(), h, update.rb());
 
                 if let Method::RK4KO6(diss) = self.method {
-                    mesh.fill_boundary(order, conditions.clone(), result.rb_mut());
+                    mesh.fill_boundary_to_extent(order, 6, conditions.clone(), result.rb_mut());
                     deriv.preprocess(mesh, result.rb_mut());
                     mesh.dissipation(Order::<6>, diss, result.rb_mut());
                 }

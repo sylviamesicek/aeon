@@ -18,7 +18,6 @@ pub use tensor::{
 };
 
 const ORDER: Order<4> = Order::<4>;
-const DISS_ORDER: Order<6> = Order::<6>;
 
 #[derive(Clone)]
 pub struct FieldDerivs;
@@ -299,7 +298,6 @@ pub fn evolution() -> Result<bool> {
     let max_time = config.max_time;
     let max_proper_time = config.max_proper_time;
     let cfl = config.cfl;
-    let diss = config.dissipation;
     let regrid_steps = config.regrid.flag_interval;
     let lower = config.regrid.coarsen_tolerance;
     let upper = config.regrid.refine_tolerance;
@@ -466,10 +464,6 @@ pub fn evolution() -> Result<bool> {
             h,
             fields.as_mut_slice(),
         );
-
-        // Compute dissipation
-        mesh.fill_boundary(ORDER, FieldConditions, fields.as_mut_slice());
-        mesh.dissipation(DISS_ORDER, diss, fields.as_mut_slice());
 
         let lapse = fields.field(Field::Gauge(Gauge::Lapse))[0];
 

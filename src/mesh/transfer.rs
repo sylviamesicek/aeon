@@ -243,6 +243,7 @@ impl<const N: usize> Mesh<N> {
         self.fill_physical(extent, &conditions, system.rb_mut());
     }
 
+    /// A debugging function that fills ghost nodes with zeros.
     pub fn fill_boundary_zeros<S: System>(&mut self, dest: SystemSliceMut<S>) {
         let shared = dest.into_shared();
 
