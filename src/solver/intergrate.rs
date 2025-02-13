@@ -110,7 +110,7 @@ impl Integrator {
                 Self::fused_multiply_add_assign(result.rb_mut(), h, update.rb());
 
                 if let Method::RK4KO6(diss) = self.method {
-                    mesh.fill_boundary_to_extent(order, 6, conditions.clone(), result.rb_mut());
+                    mesh.fill_boundary_to_extent(order, 3, conditions.clone(), result.rb_mut());
                     deriv.preprocess(mesh, result.rb_mut());
                     mesh.dissipation(Order::<6>, diss, result.rb_mut());
                 }

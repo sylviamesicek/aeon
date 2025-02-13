@@ -5,7 +5,7 @@ use aeon::{
     solver::{Integrator, Method},
 };
 use anyhow::{anyhow, Context as _, Result};
-use clap::{Arg, Command, Subcommand};
+use clap::{Arg, Command};
 use sharedaxi::{
     import_from_toml, Constraint, EVConfig, Field, FieldConditions, Fields, Gauge, Metric,
     ScalarField, Visualize,
@@ -450,7 +450,7 @@ pub fn evolution() -> Result<bool> {
 
             save_step += 1;
 
-            let pi = fields.field(Field::ScalarField(ScalarField::Pi, 0))[0];
+            let pi = mesh.bottom_left_value(fields.field(Field::ScalarField(ScalarField::Pi, 0)));
 
             results.push((proper_time, pi * pi));
         }
@@ -465,7 +465,7 @@ pub fn evolution() -> Result<bool> {
             fields.as_mut_slice(),
         );
 
-        let lapse = fields.field(Field::Gauge(Gauge::Lapse))[0];
+        let lapse = mesh.bottom_left_value(fields.field(Field::Gauge(Gauge::Lapse)));
 
         if step % 50 == 0 {
             use std::fmt::Write;

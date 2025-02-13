@@ -345,3 +345,30 @@ pub fn generate_initial_scalar_field(mesh: &mut Mesh<1>, amplitude: f64) -> Vec<
 
     scalar_field
 }
+
+pub fn find_mass(mesh: &Mesh<1>, system: SystemSlice<Fields>) -> f64 {
+    let mut a_max = 0.0;
+    let mut r_max = 0.0;
+
+    for block in 0..mesh.num_blocks() {
+        let space = mesh.block_space(block);
+        let nodes = mesh.block_nodes(block);
+        let bounds = mesh.block_bounds(block);
+
+        let vertex_size = space.vertex_size()[0];
+        let a = &system.field(Field::Conformal)[nodes.clone()];
+
+        for vertex in 0..vertex_size {
+            let index = space.index_from_vertex([vertex]);
+            let [r] = space.position([vertex as isize], bounds);
+            let a = a[index];
+
+            if a > a_max {
+                a_max = a;
+                r_max = r;
+            }
+        }
+    }
+
+    r_max / 2.0
+}

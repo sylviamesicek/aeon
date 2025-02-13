@@ -1,15 +1,15 @@
 //! An executable for creating general initial data for numerical relativity simulations in 2D.
 #![allow(unused_assignments)]
 
-use core::f64;
-use std::{path::PathBuf, process::ExitCode};
-
 use aeon::{
     prelude::*,
     solver::{Integrator, Method},
 };
 use anyhow::{anyhow, Context, Result};
 use clap::{Arg, Command};
+use core::f64;
+use std::fmt::Write as _;
+use std::{path::PathBuf, process::ExitCode};
 
 mod config;
 mod system;
@@ -17,106 +17,67 @@ mod system;
 use config::*;
 use system::*;
 
-fn evolve() -> Result<()> {
-    // Load configuration
-    let matches = Command::new("evsphere")
-        .about("A program for generating initial data for numerical relativity using hyperbolic relaxation.")
-        .author("Lukas Mesicek, lukas.m.mesicek@gmail.com")
-        .arg(
-            Arg::new("amplitude")
-                .short('a')
-                .long("amplitude")
-                .default_value("1.0")
-                .value_name("FLOAT")
-        )
-        .arg(
-            Arg::new("visualize")
-                .short('v')
-                .long("visualize")
-                .num_args(0)
-                .help("Output visualizations during evolution"))
-                .arg(
-                    Arg::new("output").required(true)
-                        .help("Output directory")
-                        .value_name("DIR")
-                )
+#[derive(Clone)]
+struct RunConfig {
+    absolute: PathBuf,
+    amplitude: f64,
+    serial_id: Option<usize>,
+    visualize: bool,
+}
 
-        .subcommand(
-            Command::new("cole")
-                .arg(
-                    Arg::new("amp")
-                        .value_name("FLOAT")
-                        .required(true)
-                        .help("Amplitude of massless scalar field to simulate")
-                )
-                .arg(
-                    Arg::new("ser")
-                        .value_name("INT")
-                        .required(true)
-                        .help("Serialization number for massless scalar field data")
-                )
-        )
-        .version("0.1.0")
-        .get_matches();
+#[derive(Default)]
+struct Diagnostics {
+    times: Vec<f64>,
+    masses: Vec<f64>,
+    alphas: Vec<f64>,
+}
 
-    // Output directory
-    let mut absolute = PathBuf::new();
-    // Amplitude of scalar field
-    let mut amplitude = 0.0;
-    // Serial id (in case of being launched by Cole's code).
-    let mut serial_id = None;
-    // Should we save visualization data?
-    let mut should_visualize = false;
-
-    if let Some(matches) = matches.subcommand_matches("cole") {
-        amplitude = matches
-            .get_one::<String>("amp")
-            .ok_or(anyhow!("Failed to find amplitude positional argument"))?
-            .parse::<f64>()
-            .map_err(|_| anyhow!("Failed to parse amplitude as float"))?
-            .clone();
-
-        serial_id = Some(
-            matches
-                .get_one::<String>("ser")
-                .ok_or(anyhow!("Failed to find serial_id positional argument"))?
-                .parse::<usize>()
-                .map_err(|_| anyhow!("Failed to parse serial_id as int"))?
-                .clone(),
-        );
-
-        absolute = std::env::current_dir().context("Failed to find current working directory")?;
-    } else {
-        amplitude = matches
-            .get_one::<String>("amplitude")
-            .ok_or(anyhow!("Could not find amplitude argument"))?
-            .parse::<f64>()
-            .map_err(|_| anyhow!("Failed parse amplitude argument"))?
-            .clone();
-
-        let output = PathBuf::from(
-            matches
-                .get_one::<String>("output")
-                .ok_or(anyhow!("Failed parse path argument"))?
-                .clone(),
-        );
-
-        if output.is_absolute() {
-            absolute = output
-        } else {
-            absolute = std::env::current_dir()
-                .context("Failed to find current working directory")?
-                .join(output);
-        }
-
-        should_visualize = matches.contains_id("visualize");
+impl Diagnostics {
+    fn append(&mut self, time: f64, mass: f64, alpha: f64) {
+        self.times.push(time);
+        self.masses.push(mass);
+        self.alphas.push(alpha);
     }
 
-    // Build enviornment logger.
-    env_logger::builder()
-        .filter_level(log::LevelFilter::Trace)
-        .init();
+    fn flush(&self, config: RunConfig) -> Result<()> {
+        let Some(serial_id) = config.serial_id else {
+            return Ok(());
+        };
 
+        let file1 = format!("Mass-{}-{}", 4, serial_id);
+        let file2 = format!("Al-{}-{}", 4, serial_id);
+        let file3 = format!("Origin-{}.txt", serial_id);
+
+        let mut data1 = String::new();
+        let mut data2 = String::new();
+        let mut data3 = String::new();
+
+        for (&time, &mass) in self.times.iter().zip(self.masses.iter()) {
+            writeln!(data1, "{} {}", time, mass)?;
+        }
+
+        for (&time, &alpha) in self.times.iter().zip(self.alphas.iter()) {
+            writeln!(data2, "{} {}", time, alpha)?;
+        }
+
+        writeln!(data3, "TODO")?;
+
+        std::fs::write(file1, data1)?;
+        std::fs::write(file2, data2)?;
+        std::fs::write(file3, data3)?;
+
+        Ok(())
+    }
+}
+
+fn run(config: RunConfig, diagnostics: &mut Diagnostics) -> Result<()> {
+    // Unpack config
+    let RunConfig {
+        absolute,
+        amplitude,
+        serial_id,
+        visualize,
+    } = config;
     // Log Header data.
     log::info!(
         "Output Directory: {}",
@@ -187,7 +148,7 @@ fn evolve() -> Result<()> {
         log::info!("Scalar Field Norm {}", l2_norm);
 
         // Save visualization
-        if should_visualize {
+        if visualize {
             let mut checkpoint = SystemCheckpoint::default();
             checkpoint.save_system_ser(system.as_slice());
             mesh.export_vtu(
@@ -231,7 +192,7 @@ fn evolve() -> Result<()> {
         }
     }
 
-    if should_visualize {
+    if visualize {
         let mut checkpoint = SystemCheckpoint::default();
         checkpoint.save_system_ser(system.as_slice());
 
@@ -260,6 +221,10 @@ fn evolve() -> Result<()> {
     let mut save_step = 0;
     let mut steps_since_regrid = 0;
     let mut time_since_save = 0.0;
+
+    let mass = find_mass(&mesh, system.as_slice());
+    let alpha = mesh.bottom_left_value(system.field(Field::Lapse));
+    diagnostics.append(time, mass, alpha);
 
     while proper_time < MAX_PROPER_TIME {
         assert!(system.len() == mesh.num_nodes());
@@ -349,7 +314,7 @@ fn evolve() -> Result<()> {
             continue;
         }
 
-        if time_since_save >= SAVE_INTERVAL && should_visualize {
+        if time_since_save >= SAVE_INTERVAL && visualize {
             time_since_save -= SAVE_INTERVAL;
 
             log::trace!(
@@ -384,7 +349,9 @@ fn evolve() -> Result<()> {
             system.as_mut_slice(),
         );
 
-        let lapse = system.field(Field::Lapse)[0];
+        let mass = find_mass(&mesh, system.as_slice());
+        let alpha = mesh.bottom_left_value(system.field(Field::Lapse));
+        diagnostics.append(time, mass, alpha);
 
         step += 1;
         steps_since_regrid += 1;
@@ -392,15 +359,128 @@ fn evolve() -> Result<()> {
         time += h;
         time_since_save += h;
 
-        proper_time += h * lapse;
+        proper_time += h * alpha;
     }
 
     Ok(())
 }
 
+// Main function that can return an error
+fn try_main() -> Result<()> {
+    // Load configuration
+    let matches = Command::new("evsphere")
+        .about("A program for generating initial data for numerical relativity using hyperbolic relaxation.")
+        .author("Lukas Mesicek, lukas.m.mesicek@gmail.com")
+        // .arg(
+        //     Arg::new("amplitude")
+        //         .short('a')
+        //         .long("amplitude")
+        //         .default_value("1.0")
+        //         .value_name("FLOAT")
+        //         .global(false)
+        // )
+        // .arg(
+        //     Arg::new("visualize")
+        //         .short('v')
+        //         .long("visualize")
+        //         .num_args(0)
+        //         .help("Output visualizations during evolution")
+        //         .global(false)
+        // )
+        // .arg(
+        //     Arg::new("output").required(true)
+        //         .help("Output directory")
+        //         .value_name("DIR")
+        //         .global(false)
+        //     )
+        .subcommand(
+            Command::new("cole")
+                .arg(
+                    Arg::new("amp")
+                        .value_name("FLOAT")
+                        .required(true)
+                        .help("Amplitude of massless scalar field to simulate")
+                )
+                .arg(
+                    Arg::new("ser")
+                        .value_name("INT")
+                        .required(true)
+                        .help("Serialization number for massless scalar field data")
+                )
+        )
+        .version("0.1.0")
+        .get_matches();
+
+    let mut config = RunConfig {
+        absolute: PathBuf::new(),
+        amplitude: 0.0,
+        serial_id: None,
+        visualize: false,
+    };
+
+    if let Some(matches) = matches.subcommand_matches("cole") {
+        config.amplitude = matches
+            .get_one::<String>("amp")
+            .ok_or(anyhow!("Failed to find amplitude positional argument"))?
+            .parse::<f64>()
+            .map_err(|_| anyhow!("Failed to parse amplitude as float"))?
+            .clone();
+
+        config.serial_id = Some(
+            matches
+                .get_one::<String>("ser")
+                .ok_or(anyhow!("Failed to find serial_id positional argument"))?
+                .parse::<usize>()
+                .map_err(|_| anyhow!("Failed to parse serial_id as int"))?
+                .clone(),
+        );
+
+        config.absolute =
+            std::env::current_dir().context("Failed to find current working directory")?;
+    } else {
+        config.amplitude = matches
+            .get_one::<String>("amplitude")
+            .ok_or(anyhow!("Could not find amplitude argument"))?
+            .parse::<f64>()
+            .map_err(|_| anyhow!("Failed parse amplitude argument"))?
+            .clone();
+
+        let output = PathBuf::from(
+            matches
+                .get_one::<String>("output")
+                .ok_or(anyhow!("Failed parse path argument"))?
+                .clone(),
+        );
+
+        if output.is_absolute() {
+            config.absolute = output
+        } else {
+            config.absolute = std::env::current_dir()
+                .context("Failed to find current working directory")?
+                .join(output);
+        }
+
+        config.visualize = matches.contains_id("visualize");
+    }
+
+    // Build enviornment logger.
+    env_logger::builder()
+        .filter_level(log::LevelFilter::Trace)
+        .init();
+
+    // Diagnostic object
+    let mut diagnostics = Diagnostics::default();
+    // Run simulation
+    let result = run(config.clone(), &mut diagnostics);
+    // Write diagnostics to file
+    diagnostics.flush(config)?;
+    // Bubble up result
+    result
+}
+
 fn main() -> ExitCode {
-    match evolve() {
-        Ok(_) => ExitCode::SUCCESS,
+    match try_main() {
+        Ok(()) => ExitCode::SUCCESS,
         Err(err) => {
             if log::log_enabled!(log::Level::Error) {
                 log::error!("{:?}", err);

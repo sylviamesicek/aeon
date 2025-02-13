@@ -619,6 +619,15 @@ impl<const N: usize> Mesh<N> {
             .unwrap()
     }
 
+    /// Returns the value of a function at the bottom left corner of
+    /// the mesh.
+    pub fn bottom_left_value(&self, src: &[f64]) -> f64 {
+        let space = self.block_space(0);
+        let nodes = self.block_nodes(0);
+
+        src[nodes][space.index_from_vertex([0; N])]
+    }
+
     /// Computes the l2 norm of a field on the mesh.
     fn l2_norm_scalar(&mut self, src: &[f64]) -> f64 {
         let mut result = 0.0;
