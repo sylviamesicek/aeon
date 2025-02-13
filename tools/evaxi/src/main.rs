@@ -5,7 +5,7 @@ use aeon::{
     solver::{Integrator, Method},
 };
 use anyhow::{anyhow, Context as _, Result};
-use clap::{Arg, Command};
+use clap::{Arg, Command, Subcommand};
 use sharedaxi::{
     import_from_toml, Constraint, EVConfig, Field, FieldConditions, Fields, Gauge, Metric,
     ScalarField, Visualize,

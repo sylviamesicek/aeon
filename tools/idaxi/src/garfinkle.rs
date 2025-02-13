@@ -326,7 +326,7 @@ where
 
     // Compute seed values.
     mesh.project(
-        order,
+        ORDER,
         SeedProjection(sources),
         context.field_mut(Context::Seed),
     );
@@ -339,7 +339,7 @@ where
         } = source
         {
             mesh.project(
-                order,
+                ORDER,
                 Gaussian {
                     amplitude: *amplitude,
                     sigma: [sigma.0, sigma.1],
@@ -379,7 +379,7 @@ where
     )?;
 
     mesh.evaluate(
-        order,
+        ORDER,
         FieldsFromGarfinkle {
             psi: &psi,
             context: context.as_slice(),

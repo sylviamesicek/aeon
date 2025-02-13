@@ -311,30 +311,15 @@ fn initial_data() -> Result<()> {
     match order {
         2 => {
             mesh.fill_boundary(Order::<2>, FieldConditions, system.as_mut_slice());
-            mesh.evaluate(
-                Order::<2>,
-                EnergyDensity,
-                system.as_slice(),
-                (&mut sigma).into(),
-            );
+            mesh.evaluate(2, EnergyDensity, system.as_slice(), (&mut sigma).into());
         }
         4 => {
             mesh.fill_boundary(Order::<4>, FieldConditions, system.as_mut_slice());
-            mesh.evaluate(
-                Order::<4>,
-                EnergyDensity,
-                system.as_slice(),
-                (&mut sigma).into(),
-            );
+            mesh.evaluate(4, EnergyDensity, system.as_slice(), (&mut sigma).into());
         }
         6 => {
             mesh.fill_boundary(Order::<6>, FieldConditions, system.as_mut_slice());
-            mesh.evaluate(
-                Order::<6>,
-                EnergyDensity,
-                system.as_slice(),
-                (&mut sigma).into(),
-            );
+            mesh.evaluate(6, EnergyDensity, system.as_slice(), (&mut sigma).into());
         }
         _ => {}
     };
