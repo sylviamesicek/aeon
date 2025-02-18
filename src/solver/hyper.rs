@@ -151,11 +151,8 @@ impl HyperRelaxSolver {
 
             {
                 let u = SystemSlice::from_contiguous(&mut data[..dimension], &system.0);
-
                 mesh.copy_from_slice(result.rb_mut(), u.rb());
-
                 mesh.apply(order, conditions.clone(), deriv.clone(), result.rb_mut());
-
                 callback.callback(mesh, u.rb(), result.rb(), index);
             }
 
@@ -309,10 +306,7 @@ impl<'a, const N: usize, S: System, F: Function<N, Input = S, Output = S>> Funct
 
 #[cfg(test)]
 mod tests {
-    use std::f64::consts;
-
     use aeon_geometry::Rectangle;
-    use num_traits::int;
 
     use super::*;
     use crate::{
@@ -320,6 +314,7 @@ mod tests {
         mesh::Projection,
         system::{Scalar, SystemConditions},
     };
+    use std::f64::consts;
 
     #[derive(Clone)]
     struct PoissonConditions;
@@ -374,48 +369,48 @@ mod tests {
         }
     }
 
-    // #[test]
-    // fn poisson() {
-    //     let mut mesh = Mesh::new(Rectangle::from_aabb([0.0, 0.0], [1.0, 1.0]), 4, 2);
-    //     mesh.refine_global();
-    //     mesh.refine_global();
+    #[test]
+    fn poisson() {
+        let mut mesh = Mesh::new(Rectangle::from_aabb([0.0, 0.0], [1.0, 1.0]), 4, 2);
+        mesh.refine_global();
+        mesh.refine_global();
 
-    //     // Write solution vector
-    //     let mut solution = vec![0.0; mesh.num_nodes()];
-    //     mesh.project(Order::<4>, PoissonSolution, &mut solution);
+        // Write solution vector
+        let mut solution = vec![0.0; mesh.num_nodes()];
+        mesh.project(4, PoissonSolution, &mut solution);
 
-    //     let mut solver = HyperRelaxSolver::new();
-    //     solver.adaptive = true;
-    //     solver.cfl = 0.5;
-    //     solver.dampening = 0.4;
-    //     solver.max_steps = 1_000_000;
-    //     solver.tolerance = 1e-4;
+        let mut solver = HyperRelaxSolver::new();
+        solver.adaptive = true;
+        solver.cfl = 0.5;
+        solver.dampening = 0.4;
+        solver.max_steps = 1_000_000;
+        solver.tolerance = 1e-4;
 
-    //     loop {
-    //         if mesh.max_level() > 11 {
-    //             panic!("Poisson mesh solver exceeded max levels");
-    //         }
+        loop {
+            if mesh.max_level() > 11 {
+                panic!("Poisson mesh solver exceeded max levels");
+            }
 
-    //         let mut result = vec![1.0; mesh.num_nodes()];
+            let mut result = vec![1.0; mesh.num_nodes()];
 
-    //         solver
-    //             .solve(
-    //                 &mut mesh,
-    //                 Order::<4>,
-    //                 PoissonConditions,
-    //                 PoissonEquation,
-    //                 (&mut result).into(),
-    //             )
-    //             .unwrap();
+            solver
+                .solve(
+                    &mut mesh,
+                    Order::<4>,
+                    PoissonConditions,
+                    PoissonEquation,
+                    (&mut result).into(),
+                )
+                .unwrap();
 
-    //         mesh.flag_wavelets::<Scalar>(4, 0.0, 1e-4, result.as_slice().into());
-    //         mesh.balance_flags();
+            mesh.flag_wavelets::<Scalar>(4, 0.0, 1e-4, result.as_slice().into());
+            mesh.balance_flags();
 
-    //         if mesh.requires_regridding() {
-    //             mesh.regrid();
-    //         } else {
-    //             break;
-    //         }
-    //     }
-    // }
+            if mesh.requires_regridding() {
+                mesh.regrid();
+            } else {
+                break;
+            }
+        }
+    }
 }

@@ -1,12 +1,13 @@
 mod derive;
 mod lagrange;
+mod tensor;
 
 use lagrange::Stencil;
 use num::rational::Ratio;
 
-use quote::quote;
-use syn::parse::Parser;
-use syn::Token;
+use quote::{quote, ToTokens};
+use syn::parse::{Parse, Parser};
+use syn::{parse_macro_input, ExprAssign, Ident, Token};
 use syn::{punctuated::Punctuated, LitInt};
 
 #[proc_macro]
@@ -91,6 +92,56 @@ pub fn prolong(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
     });
 
     quote! { [ #(#tokens),* ] }.into()
+}
+
+struct TensorInput {
+    free: Punctuated<Ident, Token![,]>,
+    contract: Punctuated<Ident, Token![,]>,
+    assign: ExprAssign,
+}
+
+impl Parse for TensorInput {
+    fn parse(input: syn::parse::ParseStream) -> syn::Result<Self> {
+        if input.fork().parse::<Token![;]>().is_ok() {
+            let _ = input.parse::<Token![;]>()?;
+            let contract = Punctuated::<Ident, Token![,]>::parse_separated_nonempty(input)?;
+            // let contract = input.parse_terminated(Ident::parse, Token![,])?;
+            let _ = input.parse::<Token![=>]>()?;
+            let assign = input.parse::<ExprAssign>()?;
+            return Ok(TensorInput {
+                free: Punctuated::new(),
+                contract,
+                assign,
+            });
+        }
+        // Parse free indices
+        let free = Punctuated::<Ident, Token![,]>::parse_separated_nonempty(input)?;
+        // Fork
+        if input.fork().parse::<Token![=>]>().is_ok() {
+            let _ = input.parse::<Token![=>]>()?;
+            let assign = input.parse::<ExprAssign>()?;
+            return Ok(TensorInput {
+                free,
+                contract: Punctuated::new(),
+                assign,
+            });
+        }
+        let _ = input.parse::<Token![;]>()?;
+        let contract = Punctuated::<Ident, Token![,]>::parse_separated_nonempty(input)?;
+        let _ = input.parse::<Token![=>]>()?;
+        let assign = input.parse::<ExprAssign>()?;
+        Ok(TensorInput {
+            free,
+            contract,
+            assign,
+        })
+    }
+}
+
+#[proc_macro]
+pub fn tensor(item: proc_macro::TokenStream) -> proc_macro::TokenStream {
+    let input = parse_macro_input!(item as TensorInput);
+    tensor::tensor(input).into()
 }
 
 #[proc_macro_derive(SystemLabel)]
