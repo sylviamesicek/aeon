@@ -5,6 +5,7 @@ edition = "2021"
 
 [dependencies]
 aeon.workspace = true
+aeon_tensor.workspace = true
 
 anyhow.workspace = true
 clap.workspace = true

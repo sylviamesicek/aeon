@@ -26,17 +26,3 @@ pub mod prelude {
     pub use aeon_geometry::{Face, IndexSpace, Rectangle};
     pub use aeon_macros::SystemLabel;
 }
-
-mod test {
-    use super::macros::tensor;
-
-    fn hello() {
-        let mut a = [[0.0; 2]; 2];
-
-        const TENSOR_DIM: usize = 2;
-        tensor!(i, j => a[i][j] = 0.0);
-
-        let mut a_trace = 0.0;
-        tensor!(;k => a_trace = a[k][k]);
-    }
-}

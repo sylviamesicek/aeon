@@ -5,7 +5,6 @@ use crate::{
 };
 
 const ON_AXIS: f64 = 1e-10;
-
 const KAPPA: f64 = 1.0;
 
 pub struct Twist {

@@ -4,11 +4,13 @@ mod tensor;
 
 use lagrange::Stencil;
 use num::rational::Ratio;
-
-use quote::{quote, ToTokens};
-use syn::parse::{Parse, Parser};
-use syn::{parse_macro_input, ExprAssign, Ident, Token};
-use syn::{punctuated::Punctuated, LitInt};
+use quote::quote;
+use syn::{
+    parse::{Parse, Parser},
+    parse_macro_input,
+    punctuated::Punctuated,
+    Expr, ExprAssign, Ident, LitInt, Token,
+};
 
 #[proc_macro]
 pub fn derivative(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
@@ -100,6 +102,20 @@ struct TensorInput {
     assign: ExprAssign,
 }
 
+impl TensorInput {
+    fn parse_dimension(input: syn::parse::ParseStream) -> syn::Result<Expr> {
+        if let Ok(expr) = input.parse::<syn::ExprPath>() {
+            _ = input.parse::<Token![|]>()?;
+            return Ok(Expr::Path(expr));
+        }
+
+        let expr = input.parse::<syn::ExprLit>()?;
+        _ = input.parse::<Token![|]>()?;
+
+        Ok(Expr::Lit(expr))
+    }
+}
+
 impl Parse for TensorInput {
     fn parse(input: syn::parse::ParseStream) -> syn::Result<Self> {
         if input.fork().parse::<Token![;]>().is_ok() {
@@ -138,6 +154,7 @@ impl Parse for TensorInput {
     }
 }
 
+/// A macro for using einstein summation notation.
 #[proc_macro]
 pub fn tensor(item: proc_macro::TokenStream) -> proc_macro::TokenStream {
     let input = parse_macro_input!(item as TensorInput);

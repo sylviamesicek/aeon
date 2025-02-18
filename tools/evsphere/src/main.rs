@@ -30,13 +30,15 @@ struct Diagnostics {
     times: Vec<f64>,
     masses: Vec<f64>,
     alphas: Vec<f64>,
+    phi: Vec<f64>,
 }
 
 impl Diagnostics {
-    fn append(&mut self, time: f64, mass: f64, alpha: f64) {
+    fn append(&mut self, time: f64, mass: f64, alpha: f64, phi: f64) {
         self.times.push(time);
         self.masses.push(mass);
         self.alphas.push(alpha);
+        self.phi.push(phi);
     }
 
     fn flush(&self, config: RunConfig) -> Result<()> {
@@ -60,7 +62,13 @@ impl Diagnostics {
             writeln!(data2, "{} {}", time, alpha)?;
         }
 
-        writeln!(data3, "TODO")?;
+        for i in 0..self.times.len() {
+            writeln!(
+                data3,
+                "{} {} {} {} {} {}",
+                self.times[i], 0.0, self.alphas[i], self.alphas[i], self.phi[i], 0.0
+            )?;
+        }
 
         std::fs::write(file1, data1)?;
         std::fs::write(file2, data2)?;
@@ -224,7 +232,8 @@ fn run(config: RunConfig, diagnostics: &mut Diagnostics) -> Result<()> {
 
     let mass = find_mass(&mesh, system.as_slice());
     let alpha = mesh.bottom_left_value(system.field(Field::Lapse));
-    diagnostics.append(time, mass, alpha);
+    let phi = mesh.bottom_left_value(system.field(Field::Phi));
+    diagnostics.append(time, mass, alpha, phi);
 
     while proper_time < MAX_PROPER_TIME {
         assert!(system.len() == mesh.num_nodes());
@@ -351,7 +360,8 @@ fn run(config: RunConfig, diagnostics: &mut Diagnostics) -> Result<()> {
 
         let mass = find_mass(&mesh, system.as_slice());
         let alpha = mesh.bottom_left_value(system.field(Field::Lapse));
-        diagnostics.append(time, mass, alpha);
+        let phi = mesh.bottom_left_value(system.field(Field::Phi));
+        diagnostics.append(time, mass, alpha, phi);
 
         step += 1;
         steps_since_regrid += 1;
@@ -464,16 +474,22 @@ fn try_main() -> Result<()> {
     }
 
     // Build enviornment logger.
-    env_logger::builder()
-        .filter_level(log::LevelFilter::Trace)
-        .init();
+    // env_logger::builder()
+    //     .filter_level(log::LevelFilter::Error)
+    //     .init();
 
     // Diagnostic object
     let mut diagnostics = Diagnostics::default();
     // Run simulation
     let result = run(config.clone(), &mut diagnostics);
     // Write diagnostics to file
-    diagnostics.flush(config)?;
+    diagnostics.flush(config.clone())?;
+
+    match result {
+        Ok(_) => eprintln!("A: {:.15} Disperses", config.amplitude),
+        Err(_) => eprintln!("A: {:.15} Collapses", config.amplitude),
+    }
+
     // Bubble up result
     result
 }

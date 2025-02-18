@@ -13,26 +13,32 @@ pub fn tensor(
     let right = assign.right;
     let left = assign.left;
 
-    let mut inner = quote! {
-        #left += #right;
-    };
+    let mut outer = if contract.len() == 0 {
+        quote! {
+            #left = #right;
+        }
+    } else {
+        let mut inner = quote! {
+            #left += #right;
+        };
 
-    for index in contract.iter() {
-        inner = quote! {
-            for #index in 0..TENSOR_DIM {
-                #inner
+        for index in contract.iter() {
+            inner = quote! {
+                for #index in 0..tensor_dim {
+                    #inner
+                }
             }
         }
-    }
 
-    let mut outer = quote! {
-        #left = 0.0;
-        #inner
+        quote! {
+            #left = 0.0;
+            #inner
+        }
     };
 
     for index in free.iter() {
         outer = quote! {
-            for #index in 0..TENSOR_DIM {
+            for #index in 0..tensor_dim {
                 #outer
             }
         }
@@ -48,12 +54,60 @@ mod tests {
     use quote::quote;
 
     #[test]
-    fn tensor_test() {
-        let input = quote!(i, j; k => a[i][j] = b[i][j][k] * c[k]).into();
-        println!("Input {}\n", input);
-        let parsed = syn::parse2::<TensorInput>(input).unwrap();
-        let output = tensor(parsed);
-        println!("Output {}", output);
+    fn free() {
+        let input = quote!(i, j => a[i][j] = if i == j { 1.0 } else { 0.0 });
+        let output = tensor(syn::parse2::<TensorInput>(input).unwrap());
+
+        assert_eq!(
+            output.to_string(),
+            quote! {
+                for j in 0..tensor_dim {
+                    for i in 0..tensor_dim {
+                        a[i][j] = if i == j { 1.0 } else { 0.0 };
+                    }
+                }
+            }
+            .to_string()
+        );
+    }
+
+    #[test]
+    fn contract() {
+        let input = quote!(; i, j => a = k[i][i] * m[j][j]);
+        let output = tensor(syn::parse2::<TensorInput>(input).unwrap());
+
+        assert_eq!(
+            output.to_string(),
+            quote! {
+                a = 0.0;
+                for j in 0..tensor_dim {
+                    for i in 0..tensor_dim {
+                        a += k[i][i] * m[j][j];
+                    }
+                }
+            }
+            .to_string()
+        );
+    }
+
+    #[test]
+    fn free_and_contract() {
+        let input = quote!(i, j; k => a[i][j] = b[i][j][k] * c[k]);
+        let output = tensor(syn::parse2::<TensorInput>(input).unwrap());
+        assert_eq!(
+            output.to_string(),
+            quote! {
+                for j in 0..tensor_dim {
+                    for i in 0..tensor_dim {
+                        a[i][j] = 0.0;
+                        for k in 0..tensor_dim {
+                            a[i][j] += b[i][j][k] * c[k];
+                        }
+                    }
+                }
+            }
+            .to_string()
+        );
     }
 }
 
@@ -113,63 +167,4 @@ mod tests {
 //         brace_token: block.brace_token.clone(),
 //         stmts,
 //     }
-// }
-
-// pub fn tensor(attr: syn::Arm, func: syn::ItemFn) -> TokenStream {
-//     let Pat::Lit(dim) = attr.pat.clone() else {
-//         return quote_spanned! {
-//             attr.span() => compile_error!("#[tensor(N => (i, j, ...))] expects N to be a integer literal.");
-//         };
-//     };
-//     // let Lit::Int(value) = expr.lit else {
-//     //     return quote_spanned! {
-//     //         attr.span() => compile_error!("#[tensor(N => (i, j, ...))] expects N to be a integer literal.");
-//     //     };
-//     // };
-//     // let Ok(dimension) = value.base10_parse::<usize>() else {
-//     //     return quote_spanned! {
-//     //         attr.span() => compile_error!("#[tensor(N => (i, j, ...))] expects N to be a integer literal.");
-//     //     };
-//     // };
-
-//     let Expr::Tuple(tuple) = (&*attr.body).clone() else {
-//         return quote_spanned! {
-//             attr.span() => compile_error!("#[tensor(N => (i, j, ...))] expects a tuple of indices on the right hand side");
-//         };
-//     };
-
-//     // Enumerate indices
-//     let mut indices = Vec::new();
-//     for elem in tuple.elems.iter() {
-//         let Expr::Path(expr) = elem else {
-//             return quote_spanned! {
-//                 elem.span() => compile_error!("#[tensor(N => (i, j, ...))] expects a tuple of indices on the right hand side");
-//             };
-//         };
-
-//         let Some(ident) = expr.path.get_ident() else {
-//             return quote_spanned! {
-//                 elem.span() => compile_error!("#[tensor(N => (i, j, ...))] expects a tuple of indices on the right hand side");
-//             };
-//         };
-
-//         indices.push(ident.clone());
-//     }
-
-//     for stmt in func.block.stmts.iter() {
-//         let Stmt::Expr(expr, _semi) = stmt else {
-//             continue;
-//         };
-//         let Expr::Assign(assign) = expr else {
-//             continue;
-//         };
-
-//         // for attrib in assign.attrs.iter().filter_map(|attrib| {
-//         //     let path = attrib.path();
-//         // }) {
-//         //     attrib.
-//         // }
-//     }
-
-//     func.into_token_stream()
 // }

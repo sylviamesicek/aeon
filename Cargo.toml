@@ -13,6 +13,7 @@ members = [
 default-members = [
     "crates/aeon_geometry",
     "crates/aeon_macros",
+    "crates/aeon_tensor",
 
     "tools/critaxi",
     "tools/evaxi",

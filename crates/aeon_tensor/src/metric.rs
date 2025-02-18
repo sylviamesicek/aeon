@@ -80,6 +80,7 @@ impl Metric<2> {
 }
 
 impl<const N: usize> Metric<N> {
+    /// Computes and caches the metric's christofell symbols from the currently set g, ginv, and derivatives.
     pub fn compute_christoffel(&mut self) {
         let space = Space::<N>;
         // Compute christoffel symbols of the first kind.
@@ -103,44 +104,52 @@ impl<const N: usize> Metric<N> {
         });
     }
 
+    /// Returns the value of the metric.
     pub fn value(&self) -> &Matrix<N> {
         &self.g
     }
 
+    /// Returns partial derivatives for each metric component.
     pub fn derivs(&self) -> &Tensor3<N> {
         &self.g_derivs
     }
 
+    /// Returns second derivatives for each metric component.
     pub fn second_derivs(&self) -> &Tensor4<N> {
         &self.g_second_derivs
     }
 
+    /// Returns the inverse of the metric.
     pub fn inv(&self) -> &Matrix<N> {
         &self.ginv
     }
 
+    /// Derivatives of the inverse metric.
     pub fn inv_derivs(&self) -> &Tensor3<N> {
         &self.ginv_derivs
     }
 
+    /// Determinate of the metric.
     pub fn det(&self) -> f64 {
         self.gdet
     }
 
+    /// Partial derivatives of the determinate of the metric.
     pub fn det_derivs(&self) -> &Vector<N> {
         &self.gdet_derivs
     }
 
-    /// Returns christoffel symbols of the first kind.
+    /// Returns christoffel symbols of the first kind Γₐᵦᵧ.
     pub fn christoffel(&self) -> &Tensor3<N> {
         &self.gamma
     }
 
+    /// Returns chirstoffel symbolcs of the second kind Γᵃᵦᵧ.
     pub fn christoffel_2nd(&self) -> &Tensor3<N> {
         &self.gamma_2nd
     }
 
-    // Computes killing's equation for the given vector field.
+    // Computes killing's equation 𝓛ₓgₐᵦ for the given vector field X.
     pub fn killing(&self, vector: VectorFieldC1<N>) -> Matrix<N> {
         MatrixFieldC2 {
             value: self.g,
@@ -185,8 +194,166 @@ impl<const N: usize> Metric<N> {
         })
     }
 
+    /// Computes the trace of some tensor Tₐᵦ by contracting it with the inverse metric.
+    /// `T = gᵃᵝ Tₐᵦ`.
     pub fn cotrace<L: TensorLayout<N, 2>>(&self, tensor: Tensor<N, 2, L>) -> f64 {
         let s = Space::<N>;
         s.sum(|[a, b]| self.ginv[[a, b]] * tensor[[a, b]])
+    }
+
+    /// Computes the covariant derivative of a tensor `∇ᵧTₐᵦ`.
+    pub fn gradient<T: Derivatives<N>>(
+        &self,
+        value: &T,
+        partials: &T::Derivative,
+    ) -> T::Derivative {
+        value.covariant_gradient(partials, self)
+    }
+
+    /// Computes the second covariant derivative of a tensor `∇ₚ∇ᵩTₐᵦ`.
+    pub fn hessian<T: SecondDerivatives<N>>(
+        &self,
+        value: &T,
+        partials: &T::Derivative,
+        second_partials: &T::SecondDerivative,
+    ) -> T::SecondDerivative {
+        value.covariant_hessian(partials, second_partials, self)
+    }
+}
+
+/// Computes 𝓛ᵪTₐ = χⁿ∂ₙTₐ + Tₙ∂ₐχⁿ
+pub fn lie_derivative<const N: usize, T: Derivatives<N>>(
+    value: &T,
+    partials: &T::Derivative,
+    flow: &Vector<N>,
+    flow_partials: &Matrix<N>,
+) -> T {
+    value.lie_derivative(partials, flow, flow_partials)
+}
+
+// *****************************
+// Derivative Impls ************
+// *****************************
+
+pub trait Derivatives<const N: usize> {
+    type Derivative;
+
+    fn covariant_gradient(
+        &self,
+        partials: &Self::Derivative,
+        metric: &Metric<N>,
+    ) -> Self::Derivative;
+
+    fn lie_derivative(
+        &self,
+        partials: &Self::Derivative,
+        flow: &Vector<N>,
+        flow_partials: &Matrix<N>,
+    ) -> Self;
+}
+
+pub trait SecondDerivatives<const N: usize> {
+    type Derivative;
+    type SecondDerivative;
+
+    fn covariant_hessian(
+        &self,
+        partials: &Self::Derivative,
+        second_partials: &Self::SecondDerivative,
+        metric: &Metric<N>,
+    ) -> Self::SecondDerivative;
+}
+
+impl<const N: usize> Derivatives<N> for f64 {
+    type Derivative = Vector<N>;
+
+    fn covariant_gradient(
+        &self,
+        partials: &Self::Derivative,
+        _metric: &Metric<N>,
+    ) -> Self::Derivative {
+        partials.clone()
+    }
+
+    fn lie_derivative(
+        &self,
+        partials: &Self::Derivative,
+        flow: &Vector<N>,
+        _flow_partials: &Matrix<N>,
+    ) -> Self {
+        let s = Space::<N>;
+        s.sum(|[m]| flow[m] * partials[m])
+    }
+}
+
+impl<const N: usize> Derivatives<N> for Vector<N> {
+    type Derivative = Matrix<N>;
+
+    fn covariant_gradient(
+        &self,
+        partials: &Self::Derivative,
+        metric: &Metric<N>,
+    ) -> Self::Derivative {
+        let s = Space::<N>;
+        Matrix::from_fn(|[i, j]| {
+            partials[[i, j]] - s.sum(|[m]| metric.christoffel_2nd()[[m, i, j]] * self[m])
+        })
+    }
+
+    fn lie_derivative(
+        &self,
+        partials: &Self::Derivative,
+        flow: &Vector<N>,
+        flow_partials: &Matrix<N>,
+    ) -> Self {
+        let s = Space::<N>;
+        s.vector(|i| s.sum(|[m]| flow[m] * partials[[i, m]] + self[m] * flow_partials[[m, i]]))
+    }
+}
+
+impl<const N: usize> Derivatives<N> for Matrix<N> {
+    type Derivative = Tensor3<N>;
+
+    fn covariant_gradient(
+        &self,
+        partials: &Self::Derivative,
+        metric: &Metric<N>,
+    ) -> Self::Derivative {
+        let s = Space::<N>;
+        Tensor3::from_fn(|[i, j, k]| {
+            partials[[i, j, k]]
+                - s.sum(|[m]| metric.christoffel_2nd()[[m, i, k]] * self[[m, j]])
+                - s.sum(|[m]| metric.christoffel_2nd()[[m, j, k]] * self[[i, m]])
+        })
+    }
+
+    fn lie_derivative(
+        &self,
+        partials: &Self::Derivative,
+        flow: &Vector<N>,
+        flow_partials: &Matrix<N>,
+    ) -> Self {
+        let s = Space::<N>;
+        s.matrix(|i, j| {
+            s.sum(|[m]| {
+                flow[m] * partials[[i, j, m]]
+                    + self[[m, j]] * flow_partials[[m, i]]
+                    + self[[i, m]] * flow_partials[[m, j]]
+            })
+        })
+    }
+}
+
+impl<const N: usize> SecondDerivatives<N> for f64 {
+    type Derivative = Vector<N>;
+    type SecondDerivative = Matrix<N>;
+
+    fn covariant_hessian(
+        &self,
+        partials: &Self::Derivative,
+        second_partials: &Self::SecondDerivative,
+        metric: &Metric<N>,
+    ) -> Self::SecondDerivative {
+        partials.covariant_gradient(second_partials, metric)
     }
 }
