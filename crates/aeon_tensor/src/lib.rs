@@ -16,6 +16,8 @@ mod metric;
 pub use field::{MatrixFieldC1, MatrixFieldC2, ScalarFieldC1, ScalarFieldC2, VectorFieldC1};
 pub use metric::Metric;
 
+pub use metric::lie_derivative;
+
 pub fn for_each_index<const N: usize, const RANK: usize>(mut f: impl FnMut([usize; RANK])) {
     let mut cursor = [0; RANK];
 

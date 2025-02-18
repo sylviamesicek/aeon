@@ -9,7 +9,7 @@ use clap::ArgMatches;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
 mod config;
-mod eqs;
+pub mod eqs;
 
 pub use config::*;
 

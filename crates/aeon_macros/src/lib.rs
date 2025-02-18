@@ -103,7 +103,7 @@ struct TensorInput {
 }
 
 impl TensorInput {
-    fn parse_dimension(input: syn::parse::ParseStream) -> syn::Result<Expr> {
+    fn _parse_dimension(input: syn::parse::ParseStream) -> syn::Result<Expr> {
         if let Ok(expr) = input.parse::<syn::ExprPath>() {
             _ = input.parse::<Token![|]>()?;
             return Ok(Expr::Path(expr));
@@ -118,6 +118,8 @@ impl TensorInput {
 
 impl Parse for TensorInput {
     fn parse(input: syn::parse::ParseStream) -> syn::Result<Self> {
+        // let dimension = Self::parse_dimension(input)?;
+
         if input.fork().parse::<Token![;]>().is_ok() {
             let _ = input.parse::<Token![;]>()?;
             let contract = Punctuated::<Ident, Token![,]>::parse_separated_nonempty(input)?;

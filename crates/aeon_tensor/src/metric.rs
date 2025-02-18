@@ -159,6 +159,10 @@ impl<const N: usize> Metric<N> {
         .lie_derivative(vector)
     }
 
+    pub fn killing2(&self, flow: &Vector<N>, flow_partials: &Matrix<N>) -> Matrix<N> {
+        lie_derivative(&self.g, &self.g_derivs, flow, flow_partials)
+    }
+
     /// Computes the ricci tensor for the given metric.
     pub fn ricci(&self) -> Matrix<N> {
         let s = Space::<N>;
@@ -196,7 +200,7 @@ impl<const N: usize> Metric<N> {
 
     /// Computes the trace of some tensor Tₐᵦ by contracting it with the inverse metric.
     /// `T = gᵃᵝ Tₐᵦ`.
-    pub fn cotrace<L: TensorLayout<N, 2>>(&self, tensor: Tensor<N, 2, L>) -> f64 {
+    pub fn cotrace<L: TensorLayout<N, 2>>(&self, tensor: &Tensor<N, 2, L>) -> f64 {
         let s = Space::<N>;
         s.sum(|[a, b]| self.ginv[[a, b]] * tensor[[a, b]])
     }

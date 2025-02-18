@@ -1,4 +1,4 @@
-use aeon_tensor::axisymmetry as axi;
+use sharedaxi::eqs as axi;
 
 pub type Rank1 = [f64; 2];
 pub type Rank2 = [[f64; 2]; 2];
@@ -82,7 +82,7 @@ pub struct HyperbolicSystem {
 }
 
 impl HyperbolicSystem {
-    pub fn axisymmetric_system(&self, scalar_fields: &[ScalarFieldSystem]) -> axi::System {
+    pub fn axisymmetric_system(&self, scalar_fields: &[ScalarFieldSystem]) -> axi::DynamicalSystem {
         use aeon_tensor::*;
 
         let metric = Metric::new(MatrixFieldC2 {
@@ -90,12 +90,6 @@ impl HyperbolicSystem {
             derivs: Tensor::from(self.metric_derivs()),
             second_derivs: Tensor::from(self.metric_second_derivs()),
         });
-
-        let seed = ScalarFieldC2 {
-            value: self.seed(),
-            derivs: Tensor::from(self.seed_derivs()),
-            second_derivs: Tensor::from(self.seed_second_derivs()),
-        };
 
         let mut source = axi::StressEnergy::vacuum();
 
@@ -117,40 +111,37 @@ impl HyperbolicSystem {
             source.angular_stress += sf.angular_stress;
         }
 
-        axi::System {
+        axi::DynamicalSystem {
             metric,
-            seed,
-            k: MatrixFieldC1 {
-                value: Tensor::from(self.extrinsic()),
-                derivs: Tensor::from(self.extrinsic_derivs()),
-            },
-            y: ScalarFieldC1 {
-                value: self.y,
-                derivs: Tensor::from([self.y_r, self.y_z]),
-            },
-            theta: ScalarFieldC1 {
-                value: self.theta,
-                derivs: Tensor::from([self.theta_r, self.theta_z]),
-            },
-            z: VectorFieldC1 {
-                value: Tensor::from([self.zr, self.zz]),
-                derivs: Tensor::from([[self.zr_r, self.zr_z], [self.zz_r, self.zz_z]]),
-            },
-            lapse: ScalarFieldC2 {
-                value: self.lapse,
-                derivs: Tensor::from([self.lapse_r, self.lapse_z]),
-                second_derivs: Tensor::from([
-                    [self.lapse_rr, self.lapse_rz],
-                    [self.lapse_rz, self.lapse_zz],
-                ]),
-            },
-            shift: VectorFieldC1 {
-                value: Tensor::from([self.shiftr, self.shiftz]),
-                derivs: Tensor::from([
-                    [self.shiftr_r, self.shiftr_z],
-                    [self.shiftz_r, self.shiftz_z],
-                ]),
-            },
+            seed: self.seed(),
+            seed_partials: self.seed_derivs().into(),
+            seed_second_partials: self.seed_second_derivs().into(),
+
+            k: self.extrinsic().into(),
+            k_partials: self.extrinsic_derivs().into(),
+            y: self.y,
+            y_partials: [self.y_r, self.y_z].into(),
+
+            theta: self.theta,
+            theta_partials: [self.theta_r, self.theta_z].into(),
+            z: [self.zr, self.zz].into(),
+            z_partials: [[self.zr_r, self.zr_z], [self.zz_r, self.zz_z]].into(),
+
+            lapse: self.lapse,
+            lapse_partials: [self.lapse_r, self.lapse_z].into(),
+            lapse_second_partials: [
+                [self.lapse_rr, self.lapse_rz],
+                [self.lapse_rz, self.lapse_zz],
+            ]
+            .into(),
+
+            shift: [self.shiftr, self.shiftz].into(),
+            shift_partials: [
+                [self.shiftr_r, self.shiftr_z],
+                [self.shiftz_r, self.shiftz_z],
+            ]
+            .into(),
+
             source,
         }
     }
@@ -223,21 +214,13 @@ pub struct ScalarFieldSystem {
 
 impl ScalarFieldSystem {
     pub fn axisymmetric_system(&self) -> axi::ScalarFieldSystem {
-        use aeon_tensor::*;
-
         axi::ScalarFieldSystem {
-            phi: ScalarFieldC2 {
-                value: self.phi,
-                derivs: Tensor::from([self.phi_r, self.phi_z]),
-                second_derivs: Tensor::from([
-                    [self.phi_rr, self.phi_rz],
-                    [self.phi_rz, self.phi_zz],
-                ]),
-            },
-            pi: ScalarFieldC1 {
-                value: self.pi,
-                derivs: Tensor::from([self.pi_r, self.pi_z]),
-            },
+            phi: self.phi,
+            phi_derivs: [self.phi_r, self.phi_z].into(),
+            phi_second_derivs: [[self.phi_rr, self.phi_rz], [self.phi_rz, self.phi_zz]].into(),
+
+            pi: self.pi,
+            pi_derivs: [self.pi_r, self.pi_z].into(),
             mass: self.mass,
         }
     }
@@ -281,8 +264,8 @@ pub fn hyperbolic(
     debug_assert!(scalar_fields.len() == scalar_field_derivs.len());
 
     let decomp = axi::Decomposition::new(pos, system.axisymmetric_system(scalar_fields));
-    let evolve = decomp.evolution();
-    let gauge = decomp.gauge();
+    let evolve = decomp.metric_evolution();
+    let gauge = decomp.gauge_evolution();
 
     derivs.grr_t = evolve.g[[0, 0]];
     derivs.grz_t = evolve.g[[0, 1]];
@@ -300,7 +283,7 @@ pub fn hyperbolic(
     derivs.zz_t = evolve.z[[1]];
 
     for i in 0..scalar_fields.len() {
-        let scalar = decomp.scalar(scalar_fields[i].axisymmetric_system());
+        let scalar = decomp.scalar_field_evolution(scalar_fields[i].axisymmetric_system());
 
         scalar_field_derivs[i].phi = scalar.phi;
         scalar_field_derivs[i].pi = scalar.pi;

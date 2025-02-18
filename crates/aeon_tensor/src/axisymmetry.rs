@@ -336,7 +336,7 @@ impl Decomposition {
         let s = Space::<2>;
 
         let ricci = metric.ricci();
-        let ricci_trace = metric.cotrace(ricci);
+        let ricci_trace = metric.cotrace(&ricci);
 
         let k_grad = k.gradient(metric);
         let k_trace = s.sum(|[i, j]| k.value[[i, j]] * metric.inv()[[i, j]]);
@@ -360,7 +360,7 @@ impl Decomposition {
         let lapse_grad = lapse.gradient(metric);
         let lapse_hess = lapse.hessian(metric);
 
-        let stress_trace = metric.cotrace(*stress);
+        let stress_trace = metric.cotrace(stress);
 
         // *********************************
         // Hamiltonian *********************
@@ -439,7 +439,7 @@ impl Decomposition {
 
         let l_t = {
             let term1 = lapse.value * l.value * (k_trace + l.value - 2.0 * theta.value);
-            let term2 = -lapse.value * metric.cotrace(*twist.hess());
+            let term2 = -lapse.value * metric.cotrace(twist.hess());
             let term3 = s.sum(|m| shift.value[m] * l.derivs[m]);
 
             let mut regular = s.sum(|[m]| {
@@ -462,7 +462,7 @@ impl Decomposition {
 
         let theta_t = {
             let term1 = lapse.value * hamiltonian - lapse.value * (k_trace + l.value) * theta.value;
-            let term2 = lapse.value * metric.cotrace(z_grad);
+            let term2 = lapse.value * metric.cotrace(&z_grad);
             let term3 = -s.sum(|i| lapse_grad[i] * z_con[i]);
             let term4 = s.sum(|[i]| theta.derivs[i] * shift.value[i]);
 
@@ -586,8 +586,8 @@ impl Decomposition {
         let phi_t = lapse.value * field.pi.value + s.sum(|[i]| phi_grad[[i]] * shift.value[[i]]);
 
         let pi_t = {
-            let term1 = lapse.value * metric.cotrace(phi_hess)
-                + lapse.value * field.pi.value * (metric.cotrace(k.value) + l.value);
+            let term1 = lapse.value * metric.cotrace(&phi_hess)
+                + lapse.value * field.pi.value * (metric.cotrace(&k.value) + l.value);
             let term2 = s.sum(|[i, j]| phi_grad[[i]] * metric.inv()[[i, j]] * lapse_grad[[j]]);
 
             let mut term3 = lapse.value * s.sum(|[i]| phi_grad[[i]] * twist.regular_con()[[i]]);
