@@ -1,5 +1,5 @@
-name = "prolate"
-output_dir = "output/prolatecrit"
+name = "sphere"
+output_dir = "output/spherecrit"
 order = 4
 
 start = 0.0

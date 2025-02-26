@@ -233,7 +233,7 @@ fn run(config: RunConfig, diagnostics: &mut Diagnostics) -> Result<()> {
     let mass = find_mass(&mesh, system.as_slice());
     let alpha = mesh.bottom_left_value(system.field(Field::Lapse));
     let phi = mesh.bottom_left_value(system.field(Field::Phi));
-    diagnostics.append(time, mass, alpha, phi);
+    diagnostics.append(proper_time, mass, alpha, phi);
 
     while proper_time < MAX_PROPER_TIME {
         assert!(system.len() == mesh.num_nodes());
@@ -361,7 +361,7 @@ fn run(config: RunConfig, diagnostics: &mut Diagnostics) -> Result<()> {
         let mass = find_mass(&mesh, system.as_slice());
         let alpha = mesh.bottom_left_value(system.field(Field::Lapse));
         let phi = mesh.bottom_left_value(system.field(Field::Phi));
-        diagnostics.append(time, mass, alpha, phi);
+        diagnostics.append(proper_time, mass, alpha, phi);
 
         step += 1;
         steps_since_regrid += 1;

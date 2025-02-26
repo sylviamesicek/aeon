@@ -10,7 +10,7 @@ use aeon::{
 
 use reborrow::ReborrowMut;
 use sharedaxi::{
-    Constraint, Field, FieldConditions, Fields, Gauge, Metric, ScalarField, Solver, Source,
+    eqs, Constraint, Field, FieldConditions, Fields, Gauge, Metric, ScalarField, Solver, Source,
 };
 
 // *************************
@@ -204,7 +204,7 @@ impl<'a> Function<2> for Hamiltonian<'a> {
 
             dest[index] = laplacian
                 + psi[index] / 4.0 * (rho * seed_rr + 2.0 * seed_r + rho * seed_zz)
-                + psi[index] / 4.0 * source;
+                + psi[index] / 4.0 * source * eqs::KAPPA;
         }
     }
 }

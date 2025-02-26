@@ -9,7 +9,7 @@ use std::{
     ops::{Add, Div, Index, IndexMut, Mul, Sub},
 };
 
-pub mod axisymmetry;
+// pub mod axisymmetry;
 mod field;
 mod metric;
 

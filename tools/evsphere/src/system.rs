@@ -5,6 +5,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::config::SIGMA;
 
+const KAPPA: f64 = 8.0 * f64::consts::PI;
+// const KAPPA: f64 = 1.0;
+
 /// System for storing all fields necessary for axisymmetric evolution.
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Fields;
@@ -222,7 +225,7 @@ pub fn solve_constraints(mesh: &mut Mesh<1>, system: SystemSliceMut<Fields>) {
                 return 0.0;
             }
 
-            2.0 * f64::consts::PI * r * a * (phi * phi + pi * pi) - a * (a * a - 1.0) / (2.0 * r)
+            KAPPA / 4.0 * r * a * (phi * phi + pi * pi) - a * (a * a - 1.0) / (2.0 * r)
         };
 
         conformal[space.index_from_vertex([0])] = conformal_prev;
@@ -275,8 +278,7 @@ pub fn solve_constraints(mesh: &mut Mesh<1>, system: SystemSliceMut<Fields>) {
                 return 0.0;
             }
 
-            2.0 * f64::consts::PI * r * alpha * (phi * phi + pi * pi)
-                + alpha * (a * a - 1.0) / (2.0 * r)
+            KAPPA / 4.0 * r * alpha * (phi * phi + pi * pi) + alpha * (a * a - 1.0) / (2.0 * r)
         };
 
         lapse[space.index_from_vertex([cell_size])] = lapse_prev;

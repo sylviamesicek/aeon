@@ -381,7 +381,7 @@ pub fn evolution() -> Result<bool> {
             // );
 
             log::trace!(
-                "Regrided Mesh at time: {time:.5}, Max Level {}, Num Nodes {}",
+                "Regrided Mesh at time: {time:.5}, Step {step}, Max Level {}, Num Nodes {}",
                 mesh.max_level(),
                 mesh.num_nodes(),
             );
@@ -410,8 +410,10 @@ pub fn evolution() -> Result<bool> {
             //             mesh.num_nodes()
             //         );
 
+            let lapse = mesh.bottom_left_value(fields.field(Field::Gauge(Gauge::Lapse)));
+
             log::trace!(
-                "Saving Checkpoint {save_step}, Time: {time:.5}, Dilated Time: {proper_time:.5}, Step: {h:.8}, Norm: {norm:.5e}, Nodes: {}",
+                "Saving Checkpoint {save_step}, Time: {time:.5}, Dilated Time: {proper_time:.5}, Lapse: {lapse:.5e}, Nodes: {}",
                 mesh.num_nodes()
             );
 

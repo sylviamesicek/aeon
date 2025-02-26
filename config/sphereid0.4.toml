@@ -1,11 +1,11 @@
-name = "sphereid"
-output_dir = "output/sphereid"
+name = "sphereid0.4"
+output_dir = "output/sphereid0.4"
 order = 4
 
 visualize_levels = true
 visualize_result = true
 visualize_stride = 6
-visualize_every = 500
+visualize_every = 1000
 visualize_relax = true
 
 max_error = 1e-6
@@ -33,5 +33,5 @@ tolerance = 1e-6
 [[source]]
 type = "scalar_field"
 mass = 0.0
-amplitude = 1.4
+amplitude = 0.4
 sigma = [5.35, 5.35]
