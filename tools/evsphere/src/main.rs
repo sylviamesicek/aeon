@@ -170,7 +170,7 @@ fn run(config: RunConfig, diagnostics: &mut Diagnostics) -> Result<()> {
             )?;
         }
 
-        if mesh.max_level() >= MAX_LEVELS || mesh.num_nodes() >= MAX_NODES {
+        if mesh.num_nodes() >= MAX_NODES {
             log::error!(
                 "Failed to solve initial data, level: {}, nodes: {}",
                 mesh.max_level(),
@@ -181,6 +181,7 @@ fn run(config: RunConfig, diagnostics: &mut Diagnostics) -> Result<()> {
         }
 
         mesh.flag_wavelets(4, 0.0, MAX_ERROR_TOLERANCE, system.as_slice());
+        mesh.set_regrid_level_limit(MAX_LEVELS);
         mesh.balance_flags();
 
         if !mesh.requires_regridding() {

@@ -2,6 +2,7 @@ use aeon_tensor::{lie_derivative, Matrix, Metric, Space, Tensor, Tensor3, Vector
 
 pub const ON_AXIS: f64 = 1e-10;
 pub const KAPPA: f64 = 8.0 * std::f64::consts::PI;
+// pub const KAPPA: f64 = 1.0;
 
 #[derive(Default, Clone)]
 pub struct ScalarFieldSystem {
@@ -165,6 +166,7 @@ pub struct Decomposition {
     y: f64,
 }
 impl Decomposition {
+    /// Construct a decomposition from a position and dynamical system.
     pub fn new(
         pos: [f64; 2],
         DynamicalSystem {

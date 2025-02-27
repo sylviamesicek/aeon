@@ -1,9 +1,5 @@
+use aeon_tensor::{Matrix, Tensor, Tensor3, Tensor4, Vector};
 use sharedaxi::eqs as axi;
-
-pub type Rank1 = [f64; 2];
-pub type Rank2 = [[f64; 2]; 2];
-pub type Rank3 = [[[f64; 2]; 2]; 2];
-pub type Rank4 = [[[[f64; 2]; 2]; 2]; 2];
 
 /// All degrees of freedom re
 #[repr(C)]
@@ -82,14 +78,16 @@ pub struct HyperbolicSystem {
 }
 
 impl HyperbolicSystem {
+    /// Transforms a struct containing individual field values into an `DynamicalSystem` (stored)
+    /// with tensor fields.
     pub fn axisymmetric_system(&self, scalar_fields: &[ScalarFieldSystem]) -> axi::DynamicalSystem {
         use aeon_tensor::*;
 
-        let metric = Metric::new(MatrixFieldC2 {
-            value: Tensor::from(self.metric()),
-            derivs: Tensor::from(self.metric_derivs()),
-            second_derivs: Tensor::from(self.metric_second_derivs()),
-        });
+        let metric = Metric::new(
+            self.metric(),
+            self.metric_derivs(),
+            self.metric_second_derivs(),
+        );
 
         let mut source = axi::StressEnergy::vacuum();
 
@@ -114,11 +112,11 @@ impl HyperbolicSystem {
         axi::DynamicalSystem {
             metric,
             seed: self.seed(),
-            seed_partials: self.seed_derivs().into(),
-            seed_second_partials: self.seed_second_derivs().into(),
+            seed_partials: self.seed_derivs(),
+            seed_second_partials: self.seed_second_derivs(),
 
-            k: self.extrinsic().into(),
-            k_partials: self.extrinsic_derivs().into(),
+            k: self.extrinsic(),
+            k_partials: self.extrinsic_derivs(),
             y: self.y,
             y_partials: [self.y_r, self.y_z].into(),
 
@@ -146,52 +144,53 @@ impl HyperbolicSystem {
         }
     }
 
+    /// Computes the determinant of the metric.
     pub fn det(&self) -> f64 {
         self.grr * self.gzz - self.grz * self.grz
     }
 
-    pub fn metric(&self) -> Rank2 {
-        [[self.grr, self.grz], [self.grz, self.gzz]]
+    pub fn metric(&self) -> Matrix<2> {
+        Tensor::from([[self.grr, self.grz], [self.grz, self.gzz]])
     }
 
-    pub fn metric_derivs(&self) -> Rank3 {
+    pub fn metric_derivs(&self) -> Tensor3<2> {
         let grr_par = [self.grr_r, self.grr_z];
         let grz_par = [self.grz_r, self.grz_z];
         let gzz_par = [self.gzz_r, self.gzz_z];
 
-        [[grr_par, grz_par], [grz_par, gzz_par]]
+        [[grr_par, grz_par], [grz_par, gzz_par]].into()
     }
 
-    pub fn metric_second_derivs(&self) -> Rank4 {
+    pub fn metric_second_derivs(&self) -> Tensor4<2> {
         let grr_par2 = [[self.grr_rr, self.grr_rz], [self.grr_rz, self.grr_zz]];
         let grz_par2 = [[self.grz_rr, self.grz_rz], [self.grz_rz, self.grz_zz]];
         let gzz_par2 = [[self.gzz_rr, self.gzz_rz], [self.gzz_rz, self.gzz_zz]];
 
-        [[grr_par2, grz_par2], [grz_par2, gzz_par2]]
+        [[grr_par2, grz_par2], [grz_par2, gzz_par2]].into()
     }
 
     pub fn seed(&self) -> f64 {
         self.s
     }
 
-    pub fn seed_derivs(&self) -> Rank1 {
-        [self.s_r, self.s_z]
+    pub fn seed_derivs(&self) -> Vector<2> {
+        [self.s_r, self.s_z].into()
     }
 
-    pub fn seed_second_derivs(&self) -> Rank2 {
-        [[self.s_rr, self.s_rz], [self.s_rz, self.s_zz]]
+    pub fn seed_second_derivs(&self) -> Matrix<2> {
+        [[self.s_rr, self.s_rz], [self.s_rz, self.s_zz]].into()
     }
 
-    pub fn extrinsic(&self) -> Rank2 {
-        [[self.krr, self.krz], [self.krz, self.kzz]]
+    pub fn extrinsic(&self) -> Matrix<2> {
+        [[self.krr, self.krz], [self.krz, self.kzz]].into()
     }
 
-    pub fn extrinsic_derivs(&self) -> Rank3 {
+    pub fn extrinsic_derivs(&self) -> Tensor3<2> {
         let krr_par = [self.krr_r, self.krr_z];
         let krz_par = [self.krz_r, self.krz_z];
         let kzz_par = [self.kzz_r, self.kzz_z];
 
-        [[krr_par, krz_par], [krz_par, kzz_par]]
+        [[krr_par, krz_par], [krz_par, kzz_par]].into()
     }
 }
 

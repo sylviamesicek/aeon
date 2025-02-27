@@ -1,6 +1,4 @@
-use crate::{
-    Matrix, MatrixFieldC2, Space, Tensor, Tensor3, Tensor4, TensorLayout, Vector, VectorFieldC1,
-};
+use crate::{Matrix, Space, Tensor, Tensor3, Tensor4, TensorLayout, Vector};
 
 #[derive(Clone, Default)]
 pub struct Metric<const N: usize> {
@@ -22,33 +20,33 @@ pub struct Metric<const N: usize> {
 }
 
 impl Metric<2> {
-    pub fn new(g: MatrixFieldC2<2>) -> Self {
+    pub fn new(g: Matrix<2>, g_partials: Tensor3<2>, g_second_partials: Tensor4<2>) -> Self {
         // Compute determinant and its derivatives.
-        let gdet = g.value[[0, 0]] * g.value[[1, 1]] - g.value[[0, 1]] * g.value[[1, 0]];
+        let gdet = g[[0, 0]] * g[[1, 1]] - g[[0, 1]] * g[[1, 0]];
         let gdet_derivs = Vector::from_fn(|[i]| {
-            g.value[[0, 0]] * g.derivs[[1, 1, i]] + g.derivs[[0, 0, i]] * g.value[[1, 1]]
-                - g.derivs[[0, 1, i]] * g.value[[1, 0]]
-                - g.value[[0, 1]] * g.derivs[[1, 0, i]]
+            g[[0, 0]] * g_partials[[1, 1, i]] + g_partials[[0, 0, i]] * g[[1, 1]]
+                - g_partials[[0, 1, i]] * g[[1, 0]]
+                - g[[0, 1]] * g_partials[[1, 0, i]]
         });
 
         // Compute inverse and its derivatives
         let ginv = Matrix::from([
-            [g.value[[1, 1]] / gdet, -g.value[[1, 0]] / gdet],
-            [-g.value[[0, 1]] / gdet, g.value[[0, 0]] / gdet],
+            [g[[1, 1]] / gdet, -g[[1, 0]] / gdet],
+            [-g[[0, 1]] / gdet, g[[0, 0]] / gdet],
         ]);
         let ginv_derivs = Tensor3::from({
             let grr_inv_derivs = *Vector::from_fn(|[i]| {
-                g.derivs[[1, 1, i]] / gdet - g.value[[1, 1]] / (gdet * gdet) * gdet_derivs[[i]]
+                g_partials[[1, 1, i]] / gdet - g[[1, 1]] / (gdet * gdet) * gdet_derivs[[i]]
             })
             .inner();
 
             let grz_inv_derivs = *Vector::from_fn(|[i]| {
-                -g.derivs[[0, 1, i]] / gdet + g.value[[0, 1]] / (gdet * gdet) * gdet_derivs[[i]]
+                -g_partials[[0, 1, i]] / gdet + g[[0, 1]] / (gdet * gdet) * gdet_derivs[[i]]
             })
             .inner();
 
             let gzz_inv_derivs = *Vector::from_fn(|[i]| {
-                g.derivs[[0, 0, i]] / gdet - g.value[[0, 0]] / (gdet * gdet) * gdet_derivs[[i]]
+                g_partials[[0, 0, i]] / gdet - g[[0, 0]] / (gdet * gdet) * gdet_derivs[[i]]
             })
             .inner();
 
@@ -60,9 +58,9 @@ impl Metric<2> {
 
         // Set fields of result
         let mut result = Self {
-            g: g.value,
-            g_derivs: g.derivs,
-            g_second_derivs: g.second_derivs,
+            g,
+            g_derivs: g_partials,
+            g_second_derivs: g_second_partials,
 
             gdet,
             gdet_derivs,
@@ -149,15 +147,15 @@ impl<const N: usize> Metric<N> {
         &self.gamma_2nd
     }
 
-    // Computes killing's equation 𝓛ₓgₐᵦ for the given vector field X.
-    pub fn killing(&self, vector: VectorFieldC1<N>) -> Matrix<N> {
-        MatrixFieldC2 {
-            value: self.g,
-            derivs: self.g_derivs,
-            second_derivs: self.g_second_derivs,
-        }
-        .lie_derivative(vector)
-    }
+    // // Computes killing's equation 𝓛ₓgₐᵦ for the given vector field X.
+    // pub fn killing(&self, vector: VectorFieldC1<N>) -> Matrix<N> {
+    //     MatrixFieldC2 {
+    //         value: self.g,
+    //         derivs: self.g_derivs,
+    //         second_derivs: self.g_second_derivs,
+    //     }
+    //     .lie_derivative(vector)
+    // }
 
     pub fn killing2(&self, flow: &Vector<N>, flow_partials: &Matrix<N>) -> Matrix<N> {
         lie_derivative(&self.g, &self.g_derivs, flow, flow_partials)

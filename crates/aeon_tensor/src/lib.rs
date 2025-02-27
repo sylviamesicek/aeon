@@ -9,11 +9,9 @@ use std::{
     ops::{Add, Div, Index, IndexMut, Mul, Sub},
 };
 
-// pub mod axisymmetry;
-mod field;
 mod metric;
 
-pub use field::{MatrixFieldC1, MatrixFieldC2, ScalarFieldC1, ScalarFieldC2, VectorFieldC1};
+// pub use field::{MatrixFieldC1, MatrixFieldC2, ScalarFieldC1, ScalarFieldC2, VectorFieldC1};
 pub use metric::Metric;
 
 pub use metric::lie_derivative;

@@ -5,9 +5,9 @@
 #SBATCH --nodes=1
 #SBATCH --ntasks=10
 #SBATCH --job-name=prolatesearch
-#SBATCH -o ./output/prolatesearch.out
-#SBATCH -e ./output/prolatesearch.err
+#SBATCH -o ./output/spherecrit.out
+#SBATCH -e ./output/spherecrit.err
 
 module load rust
 cargo build --release
-cargo run --release --package critaxi -- "config/prolatecrit.toml"
+cargo run --release --package critaxi -- "config/spherecrit.toml"

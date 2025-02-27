@@ -8,7 +8,7 @@ end = 2.0
 cache_initial = true
 cache_evolve = false
 
-bifurcations = 2
+bifurcations = 10
 
 [logging]
 level = 5
