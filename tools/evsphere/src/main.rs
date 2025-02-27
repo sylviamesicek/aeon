@@ -382,28 +382,21 @@ fn try_main() -> Result<()> {
     let matches = Command::new("evsphere")
         .about("A program for generating initial data for numerical relativity using hyperbolic relaxation.")
         .author("Lukas Mesicek, lukas.m.mesicek@gmail.com")
-        // .arg(
-        //     Arg::new("amplitude")
-        //         .short('a')
-        //         .long("amplitude")
-        //         .default_value("1.0")
-        //         .value_name("FLOAT")
-        //         .global(false)
-        // )
-        // .arg(
-        //     Arg::new("visualize")
-        //         .short('v')
-        //         .long("visualize")
-        //         .num_args(0)
-        //         .help("Output visualizations during evolution")
-        //         .global(false)
-        // )
-        // .arg(
-        //     Arg::new("output").required(true)
-        //         .help("Output directory")
-        //         .value_name("DIR")
-        //         .global(false)
-        //     )
+        .subcommand(Command::new("vis")
+            .arg(
+                Arg::new("amp")
+                    .short('a')
+                    .long("amp")
+                    .default_value("1.0")
+                    .value_name("FLOAT")
+            )
+            .arg(
+                Arg::new("output")
+                    .required(true)
+                    .help("Output directory")
+                    .value_name("DIR")
+                )
+            )
         .subcommand(
             Command::new("cole")
                 .arg(
@@ -448,9 +441,9 @@ fn try_main() -> Result<()> {
 
         config.absolute =
             std::env::current_dir().context("Failed to find current working directory")?;
-    } else {
+    } else if let Some(matches) = matches.subcommand_matches("vis") {
         config.amplitude = matches
-            .get_one::<String>("amplitude")
+            .get_one::<String>("amp")
             .ok_or(anyhow!("Could not find amplitude argument"))?
             .parse::<f64>()
             .map_err(|_| anyhow!("Failed parse amplitude argument"))?
@@ -471,7 +464,7 @@ fn try_main() -> Result<()> {
                 .join(output);
         }
 
-        config.visualize = matches.contains_id("visualize");
+        config.visualize = true;
     }
 
     // Build enviornment logger.

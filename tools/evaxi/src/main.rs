@@ -380,11 +380,11 @@ pub fn evolution() -> Result<bool> {
             //     num_coarsen,
             // );
 
-            log::trace!(
-                "Regrided Mesh at time: {time:.5}, Step {step}, Max Level {}, Num Nodes {}",
-                mesh.max_level(),
-                mesh.num_nodes(),
-            );
+            // log::trace!(
+            //     "Regrided Mesh at time: {time:.5}, Step {step}, Max Level {}, Num Nodes {}",
+            //     mesh.max_level(),
+            //     mesh.num_nodes(),
+            // );
 
             // Copy system into tmp scratch space (provieded by dissipation).
             let scratch = integrator.scratch(fields.contigious().len());
@@ -413,8 +413,8 @@ pub fn evolution() -> Result<bool> {
             let lapse = mesh.bottom_left_value(fields.field(Field::Gauge(Gauge::Lapse)));
 
             log::trace!(
-                "Saving Checkpoint {save_step}, Time: {time:.5}, Dilated Time: {proper_time:.5}, Lapse: {lapse:.5e}, Nodes: {}",
-                mesh.num_nodes()
+                "Checkpoint {save_step}, Time: {time:.5}, Dilated Time: {proper_time:.5}, Lapse: {lapse:.5e}, Nodes: {}, Levels: {}",
+                mesh.num_nodes(), mesh.max_level()
             );
 
             // Output current system to disk

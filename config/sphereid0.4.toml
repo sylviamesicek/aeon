@@ -1,5 +1,5 @@
-name = "sphereid0.4"
-output_dir = "output/sphereid0.4"
+name = "sphereid"
+output_dir = "output/sphereid/0.4"
 order = 4
 
 visualize_levels = true

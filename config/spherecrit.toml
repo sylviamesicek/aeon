@@ -3,7 +3,7 @@ output_dir = "output/spherecrit"
 order = 4
 
 start = 0.0
-end = 2.0
+end = 0.4
 
 cache_initial = true
 cache_evolve = false

@@ -278,11 +278,11 @@ fn initial_data() -> Result<()> {
         mesh.balance_flags();
 
         if mesh.requires_regridding() {
-            log::trace!(
-                "Regridding mesh from level {} to {}",
-                mesh.max_level(),
-                mesh.max_level() + 1
-            );
+            // log::trace!(
+            //     "Regridding mesh from level {} to {}",
+            //     mesh.max_level(),
+            //     mesh.max_level() + 1
+            // );
 
             transfer.resize(mesh.num_nodes());
             transfer
@@ -326,7 +326,7 @@ fn initial_data() -> Result<()> {
 
     let l2_norm = mesh.l2_norm(sigma.as_slice().into());
     let max_norm = mesh.max_norm(sigma.as_slice().into());
-    println!("Energy Density: l2 Norm {l2_norm:.5e}, max Norm {max_norm:.5e}");
+    log::info!("Energy Density: l2 Norm {l2_norm:.5e}, max Norm {max_norm:.5e}");
 
     let mut checkpoint = SystemCheckpoint::default();
     checkpoint.save_system_ser(system.as_slice());

@@ -162,16 +162,12 @@ impl HyperRelaxSolver {
                 return Err(HyperRelaxError::Diverged);
             }
 
-            if index % 1000 == 0 {
-                log::trace!("Relaxed {}k steps, norm: {:.5e}", index / 1000, norm);
-            }
+            // if index % 1000 == 0 {
+            //     log::trace!("Relaxed {}k steps, norm: {:.5e}", index / 1000, norm);
+            // }
 
             if norm <= self.tolerance {
-                log::trace!(
-                    "Hyperbolic Relaxation converged with error {:.5e} in {} steps.",
-                    self.tolerance,
-                    index
-                );
+                log::trace!("Converged in {} steps.", index);
                 break;
             }
 

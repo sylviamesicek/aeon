@@ -1,5 +1,5 @@
-name = "sphereev0.4"
-output_dir = "output/sphereev0.4"
+name = "sphereev"
+output_dir = "output/sphereev/0.4"
 order = 4
 diss_order = 6
 cfl = 0.1
@@ -18,7 +18,7 @@ flag_interval = 20
 max_levels = 20
 
 [visualize]
-save_interval = 0.01
+save_interval = 0.02
 stride = 6
 
 [logging]

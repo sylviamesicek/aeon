@@ -358,7 +358,11 @@ where
     // Initial Guess for Psi
     psi.fill(1.0);
 
-    log::trace!("Running Hyperbolic Relaxation. Nodes: {}", mesh.num_nodes());
+    log::trace!(
+        "Relaxing. Max Level {}, Nodes: {}",
+        mesh.max_level(),
+        mesh.num_nodes()
+    );
 
     let mut solver = HyperRelaxSolver::new();
     solver.dampening = solver_con.dampening;
