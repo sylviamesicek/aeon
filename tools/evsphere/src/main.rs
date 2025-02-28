@@ -292,6 +292,7 @@ fn run(config: RunConfig, diagnostics: &mut Diagnostics) -> Result<()> {
                 MAX_ERROR_TOLERANCE,
                 system.as_slice(),
             );
+            mesh.set_regrid_level_limit(MAX_LEVELS);
             mesh.balance_flags();
 
             // let num_refine = mesh.num_refine_cells();
