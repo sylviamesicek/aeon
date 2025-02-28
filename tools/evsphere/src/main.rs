@@ -270,16 +270,16 @@ fn run(config: RunConfig, diagnostics: &mut Diagnostics) -> Result<()> {
             ));
         }
 
-        if mesh.max_level() >= MAX_LEVELS {
-            log::trace!(
-                "Evolution collapses, Reached maximum allowed level of refinement: {}",
-                mesh.max_level()
-            );
-            return Err(anyhow!(
-                "reached maximum allowed level of refinement: {}",
-                mesh.max_level()
-            ));
-        }
+        // if mesh.max_level() >= MAX_LEVELS {
+        //     log::trace!(
+        //         "Evolution collapses, Reached maximum allowed level of refinement: {}",
+        //         mesh.max_level()
+        //     );
+        //     return Err(anyhow!(
+        //         "reached maximum allowed level of refinement: {}",
+        //         mesh.max_level()
+        //     ));
+        // }
 
         let h = mesh.min_spacing() * CFL;
 
