@@ -363,7 +363,10 @@ fn run(config: RunConfig, diagnostics: &mut Diagnostics) -> Result<()> {
         let mass = find_mass(&mesh, system.as_slice());
         let alpha = mesh.bottom_left_value(system.field(Field::Lapse));
         let phi = mesh.bottom_left_value(system.field(Field::Phi));
-        diagnostics.append(proper_time, mass, alpha, phi);
+
+        if step % DIAGNOSTIC_STRIDE == 0 {
+            diagnostics.append(proper_time, mass, alpha, phi);
+        }
 
         step += 1;
         steps_since_regrid += 1;

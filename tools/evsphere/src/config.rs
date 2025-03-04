@@ -13,3 +13,4 @@ pub const DISSIPATION: f64 = 0.5;
 pub const SAVE_INTERVAL: f64 = 0.1;
 pub const REGRID_FLAG_INTERVAL: usize = 20;
 pub const CFL: f64 = 0.1;
+pub const DIAGNOSTIC_STRIDE: usize = 2;
