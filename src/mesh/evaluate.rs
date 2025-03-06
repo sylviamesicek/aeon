@@ -1,16 +1,19 @@
 use std::{array, ops::Range};
 
 use crate::{
-    kernel::{node_from_vertex, BoundaryKind, Hessian, Kernels, NodeSpace, Order, VertexKernel},
+    kernel::{
+        node_from_vertex, vertex_from_node, BoundaryConds as _, BoundaryKind, Hessian, Kernels,
+        NodeSpace, Order, VertexKernel,
+    },
     system::Empty,
 };
-use aeon_geometry::{faces, Face, FaceMask, IndexSpace, Rectangle, NULL};
+use aeon_geometry::{faces, Face, FaceMask, IndexSpace, NULL};
 use reborrow::{Reborrow, ReborrowMut as _};
 
 use crate::{
     mesh::{Engine, Function, Projection},
     shared::SharedSlice,
-    system::{Scalar, System, SystemConditions, SystemSlice, SystemSliceMut},
+    system::{Scalar, System, SystemBoundaryConds, SystemSlice, SystemSliceMut},
 };
 
 use super::{Mesh, MeshStore};
@@ -18,7 +21,6 @@ use super::{Mesh, MeshStore};
 /// A finite difference engine of a given order, but potentially bordering a free boundary.
 struct FdEngine<'store, const N: usize, K: Kernels> {
     space: NodeSpace<N>,
-    bounds: Rectangle<N>,
     _order: K,
     store: &'store MeshStore,
     range: Range<usize>,
@@ -33,33 +35,21 @@ impl<'store, const N: usize, K: Kernels> FdEngine<'store, N, K> {
         vertex: [usize; N],
     ) -> f64 {
         self.space
-            .evaluate_axis(kernel, self.bounds, node_from_vertex(vertex), field, axis)
+            .evaluate_axis(kernel, node_from_vertex(vertex), field, axis)
     }
 }
 
 impl<'store, const N: usize, K: Kernels> Engine<N> for FdEngine<'store, N, K> {
-    fn num_nodes(&self) -> usize {
-        self.space.num_nodes()
+    fn space(&self) -> &NodeSpace<N> {
+        &self.space
     }
 
     fn node_range(&self) -> Range<usize> {
         self.range.clone()
     }
 
-    fn vertex_size(&self) -> [usize; N] {
-        self.space.vertex_size()
-    }
-
     fn alloc<T: Default>(&self, len: usize) -> &mut [T] {
         self.store.scratch(len)
-    }
-
-    fn position(&self, vertex: [usize; N]) -> [f64; N] {
-        self.space.position(node_from_vertex(vertex), self.bounds)
-    }
-
-    fn index_from_vertex(&self, vertex: [usize; N]) -> usize {
-        self.space.index_from_vertex(vertex)
     }
 
     fn value(&self, field: &[f64], vertex: [usize; N]) -> f64 {
@@ -76,32 +66,18 @@ impl<'store, const N: usize, K: Kernels> Engine<N> for FdEngine<'store, N, K> {
     }
 
     fn mixed_derivative(&self, field: &[f64], i: usize, j: usize, vertex: [usize; N]) -> f64 {
-        self.space.evaluate(
-            Hessian::<K>::new(i, j),
-            self.bounds,
-            node_from_vertex(vertex),
-            field,
-        )
+        self.space
+            .evaluate(Hessian::<K>::new(i, j), node_from_vertex(vertex), field)
     }
 
     fn dissipation(&self, field: &[f64], axis: usize, vertex: [usize; N]) -> f64 {
         self.evaluate_axis(field, axis, K::dissipation(), vertex)
-    }
-
-    fn min_spacing(&self) -> f64 {
-        let spacing = self.space.spacing(self.bounds);
-        spacing
-            .iter()
-            .min_by(|a, b| a.total_cmp(&b))
-            .cloned()
-            .unwrap_or(1.0)
     }
 }
 
 /// A finite difference engine that only every relies on interior support (and can thus use better optimized stencils).
 struct FdIntEngine<'store, const N: usize, K: Kernels> {
     space: NodeSpace<N>,
-    bounds: Rectangle<N>,
     _order: K,
     store: &'store MeshStore,
     range: Range<usize>,
@@ -115,39 +91,22 @@ impl<'store, const N: usize, K: Kernels> FdIntEngine<'store, N, K> {
         kernel: &impl VertexKernel,
         vertex: [usize; N],
     ) -> f64 {
-        self.space.evaluate_axis_interior(
-            kernel,
-            self.bounds,
-            node_from_vertex(vertex),
-            field,
-            axis,
-        )
+        self.space
+            .evaluate_axis_interior(kernel, node_from_vertex(vertex), field, axis)
     }
 }
 
 impl<'store, const N: usize, K: Kernels> Engine<N> for FdIntEngine<'store, N, K> {
-    fn num_nodes(&self) -> usize {
-        self.space.num_nodes()
+    fn space(&self) -> &NodeSpace<N> {
+        &self.space
     }
 
     fn node_range(&self) -> Range<usize> {
         self.range.clone()
     }
 
-    fn vertex_size(&self) -> [usize; N] {
-        self.space.vertex_size()
-    }
-
     fn alloc<T: Default>(&self, len: usize) -> &mut [T] {
         self.store.scratch(len)
-    }
-
-    fn position(&self, vertex: [usize; N]) -> [f64; N] {
-        self.space.position(node_from_vertex(vertex), self.bounds)
-    }
-
-    fn index_from_vertex(&self, vertex: [usize; N]) -> usize {
-        self.space.index_from_vertex(vertex)
     }
 
     fn value(&self, field: &[f64], vertex: [usize; N]) -> f64 {
@@ -164,25 +123,12 @@ impl<'store, const N: usize, K: Kernels> Engine<N> for FdIntEngine<'store, N, K>
     }
 
     fn mixed_derivative(&self, field: &[f64], i: usize, j: usize, vertex: [usize; N]) -> f64 {
-        self.space.evaluate_interior(
-            Hessian::<K>::new(i, j),
-            self.bounds,
-            node_from_vertex(vertex),
-            field,
-        )
+        self.space
+            .evaluate_interior(Hessian::<K>::new(i, j), node_from_vertex(vertex), field)
     }
 
     fn dissipation(&self, field: &[f64], axis: usize, vertex: [usize; N]) -> f64 {
         self.evaluate(field, axis, K::dissipation(), vertex)
-    }
-
-    fn min_spacing(&self) -> f64 {
-        let spacing = self.space.spacing(self.bounds);
-        spacing
-            .iter()
-            .min_by(|a, b| a.total_cmp(&b))
-            .cloned()
-            .unwrap_or(1.0)
     }
 }
 
@@ -227,7 +173,6 @@ impl<const N: usize> Mesh<N> {
         let dest = dest.into_shared();
 
         self.block_compute(|mesh, store, block| {
-            let bounds = mesh.block_bounds(block);
             let space = mesh.block_space(block);
             let nodes = mesh.block_nodes(block);
 
@@ -240,7 +185,6 @@ impl<const N: usize> Mesh<N> {
                         function.evaluate(
                             FdIntEngine {
                                 space: space.clone(),
-                                bounds,
                                 _order: Order::<$order>,
                                 store,
                                 range: nodes.clone(),
@@ -263,7 +207,6 @@ impl<const N: usize> Mesh<N> {
                         function.evaluate(
                             FdEngine {
                                 space: space.clone(),
-                                bounds,
                                 _order: Order::<$order>,
                                 store,
                                 range: nodes.clone(),
@@ -285,13 +228,13 @@ impl<const N: usize> Mesh<N> {
     }
 
     pub(crate) fn is_block_in_interior(&self, block: usize) -> bool {
-        let boundary = self.block_boundary(block);
+        let ghost_flags = self.block_ghost_flags(block);
 
         let mut result = true;
 
         for axis in 0..N {
-            result &= boundary[Face::negative(axis)].has_ghost();
-            result &= boundary[Face::positive(axis)].has_ghost();
+            result &= ghost_flags.is_set(Face::negative(axis));
+            result &= ghost_flags.is_set(Face::positive(axis));
         }
 
         result
@@ -311,7 +254,6 @@ impl<const N: usize> Mesh<N> {
         let dest = dest.into_shared();
 
         self.block_compute(|mesh, store, block| {
-            let bounds = mesh.block_bounds(block);
             let space = mesh.block_space(block);
             let nodes = mesh.block_nodes(block);
 
@@ -330,7 +272,7 @@ impl<const N: usize> Mesh<N> {
             if mesh.is_block_in_interior(block) {
                 let engine = FdIntEngine {
                     space: space.clone(),
-                    bounds,
+
                     _order: order,
                     store,
                     range: nodes.clone(),
@@ -340,7 +282,7 @@ impl<const N: usize> Mesh<N> {
             } else {
                 let engine = FdEngine {
                     space: space.clone(),
-                    bounds,
+
                     _order: order,
                     store,
                     range: nodes.clone(),
@@ -355,28 +297,28 @@ impl<const N: usize> Mesh<N> {
     /// and running necessary preprocessing.
     pub fn apply<
         O: Kernels + Sync,
-        C: SystemConditions<N> + Sync,
+        C: SystemBoundaryConds<N> + Sync,
         P: Function<N, Input = C::System, Output = C::System> + Sync,
     >(
         &mut self,
         order: O,
-        conditions: C,
+        bcs: C,
         op: P,
         mut f: SystemSliceMut<'_, C::System>,
     ) where
         C::System: Sync,
     {
         // Strong boundary condition
-        self.fill_boundary(order, conditions.clone(), f.rb_mut());
+        self.fill_boundary(order, bcs.clone(), f.rb_mut());
         // Preprocess data
         op.preprocess(self, f.rb_mut());
 
         let f = f.into_shared();
 
         self.block_compute(|mesh, store, block| {
-            let bounds = mesh.block_bounds(block);
             let space = mesh.block_space(block);
             let nodes = mesh.block_nodes(block);
+            let bcs = mesh.block_bcs(block, bcs.clone());
 
             let mut block_dest = unsafe { f.slice_mut(nodes.clone()) };
 
@@ -393,7 +335,6 @@ impl<const N: usize> Mesh<N> {
             if mesh.is_block_in_interior(block) {
                 let engine = FdIntEngine {
                     space: space.clone(),
-                    bounds,
                     _order: order,
                     store,
                     range: nodes.clone(),
@@ -403,7 +344,7 @@ impl<const N: usize> Mesh<N> {
             } else {
                 let engine = FdEngine {
                     space: space.clone(),
-                    bounds,
+
                     _order: order,
                     store,
                     range: nodes.clone(),
@@ -413,48 +354,62 @@ impl<const N: usize> Mesh<N> {
 
                 // Weak boundary conditions.
                 for face in faces::<N>() {
-                    if space.boundary[face] != BoundaryKind::Radiative {
-                        continue;
-                    }
+                    for field in f.system().enumerate() {
+                        let boundary = bcs.field(field);
+                        let source = block_source.field(field);
+                        let dest = block_dest.field_mut(field);
 
-                    // Sommerfeld radiative boundary conditions.
-                    for vertex in IndexSpace::new(engine.vertex_size()).face(face).iter() {
-                        // *************************
-                        // At vertex
-
-                        let position: [f64; N] = engine.position(vertex);
-                        let r = position.iter().map(|&v| v * v).sum::<f64>().sqrt();
-                        let index = engine.index_from_vertex(vertex);
-
-                        // *************************
-                        // Inner
-
-                        let mut inner = vertex;
-
-                        // Find innter vertex for approximating higher order r dependence
-                        for axis in 0..N {
-                            if space.boundary[Face::negative(axis)] == BoundaryKind::Radiative
-                                && vertex[axis] == 0
-                            {
-                                inner[axis] += 1;
-                            }
-
-                            if space.boundary[Face::positive(axis)] == BoundaryKind::Radiative
-                                && vertex[axis] == engine.vertex_size()[axis] - 1
-                            {
-                                inner[axis] -= 1;
+                        // Apply weak dirichlet boundary conditions
+                        if boundary.kind(face) == BoundaryKind::WeakDirichlet {
+                            for node in space.face_window_disjoint(face) {
+                                let index = space.index_from_node(node);
+                                let position = space.position(node);
+                                dest[index] = boundary.dirichlet_strength(position)
+                                    * (boundary.dirichlet(position) - source[index])
                             }
                         }
 
-                        let inner_position = engine.position(inner);
-                        let inner_r = inner_position.iter().map(|&v| v * v).sum::<f64>().sqrt();
-                        let inner_index = engine.index_from_vertex(inner);
+                        // Apply radiative condition
+                        if boundary.kind(face) != BoundaryKind::Radiative {
+                            continue;
+                        }
 
-                        for field in f.system().enumerate() {
-                            let source = block_source.field(field);
-                            let dest = block_dest.field_mut(field);
+                        // Sommerfeld radiative boundary conditions.
+                        for node in space.face_window(face) {
+                            let vertex = vertex_from_node(node);
+                            // *************************
+                            // At vertex
+
+                            let position: [f64; N] = space.position(node);
+                            let r = position.iter().map(|&v| v * v).sum::<f64>().sqrt();
+                            let index = space.index_from_node(node);
+
+                            // *************************
+                            // Inner
+
+                            let mut inner = vertex;
+
+                            // Find innter vertex for approximating higher order r dependence
+                            for axis in 0..N {
+                                if boundary.kind(Face::negative(axis)) == BoundaryKind::Radiative
+                                    && vertex[axis] == 0
+                                {
+                                    inner[axis] += 1;
+                                }
+
+                                if boundary.kind(Face::positive(axis)) == BoundaryKind::Radiative
+                                    && vertex[axis] == engine.vertex_size()[axis] - 1
+                                {
+                                    inner[axis] -= 1;
+                                }
+                            }
+
+                            let inner_position = engine.position(inner);
+                            let inner_r = inner_position.iter().map(|&v| v * v).sum::<f64>().sqrt();
+                            let inner_index = engine.index_from_vertex(inner);
+
                             // Get condition parameters.
-                            let params = conditions.radiative(field, position);
+                            let params = boundary.radiative(position);
                             // Inner R dependence.
                             let mut inner_advection = source[inner_index] - params.target;
 
@@ -485,110 +440,6 @@ impl<const N: usize> Mesh<N> {
                 }
             }
         });
-    }
-
-    /// Enforce weak boundary conditions on the time derivative of a system.
-    pub fn weak_boundary<O: Kernels + Sync, C: SystemConditions<N> + Sync>(
-        &mut self,
-        order: O,
-        conditions: C,
-        source: SystemSlice<'_, C::System>,
-        deriv: SystemSliceMut<'_, C::System>,
-    ) where
-        C::System: Sync,
-    {
-        let deriv = deriv.into_shared();
-
-        self.block_compute(|mesh, store, block| {
-            let bounds = mesh.blocks.bounds(block);
-            let space = mesh.block_space(block);
-            let nodes = mesh.block_nodes(block);
-            let vertex_size = space.vertex_size();
-
-            let block_source = source.slice(nodes.clone());
-            let mut block_deriv = unsafe { deriv.slice_mut(nodes.clone()) };
-
-            let engine = FdEngine {
-                space: space.clone(),
-                bounds,
-                _order: order,
-                store,
-                range: nodes.clone(),
-            };
-
-            for face in faces::<N>() {
-                if space.boundary[face] != BoundaryKind::Radiative {
-                    continue;
-                }
-
-                // Sommerfeld radiative boundary conditions.
-                for vertex in IndexSpace::new(vertex_size).face(face).iter() {
-                    // *************************
-                    // At vertex
-
-                    let position: [f64; N] = engine.position(vertex);
-                    let r = position.iter().map(|&v| v * v).sum::<f64>().sqrt();
-                    let index = engine.index_from_vertex(vertex);
-
-                    // *************************
-                    // Inner
-
-                    let mut inner = vertex;
-
-                    // Find innter vertex for approximating higher order r dependence
-                    for axis in 0..N {
-                        if space.boundary[Face::negative(axis)] == BoundaryKind::Radiative
-                            && vertex[axis] == 0
-                        {
-                            inner[axis] += 1;
-                        }
-
-                        if space.boundary[Face::positive(axis)] == BoundaryKind::Radiative
-                            && vertex[axis] == vertex_size[axis] - 1
-                        {
-                            inner[axis] -= 1;
-                        }
-                    }
-
-                    let inner_position = engine.position(inner);
-                    let inner_r = inner_position.iter().map(|&v| v * v).sum::<f64>().sqrt();
-                    let inner_index = engine.index_from_vertex(inner);
-
-                    for field in deriv.system().enumerate() {
-                        let source = block_source.field(field);
-                        let deriv = block_deriv.field_mut(field);
-
-                        let params = conditions.radiative(field, position);
-
-                        // Inner R dependence
-                        let mut inner_advection = source[inner_index] - params.target;
-
-                        for axis in 0..N {
-                            let derivative = engine.derivative(source, axis, inner);
-                            inner_advection += inner_position[axis] * derivative;
-                        }
-
-                        inner_advection *= params.speed;
-
-                        let k = inner_r
-                            * inner_r
-                            * inner_r
-                            * (deriv[inner_index] + inner_advection / inner_r);
-
-                        // Vertex
-                        let mut advection = source[index] - params.target;
-
-                        for axis in 0..N {
-                            let derivative = engine.derivative(source, axis, vertex);
-                            advection += position[axis] * derivative;
-                        }
-
-                        advection *= params.speed;
-                        deriv[index] = -advection / r + k / (r * r * r);
-                    }
-                }
-            }
-        })
     }
 
     /// Copies an immutable src slice into a mutable dest slice.
@@ -664,9 +515,8 @@ impl<const N: usize> Mesh<N> {
         self.block_compute(|mesh, _, block| {
             let nodes = mesh.block_nodes(block);
             let space = mesh.block_space(block);
-            let bounds = mesh.block_bounds(block);
 
-            let spacing = space.spacing(bounds);
+            let spacing = space.spacing();
             let min_spacing = spacing
                 .iter()
                 .min_by(|a, b| a.total_cmp(&b))

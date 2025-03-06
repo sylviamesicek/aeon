@@ -1,7 +1,7 @@
 use crate::{
     kernel::{Kernels, Order},
     mesh::{Function, Mesh},
-    system::{System, SystemConditions, SystemSlice, SystemSliceMut},
+    system::{System, SystemBoundaryConds, SystemSlice, SystemSliceMut},
 };
 use rayon::iter::{ParallelBridge, ParallelIterator};
 use reborrow::{Reborrow, ReborrowMut};
@@ -37,7 +37,7 @@ impl Integrator {
     pub fn step<
         const N: usize,
         K: Kernels + Sync,
-        C: SystemConditions<N> + Sync,
+        C: SystemBoundaryConds<N> + Sync,
         F: Function<N, Input = C::System, Output = C::System> + Clone + Sync,
     >(
         &mut self,

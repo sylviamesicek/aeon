@@ -61,7 +61,7 @@ pub enum Field {
 #[derive(Clone)]
 pub struct FieldConditions;
 
-impl SystemConditions<1> for FieldConditions {
+impl SystemBoundaryConds<1> for FieldConditions {
     type System = Fields;
 
     fn parity(&self, label: <Self::System as System>::Label, _face: Face<1>) -> bool {
@@ -86,7 +86,7 @@ impl SystemConditions<1> for FieldConditions {
 #[derive(Clone)]
 pub struct SymCondition;
 
-impl Condition<1> for SymCondition {
+impl BoundaryCondition<1> for SymCondition {
     fn parity(&self, _face: Face<1>) -> bool {
         true
     }
@@ -102,7 +102,7 @@ impl Condition<1> for SymCondition {
 #[derive(Clone)]
 pub struct AntiSymCondition;
 
-impl Condition<1> for AntiSymCondition {
+impl BoundaryCondition<1> for AntiSymCondition {
     fn parity(&self, _face: Face<1>) -> bool {
         false
     }
@@ -210,7 +210,7 @@ pub fn solve_constraints(mesh: &mut Mesh<1>, system: SystemSliceMut<Fields>) {
     for block in 0..mesh.num_blocks() {
         let space = mesh.block_space(block);
         let nodes = mesh.block_nodes(block);
-        let bounds = mesh.block_bounds(block);
+        // let bounds = mesh.block_bounds(block);
         let spacing = mesh.block_spacing(block);
         let cell_size = space.cell_size()[0];
 
@@ -232,7 +232,7 @@ pub fn solve_constraints(mesh: &mut Mesh<1>, system: SystemSliceMut<Fields>) {
 
         for vertex in 0..cell_size {
             let index = space.index_from_vertex([vertex]);
-            let [r] = space.position([vertex as isize], bounds);
+            let [r] = space.position([vertex as isize]);
             // Intermediate step interpolation
             let r_half = r + spacing / 2.0;
             let phi_half = space.prolong(Interpolation::<4>, [(2 * vertex + 1) as isize], phi);
@@ -264,7 +264,6 @@ pub fn solve_constraints(mesh: &mut Mesh<1>, system: SystemSliceMut<Fields>) {
     for block in (0..mesh.num_blocks()).rev() {
         let space = mesh.block_space(block);
         let nodes = mesh.block_nodes(block);
-        let bounds = mesh.block_bounds(block);
         let spacing = mesh.block_spacing(block);
         let cell_size = space.cell_size()[0];
 
@@ -285,7 +284,7 @@ pub fn solve_constraints(mesh: &mut Mesh<1>, system: SystemSliceMut<Fields>) {
 
         for vertex in (0..cell_size).rev().map(|i| i + 1) {
             let index = space.index_from_vertex([vertex]);
-            let [r] = space.position([vertex as isize], bounds);
+            let [r] = space.position([vertex as isize]);
             // Intermediate step interpolation
             let r_half = r - spacing / 2.0;
             let phi_half = space.prolong(Interpolation::<4>, [(2 * vertex - 1) as isize], phi);
@@ -355,14 +354,13 @@ pub fn find_mass(mesh: &Mesh<1>, system: SystemSlice<Fields>) -> f64 {
     for block in 0..mesh.num_blocks() {
         let space = mesh.block_space(block);
         let nodes = mesh.block_nodes(block);
-        let bounds = mesh.block_bounds(block);
 
         let vertex_size = space.vertex_size()[0];
         let a = &system.field(Field::Conformal)[nodes.clone()];
 
         for vertex in 0..vertex_size {
             let index = space.index_from_vertex([vertex]);
-            let [r] = space.position([vertex as isize], bounds);
+            let [r] = space.position([vertex as isize]);
             let a = a[index];
 
             if a > a_max {

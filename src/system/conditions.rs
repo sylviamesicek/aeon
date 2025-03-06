@@ -1,13 +1,13 @@
-use crate::kernel::{Condition, RadiativeParams};
+use crate::kernel::{BoundaryConds, BoundaryKind, RadiativeParams};
 use crate::system::{Empty, Pair, Scalar, System};
 use aeon_geometry::Face;
 
 /// A generalization of `Condition<N>` for a coupled systems of scalar fields.
-pub trait SystemConditions<const N: usize>: Clone {
+pub trait SystemBoundaryConds<const N: usize>: Clone {
     type System: System;
 
-    fn parity(&self, _label: <Self::System as System>::Label, _face: Face<N>) -> bool {
-        false
+    fn kind(&self, _label: <Self::System as System>::Label, _face: Face<N>) -> BoundaryKind {
+        BoundaryKind::Free
     }
 
     fn radiative(
@@ -20,22 +20,38 @@ pub trait SystemConditions<const N: usize>: Clone {
             speed: 1.0,
         }
     }
+
+    fn dirichlet(&self, _label: <Self::System as System>::Label, _position: [f64; N]) -> f64 {
+        0.0
+    }
+
+    fn dirichlet_strength(
+        &self,
+        _label: <Self::System as System>::Label,
+        _position: [f64; N],
+    ) -> f64 {
+        1.0
+    }
+
+    fn field(&self, field: <Self::System as System>::Label) -> FieldBoundaryConds<N, Self> {
+        FieldBoundaryConds::new(self.clone(), field)
+    }
 }
 
 /// Transfers a set of `Conditions<N>` into a single `Condition<N>` by only applying the set of conditions
 /// to a single field.
-pub struct SystemCondition<const N: usize, C: SystemConditions<N>> {
+pub struct FieldBoundaryConds<const N: usize, C: SystemBoundaryConds<N>> {
     conditions: C,
     field: <C::System as System>::Label,
 }
 
-impl<const N: usize, C: SystemConditions<N>> SystemCondition<N, C> {
+impl<const N: usize, C: SystemBoundaryConds<N>> FieldBoundaryConds<N, C> {
     pub const fn new(conditions: C, field: <C::System as System>::Label) -> Self {
         Self { field, conditions }
     }
 }
 
-impl<const N: usize, C: SystemConditions<N>> Clone for SystemCondition<N, C> {
+impl<const N: usize, C: SystemBoundaryConds<N>> Clone for FieldBoundaryConds<N, C> {
     fn clone(&self) -> Self {
         Self {
             conditions: self.conditions.clone(),
@@ -44,13 +60,21 @@ impl<const N: usize, C: SystemConditions<N>> Clone for SystemCondition<N, C> {
     }
 }
 
-impl<const N: usize, C: SystemConditions<N>> Condition<N> for SystemCondition<N, C> {
-    fn parity(&self, face: Face<N>) -> bool {
-        self.conditions.parity(self.field.clone(), face)
+impl<const N: usize, C: SystemBoundaryConds<N>> BoundaryConds<N> for FieldBoundaryConds<N, C> {
+    fn kind(&self, face: Face<N>) -> BoundaryKind {
+        self.conditions.kind(self.field, face)
     }
 
     fn radiative(&self, position: [f64; N]) -> RadiativeParams {
-        self.conditions.radiative(self.field.clone(), position)
+        self.conditions.radiative(self.field, position)
+    }
+
+    fn dirichlet(&self, position: [f64; N]) -> f64 {
+        self.conditions.dirichlet(self.field, position)
+    }
+
+    fn dirichlet_strength(&self, position: [f64; N]) -> f64 {
+        self.conditions.dirichlet_strength(self.field, position)
     }
 }
 
@@ -68,15 +92,27 @@ impl<I> ScalarConditions<I> {
     }
 }
 
-impl<const N: usize, I: Condition<N>> SystemConditions<N> for ScalarConditions<I> {
+impl<const N: usize, I: BoundaryConds<N>> SystemBoundaryConds<N> for ScalarConditions<I> {
     type System = Scalar;
 
-    fn parity(&self, _field: (), face: Face<N>) -> bool {
-        self.0.parity(face)
+    fn kind(&self, _label: <Self::System as System>::Label, face: Face<N>) -> BoundaryKind {
+        self.0.kind(face)
     }
 
     fn radiative(&self, _field: (), position: [f64; N]) -> RadiativeParams {
         self.0.radiative(position)
+    }
+
+    fn dirichlet(&self, _label: <Self::System as System>::Label, position: [f64; N]) -> f64 {
+        self.0.dirichlet(position)
+    }
+
+    fn dirichlet_strength(
+        &self,
+        _label: <Self::System as System>::Label,
+        position: [f64; N],
+    ) -> f64 {
+        self.0.dirichlet_strength(position)
     }
 }
 
@@ -86,15 +122,15 @@ pub struct PairConditions<L, R> {
     pub right: R,
 }
 
-impl<const N: usize, L: SystemConditions<N>, R: SystemConditions<N>> SystemConditions<N>
+impl<const N: usize, L: SystemBoundaryConds<N>, R: SystemBoundaryConds<N>> SystemBoundaryConds<N>
     for PairConditions<L, R>
 {
     type System = (L::System, R::System);
 
-    fn parity(&self, field: <Self::System as System>::Label, face: Face<N>) -> bool {
+    fn kind(&self, field: <Self::System as System>::Label, face: Face<N>) -> BoundaryKind {
         match field {
-            Pair::First(left) => self.left.parity(left, face),
-            Pair::Second(right) => self.right.parity(right, face),
+            Pair::First(left) => self.left.kind(left, face),
+            Pair::Second(right) => self.right.kind(right, face),
         }
     }
 
@@ -108,15 +144,33 @@ impl<const N: usize, L: SystemConditions<N>, R: SystemConditions<N>> SystemCondi
             Pair::Second(right) => self.right.radiative(right, position),
         }
     }
+
+    fn dirichlet(&self, field: <Self::System as System>::Label, position: [f64; N]) -> f64 {
+        match field {
+            Pair::First(left) => self.left.dirichlet(left, position),
+            Pair::Second(right) => self.right.dirichlet(right, position),
+        }
+    }
+
+    fn dirichlet_strength(
+        &self,
+        field: <Self::System as System>::Label,
+        position: [f64; N],
+    ) -> f64 {
+        match field {
+            Pair::First(left) => self.left.dirichlet_strength(left, position),
+            Pair::Second(right) => self.right.dirichlet_strength(right, position),
+        }
+    }
 }
 
 #[derive(Clone)]
 pub struct EmptyConditions;
 
-impl<const N: usize> SystemConditions<N> for EmptyConditions {
+impl<const N: usize> SystemBoundaryConds<N> for EmptyConditions {
     type System = Empty;
 
-    fn parity(&self, _field: <Self::System as System>::Label, _face: Face<N>) -> bool {
+    fn kind(&self, _label: <Self::System as System>::Label, _face: Face<N>) -> BoundaryKind {
         unreachable!()
     }
 
@@ -125,6 +179,18 @@ impl<const N: usize> SystemConditions<N> for EmptyConditions {
         _field: <Self::System as System>::Label,
         _position: [f64; N],
     ) -> RadiativeParams {
+        unreachable!()
+    }
+
+    fn dirichlet(&self, _label: <Self::System as System>::Label, _position: [f64; N]) -> f64 {
+        unreachable!()
+    }
+
+    fn dirichlet_strength(
+        &self,
+        _label: <Self::System as System>::Label,
+        _position: [f64; N],
+    ) -> f64 {
         unreachable!()
     }
 }

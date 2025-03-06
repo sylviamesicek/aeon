@@ -15,13 +15,13 @@ pub use aeon_macros as macros;
 
 /// Provides common types used for most `aeon` applications.
 pub mod prelude {
-    pub use crate::kernel::{BoundaryKind, Condition, Order, RadiativeParams};
+    pub use crate::kernel::{BoundaryConds, BoundaryKind, Order, RadiativeParams};
     pub use crate::mesh::{
         Engine, ExportVtuConfig, Function, Mesh, MeshCheckpoint, Projection, SystemCheckpoint,
     };
     pub use crate::system::{
         Empty, EmptyConditions, Pair, PairConditions, Scalar, ScalarConditions, System,
-        SystemConditions, SystemSlice, SystemSliceMut, SystemVec,
+        SystemBoundaryConds, SystemSlice, SystemSliceMut, SystemVec,
     };
     pub use aeon_geometry::{Face, IndexSpace, Rectangle};
     pub use aeon_macros::SystemLabel;

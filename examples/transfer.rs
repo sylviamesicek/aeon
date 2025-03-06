@@ -9,7 +9,7 @@ const UPPER: f64 = 1e-6;
 #[derive(Clone)]
 pub struct WaveConditions;
 
-impl SystemConditions<2> for WaveConditions {
+impl SystemBoundaryConds<2> for WaveConditions {
     type System = Scalar;
 
     fn radiative(&self, _field: (), _position: [f64; 2]) -> RadiativeParams {

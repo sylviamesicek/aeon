@@ -87,7 +87,7 @@ pub enum Context {
 #[derive(Clone)]
 pub struct PsiCondition;
 
-impl Condition<2> for PsiCondition {
+impl BoundaryCondition<2> for PsiCondition {
     fn parity(&self, face: Face<2>) -> bool {
         [true, true][face.axis]
     }
@@ -101,7 +101,7 @@ impl Condition<2> for PsiCondition {
 #[derive(Clone)]
 pub struct ContextConditions;
 
-impl SystemConditions<2> for ContextConditions {
+impl SystemBoundaryConds<2> for ContextConditions {
     type System = ContextSystem;
 
     fn parity(&self, field: Context, face: Face<2>) -> bool {

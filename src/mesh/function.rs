@@ -1,21 +1,44 @@
 #![allow(clippy::needless_range_loop)]
 
-use crate::system::{System, SystemSlice, SystemSliceMut};
+use crate::{
+    kernel::{node_from_vertex, NodeSpace},
+    system::{System, SystemSlice, SystemSliceMut},
+};
 use std::ops::Range;
 
 use super::Mesh;
 
 /// An interface for computing values, gradients, and hessians of fields.
 pub trait Engine<const N: usize> {
-    fn num_nodes(&self) -> usize;
+    fn space(&self) -> &NodeSpace<N>;
+
+    fn num_nodes(&self) -> usize {
+        self.space().num_nodes()
+    }
+
+    fn vertex_size(&self) -> [usize; N] {
+        self.space().vertex_size()
+    }
+
     fn node_range(&self) -> Range<usize>;
-    fn vertex_size(&self) -> [usize; N];
 
     fn alloc<T: Default>(&self, len: usize) -> &mut [T];
 
-    fn position(&self, vertex: [usize; N]) -> [f64; N];
-    fn index_from_vertex(&self, vertex: [usize; N]) -> usize;
-    fn min_spacing(&self) -> f64;
+    fn position(&self, vertex: [usize; N]) -> [f64; N] {
+        self.space().position(node_from_vertex(vertex))
+    }
+
+    fn index_from_vertex(&self, vertex: [usize; N]) -> usize {
+        self.space().index_from_vertex(vertex)
+    }
+    fn min_spacing(&self) -> f64 {
+        let spacing = self.space().spacing();
+        spacing
+            .iter()
+            .min_by(|a, b| a.total_cmp(&b))
+            .cloned()
+            .unwrap_or(1.0)
+    }
 
     fn value(&self, field: &[f64], vertex: [usize; N]) -> f64;
     fn derivative(&self, field: &[f64], axis: usize, vertex: [usize; N]) -> f64;
@@ -25,6 +48,9 @@ pub trait Engine<const N: usize> {
 }
 
 impl<'a, const N: usize, E: Engine<N>> Engine<N> for &'a E {
+    fn space(&self) -> &NodeSpace<N> {
+        (&**self).space()
+    }
     fn num_nodes(&self) -> usize {
         (&**self).num_nodes()
     }

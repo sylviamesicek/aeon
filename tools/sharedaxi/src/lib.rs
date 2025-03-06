@@ -217,7 +217,7 @@ pub enum ScalarField {
 #[derive(Clone)]
 pub struct FieldConditions;
 
-impl SystemConditions<2> for FieldConditions {
+impl SystemBoundaryConds<2> for FieldConditions {
     type System = Fields;
 
     fn parity(&self, field: Field, face: Face<2>) -> bool {

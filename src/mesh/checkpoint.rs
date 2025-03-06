@@ -5,7 +5,6 @@ use std::collections::HashMap;
 use std::str::FromStr;
 use thiserror::Error;
 
-use crate::kernel::BoundaryKind;
 use crate::mesh::Mesh;
 use crate::system::{System, SystemSlice, SystemVec};
 
@@ -24,7 +23,7 @@ pub struct MeshCheckpoint<const N: usize> {
     tree: Tree<N>,
     width: usize,
     ghost: usize,
-    boundary: FaceArray<N, BoundaryKind>,
+    ghost_flags: FaceArray<N, bool>,
 }
 
 impl<const N: usize> MeshCheckpoint<N> {
@@ -32,14 +31,14 @@ impl<const N: usize> MeshCheckpoint<N> {
         self.tree.clone_from(&mesh.tree);
         self.width = mesh.width;
         self.ghost = mesh.ghost;
-        self.boundary = mesh.boundary;
+        self.ghost_flags = mesh.boundary_ghost_flags;
     }
 
     pub fn load_mesh(&self, mesh: &mut Mesh<N>) {
         mesh.tree.clone_from(&self.tree);
         mesh.width = self.width;
         mesh.ghost = self.ghost;
-        mesh.boundary = self.boundary;
+        mesh.boundary_ghost_flags = self.ghost_flags;
 
         mesh.build();
     }
@@ -51,7 +50,7 @@ impl<const N: usize> Default for MeshCheckpoint<N> {
             tree: Tree::new(Rectangle::UNIT),
             width: 4,
             ghost: 1,
-            boundary: FaceArray::from_fn(|_| BoundaryKind::Radiative),
+            ghost_flags: FaceArray::from_fn(|_| false),
         }
     }
 }

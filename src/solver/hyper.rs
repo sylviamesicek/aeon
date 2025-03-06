@@ -1,4 +1,4 @@
-use crate::kernel::{Kernels, RadiativeParams};
+use crate::kernel::{BoundaryKind, Kernels, RadiativeParams};
 use aeon_geometry::{Face, IndexSpace};
 use reborrow::{Reborrow, ReborrowMut};
 use thiserror::Error;
@@ -6,7 +6,7 @@ use thiserror::Error;
 use crate::{
     mesh::{Engine, Function, Mesh},
     solver::{Integrator, Method},
-    system::{Pair, System, SystemConditions, SystemSlice, SystemSliceMut},
+    system::{Pair, System, SystemBoundaryConds, SystemSlice, SystemSliceMut},
 };
 
 use super::SolverCallback;
@@ -67,7 +67,7 @@ impl HyperRelaxSolver {
     pub fn solve<
         const N: usize,
         K: Kernels + Sync,
-        C: SystemConditions<N> + Sync,
+        C: SystemBoundaryConds<N> + Sync,
         F: Function<N, Input = C::System, Output = C::System> + Clone + Sync,
     >(
         &mut self,
@@ -86,7 +86,7 @@ impl HyperRelaxSolver {
     pub fn solve_with_callback<
         const N: usize,
         K: Kernels + Sync,
-        C: SystemConditions<N> + Sync,
+        C: SystemBoundaryConds<N> + Sync,
         F: Function<N, Input = C::System, Output = C::System> + Clone + Sync,
         Call: SolverCallback<N, C::System> + Sync,
     >(
@@ -142,7 +142,7 @@ impl HyperRelaxSolver {
         for index in 0..self.max_steps {
             mesh.fill_boundary(
                 order,
-                FicticuousConditions {
+                FicticuousBoundaryConds {
                     dampening: self.dampening,
                     conditions: conditions.clone(),
                 },
@@ -174,7 +174,7 @@ impl HyperRelaxSolver {
             self.integrator.step(
                 mesh,
                 order,
-                FicticuousConditions {
+                FicticuousBoundaryConds {
                     dampening: self.dampening,
                     conditions: conditions.clone(),
                 },
@@ -208,18 +208,33 @@ impl HyperRelaxSolver {
 }
 
 #[derive(Clone)]
-struct FicticuousConditions<C> {
+struct FicticuousBoundaryConds<C> {
     dampening: f64,
     conditions: C,
 }
 
-impl<const N: usize, C: SystemConditions<N>> SystemConditions<N> for FicticuousConditions<C> {
+impl<const N: usize, C: SystemBoundaryConds<N>> SystemBoundaryConds<N>
+    for FicticuousBoundaryConds<C>
+{
     type System = (C::System, C::System);
 
-    fn parity(&self, label: <Self::System as System>::Label, face: Face<N>) -> bool {
-        match label {
-            Pair::First(label) => self.conditions.parity(label, face),
-            Pair::Second(label) => self.conditions.parity(label, face),
+    fn kind(&self, label: <Self::System as System>::Label, face: Face<N>) -> BoundaryKind {
+        let label = match label {
+            Pair::First(label) => label,
+            Pair::Second(label) => label,
+        };
+
+        let boundary_kind = self.conditions.kind(label, face);
+
+        match boundary_kind {
+            BoundaryKind::Symmetric => BoundaryKind::Symmetric,
+            BoundaryKind::AntiSymmetric => BoundaryKind::AntiSymmetric,
+            BoundaryKind::Custom => BoundaryKind::Custom,
+            BoundaryKind::Radiative => BoundaryKind::Radiative,
+            BoundaryKind::Free => BoundaryKind::Free,
+            BoundaryKind::StrongDirichlet | BoundaryKind::WeakDirichlet => {
+                BoundaryKind::WeakDirichlet
+            }
         }
     }
 
@@ -236,6 +251,25 @@ impl<const N: usize, C: SystemConditions<N>> SystemConditions<N> for FicticuousC
                 result
             }
         }
+    }
+
+    fn dirichlet(&self, label: <Self::System as System>::Label, position: [f64; N]) -> f64 {
+        match label {
+            Pair::First(label) => self.conditions.dirichlet(label, position),
+            Pair::Second(label) => self.conditions.dirichlet(label, position) * self.dampening,
+        }
+    }
+
+    fn dirichlet_strength(
+        &self,
+        label: <Self::System as System>::Label,
+        position: [f64; N],
+    ) -> f64 {
+        let label = match label {
+            Pair::First(label) => label,
+            Pair::Second(label) => label,
+        };
+        self.conditions.dirichlet_strength(label, position)
     }
 }
 
@@ -306,19 +340,20 @@ mod tests {
 
     use super::*;
     use crate::{
+        kernel::BoundaryKind,
         mesh::Projection,
-        system::{Scalar, SystemConditions},
+        system::{Scalar, SystemBoundaryConds},
     };
     use std::f64::consts;
 
     #[derive(Clone)]
     struct PoissonConditions;
 
-    impl SystemConditions<2> for PoissonConditions {
+    impl SystemBoundaryConds<2> for PoissonConditions {
         type System = Scalar;
 
-        fn parity(&self, _label: <Self::System as System>::Label, _face: Face<2>) -> bool {
-            true
+        fn kind(&self, _label: <Self::System as System>::Label, _face: Face<2>) -> BoundaryKind {
+            BoundaryKind::Symmetric
         }
     }
 

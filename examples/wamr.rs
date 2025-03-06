@@ -7,7 +7,7 @@ use std::f64::consts::PI;
 #[derive(Clone)]
 pub struct SeedConditions;
 
-impl SystemConditions<2> for SeedConditions {
+impl SystemBoundaryConds<2> for SeedConditions {
     type System = Scalar;
 
     fn parity(&self, _field: (), face: Face<2>) -> bool {

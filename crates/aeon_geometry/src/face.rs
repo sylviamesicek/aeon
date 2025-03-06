@@ -194,6 +194,12 @@ impl<const N: usize, T> IndexMut<Face<N>> for FaceArray<N, T> {
 pub struct FaceMask<const N: usize>([[bool; 2]; N]);
 
 impl<const N: usize> FaceMask<N> {
+    pub fn from_fn<F: FnMut(Face<N>) -> bool>(mut f: F) -> Self {
+        Self(core::array::from_fn(|axis| {
+            [f(Face::negative(axis)), f(Face::positive(axis))]
+        }))
+    }
+
     pub fn pack(bits: [[bool; 2]; N]) -> Self {
         Self(bits)
     }
@@ -242,6 +248,12 @@ impl<const N: usize> FaceMask<N> {
         window
             .iter()
             .map(|index| Region::new(from_fn(|axis| Side::from_value(index[axis] as u8))))
+    }
+}
+
+impl<const N: usize> Default for FaceMask<N> {
+    fn default() -> Self {
+        Self::from_fn(|_| false)
     }
 }
 

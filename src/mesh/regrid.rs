@@ -130,16 +130,16 @@ impl<const N: usize> Mesh<N> {
 
 #[cfg(test)]
 mod tests {
-    use crate::{kernel::BoundaryKind, mesh::Mesh};
+    use crate::mesh::Mesh;
     use aeon_geometry::{Face, Rectangle};
 
     #[test]
     fn element_windows() {
         let mut mesh: Mesh<2> = Mesh::new(Rectangle::UNIT, 4, 2);
-        mesh.set_face_boundary(Face::negative(0), BoundaryKind::Parity);
-        mesh.set_face_boundary(Face::negative(1), BoundaryKind::Parity);
-        mesh.set_face_boundary(Face::positive(0), BoundaryKind::Free);
-        mesh.set_face_boundary(Face::positive(1), BoundaryKind::Free);
+        mesh.set_face_boundary(Face::negative(0), true);
+        mesh.set_face_boundary(Face::negative(1), true);
+        mesh.set_face_boundary(Face::positive(0), false);
+        mesh.set_face_boundary(Face::positive(1), false);
 
         mesh.set_refine_flag(0);
         mesh.regrid();

@@ -1,4 +1,4 @@
-use crate::{kernel::Kernels, system::SystemCondition};
+use crate::kernel::Kernels;
 use aeon_geometry::{AxisMask, IndexSpace, Side, TreeBlockNeighbor, TreeCellNeighbor};
 use reborrow::ReborrowMut;
 use std::{array, cmp::Ordering, ops::Range};
@@ -6,7 +6,7 @@ use std::{array, cmp::Ordering, ops::Range};
 use crate::{
     mesh::Mesh,
     shared::SharedSlice,
-    system::{System, SystemConditions, SystemSlice, SystemSliceMut},
+    system::{System, SystemBoundaryConds, SystemSlice, SystemSliceMut},
 };
 
 #[derive(Clone, Debug)]
@@ -214,23 +214,23 @@ impl<const N: usize> Mesh<N> {
 
     /// Enforces strong boundary conditions. This includes strong physical boundary conditions, as well
     /// as handling interior boundaries (same level, coarse-fine, or fine-coarse).
-    pub fn fill_boundary<K: Kernels, C: SystemConditions<N> + Sync>(
+    pub fn fill_boundary<K: Kernels, BCs: SystemBoundaryConds<N> + Sync>(
         &mut self,
         order: K,
-        conditions: C,
-        system: SystemSliceMut<'_, C::System>,
+        bcs: BCs,
+        system: SystemSliceMut<'_, BCs::System>,
     ) {
-        self.fill_boundary_to_extent(order, self.ghost, conditions, system);
+        self.fill_boundary_to_extent(order, self.ghost, bcs, system);
     }
 
     /// Enforces strong boundary conditions, only filling ghost nodes if those nodes are within `extent`
     /// of a physical node. This is useful if one is using Kriss-Olgier dissipation, where dissipation
     /// and derivatives use different order stencils.
-    pub fn fill_boundary_to_extent<K: Kernels, C: SystemConditions<N> + Sync>(
+    pub fn fill_boundary_to_extent<K: Kernels, C: SystemBoundaryConds<N> + Sync>(
         &mut self,
         order: K,
         extent: usize,
-        conditions: C,
+        bcs: C,
         mut system: SystemSliceMut<'_, C::System>,
     ) {
         assert!(extent <= self.ghost);
@@ -238,9 +238,9 @@ impl<const N: usize> Mesh<N> {
         self.fill_fine(extent, system.rb_mut());
         self.fill_direct(extent, system.rb_mut());
 
-        self.fill_physical(extent, &conditions, system.rb_mut());
+        self.fill_physical(extent, &bcs, system.rb_mut());
         self.fill_prolong(order, extent, system.rb_mut());
-        self.fill_physical(extent, &conditions, system.rb_mut());
+        self.fill_physical(extent, &bcs, system.rb_mut());
     }
 
     /// A debugging function that fills ghost nodes with zeros.
@@ -268,10 +268,10 @@ impl<const N: usize> Mesh<N> {
         });
     }
 
-    fn fill_physical<C: SystemConditions<N> + Sync>(
+    fn fill_physical<C: SystemBoundaryConds<N> + Sync>(
         &mut self,
         extent: usize,
-        conditions: &C,
+        bcs: &C,
         dest: SystemSliceMut<'_, C::System>,
     ) {
         debug_assert!(dest.len() == self.num_nodes());
@@ -282,12 +282,12 @@ impl<const N: usize> Mesh<N> {
             // Fill Physical Boundary conditions
             let nodes = self.block_nodes(block);
             let space = self.block_space(block);
+            let bcs = self.block_bcs(block, bcs.clone());
 
             let mut block_system = unsafe { shared.slice_mut(nodes) };
 
             for field in shared.system().enumerate() {
-                let condition = SystemCondition::new(conditions.clone(), field);
-                space.fill_boundary(extent, condition, block_system.field_mut(field));
+                space.fill_boundary(extent, bcs.field(field), block_system.field_mut(field));
             }
         });
     }

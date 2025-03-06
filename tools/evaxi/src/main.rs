@@ -292,8 +292,6 @@ pub fn evolution() -> Result<bool> {
     let mut save_step = 0;
     let mut steps_since_regrid = 0;
 
-    // let mut errors = Vec::new();
-
     let max_steps = config.max_steps;
     let max_time = config.max_time;
     let max_proper_time = config.max_proper_time;
@@ -362,7 +360,7 @@ pub fn evolution() -> Result<bool> {
         // Get step size
         let h = mesh.min_spacing() * cfl;
 
-        if steps_since_regrid > regrid_steps {
+        if steps_since_regrid >= regrid_steps {
             steps_since_regrid = 0;
 
             mesh.flag_wavelets(4, lower, upper, fields.as_slice());
@@ -469,16 +467,16 @@ pub fn evolution() -> Result<bool> {
 
         let lapse = mesh.bottom_left_value(fields.field(Field::Gauge(Gauge::Lapse)));
 
-        if step % 50 == 0 {
-            use std::fmt::Write;
+        // if step % 50 == 0 {
+        //     use std::fmt::Write;
 
-            let mut graph = String::new();
-            for (time, pi) in &results {
-                writeln!(&mut graph, "{} {}", time, pi).unwrap();
-            }
+        //     let mut graph = String::new();
+        //     for (time, pi) in &results {
+        //         writeln!(&mut graph, "{} {}", time, pi).unwrap();
+        //     }
 
-            std::fs::write("output/strong1.4.txt", graph).unwrap();
-        }
+        //     std::fs::write("output/strong1.4.txt", graph).unwrap();
+        // }
 
         step += 1;
         steps_since_regrid += 1;

@@ -216,8 +216,6 @@ fn run(config: RunConfig, diagnostics: &mut Diagnostics) -> Result<()> {
         )?;
     }
 
-    // mesh.export_dat(absolute.join(format!("{}.dat", config.name)), &checkpoint)?;
-
     // ****************************************
     // Run evolution
 

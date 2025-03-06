@@ -3,14 +3,14 @@
 //! This module introduces the primary abstraction of `aeon_kernel`, namely
 //! the `NodeSpace`.
 
+use crate::kernel::{
+    boundary::are_bcs_compatible, Border, BoundaryConds, BoundaryKind, CellKernel, Convolution,
+    Kernel, Value, VertexKernel,
+};
 use aeon_geometry::{
-    faces, regions, CartesianIter, Face, FaceArray, IndexSpace, Rectangle, Region, Side,
+    faces, regions, CartesianIter, Face, FaceMask, IndexSpace, Rectangle, Region, Side,
 };
 use std::array::{self, from_fn};
-
-use crate::kernel::{
-    Border, BoundaryKind, CellKernel, Condition, Convolution, Kernel, Value, VertexKernel,
-};
 
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
 pub enum Support {
@@ -35,7 +35,8 @@ pub struct NodeSpace<const N: usize> {
     /// Number of cells along each axis (one less than then number of vertices).
     pub size: [usize; N],
     pub ghost: usize,
-    pub boundary: FaceArray<N, BoundaryKind>,
+    pub ghost_flags: FaceMask<N>,
+    pub bounds: Rectangle<N>,
 }
 
 impl<const N: usize> NodeSpace<N> {
@@ -61,12 +62,12 @@ impl<const N: usize> NodeSpace<N> {
     }
 
     /// Returns the spacing along each axis of the node space.
-    pub fn spacing(&self, bounds: Rectangle<N>) -> [f64; N] {
-        from_fn(|axis| bounds.size[axis] / self.size[axis] as f64)
+    pub fn spacing(&self) -> [f64; N] {
+        from_fn(|axis| self.bounds.size[axis] / self.size[axis] as f64)
     }
 
-    pub fn spacing_axis(&self, bounds: Rectangle<N>, axis: usize) -> f64 {
-        bounds.size[axis] / self.size[axis] as f64
+    pub fn spacing_axis(&self, axis: usize) -> f64 {
+        self.bounds.size[axis] / self.size[axis] as f64
     }
 
     /// Returns true if the node lies inside the interior of the nodespace (i.e. it is not a  ghost node).
@@ -76,50 +77,14 @@ impl<const N: usize> NodeSpace<N> {
             .all(|b| b)
     }
 
-    // /// Returns true of the node lies on the given face.
-    // pub fn is_on_face(&self, face: Face<N>, node: [isize; N]) -> bool {
-    //     let intercept = if face.side { self.size[face.axis] } else { 0 };
-    //     node[face.axis] == intercept as isize
-    // }
-
-    // /// Returns true if the node is owned by the given face.
-    // pub fn is_owned_by_face(&self, face: Face<N>, node: [isize; N]) -> bool {
-    //     if face.side {
-    //         // Check all negative faces
-    //         for axis in 0..N {
-    //             if node[axis] == 0 {
-    //                 return false;
-    //             }
-    //         }
-
-    //         // Check all lower postive faces
-    //         for axis in 0..face.axis {
-    //             if node[axis] == self.size[axis] as isize {
-    //                 return false;
-    //             }
-    //         }
-
-    //         node[face.axis] == self.size[face.axis] as isize
-    //     } else {
-    //         // Check all negative faces lower than this face
-    //         for axis in 0..face.axis {
-    //             if node[axis] == 0 {
-    //                 return false;
-    //             }
-    //         }
-
-    //         node[face.axis] == 0
-    //     }
-    // }
-
     /// Computes the position of the given node.
-    pub fn position(&self, node: [isize; N], bounds: Rectangle<N>) -> [f64; N] {
-        let spacing: [_; N] = from_fn(|axis| bounds.size[axis] / self.size[axis] as f64);
+    pub fn position(&self, node: [isize; N]) -> [f64; N] {
+        let spacing: [_; N] = from_fn(|axis| self.bounds.size[axis] / self.size[axis] as f64);
 
         let mut result = [0.0; N];
 
         for i in 0..N {
-            result[i] = bounds.origin[i] + spacing[i] * node[i] as f64;
+            result[i] = self.bounds.origin[i] + spacing[i] * node[i] as f64;
         }
 
         result
@@ -145,13 +110,6 @@ impl<const N: usize> NodeSpace<N> {
     pub fn index_from_vertex(&self, vertex: [usize; N]) -> usize {
         self.index_from_node(node_from_vertex(vertex))
     }
-
-    // pub fn vertices(&self) -> IndexWindow<N> {
-    //     IndexWindow {
-    //         origin: [0; N],
-    //         size: self.vertex_size(),
-    //     }
-    // }
 
     /// Returns a window of just the interior and edges of the node space (no ghost nodes).
     pub fn inner_window(&self) -> NodeWindow<N> {
@@ -234,12 +192,12 @@ impl<const N: usize> NodeSpace<N> {
         NodeWindow { origin, size }
     }
 
-    pub fn support_axis(&self, vertex: usize, border_width: usize, axis: usize) -> Support {
+    fn support_axis(&self, vertex: usize, border_width: usize, axis: usize) -> Support {
         debug_assert!(self.ghost >= border_width);
         debug_assert!(self.size[axis] + 1 >= border_width);
 
-        let has_negative = self.boundary[Face::negative(axis)].has_ghost();
-        let has_positive = self.boundary[Face::positive(axis)].has_ghost();
+        let has_negative = self.ghost_flags.is_set(Face::negative(axis));
+        let has_positive = self.ghost_flags.is_set(Face::positive(axis));
 
         if !has_negative && vertex < border_width {
             Support::Negative(vertex as usize)
@@ -250,12 +208,12 @@ impl<const N: usize> NodeSpace<N> {
         }
     }
 
-    pub fn support_cell_axis(&self, cell: usize, border_width: usize, axis: usize) -> Support {
+    fn support_cell_axis(&self, cell: usize, border_width: usize, axis: usize) -> Support {
         debug_assert!(self.ghost >= border_width);
         debug_assert!(cell < self.size[axis]);
 
-        let has_negative = self.boundary[Face::negative(axis)].has_ghost();
-        let has_positive = self.boundary[Face::positive(axis)].has_ghost();
+        let has_negative = self.ghost_flags.is_set(Face::negative(axis));
+        let has_positive = self.ghost_flags.is_set(Face::positive(axis));
 
         if !has_negative && cell < border_width {
             let right = cell;
@@ -269,7 +227,31 @@ impl<const N: usize> NodeSpace<N> {
     }
 
     /// Set strongly enforced boundary conditions.
-    pub fn fill_boundary(&self, extent: usize, boundary: impl Condition<N>, dest: &mut [f64]) {
+    pub fn fill_boundary(&self, extent: usize, cond: impl BoundaryConds<N>, dest: &mut [f64]) {
+        debug_assert!(are_bcs_compatible(self.ghost_flags, &cond));
+
+        // Loop over faces
+        for face in faces::<N>() {
+            // Enforce zeros if boundary condition is odd
+            if cond.kind(face) == BoundaryKind::AntiSymmetric {
+                // Iterate over face
+                for node in self.face_window_disjoint(face) {
+                    // For antisymmetric boundaries we set all values on axis to be 0.
+                    let index = self.index_from_node(node);
+                    dest[index] = 0.0;
+                }
+            }
+
+            if cond.kind(face) == BoundaryKind::StrongDirichlet {
+                // Iterate over face
+                for node in self.face_window_disjoint(face) {
+                    let position = self.position(node);
+                    let index = self.index_from_node(node);
+                    dest[index] = cond.dirichlet(position);
+                }
+            }
+        }
+
         // Loop over regions
         for region in regions::<N>() {
             if region == Region::CENTRAL {
@@ -284,7 +266,9 @@ impl<const N: usize> NodeSpace<N> {
 
             for face in region.adjacent_faces() {
                 // Flip parity if boundary is antisymmetric
-                parity ^= self.boundary[face] == BoundaryKind::Parity && !boundary.parity(face);
+                // parity ^= self.boundary[face] == BoundaryKind::Parity && !boundary.parity(face);
+
+                parity ^= cond.kind(face) == BoundaryKind::AntiSymmetric;
             }
 
             let sign = if parity { 1.0 } else { -1.0 };
@@ -293,7 +277,7 @@ impl<const N: usize> NodeSpace<N> {
                 let mut source = node;
 
                 for face in region.adjacent_faces() {
-                    if self.boundary[face] != BoundaryKind::Parity {
+                    if !cond.kind(face).is_parity() {
                         continue;
                     }
 
@@ -306,18 +290,6 @@ impl<const N: usize> NodeSpace<N> {
                 }
 
                 dest[self.index_from_node(node)] = sign * dest[self.index_from_node(source)];
-            }
-        }
-
-        // Loop over faces
-        for face in faces::<N>() {
-            if self.boundary[face] == BoundaryKind::Parity && !boundary.parity(face) {
-                // Iterate over face
-                for node in self.face_window_disjoint(face) {
-                    // For antisymmetric boundaries we set all values on axis to be 0.
-                    let index = self.index_from_node(node);
-                    dest[index] = 0.0;
-                }
             }
         }
     }
@@ -375,11 +347,10 @@ impl<const N: usize> NodeSpace<N> {
     pub fn evaluate_interior(
         &self,
         convolution: impl Convolution<N>,
-        bounds: Rectangle<N>,
         node: [isize; N],
         field: &[f64],
     ) -> f64 {
-        let spacing = self.spacing(bounds);
+        let spacing = self.spacing();
         let stencils = array::from_fn(|axis| convolution.interior(axis));
         let corner = array::from_fn(|axis| node[axis] - convolution.border_width(axis) as isize);
         self.apply(corner, stencils, field) * convolution.scale(spacing)
@@ -388,12 +359,11 @@ impl<const N: usize> NodeSpace<N> {
     pub fn evaluate_axis_interior(
         &self,
         kernel: &impl VertexKernel,
-        bounds: Rectangle<N>,
         node: [isize; N],
         field: &[f64],
         axis: usize,
     ) -> f64 {
-        let spacing = self.spacing_axis(bounds, axis);
+        let spacing = self.spacing_axis(axis);
         let stencil = kernel.interior();
         let mut corner = node;
         corner[axis] -= kernel.border_width() as isize;
@@ -419,9 +389,10 @@ impl<const N: usize> NodeSpace<N> {
                 side: border.side(),
             };
 
-            match self.boundary[face] {
-                BoundaryKind::Custom | BoundaryKind::Parity => convolution.interior(axis),
-                BoundaryKind::Free | BoundaryKind::Radiative => convolution.free(border, axis),
+            if self.ghost_flags.is_set(face) {
+                convolution.interior(axis)
+            } else {
+                convolution.free(border, axis)
             }
         })
     }
@@ -445,9 +416,10 @@ impl<const N: usize> NodeSpace<N> {
             side: border.side(),
         };
 
-        match self.boundary[face] {
-            BoundaryKind::Custom | BoundaryKind::Parity => kernel.interior(),
-            BoundaryKind::Free | BoundaryKind::Radiative => kernel.free(border),
+        if self.ghost_flags.is_set(face) {
+            kernel.interior()
+        } else {
+            kernel.free(border)
         }
     }
 
@@ -455,11 +427,10 @@ impl<const N: usize> NodeSpace<N> {
     pub fn evaluate(
         &self,
         convolution: impl Convolution<N>,
-        bounds: Rectangle<N>,
         node: [isize; N],
         field: &[f64],
     ) -> f64 {
-        let spacing = self.spacing(bounds);
+        let spacing = self.spacing();
         let support = array::from_fn(|axis| {
             if convolution.border_width(axis) > 0 {
                 debug_assert!(node[axis] >= 0);
@@ -483,7 +454,6 @@ impl<const N: usize> NodeSpace<N> {
     pub fn evaluate_axis(
         &self,
         kernel: &impl VertexKernel,
-        bounds: Rectangle<N>,
         node: [isize; N],
         field: &[f64],
         axis: usize,
@@ -497,7 +467,7 @@ impl<const N: usize> NodeSpace<N> {
         debug_assert!(node[axis] >= 0);
         debug_assert!(node[axis] <= self.size[axis] as isize);
 
-        let spacing = self.spacing_axis(bounds, axis);
+        let spacing = self.spacing_axis(axis);
         let support = self.support_axis(node[axis] as usize, kernel.border_width(), axis);
         let stencil = self.stencil_axis(support, kernel, axis);
 
@@ -551,9 +521,10 @@ impl<const N: usize> NodeSpace<N> {
                 side: border.side(),
             };
 
-            match self.boundary[face] {
-                BoundaryKind::Custom | BoundaryKind::Parity => kernel.interior(),
-                BoundaryKind::Free | BoundaryKind::Radiative => kernel.free(border),
+            if self.ghost_flags.is_set(face) {
+                kernel.interior()
+            } else {
+                kernel.free(border)
             }
         });
 
@@ -673,11 +644,8 @@ mod tests {
     use super::*;
     use crate::kernel::{Kernels as _, Order};
 
-    fn boundary<const N: usize>() -> FaceArray<N, BoundaryKind> {
-        FaceArray::from_fn(|face| match face.side {
-            false => BoundaryKind::Parity,
-            true => BoundaryKind::Free,
-        })
+    fn ghost_flags<const N: usize>() -> FaceMask<N> {
+        FaceMask::from_fn(|face| !face.side)
     }
 
     #[test]
@@ -685,7 +653,8 @@ mod tests {
         let space = NodeSpace {
             size: [8],
             ghost: 3,
-            boundary: boundary(),
+            ghost_flags: ghost_flags(),
+            bounds: Rectangle::UNIT,
         };
 
         const BORDER: usize = 3;
@@ -712,7 +681,8 @@ mod tests {
         let space = NodeSpace {
             size: [8],
             ghost: 3,
-            boundary: boundary(),
+            ghost_flags: ghost_flags(),
+            bounds: Rectangle::UNIT,
         };
 
         const BORDER: usize = 3;
@@ -737,28 +707,27 @@ mod tests {
         let space = NodeSpace {
             size,
             ghost: 2,
-            boundary: boundary(),
+            ghost_flags: ghost_flags(),
+            bounds: Rectangle::UNIT,
         };
-        let bounds = Rectangle::UNIT;
 
         let mut field = vec![0.0; space.num_nodes()];
 
         for node in space.full_window().iter() {
             let index = space.index_from_node(node);
-            let [x, y] = space.position(node, bounds);
+            let [x, y] = space.position(node);
             field[index] = x.sin() * y.sin();
         }
 
         let mut result: f64 = 0.0;
 
         for node in space.inner_window().iter() {
-            let [x, y] = space.position(node, bounds);
+            let [x, y] = space.position(node);
             let numerical = space.evaluate(
                 (
                     Order::<4>::derivative().clone(),
                     Order::<4>::derivative().clone(),
                 ),
-                bounds,
                 node,
                 &field,
             );
@@ -785,28 +754,28 @@ mod tests {
         let cspace = NodeSpace {
             size,
             ghost: 2,
-            boundary: boundary(),
+            ghost_flags: ghost_flags(),
+            bounds: Rectangle::UNIT,
         };
         let rspace = NodeSpace {
             size: size.map(|v| v * 2),
             ghost: 2,
-            boundary: boundary(),
+            ghost_flags: ghost_flags(),
+            bounds: Rectangle::UNIT,
         };
-
-        let bounds = Rectangle::UNIT;
 
         let mut field = vec![0.0; cspace.num_nodes()];
 
         for node in cspace.full_window().iter() {
             let index = cspace.index_from_node(node);
-            let [x, y] = cspace.position(node, bounds);
+            let [x, y] = cspace.position(node);
             field[index] = x.sin() * y.sin();
         }
 
         let mut result: f64 = 0.0;
 
         for node in rspace.inner_window().iter() {
-            let [x, y] = rspace.position(node, bounds);
+            let [x, y] = rspace.position(node);
             let numerical = cspace.prolong(Order::<4>::interpolation().clone(), node, &field);
             let analytical = x.sin() * y.sin();
             let error: f64 = (numerical - analytical).abs();
@@ -831,7 +800,8 @@ mod tests {
         let space = NodeSpace {
             size: [10; 2],
             ghost: 2,
-            boundary: boundary(),
+            ghost_flags: ghost_flags(),
+            bounds: Rectangle::UNIT,
         };
 
         // Regions

@@ -23,7 +23,7 @@ const SPEED: [f64; 2] = [1.0, 0.0];
 #[derive(Clone)]
 struct WaveConditions;
 
-impl SystemConditions<2> for WaveConditions {
+impl SystemBoundaryConds<2> for WaveConditions {
     type System = Scalar;
 
     fn radiative(&self, _field: (), _position: [f64; 2]) -> RadiativeParams {
