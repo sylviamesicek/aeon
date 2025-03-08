@@ -176,10 +176,10 @@ fn initial_data() -> Result<()> {
         domain.cell.subdivisions,
         domain.cell.ghost,
     );
-    mesh.set_face_boundary(Face::negative(0), BoundaryKind::Parity);
-    mesh.set_face_boundary(Face::negative(1), BoundaryKind::Parity);
-    mesh.set_face_boundary(Face::positive(0), BoundaryKind::Radiative);
-    mesh.set_face_boundary(Face::positive(1), BoundaryKind::Radiative);
+    mesh.set_boundary_ghost(Face::negative(0), true);
+    mesh.set_boundary_ghost(Face::negative(1), true);
+    mesh.set_boundary_ghost(Face::positive(0), false);
+    mesh.set_boundary_ghost(Face::positive(1), false);
 
     log::trace!("Refining mesh globally {} times", config.refine_global);
 

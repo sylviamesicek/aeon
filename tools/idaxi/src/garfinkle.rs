@@ -87,9 +87,13 @@ pub enum Context {
 #[derive(Clone)]
 pub struct PsiCondition;
 
-impl BoundaryCondition<2> for PsiCondition {
-    fn parity(&self, face: Face<2>) -> bool {
-        [true, true][face.axis]
+impl BoundaryConds<2> for PsiCondition {
+    fn kind(&self, face: Face<2>) -> BoundaryKind {
+        if face.side {
+            return BoundaryKind::Radiative;
+        }
+
+        BoundaryKind::Symmetric
     }
 
     fn radiative(&self, _position: [f64; 2]) -> RadiativeParams {
@@ -104,11 +108,17 @@ pub struct ContextConditions;
 impl SystemBoundaryConds<2> for ContextConditions {
     type System = ContextSystem;
 
-    fn parity(&self, field: Context, face: Face<2>) -> bool {
-        match field {
-            Context::Seed => [false, true][face.axis],
-            Context::Phi(_) => [true, true][face.axis],
+    fn kind(&self, label: <Self::System as System>::Label, face: Face<2>) -> BoundaryKind {
+        if face.side {
+            return BoundaryKind::Radiative;
         }
+
+        let axes = match label {
+            Context::Seed => [BoundaryKind::AntiSymmetric, BoundaryKind::Symmetric],
+            Context::Phi(_) => [BoundaryKind::Symmetric, BoundaryKind::Symmetric],
+        };
+
+        axes[face.axis]
     }
 
     fn radiative(&self, _field: Context, _position: [f64; 2]) -> RadiativeParams {

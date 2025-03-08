@@ -1,4 +1,5 @@
 use aeon::{mesh::Gaussian, prelude::*, solver::HyperRelaxSolver};
+use aeon_geometry::faces;
 
 const ORDER: Order<4> = Order::<4>;
 
@@ -10,6 +11,10 @@ struct Conditions;
 
 impl SystemBoundaryConds<2> for Conditions {
     type System = Scalar;
+
+    fn kind(&self, _label: <Self::System as System>::Label, _face: Face<2>) -> BoundaryKind {
+        BoundaryKind::Radiative
+    }
 
     fn radiative(&self, _field: (), _position: [f64; 2]) -> RadiativeParams {
         RadiativeParams::lightlike(0.0)
@@ -58,7 +63,9 @@ pub fn main() -> anyhow::Result<()> {
 
     // Generate initial mesh
     let mut mesh = Mesh::new(Rectangle::from_aabb([-20., -20.], [20., 20.]), 4, 2);
-    mesh.set_boundary(BoundaryKind::Radiative);
+    for face in faces() {
+        mesh.set_boundary_ghost(face, false);
+    }
     // Allocate space for system
     let mut source = Vec::new();
     let mut solution = Vec::new();

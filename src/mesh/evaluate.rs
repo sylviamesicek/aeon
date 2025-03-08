@@ -228,7 +228,7 @@ impl<const N: usize> Mesh<N> {
     }
 
     pub(crate) fn is_block_in_interior(&self, block: usize) -> bool {
-        let ghost_flags = self.block_ghost_flags(block);
+        let ghost_flags = self.block_boundary_ghost_flags(block);
 
         let mut result = true;
 

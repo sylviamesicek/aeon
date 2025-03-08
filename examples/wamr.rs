@@ -10,8 +10,12 @@ pub struct SeedConditions;
 impl SystemBoundaryConds<2> for SeedConditions {
     type System = Scalar;
 
-    fn parity(&self, _field: (), face: Face<2>) -> bool {
-        [false, true][face.axis]
+    fn kind(&self, _label: <Self::System as System>::Label, face: Face<2>) -> BoundaryKind {
+        if face.side {
+            return BoundaryKind::Radiative;
+        }
+
+        [BoundaryKind::AntiSymmetric, BoundaryKind::Symmetric][face.axis]
     }
 
     fn radiative(&self, _field: (), _position: [f64; 2]) -> RadiativeParams {
@@ -44,10 +48,10 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Create mesh
     let mut mesh = Mesh::new(domain, 4, 2);
-    mesh.set_face_boundary(Face::negative(0), BoundaryKind::Parity);
-    mesh.set_face_boundary(Face::negative(1), BoundaryKind::Parity);
-    mesh.set_face_boundary(Face::positive(0), BoundaryKind::Radiative);
-    mesh.set_face_boundary(Face::positive(1), BoundaryKind::Radiative);
+    mesh.set_boundary_ghost(Face::negative(0), true);
+    mesh.set_boundary_ghost(Face::negative(1), true);
+    mesh.set_boundary_ghost(Face::positive(0), false);
+    mesh.set_boundary_ghost(Face::positive(1), false);
 
     // Store system from previous iteration.
     let mut system_prev = SystemVec::with_length(mesh.num_nodes(), Scalar);

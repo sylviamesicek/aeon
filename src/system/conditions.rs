@@ -6,9 +6,7 @@ use aeon_geometry::Face;
 pub trait SystemBoundaryConds<const N: usize>: Clone {
     type System: System;
 
-    fn kind(&self, _label: <Self::System as System>::Label, _face: Face<N>) -> BoundaryKind {
-        BoundaryKind::Free
-    }
+    fn kind(&self, _label: <Self::System as System>::Label, _face: Face<N>) -> BoundaryKind;
 
     fn radiative(
         &self,

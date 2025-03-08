@@ -220,18 +220,27 @@ pub struct FieldConditions;
 impl SystemBoundaryConds<2> for FieldConditions {
     type System = Fields;
 
-    fn parity(&self, field: Field, face: Face<2>) -> bool {
-        let axes = match field {
-            Field::Metric(Metric::Grr) | Field::Metric(Metric::Krr) => [true, true],
-            Field::Metric(Metric::Grz) | Field::Metric(Metric::Krz) => [false, false],
-            Field::Metric(Metric::Gzz) | Field::Metric(Metric::Kzz) => [true, true],
-            Field::Metric(Metric::S) | Field::Metric(Metric::Y) => [false, true],
+    fn kind(&self, label: <Self::System as System>::Label, face: Face<2>) -> BoundaryKind {
+        if face.side {
+            return BoundaryKind::Radiative;
+        }
 
-            Field::Constraint(Constraint::Theta) | Field::Gauge(Gauge::Lapse) => [true, true],
-            Field::Constraint(Constraint::Zr) | Field::Gauge(Gauge::Shiftr) => [false, true],
-            Field::Constraint(Constraint::Zz) | Field::Gauge(Gauge::Shiftz) => [true, false],
+        let s00 = [BoundaryKind::AntiSymmetric, BoundaryKind::AntiSymmetric];
+        let s10 = [BoundaryKind::Symmetric, BoundaryKind::AntiSymmetric];
+        let s01 = [BoundaryKind::AntiSymmetric, BoundaryKind::Symmetric];
+        let s11 = [BoundaryKind::Symmetric, BoundaryKind::Symmetric];
 
-            Field::ScalarField(_, _) => [true, true],
+        let axes = match label {
+            Field::Metric(Metric::Grr) | Field::Metric(Metric::Krr) => s11,
+            Field::Metric(Metric::Grz) | Field::Metric(Metric::Krz) => s00,
+            Field::Metric(Metric::Gzz) | Field::Metric(Metric::Kzz) => s11,
+            Field::Metric(Metric::S) | Field::Metric(Metric::Y) => s01,
+
+            Field::Constraint(Constraint::Theta) | Field::Gauge(Gauge::Lapse) => s11,
+            Field::Constraint(Constraint::Zr) | Field::Gauge(Gauge::Shiftr) => s01,
+            Field::Constraint(Constraint::Zz) | Field::Gauge(Gauge::Shiftz) => s10,
+
+            Field::ScalarField(_, _) => s11,
         };
         axes[face.axis]
     }

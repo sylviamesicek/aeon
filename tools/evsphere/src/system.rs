@@ -64,10 +64,11 @@ pub struct FieldConditions;
 impl SystemBoundaryConds<1> for FieldConditions {
     type System = Fields;
 
-    fn parity(&self, label: <Self::System as System>::Label, _face: Face<1>) -> bool {
-        match label {
-            Field::Phi => false,
-            Field::Pi | Field::Conformal | Field::Lapse => true,
+    fn kind(&self, _label: <Self::System as System>::Label, face: Face<1>) -> BoundaryKind {
+        if face.side {
+            BoundaryKind::Radiative
+        } else {
+            BoundaryKind::Symmetric
         }
     }
 
@@ -86,9 +87,9 @@ impl SystemBoundaryConds<1> for FieldConditions {
 #[derive(Clone)]
 pub struct SymCondition;
 
-impl BoundaryCondition<1> for SymCondition {
-    fn parity(&self, _face: Face<1>) -> bool {
-        true
+impl BoundaryConds<1> for SymCondition {
+    fn kind(&self, _face: Face<1>) -> BoundaryKind {
+        BoundaryKind::Symmetric
     }
 
     fn radiative(&self, _position: [f64; 1]) -> RadiativeParams {
@@ -102,9 +103,9 @@ impl BoundaryCondition<1> for SymCondition {
 #[derive(Clone)]
 pub struct AntiSymCondition;
 
-impl BoundaryCondition<1> for AntiSymCondition {
-    fn parity(&self, _face: Face<1>) -> bool {
-        false
+impl BoundaryConds<1> for AntiSymCondition {
+    fn kind(&self, _face: Face<1>) -> BoundaryKind {
+        BoundaryKind::AntiSymmetric
     }
 
     fn radiative(&self, _position: [f64; 1]) -> RadiativeParams {

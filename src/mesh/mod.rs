@@ -159,14 +159,8 @@ impl<const N: usize> Mesh<N> {
         self.ghost
     }
 
-    pub fn set_face_boundary(&mut self, face: Face<N>, kind: bool) {
-        self.boundary_ghost_flags[face] = kind;
-    }
-
-    pub fn set_boundary(&mut self, kind: bool) {
-        for face in faces() {
-            self.boundary_ghost_flags[face] = kind;
-        }
+    pub fn set_boundary_ghost(&mut self, face: Face<N>, ghost: bool) {
+        self.boundary_ghost_flags[face] = ghost;
     }
 
     /// Rebuilds mesh from current tree.
@@ -373,7 +367,7 @@ impl<const N: usize> Mesh<N> {
         NodeSpace {
             size: cell_size,
             ghost: self.ghost,
-            ghost_flags: self.block_ghost_flags(block),
+            ghost_flags: self.block_boundary_ghost_flags(block),
             bounds: self.block_bounds(block),
         }
     }
@@ -398,12 +392,12 @@ impl<const N: usize> Mesh<N> {
 
     /// Computes flags indicating whether a particular face of a block borders a physical
     /// boundary.
-    pub fn block_physical_flags(&self, block: usize) -> FaceMask<N> {
+    pub fn block_boundary_flags(&self, block: usize) -> FaceMask<N> {
         self.blocks.boundary_flags(block)
     }
 
-    pub fn block_ghost_flags(&self, block: usize) -> FaceMask<N> {
-        let flag = self.block_physical_flags(block);
+    pub fn block_boundary_ghost_flags(&self, block: usize) -> FaceMask<N> {
+        let flag = self.block_boundary_flags(block);
 
         FaceMask::from_fn(|face| {
             if flag.is_set(face) {
@@ -423,7 +417,7 @@ impl<const N: usize> Mesh<N> {
     ) -> BlockBoundaryConds<N, B> {
         BlockBoundaryConds {
             inner: bcs,
-            physical_flags: self.block_physical_flags(block),
+            physical_flags: self.block_boundary_flags(block),
         }
     }
 
@@ -482,7 +476,7 @@ impl<const N: usize> Mesh<N> {
     pub fn is_cell_on_boundary(&self, cell: usize) -> bool {
         let block = self.blocks.cell_block(cell);
         let block_size = self.blocks.size(block);
-        let block_flags = self.block_physical_flags(block);
+        let block_flags = self.block_boundary_flags(block);
 
         let position = self.blocks.cell_position(cell);
 

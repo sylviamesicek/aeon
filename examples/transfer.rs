@@ -12,6 +12,10 @@ pub struct WaveConditions;
 impl SystemBoundaryConds<2> for WaveConditions {
     type System = Scalar;
 
+    fn kind(&self, _label: <Self::System as System>::Label, _face: Face<2>) -> BoundaryKind {
+        BoundaryKind::Radiative
+    }
+
     fn radiative(&self, _field: (), _position: [f64; 2]) -> RadiativeParams {
         RadiativeParams::lightlike(0.0)
     }
@@ -28,10 +32,10 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Generate initial mesh
     let mut mesh = Mesh::new(Rectangle::from_aabb([-10., -10.], [10., 10.]), 4, 3);
-    mesh.set_face_boundary(Face::negative(0), BoundaryKind::Radiative);
-    mesh.set_face_boundary(Face::negative(1), BoundaryKind::Radiative);
-    mesh.set_face_boundary(Face::positive(0), BoundaryKind::Radiative);
-    mesh.set_face_boundary(Face::positive(1), BoundaryKind::Radiative);
+    mesh.set_boundary_ghost(Face::negative(0), false);
+    mesh.set_boundary_ghost(Face::negative(1), false);
+    mesh.set_boundary_ghost(Face::positive(0), false);
+    mesh.set_boundary_ghost(Face::positive(1), false);
     // Allocate space for system
     let mut system = SystemVec::default();
 

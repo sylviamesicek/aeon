@@ -5,6 +5,7 @@ use aeon::{
     prelude::*,
     solver::{Integrator, Method},
 };
+use aeon_geometry::faces;
 
 const MAX_TIME: f64 = 1.0;
 const MAX_STEPS: usize = 1000;
@@ -25,6 +26,10 @@ struct WaveConditions;
 
 impl SystemBoundaryConds<2> for WaveConditions {
     type System = Scalar;
+
+    fn kind(&self, _label: <Self::System as System>::Label, _face: Face<2>) -> BoundaryKind {
+        BoundaryKind::Radiative
+    }
 
     fn radiative(&self, _field: (), _position: [f64; 2]) -> RadiativeParams {
         RadiativeParams::lightlike(0.0)
@@ -86,7 +91,9 @@ pub fn main() -> anyhow::Result<()> {
 
     // Generate initial mesh
     let mut mesh = Mesh::new(Rectangle::from_aabb([-10., -10.], [10., 10.]), 6, 3);
-    mesh.set_boundary(BoundaryKind::Radiative);
+    for face in faces() {
+        mesh.set_boundary_ghost(face, false);
+    }
     // Allocate space for system
     let mut system = SystemVec::<Scalar>::default();
 
