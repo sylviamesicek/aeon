@@ -249,7 +249,8 @@ pub enum Source {
     #[serde(rename = "scalar_field")]
     ScalarField {
         amplitude: f64,
-        sigma: (f64, f64),
+        sigma: f64,
+        eccentricity: f64,
         mass: f64,
     },
 }

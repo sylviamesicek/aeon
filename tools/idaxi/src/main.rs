@@ -149,16 +149,17 @@ fn initial_data() -> Result<()> {
                 amplitude,
                 sigma,
                 mass,
+                eccentricity,
             } => {
                 log::info!(
                     "Running Instance: {}, Type: Scalar Field Initial Data",
                     config.name
                 );
                 log::info!(
-                    "A: {:.5e}, sigma_r: {:.5e}, sigma_z: {:.5e}, Mass {:.5e}",
+                    "A: {:.5e}, sigma: {:.5e}, eccentricity: {:.5e}, Mass {:.5e}",
                     amplitude,
-                    sigma.0,
-                    sigma.1,
+                    sigma,
+                    eccentricity,
                     mass
                 );
             }

@@ -166,7 +166,8 @@ fn critical_search() -> Result<()> {
                 domain: config.domain.clone(),
                 source: vec![Source::ScalarField {
                     amplitude: *amplitude,
-                    sigma: (5.35, 5.35),
+                    sigma: 5.35,
+                    eccentricity: 0.0,
                     mass: 0.0,
                 }],
 

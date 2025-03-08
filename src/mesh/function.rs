@@ -105,6 +105,18 @@ pub struct Gaussian<const N: usize> {
     pub center: [f64; N],
 }
 
+impl Gaussian<2> {
+    pub fn prolate(amplitude: f64, sigma: f64, e: f64) -> Self {
+        let sigma = [sigma, sigma / (1.0 - e * e).sqrt()];
+
+        Self {
+            amplitude,
+            sigma,
+            center: [0., 0.],
+        }
+    }
+}
+
 impl<const N: usize> Projection<N> for Gaussian<N> {
     fn project(&self, position: [f64; N]) -> f64 {
         let offset: [_; N] =

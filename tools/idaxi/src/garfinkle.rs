@@ -335,16 +335,15 @@ where
     let mut scalar_field_index = 0;
     for source in sources {
         if let Source::ScalarField {
-            amplitude, sigma, ..
+            amplitude,
+            sigma,
+            eccentricity,
+            ..
         } = source
         {
             mesh.project(
                 ORDER,
-                Gaussian {
-                    amplitude: *amplitude,
-                    sigma: [sigma.0, sigma.1],
-                    center: [0.0; 2],
-                },
+                Gaussian::prolate(*amplitude, *sigma, *eccentricity),
                 context.field_mut(Context::Phi(scalar_field_index)),
             );
 
