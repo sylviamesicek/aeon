@@ -1,5 +1,5 @@
 use faer::{ColRef, Mat, MatRef};
-use std::{array, collections::HashMap};
+use std::array;
 
 use crate::geometry::{AxisMask, IndexSpace};
 
@@ -31,6 +31,7 @@ impl Basis for Monomial {
 }
 
 /// A reference element defined on [-1, 1]^N.
+#[derive(Clone, Debug)]
 pub struct Element<const N: usize> {
     /// Order of basis functions used in element.
     order: usize,
@@ -356,22 +357,6 @@ impl<const N: usize> Element<N> {
             .map(|v| coefs[v].abs())
             .max_by(|a, b| a.total_cmp(b))
             .unwrap()
-    }
-}
-
-/// Constructing a new element requires a fairly involved matrix inversion/solution
-/// to a least squares problem via SVD. This object provides a way to cache this computations,
-/// instead of redoing them everytime we call `flag_wavelets`.
-#[derive(Default)]
-pub struct ElementCache<const N: usize> {
-    uniform: HashMap<(usize, usize), Element<N>>,
-}
-
-impl<const N: usize> ElementCache<N> {
-    pub fn request_uniform(&mut self, width: usize, order: usize) -> &Element<N> {
-        self.uniform
-            .entry((width, order))
-            .or_insert_with(|| Element::uniform(width, order))
     }
 }
 

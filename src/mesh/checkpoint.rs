@@ -31,14 +31,14 @@ impl<const N: usize> MeshCheckpoint<N> {
         self.tree.clone_from(&mesh.tree);
         self.width = mesh.width;
         self.ghost = mesh.ghost;
-        self.ghost_flags = mesh.boundary_ghost_flags;
+        self.ghost_flags = mesh.ghost_flags;
     }
 
     pub fn load_mesh(&self, mesh: &mut Mesh<N>) {
         mesh.tree.clone_from(&self.tree);
         mesh.width = self.width;
         mesh.ghost = self.ghost;
-        mesh.boundary_ghost_flags = self.ghost_flags;
+        mesh.ghost_flags = self.ghost_flags;
 
         mesh.build();
     }

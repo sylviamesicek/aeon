@@ -9,6 +9,7 @@ use crate::geometry::{
     faces, AxisMask, Face, FaceArray, FaceMask, IndexSpace, Rectangle, Tree, TreeBlocks,
     TreeNeighbors,
 };
+use crate::kernel::Element;
 use crate::{
     kernel::{BoundaryKind, NodeSpace, NodeWindow},
     system::SystemBoundaryConds,
@@ -16,6 +17,7 @@ use crate::{
 use num_traits::ToPrimitive;
 use rayon::iter::{IntoParallelIterator, ParallelBridge, ParallelIterator};
 use ron::ser::PrettyConfig;
+use std::collections::HashMap;
 use std::{
     array,
     cell::UnsafeCell,
@@ -64,6 +66,10 @@ pub struct Mesh<const N: usize> {
     width: usize,
     /// The number of ghost cells used to facilitate inter-block communication.
     ghost: usize,
+    /// A mask indicating whether a particular face uses ghost nodes to implement
+    /// boundary conditions. This should only be set to true if a boundary
+    /// needs to use parity or custom boundary conditions.
+    ghost_flags: FaceArray<N, bool>,
 
     /// Maximum level of cell on the mesh.
     max_level: usize,
@@ -100,12 +106,12 @@ pub struct Mesh<const N: usize> {
     /// May be temporary if I can find a more elegant solution.
     old_cell_splits: Vec<AxisMask<N>>,
 
+    // ********************************
+    // Caches *************************
     /// Thread-local stores used for allocation.
     stores: ThreadLocal<UnsafeCell<MeshStore>>,
-
-    /// Returns true if a boundary condition is enforced by setting ghost node
-    /// values.
-    boundary_ghost_flags: FaceArray<N, bool>,
+    /// Cache for uniform elements
+    elements: HashMap<(usize, usize), Element<N>>,
 }
 
 impl<const N: usize> Mesh<N> {
@@ -121,6 +127,7 @@ impl<const N: usize> Mesh<N> {
             tree,
             width,
             ghost,
+            ghost_flags: FaceArray::default(),
 
             max_level: 0,
 
@@ -142,8 +149,7 @@ impl<const N: usize> Mesh<N> {
             old_cell_splits: Vec::default(),
 
             stores: ThreadLocal::new(),
-
-            boundary_ghost_flags: FaceArray::default(),
+            elements: HashMap::default(),
         };
 
         result.build();
@@ -160,7 +166,7 @@ impl<const N: usize> Mesh<N> {
     }
 
     pub fn set_boundary_ghost(&mut self, face: Face<N>, ghost: bool) {
-        self.boundary_ghost_flags[face] = ghost;
+        self.ghost_flags[face] = ghost;
     }
 
     /// Rebuilds mesh from current tree.
@@ -214,62 +220,12 @@ impl<const N: usize> Mesh<N> {
         self.coarsen_flags.resize(self.num_cells(), false);
     }
 
+    // *******************************
+    // Global Info *******************
+
     /// Retrieves the Quadtree this mesh is built on top of.
     pub fn tree(&self) -> &Tree<N> {
         &self.tree
-    }
-
-    pub fn refine_flags(&self) -> &[bool] {
-        self.refine_flags.as_slice()
-    }
-
-    pub fn coarsen_flags(&self) -> &[bool] {
-        self.coarsen_flags.as_slice()
-    }
-
-    /// Refines the mesh using currently set flags.
-    pub fn regrid(&mut self) {
-        self.regrid_map.clear();
-
-        // Save old information
-        self.old_blocks.clone_from(&self.blocks);
-        self.old_block_node_offsets
-            .clone_from(&self.block_node_offsets);
-
-        self.old_cell_splits.clear();
-        self.old_cell_splits
-            .extend((0..self.tree.num_cells()).map(|cell| self.tree.split(cell)));
-
-        // Perform regriding
-        self.regrid_map.resize(self.tree.num_cells(), 0);
-
-        let mut coarsen_map = vec![0; self.tree.num_cells()];
-        self.tree
-            .coarsen_index_map(&self.coarsen_flags, &mut coarsen_map);
-        self.tree.coarsen(&self.coarsen_flags);
-
-        let mut refine_map = vec![0; self.tree.num_cells()];
-        let mut flags = vec![false; self.tree.num_cells()];
-
-        for (old, &new) in coarsen_map.iter().enumerate() {
-            flags[new] = self.refine_flags[old];
-        }
-
-        self.tree.refine_index_map(&flags, &mut refine_map);
-        self.tree.refine(&flags);
-
-        for i in 0..self.regrid_map.len() {
-            self.regrid_map[i] = refine_map[coarsen_map[i]];
-        }
-
-        // Rebuild mesh
-        self.build();
-    }
-
-    /// Flags every cell for refinement, then performs the operation.
-    pub fn refine_global(&mut self) {
-        self.refine_flags.fill(true);
-        self.regrid();
     }
 
     /// Returns the total number of blocks on the mesh.
@@ -297,6 +253,9 @@ impl<const N: usize> Mesh<N> {
         *self.old_block_node_offsets.last().unwrap_or(&0)
     }
 
+    // *******************************
+    // Data for each block ***********
+
     /// The range of nodes assigned to a given block.
     pub fn block_nodes(&self, block: usize) -> Range<usize> {
         self.block_node_offsets[block]..self.block_node_offsets[block + 1]
@@ -305,35 +264,6 @@ impl<const N: usize> Mesh<N> {
     /// The range of nodes assigned to a given block on the mesh before the most recent refinement.
     pub(crate) fn old_block_nodes(&self, block: usize) -> Range<usize> {
         self.old_block_node_offsets[block]..self.old_block_node_offsets[block + 1]
-    }
-
-    /// Element associated with a given cell.
-    pub fn element_window(&self, cell: usize) -> NodeWindow<N> {
-        let position = self.blocks.cell_position(cell);
-
-        let size = [2 * self.width + 1; N];
-        let mut origin = [(self.width as isize) / 2 - self.width as isize; N];
-
-        for axis in 0..N {
-            origin[axis] += (self.width * position[axis]) as isize
-        }
-
-        NodeWindow { origin, size }
-    }
-
-    /// Returns the window of nodes in a block corresponding to a given cell, including
-    /// no padding.
-    pub fn element_coarse_window(&self, cell: usize) -> NodeWindow<N> {
-        let position = self.blocks.cell_position(cell);
-
-        let size = [self.width + 1; N];
-        let mut origin = [0; N];
-
-        for axis in 0..N {
-            origin[axis] += (self.width * position[axis]) as isize
-        }
-
-        NodeWindow { origin, size }
     }
 
     /// Computes the nodespace corresponding to a block.
@@ -378,7 +308,7 @@ impl<const N: usize> Mesh<N> {
 
         FaceMask::from_fn(|face| {
             if flag.is_set(face) {
-                self.boundary_ghost_flags[face]
+                self.ghost_flags[face]
             } else {
                 true
             }
@@ -394,7 +324,7 @@ impl<const N: usize> Mesh<N> {
     ) -> BlockBoundaryConds<N, B> {
         BlockBoundaryConds {
             inner: bcs,
-            physical_flags: self.block_boundary_flags(block),
+            boundary_flags: self.block_boundary_flags(block),
         }
     }
 
@@ -404,7 +334,7 @@ impl<const N: usize> Mesh<N> {
 
         FaceMask::from_fn(|face| {
             if flag.is_set(face) {
-                self.boundary_ghost_flags[face]
+                self.ghost_flags[face]
             } else {
                 true
             }
@@ -419,6 +349,50 @@ impl<const N: usize> Mesh<N> {
     /// The level of a block before the most recent refinement.
     pub(crate) fn old_block_level(&self, block: usize) -> usize {
         self.old_blocks.level(block)
+    }
+
+    // *******************************
+    // Elements **********************
+
+    /// Element associated with a given cell.
+    pub fn element_window(&self, cell: usize) -> NodeWindow<N> {
+        let position = self.blocks.cell_position(cell);
+
+        let size = [2 * self.width + 1; N];
+        let mut origin = [(self.width as isize) / 2 - self.width as isize; N];
+
+        for axis in 0..N {
+            origin[axis] += (self.width * position[axis]) as isize
+        }
+
+        NodeWindow { origin, size }
+    }
+
+    /// Returns the window of nodes in a block corresponding to a given cell, including
+    /// no padding.
+    pub fn element_coarse_window(&self, cell: usize) -> NodeWindow<N> {
+        let position = self.blocks.cell_position(cell);
+
+        let size = [self.width + 1; N];
+        let mut origin = [0; N];
+
+        for axis in 0..N {
+            origin[axis] += (self.width * position[axis]) as isize
+        }
+
+        NodeWindow { origin, size }
+    }
+
+    pub fn request_element(&mut self, width: usize, order: usize) -> Element<N> {
+        self.elements
+            .remove(&(width, order))
+            .unwrap_or_else(|| Element::uniform(width, order))
+    }
+
+    pub fn replace_element(&mut self, element: Element<N>) {
+        _ = self
+            .elements
+            .insert((element.width(), element.order()), element)
     }
 
     /// Retrieves the number of nodes along each axis of a cell.
@@ -465,7 +439,7 @@ impl<const N: usize> Mesh<N> {
                     0
                 };
 
-            if !self.boundary_ghost_flags[face] && block_flags.is_set(face) && on_border {
+            if !self.ghost_flags[face] && block_flags.is_set(face) && on_border {
                 return true;
             }
         }
@@ -763,6 +737,7 @@ impl<const N: usize> Clone for Mesh<N> {
             tree: self.tree.clone(),
             width: self.width,
             ghost: self.ghost,
+            ghost_flags: self.ghost_flags.clone(),
 
             max_level: self.max_level,
 
@@ -783,9 +758,8 @@ impl<const N: usize> Clone for Mesh<N> {
             old_block_node_offsets: self.old_block_node_offsets.clone(),
             old_cell_splits: self.old_cell_splits.clone(),
 
-            boundary_ghost_flags: self.boundary_ghost_flags.clone(),
-
             stores: ThreadLocal::new(),
+            elements: HashMap::default(),
         }
     }
 }
@@ -796,6 +770,7 @@ impl<const N: usize> Default for Mesh<N> {
             tree: Tree::new(Rectangle::UNIT),
             width: 4,
             ghost: 1,
+            ghost_flags: FaceArray::default(),
 
             max_level: 0,
 
@@ -815,9 +790,8 @@ impl<const N: usize> Default for Mesh<N> {
             old_block_node_offsets: Vec::default(),
             old_cell_splits: Vec::default(),
 
-            boundary_ghost_flags: FaceArray::default(),
-
             stores: ThreadLocal::new(),
+            elements: HashMap::default(),
         };
 
         result.build();
@@ -1121,7 +1095,8 @@ impl<const N: usize> Mesh<N> {
 #[derive(Clone, Debug)]
 pub struct BlockBoundaryConds<const N: usize, I> {
     inner: I,
-    physical_flags: FaceMask<N>,
+    /// Physical boundary mask for various faces.
+    boundary_flags: FaceMask<N>,
 }
 
 impl<const N: usize, I: SystemBoundaryConds<N>> SystemBoundaryConds<N>
@@ -1130,7 +1105,7 @@ impl<const N: usize, I: SystemBoundaryConds<N>> SystemBoundaryConds<N>
     type System = I::System;
 
     fn kind(&self, label: <Self::System as System>::Label, face: Face<N>) -> BoundaryKind {
-        if self.physical_flags.is_set(face) {
+        if self.boundary_flags.is_set(face) {
             self.inner.kind(label, face)
         } else {
             BoundaryKind::Custom

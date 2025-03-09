@@ -25,20 +25,24 @@ struct RunConfig {
     visualize: bool,
 }
 
+struct Snapshot {
+    mass: f64,
+    alpha: f64,
+    phi: f64,
+    level: usize,
+    nodes: usize,
+}
+
 #[derive(Default)]
 struct Diagnostics {
     times: Vec<f64>,
-    masses: Vec<f64>,
-    alphas: Vec<f64>,
-    phi: Vec<f64>,
+    data: Vec<Snapshot>,
 }
 
 impl Diagnostics {
-    fn append(&mut self, time: f64, mass: f64, alpha: f64, phi: f64) {
+    fn append(&mut self, time: f64, data: Snapshot) {
         self.times.push(time);
-        self.masses.push(mass);
-        self.alphas.push(alpha);
-        self.phi.push(phi);
+        self.data.push(data);
     }
 
     fn flush(&self, config: RunConfig) -> Result<()> {
@@ -48,31 +52,29 @@ impl Diagnostics {
 
         let file1 = format!("Mass-{}-{}", 4, serial_id);
         let file2 = format!("Al-{}-{}", 4, serial_id);
-        let file3 = format!("Origin-{}.txt", serial_id);
+        let file3 = format!("Level-{}-{}", 4, serial_id);
+        let file4 = format!("Origin-{}.txt", serial_id);
 
         let mut data1 = String::new();
         let mut data2 = String::new();
         let mut data3 = String::new();
+        let mut data4 = String::new();
 
-        for (&time, &mass) in self.times.iter().zip(self.masses.iter()) {
-            writeln!(data1, "{} {}", time, mass)?;
-        }
-
-        for (&time, &alpha) in self.times.iter().zip(self.alphas.iter()) {
-            writeln!(data2, "{} {}", time, alpha)?;
-        }
-
-        for i in 0..self.times.len() {
+        for (&time, data) in self.times.iter().zip(self.data.iter()) {
+            writeln!(data1, "{} {}", time, data.mass)?;
+            writeln!(data2, "{} {}", time, data.alpha)?;
+            writeln!(data3, "{} {} {}", time, data.level, data.nodes)?;
             writeln!(
-                data3,
+                data4,
                 "{} {} {} {} {} {}",
-                self.times[i], 0.0, self.alphas[i], self.alphas[i], self.phi[i], 0.0
+                time, 0.0, data.alpha, data.alpha, data.phi, 0.0
             )?;
         }
 
         std::fs::write(file1, data1)?;
         std::fs::write(file2, data2)?;
         std::fs::write(file3, data3)?;
+        std::fs::write(file4, data4)?;
 
         Ok(())
     }
@@ -176,12 +178,11 @@ fn run(config: RunConfig, diagnostics: &mut Diagnostics) -> Result<()> {
                 mesh.max_level(),
                 mesh.num_nodes()
             );
-            break;
-            // return Err(anyhow!("failed to refine within perscribed limits"));
+            return Err(anyhow!("failed to refine within perscribed limits"));
         }
 
         mesh.flag_wavelets(4, 0.0, MAX_ERROR_TOLERANCE, system.as_slice());
-        mesh.limit_level_range_flags(MAX_LEVELS);
+        mesh.limit_level_range_flags(1, MAX_LEVELS);
         mesh.balance_flags();
 
         if !mesh.requires_regridding() {
@@ -229,10 +230,16 @@ fn run(config: RunConfig, diagnostics: &mut Diagnostics) -> Result<()> {
     let mut steps_since_regrid = 0;
     let mut time_since_save = 0.0;
 
-    let mass = find_mass(&mesh, system.as_slice());
-    let alpha = mesh.bottom_left_value(system.field(Field::Lapse));
-    let phi = mesh.bottom_left_value(system.field(Field::Phi));
-    diagnostics.append(proper_time, mass, alpha, phi);
+    diagnostics.append(
+        proper_time,
+        Snapshot {
+            mass: find_mass(&mesh, system.as_slice()),
+            alpha: mesh.bottom_left_value(system.field(Field::Lapse)),
+            phi: mesh.bottom_left_value(system.field(Field::Phi)),
+            level: mesh.max_level(),
+            nodes: mesh.num_nodes(),
+        },
+    );
 
     while proper_time < MAX_PROPER_TIME {
         assert!(system.len() == mesh.num_nodes());
@@ -290,19 +297,9 @@ fn run(config: RunConfig, diagnostics: &mut Diagnostics) -> Result<()> {
                 MAX_ERROR_TOLERANCE,
                 system.as_slice(),
             );
-            mesh.limit_level_range_flags(MAX_LEVELS);
+            mesh.limit_level_range_flags(1, MAX_LEVELS);
             mesh.balance_flags();
-
-            // let num_refine = mesh.num_refine_cells();
-            // let num_coarsen = mesh.num_coarsen_cells();
             mesh.regrid();
-
-            // log::trace!(
-            //     "Regrided Mesh at time: {time:.5}, Max Level {}, {} R, {} C",
-            //     mesh.max_level(),
-            //     num_refine,
-            //     num_coarsen,
-            // );
 
             log::trace!(
                 "Regrided Mesh at time: {time:.5}, Max Level {}, Num Nodes {}",
@@ -358,12 +355,18 @@ fn run(config: RunConfig, diagnostics: &mut Diagnostics) -> Result<()> {
             system.as_mut_slice(),
         );
 
-        let mass = find_mass(&mesh, system.as_slice());
         let alpha = mesh.bottom_left_value(system.field(Field::Lapse));
-        let phi = mesh.bottom_left_value(system.field(Field::Phi));
-
         if step % DIAGNOSTIC_STRIDE == 0 {
-            diagnostics.append(proper_time, mass, alpha, phi);
+            diagnostics.append(
+                proper_time,
+                Snapshot {
+                    mass: find_mass(&mesh, system.as_slice()),
+                    alpha,
+                    phi: mesh.bottom_left_value(system.field(Field::Phi)),
+                    level: mesh.max_level(),
+                    nodes: mesh.num_nodes(),
+                },
+            );
         }
 
         step += 1;

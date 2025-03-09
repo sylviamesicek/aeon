@@ -17,6 +17,10 @@
 //!     type Weights = [f64; 10];
 //! }
 //! ```
+//!
+//! This module also implements various utilities for serializing arbitrary length arrays.
+//! The current version of `serde` hasn't been able to do this as it breaks backwards
+//! compatibility for zero length arrays.
 
 use serde::de::{Deserialize, Deserializer, Error as _};
 use serde::ser::{Serialize, SerializeTuple as _, Serializer};

@@ -1,7 +1,6 @@
 use std::array;
 
 use crate::geometry::IndexSpace;
-use crate::kernel::Element;
 
 use crate::{
     mesh::Mesh,
@@ -10,6 +9,60 @@ use crate::{
 };
 
 impl<const N: usize> Mesh<N> {
+    /// Retrieves a vector representing all regridding flags for the mesh.
+    pub fn refine_flags(&self) -> &[bool] {
+        self.refine_flags.as_slice()
+    }
+    /// Retrievs a vector representing all coarsening flags for the mesh.
+    pub fn coarsen_flags(&self) -> &[bool] {
+        self.coarsen_flags.as_slice()
+    }
+
+    /// Refines the mesh using currently set flags.
+    pub fn regrid(&mut self) {
+        self.regrid_map.clear();
+
+        // Save old information
+        self.old_blocks.clone_from(&self.blocks);
+        self.old_block_node_offsets
+            .clone_from(&self.block_node_offsets);
+
+        self.old_cell_splits.clear();
+        self.old_cell_splits
+            .extend((0..self.tree.num_cells()).map(|cell| self.tree.split(cell)));
+
+        // Perform regriding
+        self.regrid_map.resize(self.tree.num_cells(), 0);
+
+        let mut coarsen_map = vec![0; self.tree.num_cells()];
+        self.tree
+            .coarsen_index_map(&self.coarsen_flags, &mut coarsen_map);
+        self.tree.coarsen(&self.coarsen_flags);
+
+        let mut refine_map = vec![0; self.tree.num_cells()];
+        let mut flags = vec![false; self.tree.num_cells()];
+
+        for (old, &new) in coarsen_map.iter().enumerate() {
+            flags[new] = self.refine_flags[old];
+        }
+
+        self.tree.refine_index_map(&flags, &mut refine_map);
+        self.tree.refine(&flags);
+
+        for i in 0..self.regrid_map.len() {
+            self.regrid_map[i] = refine_map[coarsen_map[i]];
+        }
+
+        // Rebuild mesh
+        self.build();
+    }
+
+    /// Flags every cell for refinement, then performs the operation.
+    pub fn refine_global(&mut self) {
+        self.refine_flags.fill(true);
+        self.regrid();
+    }
+
     /// Flags cells for refinement using a wavelet criterion. The system must have filled
     /// boundaries. This function tags any cell that is insufficiently refined to approximate
     /// operators of the given `order` within the range of error.
@@ -23,8 +76,9 @@ impl<const N: usize> Mesh<N> {
         assert!(order % 2 == 0);
         assert!(order <= self.width);
 
-        let element = Element::<N>::uniform(self.width, order);
-        let element_coarse = Element::<N>::uniform(self.width / 2, order / 2);
+        let element = self.request_element(self.width, order);
+        let element_coarse = self.request_element(self.width / 2, order / 2);
+
         let support = element.support_refined();
 
         let mut rflags_buf = std::mem::take(&mut self.refine_flags);
@@ -96,6 +150,9 @@ impl<const N: usize> Mesh<N> {
 
         let _ = std::mem::replace(&mut self.refine_flags, rflags_buf);
         let _ = std::mem::replace(&mut self.coarsen_flags, cflags_buf);
+
+        self.replace_element(element);
+        self.replace_element(element_coarse);
     }
 
     /// Store flags for each cell in a debug buffer.
@@ -137,20 +194,20 @@ impl<const N: usize> Mesh<N> {
         self.coarsen_flags[cell] = true
     }
 
-    /// Mark `count` cells around each currently tagged cell for refinement.
-    // pub fn buffer_refine_flags(&mut self, count: usize) {
-    //     for _ in 0..count {
-    //         for cell in 0..self.num_cells() {
-    //             if !self.refine_flags[cell] {
-    //                 continue;
-    //             }
+    // Mark `count` cells around each currently tagged cell for refinement.
+    pub fn buffer_refine_flags(&mut self, count: usize) {
+        for _ in 0..count {
+            for cell in 0..self.num_cells() {
+                if !self.refine_flags[cell] {
+                    continue;
+                }
 
-    //             for neighbor in self.tree.neighborhood(cell) {
-    //                 self.refine_flags[neighbor] = true;
-    //             }
-    //         }
-    //     }
-    // }
+                for neighbor in self.tree.neighborhood(cell) {
+                    self.refine_flags[neighbor] = true;
+                }
+            }
+        }
+    }
 
     /// Limits coarsening to cells with a `level > min_level`, and refinement to
     /// cells with a `level < max_level`.
