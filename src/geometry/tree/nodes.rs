@@ -4,14 +4,14 @@
 // Block Dofs *************
 // ************************
 
-use crate::TreeBlocks;
+use crate::geometry::TreeBlocks;
 use std::{array, ops::Range};
 
 /// Associates vertices with each block in the `Tree`.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct TreeNodes<const N: usize> {
     /// Number of subdivisions for each axis.
-    #[serde(with = "aeon_array")]
+    #[serde(with = "crate::array")]
     pub width: [usize; N],
     /// Ghost vertices along each face.
     pub ghost: usize,
@@ -76,7 +76,7 @@ impl<const N: usize> Default for TreeNodes<N> {
 
 #[cfg(test)]
 mod tests {
-    use crate::{Rectangle, Tree, TreeBlocks, TreeNodes};
+    use crate::geometry::{Rectangle, Tree, TreeBlocks, TreeNodes};
     #[test]
     fn ranges() {
         let mut tree = Tree::new(Rectangle::<2>::UNIT);

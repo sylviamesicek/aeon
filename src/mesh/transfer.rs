@@ -1,5 +1,5 @@
+use crate::geometry::{AxisMask, IndexSpace, Side, TreeBlockNeighbor, TreeCellNeighbor};
 use crate::kernel::Kernels;
-use aeon_geometry::{AxisMask, IndexSpace, Side, TreeBlockNeighbor, TreeCellNeighbor};
 use reborrow::ReborrowMut;
 use std::{array, cmp::Ordering, ops::Range};
 

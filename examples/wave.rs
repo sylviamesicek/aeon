@@ -1,11 +1,11 @@
 use std::array;
 
+use aeon::geometry::faces;
 use aeon::{
     mesh::Gaussian,
     prelude::*,
     solver::{Integrator, Method},
 };
-use aeon_geometry::faces;
 
 const MAX_TIME: f64 = 1.0;
 const MAX_STEPS: usize = 1000;
@@ -119,7 +119,7 @@ pub fn main() -> anyhow::Result<()> {
         log::trace!("Flagging Wavelets");
 
         mesh.flag_wavelets(4, LOWER, UPPER, system.as_slice());
-        mesh.set_regrid_level_limit(10);
+        mesh.limit_level_range_flags(1, 10);
 
         log::trace!("Balancing Flags");
 
@@ -208,7 +208,7 @@ pub fn main() -> anyhow::Result<()> {
 
             mesh.fill_boundary(ORDER, WaveConditions, system.as_mut_slice());
             mesh.flag_wavelets(4, LOWER, UPPER, system.as_slice());
-            mesh.set_regrid_level_limit(10);
+            mesh.limit_level_range_flags(1, 10);
 
             mesh.balance_flags();
 

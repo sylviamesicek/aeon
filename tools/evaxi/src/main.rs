@@ -364,7 +364,7 @@ pub fn evolution() -> Result<bool> {
             steps_since_regrid = 0;
 
             mesh.flag_wavelets(4, lower, upper, fields.as_slice());
-            mesh.set_regrid_level_limit(max_level);
+            mesh.limit_level_range_flags(1, max_level);
             mesh.balance_flags();
 
             // let num_refine = mesh.num_refine_cells();

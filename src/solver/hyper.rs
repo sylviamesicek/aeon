@@ -1,5 +1,5 @@
+use crate::geometry::{Face, IndexSpace};
 use crate::kernel::{BoundaryKind, Kernels, RadiativeParams};
-use aeon_geometry::{Face, IndexSpace};
 use reborrow::{Reborrow, ReborrowMut};
 use thiserror::Error;
 
@@ -336,7 +336,7 @@ impl<'a, const N: usize, S: System, F: Function<N, Input = S, Output = S>> Funct
 
 #[cfg(test)]
 mod tests {
-    use aeon_geometry::Rectangle;
+    use crate::geometry::Rectangle;
 
     use super::*;
     use crate::{

@@ -1,7 +1,7 @@
 use std::array;
 
+use crate::geometry::IndexSpace;
 use crate::kernel::Element;
-use aeon_geometry::IndexSpace;
 
 use crate::{
     mesh::Mesh,
@@ -126,12 +126,91 @@ impl<const N: usize> Mesh<N> {
             }
         });
     }
+
+    /// Manually marks a cell for refinement.
+    pub fn set_refine_flag(&mut self, cell: usize) {
+        self.refine_flags[cell] = true
+    }
+
+    /// Manually marks a cell for coarsening.
+    pub fn set_coarsen_flag(&mut self, cell: usize) {
+        self.coarsen_flags[cell] = true
+    }
+
+    /// Mark `count` cells around each currently tagged cell for refinement.
+    // pub fn buffer_refine_flags(&mut self, count: usize) {
+    //     for _ in 0..count {
+    //         for cell in 0..self.num_cells() {
+    //             if !self.refine_flags[cell] {
+    //                 continue;
+    //             }
+
+    //             for neighbor in self.tree.neighborhood(cell) {
+    //                 self.refine_flags[neighbor] = true;
+    //             }
+    //         }
+    //     }
+    // }
+
+    /// Limits coarsening to cells with a `level > min_level`, and refinement to
+    /// cells with a `level < max_level`.
+    pub fn limit_level_range_flags(&mut self, min_level: usize, max_level: usize) {
+        for cell in 0..self.num_cells() {
+            let level = self.tree.level(cell);
+            if level >= max_level {
+                self.refine_flags[cell] = false;
+            }
+
+            if level <= min_level {
+                self.coarsen_flags[cell] = false;
+            }
+        }
+    }
+
+    /// After cells have been tagged, the refinement/coarsening flags
+    /// must be balanced to ensure that the 2:1 balance across faces and vertices
+    /// is still maintained.
+    pub fn balance_flags(&mut self) {
+        // Propogate refinement flags outwards.
+        self.tree.balance_refine_flags(&mut self.refine_flags);
+        // Refinement has priority over coarsening. Ensure that there is never a cell marked
+        // for refinement next to a equal or coarser cell marked for coarsening.
+        for cell in 0..self.num_cells() {
+            if self.refine_flags[cell] {
+                let level = self.tree.level(cell);
+                for neighbor in self.tree.neighborhood(cell) {
+                    let nlevel = self.tree.level(neighbor);
+                    if nlevel <= level {
+                        self.coarsen_flags[neighbor] = false;
+                    }
+                }
+            }
+        }
+        // Unmark coarsening flags as necessary.
+        self.tree.balance_coarsen_flags(&mut self.coarsen_flags);
+    }
+
+    /// Returns true if the mesh requires regridding (i.e. any cells are tagged for either refinement
+    /// or coarsening).
+    pub fn requires_regridding(&self) -> bool {
+        self.refine_flags.iter().any(|&b| b) || self.coarsen_flags.iter().any(|&b| b)
+    }
+
+    /// The number of cell that are marked for refinement.
+    pub fn num_refine_cells(&self) -> usize {
+        self.refine_flags.iter().filter(|&&b| b).count()
+    }
+
+    /// The number of cells that are marked for coarsening.
+    pub fn num_coarsen_cells(&self) -> usize {
+        self.coarsen_flags.iter().filter(|&&b| b).count()
+    }
 }
 
 #[cfg(test)]
 mod tests {
+    use crate::geometry::{Face, Rectangle};
     use crate::mesh::Mesh;
-    use aeon_geometry::{Face, Rectangle};
 
     #[test]
     fn element_windows() {

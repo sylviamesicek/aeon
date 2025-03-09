@@ -1,4 +1,4 @@
-use aeon_geometry::{FaceArray, Rectangle, Tree};
+use crate::geometry::{FaceArray, Rectangle, Tree};
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 use std::collections::HashMap;

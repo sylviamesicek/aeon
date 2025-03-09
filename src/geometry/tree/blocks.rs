@@ -1,4 +1,4 @@
-use crate::{faces, Face, FaceMask, IndexSpace, Rectangle, Tree, NULL};
+use crate::geometry::{faces, Face, FaceMask, IndexSpace, Rectangle, Tree, NULL};
 use bitvec::prelude::*;
 use std::array::from_fn;
 
@@ -6,12 +6,12 @@ use std::array::from_fn;
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct TreeBlocks<const N: usize> {
     /// Stores each cell's position within its parent's block.
-    #[serde(with = "aeon_array::vec")]
+    #[serde(with = "crate::array::vec")]
     cell_indices: Vec<[usize; N]>,
     /// Maps cell to the block that contains it.
     cell_to_block: Vec<usize>,
     /// Stores the size of each block.
-    #[serde(with = "aeon_array::vec")]
+    #[serde(with = "crate::array::vec")]
     block_sizes: Vec<[usize; N]>,
     block_cell_indices: Vec<usize>,
     block_cell_offsets: Vec<usize>,

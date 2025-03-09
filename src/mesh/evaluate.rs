@@ -1,5 +1,6 @@
 use std::{array, ops::Range};
 
+use crate::geometry::{faces, Face, FaceMask, IndexSpace, NULL};
 use crate::{
     kernel::{
         node_from_vertex, vertex_from_node, BoundaryConds as _, BoundaryKind, Hessian, Kernels,
@@ -7,7 +8,6 @@ use crate::{
     },
     system::Empty,
 };
-use aeon_geometry::{faces, Face, FaceMask, IndexSpace, NULL};
 use reborrow::{Reborrow, ReborrowMut as _};
 
 use crate::{

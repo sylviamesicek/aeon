@@ -1,6 +1,6 @@
 #![allow(clippy::needless_range_loop)]
 
-use crate::{faces, regions, AxisMask, Face, Rectangle, Region, Side};
+use crate::geometry::{faces, regions, AxisMask, Face, Rectangle, Region, Side};
 use bitvec::prelude::*;
 use std::iter::once;
 use std::{array::from_fn, cmp::Ordering};
@@ -29,7 +29,7 @@ pub struct Tree<const N: usize> {
     /// Stores neighbors along each face
     neighbors: Vec<usize>,
     /// Index within z-filling curve
-    #[serde(with = "aeon_array")]
+    #[serde(with = "crate::array")]
     indices: [BitVec<usize, Lsb0>; N],
     /// Offsets into indices,
     offsets: Vec<usize>,
@@ -782,7 +782,7 @@ impl<const N: usize> Tree<N> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{regions, FaceMask};
+    use crate::geometry::{regions, FaceMask};
 
     #[test]
     fn refine_balancing() {

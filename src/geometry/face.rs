@@ -4,7 +4,7 @@ use std::{
     ops::{Index, IndexMut},
 };
 
-use aeon_array::ArrayWrap;
+use crate::array::ArrayWrap;
 
 use super::{index::IndexWindow, AxisMask, Region, Side};
 

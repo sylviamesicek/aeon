@@ -6,9 +6,9 @@
 //! use the following pattern:
 //!
 //! ```rust
-//! # use aeon_array::ArrayLike;
+//! # use aeon::array::ArrayLike;
 //! trait MyTrait {
-//!     type Weights: ArrayLike<Elem = f64>;
+//!     type Weights: ArrayLike<usize, Elem = f64>;
 //! }
 //!
 //! struct MyStruct;
@@ -17,8 +17,6 @@
 //!     type Weights = [f64; 10];
 //! }
 //! ```
-
-extern crate self as aeon_array;
 
 use serde::de::{Deserialize, Deserializer, Error as _};
 use serde::ser::{Serialize, SerializeTuple as _, Serializer};

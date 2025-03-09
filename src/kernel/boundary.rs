@@ -3,7 +3,7 @@
 //! This module uses a combination of trait trickery and type transformers to
 //! create an ergonomic API for working with boundaries.
 
-use aeon_geometry::{faces, Face, FaceMask};
+use crate::geometry::{faces, Face, FaceMask};
 
 /// Indicates what type of boundary condition is used along a particualr
 /// face of the domain. More specific boundary conditions are provided

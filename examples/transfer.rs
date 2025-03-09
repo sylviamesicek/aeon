@@ -61,8 +61,8 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
         mesh.fill_boundary(ORDER, WaveConditions, system.as_mut_slice());
 
         mesh.flag_wavelets(4, LOWER, UPPER, system.as_slice());
-        mesh.set_regrid_level_limit(10);
 
+        mesh.limit_level_range_flags(1, 10);
         mesh.balance_flags();
 
         // Save data to file.

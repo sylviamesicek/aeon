@@ -1,15 +1,15 @@
 use std::array;
 
-use crate::AxisMask;
+use crate::geometry::AxisMask;
 
 /// Represents a rectangular physical domain.
 #[derive(Debug, Copy, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Rectangle<const N: usize> {
     /// Size of the rectangle along each axis.
-    #[serde(with = "aeon_array")]
+    #[serde(with = "crate::array")]
     pub size: [f64; N],
     /// Origin of the rectangle (located at the bottom-left corner).
-    #[serde(with = "aeon_array")]
+    #[serde(with = "crate::array")]
     pub origin: [f64; N],
 }
 

@@ -11,7 +11,6 @@ members = [
     "tools/evsphere",
 ]
 default-members = [
-    "crates/aeon_geometry",
     "crates/aeon_macros",
     "crates/aeon_tensor",
 
@@ -27,8 +26,6 @@ resolver = "2"
 
 [workspace.dependencies]
 aeon = { path = "." }
-aeon_array = { path = "crates/aeon_array" }
-aeon_geometry = { path = "crates/aeon_geometry" }
 aeon_macros = { path = "crates/aeon_macros" }
 aeon_tensor = { path = "crates/aeon_tensor" }
 
@@ -63,8 +60,6 @@ exclude = ["crates/", "tools/"]
 readme = "README.md"
 
 [dependencies]
-aeon_array.workspace = true
-aeon_geometry.workspace = true
 aeon_macros.workspace = true
 
 bitvec.workspace = true

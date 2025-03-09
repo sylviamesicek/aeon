@@ -1,5 +1,5 @@
-use crate::{regions, IndexSpace, Region, NULL};
-use crate::{Face, Side, Tree, TreeBlocks};
+use crate::geometry::{regions, IndexSpace, Region, NULL};
+use crate::geometry::{Face, Side, Tree, TreeBlocks};
 use std::ops::Range;
 use std::slice;
 
@@ -244,13 +244,13 @@ pub struct TreeInterface<const N: usize> {
     /// Source block.
     pub neighbor: usize,
     /// Source dof on neighbor.
-    #[serde(with = "aeon_array")]
+    #[serde(with = "crate::array")]
     pub source: [isize; N],
     /// Destination dof on target.
-    #[serde(with = "aeon_array")]
+    #[serde(with = "crate::array")]
     pub dest: [isize; N],
     /// Number of dofs to be filled along each axis.
-    #[serde(with = "aeon_array")]
+    #[serde(with = "crate::array")]
     pub size: [usize; N],
 }
 
@@ -274,7 +274,7 @@ impl InterfaceKind {
 
 #[cfg(test)]
 mod tests {
-    use crate::Rectangle;
+    use crate::geometry::Rectangle;
 
     use super::*;
 

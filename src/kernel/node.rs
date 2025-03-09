@@ -3,12 +3,12 @@
 //! This module introduces the primary abstraction of `aeon_kernel`, namely
 //! the `NodeSpace`.
 
+use crate::geometry::{
+    faces, regions, CartesianIter, Face, FaceMask, IndexSpace, Rectangle, Region, Side,
+};
 use crate::kernel::{
     boundary::are_bcs_compatible, Border, BoundaryConds, BoundaryKind, CellKernel, Convolution,
     Kernel, Value, VertexKernel,
-};
-use aeon_geometry::{
-    faces, regions, CartesianIter, Face, FaceMask, IndexSpace, Rectangle, Region, Side,
 };
 use std::array::{self, from_fn};
 
@@ -639,7 +639,7 @@ impl<const N: usize> Iterator for NodePlaneIter<N> {
 
 #[cfg(test)]
 mod tests {
-    use aeon_geometry::Rectangle;
+    use crate::geometry::Rectangle;
 
     use super::*;
     use crate::kernel::{Kernels as _, Order};

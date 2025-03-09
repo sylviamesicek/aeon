@@ -1,4 +1,4 @@
-use crate::{faces, Face};
+use crate::geometry::{faces, Face};
 
 /// Stores a flag for each axis.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]

@@ -1,6 +1,6 @@
+use crate::geometry::Face;
 use crate::kernel::{BoundaryConds, BoundaryKind, RadiativeParams};
 use crate::system::{Empty, Pair, Scalar, System};
-use aeon_geometry::Face;
 
 /// A generalization of `Condition<N>` for a coupled systems of scalar fields.
 pub trait SystemBoundaryConds<const N: usize>: Clone {

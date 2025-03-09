@@ -1,5 +1,5 @@
+use aeon::geometry::faces;
 use aeon::{mesh::Gaussian, prelude::*, solver::HyperRelaxSolver};
-use aeon_geometry::faces;
 
 const ORDER: Order<4> = Order::<4>;
 
@@ -109,8 +109,8 @@ pub fn main() -> anyhow::Result<()> {
         )?;
 
         mesh.flag_wavelets(4, LOWER, UPPER, (&solution).into());
-        mesh.set_regrid_level_limit(10);
 
+        mesh.limit_level_range_flags(1, 10);
         mesh.balance_flags();
 
         // Save data to file.

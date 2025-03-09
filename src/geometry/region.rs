@@ -34,7 +34,7 @@ impl Side {
 
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Region<const N: usize> {
-    #[serde(with = "aeon_array")]
+    #[serde(with = "crate::array")]
     sides: [Side; N],
 }
 
@@ -368,7 +368,7 @@ pub fn regions<const N: usize>() -> RegionIter<N> {
 
 #[cfg(test)]
 mod tests {
-    use crate::{AxisMask, Face};
+    use crate::geometry::{AxisMask, Face};
 
     use super::{regions, Region, Side};
 

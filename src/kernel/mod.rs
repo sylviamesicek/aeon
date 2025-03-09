@@ -10,7 +10,7 @@ mod weights;
 
 pub use boundary::{BoundaryConds, BoundaryKind, RadiativeParams};
 pub use convolution::{Convolution, Gradient, Hessian};
-pub use element::Element;
+pub use element::{Element, ElementCache};
 pub use node::{
     node_from_vertex, vertex_from_node, NodeCartesianIter, NodePlaneIter, NodeSpace, NodeWindow,
 };
