@@ -267,15 +267,16 @@ impl<const N: usize> Mesh<N> {
 #[cfg(test)]
 mod tests {
     use crate::geometry::{Face, Rectangle};
+    use crate::kernel::BoundaryClass;
     use crate::mesh::Mesh;
 
     #[test]
     fn element_windows() {
         let mut mesh: Mesh<2> = Mesh::new(Rectangle::UNIT, 4, 2);
-        mesh.set_boundary_ghost(Face::negative(0), true);
-        mesh.set_boundary_ghost(Face::negative(1), true);
-        mesh.set_boundary_ghost(Face::positive(0), false);
-        mesh.set_boundary_ghost(Face::positive(1), false);
+        mesh.set_boundary_class(Face::negative(0), BoundaryClass::Ghost);
+        mesh.set_boundary_class(Face::negative(1), BoundaryClass::Ghost);
+        mesh.set_boundary_class(Face::positive(0), BoundaryClass::OneSided);
+        mesh.set_boundary_class(Face::positive(1), BoundaryClass::OneSided);
 
         mesh.set_refine_flag(0);
         mesh.regrid();

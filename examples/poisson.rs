@@ -1,4 +1,6 @@
-use aeon::geometry::faces;
+use std::path::PathBuf;
+
+use aeon::solver::SolverCallback;
 use aeon::{mesh::Gaussian, prelude::*, solver::HyperRelaxSolver};
 
 const ORDER: Order<4> = Order::<4>;
@@ -13,7 +15,18 @@ impl SystemBoundaryConds<2> for Conditions {
     type System = Scalar;
 
     fn kind(&self, _label: <Self::System as System>::Label, _face: Face<2>) -> BoundaryKind {
-        BoundaryKind::Radiative
+        BoundaryKind::StrongDirichlet
+    }
+
+    fn dirichlet(
+        &self,
+        _label: <Self::System as System>::Label,
+        _position: [f64; 2],
+    ) -> DirichletParams {
+        DirichletParams {
+            target: 0.0,
+            strength: 1.0,
+        }
     }
 
     fn radiative(&self, _field: (), _position: [f64; 2]) -> RadiativeParams {
@@ -52,6 +65,45 @@ impl<'a> Function<2> for PoissonEquation<'a> {
     }
 }
 
+struct Callback;
+
+// Implement visualization for hamiltonian.
+impl SolverCallback<2, Scalar> for Callback {
+    fn callback(
+        &self,
+        mesh: &Mesh<2>,
+        input: SystemSlice<Scalar>,
+        output: SystemSlice<Scalar>,
+        iteration: usize,
+    ) {
+        if iteration % 50 != 0 {
+            return;
+        }
+
+        let i = iteration / 50;
+
+        let mut checkpoint = SystemCheckpoint::default();
+        checkpoint.save_field("Solution", input.into_scalar());
+        checkpoint.save_field("Derivative", output.into_scalar());
+
+        mesh.export_vtu(
+            PathBuf::from("output/poisson").join(format!(
+                "{}_level_{}_iter_{}.vtu",
+                "poisson",
+                mesh.max_level(),
+                i
+            )),
+            &checkpoint,
+            ExportVtuConfig {
+                title: "poisson".to_string(),
+                ghost: false,
+                stride: 1,
+            },
+        )
+        .unwrap()
+    }
+}
+
 pub fn main() -> anyhow::Result<()> {
     env_logger::builder()
         .filter_level(log::LevelFilter::Trace)
@@ -63,9 +115,8 @@ pub fn main() -> anyhow::Result<()> {
 
     // Generate initial mesh
     let mut mesh = Mesh::new(Rectangle::from_aabb([-20., -20.], [20., 20.]), 4, 2);
-    for face in faces() {
-        mesh.set_boundary_ghost(face, false);
-    }
+    mesh.set_boundary_classes(BoundaryClass::OneSided);
+    mesh.refine_global();
     // Allocate space for system
     let mut source = Vec::new();
     let mut solution = Vec::new();
@@ -100,11 +151,12 @@ pub fn main() -> anyhow::Result<()> {
         solver.cfl = 0.5;
         solver.adaptive = true;
 
-        solver.solve(
+        solver.solve_with_callback(
             &mut mesh,
             ORDER,
             Conditions,
             PoissonEquation { source: &source },
+            Callback,
             (&mut solution).into(),
         )?;
 

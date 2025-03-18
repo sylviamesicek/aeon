@@ -4,11 +4,11 @@
 //! the `NodeSpace`.
 
 use crate::geometry::{
-    faces, regions, CartesianIter, Face, FaceMask, IndexSpace, Rectangle, Region, Side,
+    faces, regions, CartesianIter, Face, FaceArray, IndexSpace, Rectangle, Region, Side,
 };
 use crate::kernel::{
-    boundary::are_bcs_compatible, Border, BoundaryConds, BoundaryKind, CellKernel, Convolution,
-    Kernel, Value, VertexKernel,
+    boundary::is_boundary_compatible, Border, BoundaryClass, BoundaryConds, BoundaryKind,
+    CellKernel, Convolution, Kernel, Value, VertexKernel,
 };
 use std::array::{self, from_fn};
 
@@ -34,9 +34,11 @@ pub fn node_from_vertex<const N: usize>(vertex: [usize; N]) -> [isize; N] {
 pub struct NodeSpace<const N: usize> {
     /// Number of cells along each axis (one less than then number of vertices).
     pub size: [usize; N],
+    /// Number of ghost nodes along each face.
     pub ghost: usize,
-    pub ghost_flags: FaceMask<N>,
+    /// Position of the node space.
     pub bounds: Rectangle<N>,
+    pub boundary: FaceArray<N, BoundaryClass>,
 }
 
 impl<const N: usize> NodeSpace<N> {
@@ -196,8 +198,8 @@ impl<const N: usize> NodeSpace<N> {
         debug_assert!(self.ghost >= border_width);
         debug_assert!(self.size[axis] + 1 >= border_width);
 
-        let has_negative = self.ghost_flags.is_set(Face::negative(axis));
-        let has_positive = self.ghost_flags.is_set(Face::positive(axis));
+        let has_negative = self.boundary[Face::negative(axis)].has_ghost();
+        let has_positive = self.boundary[Face::positive(axis)].has_ghost();
 
         if !has_negative && vertex < border_width {
             Support::Negative(vertex as usize)
@@ -212,8 +214,8 @@ impl<const N: usize> NodeSpace<N> {
         debug_assert!(self.ghost >= border_width);
         debug_assert!(cell < self.size[axis]);
 
-        let has_negative = self.ghost_flags.is_set(Face::negative(axis));
-        let has_positive = self.ghost_flags.is_set(Face::positive(axis));
+        let has_negative = self.boundary[Face::negative(axis)].has_ghost();
+        let has_positive = self.boundary[Face::positive(axis)].has_ghost();
 
         if !has_negative && cell < border_width {
             let right = cell;
@@ -228,7 +230,7 @@ impl<const N: usize> NodeSpace<N> {
 
     /// Set strongly enforced boundary conditions.
     pub fn fill_boundary(&self, extent: usize, cond: impl BoundaryConds<N>, dest: &mut [f64]) {
-        debug_assert!(are_bcs_compatible(self.ghost_flags, &cond));
+        debug_assert!(is_boundary_compatible(&self.boundary, &cond));
 
         // Loop over faces
         for face in faces::<N>() {
@@ -247,7 +249,7 @@ impl<const N: usize> NodeSpace<N> {
                 for node in self.face_window_disjoint(face) {
                     let position = self.position(node);
                     let index = self.index_from_node(node);
-                    dest[index] = cond.dirichlet(position);
+                    dest[index] = cond.dirichlet(position).target;
                 }
             }
         }
@@ -389,7 +391,7 @@ impl<const N: usize> NodeSpace<N> {
                 side: border.side(),
             };
 
-            if self.ghost_flags.is_set(face) {
+            if self.boundary[face].has_ghost() {
                 convolution.interior(axis)
             } else {
                 convolution.free(border, axis)
@@ -416,7 +418,7 @@ impl<const N: usize> NodeSpace<N> {
             side: border.side(),
         };
 
-        if self.ghost_flags.is_set(face) {
+        if self.boundary[face].has_ghost() {
             kernel.interior()
         } else {
             kernel.free(border)
@@ -521,7 +523,7 @@ impl<const N: usize> NodeSpace<N> {
                 side: border.side(),
             };
 
-            if self.ghost_flags.is_set(face) {
+            if self.boundary[face].has_ghost() {
                 kernel.interior()
             } else {
                 kernel.free(border)
@@ -644,8 +646,14 @@ mod tests {
     use super::*;
     use crate::kernel::{Kernels as _, Order};
 
-    fn ghost_flags<const N: usize>() -> FaceMask<N> {
-        FaceMask::from_fn(|face| !face.side)
+    fn boundary<const N: usize>() -> FaceArray<N, BoundaryClass> {
+        FaceArray::from_fn(|face| {
+            if face.side {
+                BoundaryClass::OneSided
+            } else {
+                BoundaryClass::Ghost
+            }
+        })
     }
 
     #[test]
@@ -653,8 +661,8 @@ mod tests {
         let space = NodeSpace {
             size: [8],
             ghost: 3,
-            ghost_flags: ghost_flags(),
             bounds: Rectangle::UNIT,
+            boundary: boundary(),
         };
 
         const BORDER: usize = 3;
@@ -681,8 +689,8 @@ mod tests {
         let space = NodeSpace {
             size: [8],
             ghost: 3,
-            ghost_flags: ghost_flags(),
             bounds: Rectangle::UNIT,
+            boundary: boundary(),
         };
 
         const BORDER: usize = 3;
@@ -707,8 +715,8 @@ mod tests {
         let space = NodeSpace {
             size,
             ghost: 2,
-            ghost_flags: ghost_flags(),
             bounds: Rectangle::UNIT,
+            boundary: boundary(),
         };
 
         let mut field = vec![0.0; space.num_nodes()];
@@ -754,13 +762,13 @@ mod tests {
         let cspace = NodeSpace {
             size,
             ghost: 2,
-            ghost_flags: ghost_flags(),
+            boundary: boundary(),
             bounds: Rectangle::UNIT,
         };
         let rspace = NodeSpace {
             size: size.map(|v| v * 2),
             ghost: 2,
-            ghost_flags: ghost_flags(),
+            boundary: boundary(),
             bounds: Rectangle::UNIT,
         };
 
@@ -800,7 +808,7 @@ mod tests {
         let space = NodeSpace {
             size: [10; 2],
             ghost: 2,
-            ghost_flags: ghost_flags(),
+            boundary: boundary(),
             bounds: Rectangle::UNIT,
         };
 

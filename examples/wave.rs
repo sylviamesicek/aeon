@@ -92,7 +92,7 @@ pub fn main() -> anyhow::Result<()> {
     // Generate initial mesh
     let mut mesh = Mesh::new(Rectangle::from_aabb([-10., -10.], [10., 10.]), 6, 3);
     for face in faces() {
-        mesh.set_boundary_ghost(face, false);
+        mesh.set_boundary_class(face, BoundaryClass::OneSided);
     }
     // Allocate space for system
     let mut system = SystemVec::<Scalar>::default();

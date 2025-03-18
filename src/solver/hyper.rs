@@ -1,5 +1,5 @@
 use crate::geometry::{Face, IndexSpace};
-use crate::kernel::{BoundaryKind, Kernels, RadiativeParams};
+use crate::kernel::{BoundaryKind, DirichletParams, Kernels, RadiativeParams};
 use reborrow::{Reborrow, ReborrowMut};
 use thiserror::Error;
 
@@ -162,9 +162,9 @@ impl HyperRelaxSolver {
                 return Err(HyperRelaxError::Diverged);
             }
 
-            // if index % 1000 == 0 {
-            //     log::trace!("Relaxed {}k steps, norm: {:.5e}", index / 1000, norm);
-            // }
+            if index % 1000 == 0 {
+                log::trace!("Relaxed {}k steps, norm: {:.5e}", index / 1000, norm);
+            }
 
             if norm <= self.tolerance {
                 log::trace!("Converged in {} steps.", index);
@@ -253,23 +253,19 @@ impl<const N: usize, C: SystemBoundaryConds<N>> SystemBoundaryConds<N>
         }
     }
 
-    fn dirichlet(&self, label: <Self::System as System>::Label, position: [f64; N]) -> f64 {
-        match label {
-            Pair::First(label) => self.conditions.dirichlet(label, position),
-            Pair::Second(label) => self.conditions.dirichlet(label, position) * self.dampening,
-        }
-    }
-
-    fn dirichlet_strength(
+    fn dirichlet(
         &self,
         label: <Self::System as System>::Label,
         position: [f64; N],
-    ) -> f64 {
-        let label = match label {
-            Pair::First(label) => label,
-            Pair::Second(label) => label,
-        };
-        self.conditions.dirichlet_strength(label, position)
+    ) -> DirichletParams {
+        match label {
+            Pair::First(label) => self.conditions.dirichlet(label, position),
+            Pair::Second(label) => {
+                let mut params = self.conditions.dirichlet(label, position);
+                params.target *= self.dampening;
+                params
+            }
+        }
     }
 }
 
@@ -336,7 +332,10 @@ impl<'a, const N: usize, S: System, F: Function<N, Input = S, Output = S>> Funct
 
 #[cfg(test)]
 mod tests {
-    use crate::geometry::Rectangle;
+    use crate::{
+        geometry::Rectangle,
+        kernel::{BoundaryClass, DirichletParams},
+    };
 
     use super::*;
     use crate::{
@@ -353,7 +352,18 @@ mod tests {
         type System = Scalar;
 
         fn kind(&self, _label: <Self::System as System>::Label, _face: Face<2>) -> BoundaryKind {
-            BoundaryKind::Symmetric
+            BoundaryKind::StrongDirichlet
+        }
+
+        fn dirichlet(
+            &self,
+            _label: <Self::System as System>::Label,
+            _position: [f64; 2],
+        ) -> DirichletParams {
+            DirichletParams {
+                target: 0.0,
+                strength: 1.0,
+            }
         }
     }
 
@@ -362,7 +372,7 @@ mod tests {
 
     impl Projection<2> for PoissonSolution {
         fn project(&self, [x, y]: [f64; 2]) -> f64 {
-            (2.0 * consts::PI * x).cos() * (2.0 * consts::PI * y).cos()
+            (2.0 * consts::PI * x).sin() * (2.0 * consts::PI * y).sin()
         }
     }
 
@@ -391,8 +401,8 @@ mod tests {
                 let source = -8.0
                     * consts::PI
                     * consts::PI
-                    * (2.0 * consts::PI * x).cos()
-                    * (2.0 * consts::PI * y).cos();
+                    * (2.0 * consts::PI * x).sin()
+                    * (2.0 * consts::PI * y).sin();
 
                 output[index] = laplacian - source;
             }
@@ -402,6 +412,9 @@ mod tests {
     #[test]
     fn poisson() {
         let mut mesh = Mesh::new(Rectangle::from_aabb([0.0, 0.0], [1.0, 1.0]), 4, 2);
+        // Set boundary ghost flags.
+        mesh.set_boundary_classes(BoundaryClass::OneSided);
+        // Perform refinement
         mesh.refine_global();
         mesh.refine_global();
 
@@ -417,30 +430,30 @@ mod tests {
         solver.tolerance = 1e-4;
 
         // loop {
-        //     if mesh.max_level() > 11 {
-        //         panic!("Poisson mesh solver exceeded max levels");
-        //     }
+        // if mesh.max_level() > 11 {
+        //     panic!("Poisson mesh solver exceeded max levels");
+        // }
 
-        //     let mut result = vec![1.0; mesh.num_nodes()];
+        // let mut result = vec![1.0; mesh.num_nodes()];
 
-        //     solver
-        //         .solve(
-        //             &mut mesh,
-        //             Order::<4>,
-        //             PoissonConditions,
-        //             PoissonEquation,
-        //             (&mut result).into(),
-        //         )
-        //         .unwrap();
+        // solver
+        //     .solve(
+        //         &mut mesh,
+        //         Order::<4>,
+        //         PoissonConditions,
+        //         PoissonEquation,
+        //         (&mut result).into(),
+        //     )
+        //     .unwrap();
 
-        //     mesh.flag_wavelets::<Scalar>(4, 0.0, 1e-4, result.as_slice().into());
-        //     mesh.balance_flags();
+        // mesh.flag_wavelets::<Scalar>(4, 0.0, 1e-4, result.as_slice().into());
+        // mesh.balance_flags();
 
-        //     if mesh.requires_regridding() {
-        //         mesh.regrid();
-        //     } else {
-        //         break;
-        //     }
+        // if mesh.requires_regridding() {
+        //     mesh.regrid();
+        // } else {
+        //     return;
+        // }
         // }
     }
 }

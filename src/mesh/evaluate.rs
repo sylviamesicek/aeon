@@ -228,13 +228,13 @@ impl<const N: usize> Mesh<N> {
     }
 
     pub(crate) fn is_block_in_interior(&self, block: usize) -> bool {
-        let ghost_flags = self.block_boundary_ghost_flags(block);
+        let boundary = self.block_boundary_classes(block);
 
         let mut result = true;
 
         for axis in 0..N {
-            result &= ghost_flags.is_set(Face::negative(axis));
-            result &= ghost_flags.is_set(Face::positive(axis));
+            result &= boundary[Face::negative(axis)].has_ghost();
+            result &= boundary[Face::positive(axis)].has_ghost();
         }
 
         result
@@ -364,8 +364,9 @@ impl<const N: usize> Mesh<N> {
                             for node in space.face_window_disjoint(face) {
                                 let index = space.index_from_node(node);
                                 let position = space.position(node);
-                                dest[index] = boundary.dirichlet_strength(position)
-                                    * (boundary.dirichlet(position) - source[index])
+                                let dirichlet = boundary.dirichlet(position);
+                                dest[index] =
+                                    dirichlet.strength * (dirichlet.target - source[index])
                             }
                         }
 

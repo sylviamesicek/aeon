@@ -1,4 +1,5 @@
 use crate::geometry::{FaceArray, Rectangle, Tree};
+use crate::kernel::BoundaryClass;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 use std::collections::HashMap;
@@ -23,7 +24,7 @@ pub struct MeshCheckpoint<const N: usize> {
     tree: Tree<N>,
     width: usize,
     ghost: usize,
-    ghost_flags: FaceArray<N, bool>,
+    boundary: FaceArray<N, BoundaryClass>,
 }
 
 impl<const N: usize> MeshCheckpoint<N> {
@@ -31,14 +32,14 @@ impl<const N: usize> MeshCheckpoint<N> {
         self.tree.clone_from(&mesh.tree);
         self.width = mesh.width;
         self.ghost = mesh.ghost;
-        self.ghost_flags = mesh.ghost_flags;
+        self.boundary = mesh.boundary;
     }
 
     pub fn load_mesh(&self, mesh: &mut Mesh<N>) {
         mesh.tree.clone_from(&self.tree);
         mesh.width = self.width;
         mesh.ghost = self.ghost;
-        mesh.ghost_flags = self.ghost_flags;
+        mesh.boundary = self.boundary;
 
         mesh.build();
     }
@@ -50,7 +51,7 @@ impl<const N: usize> Default for MeshCheckpoint<N> {
             tree: Tree::new(Rectangle::UNIT),
             width: 4,
             ghost: 1,
-            ghost_flags: FaceArray::from_fn(|_| false),
+            boundary: FaceArray::from_fn(|_| BoundaryClass::OneSided),
         }
     }
 }

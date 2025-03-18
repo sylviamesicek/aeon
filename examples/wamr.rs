@@ -48,10 +48,10 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Create mesh
     let mut mesh = Mesh::new(domain, 4, 2);
-    mesh.set_boundary_ghost(Face::negative(0), true);
-    mesh.set_boundary_ghost(Face::negative(1), true);
-    mesh.set_boundary_ghost(Face::positive(0), false);
-    mesh.set_boundary_ghost(Face::positive(1), false);
+    mesh.set_boundary_class(Face::negative(0), BoundaryClass::Ghost);
+    mesh.set_boundary_class(Face::negative(1), BoundaryClass::Ghost);
+    mesh.set_boundary_class(Face::positive(0), BoundaryClass::OneSided);
+    mesh.set_boundary_class(Face::positive(1), BoundaryClass::OneSided);
 
     // Store system from previous iteration.
     let mut system_prev = SystemVec::with_length(mesh.num_nodes(), Scalar);

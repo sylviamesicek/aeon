@@ -3,7 +3,7 @@
 //! This module uses a combination of trait trickery and type transformers to
 //! create an ergonomic API for working with boundaries.
 
-use crate::geometry::{faces, Face, FaceMask};
+use crate::geometry::{faces, Face, FaceArray};
 
 /// Indicates what type of boundary condition is used along a particualr
 /// face of the domain. More specific boundary conditions are provided
@@ -48,9 +48,36 @@ impl BoundaryKind {
     pub fn is_parity(self) -> bool {
         matches!(self, BoundaryKind::AntiSymmetric | BoundaryKind::Symmetric)
     }
+
+    pub fn class(self) -> BoundaryClass {
+        match self {
+            BoundaryKind::AntiSymmetric | BoundaryKind::Symmetric | BoundaryKind::Custom => {
+                BoundaryClass::Ghost
+            }
+            BoundaryKind::Radiative
+            | BoundaryKind::StrongDirichlet
+            | BoundaryKind::WeakDirichlet
+            | BoundaryKind::Free => BoundaryClass::OneSided,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+pub enum BoundaryClass {
+    #[default]
+    OneSided,
+    Ghost,
+    Periodic,
+}
+
+impl BoundaryClass {
+    pub fn has_ghost(self) -> bool {
+        matches!(self, BoundaryClass::Ghost | BoundaryClass::Periodic)
+    }
 }
 
 /// Describes a radiative boundary condition at a point on the boundary.
+#[derive(Clone, Copy, Debug)]
 pub struct RadiativeParams {
     /// Target value for field.
     pub target: f64,
@@ -66,6 +93,12 @@ impl RadiativeParams {
     }
 }
 
+#[derive(Clone, Copy, Debug)]
+pub struct DirichletParams {
+    pub target: f64,
+    pub strength: f64,
+}
+
 /// Provides specifics for enforcing boundary conditions for
 /// a particular field.
 pub trait BoundaryConds<const N: usize>: Clone {
@@ -78,21 +111,20 @@ pub trait BoundaryConds<const N: usize>: Clone {
         }
     }
 
-    fn dirichlet(&self, _position: [f64; N]) -> f64 {
-        0.0
-    }
-
-    fn dirichlet_strength(&self, _position: [f64; N]) -> f64 {
-        1.0
+    fn dirichlet(&self, _position: [f64; N]) -> DirichletParams {
+        DirichletParams {
+            target: 0.0,
+            strength: 1.0,
+        }
     }
 }
 
 /// Checks whether a set of boundary conditions are compatible with the given ghost flags.
-pub fn are_bcs_compatible<const N: usize>(
-    ghost_flags: FaceMask<N>,
-    bcs: &impl BoundaryConds<N>,
+pub fn is_boundary_compatible<const N: usize, B: BoundaryConds<N>>(
+    boundary: &FaceArray<N, BoundaryClass>,
+    conditions: &B,
 ) -> bool {
     faces::<N>()
-        .map(|face| bcs.kind(face).needs_ghost() == ghost_flags.is_set(face))
+        .map(|face| conditions.kind(face).class() == boundary[face])
         .all(|x| x)
 }

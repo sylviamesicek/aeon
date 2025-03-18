@@ -32,10 +32,7 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Generate initial mesh
     let mut mesh = Mesh::new(Rectangle::from_aabb([-10., -10.], [10., 10.]), 4, 3);
-    mesh.set_boundary_ghost(Face::negative(0), false);
-    mesh.set_boundary_ghost(Face::negative(1), false);
-    mesh.set_boundary_ghost(Face::positive(0), false);
-    mesh.set_boundary_ghost(Face::positive(1), false);
+    mesh.set_boundary_classes(BoundaryClass::OneSided);
     // Allocate space for system
     let mut system = SystemVec::default();
 

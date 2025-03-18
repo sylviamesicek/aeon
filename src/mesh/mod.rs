@@ -9,7 +9,7 @@ use crate::geometry::{
     faces, AxisMask, Face, FaceArray, FaceMask, IndexSpace, Rectangle, Tree, TreeBlocks,
     TreeNeighbors,
 };
-use crate::kernel::Element;
+use crate::kernel::{BoundaryClass, DirichletParams, Element};
 use crate::{
     kernel::{BoundaryKind, NodeSpace, NodeWindow},
     system::SystemBoundaryConds,
@@ -66,10 +66,8 @@ pub struct Mesh<const N: usize> {
     width: usize,
     /// The number of ghost cells used to facilitate inter-block communication.
     ghost: usize,
-    /// A mask indicating whether a particular face uses ghost nodes to implement
-    /// boundary conditions. This should only be set to true if a boundary
-    /// needs to use parity or custom boundary conditions.
-    ghost_flags: FaceArray<N, bool>,
+
+    boundary: FaceArray<N, BoundaryClass>,
 
     /// Maximum level of cell on the mesh.
     max_level: usize,
@@ -127,7 +125,7 @@ impl<const N: usize> Mesh<N> {
             tree,
             width,
             ghost,
-            ghost_flags: FaceArray::default(),
+            boundary: FaceArray::default(),
 
             max_level: 0,
 
@@ -165,8 +163,14 @@ impl<const N: usize> Mesh<N> {
         self.ghost
     }
 
-    pub fn set_boundary_ghost(&mut self, face: Face<N>, ghost: bool) {
-        self.ghost_flags[face] = ghost;
+    pub fn set_boundary_class(&mut self, face: Face<N>, class: BoundaryClass) {
+        self.boundary[face] = class;
+    }
+
+    pub fn set_boundary_classes(&mut self, class: BoundaryClass) {
+        for face in faces() {
+            self.set_boundary_class(face, class);
+        }
     }
 
     /// Rebuilds mesh from current tree.
@@ -200,8 +204,8 @@ impl<const N: usize> Mesh<N> {
             let nodes_in_block = NodeSpace::<N> {
                 size: array::from_fn(|axis| size[axis] * self.width),
                 ghost: self.ghost,
-                ghost_flags: FaceMask::default(),
                 bounds: Rectangle::UNIT,
+                boundary: FaceArray::default(),
             }
             .num_nodes();
 
@@ -274,7 +278,7 @@ impl<const N: usize> Mesh<N> {
         NodeSpace {
             size: cell_size,
             ghost: self.ghost,
-            ghost_flags: self.block_boundary_ghost_flags(block),
+            boundary: self.block_boundary_classes(block),
             bounds: self.block_bounds(block),
         }
     }
@@ -287,8 +291,8 @@ impl<const N: usize> Mesh<N> {
         NodeSpace {
             size: cell_size,
             ghost: self.ghost,
-            ghost_flags: self.old_block_ghost_flags(block),
             bounds: Rectangle::UNIT,
+            boundary: self.old_block_boundary_classes(block),
         }
     }
 
@@ -303,14 +307,14 @@ impl<const N: usize> Mesh<N> {
         self.blocks.boundary_flags(block)
     }
 
-    pub fn block_boundary_ghost_flags(&self, block: usize) -> FaceMask<N> {
+    pub fn block_boundary_classes(&self, block: usize) -> FaceArray<N, BoundaryClass> {
         let flag = self.block_boundary_flags(block);
 
-        FaceMask::from_fn(|face| {
+        FaceArray::from_fn(|face| {
             if flag.is_set(face) {
-                self.ghost_flags[face]
+                self.boundary[face]
             } else {
-                true
+                BoundaryClass::Ghost
             }
         })
     }
@@ -329,14 +333,14 @@ impl<const N: usize> Mesh<N> {
     }
 
     /// Produces a block ghost flags for the mesh before its most recent refinement.
-    pub(crate) fn old_block_ghost_flags(&self, block: usize) -> FaceMask<N> {
+    pub(crate) fn old_block_boundary_classes(&self, block: usize) -> FaceArray<N, BoundaryClass> {
         let flag = self.old_blocks.boundary_flags(block);
 
-        FaceMask::from_fn(|face| {
+        FaceArray::from_fn(|face| {
             if flag.is_set(face) {
-                self.ghost_flags[face]
+                self.boundary[face]
             } else {
-                true
+                BoundaryClass::Ghost
             }
         })
     }
@@ -439,7 +443,7 @@ impl<const N: usize> Mesh<N> {
                     0
                 };
 
-            if !self.ghost_flags[face] && block_flags.is_set(face) && on_border {
+            if !self.boundary[face].has_ghost() && block_flags.is_set(face) && on_border {
                 return true;
             }
         }
@@ -737,7 +741,7 @@ impl<const N: usize> Clone for Mesh<N> {
             tree: self.tree.clone(),
             width: self.width,
             ghost: self.ghost,
-            ghost_flags: self.ghost_flags.clone(),
+            boundary: self.boundary.clone(),
 
             max_level: self.max_level,
 
@@ -770,7 +774,7 @@ impl<const N: usize> Default for Mesh<N> {
             tree: Tree::new(Rectangle::UNIT),
             width: 4,
             ghost: 1,
-            ghost_flags: FaceArray::default(),
+            boundary: FaceArray::default(),
 
             max_level: 0,
 
@@ -999,7 +1003,7 @@ impl<const N: usize> Mesh<N> {
                     format!("{}::{}", name, field),
                     &system.buffer[start..end],
                     config.ghost,
-                    config.stride,
+                    stride,
                 ));
             }
         }
@@ -1009,7 +1013,7 @@ impl<const N: usize> Mesh<N> {
                 format!("Field::{}", name),
                 system,
                 config.ghost,
-                config.stride,
+                stride,
             ));
         }
 
@@ -1018,7 +1022,7 @@ impl<const N: usize> Mesh<N> {
                 format!("IntField::{}", name),
                 system,
                 config.ghost,
-                config.stride,
+                stride,
             ));
         }
 
@@ -1112,16 +1116,12 @@ impl<const N: usize, I: SystemBoundaryConds<N>> SystemBoundaryConds<N>
         }
     }
 
-    fn dirichlet(&self, label: <Self::System as System>::Label, position: [f64; N]) -> f64 {
-        self.inner.dirichlet(label, position)
-    }
-
-    fn dirichlet_strength(
+    fn dirichlet(
         &self,
         label: <Self::System as System>::Label,
         position: [f64; N],
-    ) -> f64 {
-        self.inner.dirichlet_strength(label, position)
+    ) -> DirichletParams {
+        self.inner.dirichlet(label, position)
     }
 
     fn radiative(

@@ -32,3 +32,17 @@ impl<const N: usize, S: System> SolverCallback<N, S> for () {
     ) {
     }
 }
+
+impl<const N: usize, S: System, F: Fn(&Mesh<N>, SystemSlice<S>, SystemSlice<S>, usize)>
+    SolverCallback<N, S> for F
+{
+    fn callback(
+        &self,
+        mesh: &Mesh<N>,
+        input: SystemSlice<S>,
+        output: SystemSlice<S>,
+        iteration: usize,
+    ) {
+        self(mesh, input, output, iteration)
+    }
+}

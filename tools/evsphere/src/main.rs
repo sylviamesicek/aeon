@@ -126,8 +126,8 @@ fn run(config: RunConfig, diagnostics: &mut Diagnostics) -> Result<()> {
         CELL_WIDTH,
         GHOST,
     );
-    mesh.set_boundary_ghost(Face::negative(0), true);
-    mesh.set_boundary_ghost(Face::positive(0), false);
+    mesh.set_boundary_class(Face::negative(0), BoundaryClass::Ghost);
+    mesh.set_boundary_class(Face::positive(0), BoundaryClass::OneSided);
 
     log::trace!("Refining mesh globally {} times", REFINE_GLOBAL);
 

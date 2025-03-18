@@ -1,5 +1,5 @@
 use crate::geometry::Face;
-use crate::kernel::{BoundaryConds, BoundaryKind, RadiativeParams};
+use crate::kernel::{BoundaryConds, BoundaryKind, DirichletParams, RadiativeParams};
 use crate::system::{Empty, Pair, Scalar, System};
 
 /// A generalization of `Condition<N>` for a coupled systems of scalar fields.
@@ -19,16 +19,15 @@ pub trait SystemBoundaryConds<const N: usize>: Clone {
         }
     }
 
-    fn dirichlet(&self, _label: <Self::System as System>::Label, _position: [f64; N]) -> f64 {
-        0.0
-    }
-
-    fn dirichlet_strength(
+    fn dirichlet(
         &self,
         _label: <Self::System as System>::Label,
         _position: [f64; N],
-    ) -> f64 {
-        1.0
+    ) -> DirichletParams {
+        DirichletParams {
+            target: 0.0,
+            strength: 1.0,
+        }
     }
 
     fn field(&self, field: <Self::System as System>::Label) -> FieldBoundaryConds<N, Self> {
@@ -67,12 +66,8 @@ impl<const N: usize, C: SystemBoundaryConds<N>> BoundaryConds<N> for FieldBounda
         self.conditions.radiative(self.field, position)
     }
 
-    fn dirichlet(&self, position: [f64; N]) -> f64 {
+    fn dirichlet(&self, position: [f64; N]) -> DirichletParams {
         self.conditions.dirichlet(self.field, position)
-    }
-
-    fn dirichlet_strength(&self, position: [f64; N]) -> f64 {
-        self.conditions.dirichlet_strength(self.field, position)
     }
 }
 
@@ -101,16 +96,12 @@ impl<const N: usize, I: BoundaryConds<N>> SystemBoundaryConds<N> for ScalarCondi
         self.0.radiative(position)
     }
 
-    fn dirichlet(&self, _label: <Self::System as System>::Label, position: [f64; N]) -> f64 {
-        self.0.dirichlet(position)
-    }
-
-    fn dirichlet_strength(
+    fn dirichlet(
         &self,
         _label: <Self::System as System>::Label,
         position: [f64; N],
-    ) -> f64 {
-        self.0.dirichlet_strength(position)
+    ) -> DirichletParams {
+        self.0.dirichlet(position)
     }
 }
 
@@ -143,21 +134,14 @@ impl<const N: usize, L: SystemBoundaryConds<N>, R: SystemBoundaryConds<N>> Syste
         }
     }
 
-    fn dirichlet(&self, field: <Self::System as System>::Label, position: [f64; N]) -> f64 {
-        match field {
-            Pair::First(left) => self.left.dirichlet(left, position),
-            Pair::Second(right) => self.right.dirichlet(right, position),
-        }
-    }
-
-    fn dirichlet_strength(
+    fn dirichlet(
         &self,
         field: <Self::System as System>::Label,
         position: [f64; N],
-    ) -> f64 {
+    ) -> DirichletParams {
         match field {
-            Pair::First(left) => self.left.dirichlet_strength(left, position),
-            Pair::Second(right) => self.right.dirichlet_strength(right, position),
+            Pair::First(left) => self.left.dirichlet(left, position),
+            Pair::Second(right) => self.right.dirichlet(right, position),
         }
     }
 }
@@ -180,15 +164,11 @@ impl<const N: usize> SystemBoundaryConds<N> for EmptyConditions {
         unreachable!()
     }
 
-    fn dirichlet(&self, _label: <Self::System as System>::Label, _position: [f64; N]) -> f64 {
-        unreachable!()
-    }
-
-    fn dirichlet_strength(
+    fn dirichlet(
         &self,
         _label: <Self::System as System>::Label,
         _position: [f64; N],
-    ) -> f64 {
+    ) -> DirichletParams {
         unreachable!()
     }
 }

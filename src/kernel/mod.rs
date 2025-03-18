@@ -8,7 +8,7 @@ mod element;
 mod node;
 mod weights;
 
-pub use boundary::{BoundaryConds, BoundaryKind, RadiativeParams};
+pub use boundary::{BoundaryClass, BoundaryConds, BoundaryKind, DirichletParams, RadiativeParams};
 pub use convolution::{Convolution, Gradient, Hessian};
 pub use element::Element;
 pub use node::{

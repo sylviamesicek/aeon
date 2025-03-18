@@ -17,7 +17,9 @@ pub use aeon_macros as macros;
 /// Provides common types used for most `aeon` applications.
 pub mod prelude {
     pub use crate::geometry::{Face, IndexSpace, Rectangle};
-    pub use crate::kernel::{BoundaryConds, BoundaryKind, Order, RadiativeParams};
+    pub use crate::kernel::{
+        BoundaryClass, BoundaryConds, BoundaryKind, DirichletParams, Order, RadiativeParams,
+    };
     pub use crate::mesh::{
         Engine, ExportVtuConfig, Function, Mesh, MeshCheckpoint, Projection, SystemCheckpoint,
     };
