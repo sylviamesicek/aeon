@@ -66,7 +66,8 @@ pub struct Mesh<const N: usize> {
     width: usize,
     /// The number of ghost cells used to facilitate inter-block communication.
     ghost: usize,
-
+    /// `BoundaryClass` for each face. Restricts what kinds of boundary condition
+    /// (encoded in `BoundaryKind`) may be enforced on that face.
     boundary: FaceArray<N, BoundaryClass>,
 
     /// Maximum level of cell on the mesh.
@@ -115,17 +116,40 @@ pub struct Mesh<const N: usize> {
 impl<const N: usize> Mesh<N> {
     /// Constructs a new `Mesh` covering the domain, with a number of nodes
     /// defined by `width` and `ghost`.
-    pub fn new(bounds: Rectangle<N>, width: usize, ghost: usize) -> Self {
+    pub fn new(
+        bounds: Rectangle<N>,
+        width: usize,
+        ghost: usize,
+        boundary: FaceArray<N, BoundaryClass>,
+    ) -> Self {
         assert!(width % 2 == 0);
         assert!(ghost == width / 2);
 
-        let tree = Tree::new(bounds);
+        let mut periodic = [false; N];
+
+        for axis in 0..N {
+            let negative_periodic =
+                matches!(boundary[Face::negative(axis)], BoundaryClass::Periodic);
+            let positive_periodic =
+                matches!(boundary[Face::positive(axis)], BoundaryClass::Periodic);
+
+            assert_eq!(
+                negative_periodic, positive_periodic,
+                "Periodicity on a given axis must match"
+            );
+
+            if negative_periodic && positive_periodic {
+                periodic[axis] = true;
+            }
+        }
+
+        let tree = Tree::new(bounds, periodic);
 
         let mut result = Self {
             tree,
             width,
             ghost,
-            boundary: FaceArray::default(),
+            boundary,
 
             max_level: 0,
 
@@ -163,15 +187,15 @@ impl<const N: usize> Mesh<N> {
         self.ghost
     }
 
-    pub fn set_boundary_class(&mut self, face: Face<N>, class: BoundaryClass) {
-        self.boundary[face] = class;
-    }
+    // pub fn set_boundary_class(&mut self, face: Face<N>, class: BoundaryClass) {
+    //     self.boundary[face] = class;
+    // }
 
-    pub fn set_boundary_classes(&mut self, class: BoundaryClass) {
-        for face in faces() {
-            self.set_boundary_class(face, class);
-        }
-    }
+    // pub fn set_boundary_classes(&mut self, class: BoundaryClass) {
+    //     for face in faces() {
+    //         self.set_boundary_class(face, class);
+    //     }
+    // }
 
     /// Rebuilds mesh from current tree.
     fn build(&mut self) {
@@ -303,12 +327,13 @@ impl<const N: usize> Mesh<N> {
 
     /// Computes flags indicating whether a particular face of a block borders a physical
     /// boundary.
-    pub fn block_boundary_flags(&self, block: usize) -> FaceMask<N> {
+    pub fn block_physical_boundary_flags(&self, block: usize) -> FaceMask<N> {
         self.blocks.boundary_flags(block)
     }
 
+    /// Indicates what class of boundary condition is enforced along each face of the block.
     pub fn block_boundary_classes(&self, block: usize) -> FaceArray<N, BoundaryClass> {
-        let flag = self.block_boundary_flags(block);
+        let flag = self.block_physical_boundary_flags(block);
 
         FaceArray::from_fn(|face| {
             if flag.is_set(face) {
@@ -328,7 +353,7 @@ impl<const N: usize> Mesh<N> {
     ) -> BlockBoundaryConds<N, B> {
         BlockBoundaryConds {
             inner: bcs,
-            boundary_flags: self.block_boundary_flags(block),
+            physical_boundary_flags: self.block_physical_boundary_flags(block),
         }
     }
 
@@ -387,12 +412,14 @@ impl<const N: usize> Mesh<N> {
         NodeWindow { origin, size }
     }
 
+    /// Retrieves an element from the mesh's element cache.
     pub fn request_element(&mut self, width: usize, order: usize) -> Element<N> {
         self.elements
             .remove(&(width, order))
             .unwrap_or_else(|| Element::uniform(width, order))
     }
 
+    /// Reinserts an element into the mesh's element cache.
     pub fn replace_element(&mut self, element: Element<N>) {
         _ = self
             .elements
@@ -416,34 +443,30 @@ impl<const N: usize> Mesh<N> {
         })
     }
 
-    pub fn cell_node_offset(&self, cell: usize) -> [usize; N] {
-        let position = self.blocks.cell_position(cell);
-        array::from_fn(|axis| position[axis] * self.width)
-    }
-
     /// Returns the origin of a cell in its block's `NodeSpace<N>`.
     pub fn cell_node_origin(&self, cell: usize) -> [usize; N] {
         let position = self.blocks.cell_position(cell);
         array::from_fn(|axis| position[axis] * self.width)
     }
 
-    /// Returns true if the given cell is on a physical boundary.
-    pub fn is_cell_on_boundary(&self, cell: usize) -> bool {
+    /// Returns true if the given cell is on a boundary that does not contain
+    /// ghost nodes. If this is the case we must fall back to a lower order element
+    /// error approximation.
+    pub fn cell_needs_coarse_element(&self, cell: usize) -> bool {
         let block = self.blocks.cell_block(cell);
         let block_size = self.blocks.size(block);
-        let block_flags = self.block_boundary_flags(block);
-
+        let boundary = self.block_boundary_classes(block);
         let position = self.blocks.cell_position(cell);
 
         for face in faces::<N>() {
-            let on_border = position[face.axis]
-                == if face.side {
-                    block_size[face.axis] - 1
-                } else {
-                    0
-                };
+            let border = if face.side {
+                block_size[face.axis] - 1
+            } else {
+                0
+            };
+            let on_border = position[face.axis] == border;
 
-            if !self.boundary[face].has_ghost() && block_flags.is_set(face) && on_border {
+            if !boundary[face].has_ghost() && on_border {
                 return true;
             }
         }
@@ -511,21 +534,21 @@ impl<const N: usize> Mesh<N> {
     }
 
     /// Computes the maximum l2 norm of all fields in the system.
-    pub fn l2_norm<S: System>(&mut self, source: SystemSlice<S>) -> f64 {
+    pub fn l2_norm_system<S: System>(&mut self, source: SystemSlice<S>) -> f64 {
         source
             .system()
             .enumerate()
-            .map(|label| self.l2_norm_scalar(source.field(label)))
+            .map(|label| self.l2_norm(source.field(label)))
             .max_by(|a, b| a.total_cmp(b))
             .unwrap()
     }
 
     /// Computes the maximum l-infinity norm of all fields in the system.
-    pub fn max_norm<S: System>(&mut self, source: SystemSlice<S>) -> f64 {
+    pub fn max_norm_system<S: System>(&mut self, source: SystemSlice<S>) -> f64 {
         source
             .system()
             .enumerate()
-            .map(|label| self.max_norm_scalar(source.field(label)))
+            .map(|label| self.max_norm(source.field(label)))
             .max_by(|a, b| a.total_cmp(b))
             .unwrap()
     }
@@ -540,7 +563,7 @@ impl<const N: usize> Mesh<N> {
     }
 
     /// Computes the l2 norm of a field on the mesh.
-    fn l2_norm_scalar(&mut self, src: &[f64]) -> f64 {
+    pub fn l2_norm(&mut self, src: &[f64]) -> f64 {
         let mut result = 0.0;
 
         for block in 0..self.blocks.len() {
@@ -575,7 +598,7 @@ impl<const N: usize> Mesh<N> {
     }
 
     /// Computes the l-infinity norm of a field on a mesh.
-    fn max_norm_scalar(&mut self, src: &[f64]) -> f64 {
+    pub fn max_norm(&mut self, src: &[f64]) -> f64 {
         let mut result = 0.0f64;
 
         for block in 0..self.blocks.len() {
@@ -771,7 +794,7 @@ impl<const N: usize> Clone for Mesh<N> {
 impl<const N: usize> Default for Mesh<N> {
     fn default() -> Self {
         let mut result = Self {
-            tree: Tree::new(Rectangle::UNIT),
+            tree: Tree::new(Rectangle::UNIT, [false; N]),
             width: 4,
             ghost: 1,
             boundary: FaceArray::default(),
@@ -1100,7 +1123,7 @@ impl<const N: usize> Mesh<N> {
 pub struct BlockBoundaryConds<const N: usize, I> {
     inner: I,
     /// Physical boundary mask for various faces.
-    boundary_flags: FaceMask<N>,
+    physical_boundary_flags: FaceMask<N>,
 }
 
 impl<const N: usize, I: SystemBoundaryConds<N>> SystemBoundaryConds<N>
@@ -1109,7 +1132,7 @@ impl<const N: usize, I: SystemBoundaryConds<N>> SystemBoundaryConds<N>
     type System = I::System;
 
     fn kind(&self, label: <Self::System as System>::Label, face: Face<N>) -> BoundaryKind {
-        if self.boundary_flags.is_set(face) {
+        if self.physical_boundary_flags.is_set(face) {
             self.inner.kind(label, face)
         } else {
             BoundaryKind::Custom

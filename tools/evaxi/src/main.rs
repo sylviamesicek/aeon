@@ -321,7 +321,7 @@ pub fn evolution() -> Result<bool> {
         mesh.fill_boundary(ORDER, FieldConditions, fields.as_mut_slice());
 
         // Check Norm
-        let norm = mesh.l2_norm(fields.as_slice());
+        let norm = mesh.l2_norm_system(fields.as_slice());
 
         if norm.is_nan() || norm >= 1e60 {
             log::trace!("Evolution collapses, norm: {}", norm);

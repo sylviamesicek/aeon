@@ -1,13 +1,12 @@
-use std::array;
+use std::{array, path::PathBuf};
 
-use aeon::geometry::faces;
 use aeon::{
     mesh::Gaussian,
     prelude::*,
     solver::{Integrator, Method},
 };
 
-const MAX_TIME: f64 = 1.0;
+const MAX_TIME: f64 = 10.0;
 const MAX_STEPS: usize = 1000;
 
 const CFL: f64 = 0.1;
@@ -90,10 +89,12 @@ pub fn main() -> anyhow::Result<()> {
     log::info!("Intializing Mesh.");
 
     // Generate initial mesh
-    let mut mesh = Mesh::new(Rectangle::from_aabb([-10., -10.], [10., 10.]), 6, 3);
-    for face in faces() {
-        mesh.set_boundary_class(face, BoundaryClass::OneSided);
-    }
+    let mut mesh = Mesh::new(
+        Rectangle::from_aabb([-10., -10.], [10., 10.]),
+        6,
+        3,
+        FaceArray::splat(BoundaryClass::Periodic),
+    );
     // Allocate space for system
     let mut system = SystemVec::<Scalar>::default();
 
@@ -154,6 +155,24 @@ pub fn main() -> anyhow::Result<()> {
 
             log::info!("Refining {refine} cells, coarsening {coarsen} cells.");
             mesh.regrid();
+
+            let mut string = String::new();
+            mesh.write_debug(&mut string);
+            std::fs::write(PathBuf::from(format!("output/waves/debug{i}.txt")), string)?;
+
+            let mut checkpoint = SystemCheckpoint::default();
+            checkpoint.save_int_field("Flags", &vec![0; mesh.num_nodes()]);
+
+            mesh.export_vtu(
+                format!("output/waves/debug{i}.vtu"),
+                &checkpoint,
+                ExportVtuConfig {
+                    title: "Initial Wave Mesh".to_string(),
+                    ghost: false,
+                    stride: 6,
+                },
+            )?;
+
             continue;
         } else {
             log::info!("Regridded within range in {} iterations.", i + 1);

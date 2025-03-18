@@ -45,10 +45,6 @@ impl BoundaryKind {
         }
     }
 
-    pub fn is_parity(self) -> bool {
-        matches!(self, BoundaryKind::AntiSymmetric | BoundaryKind::Symmetric)
-    }
-
     pub fn class(self) -> BoundaryClass {
         match self {
             BoundaryKind::AntiSymmetric | BoundaryKind::Symmetric | BoundaryKind::Custom => {

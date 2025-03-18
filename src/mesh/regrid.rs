@@ -98,7 +98,7 @@ impl<const N: usize> Mesh<N> {
             let block_system = result.slice(nodes.clone());
 
             for &cell in mesh.blocks.cells(block) {
-                let is_cell_on_boundary = mesh.is_cell_on_boundary(cell);
+                let is_cell_on_boundary = mesh.cell_needs_coarse_element(cell);
 
                 // Window of nodes on element.
                 let window = if is_cell_on_boundary {
@@ -266,27 +266,28 @@ impl<const N: usize> Mesh<N> {
 
 #[cfg(test)]
 mod tests {
-    use crate::geometry::{Face, Rectangle};
+    use crate::geometry::{FaceArray, Rectangle};
     use crate::kernel::BoundaryClass;
     use crate::mesh::Mesh;
 
     #[test]
     fn element_windows() {
-        let mut mesh: Mesh<2> = Mesh::new(Rectangle::UNIT, 4, 2);
-        mesh.set_boundary_class(Face::negative(0), BoundaryClass::Ghost);
-        mesh.set_boundary_class(Face::negative(1), BoundaryClass::Ghost);
-        mesh.set_boundary_class(Face::positive(0), BoundaryClass::OneSided);
-        mesh.set_boundary_class(Face::positive(1), BoundaryClass::OneSided);
+        let mut mesh = Mesh::new(
+            Rectangle::UNIT,
+            4,
+            2,
+            FaceArray::from_sides([BoundaryClass::Ghost; 2], [BoundaryClass::OneSided; 2]),
+        );
 
         mesh.set_refine_flag(0);
         mesh.regrid();
 
-        assert!(!mesh.is_cell_on_boundary(0));
-        assert!(!mesh.is_cell_on_boundary(1));
-        assert!(!mesh.is_cell_on_boundary(2));
-        assert!(!mesh.is_cell_on_boundary(3));
-        assert!(mesh.is_cell_on_boundary(4));
-        assert!(mesh.is_cell_on_boundary(5));
-        assert!(mesh.is_cell_on_boundary(6));
+        assert!(!mesh.cell_needs_coarse_element(0));
+        assert!(!mesh.cell_needs_coarse_element(1));
+        assert!(!mesh.cell_needs_coarse_element(2));
+        assert!(!mesh.cell_needs_coarse_element(3));
+        assert!(mesh.cell_needs_coarse_element(4));
+        assert!(mesh.cell_needs_coarse_element(5));
+        assert!(mesh.cell_needs_coarse_element(6));
     }
 }

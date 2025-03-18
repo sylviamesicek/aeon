@@ -243,30 +243,30 @@ impl<const N: usize> Mesh<N> {
         self.fill_physical(extent, &bcs, system.rb_mut());
     }
 
-    /// A debugging function that fills ghost nodes with zeros.
-    pub fn fill_boundary_zeros<S: System>(&mut self, dest: SystemSliceMut<S>) {
-        let shared = dest.into_shared();
+    // /// A debugging function that fills ghost nodes with zeros.
+    // pub fn fill_boundary_zeros<S: System>(&mut self, dest: SystemSliceMut<S>) {
+    //     let shared = dest.into_shared();
 
-        (0..self.interfaces.len()).for_each(|interface| {
-            let info = self.interface(interface);
+    //     (0..self.interfaces.len()).for_each(|interface| {
+    //         let info = self.interface(interface);
 
-            let block_space = self.block_space(info.block);
-            let block_nodes = self.block_nodes(info.block);
+    //         let block_space = self.block_space(info.block);
+    //         let block_nodes = self.block_nodes(info.block);
 
-            let dest = info.dest;
+    //         let dest = info.dest;
 
-            let mut block_system = unsafe { shared.slice_mut(block_nodes) };
+    //         let mut block_system = unsafe { shared.slice_mut(block_nodes) };
 
-            for node in self.interface_nodes_active(interface, self.ghost) {
-                let block_node = array::from_fn(|axis| node[axis] as isize + dest[axis]);
-                let block_index = block_space.index_from_node(block_node);
+    //         for node in self.interface_nodes_active(interface, self.ghost) {
+    //             let block_node = array::from_fn(|axis| node[axis] as isize + dest[axis]);
+    //             let block_index = block_space.index_from_node(block_node);
 
-                for field in shared.system().enumerate() {
-                    block_system.field_mut(field)[block_index] = 0.0;
-                }
-            }
-        });
-    }
+    //             for field in shared.system().enumerate() {
+    //                 block_system.field_mut(field)[block_index] = 0.0;
+    //             }
+    //         }
+    //     });
+    // }
 
     fn fill_physical<C: SystemBoundaryConds<N> + Sync>(
         &mut self,
@@ -620,15 +620,6 @@ impl<const N: usize> Mesh<N> {
         // Source
 
         let mut source = self.transfer_source(&interface.a);
-
-        // // Ensure regions are disjoint
-        // for axis in 0..N {
-        //     if b.region.side(axis) == Side::Middle
-        //         && bnode[axis] < (block_size[axis] * self.width) as isize
-        //     {
-        //         bnode[axis] -= 1;
-        //     }
-        // }
 
         for axis in 0..N {
             if b.region.side(axis) == Side::Left && block_level < neighbor_level {

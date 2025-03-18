@@ -3,6 +3,7 @@
 use crate::geometry::{faces, regions, AxisMask, Face, Rectangle, Region, Side};
 use bitvec::prelude::*;
 use std::iter::once;
+use std::usize;
 use std::{array::from_fn, cmp::Ordering};
 
 mod blocks;
@@ -15,6 +16,41 @@ pub use nodes::TreeNodes;
 
 /// Denotes that the cell neighbors the physical boundary of a spatial domain.
 pub const NULL: usize = usize::MAX;
+
+// #[derive(Clone, Copy, Debug, serde::Serialize, serde::Deserialize)]
+// pub struct Neighbor(usize);
+
+// impl Neighbor {
+//     pub const MSB_MASK: usize = {
+//         let bits = size_of::<usize>() * 8;
+//         let index = bits - 1;
+//         1 << index
+//     };
+
+//     pub const NULL: usize = usize::MAX & !Self::MSB_MASK;
+
+//     pub fn new(cell: usize) -> Self {
+//         Self(cell & !Self::MSB_MASK)
+//     }
+
+//     /// Is this cell a neighbor over a periodic boundary?
+//     pub fn is_periodic(self) -> bool {
+//         (self.0 & Self::MSB_MASK) != 0
+//     }
+
+//     pub fn is_null(self) -> bool {
+//         (self.0 & Self::MSB_MASK) == Self::NULL
+//     }
+// }
+
+// impl PartialEq for Neighbor {
+//     fn eq(&self, other: &Self) -> bool {
+//         // We only care about bits other than the most significant bit.
+//         (self.0 | Self::MSB_MASK) == (other.0 | Self::MSB_MASK)
+//     }
+// }
+
+// impl Eq for Neighbor {}
 
 /// An implementation of a spatial quadtree in any number of dimensions.
 /// Only leaves are stored by this tree, and its hierarchical structure is implied.
@@ -37,15 +73,16 @@ pub struct Tree<const N: usize> {
 
 impl<const N: usize> Tree<N> {
     /// Constructs a new tree consisting of a single root cell that has been
-    /// subdivided once.
-    pub fn new(domain: Rectangle<N>) -> Self {
+    /// subdivided once. `periodic` encodes whether each axis has periodic
+    /// boundary conditions.
+    pub fn new(domain: Rectangle<N>, periodic: [bool; N]) -> Self {
         let bounds = AxisMask::enumerate()
             .map(|mask| domain.split(mask))
             .collect();
         let neighbors = AxisMask::<N>::enumerate()
             .flat_map(|mask| {
                 faces::<N>().map(move |face| {
-                    if mask.is_inner_face(face) {
+                    if mask.is_inner_face(face) || periodic[face.axis] {
                         mask.toggled(face.axis).to_linear()
                     } else {
                         NULL
@@ -216,10 +253,6 @@ impl<const N: usize> Tree<N> {
                     neighbor_fine = false;
                 }
                 Ordering::Greater => {
-                    if nlevel != level + 1 {
-                        println!("Cell {cell}, {level}; Neighbor {nneighbor}, {nlevel}");
-                    }
-
                     debug_assert!(nlevel == level + 1);
                     debug_assert!(!neighbor_coarse);
                     neighbor_fine = true;
@@ -786,7 +819,7 @@ mod tests {
 
     #[test]
     fn refine_balancing() {
-        let mut tree = Tree::new(Rectangle::<2>::UNIT);
+        let mut tree = Tree::new(Rectangle::<2>::UNIT, [false; 2]);
         tree.refine(&[true, false, false, false]);
 
         // Produce unbalanced flags
@@ -802,7 +835,7 @@ mod tests {
 
     #[test]
     fn refinement() {
-        let mut tree = Tree::new(Rectangle::<2>::UNIT);
+        let mut tree = Tree::new(Rectangle::<2>::UNIT, [false; 2]);
 
         assert_eq!(tree.num_cells(), 4);
         assert_eq!(tree.split(0).unpack(), [false, false]);
@@ -832,7 +865,7 @@ mod tests {
 
     #[test]
     fn uniform() {
-        let tree = Tree::new(Rectangle::<2>::UNIT);
+        let tree = Tree::new(Rectangle::<2>::UNIT, [false; 2]);
 
         assert_eq!(tree.num_cells(), 4);
         assert_eq!(tree.neighbor_slice(0), &[NULL, 1, NULL, 2]);
@@ -884,7 +917,7 @@ mod tests {
 
     #[test]
     fn two_levels() {
-        let mut tree = Tree::new(Rectangle::<2>::UNIT);
+        let mut tree = Tree::new(Rectangle::<2>::UNIT, [false; 2]);
         tree.refine(&[true, false, false, false]);
 
         assert_eq!(tree.num_cells(), 7);
@@ -933,7 +966,7 @@ mod tests {
 
     #[test]
     fn three_levels() {
-        let mut tree = Tree::new(Rectangle::<2>::UNIT);
+        let mut tree = Tree::new(Rectangle::<2>::UNIT, [false; 2]);
         tree.refine(&[true, false, false, false]);
         tree.refine(&[true, false, false, false, false, false, false]);
 
@@ -992,7 +1025,7 @@ mod tests {
 
     #[test]
     fn refinement_and_coarsening() {
-        let mut tree = Tree::<2>::new(Rectangle::UNIT);
+        let mut tree = Tree::<2>::new(Rectangle::UNIT, [false; 2]);
         // Make initially asymmetric.
         tree.refine(&[true, false, false, false]);
 
@@ -1012,6 +1045,6 @@ mod tests {
             tree.coarsen(&flags);
         }
 
-        assert_eq!(tree, Tree::<2>::new(Rectangle::UNIT));
+        assert_eq!(tree, Tree::<2>::new(Rectangle::UNIT, [false; 2]));
     }
 }

@@ -1,6 +1,7 @@
 use std::{array, ops::Range};
 
 use crate::geometry::{faces, Face, FaceMask, IndexSpace, NULL};
+use crate::kernel::is_boundary_compatible;
 use crate::{
     kernel::{
         node_from_vertex, vertex_from_node, BoundaryConds as _, BoundaryKind, Hessian, Kernels,
@@ -308,6 +309,13 @@ impl<const N: usize> Mesh<N> {
     ) where
         C::System: Sync,
     {
+        for field in f.system().enumerate() {
+            assert!(
+                is_boundary_compatible(&self.boundary, &bcs.field(field)),
+                "Boundary Conditions incompatible with set boundary classes"
+            )
+        }
+
         // Strong boundary condition
         self.fill_boundary(order, bcs.clone(), f.rb_mut());
         // Preprocess data
@@ -531,7 +539,7 @@ impl<const N: usize> Mesh<N> {
             for &cell in mesh.blocks.cells(block) {
                 let cell_level = mesh.tree.level(cell);
                 let node_size = mesh.cell_node_size(cell);
-                let node_origin = mesh.cell_node_offset(cell);
+                let node_origin = mesh.cell_node_origin(cell);
 
                 let mut flags = FaceMask::empty();
 

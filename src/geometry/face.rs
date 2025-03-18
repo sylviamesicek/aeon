@@ -169,6 +169,13 @@ impl<const N: usize, T: Clone> FaceArray<N, T> {
     pub fn splat(value: T) -> Self {
         Self::from_fn(|_| value.clone())
     }
+
+    pub fn from_sides(negative: [T; N], positive: [T; N]) -> Self {
+        Self::from_fn(|face| match face.side {
+            true => positive[face.axis].clone(),
+            false => negative[face.axis].clone(),
+        })
+    }
 }
 impl<const N: usize, T: Default> Default for FaceArray<N, T> {
     fn default() -> Self {

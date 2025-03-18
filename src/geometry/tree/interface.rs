@@ -63,10 +63,15 @@ pub fn regions_to_face<const N: usize>(a: Region<N>, b: Region<N>) -> Option<Fac
 /// Stores information about neighbors of blocks and cells.
 #[derive(Default, Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct TreeNeighbors<const N: usize> {
+    /// Flattened list of nieghbors for each block.
     neighbors: Vec<TreeBlockNeighbor<N>>,
+    /// Offset map for blocks -> neighbors.
     block_offsets: Vec<usize>,
+    /// A cached list of all fine interfaces.
     fine: Vec<usize>,
+    /// A cached list of all direct interfaces.
     direct: Vec<usize>,
+    /// A cached list of all coarse interfaces.
     coarse: Vec<usize>,
 }
 
@@ -313,7 +318,7 @@ mod tests {
 
     #[test]
     fn neighbors() {
-        let mut tree = Tree::new(Rectangle::<2>::UNIT);
+        let mut tree = Tree::new(Rectangle::<2>::UNIT, [false; 2]);
         let mut blocks = TreeBlocks::default();
         let mut interfaces = TreeNeighbors::default();
 

@@ -228,7 +228,8 @@ impl<const N: usize> NodeSpace<N> {
         }
     }
 
-    /// Set strongly enforced boundary conditions.
+    /// Set strongly enforced boundary conditions. This enforces parity and dirichlet boundary
+    /// conditions on this particular `NodeSpace`.
     pub fn fill_boundary(&self, extent: usize, cond: impl BoundaryConds<N>, dest: &mut [f64]) {
         debug_assert!(is_boundary_compatible(&self.boundary, &cond));
 
@@ -279,7 +280,10 @@ impl<const N: usize> NodeSpace<N> {
                 let mut source = node;
 
                 for face in region.adjacent_faces() {
-                    if !cond.kind(face).is_parity() {
+                    if !matches!(
+                        cond.kind(face),
+                        BoundaryKind::AntiSymmetric | BoundaryKind::Symmetric
+                    ) {
                         continue;
                     }
 

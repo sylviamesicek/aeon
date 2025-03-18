@@ -13,10 +13,14 @@ pub struct TreeBlocks<const N: usize> {
     /// Stores the size of each block.
     #[serde(with = "crate::array::vec")]
     block_sizes: Vec<[usize; N]>,
+    /// A flattened list of lists (for each block) that stores
+    /// a local cell index to global cell index map.
     block_cell_indices: Vec<usize>,
+    /// The offsets for the aforementioned flattened list of lists.
     block_cell_offsets: Vec<usize>,
     /// The physical bounds of each block.
     block_bounds: Vec<Rectangle<N>>,
+    /// The level of refinement of each block.
     block_levels: Vec<usize>,
     /// Stores whether block face is on physical boundary.
     boundaries: BitVec,
@@ -241,7 +245,7 @@ mod tests {
 
     #[test]
     fn greedy_meshing() {
-        let mut tree = Tree::new(Rectangle::UNIT);
+        let mut tree = Tree::new(Rectangle::UNIT, [false; 2]);
         tree.refine(&[true, false, false, false]);
 
         let mut blocks = TreeBlocks::default();

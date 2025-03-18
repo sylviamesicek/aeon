@@ -47,11 +47,15 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
     log::info!("Building Base Mesh.");
 
     // Create mesh
-    let mut mesh = Mesh::new(domain, 4, 2);
-    mesh.set_boundary_class(Face::negative(0), BoundaryClass::Ghost);
-    mesh.set_boundary_class(Face::negative(1), BoundaryClass::Ghost);
-    mesh.set_boundary_class(Face::positive(0), BoundaryClass::OneSided);
-    mesh.set_boundary_class(Face::positive(1), BoundaryClass::OneSided);
+    let mut mesh = Mesh::new(
+        domain,
+        4,
+        2,
+        FaceArray::from_fn(|face| match face.side {
+            false => BoundaryClass::Ghost,
+            true => BoundaryClass::OneSided,
+        }),
+    );
 
     // Store system from previous iteration.
     let mut system_prev = SystemVec::with_length(mesh.num_nodes(), Scalar);
@@ -90,7 +94,7 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
             .map(|(i, j)| i - j)
             .collect::<Vec<_>>();
 
-        let norm = mesh.l2_norm(SystemSlice::from_scalar(diff.as_slice()));
+        let norm = mesh.l2_norm_system(SystemSlice::from_scalar(diff.as_slice()));
 
         if norm.abs() >= 1e-20 {
             errors.push((i, norm));

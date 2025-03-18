@@ -175,11 +175,11 @@ fn initial_data() -> Result<()> {
         },
         domain.cell.subdivisions,
         domain.cell.ghost,
+        FaceArray::from_fn(|face| match face.side {
+            false => BoundaryClass::Ghost,
+            true => BoundaryClass::OneSided,
+        }),
     );
-    mesh.set_boundary_class(Face::negative(0), BoundaryClass::Ghost);
-    mesh.set_boundary_class(Face::negative(1), BoundaryClass::Ghost);
-    mesh.set_boundary_class(Face::positive(0), BoundaryClass::OneSided);
-    mesh.set_boundary_class(Face::positive(1), BoundaryClass::OneSided);
 
     log::trace!("Refining mesh globally {} times", config.refine_global);
 
@@ -324,8 +324,8 @@ fn initial_data() -> Result<()> {
         _ => {}
     };
 
-    let l2_norm = mesh.l2_norm(sigma.as_slice().into());
-    let max_norm = mesh.max_norm(sigma.as_slice().into());
+    let l2_norm = mesh.l2_norm_system(sigma.as_slice().into());
+    let max_norm = mesh.max_norm_system(sigma.as_slice().into());
     log::info!("Energy Density: l2 Norm {l2_norm:.5e}, max Norm {max_norm:.5e}");
 
     let mut checkpoint = SystemCheckpoint::default();

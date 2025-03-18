@@ -156,7 +156,7 @@ impl HyperRelaxSolver {
                 callback.callback(mesh, u.rb(), result.rb(), index);
             }
 
-            let norm = mesh.l2_norm(result.rb());
+            let norm = mesh.l2_norm_system(result.rb());
 
             if !norm.is_finite() || norm >= 1e60 {
                 return Err(HyperRelaxError::Diverged);
@@ -333,7 +333,7 @@ impl<'a, const N: usize, S: System, F: Function<N, Input = S, Output = S>> Funct
 #[cfg(test)]
 mod tests {
     use crate::{
-        geometry::Rectangle,
+        geometry::{FaceArray, Rectangle},
         kernel::{BoundaryClass, DirichletParams},
     };
 
@@ -411,9 +411,12 @@ mod tests {
 
     #[test]
     fn poisson() {
-        let mut mesh = Mesh::new(Rectangle::from_aabb([0.0, 0.0], [1.0, 1.0]), 4, 2);
-        // Set boundary ghost flags.
-        mesh.set_boundary_classes(BoundaryClass::OneSided);
+        let mut mesh = Mesh::new(
+            Rectangle::from_aabb([0.0, 0.0], [1.0, 1.0]),
+            4,
+            2,
+            FaceArray::splat(BoundaryClass::Ghost),
+        );
         // Perform refinement
         mesh.refine_global();
         mesh.refine_global();

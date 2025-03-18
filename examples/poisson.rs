@@ -114,8 +114,12 @@ pub fn main() -> anyhow::Result<()> {
     log::info!("Intializing Mesh.");
 
     // Generate initial mesh
-    let mut mesh = Mesh::new(Rectangle::from_aabb([-20., -20.], [20., 20.]), 4, 2);
-    mesh.set_boundary_classes(BoundaryClass::OneSided);
+    let mut mesh = Mesh::new(
+        Rectangle::from_aabb([-20., -20.], [20., 20.]),
+        4,
+        2,
+        FaceArray::splat(BoundaryClass::OneSided),
+    );
     mesh.refine_global();
     // Allocate space for system
     let mut source = Vec::new();

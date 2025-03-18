@@ -31,8 +31,12 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
     log::info!("Intializing Mesh.");
 
     // Generate initial mesh
-    let mut mesh = Mesh::new(Rectangle::from_aabb([-10., -10.], [10., 10.]), 4, 3);
-    mesh.set_boundary_classes(BoundaryClass::OneSided);
+    let mut mesh = Mesh::new(
+        Rectangle::from_aabb([-10., -10.], [10., 10.]),
+        4,
+        3,
+        FaceArray::splat(BoundaryClass::OneSided),
+    );
     // Allocate space for system
     let mut system = SystemVec::default();
 

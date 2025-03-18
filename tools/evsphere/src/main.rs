@@ -125,9 +125,8 @@ fn run(config: RunConfig, diagnostics: &mut Diagnostics) -> Result<()> {
         },
         CELL_WIDTH,
         GHOST,
+        FaceArray::from_sides([BoundaryClass::Ghost], [BoundaryClass::OneSided]),
     );
-    mesh.set_boundary_class(Face::negative(0), BoundaryClass::Ghost);
-    mesh.set_boundary_class(Face::positive(0), BoundaryClass::OneSided);
 
     log::trace!("Refining mesh globally {} times", REFINE_GLOBAL);
 
@@ -154,7 +153,7 @@ fn run(config: RunConfig, diagnostics: &mut Diagnostics) -> Result<()> {
         // Solve for conformal and lapse
         solve_constraints(&mut mesh, system.as_mut_slice());
         // Compute norm
-        let l2_norm = mesh.l2_norm(system.as_slice());
+        let l2_norm = mesh.l2_norm_system(system.as_slice());
         log::info!("Scalar Field Norm {}", l2_norm);
 
         // Save visualization
@@ -246,7 +245,7 @@ fn run(config: RunConfig, diagnostics: &mut Diagnostics) -> Result<()> {
         mesh.fill_boundary(Order::<4>, FieldConditions, system.as_mut_slice());
 
         // Check Norm
-        let norm = mesh.l2_norm(system.as_slice());
+        let norm = mesh.l2_norm_system(system.as_slice());
 
         if norm.is_nan() || norm >= 1e60 {
             log::trace!("Evolution collapses, norm: {}", norm);
