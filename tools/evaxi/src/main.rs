@@ -7,8 +7,8 @@ use aeon::{
 use anyhow::{anyhow, Context as _, Result};
 use clap::{Arg, Command};
 use sharedaxi::{
-    import_from_toml, Constraint, EVConfig, Field, FieldConditions, Fields, Gauge, Metric,
-    ScalarField, Visualize,
+    import_from_toml, Constraint, EVConfig, Field, FieldConditions, Fields, Gauge, GaugeCondition,
+    Metric, ScalarField, Visualize,
 };
 
 mod tensor;
@@ -20,7 +20,9 @@ pub use tensor::{
 const ORDER: Order<4> = Order::<4>;
 
 #[derive(Clone)]
-pub struct FieldDerivs;
+pub struct FieldDerivs {
+    gauge: GaugeCondition,
+}
 
 impl Function<2> for FieldDerivs {
     type Input = Fields;
@@ -188,7 +190,14 @@ impl Function<2> for FieldDerivs {
             };
 
             let mut derivs = HyperbolicDerivs::default();
-            hyperbolic(system, scalar_fields, pos, &mut derivs, scalar_field_derivs);
+            hyperbolic(
+                system,
+                scalar_fields,
+                pos,
+                &mut derivs,
+                scalar_field_derivs,
+                self.gauge,
+            );
 
             output.field_mut(Field::Metric(Metric::Grr))[index] = derivs.grr_t;
             output.field_mut(Field::Metric(Metric::Grz))[index] = derivs.grz_t;
@@ -460,7 +469,9 @@ pub fn evolution() -> Result<bool> {
             &mut mesh,
             ORDER,
             FieldConditions,
-            FieldDerivs,
+            FieldDerivs {
+                gauge: config.gauge,
+            },
             h,
             fields.as_mut_slice(),
         );

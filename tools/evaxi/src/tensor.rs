@@ -1,5 +1,5 @@
 use aeon_tensor::{Matrix, Tensor, Tensor3, Tensor4, Vector};
-use sharedaxi::eqs as axi;
+use sharedaxi::{eqs as axi, GaugeCondition};
 
 /// All degrees of freedom re
 #[repr(C)]
@@ -259,12 +259,16 @@ pub fn hyperbolic(
     pos: [f64; 2],
     derivs: &mut HyperbolicDerivs,
     scalar_field_derivs: &mut [ScalarFieldDerivs],
+    gauge: GaugeCondition,
 ) {
     debug_assert!(scalar_fields.len() == scalar_field_derivs.len());
 
     let decomp = axi::Decomposition::new(pos, system.axisymmetric_system(scalar_fields));
     let evolve = decomp.metric_evolution();
-    let gauge = decomp.gauge_evolution();
+    let gauge = match gauge {
+        GaugeCondition::Harmonic => decomp.harmonic_gauge(),
+        GaugeCondition::ZeroShift => decomp.zero_shift_gauge(),
+    };
 
     derivs.grr_t = evolve.g[[0, 0]];
     derivs.grz_t = evolve.g[[0, 1]];

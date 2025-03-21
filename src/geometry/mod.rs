@@ -17,5 +17,6 @@ pub use index::{CartesianIter, CartesianWindowIter, IndexSpace, IndexWindow};
 pub use rectangle::Rectangle;
 pub use region::{regions, Region, RegionIter, Side};
 pub use tree::{
-    Tree, TreeBlockNeighbor, TreeBlocks, TreeCellNeighbor, TreeNeighbors, TreeNodes, NULL,
+    Tree, TreeBlockNeighbor, TreeBlocks, TreeCellNeighbor, TreeGraph, TreeNeighbors, TreeNodes,
+    NULL,
 };

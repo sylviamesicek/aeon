@@ -1,4 +1,4 @@
-use std::array;
+use std::array::{self, from_fn};
 
 use crate::geometry::AxisMask;
 
@@ -55,5 +55,13 @@ impl<const N: usize> Rectangle<N> {
         });
 
         Self { size, origin }
+    }
+
+    pub fn aa(&self) -> [f64; N] {
+        self.origin
+    }
+
+    pub fn bb(&self) -> [f64; N] {
+        from_fn(|i| self.origin[i] + self.size[i])
     }
 }

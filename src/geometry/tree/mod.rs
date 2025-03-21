@@ -7,10 +7,12 @@ use std::usize;
 use std::{array::from_fn, cmp::Ordering};
 
 mod blocks;
+mod graph;
 mod interface;
 mod nodes;
 
 pub use blocks::TreeBlocks;
+pub use graph::TreeGraph;
 pub use interface::{TreeBlockNeighbor, TreeCellNeighbor, TreeNeighbors};
 pub use nodes::TreeNodes;
 
@@ -806,8 +808,8 @@ impl<const N: usize> Tree<N> {
         self.offsets.clone_from(&offsets);
     }
 
-    /// Returns the z index for
-    fn index_slice(&self, cell: usize, axis: usize) -> &BitSlice<usize, Lsb0> {
+    /// Returns the z index for a cell along a given axis
+    pub fn index_slice(&self, cell: usize, axis: usize) -> &BitSlice<usize, Lsb0> {
         &self.indices[axis][self.offsets[cell]..self.offsets[cell + 1]]
     }
 }

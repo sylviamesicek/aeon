@@ -139,6 +139,9 @@ pub struct EVConfig {
     /// Configuration for visualization (if any)
     #[serde(default)]
     pub visualize: Option<Visualize>,
+    /// Gauge conditions to use during evolution.
+    #[serde(default)]
+    pub gauge: GaugeCondition,
 }
 
 fn default_order() -> usize {
@@ -290,4 +293,13 @@ impl Default for Limits {
             max_steps: 10_000_000,
         }
     }
+}
+
+#[derive(Clone, Copy, Debug, Default, serde::Serialize, serde::Deserialize)]
+pub enum GaugeCondition {
+    #[default]
+    #[serde(rename = "harmonic")]
+    Harmonic,
+    #[serde(rename = "zero_shift")]
+    ZeroShift,
 }

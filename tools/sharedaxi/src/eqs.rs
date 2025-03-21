@@ -425,7 +425,7 @@ impl Decomposition {
         }
     }
 
-    pub fn gauge_evolution(&self) -> GaugeEvolution {
+    pub fn harmonic_gauge(&self) -> GaugeEvolution {
         let Self {
             pos,
             metric,
@@ -480,6 +480,40 @@ impl Decomposition {
 
             term1 + term2 + term3 + term4 + regular
         });
+
+        GaugeEvolution {
+            lapse: lapse_t,
+            shift: shift_t,
+        }
+    }
+
+    pub fn zero_shift_gauge(&self) -> GaugeEvolution {
+        let Self {
+            metric,
+            k,
+            l,
+            theta,
+            lapse,
+            lapse_partials,
+            shift,
+            ..
+        } = self;
+
+        const F: f64 = 1.0;
+        const M: f64 = 2.0;
+
+        let s = Space::<2>;
+
+        let k_trace = s.sum(|[i, j]| k[[i, j]] * metric.inv()[[i, j]]);
+        let lapse2 = lapse * lapse;
+
+        let lapse_t = {
+            let term1 = -lapse2 * F * (k_trace + l - M * theta);
+            let term2 = s.sum(|i| shift[i] * lapse_partials[i]);
+            term1 + term2
+        };
+
+        let shift_t = s.vector(|_| 0.0);
 
         GaugeEvolution {
             lapse: lapse_t,

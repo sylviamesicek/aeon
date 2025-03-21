@@ -1,8 +1,8 @@
 use anyhow::{anyhow, Context, Result};
 use serde::{Deserialize, Serialize};
 use sharedaxi::{
-    import_from_path_arg, import_from_toml, CritConfig, EVConfig, IDConfig, Logging, Source,
-    Visualize,
+    import_from_path_arg, import_from_toml, CritConfig, EVConfig, GaugeCondition, IDConfig,
+    Logging, Source, Visualize,
 };
 use std::{
     collections::HashMap,
@@ -205,6 +205,7 @@ fn critical_search() -> Result<()> {
                     save_interval: 0.05,
                     stride,
                 }),
+                gauge: GaugeCondition::Harmonic,
             };
 
             let config_path = absolute
