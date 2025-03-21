@@ -1,8 +1,6 @@
 use std::{array::from_fn, ops::Range};
 
-use crate::geometry::{AxisMask, Rectangle};
-
-use super::{Tree, NULL};
+use crate::geometry::{AxisMask, Rectangle, Tree, NULL};
 
 #[derive(Clone, Debug)]
 struct TreeNode<const N: usize> {
@@ -133,19 +131,28 @@ impl<const N: usize> TreeGraph<N> {
     }
 
     /// Returns the children of a given node. Node must not be leaf.
-    pub fn children(&self, index: usize) -> Range<usize> {
-        debug_assert!(self.nodes[index].children != NULL);
-        let offset = self.nodes[index].children;
-        offset..offset + AxisMask::<N>::COUNT
+    pub fn children(&self, index: usize) -> Option<usize> {
+        if self.nodes[index].children == NULL {
+            return None;
+        }
+        Some(self.nodes[index].children)
     }
 
-    pub fn child(&self, index: usize, child: AxisMask<N>) -> usize {
-        debug_assert!(self.nodes[index].children != NULL);
-        self.nodes[index].children + child.to_linear()
+    /// Returns a child of a give node.
+    pub fn child(&self, index: usize, child: AxisMask<N>) -> Option<usize> {
+        if self.nodes[index].children == NULL {
+            return None;
+        }
+        Some(self.nodes[index].children + child.to_linear())
     }
 
-    pub fn parent(&self, index: usize) -> usize {
-        self.nodes[index].parent
+    /// The parent node of a given node.
+    pub fn parent(&self, index: usize) -> Option<usize> {
+        if self.nodes[index].parent == NULL {
+            return None;
+        }
+
+        Some(self.nodes[index].parent)
     }
 
     /// True if a node has no children.
@@ -168,54 +175,66 @@ impl<const N: usize> TreeGraph<N> {
         self.level_offsets[level]..self.level_offsets[level + 1]
     }
 
-    /// Computes the node corresponding to a given cell.
-    pub fn cell_to_node(&self, cell: usize) -> usize {
+    /// Computes the leaf node corresponding to a given cell.
+    pub fn node_from_cell(&self, cell: usize) -> usize {
         self.cell_to_node[cell]
     }
 
+    /// Computes the cell that a leaf node corresponds to (None if the node
+    /// is not leaf).
+    pub fn cell_from_node(&self, node: usize) -> Option<usize> {
+        if self.nodes[node].cell_count != 1 {
+            return None;
+        }
+
+        Some(self.nodes[node].cell_offset)
+    }
+
     /// Returns the cell which owns the given point.
+    /// Performs in O(log N).
     pub fn owner(&self, point: [f64; N]) -> usize {
         debug_assert!(self.bounds(0).contains(point));
 
         let mut node = 0;
 
-        while !self.is_leaf(node) {
+        while let Some(children) = self.children(node) {
             let bounds = self.bounds(node);
             let center = bounds.center();
 
-            let mask = AxisMask::pack(from_fn(|axis| point[axis] > center[axis]));
-            node = self.child(node, mask);
+            let mask = AxisMask::<N>::pack(from_fn(|axis| point[axis] > center[axis]));
+            node = children + mask.to_linear();
         }
 
         self.nodes[node].cell_offset
     }
 
-    /// Returns the cell which owns the given point.
-    pub fn owner_with_guess(&self, point: [f64; N], guess: usize) -> usize {
+    /// Returns the node which owns the given point, shortening this search
+    /// with an initial guess. Rather than operating in O(log N) time, this approaches
+    /// O(1) if the guess is sufficiently close.
+    pub fn owner_with_guess(&self, point: [f64; N], mut guess: usize) -> usize {
         debug_assert!(self.bounds(0).contains(point));
 
-        let mut guess = self.cell_to_node(guess);
         while !self.bounds(guess).contains(point) {
-            guess = self.parent(guess);
+            guess = self.parent(guess).unwrap();
         }
 
         let mut node = guess;
 
-        while !self.is_leaf(node) {
+        while let Some(children) = self.children(node) {
             let bounds = self.bounds(node);
             let center = bounds.center();
 
-            let mask = AxisMask::pack(from_fn(|axis| point[axis] > center[axis]));
-            node = self.child(node, mask);
+            let mask = AxisMask::<N>::pack(from_fn(|axis| point[axis] > center[axis]));
+            node = children + mask.to_linear();
         }
 
-        self.nodes[node].cell_offset
+        node
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::geometry::{Rectangle, Tree, NULL};
+    use crate::geometry::{Rectangle, Tree};
 
     use super::TreeGraph;
 
@@ -240,8 +259,8 @@ mod tests {
 
         assert_eq!(graph.num_levels(), 4);
         assert_eq!(graph.num_nodes(), 21);
-        assert_eq!(graph.parent(0), NULL);
-        assert_eq!(graph.children(0), 1..5);
+        assert_eq!(graph.parent(0), None);
+        assert_eq!(graph.children(0), Some(1));
 
         assert_eq!(graph.level_nodes(0), 0..1);
         assert_eq!(graph.level_nodes(1), 1..5);
@@ -252,7 +271,7 @@ mod tests {
             assert!(graph.is_leaf(node));
         }
 
-        assert_eq!(graph.parent(17), 11);
+        assert_eq!(graph.parent(17), Some(11));
 
         dbg!(graph);
     }
