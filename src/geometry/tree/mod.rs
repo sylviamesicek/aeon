@@ -10,6 +10,7 @@ mod blocks;
 mod graph;
 mod interface;
 mod nodes;
+mod tree2;
 
 pub use blocks::TreeBlocks;
 pub use graph::TreeGraph;

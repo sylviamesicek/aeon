@@ -3,7 +3,7 @@ use std::{array::from_fn, ops::Range};
 use crate::geometry::{AxisMask, Rectangle, Tree, NULL};
 
 #[derive(Clone, Debug)]
-struct TreeNode<const N: usize> {
+struct GraphNode<const N: usize> {
     /// Physical bounds of this node
     bounds: Rectangle<N>,
     /// Parent Node
@@ -19,7 +19,7 @@ struct TreeNode<const N: usize> {
 #[derive(Clone, Debug, Default)]
 pub struct TreeGraph<const N: usize> {
     /// Nodes that constitute this directed acyclic graph.
-    nodes: Vec<TreeNode<N>>,
+    nodes: Vec<GraphNode<N>>,
     /// Map from node level to nodes.
     level_offsets: Vec<usize>,
     /// Map from cells to leaf nodes
@@ -37,7 +37,7 @@ impl<const N: usize> TreeGraph<N> {
         self.cell_to_node.resize(tree.num_cells(), 0);
 
         // Add root node (owns all cells in tree).
-        self.nodes.push(TreeNode {
+        self.nodes.push(GraphNode {
             bounds: tree.domain(),
             parent: NULL,
             children: NULL,
@@ -90,7 +90,7 @@ impl<const N: usize> TreeGraph<N> {
 
                     let child_cell_end = cursor;
 
-                    self.nodes.push(TreeNode {
+                    self.nodes.push(GraphNode {
                         bounds: Rectangle::from_aabb(
                             tree.bounds(child_cell_start).aa(),
                             tree.bounds(child_cell_end - 1).bb(),
@@ -126,48 +126,48 @@ impl<const N: usize> TreeGraph<N> {
     }
 
     /// Returns the bounds of a given node.
-    pub fn bounds(&self, index: usize) -> Rectangle<N> {
-        self.nodes[index].bounds
+    pub fn bounds(&self, node: usize) -> Rectangle<N> {
+        self.nodes[node].bounds
     }
 
     /// Returns the children of a given node. Node must not be leaf.
-    pub fn children(&self, index: usize) -> Option<usize> {
-        if self.nodes[index].children == NULL {
+    pub fn children(&self, node: usize) -> Option<usize> {
+        if self.nodes[node].children == NULL {
             return None;
         }
-        Some(self.nodes[index].children)
+        Some(self.nodes[node].children)
     }
 
     /// Returns a child of a give node.
-    pub fn child(&self, index: usize, child: AxisMask<N>) -> Option<usize> {
-        if self.nodes[index].children == NULL {
+    pub fn child(&self, node: usize, child: AxisMask<N>) -> Option<usize> {
+        if self.nodes[node].children == NULL {
             return None;
         }
-        Some(self.nodes[index].children + child.to_linear())
+        Some(self.nodes[node].children + child.to_linear())
     }
 
     /// The parent node of a given node.
-    pub fn parent(&self, index: usize) -> Option<usize> {
-        if self.nodes[index].parent == NULL {
+    pub fn parent(&self, node: usize) -> Option<usize> {
+        if self.nodes[node].parent == NULL {
             return None;
         }
 
-        Some(self.nodes[index].parent)
+        Some(self.nodes[node].parent)
     }
 
     /// True if a node has no children.
-    pub fn is_leaf(&self, index: usize) -> bool {
-        let result = self.nodes[index].children == NULL;
-        debug_assert!(!result || self.nodes[index].cell_count == 1);
+    pub fn is_leaf(&self, node: usize) -> bool {
+        let result = self.nodes[node].children == NULL;
+        debug_assert!(!result || self.nodes[node].cell_count == 1);
         result
     }
 
     /// True if a node has no parents.
-    pub fn is_root(&self, index: usize) -> bool {
-        if index > 0 {
-            debug_assert!(self.nodes[index].parent != NULL);
+    pub fn is_root(&self, node: usize) -> bool {
+        if node > 0 {
+            debug_assert!(self.nodes[node].parent != NULL);
         }
-        index == 0
+        node == 0
     }
 
     /// Returns the nodes on the given level.
@@ -192,7 +192,7 @@ impl<const N: usize> TreeGraph<N> {
 
     /// Returns the cell which owns the given point.
     /// Performs in O(log N).
-    pub fn owner(&self, point: [f64; N]) -> usize {
+    pub fn node_from_point(&self, point: [f64; N]) -> usize {
         debug_assert!(self.bounds(0).contains(point));
 
         let mut node = 0;
@@ -205,20 +205,20 @@ impl<const N: usize> TreeGraph<N> {
             node = children + mask.to_linear();
         }
 
-        self.nodes[node].cell_offset
+        node
     }
 
     /// Returns the node which owns the given point, shortening this search
     /// with an initial guess. Rather than operating in O(log N) time, this approaches
     /// O(1) if the guess is sufficiently close.
-    pub fn owner_with_guess(&self, point: [f64; N], mut guess: usize) -> usize {
+    pub fn node_from_point_cached(&self, point: [f64; N], mut cache: usize) -> usize {
         debug_assert!(self.bounds(0).contains(point));
 
-        while !self.bounds(guess).contains(point) {
-            guess = self.parent(guess).unwrap();
+        while !self.bounds(cache).contains(point) {
+            cache = self.parent(cache).unwrap();
         }
 
-        let mut node = guess;
+        let mut node = cache;
 
         while let Some(children) = self.children(node) {
             let bounds = self.bounds(node);
@@ -256,11 +256,15 @@ mod tests {
         let mut graph = TreeGraph::default();
         graph.build(&tree);
         // Assert
-
         assert_eq!(graph.num_levels(), 4);
         assert_eq!(graph.num_nodes(), 21);
         assert_eq!(graph.parent(0), None);
         assert_eq!(graph.children(0), Some(1));
+
+        assert_eq!(graph.children(1), Some(5));
+        assert_eq!(graph.children(2), None);
+        assert_eq!(graph.children(3), Some(9));
+        assert_eq!(graph.children(4), None);
 
         assert_eq!(graph.level_nodes(0), 0..1);
         assert_eq!(graph.level_nodes(1), 1..5);
@@ -274,5 +278,19 @@ mod tests {
         assert_eq!(graph.parent(17), Some(11));
 
         dbg!(graph);
+    }
+
+    #[test]
+    fn graph_node_from_point() {
+        // Build tree
+        let tree = construct_tree();
+        // Build graph
+        let mut graph = TreeGraph::default();
+        graph.build(&tree);
+        // Asserts
+        assert_eq!(graph.node_from_point([0.6, 0.75]), 4);
+        assert_eq!(graph.node_from_point([0.4, 0.4]), 8);
+        assert_eq!(graph.node_from_point([0.1, 0.1]), 13);
+        assert_eq!(graph.node_from_point([0.1, 0.9]), 19);
     }
 }

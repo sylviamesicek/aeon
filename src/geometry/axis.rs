@@ -1,5 +1,7 @@
 use crate::geometry::{faces, Face};
 
+use super::{Region, Side};
+
 /// Stores a flag for each axis.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct AxisMask<const N: usize>(usize);
@@ -103,8 +105,54 @@ impl<const N: usize> AxisMask<N> {
         faces::<N>().filter(move |&face| self.is_outer_face(face))
     }
 
-    pub fn is_compatible_with_face(self, face: Face<N>) -> bool {
-        self.is_set(face.axis) == face.side
+    pub fn as_inner_face(mut self, face: Face<N>) -> Self {
+        self.set_to(face.axis, !face.side);
+        self
+    }
+
+    pub fn as_outer_face(mut self, face: Face<N>) -> Self {
+        self.set_to(face.axis, face.side);
+        self
+    }
+
+    pub fn is_inner_region(self, region: Region<N>) -> bool {
+        for axis in 0..N {
+            match (region.side(axis), self.is_set(axis)) {
+                (Side::Left, false) => return false,
+                (Side::Right, true) => return false,
+                _ => {}
+            }
+        }
+
+        true
+    }
+
+    pub fn is_outer_region(self, region: Region<N>) -> bool {
+        !self.is_inner_region(region)
+    }
+
+    pub fn as_inner_region(mut self, region: Region<N>) -> Self {
+        for axis in 0..N {
+            match region.side(axis) {
+                Side::Left => self.set_to(axis, true),
+                Side::Right => self.set_to(axis, false),
+                _ => {}
+            }
+        }
+
+        self
+    }
+
+    pub fn as_outer_region(mut self, region: Region<N>) -> Self {
+        for axis in 0..N {
+            match region.side(axis) {
+                Side::Left => self.set_to(axis, false),
+                Side::Right => self.set_to(axis, true),
+                _ => {}
+            }
+        }
+
+        self
     }
 }
 

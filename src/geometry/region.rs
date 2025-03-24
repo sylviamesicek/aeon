@@ -57,6 +57,10 @@ impl<const N: usize> Region<N> {
         self.sides[axis]
     }
 
+    pub const fn set_side(&mut self, axis: usize, side: Side) {
+        self.sides[axis] = side
+    }
+
     /// Reverse every side in the region.
     pub fn reverse(&self) -> Self {
         let mut result = [Side::Left; N];
@@ -110,6 +114,19 @@ impl<const N: usize> Region<N> {
             result.set_to(axis, self.side(axis) == Side::Right)
         }
         result
+    }
+
+    /// Checks whether a given split is adjacent to the region.
+    pub fn is_split_adjacent(&self, split: AxisMask<N>) -> bool {
+        for axis in 0..N {
+            match (self.side(axis), split.is_set(axis)) {
+                (Side::Left, true) => return false,
+                (Side::Right, false) => return false,
+                _ => {}
+            }
+        }
+
+        true
     }
 
     // /// Returns an index space with the same size as the region.
