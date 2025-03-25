@@ -79,7 +79,7 @@ mod tests {
     use crate::geometry::{Rectangle, Tree, TreeBlocks, TreeNodes};
     #[test]
     fn ranges() {
-        let mut tree = Tree::new(Rectangle::<2>::UNIT, [false; 2]);
+        let mut tree = Tree::new(Rectangle::<2>::UNIT);
         let mut blocks = TreeBlocks::default();
         let mut nodes = TreeNodes::new([8; 2], 3);
 

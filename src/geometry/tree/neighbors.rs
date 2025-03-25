@@ -1,3 +1,5 @@
+use super::*;
+
 /// Stores neighbor of a cell on a tree.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct TreeCellNeighbor<const N: usize> {
@@ -243,24 +245,6 @@ impl<const N: usize> TreeNeighbors<N> {
             f(neighbor, a, b)
         }
     }
-}
-
-/// Stores dataon how to fill coarse-fine interfaces.
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub struct TreeInterface<const N: usize> {
-    /// Target block.
-    pub block: usize,
-    /// Source block.
-    pub neighbor: usize,
-    /// Source dof on neighbor.
-    #[serde(with = "crate::array")]
-    pub source: [isize; N],
-    /// Destination dof on target.
-    #[serde(with = "crate::array")]
-    pub dest: [isize; N],
-    /// Number of dofs to be filled along each axis.
-    #[serde(with = "crate::array")]
-    pub size: [usize; N],
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]

@@ -6,8 +6,8 @@
 //! filling interior interfaces, and adaptively regridding a domain based on various error heuristics.
 
 use crate::geometry::{
-    faces, AxisMask, Face, FaceArray, FaceMask, IndexSpace, Rectangle, Tree, TreeBlocks,
-    TreeNeighbors,
+    faces, ActiveCellIndex, AxisMask, Face, FaceArray, FaceMask, IndexSpace, Rectangle, Tree,
+    TreeBlocks, TreeInterfaces, TreeNeighbors, TreeNodes,
 };
 use crate::kernel::{BoundaryClass, DirichletParams, Element};
 use crate::{
@@ -47,8 +47,6 @@ pub use checkpoint::{MeshCheckpoint, SystemCheckpoint};
 pub use function::{Engine, Function, Gaussian, Projection};
 pub use store::MeshStore;
 
-use transfer::TreeInterface;
-
 use crate::system::{System, SystemSlice};
 
 /// A discretization of a rectangular axis aligned grid into a collection of uniform grids of nodes
@@ -75,18 +73,12 @@ pub struct Mesh<const N: usize> {
 
     /// Block structure induced by the tree.
     blocks: TreeBlocks<N>,
-    /// Offsets linking each block to a range of nodes.
-    block_node_offsets: Vec<usize>,
-
+    /// Nodes assigned to each block
+    nodes: TreeNodes<N>,
     /// Neighbors of each block.
     neighbors: TreeNeighbors<N>,
-
-    /// Interfaces build from neighbors.
-    interfaces: Vec<TreeInterface<N>>,
-    /// Offsets linking each interface to a range of ghost/face nodes.
-    interface_node_offsets: Vec<usize>,
-    /// Mask that keeps different interfaces disjoint.
-    interface_masks: Vec<bool>,
+    /// Neighbors translated into interfaces
+    interfaces: TreeInterfaces<N>,
 
     /// Refinement flags for each cell on the mesh.
     refine_flags: Vec<bool>,
@@ -94,12 +86,12 @@ pub struct Mesh<const N: usize> {
     coarsen_flags: Vec<bool>,
 
     /// Map from cells before refinement to current cells.
-    regrid_map: Vec<usize>,
+    regrid_map: Vec<ActiveCellIndex>,
 
     /// Blocks before most recent refinement.
     old_blocks: TreeBlocks<N>,
     /// Block node offsets from before most recent refinement.
-    old_block_node_offsets: Vec<usize>,
+    old_nodes: TreeNodes<N>,
     /// Cell splits from before most recent refinement.
     ///
     /// May be temporary if I can find a more elegant solution.
@@ -125,7 +117,7 @@ impl<const N: usize> Mesh<N> {
         assert!(width % 2 == 0);
         assert!(ghost == width / 2);
 
-        let mut periodic = [false; N];
+        let mut tree = Tree::new(bounds);
 
         for axis in 0..N {
             let negative_periodic =
@@ -138,12 +130,8 @@ impl<const N: usize> Mesh<N> {
                 "Periodicity on a given axis must match"
             );
 
-            if negative_periodic && positive_periodic {
-                periodic[axis] = true;
-            }
+            tree.set_periodic(axis, negative_periodic && positive_periodic);
         }
-
-        let tree = Tree::new(bounds, periodic);
 
         let mut result = Self {
             tree,
@@ -154,20 +142,16 @@ impl<const N: usize> Mesh<N> {
             max_level: 0,
 
             blocks: TreeBlocks::default(),
-            block_node_offsets: Vec::default(),
-
+            nodes: TreeNodes::new([width; N], ghost),
             neighbors: TreeNeighbors::default(),
-
-            interfaces: Vec::default(),
-            interface_node_offsets: Vec::default(),
-            interface_masks: Vec::default(),
+            interfaces: TreeInterfaces::default(),
 
             refine_flags: Vec::new(),
             coarsen_flags: Vec::new(),
 
             regrid_map: Vec::default(),
             old_blocks: TreeBlocks::default(),
-            old_block_node_offsets: Vec::default(),
+            old_nodes: TreeNodes::new([width; N], ghost),
             old_cell_splits: Vec::default(),
 
             stores: ThreadLocal::new(),
@@ -203,40 +187,14 @@ impl<const N: usize> Mesh<N> {
 
         self.max_level = 0;
         for block in 0..self.blocks.len() {
-            let cell = self.blocks.cells(block)[0];
-            self.max_level = self.max_level.max(self.tree.level(cell))
+            self.max_level = self.max_level.max(self.blocks.level(block));
         }
 
+        self.nodes.build(&self.blocks);
         self.neighbors.build(&self.tree, &self.blocks);
-        self.build_block_node_offests();
-        self.build_interfaces();
+        self.interfaces
+            .build(&self.tree, &self.blocks, &self.neighbors, &self.nodes);
         self.build_flags();
-    }
-
-    /// Computes block node offests, assuming blocks have already been built.
-    fn build_block_node_offests(&mut self) {
-        // Reset offsets
-        self.block_node_offsets.clear();
-
-        let mut cursor = 0;
-
-        for block in 0..self.num_blocks() {
-            self.block_node_offsets.push(cursor);
-
-            let size = self.blocks.size(block);
-
-            let nodes_in_block = NodeSpace::<N> {
-                size: array::from_fn(|axis| size[axis] * self.width),
-                ghost: self.ghost,
-                bounds: Rectangle::UNIT,
-                boundary: FaceArray::default(),
-            }
-            .num_nodes();
-
-            cursor += nodes_in_block;
-        }
-
-        self.block_node_offsets.push(cursor);
     }
 
     /// Allocates requisite space for refinement and coarsening flags.
@@ -244,8 +202,10 @@ impl<const N: usize> Mesh<N> {
         self.refine_flags.clear();
         self.coarsen_flags.clear();
 
-        self.refine_flags.resize(self.num_cells(), false);
-        self.coarsen_flags.resize(self.num_cells(), false);
+        self.refine_flags
+            .resize(self.tree.num_active_cells(), false);
+        self.coarsen_flags
+            .resize(self.tree.num_active_cells(), false);
     }
 
     // *******************************
@@ -273,12 +233,12 @@ impl<const N: usize> Mesh<N> {
 
     /// Returns the total number of nodes on the mesh.
     pub fn num_nodes(&self) -> usize {
-        *self.block_node_offsets.last().unwrap()
+        self.nodes.len()
     }
 
     /// Returns the total number of nodes on the mesh before the most recent refinement.
     pub(crate) fn num_old_nodes(&self) -> usize {
-        *self.old_block_node_offsets.last().unwrap_or(&0)
+        self.old_nodes.len()
     }
 
     // *******************************
@@ -286,12 +246,12 @@ impl<const N: usize> Mesh<N> {
 
     /// The range of nodes assigned to a given block.
     pub fn block_nodes(&self, block: usize) -> Range<usize> {
-        self.block_node_offsets[block]..self.block_node_offsets[block + 1]
+        self.nodes.range(block)
     }
 
     /// The range of nodes assigned to a given block on the mesh before the most recent refinement.
     pub(crate) fn old_block_nodes(&self, block: usize) -> Range<usize> {
-        self.old_block_node_offsets[block]..self.old_block_node_offsets[block + 1]
+        self.old_nodes.range(block)
     }
 
     /// Computes the nodespace corresponding to a block.
@@ -384,8 +344,8 @@ impl<const N: usize> Mesh<N> {
     // Elements **********************
 
     /// Element associated with a given cell.
-    pub fn element_window(&self, cell: usize) -> NodeWindow<N> {
-        let position = self.blocks.cell_position(cell);
+    pub fn element_window(&self, cell: ActiveCellIndex) -> NodeWindow<N> {
+        let position = self.blocks.active_cell_position(cell);
 
         let size = [2 * self.width + 1; N];
         let mut origin = [(self.width as isize) / 2 - self.width as isize; N];
@@ -399,8 +359,8 @@ impl<const N: usize> Mesh<N> {
 
     /// Returns the window of nodes in a block corresponding to a given cell, including
     /// no padding.
-    pub fn element_coarse_window(&self, cell: usize) -> NodeWindow<N> {
-        let position = self.blocks.cell_position(cell);
+    pub fn element_coarse_window(&self, cell: ActiveCellIndex) -> NodeWindow<N> {
+        let position = self.blocks.active_cell_position(cell);
 
         let size = [self.width + 1; N];
         let mut origin = [0; N];
@@ -429,10 +389,10 @@ impl<const N: usize> Mesh<N> {
     /// Retrieves the number of nodes along each axis of a cell.
     /// This defaults to `[self.width; N]` but is increased by one
     /// if the cell lies along a block boundary for a given axis.
-    pub fn cell_node_size(&self, cell: usize) -> [usize; N] {
-        let block = self.blocks.cell_block(cell);
+    pub fn cell_node_size(&self, cell: ActiveCellIndex) -> [usize; N] {
+        let block = self.blocks.active_cell_block(cell);
         let size = self.blocks.size(block);
-        let position = self.blocks.cell_position(cell);
+        let position = self.blocks.active_cell_position(cell);
 
         array::from_fn(|axis| {
             if position[axis] == size[axis] - 1 {
@@ -444,19 +404,19 @@ impl<const N: usize> Mesh<N> {
     }
 
     /// Returns the origin of a cell in its block's `NodeSpace<N>`.
-    pub fn cell_node_origin(&self, cell: usize) -> [usize; N] {
-        let position = self.blocks.cell_position(cell);
+    pub fn cell_node_origin(&self, cell: ActiveCellIndex) -> [usize; N] {
+        let position = self.blocks.active_cell_position(cell);
         array::from_fn(|axis| position[axis] * self.width)
     }
 
     /// Returns true if the given cell is on a boundary that does not contain
     /// ghost nodes. If this is the case we must fall back to a lower order element
     /// error approximation.
-    pub fn cell_needs_coarse_element(&self, cell: usize) -> bool {
-        let block = self.blocks.cell_block(cell);
+    pub fn cell_needs_coarse_element(&self, cell: ActiveCellIndex) -> bool {
+        let block = self.blocks.active_cell_block(cell);
         let block_size = self.blocks.size(block);
         let boundary = self.block_boundary_classes(block);
-        let position = self.blocks.cell_position(cell);
+        let position = self.blocks.active_cell_position(cell);
 
         for face in faces::<N>() {
             let border = if face.side {
@@ -628,18 +588,16 @@ impl<const N: usize> Mesh<N> {
         writeln!(result, "// **********************").unwrap();
         writeln!(result).unwrap();
 
-        for cell in 0..self.tree.num_cells() {
-            writeln!(result, "Cell {cell}").unwrap();
-            writeln!(result, "    Bounds {:?}", self.tree.bounds(cell)).unwrap();
-            writeln!(result, "    Block {}", self.blocks.cell_block(cell)).unwrap();
+        for cell in self.tree.active_cell_indices() {
+            writeln!(result, "Cell {}", cell.0).unwrap();
+            writeln!(result, "    Bounds {:?}", self.tree.active_bounds(cell)).unwrap();
+            writeln!(result, "    Block {}", self.blocks.active_cell_block(cell)).unwrap();
             writeln!(
                 result,
                 "    Block Position {:?}",
-                self.blocks.cell_position(cell)
+                self.blocks.active_cell_position(cell)
             )
             .unwrap();
-
-            writeln!(result, "    Neighbors {:?}", self.tree.neighbor_slice(cell)).unwrap();
         }
 
         writeln!(result).unwrap();
@@ -652,7 +610,7 @@ impl<const N: usize> Mesh<N> {
             writeln!(result, "Block {block}").unwrap();
             writeln!(result, "    Bounds {:?}", self.blocks.bounds(block)).unwrap();
             writeln!(result, "    Size {:?}", self.blocks.size(block)).unwrap();
-            writeln!(result, "    Cells {:?}", self.blocks.cells(block)).unwrap();
+            writeln!(result, "    Cells {:?}", self.blocks.active_cells(block)).unwrap();
             writeln!(
                 result,
                 "    Vertices {:?}",
@@ -687,13 +645,13 @@ impl<const N: usize> Mesh<N> {
             writeln!(
                 result,
                 "    Lower: Cell {}, Neighbor {}, Region {}",
-                neighbor.a.cell, neighbor.a.neighbor, neighbor.a.region,
+                neighbor.a.cell.0, neighbor.a.neighbor.0, neighbor.a.region,
             )
             .unwrap();
             writeln!(
                 result,
                 "    Upper: Cell {}, Neighbor {}, Region {}",
-                neighbor.b.cell, neighbor.b.neighbor, neighbor.b.region,
+                neighbor.b.cell.0, neighbor.b.neighbor.0, neighbor.b.region,
             )
             .unwrap();
         }
@@ -713,13 +671,13 @@ impl<const N: usize> Mesh<N> {
             writeln!(
                 result,
                 "    Lower: Cell {}, Neighbor {}, Region {}",
-                neighbor.a.cell, neighbor.a.neighbor, neighbor.a.region,
+                neighbor.a.cell.0, neighbor.a.neighbor.0, neighbor.a.region,
             )
             .unwrap();
             writeln!(
                 result,
                 "    Upper: Cell {}, Neighbor {}, Region {}",
-                neighbor.b.cell, neighbor.b.neighbor, neighbor.b.region,
+                neighbor.b.cell.0, neighbor.b.neighbor.0, neighbor.b.region,
             )
             .unwrap();
         }
@@ -739,13 +697,13 @@ impl<const N: usize> Mesh<N> {
             writeln!(
                 result,
                 "    Lower: Cell {}, Neighbor {}, Region {}",
-                neighbor.a.cell, neighbor.a.neighbor, neighbor.a.region,
+                neighbor.a.cell.0, neighbor.a.neighbor.0, neighbor.a.region,
             )
             .unwrap();
             writeln!(
                 result,
                 "    Upper: Cell {}, Neighbor {}, Region {}",
-                neighbor.b.cell, neighbor.b.neighbor, neighbor.b.region,
+                neighbor.b.cell.0, neighbor.b.neighbor.0, neighbor.b.region,
             )
             .unwrap();
         }
@@ -769,20 +727,16 @@ impl<const N: usize> Clone for Mesh<N> {
             max_level: self.max_level,
 
             blocks: self.blocks.clone(),
+            nodes: self.nodes.clone(),
             neighbors: self.neighbors.clone(),
-
-            block_node_offsets: self.block_node_offsets.clone(),
-
             interfaces: self.interfaces.clone(),
-            interface_node_offsets: self.interface_node_offsets.clone(),
-            interface_masks: self.interface_masks.clone(),
 
             refine_flags: self.refine_flags.clone(),
             coarsen_flags: self.coarsen_flags.clone(),
 
             regrid_map: self.regrid_map.clone(),
             old_blocks: self.old_blocks.clone(),
-            old_block_node_offsets: self.old_block_node_offsets.clone(),
+            old_nodes: self.old_nodes.clone(),
             old_cell_splits: self.old_cell_splits.clone(),
 
             stores: ThreadLocal::new(),
@@ -794,7 +748,7 @@ impl<const N: usize> Clone for Mesh<N> {
 impl<const N: usize> Default for Mesh<N> {
     fn default() -> Self {
         let mut result = Self {
-            tree: Tree::new(Rectangle::UNIT, [false; N]),
+            tree: Tree::new(Rectangle::UNIT),
             width: 4,
             ghost: 1,
             boundary: FaceArray::default(),
@@ -802,19 +756,16 @@ impl<const N: usize> Default for Mesh<N> {
             max_level: 0,
 
             blocks: TreeBlocks::default(),
-            block_node_offsets: Vec::default(),
+            nodes: TreeNodes::new([4; N], 1),
             neighbors: TreeNeighbors::default(),
-
-            interfaces: Vec::default(),
-            interface_node_offsets: Vec::default(),
-            interface_masks: Vec::default(),
+            interfaces: TreeInterfaces::default(),
 
             refine_flags: Vec::default(),
             coarsen_flags: Vec::default(),
 
             regrid_map: Vec::default(),
             old_blocks: TreeBlocks::default(),
-            old_block_node_offsets: Vec::default(),
+            old_nodes: TreeNodes::new([4; N], 1),
             old_cell_splits: Vec::default(),
 
             stores: ThreadLocal::new(),

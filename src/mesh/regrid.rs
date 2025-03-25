@@ -1,6 +1,6 @@
 use std::array;
 
-use crate::geometry::IndexSpace;
+use crate::geometry::{ActiveCellIndex, IndexSpace};
 
 use crate::{
     mesh::Mesh,
@@ -24,33 +24,36 @@ impl<const N: usize> Mesh<N> {
 
         // Save old information
         self.old_blocks.clone_from(&self.blocks);
-        self.old_block_node_offsets
-            .clone_from(&self.block_node_offsets);
+        self.old_nodes.clone_from(&self.nodes);
 
         self.old_cell_splits.clear();
-        self.old_cell_splits
-            .extend((0..self.tree.num_cells()).map(|cell| self.tree.split(cell)));
+        self.old_cell_splits.extend(
+            self.tree
+                .active_cell_indices()
+                .flat_map(|cell| self.tree.most_recent_active_split(cell)),
+        );
 
         // Perform regriding
-        self.regrid_map.resize(self.tree.num_cells(), 0);
+        self.regrid_map
+            .resize(self.tree.num_active_cells(), ActiveCellIndex(0));
 
-        let mut coarsen_map = vec![0; self.tree.num_cells()];
+        let mut coarsen_map = vec![ActiveCellIndex(0); self.tree.num_active_cells()];
         self.tree
-            .coarsen_index_map(&self.coarsen_flags, &mut coarsen_map);
+            .coarsen_active_index_map(&self.coarsen_flags, &mut coarsen_map);
         self.tree.coarsen(&self.coarsen_flags);
 
-        let mut refine_map = vec![0; self.tree.num_cells()];
-        let mut flags = vec![false; self.tree.num_cells()];
+        let mut refine_map = vec![ActiveCellIndex(0); self.tree.num_active_cells()];
+        let mut flags = vec![false; self.tree.num_active_cells()];
 
         for (old, &new) in coarsen_map.iter().enumerate() {
-            flags[new] = self.refine_flags[old];
+            flags[new.0] = self.refine_flags[old];
         }
 
-        self.tree.refine_index_map(&flags, &mut refine_map);
+        self.tree.refine_active_index_map(&flags, &mut refine_map);
         self.tree.refine(&flags);
 
         for i in 0..self.regrid_map.len() {
-            self.regrid_map[i] = refine_map[coarsen_map[i]];
+            self.regrid_map[i] = refine_map[coarsen_map[i].0];
         }
 
         // Rebuild mesh
@@ -97,7 +100,7 @@ impl<const N: usize> Mesh<N> {
 
             let block_system = result.slice(nodes.clone());
 
-            for &cell in mesh.blocks.cells(block) {
+            for &cell in mesh.blocks.active_cells(block) {
                 let is_cell_on_boundary = mesh.cell_needs_coarse_element(cell);
 
                 // Window of nodes on element.
@@ -137,12 +140,12 @@ impl<const N: usize> Mesh<N> {
 
                     unsafe {
                         if should_refine {
-                            *rflags.get_mut(cell) = true;
+                            *rflags.get_mut(cell.0) = true;
                         }
                     }
 
                     unsafe {
-                        *cflags.get_mut(cell) = should_coarsen;
+                        *cflags.get_mut(cell.0) = should_coarsen;
                     }
                 }
             }
@@ -165,7 +168,7 @@ impl<const N: usize> Mesh<N> {
             let block_nodes = mesh.block_nodes(block);
             let block_space = mesh.block_space(block);
             let block_size = mesh.blocks.size(block);
-            let cells = mesh.blocks.cells(block);
+            let cells = mesh.blocks.active_cells(block);
 
             for (i, position) in IndexSpace::new(block_size).iter().enumerate() {
                 let cell = cells[i];
@@ -177,7 +180,7 @@ impl<const N: usize> Mesh<N> {
                     let idx = block_nodes.start + block_space.index_from_node(node);
 
                     unsafe {
-                        *debug.get_mut(idx) = mesh.refine_flags[cell] as i64;
+                        *debug.get_mut(idx) = mesh.refine_flags[cell.0] as i64;
                     }
                 }
             }
@@ -194,32 +197,32 @@ impl<const N: usize> Mesh<N> {
         self.coarsen_flags[cell] = true
     }
 
-    // Mark `count` cells around each currently tagged cell for refinement.
-    pub fn buffer_refine_flags(&mut self, count: usize) {
-        for _ in 0..count {
-            for cell in 0..self.num_cells() {
-                if !self.refine_flags[cell] {
-                    continue;
-                }
+    // // Mark `count` cells around each currently tagged cell for refinement.
+    // pub fn buffer_refine_flags(&mut self, count: usize) {
+    //     for _ in 0..count {
+    //         for cell in 0..self.num_cells() {
+    //             if !self.refine_flags[cell] {
+    //                 continue;
+    //             }
 
-                for neighbor in self.tree.neighborhood(cell) {
-                    self.refine_flags[neighbor] = true;
-                }
-            }
-        }
-    }
+    //             for neighbor in self.tree.neighborhood(cell) {
+    //                 self.refine_flags[neighbor] = true;
+    //             }
+    //         }
+    //     }
+    // }
 
     /// Limits coarsening to cells with a `level > min_level`, and refinement to
     /// cells with a `level < max_level`.
     pub fn limit_level_range_flags(&mut self, min_level: usize, max_level: usize) {
-        for cell in 0..self.num_cells() {
-            let level = self.tree.level(cell);
+        for cell in self.tree.active_cell_indices() {
+            let level = self.tree.active_level(cell);
             if level >= max_level {
-                self.refine_flags[cell] = false;
+                self.refine_flags[cell.0] = false;
             }
 
             if level <= min_level {
-                self.coarsen_flags[cell] = false;
+                self.coarsen_flags[cell.0] = false;
             }
         }
     }
@@ -232,13 +235,13 @@ impl<const N: usize> Mesh<N> {
         self.tree.balance_refine_flags(&mut self.refine_flags);
         // Refinement has priority over coarsening. Ensure that there is never a cell marked
         // for refinement next to a equal or coarser cell marked for coarsening.
-        for cell in 0..self.num_cells() {
-            if self.refine_flags[cell] {
-                let level = self.tree.level(cell);
+        for cell in self.tree.active_cell_indices() {
+            if self.refine_flags[cell.0] {
+                let level = self.tree.active_level(cell);
                 for neighbor in self.tree.neighborhood(cell) {
-                    let nlevel = self.tree.level(neighbor);
+                    let nlevel = self.tree.active_level(neighbor);
                     if nlevel <= level {
-                        self.coarsen_flags[neighbor] = false;
+                        self.coarsen_flags[neighbor.0] = false;
                     }
                 }
             }
@@ -266,7 +269,7 @@ impl<const N: usize> Mesh<N> {
 
 #[cfg(test)]
 mod tests {
-    use crate::geometry::{FaceArray, Rectangle};
+    use crate::geometry::{ActiveCellIndex, FaceArray, Rectangle};
     use crate::kernel::BoundaryClass;
     use crate::mesh::Mesh;
 
@@ -282,12 +285,12 @@ mod tests {
         mesh.set_refine_flag(0);
         mesh.regrid();
 
-        assert!(!mesh.cell_needs_coarse_element(0));
-        assert!(!mesh.cell_needs_coarse_element(1));
-        assert!(!mesh.cell_needs_coarse_element(2));
-        assert!(!mesh.cell_needs_coarse_element(3));
-        assert!(mesh.cell_needs_coarse_element(4));
-        assert!(mesh.cell_needs_coarse_element(5));
-        assert!(mesh.cell_needs_coarse_element(6));
+        assert!(!mesh.cell_needs_coarse_element(ActiveCellIndex(0)));
+        assert!(!mesh.cell_needs_coarse_element(ActiveCellIndex(1)));
+        assert!(!mesh.cell_needs_coarse_element(ActiveCellIndex(2)));
+        assert!(!mesh.cell_needs_coarse_element(ActiveCellIndex(3)));
+        assert!(mesh.cell_needs_coarse_element(ActiveCellIndex(4)));
+        assert!(mesh.cell_needs_coarse_element(ActiveCellIndex(5)));
+        assert!(mesh.cell_needs_coarse_element(ActiveCellIndex(6)));
     }
 }

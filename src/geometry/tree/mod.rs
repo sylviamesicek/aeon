@@ -1,11 +1,21 @@
 #![allow(clippy::needless_range_loop)]
 
 use crate::{
-    geometry::{faces, regions, AxisMask, Region, Side},
-    prelude::{Face, FaceMask, IndexSpace, Rectangle},
+    geometry::{regions, AxisMask, Region, Side},
+    prelude::{Face, IndexSpace, Rectangle},
 };
 use bitvec::{order::Lsb0, slice::BitSlice, vec::BitVec};
 use std::{array, ops::Range, slice};
+
+mod blocks;
+mod interfaces;
+mod neighbors;
+mod nodes;
+
+pub use blocks::TreeBlocks;
+pub use interfaces::{TreeInterface, TreeInterfaces};
+pub use neighbors::{TreeBlockNeighbor, TreeCellNeighbor, TreeNeighbors};
+pub use nodes::TreeNodes;
 
 /// Null index, used internally to make storage of `Option<usize>`` more efficent
 const NULL: usize = usize::MAX;
@@ -104,6 +114,10 @@ impl<const N: usize> Tree<N> {
         self.periodic[axis] = periodic;
     }
 
+    pub fn domain(&self) -> Rectangle<N> {
+        self.domain
+    }
+
     /// The number of active (leaf) cells in this tree.
     pub fn num_active_cells(&self) -> usize {
         self.active_offsets.len() - 1
@@ -123,9 +137,21 @@ impl<const N: usize> Tree<N> {
         (self.level_offsets[level]..self.level_offsets[level + 1]).map(CellIndex)
     }
 
+    pub fn cell_indices(&self) -> impl Iterator<Item = CellIndex> {
+        (0..self.num_cells()).map(CellIndex)
+    }
+
+    pub fn active_cell_indices(&self) -> impl Iterator<Item = ActiveCellIndex> {
+        (0..self.num_active_cells()).map(ActiveCellIndex)
+    }
+
     /// Returns the numerical bounds of a given cell.
     pub fn bounds(&self, cell: CellIndex) -> Rectangle<N> {
         self.cells[cell.0].bounds
+    }
+
+    pub fn active_bounds(&self, active: ActiveCellIndex) -> Rectangle<N> {
+        self.bounds(self.cell_from_active_index(active))
     }
 
     /// Returns the level of a given cell.
@@ -174,6 +200,33 @@ impl<const N: usize> Tree<N> {
         }))
     }
 
+    pub fn most_recent_active_split(&self, active: ActiveCellIndex) -> Option<AxisMask<N>> {
+        if self.num_cells() == 1 {
+            return None;
+        }
+
+        Some(self.active_split(active, self.active_level(active) - 1))
+    }
+
+    /// Fills the map with updated indices after refinement is performed.
+    /// If a cell is refined, this will point to the base cell in that new subdivision.
+    pub fn refine_active_index_map(&self, flags: &[bool], map: &mut [ActiveCellIndex]) {
+        assert!(flags.len() == self.num_cells());
+        assert!(map.len() == self.num_cells());
+
+        let mut cursor = 0;
+
+        for cell in 0..self.num_cells() {
+            map[cell] = ActiveCellIndex(cursor);
+
+            if flags[cell] {
+                cursor += AxisMask::<N>::COUNT;
+            } else {
+                cursor += 1;
+            }
+        }
+    }
+
     pub fn refine(&mut self, flags: &[bool]) {
         assert!(self.num_active_cells() == flags.len());
 
@@ -201,6 +254,27 @@ impl<const N: usize> Tree<N> {
 
         self.active_values.clone_from(&active_values);
         self.active_offsets.clone_from(&active_offsets);
+    }
+
+    /// Maps current cells to indices after coarsening is performed.
+    pub fn coarsen_active_index_map(&self, flags: &[bool], map: &mut [ActiveCellIndex]) {
+        assert!(flags.len() == self.num_cells());
+        assert!(map.len() == self.num_cells());
+
+        let mut cursor = 0;
+        let mut cell = 0;
+
+        while cell < self.num_cells() {
+            if flags[cell] {
+                map[cell..cell + AxisMask::<N>::COUNT].fill(ActiveCellIndex(cursor));
+                cell += AxisMask::<N>::COUNT;
+            } else {
+                map[cell] = ActiveCellIndex(cursor);
+                cell += 1;
+            }
+
+            cursor += 1;
+        }
     }
 
     pub fn coarsen(&mut self, flags: &[bool]) {

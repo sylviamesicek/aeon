@@ -48,7 +48,7 @@ impl<const N: usize> MeshCheckpoint<N> {
 impl<const N: usize> Default for MeshCheckpoint<N> {
     fn default() -> Self {
         Self {
-            tree: Tree::new(Rectangle::UNIT, [false; N]),
+            tree: Tree::new(Rectangle::UNIT),
             width: 4,
             ghost: 1,
             boundary: FaceArray::from_fn(|_| BoundaryClass::OneSided),

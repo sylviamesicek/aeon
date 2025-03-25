@@ -1,6 +1,6 @@
 use std::{array, ops::Range};
 
-use crate::geometry::{faces, Face, FaceMask, IndexSpace, NULL};
+use crate::geometry::{faces, Face, FaceMask, IndexSpace};
 use crate::kernel::is_boundary_compatible;
 use crate::{
     kernel::{
@@ -536,8 +536,8 @@ impl<const N: usize> Mesh<N> {
 
             let block_dest = unsafe { dest.slice_mut(nodes) };
 
-            for &cell in mesh.blocks.cells(block) {
-                let cell_level = mesh.tree.level(cell);
+            for &cell in mesh.blocks.active_cells(block) {
+                let cell_level = mesh.tree.active_level(cell);
                 let node_size = mesh.cell_node_size(cell);
                 let node_origin = mesh.cell_node_origin(cell);
 
