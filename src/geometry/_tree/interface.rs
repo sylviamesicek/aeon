@@ -1,14 +1,17 @@
+use crate::geometry::{regions, IndexSpace, Region, NULL};
+use crate::geometry::{Face, Side, Tree, TreeBlocks};
+use std::ops::Range;
+use std::slice;
+
 /// Stores neighbor of a cell on a tree.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct TreeCellNeighbor<const N: usize> {
     /// Primary cell.
-    pub cell: ActiveCellIndex,
+    pub cell: usize,
     /// Neighbor cell.
-    pub neighbor: ActiveCellIndex,
+    pub neighbor: usize,
     /// Which region is the neighbor cell in?
     pub region: Region<N>,
-    /// Which periodic region is the neighbor cell in?
-    pub boundary_region: Region<N>,
 }
 
 /// Neighbor of block.
@@ -31,7 +34,7 @@ impl<const N: usize> TreeBlockNeighbor<N> {
     }
 }
 
-fn regions_to_face<const N: usize>(a: Region<N>, b: Region<N>) -> Option<Face<N>> {
+pub fn regions_to_face<const N: usize>(a: Region<N>, b: Region<N>) -> Option<Face<N>> {
     let mut adjacency = 0;
     let mut faxis = 0;
     let mut fside = false;
@@ -60,7 +63,7 @@ fn regions_to_face<const N: usize>(a: Region<N>, b: Region<N>) -> Option<Face<N>
 /// Stores information about neighbors of blocks and cells.
 #[derive(Default, Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct TreeNeighbors<const N: usize> {
-    /// Flattened list of lists of neighbors for each block.
+    /// Flattened list of nieghbors for each block.
     neighbors: Vec<TreeBlockNeighbor<N>>,
     /// Offset map for blocks -> neighbors.
     block_offsets: Vec<usize>,
@@ -139,23 +142,19 @@ impl<const N: usize> TreeNeighbors<N> {
 
             // Sort neighbors (to group cells from the same block together).
             neighbors.sort_unstable_by(|left, right| {
-                let lblock = blocks.active_cell_block(left.neighbor);
-                let rblock = blocks.active_cell_block(right.neighbor);
+                let lblock = blocks.cell_block(left.neighbor);
+                let rblock = blocks.cell_block(right.neighbor);
 
-                left.boundary_region
-                    .cmp(&right.boundary_region)
-                    .then(lblock.cmp(&rblock))
+                lblock
+                    .cmp(&rblock)
                     .then(left.neighbor.cmp(&right.neighbor))
                     .then(left.cell.cmp(&right.cell))
                     .then(left.region.cmp(&right.region))
             });
 
             Self::taverse_cell_neighbors(blocks, &mut neighbors, |neighbor, a, b| {
-                let acell = tree.cell_from_active_index(a.cell);
-                let aneighbor = tree.cell_from_active_index(a.neighbor);
-
                 // Compute this boundary interface.
-                let kind = InterfaceKind::from_levels(tree.level(acell), tree.level(aneighbor));
+                let kind = InterfaceKind::from_levels(tree.level(a.cell), tree.level(a.neighbor));
                 let interface = TreeBlockNeighbor {
                     block,
                     neighbor,
@@ -185,10 +184,10 @@ impl<const N: usize> TreeNeighbors<N> {
         neighbors: &mut Vec<TreeCellNeighbor<N>>,
     ) {
         let block_size = blocks.size(block);
-        let block_active_cells = blocks.active_cells(block);
+        let block_cells = blocks.cells(block);
         let block_space = IndexSpace::new(block_size);
 
-        debug_assert!(block_size.iter().product::<usize>() == block_active_cells.len());
+        debug_assert!(block_size.iter().product::<usize>() == block_cells.len());
 
         for region in regions::<N>() {
             if region == Region::CENTRAL {
@@ -197,16 +196,15 @@ impl<const N: usize> TreeNeighbors<N> {
 
             // Find all cells adjacent to the given region.
             for index in block_space.adjacent(region) {
-                let active = block_active_cells[block_space.linear_from_cartesian(index)];
-                let cell = tree.cell_from_active_index(active);
-                let periodic = tree.boundary_region(cell, region);
+                let cell = block_cells[block_space.linear_from_cartesian(index)];
 
-                for neighbor in tree.active_neighbors_in_region(cell, region) {
+                for neighbor in tree.neighbors_in_region(cell, region) {
+                    debug_assert!(neighbor != NULL);
+
                     neighbors.push(TreeCellNeighbor {
-                        cell: active,
+                        cell,
                         neighbor,
                         region,
-                        boundary_region: periodic,
                     })
                 }
             }
@@ -222,16 +220,14 @@ impl<const N: usize> TreeNeighbors<N> {
         let mut neighbors = neighbors.iter().cloned().peekable();
 
         while let Some(a) = neighbors.next() {
-            let neighbor = blocks.active_cell_block(a.neighbor);
+            let neighbor = blocks.cell_block(a.neighbor);
 
             // Next we walk through the iterator until we find the last neighbor that is still in this block.
             let mut b = a.clone();
 
             loop {
                 if let Some(next) = neighbors.peek() {
-                    if a.boundary_region == next.boundary_region
-                        && neighbor == blocks.active_cell_block(next.neighbor)
-                    {
+                    if neighbor == blocks.cell_block(next.neighbor) {
                         b = neighbors.next().unwrap();
                         continue;
                     }
@@ -279,4 +275,188 @@ impl InterfaceKind {
             _ => panic!("Unbalanced levels"),
         }
     }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::geometry::Rectangle;
+
+    use super::*;
+
+    #[test]
+    fn regions_and_faces() {
+        assert_eq!(regions_to_face::<2>(Region::CENTRAL, Region::CENTRAL), None);
+        assert_eq!(
+            regions_to_face(
+                Region::new([Side::Left, Side::Middle]),
+                Region::new([Side::Left, Side::Left])
+            ),
+            Some(Face::negative(0))
+        );
+        assert_eq!(
+            regions_to_face(
+                Region::new([Side::Left, Side::Right]),
+                Region::new([Side::Left, Side::Right])
+            ),
+            None
+        );
+        assert_eq!(
+            regions_to_face(
+                Region::new([Side::Left, Side::Right]),
+                Region::new([Side::Middle, Side::Right])
+            ),
+            Some(Face::positive(1))
+        );
+        assert_eq!(
+            regions_to_face(
+                Region::new([Side::Middle, Side::Right]),
+                Region::new([Side::Middle, Side::Right])
+            ),
+            Some(Face::positive(1))
+        );
+    }
+
+    #[test]
+    fn neighbors() {
+        let mut tree = Tree::new(Rectangle::<2>::UNIT, [false; 2]);
+        let mut blocks = TreeBlocks::default();
+        let mut interfaces = TreeNeighbors::default();
+
+        tree.refine(&[true, false, false, false]);
+        blocks.build(&tree);
+        interfaces.build(&tree, &blocks);
+
+        let mut coarse = interfaces.coarse();
+
+        assert_eq!(
+            coarse.next(),
+            Some(&TreeBlockNeighbor {
+                block: 0,
+                neighbor: 1,
+                a: TreeCellNeighbor {
+                    cell: 1,
+                    neighbor: 4,
+                    region: Region::new([Side::Right, Side::Middle])
+                },
+                b: TreeCellNeighbor {
+                    cell: 3,
+                    neighbor: 6,
+                    region: Region::new([Side::Right, Side::Right])
+                }
+            })
+        );
+
+        assert_eq!(
+            coarse.next(),
+            Some(&TreeBlockNeighbor {
+                block: 0,
+                neighbor: 2,
+                a: TreeCellNeighbor {
+                    cell: 2,
+                    neighbor: 5,
+                    region: Region::new([Side::Middle, Side::Right])
+                },
+                b: TreeCellNeighbor {
+                    cell: 3,
+                    neighbor: 5,
+                    region: Region::new([Side::Middle, Side::Right])
+                }
+            })
+        );
+        assert_eq!(coarse.next(), None);
+    }
+
+    // #[ignore = "Outdated interface test."]
+    // #[test]
+    // fn interfaces() {
+    //     let mut tree = Tree::new(Rectangle::<2>::UNIT);
+    //     let mut blocks = TreeBlocks::default();
+    //     let mut dofs = TreeNodes::new([4; 2], 2);
+    //     let mut neighbors = TreeNeighbors::default();
+    //     let mut interfaces = TreeInterfaces::default();
+
+    //     tree.refine(&[true, false, false, false]);
+    //     blocks.build(&tree);
+    //     dofs.build(&blocks);
+    //     neighbors.build(&tree, &blocks);
+    //     interfaces.build(&tree, &blocks, &neighbors, &dofs);
+
+    //     let mut coarse = interfaces.coarse();
+
+    //     assert_eq!(
+    //         coarse.next(),
+    //         Some(&TreeInterface {
+    //             block: 0,
+    //             neighbor: 1,
+    //             source: [0, 0],
+    //             dest: [8, 0],
+    //             size: [3, 11],
+    //         })
+    //     );
+
+    //     assert_eq!(
+    //         coarse.next(),
+    //         Some(&TreeInterface {
+    //             block: 0,
+    //             neighbor: 2,
+    //             source: [0, 0],
+    //             dest: [0, 8],
+    //             size: [8, 3],
+    //         })
+    //     );
+
+    //     assert_eq!(coarse.next(), None);
+
+    //     let mut fine = interfaces.fine();
+
+    //     assert_eq!(
+    //         fine.next(),
+    //         Some(&TreeInterface {
+    //             block: 1,
+    //             neighbor: 0,
+    //             source: [2, 0],
+    //             dest: [-2, 0],
+    //             size: [3, 4],
+    //         })
+    //     );
+
+    //     assert_eq!(
+    //         fine.next(),
+    //         Some(&TreeInterface {
+    //             block: 2,
+    //             neighbor: 0,
+    //             source: [0, 2],
+    //             dest: [0, -2],
+    //             size: [4, 3],
+    //         })
+    //     );
+
+    //     assert_eq!(fine.next(), None);
+
+    //     let mut direct = interfaces.direct();
+
+    //     assert_eq!(
+    //         direct.next(),
+    //         Some(&TreeInterface {
+    //             block: 1,
+    //             neighbor: 2,
+    //             source: [2, 0],
+    //             dest: [-2, 4],
+    //             size: [3, 5],
+    //         })
+    //     );
+
+    //     assert_eq!(
+    //         direct.next(),
+    //         Some(&TreeInterface {
+    //             block: 2,
+    //             neighbor: 1,
+    //             source: [0, 2],
+    //             dest: [4, -2],
+    //             size: [3, 7],
+    //         })
+    //     );
+
+    //     assert_eq!(direct.next(), None);
+    // }
 }

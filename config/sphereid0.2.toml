@@ -35,3 +35,9 @@ type = "scalar_field"
 mass = 0.0
 amplitude = 0.2
 sigma = [5.35, 5.35]
+
+[[source]]
+type = "scalar_field"
+mass = 1.0
+amplitude = 0.2
+sigma = [5.35, 5.35]

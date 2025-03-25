@@ -1,26 +1,35 @@
-use std::{array, ops::Range, slice};
-
-use bitvec::{order::Lsb0, slice::BitSlice, vec::BitVec};
-use faer::linalg::qr;
-
 use crate::{
     geometry::{faces, regions, AxisMask, Region, Side},
     prelude::{Face, FaceMask, IndexSpace, Rectangle},
 };
+use bitvec::{order::Lsb0, slice::BitSlice, vec::BitVec};
+use std::{array, ops::Range, slice};
 
-pub const NULL: usize = usize::MAX;
+/// Null index, used internally to make storage of `Option<usize>`` more efficent
+const NULL: usize = usize::MAX;
 
+/// Index into active cells in tree.
+///
+/// This is the primary representation of cells in a `Tree`, as degrees
+/// of freedom are only assigned to active cells. Can be converted to generic `CellIndex` via
+/// `tree.cell_from_active_index(`
 #[derive(
     Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, serde::Serialize, serde::Deserialize,
 )]
 pub struct ActiveCellIndex(pub usize);
 
+/// Index into cells in a tree.
+///
+/// A tree stores non-active cells to facilitate O(log n) point -> cell and cell -> neighbor
+/// searches. These cells are generated after refinement/coarsening and are therefore not
+/// the "source of truth" for the dataset.
 #[derive(
     Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, serde::Serialize, serde::Deserialize,
 )]
 pub struct CellIndex(pub usize);
 
 impl CellIndex {
+    /// The root cell in a tree is also stored at index 0.
     pub const ROOT: CellIndex = CellIndex(0);
 
     pub fn child<const N: usize>(offset: Self, split: AxisMask<N>) -> Self {
@@ -44,6 +53,11 @@ struct Cell<const N: usize> {
     level: usize,
 }
 
+/// An `N`-dimensional hypertree, which subdives each axis in two in
+/// each refinement step.
+///
+/// Used as a basis for axes aligned adaptive finite difference
+/// meshes. The tree is
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Tree<const N: usize> {
     domain: Rectangle<N>,
@@ -68,6 +82,26 @@ pub struct Tree<const N: usize> {
 }
 
 impl<const N: usize> Tree<N> {
+    /// Constructs a new tree consisting of a single root cell, covering the given
+    /// domain.
+    pub fn new(domain: Rectangle<N>) -> Self {
+        let mut result = Self {
+            domain,
+            periodic: [false; N],
+            active_values: BitVec::new(),
+            active_offsets: vec![0, 0],
+            active_to_cell: Vec::new(),
+            level_offsets: Vec::new(),
+            cells: Vec::new(),
+        };
+        result.build();
+        result
+    }
+
+    pub fn set_periodic(&mut self, axis: usize, periodic: bool) {
+        self.periodic[axis] = periodic;
+    }
+
     /// The number of active (leaf) cells in this tree.
     pub fn num_active_cells(&self) -> usize {
         self.active_offsets.len() - 1
@@ -94,7 +128,6 @@ impl<const N: usize> Tree<N> {
 
     /// Returns the level of a given cell.
     pub fn level(&self, cell: CellIndex) -> usize {
-        // self.active_offsets[cell.0 + 1] - self.active_offsets[cell.0]
         self.cells[cell.0].level
     }
 
@@ -127,10 +160,6 @@ impl<const N: usize> Tree<N> {
         Some(CellIndex(self.cells[cell.0].parent))
     }
 
-    // pub fn sibling(&self, cell: usize, split: AxisMask<N>) -> Option<usize> {
-    //     Some(self.cells[self.parent(cell)?].children + split.to_linear())
-    // }
-
     /// Returns the zvalue of the given active cell.
     pub fn active_zvalue(&self, active: ActiveCellIndex) -> &BitSlice<usize, Lsb0> {
         &self.active_values
@@ -143,11 +172,74 @@ impl<const N: usize> Tree<N> {
         }))
     }
 
-    // pub fn cell_split(&self, cell: usize) -> AxisMask<N> {
-    //     assert!(!self.is_root(cell));
-    //     let parent = self.parent(cell).unwrap();
-    //     AxisMask::from_linear(cell - self.children(parent).unwrap())
-    // }
+    pub fn refine(&mut self, flags: &[bool]) {
+        assert!(self.num_active_cells() == flags.len());
+
+        let num_flags = flags.iter().copied().filter(|&p| p).count();
+        let total_active_cells = self.num_active_cells() + (AxisMask::<N>::COUNT - 1) * num_flags;
+
+        let mut active_values = BitVec::with_capacity(total_active_cells * N);
+        let mut active_offsets = Vec::with_capacity(total_active_cells);
+        active_offsets.push(0);
+
+        for active in 0..self.num_active_cells() {
+            if flags[active] {
+                for split in AxisMask::<N>::enumerate() {
+                    active_values.extend_from_bitslice(self.active_zvalue(ActiveCellIndex(active)));
+                    for axis in 0..N {
+                        active_values.push(split.is_set(axis));
+                    }
+                    active_offsets.push(active_values.len() / N);
+                }
+            } else {
+                active_values.extend_from_bitslice(self.active_zvalue(ActiveCellIndex(active)));
+                active_offsets.push(active_values.len() / N);
+            }
+        }
+
+        self.active_values.clone_from(&active_values);
+        self.active_offsets.clone_from(&active_offsets);
+    }
+
+    pub fn coarsen(&mut self, flags: &[bool]) {
+        assert!(flags.len() == self.num_active_cells());
+
+        // Compute number of cells after coarsening
+        let num_flags = flags.iter().copied().filter(|&p| p).count();
+        debug_assert!(num_flags % AxisMask::<N>::COUNT == 0);
+        let total_active = self.num_active_cells() - num_flags / AxisMask::<N>::COUNT;
+
+        let mut active_values = BitVec::with_capacity(total_active * N);
+        let mut active_offsets = Vec::new();
+        active_offsets.push(0);
+
+        // Loop over cells
+        let mut cursor = 0;
+
+        while cursor < self.num_active_cells() {
+            // Retrieve zvalue of cursor
+            let zvalue = self.active_zvalue(ActiveCellIndex(cursor));
+
+            if flags[cursor] {
+                #[cfg(debug_assertions)]
+                for split in AxisMask::<N>::enumerate() {
+                    assert!(flags[cursor + split.to_linear()])
+                }
+
+                active_values.extend_from_bitslice(&zvalue[0..zvalue.len().saturating_sub(N)]);
+                // Skip next `Count` cells
+                cursor += AxisMask::<N>::COUNT;
+            } else {
+                active_values.extend_from_bitslice(zvalue);
+                cursor += 1;
+            }
+
+            active_offsets.push(active_values.len() / N);
+        }
+
+        self.active_values.clone_from(&active_values);
+        self.active_offsets.clone_from(&active_offsets);
+    }
 
     pub fn build(&mut self) {
         // Reset tree
@@ -215,7 +307,7 @@ impl<const N: usize> Tree<N> {
 
             let next_level_end = self.cells.len();
 
-            if next_level_start == next_level_end {
+            if next_level_start >= next_level_end {
                 break;
             }
 
@@ -223,6 +315,7 @@ impl<const N: usize> Tree<N> {
         }
     }
 
+    /// Computes the cell index corresponding to an active cell.
     pub fn cell_from_active_index(&self, active: ActiveCellIndex) -> CellIndex {
         debug_assert!(
             active.0 < self.num_active_cells(),
@@ -231,6 +324,8 @@ impl<const N: usize> Tree<N> {
         CellIndex(self.active_to_cell[active.0])
     }
 
+    /// Computes active cell index from a cell, returning None if `cell` is
+    /// not active.
     pub fn active_index_from_cell(&self, cell: CellIndex) -> Option<ActiveCellIndex> {
         debug_assert!(
             cell.0 < self.num_cells(),
@@ -244,6 +339,9 @@ impl<const N: usize> Tree<N> {
         Some(ActiveCellIndex(self.cells[cell.0].active_offset))
     }
 
+    /// Returns an iterator over active cells that are children of the given cell.
+    /// If `is_active(cell) = true` then this iterator will be a singleton
+    /// returning the same value as `tree.active_index_from_cell(cell)`.
     pub fn active_children(
         &self,
         cell: CellIndex,
@@ -306,28 +404,27 @@ impl<const N: usize> Tree<N> {
         node
     }
 
+    /// Returns the neighboring cell along the given face. If the neighboring cell is more refined, this
+    /// returns the cell index of the adjacent cell with `tree.level(neighbor) == tree.level(cell)`.
+    /// If this passes over a nonperiodic boundary then it returns `None`.
     pub fn neighbor(&self, cell: CellIndex, face: Face<N>) -> Option<CellIndex> {
         let mut region = Region::CENTRAL;
         region.set_side(face.axis, if face.side { Side::Right } else { Side::Left });
         self.neighbor_region(cell, region)
     }
 
-    pub fn neighbor_no_periodic(&self, cell: CellIndex, face: Face<N>) -> Option<CellIndex> {
-        let mut region = Region::CENTRAL;
-        region.set_side(face.axis, if face.side { Side::Right } else { Side::Left });
-        self.neighbor_impl(cell, region, [false; N])
-    }
-
+    /// Returns the neighboring cell in the given region. If the neighboring cell is more refined, this
+    /// returns the cell index of the adjacent cell with `tree.level(neighbor) == tree.level(cell)`.
+    /// If this passes over a nonperiodic boundary then it returns `None`.
     pub fn neighbor_region(&self, cell: CellIndex, region: Region<N>) -> Option<CellIndex> {
-        self.neighbor_impl(cell, region, self.periodic)
-    }
+        let is_periodic = (0..N)
+            .map(|axis| region.side(axis) == Side::Middle || self.periodic[axis])
+            .all(|b| b);
 
-    fn neighbor_impl(
-        &self,
-        cell: CellIndex,
-        region: Region<N>,
-        periodic: [bool; N],
-    ) -> Option<CellIndex> {
+        if cell == CellIndex::ROOT && is_periodic {
+            return Some(CellIndex::ROOT);
+        }
+
         // Retrieve first active cell owned by `cell`.
         let active_index = ActiveCellIndex(self.cells[cell.0].active_offset);
         // Start at this cell
@@ -343,51 +440,82 @@ impl<const N: usize> Tree<N> {
                 break;
             }
         }
+
+        if self.children(cursor).is_some() {
+            let split = self.active_split(active_index, self.level(cursor));
+
+            if split.is_inner_region(region) {
+                cursor = CellIndex::child(
+                    self.children(cursor).unwrap(),
+                    split.as_outer_region(region),
+                )
+            }
+        }
+
         // If we are at root, we can proceed to do silliness (i.e. recurse back upwards)
-        if cursor == CellIndex(0)
-            && !(0..N)
-                .map(|axis| region.side(axis) == Side::Middle || self.periodic[axis])
-                .all(|b| b)
-        {
-            return None;
-        }
-        // Recurse back upwards
-        while let Some(children) = self.children(cursor) {
+        if cursor == CellIndex::ROOT {
+            if !is_periodic {
+                return None;
+            }
+
+            debug_assert!(self.level(cell) > 0);
+
+            let split = self.active_split(active_index, self.level(cursor));
             cursor = CellIndex::child(
-                children,
-                self.active_split(active_index, self.level(cursor))
-                    .as_inner_region(region),
-            )
+                self.children(cursor).unwrap(),
+                split.as_inner_region(region),
+            );
         }
+
+        // Recurse back upwards
+        while self.level(cursor) < self.level(cell) {
+            let Some(children) = self.children(cursor) else {
+                break;
+            };
+
+            let split = self
+                .active_split(active_index, self.level(cursor))
+                .as_inner_region(region);
+            cursor = CellIndex::child(children, split);
+        }
+
         // Algorithm complete
         Some(cursor)
     }
 
-    pub fn neighbors_in_region(
+    /// Iterates over
+    pub fn active_neighbors_in_region(
         &self,
         cell: CellIndex,
         region: Region<N>,
-    ) -> impl Iterator<Item = CellIndex> + '_ {
+    ) -> impl Iterator<Item = ActiveCellIndex> + '_ {
         let level = self.level(cell);
 
         self.neighbor_region(cell, region)
             .into_iter()
             .flat_map(move |neighbor| {
-                self.active_children(neighbor)
-                    .filter(move |&active| {
-                        for l in level..self.active_level(active) {
-                            if !region.is_split_adjacent(self.active_split(active, l)) {
-                                return false;
-                            }
+                self.active_children(neighbor).filter(move |&active| {
+                    for l in level..self.active_level(active) {
+                        if !region.is_split_adjacent(self.active_split(active, l)) {
+                            return false;
                         }
+                    }
 
-                        true
-                    })
-                    .map(|active| self.cell_from_active_index(active))
+                    true
+                })
             })
     }
 
-    pub fn periodic_region(&self, cell: CellIndex, region: Region<N>) -> Region<N> {
+    /// Returns true if a face lies on a boundary.
+    pub fn is_boundary_face(&self, cell: CellIndex, face: Face<N>) -> bool {
+        let mut region = Region::CENTRAL;
+        region.set_side(face.axis, if face.side { Side::Right } else { Side::Left });
+        self.boundary_region(cell, region) != Region::CENTRAL
+    }
+
+    /// Given a neighboring region to a cell, determines which global region that
+    /// belongs to (usually)
+    pub fn boundary_region(&self, cell: CellIndex, region: Region<N>) -> Region<N> {
         // Get the active cell owned by this cell.
         let Some(active) = self.active_index_from_cell(cell) else {
             return region;
@@ -419,228 +547,88 @@ impl<const N: usize> Tree<N> {
     }
 }
 
-/// Groups cells of a `Tree` into uniform blocks, for more efficient inter-cell communication and multithreading.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct TreeBlocks<const N: usize> {
-    /// Stores each cell's position within its parent's block.
-    #[serde(with = "crate::array::vec")]
-    active_cell_positions: Vec<[usize; N]>,
-    /// Maps cell to the block that contains it.
-    active_cell_to_block: Vec<usize>,
-    /// Stores the size of each block.
-    #[serde(with = "crate::array::vec")]
-    block_sizes: Vec<[usize; N]>,
-    /// A flattened list of lists (for each block) that stores
-    /// a local cell index to global cell index map.
-    block_active_indices: Vec<ActiveCellIndex>,
-    /// The offsets for the aforementioned flattened list of lists.
-    block_active_offsets: Vec<usize>,
-    /// The physical bounds of each block.
-    block_bounds: Vec<Rectangle<N>>,
-    /// The level of refinement of each block.
-    block_levels: Vec<usize>,
-    /// Stores whether block face is on physical boundary.
-    boundaries: BitVec,
-}
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn neighbors() {
+        let mut tree = Tree::<2>::new(Rectangle::UNIT);
 
-impl<const N: usize> TreeBlocks<N> {
-    /// Rebuilds the tree block structure from existing geometric information. Performs greedy meshing
-    /// to group cells into blocks.
-    pub fn build(&mut self, tree: &Tree<N>) {
-        self.build_blocks(tree);
-        self.build_bounds(tree);
-        self.build_boundaries(tree);
-        self.build_levels(tree);
-    }
+        assert_eq!(tree.bounds(CellIndex::ROOT), Rectangle::UNIT);
+        assert_eq!(tree.num_cells(), 1);
+        assert_eq!(tree.num_active_cells(), 1);
+        assert_eq!(tree.num_levels(), 1);
 
-    // Number of blocks in the mesh.
-    pub fn len(&self) -> usize {
-        self.block_sizes.len()
-    }
+        assert_eq!(tree.neighbor(CellIndex::ROOT, Face::negative(0)), None);
 
-    pub fn is_empty(&self) -> bool {
-        self.len() == 0
-    }
+        tree.refine(&[true]);
+        tree.build();
 
-    /// Returns the cells associated with the given block.
-    pub fn active_cells(&self, block: usize) -> &[ActiveCellIndex] {
-        &self.block_active_indices
-            [self.block_active_offsets[block]..self.block_active_offsets[block + 1]]
-    }
-
-    /// Size of a given block, measured in cells.
-    pub fn size(&self, block: usize) -> [usize; N] {
-        self.block_sizes[block]
-    }
-
-    /// Returns the bounds of the given block.
-    pub fn bounds(&self, block: usize) -> Rectangle<N> {
-        self.block_bounds[block]
-    }
-
-    pub fn level(&self, block: usize) -> usize {
-        self.block_levels[block]
-    }
-
-    /// Returns boundary flags for a block.
-    pub fn boundary_flags(&self, block: usize) -> FaceMask<N> {
-        let mut flags = [[false; 2]; N];
-
-        for face in faces::<N>() {
-            flags[face.axis][face.side as usize] =
-                self.boundaries[block * 2 * N + face.to_linear()];
+        assert_eq!(tree.num_cells(), 5);
+        assert_eq!(tree.num_active_cells(), 4);
+        assert_eq!(tree.num_levels(), 2);
+        for split in AxisMask::enumerate() {
+            assert_eq!(
+                tree.active_split(ActiveCellIndex(split.to_linear()), 0),
+                split
+            );
+        }
+        for i in 0..4 {
+            assert_eq!(
+                tree.cell_from_active_index(ActiveCellIndex(i)),
+                CellIndex(i + 1)
+            );
         }
 
-        FaceMask::pack(flags)
+        tree.refine(&[true, false, false, false]);
+        tree.build();
+
+        assert_eq!(
+            tree.cell_from_active_index(ActiveCellIndex(0)),
+            CellIndex(5)
+        );
+
+        assert!(tree.is_boundary_face(CellIndex(5), Face::negative(0)));
+        assert!(tree.is_boundary_face(CellIndex(5), Face::negative(1)));
+        assert_eq!(
+            tree.boundary_region(CellIndex(5), Region::new([Side::Left, Side::Right])),
+            Region::new([Side::Left, Side::Middle])
+        );
+
+        assert_eq!(
+            tree.neighbor_region(CellIndex(5), Region::new([Side::Right, Side::Right])),
+            Some(CellIndex(8))
+        );
+
+        assert_eq!(
+            tree.neighbor_region(CellIndex(4), Region::new([Side::Left, Side::Left])),
+            Some(CellIndex(1))
+        );
     }
 
-    /// Returns the position of the cell within the block.
-    pub fn active_cell_position(&self, cell: ActiveCellIndex) -> [usize; N] {
-        self.active_cell_positions[cell.0]
-    }
+    #[test]
+    fn periodic_neighbors() {
+        let mut tree = Tree::<2>::new(Rectangle::UNIT);
+        tree.set_periodic(0, true);
+        tree.set_periodic(1, true);
+        assert_eq!(
+            tree.neighbor(CellIndex::ROOT, Face::negative(0)),
+            Some(CellIndex::ROOT)
+        );
 
-    pub fn active_cell_block(&self, cell: ActiveCellIndex) -> usize {
-        self.active_cell_to_block[cell.0]
-    }
+        // Refine tree
+        tree.refine(&[true]);
+        tree.refine(&[true, false, false, false]);
+        tree.build();
 
-    fn build_blocks(&mut self, tree: &Tree<N>) {
-        let num_active_cells = tree.num_active_cells();
-
-        // Resize/reset various maps
-        self.active_cell_positions.resize(num_active_cells, [0; N]);
-        self.active_cell_positions.fill([0; N]);
-
-        self.active_cell_to_block
-            .resize(num_active_cells, usize::MAX);
-        self.active_cell_to_block.fill(usize::MAX);
-
-        self.block_sizes.clear();
-        self.block_active_indices.clear();
-        self.block_active_offsets.clear();
-
-        // Loop over each cell in the tree
-        for active in 0..num_active_cells {
-            if self.active_cell_to_block[active] != usize::MAX {
-                // This cell already belongs to a block, continue.
-                continue;
-            }
-
-            // Get index of next block
-            let block = self.block_sizes.len();
-
-            self.active_cell_positions[active] = [0; N];
-            self.active_cell_to_block[active] = block;
-
-            self.block_sizes.push([1; N]);
-            let block_cell_offset = self.block_active_indices.len();
-
-            self.block_active_offsets.push(block_cell_offset);
-            self.block_active_indices.push(ActiveCellIndex(active));
-
-            // Try expanding the block along each axis.
-            for axis in 0..N {
-                // Perform greedy meshing.
-                'expand: loop {
-                    let face = Face::<N>::positive(axis);
-
-                    let size = self.block_sizes[block];
-                    let space = IndexSpace::new(size);
-
-                    // Make sure every cell on face is suitable for expansion.
-                    for index in space.face(Face::positive(axis)).iter() {
-                        // Retrieves the cell on this face
-                        let cell = tree.cell_from_active_index(
-                            self.block_active_indices
-                                [block_cell_offset + space.linear_from_cartesian(index)],
-                        );
-                        let level = tree.level(cell);
-                        // We can only expand if
-                        // 1. We are not on a boundary
-                        // 2. The neighbor is the same level of refinement
-                        // 3. The neighbor does not already belong to another block.
-                        let Some(neighbor) = tree.neighbor_no_periodic(cell, face) else {
-                            break 'expand;
-                        };
-
-                        if level != tree.level(neighbor) {
-                            break 'expand;
-                        }
-
-                        if self.active_cell_to_block
-                            [tree.active_index_from_cell(neighbor).unwrap().0]
-                            != usize::MAX
-                        {
-                            break 'expand;
-                        }
-                    }
-
-                    // We may now expand along this axis
-                    for index in space.face(Face::positive(axis)).iter() {
-                        let active = self.block_active_indices
-                            [block_cell_offset + space.linear_from_cartesian(index)];
-
-                        let cell = tree.cell_from_active_index(active);
-                        let cell_neighbor = tree.neighbor(cell, face).unwrap();
-                        let active_neighbor = tree.active_index_from_cell(cell_neighbor).unwrap();
-
-                        self.active_cell_positions[active_neighbor.0] = index;
-                        self.active_cell_positions[active_neighbor.0][axis] += 1;
-                        self.active_cell_to_block[active_neighbor.0] = block;
-
-                        self.block_active_indices.push(active_neighbor);
-                    }
-
-                    self.block_sizes[block][axis] += 1;
-                }
-            }
-        }
-
-        self.block_active_offsets
-            .push(self.block_active_indices.len());
-    }
-
-    fn build_bounds(&mut self, tree: &Tree<N>) {
-        self.block_bounds.clear();
-
-        for block in 0..self.len() {
-            let size = self.block_sizes[block];
-            let a = *self.active_cells(block).first().unwrap();
-
-            let cell_bounds = tree.bounds(tree.cell_from_active_index(a));
-
-            self.block_bounds.push(Rectangle {
-                origin: cell_bounds.origin,
-                size: array::from_fn(|axis| cell_bounds.size[axis] * size[axis] as f64),
-            })
-        }
-    }
-
-    fn build_boundaries(&mut self, tree: &Tree<N>) {
-        self.boundaries.clear();
-
-        for block in 0..self.len() {
-            let a = 0;
-            let b: usize = self.active_cells(block).len() - 1;
-
-            for face in faces::<N>() {
-                let active = if face.side {
-                    self.active_cells(block)[b]
-                } else {
-                    self.active_cells(block)[a]
-                };
-                let cell = tree.cell_from_active_index(active);
-                self.boundaries.push(tree.neighbor(cell, face).is_none());
-            }
-        }
-    }
-
-    fn build_levels(&mut self, tree: &Tree<N>) {
-        self.block_levels.resize(self.len(), 0);
-        for block in 0..self.len() {
-            let active = self.active_cells(block)[0];
-            let cell = tree.cell_from_active_index(active);
-            self.block_levels[block] = tree.level(cell);
-        }
+        assert_eq!(
+            tree.neighbor(CellIndex(5), Face::negative(0)),
+            Some(CellIndex(2))
+        );
+        assert_eq!(
+            tree.neighbor_region(CellIndex(5), Region::new([Side::Left, Side::Left])),
+            Some(CellIndex(4))
+        );
     }
 }
 
@@ -654,7 +642,7 @@ pub struct TreeCellNeighbor<const N: usize> {
     /// Which region is the neighbor cell in?
     pub region: Region<N>,
     /// Which periodic region is the neighbor cell in?
-    pub periodic_region: Region<N>,
+    pub boundary_region: Region<N>,
 }
 
 /// Neighbor of block.
@@ -677,7 +665,7 @@ impl<const N: usize> TreeBlockNeighbor<N> {
     }
 }
 
-pub fn regions_to_face<const N: usize>(a: Region<N>, b: Region<N>) -> Option<Face<N>> {
+fn regions_to_face<const N: usize>(a: Region<N>, b: Region<N>) -> Option<Face<N>> {
     let mut adjacency = 0;
     let mut faxis = 0;
     let mut fside = false;
@@ -788,8 +776,8 @@ impl<const N: usize> TreeNeighbors<N> {
                 let lblock = blocks.active_cell_block(left.neighbor);
                 let rblock = blocks.active_cell_block(right.neighbor);
 
-                left.periodic_region
-                    .cmp(&right.periodic_region)
+                left.boundary_region
+                    .cmp(&right.boundary_region)
                     .then(lblock.cmp(&rblock))
                     .then(left.neighbor.cmp(&right.neighbor))
                     .then(left.cell.cmp(&right.cell))
@@ -845,14 +833,14 @@ impl<const N: usize> TreeNeighbors<N> {
             for index in block_space.adjacent(region) {
                 let active = block_active_cells[block_space.linear_from_cartesian(index)];
                 let cell = tree.cell_from_active_index(active);
-                let periodic = tree.periodic_region(cell, region);
+                let periodic = tree.boundary_region(cell, region);
 
-                for neighbor in tree.neighbors_in_region(cell, region) {
+                for neighbor in tree.active_neighbors_in_region(cell, region) {
                     neighbors.push(TreeCellNeighbor {
                         cell: active,
-                        neighbor: tree.active_index_from_cell(neighbor).unwrap(),
+                        neighbor,
                         region,
-                        periodic_region: periodic,
+                        boundary_region: periodic,
                     })
                 }
             }
@@ -875,7 +863,7 @@ impl<const N: usize> TreeNeighbors<N> {
 
             loop {
                 if let Some(next) = neighbors.peek() {
-                    if a.periodic_region == next.periodic_region
+                    if a.boundary_region == next.boundary_region
                         && neighbor == blocks.active_cell_block(next.neighbor)
                     {
                         b = neighbors.next().unwrap();
