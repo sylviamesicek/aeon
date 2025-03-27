@@ -209,10 +209,10 @@ pub fn solve_constraints(mesh: &mut Mesh<1>, system: SystemSliceMut<Fields>) {
     let mut conformal_prev = 1.0;
 
     for block in 0..mesh.num_blocks() {
-        let space = mesh.block_space(block);
-        let nodes = mesh.block_nodes(block);
+        let space = mesh.block_space(BlockId(block));
+        let nodes = mesh.block_nodes(BlockId(block));
         // let bounds = mesh.block_bounds(block);
-        let spacing = mesh.block_spacing(block);
+        let spacing = mesh.block_spacing(BlockId(block));
         let cell_size = space.cell_size()[0];
 
         let phi = &phi[nodes.clone()];
@@ -263,9 +263,9 @@ pub fn solve_constraints(mesh: &mut Mesh<1>, system: SystemSliceMut<Fields>) {
     let mut lapse_prev = 1.0 / conformal_prev;
 
     for block in (0..mesh.num_blocks()).rev() {
-        let space = mesh.block_space(block);
-        let nodes = mesh.block_nodes(block);
-        let spacing = mesh.block_spacing(block);
+        let space = mesh.block_space(BlockId(block));
+        let nodes = mesh.block_nodes(BlockId(block));
+        let spacing = mesh.block_spacing(BlockId(block));
         let cell_size = space.cell_size()[0];
 
         let phi = &phi[nodes.clone()];
@@ -353,8 +353,8 @@ pub fn find_mass(mesh: &Mesh<1>, system: SystemSlice<Fields>) -> f64 {
     let mut r_max = 0.0;
 
     for block in 0..mesh.num_blocks() {
-        let space = mesh.block_space(block);
-        let nodes = mesh.block_nodes(block);
+        let space = mesh.block_space(BlockId(block));
+        let nodes = mesh.block_nodes(BlockId(block));
 
         let vertex_size = space.vertex_size()[0];
         let a = &system.field(Field::Conformal)[nodes.clone()];

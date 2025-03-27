@@ -2,6 +2,8 @@ use crate::geometry::{faces, Face, FaceMask, IndexSpace, Rectangle, Tree, NULL};
 use bitvec::prelude::*;
 use std::array::from_fn;
 
+pub struct BlockId(pub usize);
+
 /// Groups cells of a `Tree` into uniform blocks, for more efficient inter-cell communication and multithreading.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct TreeBlocks<const N: usize> {

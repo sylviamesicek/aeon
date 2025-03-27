@@ -6,7 +6,7 @@
 //! filling interior interfaces, and adaptively regridding a domain based on various error heuristics.
 
 use crate::geometry::{
-    faces, ActiveCellIndex, AxisMask, Face, FaceArray, FaceMask, IndexSpace, Rectangle, Tree,
+    faces, ActiveCellId, AxisMask, BlockId, Face, FaceArray, FaceMask, IndexSpace, Rectangle, Tree,
     TreeBlocks, TreeInterfaces, TreeNeighbors, TreeNodes,
 };
 use crate::kernel::{BoundaryClass, DirichletParams, Element};
@@ -86,7 +86,7 @@ pub struct Mesh<const N: usize> {
     coarsen_flags: Vec<bool>,
 
     /// Map from cells before refinement to current cells.
-    regrid_map: Vec<ActiveCellIndex>,
+    regrid_map: Vec<ActiveCellId>,
 
     /// Blocks before most recent refinement.
     old_blocks: TreeBlocks<N>,
@@ -183,10 +183,11 @@ impl<const N: usize> Mesh<N> {
 
     /// Rebuilds mesh from current tree.
     fn build(&mut self) {
+        self.tree.build();
         self.blocks.build(&self.tree);
 
         self.max_level = 0;
-        for block in 0..self.blocks.len() {
+        for block in self.blocks.indices() {
             self.max_level = self.max_level.max(self.blocks.level(block));
         }
 
@@ -227,8 +228,8 @@ impl<const N: usize> Mesh<N> {
     }
 
     /// Returns the total number of cells on the mesh.
-    pub fn num_cells(&self) -> usize {
-        self.tree.num_cells()
+    pub fn num_active_cells(&self) -> usize {
+        self.tree.num_active_cells()
     }
 
     /// Returns the total number of nodes on the mesh.
@@ -245,17 +246,17 @@ impl<const N: usize> Mesh<N> {
     // Data for each block ***********
 
     /// The range of nodes assigned to a given block.
-    pub fn block_nodes(&self, block: usize) -> Range<usize> {
+    pub fn block_nodes(&self, block: BlockId) -> Range<usize> {
         self.nodes.range(block)
     }
 
     /// The range of nodes assigned to a given block on the mesh before the most recent refinement.
-    pub(crate) fn old_block_nodes(&self, block: usize) -> Range<usize> {
+    pub(crate) fn old_block_nodes(&self, block: BlockId) -> Range<usize> {
         self.old_nodes.range(block)
     }
 
     /// Computes the nodespace corresponding to a block.
-    pub fn block_space(&self, block: usize) -> NodeSpace<N> {
+    pub fn block_space(&self, block: BlockId) -> NodeSpace<N> {
         let size = self.blocks.size(block);
         let cell_size = array::from_fn(|axis| size[axis] * self.width);
 
@@ -268,7 +269,7 @@ impl<const N: usize> Mesh<N> {
     }
 
     /// Computes the nodespace corresponding to a block on the mesh before the most recent refinement.
-    pub(crate) fn old_block_space(&self, block: usize) -> NodeSpace<N> {
+    pub(crate) fn old_block_space(&self, block: BlockId) -> NodeSpace<N> {
         let size = self.old_blocks.size(block);
         let cell_size = array::from_fn(|axis| size[axis] * self.width);
 
@@ -281,18 +282,18 @@ impl<const N: usize> Mesh<N> {
     }
 
     /// The bounds of a block.
-    pub fn block_bounds(&self, block: usize) -> Rectangle<N> {
+    pub fn block_bounds(&self, block: BlockId) -> Rectangle<N> {
         self.blocks.bounds(block)
     }
 
     /// Computes flags indicating whether a particular face of a block borders a physical
     /// boundary.
-    pub fn block_physical_boundary_flags(&self, block: usize) -> FaceMask<N> {
+    pub fn block_physical_boundary_flags(&self, block: BlockId) -> FaceMask<N> {
         self.blocks.boundary_flags(block)
     }
 
     /// Indicates what class of boundary condition is enforced along each face of the block.
-    pub fn block_boundary_classes(&self, block: usize) -> FaceArray<N, BoundaryClass> {
+    pub fn block_boundary_classes(&self, block: BlockId) -> FaceArray<N, BoundaryClass> {
         let flag = self.block_physical_boundary_flags(block);
 
         FaceArray::from_fn(|face| {
@@ -308,7 +309,7 @@ impl<const N: usize> Mesh<N> {
     /// interior interfaces.
     pub fn block_bcs<B: SystemBoundaryConds<N>>(
         &self,
-        block: usize,
+        block: BlockId,
         bcs: B,
     ) -> BlockBoundaryConds<N, B> {
         BlockBoundaryConds {
@@ -318,7 +319,7 @@ impl<const N: usize> Mesh<N> {
     }
 
     /// Produces a block ghost flags for the mesh before its most recent refinement.
-    pub(crate) fn old_block_boundary_classes(&self, block: usize) -> FaceArray<N, BoundaryClass> {
+    pub(crate) fn old_block_boundary_classes(&self, block: BlockId) -> FaceArray<N, BoundaryClass> {
         let flag = self.old_blocks.boundary_flags(block);
 
         FaceArray::from_fn(|face| {
@@ -331,12 +332,12 @@ impl<const N: usize> Mesh<N> {
     }
 
     /// The level of a given block.
-    pub fn block_level(&self, block: usize) -> usize {
+    pub fn block_level(&self, block: BlockId) -> usize {
         self.blocks.level(block)
     }
 
     /// The level of a block before the most recent refinement.
-    pub(crate) fn old_block_level(&self, block: usize) -> usize {
+    pub(crate) fn old_block_level(&self, block: BlockId) -> usize {
         self.old_blocks.level(block)
     }
 
@@ -344,7 +345,7 @@ impl<const N: usize> Mesh<N> {
     // Elements **********************
 
     /// Element associated with a given cell.
-    pub fn element_window(&self, cell: ActiveCellIndex) -> NodeWindow<N> {
+    pub fn element_window(&self, cell: ActiveCellId) -> NodeWindow<N> {
         let position = self.blocks.active_cell_position(cell);
 
         let size = [2 * self.width + 1; N];
@@ -359,7 +360,7 @@ impl<const N: usize> Mesh<N> {
 
     /// Returns the window of nodes in a block corresponding to a given cell, including
     /// no padding.
-    pub fn element_coarse_window(&self, cell: ActiveCellIndex) -> NodeWindow<N> {
+    pub fn element_coarse_window(&self, cell: ActiveCellId) -> NodeWindow<N> {
         let position = self.blocks.active_cell_position(cell);
 
         let size = [self.width + 1; N];
@@ -389,7 +390,7 @@ impl<const N: usize> Mesh<N> {
     /// Retrieves the number of nodes along each axis of a cell.
     /// This defaults to `[self.width; N]` but is increased by one
     /// if the cell lies along a block boundary for a given axis.
-    pub fn cell_node_size(&self, cell: ActiveCellIndex) -> [usize; N] {
+    pub fn cell_node_size(&self, cell: ActiveCellId) -> [usize; N] {
         let block = self.blocks.active_cell_block(cell);
         let size = self.blocks.size(block);
         let position = self.blocks.active_cell_position(cell);
@@ -404,7 +405,7 @@ impl<const N: usize> Mesh<N> {
     }
 
     /// Returns the origin of a cell in its block's `NodeSpace<N>`.
-    pub fn cell_node_origin(&self, cell: ActiveCellIndex) -> [usize; N] {
+    pub fn cell_node_origin(&self, cell: ActiveCellId) -> [usize; N] {
         let position = self.blocks.active_cell_position(cell);
         array::from_fn(|axis| position[axis] * self.width)
     }
@@ -412,7 +413,7 @@ impl<const N: usize> Mesh<N> {
     /// Returns true if the given cell is on a boundary that does not contain
     /// ghost nodes. If this is the case we must fall back to a lower order element
     /// error approximation.
-    pub fn cell_needs_coarse_element(&self, cell: ActiveCellIndex) -> bool {
+    pub fn cell_needs_coarse_element(&self, cell: ActiveCellId) -> bool {
         let block = self.blocks.active_cell_block(cell);
         let block_size = self.blocks.size(block);
         let boundary = self.block_boundary_classes(block);
@@ -456,7 +457,7 @@ impl<const N: usize> Mesh<N> {
     }
 
     /// Computes the spacing on a particular block (albeit not accounting for coarse-fine interfaces).
-    pub fn block_spacing(&self, block: usize) -> f64 {
+    pub fn block_spacing(&self, block: BlockId) -> f64 {
         let space = self.block_space(block);
 
         space
@@ -469,8 +470,9 @@ impl<const N: usize> Mesh<N> {
 
     /// Runs a computation in parallel on every single block in the mesh, providing
     /// a `MeshStore` object for allocating scratch data.
-    pub fn block_compute<F: Fn(&Self, &MeshStore, usize) + Sync>(&mut self, f: F) {
-        (0..self.num_blocks())
+    pub fn block_compute<F: Fn(&Self, &MeshStore, BlockId) + Sync>(&mut self, f: F) {
+        self.blocks
+            .indices()
             .par_bridge()
             .into_par_iter()
             .for_each(|block| {
@@ -482,8 +484,9 @@ impl<const N: usize> Mesh<N> {
 
     /// Runs a computation in parallel on every single old block in the mesh, providing
     /// a `MeshStore` object for allocating scratch data.
-    pub(crate) fn old_block_compute<F: Fn(&Self, &MeshStore, usize) + Sync>(&mut self, f: F) {
+    pub(crate) fn old_block_compute<F: Fn(&Self, &MeshStore, BlockId) + Sync>(&mut self, f: F) {
         (0..self.num_old_blocks())
+            .map(BlockId)
             .par_bridge()
             .into_par_iter()
             .for_each(|block| {
@@ -516,8 +519,8 @@ impl<const N: usize> Mesh<N> {
     /// Returns the value of a function at the bottom left corner of
     /// the mesh.
     pub fn bottom_left_value(&self, src: &[f64]) -> f64 {
-        let space = self.block_space(0);
-        let nodes = self.block_nodes(0);
+        let space = self.block_space(BlockId(0));
+        let nodes = self.block_nodes(BlockId(0));
 
         src[nodes][space.index_from_vertex([0; N])]
     }
@@ -526,7 +529,7 @@ impl<const N: usize> Mesh<N> {
     pub fn l2_norm(&mut self, src: &[f64]) -> f64 {
         let mut result = 0.0;
 
-        for block in 0..self.blocks.len() {
+        for block in self.blocks.indices() {
             let space = self.block_space(block);
             let size = space.cell_size();
 
@@ -561,9 +564,8 @@ impl<const N: usize> Mesh<N> {
     pub fn max_norm(&mut self, src: &[f64]) -> f64 {
         let mut result = 0.0f64;
 
-        for block in 0..self.blocks.len() {
+        for block in self.blocks.indices() {
             let space = self.block_space(block);
-
             let data = &src[self.block_nodes(block)];
 
             let mut block_result = 0.0f64;
@@ -591,7 +593,12 @@ impl<const N: usize> Mesh<N> {
         for cell in self.tree.active_cell_indices() {
             writeln!(result, "Cell {}", cell.0).unwrap();
             writeln!(result, "    Bounds {:?}", self.tree.active_bounds(cell)).unwrap();
-            writeln!(result, "    Block {}", self.blocks.active_cell_block(cell)).unwrap();
+            writeln!(
+                result,
+                "    Block {:?}",
+                self.blocks.active_cell_block(cell)
+            )
+            .unwrap();
             writeln!(
                 result,
                 "    Block Position {:?}",
@@ -606,8 +613,8 @@ impl<const N: usize> Mesh<N> {
         writeln!(result, "// **********************").unwrap();
         writeln!(result).unwrap();
 
-        for block in 0..self.blocks.len() {
-            writeln!(result, "Block {block}").unwrap();
+        for block in self.blocks.indices() {
+            writeln!(result, "Block {block:?}").unwrap();
             writeln!(result, "    Bounds {:?}", self.blocks.bounds(block)).unwrap();
             writeln!(result, "    Size {:?}", self.blocks.size(block)).unwrap();
             writeln!(result, "    Cells {:?}", self.blocks.active_cells(block)).unwrap();
@@ -638,7 +645,7 @@ impl<const N: usize> Mesh<N> {
 
             writeln!(
                 result,
-                "    Block: {}, Neighbor: {}",
+                "    Block: {:?}, Neighbor: {:?}",
                 neighbor.block, neighbor.neighbor,
             )
             .unwrap();
@@ -664,7 +671,7 @@ impl<const N: usize> Mesh<N> {
 
             writeln!(
                 result,
-                "    Block: {}, Neighbor: {}",
+                "    Block: {:?}, Neighbor: {:?}",
                 neighbor.block, neighbor.neighbor,
             )
             .unwrap();
@@ -690,7 +697,7 @@ impl<const N: usize> Mesh<N> {
 
             writeln!(
                 result,
-                "    Block: {}, Neighbor: {}",
+                "    Block: {:?}, Neighbor: {:?}",
                 neighbor.block, neighbor.neighbor,
             )
             .unwrap();
@@ -865,7 +872,7 @@ impl<const N: usize> Mesh<N> {
         let mut vertex_total = 0;
         let mut cell_total = 0;
 
-        for block in 0..self.blocks.len() {
+        for block in self.blocks.indices() {
             let space = self.block_space(block);
 
             let mut cell_size = space.cell_size();
@@ -938,7 +945,7 @@ impl<const N: usize> Mesh<N> {
         // Generate point data
         let mut vertices = Vec::new();
 
-        for block in 0..self.blocks.len() {
+        for block in self.blocks.indices() {
             let space = self.block_space(block);
             let window = if config.ghost {
                 space.full_window()
@@ -1037,7 +1044,7 @@ impl<const N: usize> Mesh<N> {
     ) -> Attribute {
         let mut buffer = Vec::new();
 
-        for block in 0..self.blocks.len() {
+        for block in self.blocks.indices() {
             let space = self.block_space(block);
             let nodes = self.block_nodes(block);
             let window = if ghost {

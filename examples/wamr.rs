@@ -56,6 +56,7 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
             true => BoundaryClass::OneSided,
         }),
     );
+    mesh.refine_global();
 
     // Store system from previous iteration.
     let mut system_prev = SystemVec::with_length(mesh.num_nodes(), Scalar);

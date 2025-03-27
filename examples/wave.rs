@@ -7,7 +7,7 @@ use aeon::{
 };
 
 const MAX_TIME: f64 = 10.0;
-const MAX_STEPS: usize = 1000;
+const MAX_STEPS: usize = 10000;
 
 const CFL: f64 = 0.1;
 const ORDER: Order<4> = Order::<4>;
@@ -93,8 +93,9 @@ pub fn main() -> anyhow::Result<()> {
         Rectangle::from_aabb([-10., -10.], [10., 10.]),
         6,
         3,
-        FaceArray::splat(BoundaryClass::Periodic),
+        FaceArray::splat(BoundaryClass::OneSided),
     );
+    mesh.refine_global();
     // Allocate space for system
     let mut system = SystemVec::<Scalar>::default();
 

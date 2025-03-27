@@ -7,6 +7,8 @@
 use crate::geometry::TreeBlocks;
 use std::{array, ops::Range};
 
+use super::BlockId;
+
 /// Associates vertices with each block in the `Tree`.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct TreeNodes<const N: usize> {
@@ -34,8 +36,8 @@ impl<const N: usize> TreeNodes<N> {
     }
 
     /// The range of dofs associated with the given block.
-    pub fn range(&self, block: usize) -> Range<usize> {
-        self.offsets[block]..self.offsets[block + 1]
+    pub fn range(&self, block: BlockId) -> Range<usize> {
+        self.offsets[block.0]..self.offsets[block.0 + 1]
     }
 
     /// Rebuilds the set of tree nodes.
@@ -52,7 +54,7 @@ impl<const N: usize> TreeNodes<N> {
         let mut cursor = 0;
         self.offsets.push(cursor);
 
-        for block in 0..blocks.len() {
+        for block in blocks.indices() {
             let size = blocks.size(block);
             // Width of block in nodes.
             let block_width: [usize; N] =
@@ -76,21 +78,23 @@ impl<const N: usize> Default for TreeNodes<N> {
 
 #[cfg(test)]
 mod tests {
-    use crate::geometry::{Rectangle, Tree, TreeBlocks, TreeNodes};
+    use crate::geometry::{BlockId, Rectangle, Tree, TreeBlocks, TreeNodes};
     #[test]
     fn ranges() {
         let mut tree = Tree::new(Rectangle::<2>::UNIT);
         let mut blocks = TreeBlocks::default();
         let mut nodes = TreeNodes::new([8; 2], 3);
-
+        tree.refine(&[true]);
         tree.refine(&[true, false, false, false]);
+        tree.build();
+
         blocks.build(&tree);
         nodes.build(&blocks);
 
         assert_eq!(blocks.len(), 3);
 
-        assert_eq!(nodes.range(0), 0..529);
-        assert_eq!(nodes.range(1), 529..874);
-        assert_eq!(nodes.range(2), 874..1099);
+        assert_eq!(nodes.range(BlockId(0)), 0..529);
+        assert_eq!(nodes.range(BlockId(1)), 529..874);
+        assert_eq!(nodes.range(BlockId(2)), 874..1099);
     }
 }

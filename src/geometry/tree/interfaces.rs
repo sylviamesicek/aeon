@@ -1,6 +1,9 @@
 use std::{array, cmp::Ordering, ops::Range};
 
-use super::{Tree, TreeBlockNeighbor, TreeBlocks, TreeCellNeighbor, TreeNeighbors, TreeNodes};
+use super::{
+    blocks::BlockId, NeighborId, Tree, TreeBlockNeighbor, TreeBlocks, TreeCellNeighbor,
+    TreeNeighbors, TreeNodes,
+};
 use crate::{
     geometry::{IndexSpace, Side},
     kernel::NodeSpace,
@@ -10,9 +13,9 @@ use crate::{
 #[derive(Clone, Debug)]
 pub struct TreeInterface<const N: usize> {
     /// Block to be filled
-    pub block: usize,
+    pub block: BlockId,
     /// Neighbor block.
-    pub neighbor: usize,
+    pub neighbor: BlockId,
     /// Source node in neighbor block.
     pub source: [isize; N],
     /// Destination node in target block.
@@ -50,30 +53,30 @@ impl<const N: usize> TreeInterfaces<N> {
         *self.interface_node_offsets.last().unwrap()
     }
 
-    /// Retrieves the nth interface.
-    pub fn interface(&self, interface: usize) -> &TreeInterface<N> {
-        &self.interfaces[interface]
+    /// Retrieves the interface corresponding to the given neighbor.
+    pub fn interface(&self, neighbor: NeighborId) -> &TreeInterface<N> {
+        &self.interfaces[neighbor.0]
     }
 
     /// Returns the range of nodes associated with a given interface.
-    pub fn interface_nodes(&self, interface: usize) -> Range<usize> {
-        self.interface_node_offsets[interface]..self.interface_node_offsets[interface + 1]
+    pub fn interface_nodes(&self, interface: NeighborId) -> Range<usize> {
+        self.interface_node_offsets[interface.0]..self.interface_node_offsets[interface.0 + 1]
     }
 
     /// Returns a mask of nodes for a given interface.
-    pub fn interface_mask(&self, interface: usize) -> &[bool] {
+    pub fn interface_mask(&self, interface: NeighborId) -> &[bool] {
         &self.interface_masks[self.interface_nodes(interface)]
     }
 
     /// Returns an index space corresponding to a given interface.
-    pub fn interface_space(&self, interface: usize) -> IndexSpace<N> {
-        IndexSpace::new(self.interfaces[interface].size)
+    pub fn interface_space(&self, interface: NeighborId) -> IndexSpace<N> {
+        IndexSpace::new(self.interfaces[interface.0].size)
     }
 
     /// Iterates over active index nodes.
     pub fn interface_nodes_active(
         &self,
-        interface: usize,
+        interface: NeighborId,
         _extent: usize,
     ) -> impl Iterator<Item = [usize; N]> + '_ {
         let space = self.interface_space(interface);
@@ -126,7 +129,7 @@ impl<const N: usize> TreeInterfaces<N> {
 
         let mut buffer = Vec::default();
 
-        for block in 0..blocks.len() {
+        for block in blocks.indices() {
             let block_size = blocks.size(block);
             let block_level = blocks.level(block);
             let block_space = NodeSpace {

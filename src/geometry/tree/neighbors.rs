@@ -1,12 +1,17 @@
-use super::*;
+use super::{blocks::BlockId, *};
+
+#[derive(
+    Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, serde::Serialize, serde::Deserialize,
+)]
+pub struct NeighborId(pub usize);
 
 /// Stores neighbor of a cell on a tree.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct TreeCellNeighbor<const N: usize> {
     /// Primary cell.
-    pub cell: ActiveCellIndex,
+    pub cell: ActiveCellId,
     /// Neighbor cell.
-    pub neighbor: ActiveCellIndex,
+    pub neighbor: ActiveCellId,
     /// Which region is the neighbor cell in?
     pub region: Region<N>,
     /// Which periodic region is the neighbor cell in?
@@ -17,9 +22,9 @@ pub struct TreeCellNeighbor<const N: usize> {
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct TreeBlockNeighbor<const N: usize> {
     /// Primary block.
-    pub block: usize,
+    pub block: BlockId,
     /// Neighbor block.
-    pub neighbor: usize,
+    pub neighbor: BlockId,
     /// Leftmost cell neighbor.
     pub a: TreeCellNeighbor<N>,
     /// Rightmost cell neighbor.
@@ -95,30 +100,34 @@ impl<const N: usize> TreeNeighbors<N> {
         self.neighbors.iter()
     }
 
-    pub fn fine_indices(&self) -> impl Iterator<Item = usize> + '_ {
-        self.fine.iter().copied()
+    pub fn indices(&self) -> impl Iterator<Item = NeighborId> {
+        (0..self.neighbors.len()).map(NeighborId)
     }
 
-    pub fn direct_indices(&self) -> impl Iterator<Item = usize> + '_ {
-        self.direct.iter().copied()
+    pub fn fine_indices(&self) -> impl Iterator<Item = NeighborId> + '_ {
+        self.fine.iter().copied().map(NeighborId)
     }
 
-    pub fn coarse_indices(&self) -> impl Iterator<Item = usize> + '_ {
-        self.coarse.iter().copied()
+    pub fn direct_indices(&self) -> impl Iterator<Item = NeighborId> + '_ {
+        self.direct.iter().copied().map(NeighborId)
+    }
+
+    pub fn coarse_indices(&self) -> impl Iterator<Item = NeighborId> + '_ {
+        self.coarse.iter().copied().map(NeighborId)
     }
 
     /// Iterates over all neighbors of a block.
-    pub fn block(&self, block: usize) -> slice::Iter<'_, TreeBlockNeighbor<N>> {
-        self.neighbors[self.block_offsets[block]..self.block_offsets[block + 1]].iter()
+    pub fn block(&self, block: BlockId) -> slice::Iter<'_, TreeBlockNeighbor<N>> {
+        self.neighbors[self.block_offsets[block.0]..self.block_offsets[block.0 + 1]].iter()
     }
 
     /// Returns the range of neighbor indices belonging to a given block.
-    pub fn block_range(&self, block: usize) -> Range<usize> {
-        self.block_offsets[block]..self.block_offsets[block + 1]
+    pub fn block_range(&self, block: BlockId) -> Range<usize> {
+        self.block_offsets[block.0]..self.block_offsets[block.0 + 1]
     }
 
-    pub fn neighbor(&self, idx: usize) -> &TreeBlockNeighbor<N> {
-        &self.neighbors[idx]
+    pub fn neighbor(&self, idx: NeighborId) -> &TreeBlockNeighbor<N> {
+        &self.neighbors[idx.0]
     }
 
     /// Rebuilds the block interface data.
@@ -132,7 +141,7 @@ impl<const N: usize> TreeNeighbors<N> {
         // Reused memory for neighbors.
         let mut neighbors = Vec::new();
 
-        for block in 0..blocks.len() {
+        for block in blocks.indices() {
             self.block_offsets.push(self.neighbors.len());
 
             // Build cell neighbors.
@@ -183,7 +192,7 @@ impl<const N: usize> TreeNeighbors<N> {
     fn build_cell_neighbors(
         tree: &Tree<N>,
         blocks: &TreeBlocks<N>,
-        block: usize,
+        block: BlockId,
         neighbors: &mut Vec<TreeCellNeighbor<N>>,
     ) {
         let block_size = blocks.size(block);
@@ -219,7 +228,7 @@ impl<const N: usize> TreeNeighbors<N> {
     fn taverse_cell_neighbors(
         blocks: &TreeBlocks<N>,
         neighbors: &mut [TreeCellNeighbor<N>],
-        mut f: impl FnMut(usize, TreeCellNeighbor<N>, TreeCellNeighbor<N>),
+        mut f: impl FnMut(BlockId, TreeCellNeighbor<N>, TreeCellNeighbor<N>),
     ) {
         let mut neighbors = neighbors.iter().cloned().peekable();
 
@@ -262,5 +271,98 @@ impl InterfaceKind {
             -1 => InterfaceKind::Fine,
             _ => panic!("Unbalanced levels"),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::geometry::Rectangle;
+
+    #[test]
+    fn regions_and_faces() {
+        assert_eq!(regions_to_face::<2>(Region::CENTRAL, Region::CENTRAL), None);
+        assert_eq!(
+            regions_to_face(
+                Region::new([Side::Left, Side::Middle]),
+                Region::new([Side::Left, Side::Left])
+            ),
+            Some(Face::negative(0))
+        );
+        assert_eq!(
+            regions_to_face(
+                Region::new([Side::Left, Side::Right]),
+                Region::new([Side::Left, Side::Right])
+            ),
+            None
+        );
+        assert_eq!(
+            regions_to_face(
+                Region::new([Side::Left, Side::Right]),
+                Region::new([Side::Middle, Side::Right])
+            ),
+            Some(Face::positive(1))
+        );
+        assert_eq!(
+            regions_to_face(
+                Region::new([Side::Middle, Side::Right]),
+                Region::new([Side::Middle, Side::Right])
+            ),
+            Some(Face::positive(1))
+        );
+    }
+
+    #[test]
+    fn neighbors() {
+        let mut tree = Tree::new(Rectangle::<2>::UNIT);
+        let mut blocks = TreeBlocks::default();
+        let mut interfaces = TreeNeighbors::default();
+        tree.refine(&[true]);
+        tree.refine(&[true, false, false, false]);
+        blocks.build(&tree);
+        interfaces.build(&tree, &blocks);
+
+        let mut coarse = interfaces.coarse();
+
+        assert_eq!(
+            coarse.next(),
+            Some(&TreeBlockNeighbor {
+                block: BlockId(0),
+                neighbor: BlockId(1),
+                a: TreeCellNeighbor {
+                    cell: ActiveCellId(1),
+                    neighbor: ActiveCellId(4),
+                    region: Region::new([Side::Right, Side::Middle]),
+                    boundary_region: Region::CENTRAL,
+                },
+                b: TreeCellNeighbor {
+                    cell: ActiveCellId(3),
+                    neighbor: ActiveCellId(6),
+                    region: Region::new([Side::Right, Side::Right]),
+                    boundary_region: Region::CENTRAL,
+                }
+            })
+        );
+
+        assert_eq!(
+            coarse.next(),
+            Some(&TreeBlockNeighbor {
+                block: BlockId(0),
+                neighbor: BlockId(2),
+                a: TreeCellNeighbor {
+                    cell: ActiveCellId(2),
+                    neighbor: ActiveCellId(5),
+                    region: Region::new([Side::Middle, Side::Right]),
+                    boundary_region: Region::CENTRAL,
+                },
+                b: TreeCellNeighbor {
+                    cell: ActiveCellId(3),
+                    neighbor: ActiveCellId(5),
+                    region: Region::new([Side::Middle, Side::Right]),
+                    boundary_region: Region::CENTRAL,
+                }
+            })
+        );
+        assert_eq!(coarse.next(), None);
     }
 }

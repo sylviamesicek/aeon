@@ -34,9 +34,11 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut mesh = Mesh::new(
         Rectangle::from_aabb([-10., -10.], [10., 10.]),
         4,
-        3,
+        2,
         FaceArray::splat(BoundaryClass::OneSided),
     );
+    mesh.refine_global();
+
     // Allocate space for system
     let mut system = SystemVec::default();
 

@@ -1,8 +1,13 @@
 use std::array;
 
-use super::{ActiveCellIndex, Tree};
+use super::{ActiveCellId, Tree};
 use crate::geometry::{faces, Face, FaceMask, IndexSpace, Rectangle};
 use bitvec::prelude::*;
+
+#[derive(
+    Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, serde::Serialize, serde::Deserialize,
+)]
+pub struct BlockId(pub usize);
 
 /// Groups cells of a `Tree` into uniform blocks, for more efficient inter-cell communication and multithreading.
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
@@ -17,7 +22,7 @@ pub struct TreeBlocks<const N: usize> {
     block_sizes: Vec<[usize; N]>,
     /// A flattened list of lists (for each block) that stores
     /// a local cell index to global cell index map.
-    block_active_indices: Vec<ActiveCellIndex>,
+    block_active_indices: Vec<ActiveCellId>,
     /// The offsets for the aforementioned flattened list of lists.
     block_active_offsets: Vec<usize>,
     /// The physical bounds of each block.
@@ -43,49 +48,53 @@ impl<const N: usize> TreeBlocks<N> {
         self.block_sizes.len()
     }
 
+    pub fn indices(&self) -> impl Iterator<Item = BlockId> {
+        (0..self.len()).map(BlockId)
+    }
+
     pub fn is_empty(&self) -> bool {
         self.len() == 0
     }
 
     /// Returns the cells associated with the given block.
-    pub fn active_cells(&self, block: usize) -> &[ActiveCellIndex] {
+    pub fn active_cells(&self, block: BlockId) -> &[ActiveCellId] {
         &self.block_active_indices
-            [self.block_active_offsets[block]..self.block_active_offsets[block + 1]]
+            [self.block_active_offsets[block.0]..self.block_active_offsets[block.0 + 1]]
     }
 
     /// Size of a given block, measured in cells.
-    pub fn size(&self, block: usize) -> [usize; N] {
-        self.block_sizes[block]
+    pub fn size(&self, block: BlockId) -> [usize; N] {
+        self.block_sizes[block.0]
     }
 
     /// Returns the bounds of the given block.
-    pub fn bounds(&self, block: usize) -> Rectangle<N> {
-        self.block_bounds[block]
+    pub fn bounds(&self, block: BlockId) -> Rectangle<N> {
+        self.block_bounds[block.0]
     }
 
-    pub fn level(&self, block: usize) -> usize {
-        self.block_levels[block]
+    pub fn level(&self, block: BlockId) -> usize {
+        self.block_levels[block.0]
     }
 
     /// Returns boundary flags for a block.
-    pub fn boundary_flags(&self, block: usize) -> FaceMask<N> {
+    pub fn boundary_flags(&self, block: BlockId) -> FaceMask<N> {
         let mut flags = [[false; 2]; N];
 
         for face in faces::<N>() {
             flags[face.axis][face.side as usize] =
-                self.boundaries[block * 2 * N + face.to_linear()];
+                self.boundaries[block.0 * 2 * N + face.to_linear()];
         }
 
         FaceMask::pack(flags)
     }
 
     /// Returns the position of the cell within the block.
-    pub fn active_cell_position(&self, cell: ActiveCellIndex) -> [usize; N] {
+    pub fn active_cell_position(&self, cell: ActiveCellId) -> [usize; N] {
         self.active_cell_positions[cell.0]
     }
 
-    pub fn active_cell_block(&self, cell: ActiveCellIndex) -> usize {
-        self.active_cell_to_block[cell.0]
+    pub fn active_cell_block(&self, cell: ActiveCellId) -> BlockId {
+        BlockId(self.active_cell_to_block[cell.0])
     }
 
     fn build_blocks(&mut self, tree: &Tree<N>) {
@@ -104,8 +113,8 @@ impl<const N: usize> TreeBlocks<N> {
         self.block_active_offsets.clear();
 
         // Loop over each cell in the tree
-        for active in 0..num_active_cells {
-            if self.active_cell_to_block[active] != usize::MAX {
+        for active in tree.active_cell_indices() {
+            if self.active_cell_to_block[active.0] != usize::MAX {
                 // This cell already belongs to a block, continue.
                 continue;
             }
@@ -113,14 +122,14 @@ impl<const N: usize> TreeBlocks<N> {
             // Get index of next block
             let block = self.block_sizes.len();
 
-            self.active_cell_positions[active] = [0; N];
-            self.active_cell_to_block[active] = block;
+            self.active_cell_positions[active.0] = [0; N];
+            self.active_cell_to_block[active.0] = block;
 
             self.block_sizes.push([1; N]);
             let block_cell_offset = self.block_active_indices.len();
 
             self.block_active_offsets.push(block_cell_offset);
-            self.block_active_indices.push(ActiveCellIndex(active));
+            self.block_active_indices.push(active);
 
             // Try expanding the block along each axis.
             for axis in 0..N {
@@ -152,7 +161,7 @@ impl<const N: usize> TreeBlocks<N> {
                             break 'expand;
                         }
 
-                        if level != tree.level(neighbor) {
+                        if level != tree.level(neighbor) || !tree.is_active(neighbor) {
                             break 'expand;
                         }
 
@@ -171,6 +180,7 @@ impl<const N: usize> TreeBlocks<N> {
 
                         let cell = tree.cell_from_active_index(active);
                         let cell_neighbor = tree.neighbor(cell, face).unwrap();
+                        debug_assert!(tree.is_active(cell_neighbor));
                         let active_neighbor = tree.active_index_from_cell(cell_neighbor).unwrap();
 
                         self.active_cell_positions[active_neighbor.0] = index;
@@ -192,8 +202,8 @@ impl<const N: usize> TreeBlocks<N> {
     fn build_bounds(&mut self, tree: &Tree<N>) {
         self.block_bounds.clear();
 
-        for block in 0..self.len() {
-            let size = self.block_sizes[block];
+        for block in self.indices() {
+            let size = self.size(block);
             let a = *self.active_cells(block).first().unwrap();
 
             let cell_bounds = tree.bounds(tree.cell_from_active_index(a));
@@ -208,7 +218,7 @@ impl<const N: usize> TreeBlocks<N> {
     fn build_boundaries(&mut self, tree: &Tree<N>) {
         self.boundaries.clear();
 
-        for block in 0..self.len() {
+        for block in self.indices() {
             let a = 0;
             let b: usize = self.active_cells(block).len() - 1;
 
@@ -219,17 +229,16 @@ impl<const N: usize> TreeBlocks<N> {
                     self.active_cells(block)[a]
                 };
                 let cell = tree.cell_from_active_index(active);
-                self.boundaries.push(tree.neighbor(cell, face).is_none());
+                self.boundaries.push(tree.is_boundary_face(cell, face))
             }
         }
     }
 
     fn build_levels(&mut self, tree: &Tree<N>) {
         self.block_levels.resize(self.len(), 0);
-        for block in 0..self.len() {
+        for block in self.indices() {
             let active = self.active_cells(block)[0];
-            let cell = tree.cell_from_active_index(active);
-            self.block_levels[block] = tree.level(cell);
+            self.block_levels[block.0] = tree.active_level(active);
         }
     }
 }

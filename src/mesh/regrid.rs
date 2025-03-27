@@ -1,6 +1,6 @@
 use std::array;
 
-use crate::geometry::{ActiveCellIndex, IndexSpace};
+use crate::geometry::{ActiveCellId, IndexSpace};
 
 use crate::{
     mesh::Mesh,
@@ -35,14 +35,16 @@ impl<const N: usize> Mesh<N> {
 
         // Perform regriding
         self.regrid_map
-            .resize(self.tree.num_active_cells(), ActiveCellIndex(0));
+            .resize(self.tree.num_active_cells(), ActiveCellId(0));
 
-        let mut coarsen_map = vec![ActiveCellIndex(0); self.tree.num_active_cells()];
+        let mut coarsen_map = vec![ActiveCellId(0); self.tree.num_active_cells()];
         self.tree
             .coarsen_active_index_map(&self.coarsen_flags, &mut coarsen_map);
+
+        debug_assert!(self.tree.check_coarsen_flags(&self.coarsen_flags));
         self.tree.coarsen(&self.coarsen_flags);
 
-        let mut refine_map = vec![ActiveCellIndex(0); self.tree.num_active_cells()];
+        let mut refine_map = vec![ActiveCellId(0); self.tree.num_active_cells()];
         let mut flags = vec![false; self.tree.num_active_cells()];
 
         for (old, &new) in coarsen_map.iter().enumerate() {
@@ -50,6 +52,8 @@ impl<const N: usize> Mesh<N> {
         }
 
         self.tree.refine_active_index_map(&flags, &mut refine_map);
+
+        debug_assert!(self.tree.check_refine_flags(&flags));
         self.tree.refine(&flags);
 
         for i in 0..self.regrid_map.len() {
@@ -197,20 +201,20 @@ impl<const N: usize> Mesh<N> {
         self.coarsen_flags[cell] = true
     }
 
-    // // Mark `count` cells around each currently tagged cell for refinement.
-    // pub fn buffer_refine_flags(&mut self, count: usize) {
-    //     for _ in 0..count {
-    //         for cell in 0..self.num_cells() {
-    //             if !self.refine_flags[cell] {
-    //                 continue;
-    //             }
+    // Mark `count` cells around each currently tagged cell for refinement.
+    pub fn buffer_refine_flags(&mut self, count: usize) {
+        for _ in 0..count {
+            for cell in self.tree.active_cell_indices() {
+                if !self.refine_flags[cell.0] {
+                    continue;
+                }
 
-    //             for neighbor in self.tree.neighborhood(cell) {
-    //                 self.refine_flags[neighbor] = true;
-    //             }
-    //         }
-    //     }
-    // }
+                for neighbor in self.tree.active_neighborhood(cell) {
+                    self.refine_flags[neighbor.0] = true;
+                }
+            }
+        }
+    }
 
     /// Limits coarsening to cells with a `level > min_level`, and refinement to
     /// cells with a `level < max_level`.
@@ -238,7 +242,7 @@ impl<const N: usize> Mesh<N> {
         for cell in self.tree.active_cell_indices() {
             if self.refine_flags[cell.0] {
                 let level = self.tree.active_level(cell);
-                for neighbor in self.tree.neighborhood(cell) {
+                for neighbor in self.tree.active_neighborhood(cell) {
                     let nlevel = self.tree.active_level(neighbor);
                     if nlevel <= level {
                         self.coarsen_flags[neighbor.0] = false;
@@ -269,7 +273,7 @@ impl<const N: usize> Mesh<N> {
 
 #[cfg(test)]
 mod tests {
-    use crate::geometry::{ActiveCellIndex, FaceArray, Rectangle};
+    use crate::geometry::{ActiveCellId, FaceArray, Rectangle};
     use crate::kernel::BoundaryClass;
     use crate::mesh::Mesh;
 
@@ -281,16 +285,17 @@ mod tests {
             2,
             FaceArray::from_sides([BoundaryClass::Ghost; 2], [BoundaryClass::OneSided; 2]),
         );
+        mesh.refine_global();
 
         mesh.set_refine_flag(0);
         mesh.regrid();
 
-        assert!(!mesh.cell_needs_coarse_element(ActiveCellIndex(0)));
-        assert!(!mesh.cell_needs_coarse_element(ActiveCellIndex(1)));
-        assert!(!mesh.cell_needs_coarse_element(ActiveCellIndex(2)));
-        assert!(!mesh.cell_needs_coarse_element(ActiveCellIndex(3)));
-        assert!(mesh.cell_needs_coarse_element(ActiveCellIndex(4)));
-        assert!(mesh.cell_needs_coarse_element(ActiveCellIndex(5)));
-        assert!(mesh.cell_needs_coarse_element(ActiveCellIndex(6)));
+        assert!(!mesh.cell_needs_coarse_element(ActiveCellId(0)));
+        assert!(!mesh.cell_needs_coarse_element(ActiveCellId(1)));
+        assert!(!mesh.cell_needs_coarse_element(ActiveCellId(2)));
+        assert!(!mesh.cell_needs_coarse_element(ActiveCellId(3)));
+        assert!(mesh.cell_needs_coarse_element(ActiveCellId(4)));
+        assert!(mesh.cell_needs_coarse_element(ActiveCellId(5)));
+        assert!(mesh.cell_needs_coarse_element(ActiveCellId(6)));
     }
 }

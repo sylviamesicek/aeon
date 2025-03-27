@@ -1,4 +1,4 @@
-use crate::geometry::{ActiveCellIndex, AxisMask, IndexSpace};
+use crate::geometry::{ActiveCellId, AxisMask, IndexSpace, NeighborId};
 use crate::kernel::Kernels;
 use reborrow::ReborrowMut;
 use std::array;
@@ -42,7 +42,7 @@ impl<const N: usize> Mesh<N> {
                     // Loop over every child of the recently refined cell.
                     for child in AxisMask::<N>::enumerate() {
                         // Retrieves new cell.
-                        let new_cell = ActiveCellIndex(new_cell.0 + child.to_linear());
+                        let new_cell = ActiveCellId(new_cell.0 + child.to_linear());
 
                         let new_block = mesh.blocks.active_cell_block(new_cell);
                         let new_nodes = mesh.block_nodes(new_block);
@@ -191,7 +191,7 @@ impl<const N: usize> Mesh<N> {
 
         let shared = dest.into_shared();
 
-        (0..self.blocks.len()).for_each(|block| {
+        self.blocks.indices().for_each(|block| {
             // Fill Physical Boundary conditions
             let nodes = self.block_nodes(block);
             let space = self.block_space(block);
@@ -316,7 +316,7 @@ impl<const N: usize> Mesh<N> {
 
             for node in block_nodes {
                 unsafe {
-                    *debug.get_mut(node) = block as i64;
+                    *debug.get_mut(node) = block.0 as i64;
                 }
             }
         });
@@ -364,12 +364,15 @@ impl<const N: usize> Mesh<N> {
                 let block_nodes = self.block_nodes(interface.block);
                 let block_space = self.block_space(interface.block);
 
-                for offset in self.interfaces.interface_nodes_active(iidx, extent) {
+                for offset in self
+                    .interfaces
+                    .interface_nodes_active(NeighborId(iidx), extent)
+                {
                     let node = array::from_fn(|axis| interface.dest[axis] + offset[axis] as isize);
                     let index = block_space.index_from_node(node);
 
                     unsafe {
-                        *debug.get_mut(block_nodes.start + index) = interface.neighbor as i64;
+                        *debug.get_mut(block_nodes.start + index) = interface.neighbor.0 as i64;
                     }
                 }
             });
@@ -388,7 +391,10 @@ impl<const N: usize> Mesh<N> {
                 let block_nodes = self.block_nodes(interface.block);
                 let block_space = self.block_space(interface.block);
 
-                for offset in self.interfaces.interface_nodes_active(iidx, extent) {
+                for offset in self
+                    .interfaces
+                    .interface_nodes_active(NeighborId(iidx), extent)
+                {
                     let node = array::from_fn(|axis| interface.dest[axis] + offset[axis] as isize);
                     let index = block_space.index_from_node(node);
 

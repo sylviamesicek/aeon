@@ -121,6 +121,7 @@ pub fn main() -> anyhow::Result<()> {
         FaceArray::splat(BoundaryClass::OneSided),
     );
     mesh.refine_global();
+    mesh.refine_global();
     // Allocate space for system
     let mut source = Vec::new();
     let mut solution = Vec::new();
