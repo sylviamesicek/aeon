@@ -157,7 +157,7 @@ impl<const N: usize> TreeBlocks<N> {
                             break 'expand;
                         };
 
-                        if !tree.is_boundary_face(cell, face) {
+                        if tree.is_boundary_face(cell, face) {
                             break 'expand;
                         }
 
@@ -240,5 +240,68 @@ impl<const N: usize> TreeBlocks<N> {
             let active = self.active_cells(block)[0];
             self.block_levels[block.0] = tree.active_level(active);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{geometry::Tree, prelude::Rectangle};
+
+    #[test]
+    fn greedy_meshing() {
+        let mut tree = Tree::new(Rectangle::<2>::UNIT);
+        tree.refine(&[true]);
+        tree.refine(&[true, false, false, false]);
+
+        let mut blocks = TreeBlocks::default();
+        blocks.build(&tree);
+
+        assert!(blocks.len() == 3);
+        assert_eq!(blocks.level(BlockId(0)), 2);
+        assert_eq!(blocks.size(BlockId(0)), [2, 2]);
+        assert_eq!(
+            blocks.active_cells(BlockId(0)),
+            [
+                ActiveCellId(0),
+                ActiveCellId(1),
+                ActiveCellId(2),
+                ActiveCellId(3)
+            ]
+        );
+        assert_eq!(blocks.level(BlockId(1)), 1);
+        assert_eq!(blocks.size(BlockId(1)), [1, 2]);
+        assert_eq!(
+            blocks.active_cells(BlockId(1)),
+            [ActiveCellId(4), ActiveCellId(6),]
+        );
+        assert_eq!(blocks.level(BlockId(2)), 1);
+        assert_eq!(blocks.size(BlockId(2)), [1, 1]);
+        assert_eq!(blocks.active_cells(BlockId(2)), [ActiveCellId(5)]);
+
+        tree.refine(&[false, false, false, false, true, false, false]);
+        blocks.build(&tree);
+        assert!(blocks.len() == 2);
+        assert_eq!(blocks.level(BlockId(0)), 2);
+        assert_eq!(blocks.size(BlockId(0)), [4, 2]);
+        assert_eq!(
+            blocks.active_cells(BlockId(0)),
+            [
+                ActiveCellId(0),
+                ActiveCellId(1),
+                ActiveCellId(4),
+                ActiveCellId(5),
+                ActiveCellId(2),
+                ActiveCellId(3),
+                ActiveCellId(6),
+                ActiveCellId(7),
+            ]
+        );
+        assert_eq!(blocks.level(BlockId(1)), 1);
+        assert_eq!(blocks.size(BlockId(1)), [2, 1]);
+        assert_eq!(
+            blocks.active_cells(BlockId(1)),
+            [ActiveCellId(8), ActiveCellId(9),]
+        );
     }
 }
