@@ -57,7 +57,7 @@ impl<const N: usize> Region<N> {
         self.sides[axis]
     }
 
-    pub const fn set_side(&mut self, axis: usize, side: Side) {
+    pub fn set_side(&mut self, axis: usize, side: Side) {
         self.sides[axis] = side
     }
 
