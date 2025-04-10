@@ -219,6 +219,9 @@ impl<const N: usize> Mesh<N> {
     /// Limits coarsening to cells with a `level > min_level`, and refinement to
     /// cells with a `level < max_level`.
     pub fn limit_level_range_flags(&mut self, min_level: usize, max_level: usize) {
+        assert!(self.refine_flags.len() == self.num_active_cells());
+        assert!(self.coarsen_flags.len() == self.num_active_cells());
+
         for cell in self.tree.active_cell_indices() {
             let level = self.tree.active_level(cell);
             if level >= max_level {

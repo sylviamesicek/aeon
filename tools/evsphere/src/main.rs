@@ -298,12 +298,14 @@ fn run(config: RunConfig, diagnostics: &mut Diagnostics) -> Result<()> {
             );
             mesh.limit_level_range_flags(1, MAX_LEVELS);
             mesh.balance_flags();
+            mesh.limit_level_range_flags(1, MAX_LEVELS);
             mesh.regrid();
 
             log::trace!(
-                "Regrided Mesh at time: {time:.5}, Max Level {}, Num Nodes {}",
+                "Regrided Mesh at time: {proper_time:.5}, Max Level {}, Num Nodes {}, Step: {}",
                 mesh.max_level(),
                 mesh.num_nodes(),
+                step,
             );
 
             // Copy system into tmp scratch space (provieded by dissipation).
@@ -375,6 +377,16 @@ fn run(config: RunConfig, diagnostics: &mut Diagnostics) -> Result<()> {
         time_since_save += h;
 
         proper_time += h * alpha;
+
+        let norm = mesh.l2_norm_system(system.as_slice());
+
+        if norm.is_nan() || norm >= 1e60 || alpha.is_nan() {
+            log::trace!("Evolution collapses after step, norm: {}", norm);
+            return Err(anyhow!(
+                "exceded max allotted steps for evolution: {}",
+                step
+            ));
+        }
     }
 
     Ok(())
@@ -473,7 +485,7 @@ fn try_main() -> Result<()> {
 
     // Build enviornment logger.
     // env_logger::builder()
-    //     .filter_level(log::LevelFilter::Error)
+    //     .filter_level(log::LevelFilter::Trace)
     //     .init();
 
     // Diagnostic object
