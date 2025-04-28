@@ -4,8 +4,8 @@ use aeon::{
     prelude::*,
     solver::{Integrator, Method},
 };
-use anyhow::{anyhow, Context as _, Result};
 use clap::{Arg, Command};
+use eyre::{eyre, Result, WrapErr as _};
 use sharedaxi::{
     import_from_toml, Constraint, EVConfig, Field, FieldConditions, Fields, Gauge, GaugeCondition,
     Metric, ScalarField, Visualize,
@@ -252,7 +252,7 @@ pub fn evolution() -> Result<bool> {
     let config = import_from_toml::<EVConfig>(
         matches
             .get_one::<String>("config")
-            .ok_or(anyhow!("Failed to specify config argument"))?,
+            .ok_or(eyre!("Failed to specify config argument"))?,
     )?;
 
     // Load header data
@@ -280,7 +280,7 @@ pub fn evolution() -> Result<bool> {
     // Parse data file path.
     let path = matches
         .get_one::<String>("path")
-        .ok_or(anyhow!("Failed to specify path argument"))?;
+        .ok_or(eyre!("Failed to specify path argument"))?;
 
     // Import data from file.
     let mut mesh = Mesh::<2>::default();
@@ -340,10 +340,7 @@ pub fn evolution() -> Result<bool> {
 
         if step >= max_steps {
             log::error!("Evolution exceded maximum allocated steps: {}", step);
-            return Err(anyhow!(
-                "exceded max allotted steps for evolution: {}",
-                step
-            ));
+            return Err(eyre!("exceded max allotted steps for evolution: {}", step));
         }
 
         if mesh.num_nodes() >= config.max_nodes {
@@ -351,7 +348,7 @@ pub fn evolution() -> Result<bool> {
                 "Evolution exceded maximum allocated nodes: {}",
                 mesh.num_nodes()
             );
-            return Err(anyhow!(
+            return Err(eyre!(
                 "exceded max allotted nodes for evolution: {}",
                 mesh.num_nodes()
             ));

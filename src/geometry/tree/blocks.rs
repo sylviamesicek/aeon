@@ -1,7 +1,7 @@
 use std::array;
 
 use super::{ActiveCellId, Tree};
-use crate::geometry::{faces, Face, FaceMask, IndexSpace, Rectangle};
+use crate::geometry::{Face, FaceMask, IndexSpace, Rectangle, faces};
 use bitvec::prelude::*;
 
 #[derive(
@@ -48,7 +48,7 @@ impl<const N: usize> TreeBlocks<N> {
         self.block_sizes.len()
     }
 
-    pub fn indices(&self) -> impl Iterator<Item = BlockId> {
+    pub fn indices(&self) -> impl Iterator<Item = BlockId> + use<N> {
         (0..self.len()).map(BlockId)
     }
 

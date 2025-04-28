@@ -1,17 +1,16 @@
-use std::path::{Path, PathBuf};
+use crate::config::{Relax, Source};
+use crate::rinne::eqs;
+use aeon::prelude::*;
 
 use aeon::{
     kernel::Kernels,
     mesh::{Gaussian, Mesh},
-    prelude::*,
     solver::{HyperRelaxSolver, SolverCallback},
     system::System,
 };
 
+use super::{Constraint, Field, FieldConditions, Fields, Gauge, Metric, ScalarField};
 use reborrow::ReborrowMut;
-use sharedaxi::{
-    eqs, Constraint, Field, FieldConditions, Fields, Gauge, Metric, ScalarField, Solver, Source,
-};
 
 // *************************
 // Garfinkle variables *****
@@ -219,51 +218,6 @@ impl<'a> Function<2> for Hamiltonian<'a> {
     }
 }
 
-struct Callback<'a> {
-    visualize: Option<VisualizeConfig<'a>>,
-}
-
-// Implement visualization for hamiltonian.
-impl<'a> SolverCallback<2, Scalar> for Callback<'a> {
-    fn callback(
-        &self,
-        mesh: &Mesh<2>,
-        input: SystemSlice<Scalar>,
-        output: SystemSlice<Scalar>,
-        iteration: usize,
-    ) {
-        let Some(ref visualze) = self.visualize else {
-            return;
-        };
-
-        if iteration % visualze.every != 0 {
-            return;
-        }
-
-        let i = iteration / visualze.every;
-
-        let mut checkpoint = SystemCheckpoint::default();
-        checkpoint.save_field("Solution", input.into_scalar());
-        checkpoint.save_field("Derivative", output.into_scalar());
-
-        mesh.export_vtu(
-            PathBuf::from(visualze.path).join(format!(
-                "{}_level_{}_iter_{}.vtu",
-                visualze.name,
-                mesh.max_level(),
-                i
-            )),
-            &checkpoint,
-            ExportVtuConfig {
-                title: visualze.name.to_string(),
-                ghost: false,
-                stride: visualze.stride,
-            },
-        )
-        .unwrap()
-    }
-}
-
 /// Generate fields from Garfinkle variables.
 #[derive(Clone)]
 pub struct FieldsFromGarfinkle<'a> {
@@ -298,23 +252,11 @@ impl<'a> Function<2> for FieldsFromGarfinkle<'a> {
     }
 }
 
-#[derive(Clone)]
-pub struct VisualizeConfig<'a> {
-    /// Path to output relaxation data.
-    pub path: &'a Path,
-    /// Name of simulation.
-    pub name: &'a str,
-    /// Output vtu every `every` iterations.
-    pub every: usize,
-    /// Stride for outputting nodes on mesh.
-    pub stride: usize,
-}
-
-pub fn solve_order<const ORDER: usize>(
+pub fn solve_order<const ORDER: usize, S: SolverCallback<2, Scalar> + Send + Sync>(
     order: Order<ORDER>,
     mesh: &mut Mesh<2>,
-    solver_con: &Solver,
-    visualize: Option<VisualizeConfig>,
+    relax: &Relax,
+    callback: S,
     sources: &[Source],
     mut system: SystemSliceMut<Fields>,
 ) -> eyre::Result<()>
@@ -375,10 +317,10 @@ where
     );
 
     let mut solver = HyperRelaxSolver::new();
-    solver.dampening = solver_con.dampening;
-    solver.max_steps = solver_con.max_steps;
-    solver.tolerance = solver_con.tolerance;
-    solver.cfl = solver_con.cfl;
+    solver.dampening = relax.dampening;
+    solver.max_steps = relax.max_steps;
+    solver.tolerance = relax.error_tolerance;
+    solver.cfl = relax.cfl;
     solver.adaptive = true;
 
     solver.solve_with_callback(
@@ -388,7 +330,7 @@ where
         Hamiltonian {
             context: context.as_slice(),
         },
-        Callback { visualize },
+        callback,
         SystemSliceMut::from_scalar(&mut psi),
     )?;
 

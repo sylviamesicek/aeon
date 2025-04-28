@@ -9,6 +9,7 @@ members = [
     "tools/evaxi",
 
     "tools/evsphere",
+    "tools/aaxi",
 ]
 default-members = [
     "crates/aeon_macros",
@@ -20,6 +21,7 @@ default-members = [
     "tools/sharedaxi",
 
     "tools/evsphere",
+    "tools/aaxi",
     ".",
 ]
 resolver = "2"
@@ -31,13 +33,16 @@ aeon_tensor = { path = "crates/aeon_tensor" }
 
 sharedaxi = { path = "tools/sharedaxi" }
 
-anyhow = "1.0.91"
 bitvec = { version = "1.0.1", features = ["serde"] }
 bumpalo = "3.16.0"
 cc = "1.0"
 clap = "4.5.4"
+color-eyre = "0.6.3"
+console = "0.15.11"
 env_logger = "0.11"
+eyre = "0.6.12"
 faer = "0.20.1"
+indicatif = "0.17.11"
 itertools = "0.13.0"
 log = "0.4"
 num-traits = "0.2.19"
@@ -55,7 +60,7 @@ toml = "0.8.19"
 [package]
 name = "aeon"
 version = "0.1.0"
-edition = "2021"
+edition = "2024"
 exclude = ["crates/", "tools/"]
 readme = "README.md"
 
@@ -77,7 +82,7 @@ vtkio = "0.6"
 
 [dev-dependencies]
 env_logger.workspace = true
-anyhow.workspace = true
+eyre.workspace = true
 
 [[example]]
 name = "wamr"

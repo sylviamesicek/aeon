@@ -1,17 +1,5 @@
-//! This crate contains general configuration and paramter data types used by critgen, idgen, and evgen.
-//! These types are shared across crates, and thus moved here to prevent redundent definition.
-
-use std::path::Path;
-
-use aeon::{macros::SystemLabel, prelude::*, system::System};
-use clap::ArgMatches;
-use eyre::{eyre, Result};
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
-
-mod config;
-pub mod eqs;
-
-pub use config::*;
+use aeon::prelude::*;
+use serde::{Deserialize, Serialize};
 
 /// System for storing all fields necessary for axisymmetric evolution.
 #[derive(Clone, Serialize, Deserialize)]
@@ -253,29 +241,4 @@ impl SystemBoundaryConds<2> for FieldConditions {
             _ => RadiativeParams::lightlike(0.0),
         }
     }
-}
-
-/// Exports a config structure to a toml file.
-pub fn export_to_toml<T: Serialize>(path: impl AsRef<Path>, config: T) -> Result<()> {
-    let string = toml::to_string_pretty(&config)?;
-    std::fs::write(path, string)?;
-
-    Ok(())
-}
-
-/// Loads a config from a toml file given a path.
-pub fn import_from_toml<T: DeserializeOwned>(path: impl AsRef<Path>) -> Result<T> {
-    let string = std::fs::read_to_string(path)?;
-    Ok(toml::from_str(&string)?)
-}
-
-/// Loads a config from the toml file pointed to by the 'path' argument in `ArgMatches`.
-pub fn import_from_path_arg<T: DeserializeOwned>(matches: &ArgMatches) -> Result<T> {
-    // Get path argument
-    let path = matches
-        .get_one::<String>("path")
-        .ok_or(eyre!("Failed to specify path argument"))?
-        .clone();
-
-    import_from_toml(path)
 }

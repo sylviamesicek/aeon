@@ -3,8 +3,8 @@
 use std::{path::PathBuf, process::ExitCode};
 
 use aeon::prelude::*;
-use anyhow::{anyhow, Context, Result};
 use clap::{Arg, Command};
+use eyre::{eyre, Context, Result, WrapErr};
 use garfinkle::VisualizeConfig;
 use sharedaxi::{import_from_path_arg, Field, FieldConditions, Fields, IDConfig, Source};
 
@@ -97,10 +97,10 @@ fn initial_data() -> Result<()> {
         "Output Directory: {}",
         absolute
             .to_str()
-            .ok_or(anyhow!("Failed to find absolute output directory"))?
+            .ok_or(eyre!("Failed to find absolute output directory"))?
     );
 
-    anyhow::ensure!(
+    eyre::ensure!(
         config.domain.radius > 0.0 && config.domain.height > 0.0,
         "Domain must have positive non-zero radius and height"
     );
@@ -111,7 +111,7 @@ fn initial_data() -> Result<()> {
         config.domain.height
     );
 
-    anyhow::ensure!(
+    eyre::ensure!(
         config.domain.cell.subdivisions >= 2 * config.domain.cell.ghost,
         "Domain cell nodes must be >= 2 * padding"
     );
@@ -121,7 +121,7 @@ fn initial_data() -> Result<()> {
     //     "Mesh global refinements must be <= mesh max_level"
     // );
 
-    anyhow::ensure!(config.visualize_stride >= 1, "Stride must be >= 1");
+    eyre::ensure!(config.visualize_stride >= 1, "Stride must be >= 1");
 
     // Create output dir.
     std::fs::create_dir_all(&absolute)?;
@@ -247,7 +247,7 @@ fn initial_data() -> Result<()> {
                     system.as_mut_slice(),
                 )?;
             }
-            _ => return Err(anyhow!("Invalid initial data type and order")),
+            _ => return Err(eyre!("Invalid initial data type and order")),
         };
 
         if config.visualize_levels {
@@ -271,7 +271,7 @@ fn initial_data() -> Result<()> {
                 mesh.max_level(),
                 mesh.num_nodes()
             );
-            return Err(anyhow!("failed to refine within perscribed limits"));
+            return Err(eyre!("failed to refine within perscribed limits"));
         }
 
         mesh.flag_wavelets(config.order, 0.0, config.max_error, system.as_slice());

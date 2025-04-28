@@ -1,4 +1,4 @@
-use anyhow::{anyhow, Context, Result};
+use eyre::{anyhow, Result, WrapErr};
 use serde::{Deserialize, Serialize};
 use sharedaxi::{
     import_from_path_arg, import_from_toml, CritConfig, EVConfig, GaugeCondition, IDConfig,
@@ -79,7 +79,7 @@ fn critical_search() -> Result<()> {
             .ok_or(anyhow!("Failed to find absolute output directory"))?
     );
 
-    anyhow::ensure!(
+    eyre::ensure!(
         config.domain.radius > 0.0 && config.domain.height > 0.0,
         "Domain must have positive non-zero radius and height"
     );
@@ -90,14 +90,14 @@ fn critical_search() -> Result<()> {
         config.domain.height
     );
 
-    anyhow::ensure!(
+    eyre::ensure!(
         config.domain.cell.subdivisions >= 2 * config.domain.cell.ghost,
         "Domain cell nodes must be >= 2 * padding"
     );
 
     let stride = config.domain.cell.subdivisions;
 
-    anyhow::ensure!(config.start < config.end);
+    eyre::ensure!(config.start < config.end);
     std::fs::create_dir_all(&absolute)?;
     std::fs::create_dir_all(&absolute.join("config"))?;
     std::fs::create_dir_all(&absolute.join("evolve"))?;

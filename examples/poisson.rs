@@ -104,7 +104,7 @@ impl SolverCallback<2, Scalar> for Callback {
     }
 }
 
-pub fn main() -> anyhow::Result<()> {
+pub fn main() -> eyre::Result<()> {
     env_logger::builder()
         .filter_level(log::LevelFilter::Trace)
         .init();

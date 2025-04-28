@@ -1,15 +1,15 @@
 [package]
 name = "evaxi"
 version = "0.1.0"
-edition = "2021"
+edition = "2024"
 
 [dependencies]
 aeon.workspace = true
 aeon_tensor.workspace = true
 
-anyhow.workspace = true
 clap.workspace = true
 env_logger.workspace = true
+eyre.workspace = true
 log.workspace = true
 rayon.workspace = true
 reborrow.workspace = true

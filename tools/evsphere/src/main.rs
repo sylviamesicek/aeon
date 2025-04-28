@@ -5,9 +5,9 @@ use aeon::{
     prelude::*,
     solver::{Integrator, Method},
 };
-use anyhow::{anyhow, Context, Result};
 use clap::{Arg, Command};
 use core::f64;
+use eyre::{eyre, Context, Result};
 use std::fmt::Write as _;
 use std::{path::PathBuf, process::ExitCode};
 
@@ -93,7 +93,7 @@ fn run(config: RunConfig, diagnostics: &mut Diagnostics) -> Result<()> {
         "Output Directory: {}",
         absolute
             .to_str()
-            .ok_or(anyhow!("Failed to find absolute output directory"))?
+            .ok_or(eyre!("Failed to find absolute output directory"))?
     );
     // As well as general information about the run
     if let Some(id) = serial_id {
@@ -177,7 +177,7 @@ fn run(config: RunConfig, diagnostics: &mut Diagnostics) -> Result<()> {
                 mesh.max_level(),
                 mesh.num_nodes()
             );
-            return Err(anyhow!("failed to refine within perscribed limits"));
+            return Err(eyre!("failed to refine within perscribed limits"));
         }
 
         mesh.flag_wavelets(4, 0.0, MAX_ERROR_TOLERANCE, system.as_slice());
@@ -249,18 +249,12 @@ fn run(config: RunConfig, diagnostics: &mut Diagnostics) -> Result<()> {
 
         if norm.is_nan() || norm >= 1e60 {
             log::trace!("Evolution collapses, norm: {}", norm);
-            return Err(anyhow!(
-                "exceded max allotted steps for evolution: {}",
-                step
-            ));
+            return Err(eyre!("exceded max allotted steps for evolution: {}", step));
         }
 
         if step >= MAX_TIME_STEPS {
             log::error!("Evolution exceded maximum allocated steps: {}", step);
-            return Err(anyhow!(
-                "exceded max allotted steps for evolution: {}",
-                step
-            ));
+            return Err(eyre!("exceded max allotted steps for evolution: {}", step));
         }
 
         if mesh.num_nodes() >= MAX_NODES {
@@ -268,7 +262,7 @@ fn run(config: RunConfig, diagnostics: &mut Diagnostics) -> Result<()> {
                 "Evolution exceded maximum allocated nodes: {}",
                 mesh.num_nodes()
             );
-            return Err(anyhow!(
+            return Err(eyre!(
                 "exceded max allotted nodes for evolution: {}",
                 mesh.num_nodes()
             ));
@@ -382,10 +376,7 @@ fn run(config: RunConfig, diagnostics: &mut Diagnostics) -> Result<()> {
 
         if norm.is_nan() || norm >= 1e60 || alpha.is_nan() {
             log::trace!("Evolution collapses after step, norm: {}", norm);
-            return Err(anyhow!(
-                "exceded max allotted steps for evolution: {}",
-                step
-            ));
+            return Err(eyre!("exceded max allotted steps for evolution: {}", step));
         }
     }
 
@@ -441,17 +432,17 @@ fn try_main() -> Result<()> {
     if let Some(matches) = matches.subcommand_matches("cole") {
         config.amplitude = matches
             .get_one::<String>("amp")
-            .ok_or(anyhow!("Failed to find amplitude positional argument"))?
+            .ok_or(eyre!("Failed to find amplitude positional argument"))?
             .parse::<f64>()
-            .map_err(|_| anyhow!("Failed to parse amplitude as float"))?
+            .map_err(|_| eyre!("Failed to parse amplitude as float"))?
             .clone();
 
         config.serial_id = Some(
             matches
                 .get_one::<String>("ser")
-                .ok_or(anyhow!("Failed to find serial_id positional argument"))?
+                .ok_or(eyre!("Failed to find serial_id positional argument"))?
                 .parse::<usize>()
-                .map_err(|_| anyhow!("Failed to parse serial_id as int"))?
+                .map_err(|_| eyre!("Failed to parse serial_id as int"))?
                 .clone(),
         );
 
@@ -460,15 +451,15 @@ fn try_main() -> Result<()> {
     } else if let Some(matches) = matches.subcommand_matches("vis") {
         config.amplitude = matches
             .get_one::<String>("amp")
-            .ok_or(anyhow!("Could not find amplitude argument"))?
+            .ok_or(eyre!("Could not find amplitude argument"))?
             .parse::<f64>()
-            .map_err(|_| anyhow!("Failed parse amplitude argument"))?
+            .map_err(|_| eyre!("Failed parse amplitude argument"))?
             .clone();
 
         let output = PathBuf::from(
             matches
                 .get_one::<String>("output")
-                .ok_or(anyhow!("Failed parse path argument"))?
+                .ok_or(eyre!("Failed parse path argument"))?
                 .clone(),
         );
 
@@ -484,9 +475,9 @@ fn try_main() -> Result<()> {
     }
 
     // Build enviornment logger.
-    // env_logger::builder()
-    //     .filter_level(log::LevelFilter::Trace)
-    //     .init();
+    env_logger::builder()
+        .filter_level(log::LevelFilter::Trace)
+        .init();
 
     // Diagnostic object
     let mut diagnostics = Diagnostics::default();

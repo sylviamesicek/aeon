@@ -1,0 +1,46 @@
+name = "scalar_axi"
+output = "output/scalar_axi"
+
+order = 4
+diss_order = 6
+
+[domain]
+radius = 48.0
+height = 48.0
+cell_size = 6
+cell_ghost = 3
+
+[relax]
+max_steps = 10_000_000
+error_tolerance = 1e-6
+cfl = 0.5
+dampening = 0.4
+
+[evolve]
+cfl = 0.2
+dissipation = 0.5
+max_time = 30.0
+max_proper_time = 10.0
+
+[limits]
+max_levels = 15
+max_nodes = 16_000_000
+
+[regrid]
+refine_error = 1e-6
+coarsen_error = 1e-10
+global = 1
+flag_interval = 20
+
+[visualize]
+save_evolve_interval = 100
+save_relax_levels = true
+save_relax_interval = 1000
+save_relax_result = true
+stride = 6
+
+[[source]]
+type = "scalar_field"
+amplitude = "$0"
+sigma = [5.35, 5.35]
+mass = 0.0

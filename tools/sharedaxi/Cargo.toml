@@ -1,14 +1,14 @@
 [package]
 name = "sharedaxi"
 version = "0.1.0"
-edition = "2021"
+edition = "2024"
 
 [dependencies]
 aeon.workspace = true
 aeon_tensor.workspace = true
 
-anyhow.workspace = true
 clap.workspace = true
 log.workspace = true
+eyre.workspace = true
 serde.workspace = true
 toml.workspace = true

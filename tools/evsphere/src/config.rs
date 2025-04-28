@@ -1,4 +1,4 @@
-pub const MAX_LEVELS: usize = 15;
+pub const MAX_LEVELS: usize = 21;
 pub const MAX_TIME_STEPS: usize = 800_000;
 pub const MAX_PROPER_TIME: f64 = 7.6;
 pub const CELL_WIDTH: usize = 6;

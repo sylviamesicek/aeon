@@ -1,13 +1,13 @@
 [package]
 name = "evsphere"
 version = "0.1.0"
-edition = "2021"
+edition = "2024"
 
 [dependencies]
 aeon.workspace = true
 
-anyhow.workspace = true
 clap.workspace = true
+eyre.workspace = true
 env_logger.workspace = true
 log.workspace = true
 reborrow.workspace = true
