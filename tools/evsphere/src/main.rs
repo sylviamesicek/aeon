@@ -476,9 +476,9 @@ fn try_main() -> Result<()> {
     }
 
     // Build enviornment logger.
-    env_logger::builder()
-        .filter_level(log::LevelFilter::Trace)
-        .init();
+    // env_logger::builder()
+    //     .filter_level(log::LevelFilter::Trace)
+    //     .init();
 
     // Diagnostic object
     let mut diagnostics = Diagnostics::default();
