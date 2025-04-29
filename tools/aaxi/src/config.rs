@@ -21,7 +21,33 @@ pub struct Config {
     pub visualize: Visualize,
 
     #[serde(default)]
-    pub source: Vec<SourcePos>,
+    pub source: Vec<Source>,
+}
+
+impl Config {
+    pub fn apply_args(self, args: &[&str]) -> eyre::Result<Self> {
+        let mut sources = Vec::with_capacity(self.source.len());
+        for source in self.source {
+            sources.push(source.apply_args(args)?);
+        }
+
+        Ok(Self {
+            name: template_str_apply_args(&self.name, args)?,
+            output: template_str_apply_args(&self.output, args)?,
+
+            order: self.order,
+            diss_order: self.diss_order,
+
+            domain: self.domain,
+            relax: self.relax,
+            evolve: self.evolve,
+            limits: self.limits,
+            regrid: self.regrid,
+            visualize: self.visualize,
+
+            source: sources,
+        })
+    }
 }
 
 fn default_name() -> String {
@@ -111,37 +137,30 @@ pub enum FPos {
 }
 
 impl FPos {
-    pub fn parse(&self, args: &[&str]) -> eyre::Result<f64> {
-        match self {
-            FPos::F64(v) => Ok(*v),
+    fn apply_args(self, args: &[&str]) -> eyre::Result<Self> {
+        Ok(FPos::F64(match self {
+            FPos::F64(v) => v,
             FPos::Pos(pos) => {
-                if !pos.starts_with('$') {
-                    return Err(eyre!("positional arg references must begin with $"));
-                }
-
-                let index = pos[1..]
-                    .parse::<usize>()
-                    .context("failed to parse positional argument index")?;
-
-                if args.len() <= index {
-                    return Err(eyre!(
-                        "{}th positional argument referenced in file but {} positional arguments were provided",
-                        index,
-                        args.len()
-                    ));
-                }
-
-                Ok(args[index]
+                let trans = template_str_apply_args(&pos, args)?;
+                trans
                     .parse::<f64>()
-                    .context("failed to parse positional argument as float")?)
+                    .context("failed to parse string as float")?
             }
-        }
+        }))
+    }
+
+    pub fn as_f64(&self) -> f64 {
+        let Self::F64(v) = self else {
+            panic!("failed to unwrap FPos");
+        };
+
+        *v
     }
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(tag = "type")]
-pub enum SourcePos {
+pub enum Source {
     /// Instance generates Brill-type initial data with gunlach seed function.
     #[serde(rename = "brill")]
     Brill {
@@ -157,34 +176,21 @@ pub enum SourcePos {
     },
 }
 
-/// Transformed source data for aaxi.
-#[derive(Clone, Debug)]
-pub enum Source {
-    /// Instance generates Brill-type initial data with gunlach seed function.
-    Brill { amplitude: f64, sigma: (f64, f64) },
-    /// An axisymmetric scalar field with the given sigma.
-    ScalarField {
-        amplitude: f64,
-        sigma: (f64, f64),
-        mass: f64,
-    },
-}
-
 impl Source {
-    pub fn from_pos(pos: &SourcePos, args: &[&str]) -> eyre::Result<Self> {
-        Ok(match pos {
-            SourcePos::Brill { amplitude, sigma } => Source::Brill {
-                amplitude: amplitude.parse(args)?,
-                sigma: (sigma.0.parse(args)?, sigma.1.parse(args)?),
+    fn apply_args(self, args: &[&str]) -> eyre::Result<Self> {
+        Ok(match self {
+            Self::Brill { amplitude, sigma } => Self::Brill {
+                amplitude: amplitude.apply_args(args)?,
+                sigma: (sigma.0.apply_args(args)?, sigma.1.apply_args(args)?),
             },
-            SourcePos::ScalarField {
+            Self::ScalarField {
                 amplitude,
                 sigma,
                 mass,
-            } => Source::ScalarField {
-                amplitude: amplitude.parse(args)?,
-                sigma: (sigma.0.parse(args)?, sigma.1.parse(args)?),
-                mass: mass.parse(args)?,
+            } => Self::ScalarField {
+                amplitude: amplitude.apply_args(args)?,
+                sigma: (sigma.0.apply_args(args)?, sigma.1.apply_args(args)?),
+                mass: mass.apply_args(args)?,
             },
         })
     }
@@ -194,7 +200,9 @@ impl Source {
             Source::Brill { amplitude, sigma } => {
                 println!(
                     "- Gunlach seed function: A = {}, σ = ({}, {})",
-                    amplitude, sigma.0, sigma.1
+                    amplitude.as_f64(),
+                    sigma.0.as_f64(),
+                    sigma.1.as_f64()
                 );
             }
             Source::ScalarField {
@@ -202,15 +210,20 @@ impl Source {
                 sigma,
                 mass,
             } => {
-                if mass.abs() == 0.0 {
+                if mass.as_f64().abs() == 0.0 {
                     println!(
                         "- Massless Scalar Field: A = {}, σ = ({}, {})",
-                        amplitude, sigma.0, sigma.1
+                        amplitude.as_f64(),
+                        sigma.0.as_f64(),
+                        sigma.1.as_f64()
                     );
                 } else {
                     println!(
                         "- Massive Scalar Field: A = {}, σ = ({}, {}), m = {}",
-                        amplitude, sigma.0, sigma.1, mass
+                        amplitude.as_f64(),
+                        sigma.0.as_f64(),
+                        sigma.1.as_f64(),
+                        mass.as_f64()
                     );
                 }
             }
@@ -226,4 +239,92 @@ pub enum GaugeCondition {
     Harmonic,
     #[serde(rename = "zero_shift")]
     ZeroShift,
+}
+
+fn template_str_apply_args(data: &str, args: &[&str]) -> eyre::Result<String> {
+    let mut result = String::new();
+    let mut current = String::new();
+    let mut searching = false;
+
+    let mut chars = data.char_indices();
+
+    while let Some((pos, ch)) = chars.next() {
+        if searching {
+            if data[pos..].starts_with('}') {
+                searching = false;
+                let index = current.parse::<usize>()?;
+
+                if args.len() <= index as usize {
+                    return Err(eyre!(
+                        "{}th positional argument referenced in file but {} positional arguments were provided",
+                        index,
+                        args.len()
+                    ));
+                }
+
+                result.push_str(args[index as usize]);
+            }
+
+            current.push(ch);
+
+            continue;
+        }
+
+        if data[pos..].starts_with("${") {
+            // Reset current search
+            current.clear();
+
+            let next = chars.next();
+            debug_assert_eq!(next.map(|(_, c)| c), Some('{'));
+
+            searching = true;
+
+            continue;
+        }
+
+        if data[pos..].starts_with('$') {
+            let (_, index) = chars
+                .next()
+                .ok_or_else(|| eyre!("invalid argument string"))?;
+            let index: u32 = index
+                .to_digit(10)
+                .ok_or_else(|| eyre!("invalid argument string"))?;
+
+            if args.len() <= index as usize {
+                return Err(eyre!(
+                    "{}th positional argument referenced in file but {} positional arguments were provided",
+                    index,
+                    args.len()
+                ));
+            }
+
+            result.push_str(args[index as usize]);
+
+            continue;
+        }
+
+        result.push(ch);
+    }
+
+    Ok(result)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn template_str() {
+        let args = vec!["0.0", "hello world", "&&@"];
+
+        assert_eq!(
+            template_str_apply_args("test$0123", &args).unwrap(),
+            "test0.0123"
+        );
+        assert_eq!(
+            template_str_apply_args("test${1}123", &args).unwrap(),
+            "testhello world123"
+        );
+        assert_eq!(template_str_apply_args("$2tst", &args).unwrap(), "&&@tst");
+    }
 }

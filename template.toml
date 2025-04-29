@@ -1,5 +1,5 @@
-name = "scalar_axi"
-output = "output/scalar_axi"
+name = "scalar"
+output = "output/scalar$0"
 
 order = 4
 diss_order = 6

@@ -28,7 +28,7 @@ fn main() -> eyre::Result<()> {
     // *********************************
     // Configuration
 
-    let (config, sources) = parse_config(&dir, &matches)?;
+    let config = parse_config(&dir, &matches)?;
     // Compute output directory path.
     let output_path = abs_or_relative(&dir, &PathBuf::from(&config.output));
     // Ensure path exists.
@@ -47,7 +47,7 @@ fn main() -> eyre::Result<()> {
         config.domain.radius, config.domain.height
     );
     println!("Sources...");
-    for source in &sources {
+    for source in &config.source {
         source.println();
     }
 
@@ -69,7 +69,7 @@ fn main() -> eyre::Result<()> {
     // ***********************************
     // Initial data
 
-    let (_mesh, _system) = initial_data(&config, &sources, &output_path)?;
+    let (_mesh, _system) = initial_data(&config, &output_path)?;
 
     Ok(())
 }
@@ -78,31 +78,25 @@ fn main() -> eyre::Result<()> {
 // Helpers **********************
 // ******************************
 
-fn parse_config(dir: &Path, matches: &ArgMatches) -> eyre::Result<(Config, Vec<Source>)> {
+fn parse_config(dir: &Path, matches: &ArgMatches) -> eyre::Result<Config> {
     // Compute config path.
     let config_path = matches
         .get_one::<PathBuf>("config")
         .cloned()
-        .unwrap_or("aaxi.toml".to_string().into());
+        .unwrap_or("template.toml".to_string().into());
     let config_path = abs_or_relative(&dir, &config_path);
 
     // Parse config file from toml.
     let config = import_from_toml::<Config>(config_path)?;
 
-    let positional: Vec<&str> = matches
+    let args: Vec<&str> = matches
         .get_many::<String>("positional")
         .into_iter()
         // .ok_or(eyre::eyre!("Unable to parse positional arguments"))?
         .flat_map(|v| v.into_iter().map(|s| s.as_str()))
         .collect();
 
-    // Collect transformed sources.
-    let mut sources = Vec::new();
-    for pos in &config.source {
-        sources.push(Source::from_pos(pos, &positional)?);
-    }
-
-    Ok((config, sources))
+    config.apply_args(&args)
 }
 
 /// Extension trait for defining helper methods on `clap::Command`.

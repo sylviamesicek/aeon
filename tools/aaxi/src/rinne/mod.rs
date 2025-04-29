@@ -1,7 +1,10 @@
 //! This crate contains general configuration and paramter data types used by critgen, idgen, and evgen.
 //! These types are shared across crates, and thus moved here to prevent redundent definition.
 
-use std::{path::Path, time::Duration};
+use std::{
+    path::Path,
+    time::{Duration, Instant},
+};
 
 use crate::{
     config::{Config, Source},
@@ -9,7 +12,7 @@ use crate::{
 };
 use aeon::{prelude::*, solver::SolverCallback};
 use eyre::eyre;
-use indicatif::{MultiProgress, ProgressBar};
+use indicatif::{HumanDuration, MultiProgress, ProgressBar};
 
 mod eqs;
 mod garfinkle;
@@ -67,12 +70,10 @@ impl<'a> SolverCallback<2, Scalar> for IterCallback<'a> {
 }
 
 /// Solve rinne's initial data problem using Garfinkles variables.
-pub fn initial_data(
-    config: &Config,
-    sources: &[Source],
-    output: &Path,
-) -> eyre::Result<(Mesh<2>, SystemVec<Fields>)> {
+pub fn initial_data(config: &Config, output: &Path) -> eyre::Result<(Mesh<2>, SystemVec<Fields>)> {
     println!("Relaxing initial data");
+    // Save initial time
+    let start = Instant::now();
 
     // Build mesh
     let mut mesh = Mesh::new(
@@ -95,11 +96,12 @@ pub fn initial_data(
 
     // Build fields from sources.
     let fields = Fields {
-        scalar_fields: sources
+        scalar_fields: config
+            .source
             .iter()
             .flat_map(|source| {
                 if let Source::ScalarField { mass, .. } = source {
-                    Some(*mass)
+                    Some(mass.as_f64())
                 } else {
                     None
                 }
@@ -129,6 +131,8 @@ pub fn initial_data(
     // Progress bars for relaxation
     let m = MultiProgress::new();
 
+    let mut step_count = 0;
+
     loop {
         let pb = m.add(ProgressBar::no_length());
         pb.set_style(misc::spinner_style());
@@ -146,7 +150,7 @@ pub fn initial_data(
                         pb: pb.clone(),
                         output,
                     },
-                    sources,
+                    &config.source,
                     system.as_mut_slice(),
                 )?;
             }
@@ -160,7 +164,7 @@ pub fn initial_data(
                         pb: pb.clone(),
                         output,
                     },
-                    sources,
+                    &config.source,
                     system.as_mut_slice(),
                 )?;
             }
@@ -174,7 +178,7 @@ pub fn initial_data(
                         pb: pb.clone(),
                         output,
                     },
-                    sources,
+                    &config.source,
                     system.as_mut_slice(),
                 )?;
             }
@@ -186,6 +190,7 @@ pub fn initial_data(
             pb.position(),
             mesh.num_nodes()
         ));
+        step_count += pb.position();
 
         if config.visualize.save_relax_levels {
             let mut checkpoint = SystemCheckpoint::default();
@@ -260,7 +265,15 @@ pub fn initial_data(
     }
 
     m.clear().unwrap();
-    println!("Finished relaxation.");
+
+    println!(
+        "Finished relaxation in {}, {} Steps",
+        HumanDuration(start.elapsed()),
+        step_count
+    );
+    println!("Mesh Info...");
+    println!("- Nodes: {}", mesh.num_nodes());
+    println!("- Active Cells: {}", mesh.num_active_cells());
 
     Ok((mesh, system))
 }
