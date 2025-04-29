@@ -186,7 +186,7 @@ pub fn initial_data(config: &Config, output: &Path) -> eyre::Result<(Mesh<2>, Sy
         };
 
         pb.finish_with_message(format!(
-            "relaxed in {} steps, {} nodes",
+            "Relaxed in {} steps, {} nodes",
             pb.position(),
             mesh.num_nodes()
         ));

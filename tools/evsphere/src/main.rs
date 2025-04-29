@@ -7,7 +7,7 @@ use aeon::{
 };
 use clap::{Arg, Command};
 use core::f64;
-use eyre::{eyre, Context, Result};
+use eyre::{Context, Result, eyre};
 use std::fmt::Write as _;
 use std::{path::PathBuf, process::ExitCode};
 
@@ -293,6 +293,7 @@ fn run(config: RunConfig, diagnostics: &mut Diagnostics) -> Result<()> {
             mesh.limit_level_range_flags(1, MAX_LEVELS);
             mesh.balance_flags();
             mesh.limit_level_range_flags(1, MAX_LEVELS);
+
             mesh.regrid();
 
             log::trace!(

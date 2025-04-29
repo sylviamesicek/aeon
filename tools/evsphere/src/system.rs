@@ -64,11 +64,14 @@ pub struct FieldConditions;
 impl SystemBoundaryConds<1> for FieldConditions {
     type System = Fields;
 
-    fn kind(&self, _label: <Self::System as System>::Label, face: Face<1>) -> BoundaryKind {
+    fn kind(&self, label: <Self::System as System>::Label, face: Face<1>) -> BoundaryKind {
         if face.side {
             BoundaryKind::Radiative
         } else {
-            BoundaryKind::Symmetric
+            match label {
+                Field::Phi => BoundaryKind::AntiSymmetric,
+                Field::Pi | Field::Conformal | Field::Lapse => BoundaryKind::Symmetric,
+            }
         }
     }
 

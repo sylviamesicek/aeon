@@ -1,11 +1,11 @@
 use std::{array, ops::Range};
 
-use crate::geometry::{faces, BlockId, Face, FaceMask, IndexSpace};
+use crate::geometry::{BlockId, Face, FaceMask, IndexSpace, faces};
 use crate::kernel::is_boundary_compatible;
 use crate::{
     kernel::{
-        node_from_vertex, vertex_from_node, BoundaryConds as _, BoundaryKind, Hessian, Kernels,
-        NodeSpace, Order, VertexKernel,
+        BoundaryConds as _, BoundaryKind, Hessian, Kernels, NodeSpace, Order, VertexKernel,
+        node_from_vertex, vertex_from_node,
     },
     system::Empty,
 };
@@ -228,7 +228,7 @@ impl<const N: usize> Mesh<N> {
         });
     }
 
-    pub(crate) fn is_block_in_interior(&self, block: BlockId) -> bool {
+    pub fn is_block_in_interior(&self, block: BlockId) -> bool {
         let boundary = self.block_boundary_classes(block);
 
         let mut result = true;
