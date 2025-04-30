@@ -1,4 +1,4 @@
-use clap::{ArgMatches, Command, arg, value_parser};
+use clap::{Arg, ArgMatches, Command, arg, value_parser};
 use console::{Term, style};
 use eyre::WrapErr;
 use serde::de::DeserializeOwned;
@@ -40,8 +40,8 @@ fn main() -> eyre::Result<()> {
     let term = Term::stdout();
     term.set_title("Axisymmetric Simulation");
     // Basic info dumping
-    println!("Running simulation: {}", style(&config.name).green());
-    println!("Saving output to: {}", style(output_path.display()).green());
+    println!("Simulation: {}", style(&config.name).green());
+    println!("Output Directory: {}", style(output_path.display()).green());
     println!(
         "Domain: {:.5} x {:.5}",
         config.domain.radius, config.domain.height
@@ -69,7 +69,12 @@ fn main() -> eyre::Result<()> {
     // ***********************************
     // Initial data
 
-    let (_mesh, _system) = initial_data(&config, &output_path)?;
+    let (mesh, fields) = initial_data(&config, &output_path)?;
+
+    // ************************************
+    // Evolve data forwards
+
+    evolve_data(&config, &output_path, mesh, fields)?;
 
     Ok(())
 }
@@ -115,6 +120,12 @@ impl CommandExt for Command {
             arg!(<positional> ... "positional arguments referenced in config file")
                 .trailing_var_arg(true)
                 .required(false),
+        )
+        .arg(
+            Arg::new("cache-init")
+                .long("cache-init")
+                .required(false)
+                .num_args(0),
         )
     }
 }

@@ -1,10 +1,11 @@
 #![allow(clippy::needless_range_loop)]
 
 use crate::{
-    geometry::{regions, AxisMask, Region, Side},
+    geometry::{AxisMask, Region, Side, regions},
     prelude::{Face, IndexSpace, Rectangle},
 };
 use bitvec::{order::Lsb0, slice::BitSlice, vec::BitVec};
+use datasize::DataSize;
 use std::{array, ops::Range, slice};
 
 mod blocks;
@@ -26,7 +27,17 @@ const NULL: usize = usize::MAX;
 /// of freedom are only assigned to active cells. Can be converted to generic `CellIndex` via
 /// `tree.cell_from_active_index(`
 #[derive(
-    Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, serde::Serialize, serde::Deserialize,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    Debug,
+    serde::Serialize,
+    serde::Deserialize,
+    DataSize,
 )]
 pub struct ActiveCellId(pub usize);
 
@@ -36,7 +47,17 @@ pub struct ActiveCellId(pub usize);
 /// searches. These cells are generated after refinement/coarsening and are therefore not
 /// the "source of truth" for the dataset.
 #[derive(
-    Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, serde::Serialize, serde::Deserialize,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    Debug,
+    serde::Serialize,
+    serde::Deserialize,
+    DataSize,
 )]
 pub struct CellId(pub usize);
 
@@ -63,6 +84,15 @@ struct Cell<const N: usize> {
     active_count: usize,
     /// Level of cell
     level: usize,
+}
+
+impl<const N: usize> DataSize for Cell<N> {
+    const IS_DYNAMIC: bool = false;
+    const STATIC_HEAP_SIZE: usize = 0;
+
+    fn estimate_heap_size(&self) -> usize {
+        0
+    }
 }
 
 /// An `N`-dimensional hypertree, which subdives each axis in two in
@@ -893,6 +923,19 @@ impl<const N: usize> Tree<N> {
     }
 }
 
+impl<const N: usize> DataSize for Tree<N> {
+    const IS_DYNAMIC: bool = true;
+    const STATIC_HEAP_SIZE: usize = 0;
+
+    fn estimate_heap_size(&self) -> usize {
+        self.active_offsets.estimate_heap_size()
+            + self.active_values.capacity() / size_of::<usize>()
+            + self.active_to_cell.estimate_heap_size()
+            + self.level_offsets.estimate_heap_size()
+            + self.cells.estimate_heap_size()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -973,21 +1016,25 @@ mod tests {
         tree.refine(&[true, false, false, false]);
         tree.build();
 
-        assert!(tree
-            .active_neighbors_in_region(CellId(2), Region::new([Side::Left, Side::Middle]))
-            .eq([ActiveCellId(1), ActiveCellId(3)].into_iter()));
+        assert!(
+            tree.active_neighbors_in_region(CellId(2), Region::new([Side::Left, Side::Middle]))
+                .eq([ActiveCellId(1), ActiveCellId(3)].into_iter())
+        );
 
-        assert!(tree
-            .active_neighbors_in_region(CellId(3), Region::new([Side::Middle, Side::Left]))
-            .eq([ActiveCellId(2), ActiveCellId(3)].into_iter()));
+        assert!(
+            tree.active_neighbors_in_region(CellId(3), Region::new([Side::Middle, Side::Left]))
+                .eq([ActiveCellId(2), ActiveCellId(3)].into_iter())
+        );
 
-        assert!(tree
-            .active_neighbors_in_region(CellId(4), Region::new([Side::Left, Side::Left]))
-            .eq([ActiveCellId(3)].into_iter()));
+        assert!(
+            tree.active_neighbors_in_region(CellId(4), Region::new([Side::Left, Side::Left]))
+                .eq([ActiveCellId(3)].into_iter())
+        );
 
-        assert!(tree
-            .active_neighbors_in_region(CellId(6), Region::new([Side::Right, Side::Right]))
-            .eq([ActiveCellId(4)].into_iter()));
+        assert!(
+            tree.active_neighbors_in_region(CellId(6), Region::new([Side::Right, Side::Right]))
+                .eq([ActiveCellId(4)].into_iter())
+        );
     }
 
     #[test]

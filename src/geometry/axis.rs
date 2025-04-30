@@ -1,4 +1,4 @@
-use crate::geometry::{faces, Face};
+use crate::geometry::{Face, faces};
 
 use super::{Region, Side};
 
@@ -153,6 +153,15 @@ impl<const N: usize> AxisMask<N> {
         }
 
         self
+    }
+}
+
+impl<const N: usize> datasize::DataSize for AxisMask<N> {
+    const IS_DYNAMIC: bool = false;
+    const STATIC_HEAP_SIZE: usize = 0;
+
+    fn estimate_heap_size(&self) -> usize {
+        0
     }
 }
 

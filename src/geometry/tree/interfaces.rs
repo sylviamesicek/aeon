@@ -1,8 +1,8 @@
 use std::{array, cmp::Ordering, ops::Range};
 
 use super::{
-    blocks::BlockId, NeighborId, Tree, TreeBlockNeighbor, TreeBlocks, TreeCellNeighbor,
-    TreeNeighbors, TreeNodes,
+    NeighborId, Tree, TreeBlockNeighbor, TreeBlocks, TreeCellNeighbor, TreeNeighbors, TreeNodes,
+    blocks::BlockId,
 };
 use crate::{
     geometry::{IndexSpace, Side},
@@ -22,6 +22,15 @@ pub struct TreeInterface<const N: usize> {
     pub dest: [isize; N],
     /// Number of nodes to be filled along each axis.
     pub size: [usize; N],
+}
+
+impl<const N: usize> datasize::DataSize for TreeInterface<N> {
+    const IS_DYNAMIC: bool = false;
+    const STATIC_HEAP_SIZE: usize = 0;
+
+    fn estimate_heap_size(&self) -> usize {
+        0
+    }
 }
 
 struct TransferAABB<const N: usize> {
@@ -403,5 +412,16 @@ impl<const N: usize> TreeInterfaces<N> {
         }
 
         source
+    }
+}
+
+impl<const N: usize> datasize::DataSize for TreeInterfaces<N> {
+    const IS_DYNAMIC: bool = true;
+    const STATIC_HEAP_SIZE: usize = 0;
+
+    fn estimate_heap_size(&self) -> usize {
+        self.interfaces.estimate_heap_size()
+            + self.interface_node_offsets.estimate_heap_size()
+            + self.interface_masks.estimate_heap_size()
     }
 }

@@ -6,14 +6,15 @@
 //! filling interior interfaces, and adaptively regridding a domain based on various error heuristics.
 
 use crate::geometry::{
-    faces, ActiveCellId, AxisMask, BlockId, Face, FaceArray, FaceMask, IndexSpace, Rectangle, Tree,
-    TreeBlocks, TreeInterfaces, TreeNeighbors, TreeNodes,
+    ActiveCellId, AxisMask, BlockId, Face, FaceArray, FaceMask, IndexSpace, Rectangle, Tree,
+    TreeBlocks, TreeInterfaces, TreeNeighbors, TreeNodes, faces,
 };
 use crate::kernel::{BoundaryClass, DirichletParams, Element};
 use crate::{
     kernel::{BoundaryKind, NodeSpace, NodeWindow},
     system::SystemBoundaryConds,
 };
+use datasize::DataSize;
 use num_traits::ToPrimitive;
 use rayon::iter::{IntoParallelIterator, ParallelBridge, ParallelIterator};
 use ron::ser::PrettyConfig;
@@ -29,11 +30,11 @@ use std::{
 };
 use thread_local::ThreadLocal;
 use vtkio::{
+    IOBuffer, Vtk,
     model::{
         Attribute, Attributes, ByteOrder, CellType, Cells, DataArrayBase, DataSet, ElementType,
         Piece, UnstructuredGridPiece, VertexNumbers,
     },
-    IOBuffer, Vtk,
 };
 
 mod checkpoint;
@@ -729,7 +730,7 @@ impl<const N: usize> Clone for Mesh<N> {
             tree: self.tree.clone(),
             width: self.width,
             ghost: self.ghost,
-            boundary: self.boundary.clone(),
+            boundary: self.boundary,
 
             max_level: self.max_level,
 
@@ -782,6 +783,24 @@ impl<const N: usize> Default for Mesh<N> {
         result.build();
 
         result
+    }
+}
+
+impl<const N: usize> DataSize for Mesh<N> {
+    const IS_DYNAMIC: bool = false;
+    const STATIC_HEAP_SIZE: usize = 0;
+
+    fn estimate_heap_size(&self) -> usize {
+        self.tree.estimate_heap_size()
+            + self.blocks.estimate_heap_size()
+            + self.nodes.estimate_heap_size()
+            + self.neighbors.estimate_heap_size()
+            + self.interfaces.estimate_heap_size()
+            + self.refine_flags.estimate_heap_size()
+            + self.coarsen_flags.estimate_heap_size()
+            + self.regrid_map.estimate_heap_size()
+            + self.old_blocks.estimate_heap_size()
+            + self.old_cell_splits.estimate_heap_size()
     }
 }
 
@@ -889,7 +908,7 @@ impl<const N: usize> Mesh<N> {
                 debug_assert!(cell_size[axis] % stride == 0);
                 debug_assert!((vertex_size[axis] - 1) % stride == 0);
 
-                cell_size[axis] = cell_size[axis] / stride;
+                cell_size[axis] /= stride;
                 vertex_size[axis] = (vertex_size[axis] - 1) / stride + 1;
             }
 

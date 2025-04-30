@@ -1,5 +1,6 @@
 use super::*;
 
+use datasize::DataSize;
 use reborrow::{Reborrow, ReborrowMut};
 use serde::{Deserialize, Serialize};
 use std::ops::{Bound, Range, RangeBounds};
@@ -126,6 +127,15 @@ impl<S: System> SystemVec<S> {
     }
 }
 
+impl<S: System> DataSize for SystemVec<S> {
+    const IS_DYNAMIC: bool = true;
+    const STATIC_HEAP_SIZE: usize = 0;
+
+    fn estimate_heap_size(&self) -> usize {
+        self.data.estimate_heap_size()
+    }
+}
+
 #[derive(Clone)]
 /// Represents a subslice of an owned system vector.
 pub struct SystemSlice<'a, S> {
@@ -197,12 +207,12 @@ impl<'a, S: System> SystemSlice<'a, S> {
             total: self.total,
             offset: self.offset + bounds.start,
             length,
-            system: &self.system,
+            system: self.system,
         }
     }
 }
 
-impl<'a, S: System + Clone> SystemSlice<'a, S> {
+impl<S: System + Clone> SystemSlice<'_, S> {
     /// Converts a system slice to a vector.
     pub fn to_vec(&self) -> SystemVec<S> {
         let mut data = Vec::with_capacity(self.length * self.system.count());
@@ -215,7 +225,7 @@ impl<'a, S: System + Clone> SystemSlice<'a, S> {
     }
 }
 
-impl<'long, 'short, S> Reborrow<'short> for SystemSlice<'long, S> {
+impl<'short, S> Reborrow<'short> for SystemSlice<'_, S> {
     type Target = SystemSlice<'short, S>;
 
     fn rb(&'short self) -> Self::Target {
@@ -229,8 +239,8 @@ impl<'long, 'short, S> Reborrow<'short> for SystemSlice<'long, S> {
     }
 }
 
-unsafe impl<'a, S> Send for SystemSlice<'a, S> {}
-unsafe impl<'a, S> Sync for SystemSlice<'a, S> {}
+unsafe impl<S> Send for SystemSlice<'_, S> {}
+unsafe impl<S> Sync for SystemSlice<'_, S> {}
 
 /// A mutable reference to an owned system.
 pub struct SystemSliceMut<'a, S> {
@@ -319,7 +329,7 @@ impl<'a, S: System> SystemSliceMut<'a, S> {
             total: self.total,
             offset: self.offset + bounds.start,
             length,
-            system: &self.system,
+            system: self.system,
         }
     }
 
@@ -336,7 +346,7 @@ impl<'a, S: System> SystemSliceMut<'a, S> {
             total: self.total,
             offset: self.offset + bounds.start,
             length,
-            system: &self.system,
+            system: self.system,
         }
     }
 
@@ -351,7 +361,7 @@ impl<'a, S: System> SystemSliceMut<'a, S> {
     }
 }
 
-impl<'a, S: System + Clone> SystemSliceMut<'a, S> {
+impl<S: System + Clone> SystemSliceMut<'_, S> {
     /// Converts a system slice to a vector.
     pub fn to_vec(&self) -> SystemVec<S> {
         let mut data = Vec::with_capacity(self.length * self.system.count());
@@ -364,7 +374,7 @@ impl<'a, S: System + Clone> SystemSliceMut<'a, S> {
     }
 }
 
-impl<'long, 'short, S> Reborrow<'short> for SystemSliceMut<'long, S> {
+impl<'short, S> Reborrow<'short> for SystemSliceMut<'_, S> {
     type Target = SystemSlice<'short, S>;
 
     fn rb(&'short self) -> Self::Target {
@@ -373,12 +383,12 @@ impl<'long, 'short, S> Reborrow<'short> for SystemSliceMut<'long, S> {
             total: self.total,
             offset: self.offset,
             length: self.length,
-            system: &self.system,
+            system: self.system,
         }
     }
 }
 
-impl<'long, 'short, S> ReborrowMut<'short> for SystemSliceMut<'long, S> {
+impl<'short, S> ReborrowMut<'short> for SystemSliceMut<'_, S> {
     type Target = SystemSliceMut<'short, S>;
 
     fn rb_mut(&'short mut self) -> Self::Target {
@@ -387,13 +397,13 @@ impl<'long, 'short, S> ReborrowMut<'short> for SystemSliceMut<'long, S> {
             total: self.total,
             offset: self.offset,
             length: self.length,
-            system: &self.system,
+            system: self.system,
         }
     }
 }
 
-unsafe impl<'a, S: Sync> Send for SystemSliceMut<'a, S> {}
-unsafe impl<'a, S: Sync> Sync for SystemSliceMut<'a, S> {}
+unsafe impl<S: Sync> Send for SystemSliceMut<'_, S> {}
+unsafe impl<S: Sync> Sync for SystemSliceMut<'_, S> {}
 
 /// An unsafe pointer to a range of a system.
 #[derive(Debug, Clone)]
@@ -405,7 +415,7 @@ pub struct SystemSliceShared<'a, S> {
     system: &'a S,
 }
 
-impl<'a, S: System> SystemSliceShared<'a, S> {
+impl<S: System> SystemSliceShared<'_, S> {
     pub fn system(&self) -> &S {
         self.system
     }
@@ -453,7 +463,7 @@ impl<'a, S: System> SystemSliceShared<'a, S> {
             total: self.total,
             offset: self.offset + bounds.start,
             length,
-            system: &self.system,
+            system: self.system,
         }
     }
 
@@ -473,13 +483,13 @@ impl<'a, S: System> SystemSliceShared<'a, S> {
             total: self.total,
             offset: self.offset + bounds.start,
             length,
-            system: &self.system,
+            system: self.system,
         }
     }
 }
 
-unsafe impl<'a, S: Sync> Send for SystemSliceShared<'a, S> {}
-unsafe impl<'a, S: Sync> Sync for SystemSliceShared<'a, S> {}
+unsafe impl<S: Sync> Send for SystemSliceShared<'_, S> {}
+unsafe impl<S: Sync> Sync for SystemSliceShared<'_, S> {}
 
 /// Converts genetic range to a concrete range type.
 fn bounds_to_range<R>(total: usize, range: R) -> Range<usize>

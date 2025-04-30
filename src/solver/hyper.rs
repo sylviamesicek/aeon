@@ -1,5 +1,6 @@
 use crate::geometry::{Face, IndexSpace};
 use crate::kernel::{BoundaryKind, DirichletParams, Kernels, RadiativeParams};
+use datasize::DataSize;
 use reborrow::{Reborrow, ReborrowMut};
 use thiserror::Error;
 
@@ -25,7 +26,7 @@ pub enum HyperRelaxError {
 /// A solver which implements the algorithm described in NRPyElliptic. This transforms the elliptic equation
 /// 𝓛{u} = p, into the hyperbolic equation ∂ₜ²u + η∂ₜu = c² (𝓛{u} - p), where c is the speed of the wave, and η is
 /// a dampening term that speeds up convergence.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, DataSize)]
 pub struct HyperRelaxSolver {
     /// Error tolerance (relaxation stops once error goes below this value).
     pub tolerance: f64,
@@ -150,7 +151,7 @@ impl HyperRelaxSolver {
             );
 
             {
-                let u = SystemSlice::from_contiguous(&mut data[..dimension], &system.0);
+                let u = SystemSlice::from_contiguous(&data[..dimension], &system.0);
                 mesh.copy_from_slice(result.rb_mut(), u.rb());
                 mesh.apply(order, conditions.clone(), deriv.clone(), result.rb_mut());
                 callback.callback(mesh, u.rb(), result.rb(), index);
@@ -277,8 +278,8 @@ struct FicticuousDerivs<'a, const N: usize, F> {
     min_spacing: f64,
 }
 
-impl<'a, const N: usize, S: System, F: Function<N, Input = S, Output = S>> Function<N>
-    for FicticuousDerivs<'a, N, F>
+impl<const N: usize, S: System, F: Function<N, Input = S, Output = S>> Function<N>
+    for FicticuousDerivs<'_, N, F>
 {
     type Input = (S, S);
     type Output = (S, S);

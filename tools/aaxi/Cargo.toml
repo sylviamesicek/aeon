@@ -9,6 +9,7 @@ aeon_tensor.workspace = true
 clap.workspace = true
 color-eyre.workspace = true
 console.workspace = true
+datasize.workspace = true
 eyre.workspace = true
 indicatif.workspace = true
 log.workspace = true

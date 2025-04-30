@@ -88,6 +88,10 @@ pub struct Evolve {
     pub max_time: f64,
     /// Maximum amount of proper time to run (before assuming disspersion).
     pub max_proper_time: f64,
+    /// Maximum number of steps
+    pub max_steps: usize,
+    /// Gauge condition to use when evolving data.
+    pub gauge: GaugeCondition,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]

@@ -76,6 +76,15 @@ impl<const N: usize> Default for TreeNodes<N> {
     }
 }
 
+impl<const N: usize> datasize::DataSize for TreeNodes<N> {
+    const IS_DYNAMIC: bool = false;
+    const STATIC_HEAP_SIZE: usize = 0;
+
+    fn estimate_heap_size(&self) -> usize {
+        0
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::geometry::{BlockId, Rectangle, Tree, TreeBlocks, TreeNodes};

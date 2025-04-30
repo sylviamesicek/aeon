@@ -27,7 +27,7 @@ impl<'a, T> SharedSlice<'a, T> {
     /// # Safety
     /// No mutable references to this element may exist when this function is called.
     pub unsafe fn get(self, index: usize) -> &'a T {
-        &*self.0[index].get()
+        unsafe { &*self.0[index].get() }
     }
 
     /// Retrieves a mutable reference to the `index`th element of the slice.
@@ -35,7 +35,7 @@ impl<'a, T> SharedSlice<'a, T> {
     /// # Safety
     /// No mutable or immutable references to this element may exist when this function is called.
     pub unsafe fn get_mut(self, index: usize) -> &'a mut T {
-        &mut *self.0[index].get()
+        unsafe { &mut *self.0[index].get() }
     }
 
     pub unsafe fn slice(self, range: Range<usize>) -> &'a [T] {
@@ -46,7 +46,7 @@ impl<'a, T> SharedSlice<'a, T> {
             return &[];
         }
 
-        core::slice::from_raw_parts(self.get(range.start), range.end - range.start)
+        unsafe { core::slice::from_raw_parts(self.get(range.start), range.end - range.start) }
     }
 
     pub unsafe fn slice_mut(self, range: Range<usize>) -> &'a mut [T] {
@@ -56,8 +56,9 @@ impl<'a, T> SharedSlice<'a, T> {
         if range.start >= range.end {
             return &mut [];
         }
-
-        core::slice::from_raw_parts_mut(self.get_mut(range.start), range.end - range.start)
+        unsafe {
+            core::slice::from_raw_parts_mut(self.get_mut(range.start), range.end - range.start)
+        }
     }
 }
 

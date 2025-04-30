@@ -31,6 +31,15 @@ pub struct TreeBlockNeighbor<const N: usize> {
     pub b: TreeCellNeighbor<N>,
 }
 
+impl<const N: usize> DataSize for TreeBlockNeighbor<N> {
+    const IS_DYNAMIC: bool = false;
+    const STATIC_HEAP_SIZE: usize = 0;
+
+    fn estimate_heap_size(&self) -> usize {
+        0
+    }
+}
+
 impl<const N: usize> TreeBlockNeighbor<N> {
     /// If this is a face neighbor, return the corresponding face, otherwise return `None`.
     pub fn face(&self) -> Option<Face<N>> {
@@ -253,6 +262,19 @@ impl<const N: usize> TreeNeighbors<N> {
 
             f(neighbor, a, b)
         }
+    }
+}
+
+impl<const N: usize> DataSize for TreeNeighbors<N> {
+    const IS_DYNAMIC: bool = true;
+    const STATIC_HEAP_SIZE: usize = 0;
+
+    fn estimate_heap_size(&self) -> usize {
+        self.neighbors.estimate_heap_size()
+            + self.block_offsets.estimate_heap_size()
+            + self.fine.estimate_heap_size()
+            + self.direct.estimate_heap_size()
+            + self.coarse.estimate_heap_size()
     }
 }
 

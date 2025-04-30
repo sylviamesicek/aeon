@@ -3,6 +3,7 @@ use std::array;
 use super::{ActiveCellId, Tree};
 use crate::geometry::{Face, FaceMask, IndexSpace, Rectangle, faces};
 use bitvec::prelude::*;
+use datasize::DataSize;
 
 #[derive(
     Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, serde::Serialize, serde::Deserialize,
@@ -240,6 +241,22 @@ impl<const N: usize> TreeBlocks<N> {
             let active = self.active_cells(block)[0];
             self.block_levels[block.0] = tree.active_level(active);
         }
+    }
+}
+
+impl<const N: usize> DataSize for TreeBlocks<N> {
+    const IS_DYNAMIC: bool = true;
+    const STATIC_HEAP_SIZE: usize = 0;
+
+    fn estimate_heap_size(&self) -> usize {
+        self.active_cell_positions.estimate_heap_size()
+            + self.active_cell_to_block.estimate_heap_size()
+            + self.block_sizes.estimate_heap_size()
+            + self.block_active_offsets.estimate_heap_size()
+            + self.block_active_indices.estimate_heap_size()
+            + self.block_bounds.estimate_heap_size()
+            + self.block_levels.estimate_heap_size()
+            + self.boundaries.capacity() / size_of::<usize>()
     }
 }
 

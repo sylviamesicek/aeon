@@ -32,7 +32,7 @@ impl System for Empty {
     }
 }
 
-impl<'a> SystemSlice<'a, Empty> {
+impl SystemSlice<'_, Empty> {
     pub fn empty() -> Self {
         Self {
             ptr: std::ptr::null(),
@@ -44,7 +44,7 @@ impl<'a> SystemSlice<'a, Empty> {
     }
 }
 
-impl<'a> SystemSliceMut<'a, Empty> {
+impl SystemSliceMut<'_, Empty> {
     pub fn empty() -> Self {
         Self {
             ptr: std::ptr::null_mut(),
@@ -244,7 +244,7 @@ impl<const N: usize> System for Static<N> {
     }
 
     fn enumerate(&self) -> impl Iterator<Item = Self::Label> {
-        (0..N).into_iter()
+        0..N
     }
 
     fn label_index(&self, label: Self::Label) -> usize {
@@ -270,7 +270,7 @@ impl System for Dynamic {
     }
 
     fn enumerate(&self) -> impl Iterator<Item = Self::Label> {
-        (0..self.0).into_iter()
+        0..self.0
     }
 
     fn label_index(&self, label: Self::Label) -> usize {

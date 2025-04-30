@@ -1,5 +1,7 @@
 use std::array::{self, from_fn};
 
+use datasize::DataSize;
+
 use crate::geometry::AxisMask;
 
 /// Represents a rectangular physical domain.
@@ -11,6 +13,15 @@ pub struct Rectangle<const N: usize> {
     /// Origin of the rectangle (located at the bottom-left corner).
     #[serde(with = "crate::array")]
     pub origin: [f64; N],
+}
+
+impl<const N: usize> DataSize for Rectangle<N> {
+    const IS_DYNAMIC: bool = false;
+    const STATIC_HEAP_SIZE: usize = 0;
+
+    fn estimate_heap_size(&self) -> usize {
+        0
+    }
 }
 
 impl<const N: usize> Rectangle<N> {

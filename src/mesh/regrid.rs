@@ -120,7 +120,7 @@ impl<const N: usize> Mesh<N> {
                 for field in result.system().enumerate() {
                     // Unpack data to element
                     for (i, node) in window.iter().enumerate() {
-                        imsrc[i] = block_system.field(field.clone())[space.index_from_node(node)];
+                        imsrc[i] = block_system.field(field)[space.index_from_node(node)];
                     }
 
                     if is_cell_on_boundary {

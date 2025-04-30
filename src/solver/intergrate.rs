@@ -3,11 +3,12 @@ use crate::{
     mesh::{Function, Mesh},
     system::{System, SystemBoundaryConds, SystemSlice, SystemSliceMut},
 };
+use datasize::DataSize;
 use rayon::iter::{ParallelBridge, ParallelIterator};
 use reborrow::{Reborrow, ReborrowMut};
 
 /// Method to be used for numerical intergration of ODE.
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Copy, Debug, Default, DataSize)]
 pub enum Method {
     // First order accurate Euler integration
     #[default]
@@ -16,7 +17,7 @@ pub enum Method {
     RK4KO6(f64),
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, DataSize)]
 pub struct Integrator {
     /// Numerical Method
     pub method: Method,
