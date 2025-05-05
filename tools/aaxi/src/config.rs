@@ -241,8 +241,10 @@ pub enum GaugeCondition {
     #[default]
     #[serde(rename = "harmonic")]
     Harmonic,
-    #[serde(rename = "zero_shift")]
-    ZeroShift,
+    #[serde(rename = "harmonic_zero_shift")]
+    HarmonicZeroShift,
+    #[serde(rename = "log_plus_one_zero_shift")]
+    LogPlusOneZeroShift,
 }
 
 fn template_str_apply_args(data: &str, args: &[&str]) -> eyre::Result<String> {

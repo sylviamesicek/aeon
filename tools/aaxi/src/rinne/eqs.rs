@@ -488,7 +488,7 @@ impl Decomposition {
         }
     }
 
-    fn zero_shift_gauge(&self) -> GaugeEvolution {
+    fn harmonic_gauge_zero_shift(&self) -> GaugeEvolution {
         let Self {
             metric,
             k,
@@ -507,9 +507,40 @@ impl Decomposition {
 
         let k_trace = s.sum(|[i, j]| k[[i, j]] * metric.inv()[[i, j]]);
         let lapse2 = lapse * lapse;
+        // let lapse2 = lapse;
 
         let lapse_t = {
             let term1 = -lapse2 * F * (k_trace + l - M * theta);
+            let term2 = s.sum(|i| shift[i] * lapse_partials[i]);
+            term1 + term2
+        };
+
+        let shift_t = s.vector(|_| 0.0);
+
+        GaugeEvolution {
+            lapse: lapse_t,
+            shift: shift_t,
+        }
+    }
+
+    fn log_plus_one_zero_shift(&self) -> GaugeEvolution {
+        let Self {
+            metric,
+            k,
+            l,
+            theta,
+            lapse,
+            lapse_partials,
+            shift,
+            ..
+        } = self;
+
+        let s = Space::<2>;
+
+        let k_trace = s.sum(|[i, j]| k[[i, j]] * metric.inv()[[i, j]]);
+
+        let lapse_t = {
+            let term1 = -2.0 * lapse * (k_trace + l - 2.0 * theta);
             let term2 = s.sum(|i| shift[i] * lapse_partials[i]);
             term1 + term2
         };
@@ -967,7 +998,8 @@ pub fn evolution(
     let evolve = decomp.metric_evolution();
     let gauge = match gauge {
         GaugeCondition::Harmonic => decomp.harmonic_gauge(),
-        GaugeCondition::ZeroShift => decomp.zero_shift_gauge(),
+        GaugeCondition::HarmonicZeroShift => decomp.harmonic_gauge_zero_shift(),
+        GaugeCondition::LogPlusOneZeroShift => decomp.log_plus_one_zero_shift(),
     };
 
     derivs.grr_t = evolve.g[[0, 0]];

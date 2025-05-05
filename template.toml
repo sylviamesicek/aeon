@@ -19,7 +19,7 @@ dampening = 0.4
 [evolve]
 cfl = 0.2
 dissipation = 0.5
-gauge = "harmonic"
+gauge = "log_plus_one_zero_shift"
 max_time = 30.0
 max_proper_time = 10.0
 max_steps = 1_000_000
