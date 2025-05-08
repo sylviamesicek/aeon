@@ -101,17 +101,17 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
             errors.push((i, norm));
         }
 
-        let mut systems = SystemCheckpoint::default();
-        systems.save_field("Seed", system.field(()));
-        systems.save_field("SeedInterpolated", system_prev.field(()));
-        systems.save_field("SeedDiff", &diff);
-        systems.save_int_field("Flags", &flag_debug);
-        systems.save_int_field("Blocks", &block_debug);
-        systems.save_int_field("Cell", &cell_debug);
+        let mut checkpoint = Checkpoint::default();
+        checkpoint.attach_mesh(&mesh);
+        checkpoint.save_field("Seed", system.field(()));
+        checkpoint.save_field("SeedInterpolated", system_prev.field(()));
+        checkpoint.save_field("SeedDiff", &diff);
+        checkpoint.save_int_field("Flags", &flag_debug);
+        checkpoint.save_int_field("Blocks", &block_debug);
+        checkpoint.save_int_field("Cell", &cell_debug);
 
-        mesh.export_vtu(
+        checkpoint.export_vtu(
             format!("output/wamr/wamr{i}.vtu"),
-            &systems,
             ExportVtuConfig {
                 title: "WAMR".to_string(),
                 ghost: false,

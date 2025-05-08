@@ -41,6 +41,9 @@ save_relax_interval = 1000
 save_relax_result = true
 stride = 6
 
+[cache]
+initial = true
+
 [[source]]
 type = "scalar_field"
 amplitude = "$0"

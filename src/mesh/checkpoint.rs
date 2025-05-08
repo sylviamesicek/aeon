@@ -1,12 +1,15 @@
-use crate::geometry::{FaceArray, Rectangle, Tree};
-use crate::kernel::BoundaryClass;
-use serde::de::DeserializeOwned;
+use crate::prelude::IndexSpace;
+use ron::ser::PrettyConfig;
 use serde::Serialize;
+use serde::de::DeserializeOwned;
 use std::collections::HashMap;
+use std::fs::File;
+use std::io::{Read as _, Write as _};
+use std::path::Path;
 use std::str::FromStr;
 use thiserror::Error;
 
-use crate::mesh::Mesh;
+use crate::mesh::{Mesh, MeshSer};
 use crate::system::{System, SystemSlice, SystemVec};
 
 #[derive(Debug, Error)]
@@ -17,55 +20,37 @@ pub enum CheckpointParseError {
     ParseFailed(String),
 }
 
-/// Represents all information nessessary to store and load meshes from
-/// disk.
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
-pub struct MeshCheckpoint<const N: usize> {
-    tree: Tree<N>,
-    width: usize,
-    ghost: usize,
-    boundary: FaceArray<N, BoundaryClass>,
-}
-
-impl<const N: usize> MeshCheckpoint<N> {
-    pub fn save_mesh(&mut self, mesh: &Mesh<N>) {
-        self.tree.clone_from(&mesh.tree);
-        self.width = mesh.width;
-        self.ghost = mesh.ghost;
-        self.boundary = mesh.boundary;
-    }
-
-    pub fn load_mesh(&self, mesh: &mut Mesh<N>) {
-        mesh.tree.clone_from(&self.tree);
-        mesh.width = self.width;
-        mesh.ghost = self.ghost;
-        mesh.boundary = self.boundary;
-
-        mesh.build();
-    }
-}
-
-impl<const N: usize> Default for MeshCheckpoint<N> {
-    fn default() -> Self {
-        Self {
-            tree: Tree::new(Rectangle::UNIT),
-            width: 4,
-            ghost: 1,
-            boundary: FaceArray::from_fn(|_| BoundaryClass::OneSided),
-        }
-    }
-}
-
 #[derive(Default, Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct SystemCheckpoint {
-    pub(crate) meta: HashMap<String, String>,
-    pub(crate) systems: HashMap<String, SystemMeta>,
-    pub(crate) fields: HashMap<String, Vec<f64>>,
-    pub(crate) int_fields: HashMap<String, Vec<i64>>,
+pub struct Checkpoint<const N: usize> {
+    /// Meta data to be stored in checkpoint (useful for storing time, number of steps, ect.)
+    meta: HashMap<String, String>,
+    /// Mesh data to be attached to checkpoint,
+    mesh: Option<MeshSer<N>>,
+    /// Systems which are stored in the checkpoint.
+    systems: HashMap<String, SystemMeta>,
+    /// Fields which are stored in the checkpoint
+    fields: HashMap<String, Vec<f64>>,
+    /// Int fields (useful for debugging) which are stored in the checkpoint.
+    int_fields: HashMap<String, Vec<i64>>,
 }
 
-impl SystemCheckpoint {
-    pub fn save_system_ser<S: System + Serialize>(&mut self, data: SystemSlice<S>) {
+impl<const N: usize> Checkpoint<N> {
+    /// Attaches a mesh to the checkpoint
+    pub fn attach_mesh(&mut self, mesh: &Mesh<N>) {
+        self.mesh.replace(MeshSer {
+            tree: mesh.tree.clone().into(),
+            width: mesh.width,
+            ghost: mesh.ghost,
+            boundary: mesh.boundary,
+        });
+    }
+
+    /// Clones the mesh attached to the checkpoint.
+    pub fn read_mesh(&self) -> Mesh<N> {
+        self.mesh.clone().unwrap().into()
+    }
+
+    pub fn save_system<S: System + Serialize>(&mut self, data: SystemSlice<S>) {
         assert!(!self.systems.contains_key(S::NAME));
 
         let count = data.len();
@@ -92,7 +77,7 @@ impl SystemCheckpoint {
         );
     }
 
-    pub fn read_system_ser<S: System + DeserializeOwned>(&mut self) -> SystemVec<S> {
+    pub fn read_system<S: System + DeserializeOwned>(&self) -> SystemVec<S> {
         let data = self.systems.get(S::NAME).unwrap();
         let system = ron::de::from_str::<S>(&data.meta).unwrap();
 
@@ -183,6 +168,22 @@ impl SystemCheckpoint {
         data.parse()
             .map_err(|_| CheckpointParseError::ParseFailed(data.clone()))
     }
+
+    /// Loads the mesh and any additional data from disk.
+    pub fn import_dat(path: impl AsRef<Path>) -> std::io::Result<Self> {
+        let mut contents: String = String::new();
+        let mut file = File::open(path)?;
+        file.read_to_string(&mut contents)?;
+
+        ron::from_str(&contents).map_err(std::io::Error::other)
+    }
+
+    pub fn export_dat(&self, path: impl AsRef<Path>) -> std::io::Result<()> {
+        let data = ron::ser::to_string_pretty::<Checkpoint<N>>(self, PrettyConfig::default())
+            .map_err(std::io::Error::other)?;
+        let mut file = File::create(path)?;
+        file.write_all(data.as_bytes())
+    }
 }
 
 /// Metadata required for storing a system.
@@ -192,4 +193,277 @@ pub struct SystemMeta {
     pub count: usize,
     pub buffer: Vec<f64>,
     pub fields: Vec<String>,
+}
+
+use num_traits::ToPrimitive;
+use vtkio::{
+    IOBuffer, Vtk,
+    model::{
+        Attribute, Attributes, ByteOrder, CellType, Cells, DataArrayBase, DataSet, ElementType,
+        Piece, UnstructuredGridPiece, Version, VertexNumbers,
+    },
+};
+
+#[derive(Clone, Debug)]
+pub struct ExportVtuConfig {
+    pub title: String,
+    pub ghost: bool,
+    pub stride: usize,
+}
+
+impl Default for ExportVtuConfig {
+    fn default() -> Self {
+        Self {
+            title: "Title".to_string(),
+            ghost: false,
+            stride: 1,
+        }
+    }
+}
+
+impl<const N: usize> Checkpoint<N> {
+    /// Checkpoint and additional field data to a .vtu file, for visualisation in applications like
+    /// Paraview. This requires a mesh be attached to the checkpoint.
+    pub fn export_vtu(
+        &self,
+        path: impl AsRef<Path>,
+        config: ExportVtuConfig,
+    ) -> std::io::Result<()> {
+        const {
+            assert!(N > 0 && N <= 2, "Vtu Output only supported for 0 < N ≤ 2");
+        }
+        assert!(self.mesh.is_some(), "Mesh must be attached to checkpoint");
+
+        // Uncompress mesh.
+        let mesh: Mesh<N> = self.mesh.clone().unwrap().into();
+
+        let mut stride = config.stride;
+
+        if config.stride == 0 {
+            stride = mesh.width;
+        }
+
+        assert!(stride <= mesh.width, "Stride must be <= width");
+        assert!(
+            mesh.width % stride == 0,
+            "Width must be evenly divided by stride"
+        );
+        assert!(
+            !config.ghost || mesh.ghost % stride == 0,
+            "Ghost must be evenly divided by stride"
+        );
+
+        // Generate Cells
+        let mut connectivity = Vec::new();
+        let mut offsets = Vec::new();
+
+        let mut vertex_total = 0;
+        let mut cell_total = 0;
+
+        for block in mesh.blocks.indices() {
+            let space = mesh.block_space(block);
+
+            let mut cell_size = space.cell_size();
+            let mut vertex_size = space.vertex_size();
+
+            if config.ghost {
+                for axis in 0..N {
+                    cell_size[axis] += 2 * space.ghost();
+                    vertex_size[axis] += 2 * space.ghost();
+                }
+            }
+
+            for axis in 0..N {
+                debug_assert!(cell_size[axis] % stride == 0);
+                debug_assert!((vertex_size[axis] - 1) % stride == 0);
+
+                cell_size[axis] /= stride;
+                vertex_size[axis] = (vertex_size[axis] - 1) / stride + 1;
+            }
+
+            let cell_space = IndexSpace::new(cell_size);
+            let vertex_space = IndexSpace::new(vertex_size);
+
+            for cell in cell_space.iter() {
+                let mut vertex = [0; N];
+
+                if N == 1 {
+                    vertex[0] = cell[0];
+                    let v1 = vertex_space.linear_from_cartesian(vertex);
+                    vertex[0] = cell[0] + 1;
+                    let v2 = vertex_space.linear_from_cartesian(vertex);
+
+                    connectivity.push(vertex_total + v1 as u64);
+                    connectivity.push(vertex_total + v2 as u64);
+                } else if N == 2 {
+                    vertex[0] = cell[0];
+                    vertex[1] = cell[1];
+                    let v1 = vertex_space.linear_from_cartesian(vertex);
+                    vertex[0] = cell[0];
+                    vertex[1] = cell[1] + 1;
+                    let v2 = vertex_space.linear_from_cartesian(vertex);
+                    vertex[0] = cell[0] + 1;
+                    vertex[1] = cell[1] + 1;
+                    let v3 = vertex_space.linear_from_cartesian(vertex);
+                    vertex[0] = cell[0] + 1;
+                    vertex[1] = cell[1];
+                    let v4 = vertex_space.linear_from_cartesian(vertex);
+
+                    connectivity.push(vertex_total + v1 as u64);
+                    connectivity.push(vertex_total + v2 as u64);
+                    connectivity.push(vertex_total + v3 as u64);
+                    connectivity.push(vertex_total + v4 as u64);
+                }
+
+                offsets.push(connectivity.len() as u64);
+            }
+
+            cell_total += cell_space.index_count();
+            vertex_total += vertex_space.index_count() as u64;
+        }
+
+        let cells = Cells {
+            cell_verts: VertexNumbers::XML {
+                connectivity,
+                offsets,
+            },
+            types: vec![CellType::Quad; cell_total],
+        };
+
+        // Generate point data
+        let mut vertices = Vec::new();
+
+        for block in mesh.blocks.indices() {
+            let space = mesh.block_space(block);
+            let window = if config.ghost {
+                space.full_window()
+            } else {
+                space.inner_window()
+            };
+
+            'window: for node in window {
+                for axis in 0..N {
+                    if node[axis] % (stride as isize) != 0 {
+                        continue 'window;
+                    }
+                }
+
+                let position = space.position(node);
+                let mut vertex = [0.0; 3];
+                vertex[..N].copy_from_slice(&position);
+                vertices.extend(vertex);
+            }
+        }
+
+        let points = IOBuffer::new(vertices);
+
+        // Attributes
+        let mut attributes = Attributes {
+            point: Vec::new(),
+            cell: Vec::new(),
+        };
+
+        for (name, system) in self.systems.iter() {
+            for (idx, field) in system.fields.iter().enumerate() {
+                let start = idx * system.count;
+                let end = idx * system.count + system.count;
+
+                attributes.point.push(Self::field_attribute(
+                    &mesh,
+                    format!("{}::{}", name, field),
+                    &system.buffer[start..end],
+                    config.ghost,
+                    stride,
+                ));
+            }
+        }
+
+        for (name, system) in self.fields.iter() {
+            attributes.point.push(Self::field_attribute(
+                &mesh,
+                format!("Field::{}", name),
+                system,
+                config.ghost,
+                stride,
+            ));
+        }
+
+        for (name, system) in self.int_fields.iter() {
+            attributes.point.push(Self::field_attribute(
+                &mesh,
+                format!("IntField::{}", name),
+                system,
+                config.ghost,
+                stride,
+            ));
+        }
+
+        let piece = UnstructuredGridPiece {
+            points,
+            cells,
+            data: attributes,
+        };
+
+        let model = Vtk {
+            version: Version::XML { major: 2, minor: 2 },
+            title: config.title,
+            byte_order: ByteOrder::LittleEndian,
+            data: DataSet::UnstructuredGrid {
+                meta: None,
+                pieces: vec![Piece::Inline(Box::new(piece))],
+            },
+            file_path: None,
+        };
+
+        model.export(path).map_err(|i| match i {
+            vtkio::Error::IO(io) => io,
+            v => {
+                log::error!("Encountered error {:?} while exporting vtu", v);
+                std::io::Error::from(std::io::ErrorKind::Other)
+            }
+        })?;
+
+        Ok(())
+    }
+
+    fn field_attribute<T: ToPrimitive + Copy + 'static>(
+        mesh: &Mesh<N>,
+        name: String,
+        data: &[T],
+        ghost: bool,
+        stride: usize,
+    ) -> Attribute {
+        let mut buffer = Vec::new();
+
+        for block in mesh.blocks.indices() {
+            let space = mesh.block_space(block);
+            let nodes = mesh.block_nodes(block);
+            let window = if ghost {
+                space.full_window()
+            } else {
+                space.inner_window()
+            };
+
+            'window: for node in window {
+                for axis in 0..N {
+                    if node[axis] % (stride as isize) != 0 {
+                        continue 'window;
+                    }
+                }
+
+                let index = space.index_from_node(node);
+                let value = data[nodes.start + index];
+                buffer.push(value);
+            }
+        }
+
+        Attribute::DataArray(DataArrayBase {
+            name,
+            elem: ElementType::Scalars {
+                num_comp: 1,
+                lookup_table: None,
+            },
+            data: IOBuffer::new(buffer),
+        })
+    }
 }

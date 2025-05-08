@@ -101,9 +101,9 @@ impl<const N: usize> DataSize for Cell<N> {
 /// Used as a basis for axes aligned adaptive finite difference
 /// meshes. The tree is
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(from = "TreeSer<N>", into = "TreeSer<N>")]
 pub struct Tree<const N: usize> {
     domain: Rectangle<N>,
-    #[serde(with = "crate::array")]
     periodic: [bool; N],
     // *********************
     // Active Cells
@@ -936,9 +936,58 @@ impl<const N: usize> DataSize for Tree<N> {
     }
 }
 
+/// Helper struct for serializing a tree while avoiding saving redundent data.
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+pub struct TreeSer<const N: usize> {
+    domain: Rectangle<N>,
+    #[serde(with = "crate::array")]
+    periodic: [bool; N],
+    active_values: BitVec<usize, Lsb0>,
+    active_offsets: Vec<usize>,
+}
+
+impl<const N: usize> From<TreeSer<N>> for Tree<N> {
+    fn from(value: TreeSer<N>) -> Self {
+        let mut result = Tree {
+            domain: value.domain,
+            periodic: value.periodic,
+            active_values: value.active_values,
+            active_offsets: value.active_offsets,
+            active_to_cell: Vec::default(),
+            level_offsets: Vec::default(),
+            cells: Vec::default(),
+        };
+        result.build();
+        result
+    }
+}
+
+impl<const N: usize> From<Tree<N>> for TreeSer<N> {
+    fn from(value: Tree<N>) -> Self {
+        Self {
+            domain: value.domain,
+            periodic: value.periodic,
+            active_values: value.active_values,
+            active_offsets: value.active_offsets,
+        }
+    }
+}
+
+impl<const N: usize> Default for TreeSer<N> {
+    fn default() -> Self {
+        Self {
+            domain: Rectangle::UNIT,
+            periodic: [false; N],
+            active_values: BitVec::default(),
+            active_offsets: Vec::default(),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
     #[test]
     fn neighbors() {
         let mut tree = Tree::<2>::new(Rectangle::UNIT);
@@ -1062,5 +1111,30 @@ mod tests {
         other_tree.refine(&[true]);
 
         assert_eq!(tree, other_tree);
+    }
+
+    use rand::Rng;
+
+    #[test]
+    fn fuzz_serialize() -> eyre::Result<()> {
+        let mut tree = Tree::<2>::new(Rectangle::UNIT);
+
+        // Randomly refine tree
+        let mut rng = rand::rng();
+        for _ in 0..4 {
+            let mut flags = vec![false; tree.num_active_cells()];
+            rng.fill(flags.as_mut_slice());
+
+            tree.balance_coarsen_flags(&mut flags);
+            tree.refine(&mut flags);
+        }
+
+        // Serialize tree
+        let data = ron::to_string(&tree)?;
+        let tree2: Tree<2> = ron::from_str(data.as_str())?;
+
+        assert_eq!(tree, tree2);
+
+        Ok(())
     }
 }

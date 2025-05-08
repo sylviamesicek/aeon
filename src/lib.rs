@@ -22,9 +22,7 @@ pub mod prelude {
     pub use crate::kernel::{
         BoundaryClass, BoundaryConds, BoundaryKind, DirichletParams, Order, RadiativeParams,
     };
-    pub use crate::mesh::{
-        Engine, ExportVtuConfig, Function, Mesh, MeshCheckpoint, Projection, SystemCheckpoint,
-    };
+    pub use crate::mesh::{Checkpoint, Engine, ExportVtuConfig, Function, Mesh, Projection};
     pub use crate::system::{
         Empty, EmptyConditions, Pair, PairConditions, Scalar, ScalarConditions, System,
         SystemBoundaryConds, SystemSlice, SystemSliceMut, SystemVec,

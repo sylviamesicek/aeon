@@ -131,13 +131,12 @@ pub fn main() -> eyre::Result<()> {
         let mut flags = vec![0; mesh.num_nodes()];
         mesh.flags_debug(&mut flags);
 
-        let mut checkpoint = SystemCheckpoint::default();
+        let mut checkpoint = Checkpoint::default();
+        checkpoint.attach_mesh(&mesh);
         checkpoint.save_field("Wave", system.contigious());
         checkpoint.save_int_field("Flags", &flags);
-
-        mesh.export_vtu(
+        checkpoint.export_vtu(
             format!("output/waves/initial{i}.vtu"),
-            &checkpoint,
             ExportVtuConfig {
                 title: "Initial Wave Mesh".to_string(),
                 ghost: false,
@@ -161,12 +160,11 @@ pub fn main() -> eyre::Result<()> {
             mesh.write_debug(&mut string);
             std::fs::write(PathBuf::from(format!("output/waves/debug{i}.txt")), string)?;
 
-            let mut checkpoint = SystemCheckpoint::default();
+            let mut checkpoint = Checkpoint::default();
+            checkpoint.attach_mesh(&mesh);
             checkpoint.save_int_field("Flags", &vec![0; mesh.num_nodes()]);
-
-            mesh.export_vtu(
+            checkpoint.export_vtu(
                 format!("output/waves/debug{i}.vtu"),
-                &checkpoint,
                 ExportVtuConfig {
                     title: "Initial Wave Mesh".to_string(),
                     ghost: false,
@@ -265,14 +263,13 @@ pub fn main() -> eyre::Result<()> {
                 mesh.num_nodes()
             );
             // Output current system to disk
-            let mut checkpoint = SystemCheckpoint::default();
+            let mut checkpoint = Checkpoint::default();
+            checkpoint.attach_mesh(&mesh);
             checkpoint.save_field("Wave", system.contigious());
             checkpoint.save_field("Analytic", exact.contigious());
             checkpoint.save_field("Error", error.contigious());
-
-            mesh.export_vtu(
+            checkpoint.export_vtu(
                 format!("output/waves/evolution{save_step}.vtu"),
-                &checkpoint,
                 ExportVtuConfig {
                     title: "evbrill".to_string(),
                     ghost: false,

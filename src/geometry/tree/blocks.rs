@@ -11,7 +11,7 @@ use datasize::DataSize;
 pub struct BlockId(pub usize);
 
 /// Groups cells of a `Tree` into uniform blocks, for more efficient inter-cell communication and multithreading.
-#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct TreeBlocks<const N: usize> {
     /// Stores each cell's position within its parent's block.
     #[serde(with = "crate::array::vec")]

@@ -73,23 +73,23 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
         let mut flags = vec![0; mesh.num_nodes()];
         mesh.flags_debug(&mut flags);
 
-        let mut systems = SystemCheckpoint::default();
-        systems.save_field("Wave", system.contigious());
-        systems.save_int_field("Flags", &flags);
+        let mut checkpoint = Checkpoint::default();
+        checkpoint.attach_mesh(&mesh);
+        checkpoint.save_field("Wave", system.contigious());
+        checkpoint.save_int_field("Flags", &flags);
 
         if error.len() == mesh.num_nodes() {
             for i in 0..mesh.num_nodes() {
                 error.contigious_mut()[i] = system.contigious()[i] - transfered.contigious()[i]
             }
 
-            systems.save_field("Transfered", transfered.contigious());
-            systems.save_field("Error", error.contigious());
+            checkpoint.save_field("Transfered", transfered.contigious());
+            checkpoint.save_field("Error", error.contigious());
         }
 
         let path = format!("output/transfer/iteration{i}.vtu");
-        mesh.export_vtu(
+        checkpoint.export_vtu(
             path.as_str(),
-            &systems,
             ExportVtuConfig {
                 title: "Initial Wave Mesh".to_string(),
                 ghost: false,

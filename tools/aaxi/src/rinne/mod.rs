@@ -57,25 +57,25 @@ impl<'a> SolverCallback<2, Scalar> for IterCallback<'a> {
 
         let i = iteration / visualize_interval;
 
-        let mut checkpoint = SystemCheckpoint::default();
+        let mut checkpoint = Checkpoint::default();
+        checkpoint.attach_mesh(&mesh);
         checkpoint.save_field("Solution", input.into_scalar());
         checkpoint.save_field("Derivative", output.into_scalar());
-
-        mesh.export_vtu(
-            self.output.join("initial").join(format!(
-                "{}_level_{}_iter_{}.vtu",
-                self.config.name,
-                mesh.max_level(),
-                i
-            )),
-            &checkpoint,
-            ExportVtuConfig {
-                title: self.config.name.to_string(),
-                ghost: false,
-                stride: self.config.visualize.stride,
-            },
-        )
-        .unwrap()
+        checkpoint
+            .export_vtu(
+                self.output.join("initial").join(format!(
+                    "{}_level_{}_iter_{}.vtu",
+                    self.config.name,
+                    mesh.max_level(),
+                    i
+                )),
+                ExportVtuConfig {
+                    title: self.config.name.to_string(),
+                    ghost: false,
+                    stride: self.config.visualize.stride,
+                },
+            )
+            .unwrap();
     }
 }
 
@@ -83,6 +83,39 @@ impl<'a> SolverCallback<2, Scalar> for IterCallback<'a> {
 pub fn initial_data(config: &Config, output: &Path) -> eyre::Result<(Mesh<2>, SystemVec<Fields>)> {
     // Save initial time
     let start = Instant::now();
+
+    // Cache directory
+    let cache = output.join("cache");
+    let init_cache = cache.join(format!("{}_init.dat", config.name));
+
+    'cache: {
+        if !config.cache.initial {
+            // Don't attempt to load cache
+            break 'cache;
+        }
+
+        // Attempt to load file
+        let Ok(checkpoint) = Checkpoint::<2>::import_dat(&init_cache) else {
+            break 'cache;
+        };
+
+        let mesh = checkpoint.read_mesh();
+        let system = checkpoint.read_system::<Fields>();
+
+        println!(
+            "Successfully read cached initial data: {}",
+            style(init_cache.display()).cyan()
+        );
+
+        return Ok((mesh, system));
+    };
+
+    if config.cache.initial {
+        println!(
+            "Failed to read cached initial data: {}",
+            style(init_cache.display()).yellow()
+        );
+    }
 
     // Build mesh
     let mut mesh = Mesh::new(
@@ -204,16 +237,15 @@ pub fn initial_data(config: &Config, output: &Path) -> eyre::Result<(Mesh<2>, Sy
         step_count += pb.position();
 
         if config.visualize.save_relax_levels {
-            let mut checkpoint = SystemCheckpoint::default();
-            checkpoint.save_system_ser(system.as_slice());
-
-            mesh.export_vtu(
+            let mut checkpoint = Checkpoint::default();
+            checkpoint.attach_mesh(&mesh);
+            checkpoint.save_system(system.as_slice());
+            checkpoint.export_vtu(
                 output.join("initial").join(format!(
                     "{}_level{}.vtu",
                     &config.name,
                     mesh.max_level()
                 )),
-                &checkpoint,
                 ExportVtuConfig {
                     title: config.name.clone(),
                     ghost: false,
@@ -265,12 +297,11 @@ pub fn initial_data(config: &Config, output: &Path) -> eyre::Result<(Mesh<2>, Sy
     }
 
     if config.visualize.save_relax_result {
-        let mut checkpoint = SystemCheckpoint::default();
-        checkpoint.save_system_ser(system.as_slice());
-
-        mesh.export_vtu(
+        let mut checkpoint = Checkpoint::default();
+        checkpoint.attach_mesh(&mesh);
+        checkpoint.save_system(system.as_slice());
+        checkpoint.export_vtu(
             output.join("initial").join(format!("{}.vtu", config.name)),
-            &checkpoint,
             ExportVtuConfig {
                 title: config.name.clone(),
                 ghost: false,
@@ -298,6 +329,21 @@ pub fn initial_data(config: &Config, output: &Path) -> eyre::Result<(Mesh<2>, Sy
         "- RAM usage: ~{}",
         HumanBytes((system.estimate_heap_size() + transfer.estimate_heap_size()) as u64)
     );
+
+    if config.cache.initial {
+        // Ensure output directory exists
+        std::fs::create_dir_all(cache)?;
+        // Create checkpoint
+        let mut checkpoint = Checkpoint::default();
+        checkpoint.attach_mesh(&mesh);
+        checkpoint.save_system::<Fields>(system.as_slice());
+        checkpoint.export_dat(&init_cache)?;
+
+        println!(
+            "Successfully wrote initial data cache: {}",
+            style(init_cache.display()).cyan()
+        );
+    }
 
     Ok((mesh, system))
 }
@@ -552,13 +598,25 @@ pub fn evolve_data(
     // Does the simulation disperse?
     let mut disperse = true;
 
+    println!("Evolving data");
+
     // Setup progress bars
     let m = MultiProgress::new();
+    // Max nodes
+    let node_pb = m.add(ProgressBar::new(config.limits.max_nodes as u64));
+    node_pb.set_style(misc::node_style());
+    node_pb.enable_steady_tick(Duration::from_millis(100));
+    node_pb.set_prefix("[Node] ");
+    // Max levels
+    let level_pb = m.add(ProgressBar::new(config.limits.max_levels as u64));
+    level_pb.set_style(misc::level_style());
+    level_pb.enable_steady_tick(Duration::from_millis(100));
+    level_pb.set_prefix("[Level]");
+    // Step spinner
     let step_pb = m.add(ProgressBar::no_length());
     step_pb.set_style(misc::spinner_style());
     step_pb.enable_steady_tick(Duration::from_millis(100));
-
-    println!("Evolving data");
+    step_pb.set_prefix("[Step]");
 
     while time < max_time && proper_time < max_proper_time {
         assert!(fields.len() == mesh.num_nodes());
@@ -626,14 +684,13 @@ pub fn evolve_data(
             time_since_save -= save_interval;
 
             // Output current system to disk
-            let mut systems = SystemCheckpoint::default();
-            systems.save_system_ser(fields.as_slice());
-
-            mesh.export_vtu(
+            let mut checkpoint = Checkpoint::default();
+            checkpoint.attach_mesh(&mesh);
+            checkpoint.save_system(fields.as_slice());
+            checkpoint.export_vtu(
                 output
                     .join("evolve")
                     .join(format!("{}_{save_step}.vtu", config.name)),
-                &systems,
                 ExportVtuConfig {
                     title: config.name.clone(),
                     ghost: false,
@@ -665,6 +722,9 @@ pub fn evolve_data(
         time_since_save += h;
 
         proper_time += h * lapse;
+
+        node_pb.set_position(mesh.num_nodes() as u64);
+        level_pb.set_position(mesh.max_level() as u64);
 
         step_pb.inc(1);
         step_pb.set_message(format!(

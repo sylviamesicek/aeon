@@ -74,7 +74,7 @@ fn regions_to_face<const N: usize>(a: Region<N>, b: Region<N>) -> Option<Face<N>
 }
 
 /// Stores information about neighbors of blocks and cells.
-#[derive(Default, Clone, Debug, serde::Serialize, serde::Deserialize)]
+#[derive(Default, Clone, PartialEq, Eq, Debug, serde::Serialize, serde::Deserialize)]
 pub struct TreeNeighbors<const N: usize> {
     /// Flattened list of lists of neighbors for each block.
     neighbors: Vec<TreeBlockNeighbor<N>>,

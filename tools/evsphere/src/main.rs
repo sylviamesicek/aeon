@@ -158,11 +158,11 @@ fn run(config: RunConfig, diagnostics: &mut Diagnostics) -> Result<()> {
 
         // Save visualization
         if visualize {
-            let mut checkpoint = SystemCheckpoint::default();
-            checkpoint.save_system_ser(system.as_slice());
-            mesh.export_vtu(
+            let mut checkpoint = Checkpoint::default();
+            checkpoint.attach_mesh(&mesh);
+            checkpoint.save_system(system.as_slice());
+            checkpoint.export_vtu(
                 absolute.join(format!("initial{}.vtu", mesh.max_level())),
-                &checkpoint,
                 ExportVtuConfig {
                     title: "Massless Scalar Field Initial Data".to_string(),
                     ghost: false,
@@ -202,12 +202,11 @@ fn run(config: RunConfig, diagnostics: &mut Diagnostics) -> Result<()> {
     }
 
     if visualize {
-        let mut checkpoint = SystemCheckpoint::default();
-        checkpoint.save_system_ser(system.as_slice());
-
-        mesh.export_vtu(
+        let mut checkpoint = Checkpoint::default();
+        checkpoint.attach_mesh(&mesh);
+        checkpoint.save_system(system.as_slice());
+        checkpoint.export_vtu(
             absolute.join("initial.vtu"),
-            &checkpoint,
             ExportVtuConfig {
                 title: "Massless Scalar Field Initial".to_string(),
                 ghost: false,
@@ -325,12 +324,11 @@ fn run(config: RunConfig, diagnostics: &mut Diagnostics) -> Result<()> {
             );
 
             // Output current system to disk
-            let mut systems = SystemCheckpoint::default();
-            systems.save_system_ser(system.as_slice());
-
-            mesh.export_vtu(
+            let mut checkpoint = Checkpoint::default();
+            checkpoint.attach_mesh(&mesh);
+            checkpoint.save_system(system.as_slice());
+            checkpoint.export_vtu(
                 absolute.join(format!("evolve_{save_step}.vtu")),
-                &systems,
                 ExportVtuConfig {
                     title: "Masslesss Scalar Field Evolution".to_string(),
                     ghost: false,

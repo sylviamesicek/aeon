@@ -6,8 +6,8 @@
 //! filling interior interfaces, and adaptively regridding a domain based on various error heuristics.
 
 use crate::geometry::{
-    ActiveCellId, AxisMask, BlockId, Face, FaceArray, FaceMask, IndexSpace, Rectangle, Tree,
-    TreeBlocks, TreeInterfaces, TreeNeighbors, TreeNodes, faces,
+    ActiveCellId, AxisMask, BlockId, Face, FaceArray, FaceMask, Rectangle, Tree, TreeBlocks,
+    TreeInterfaces, TreeNeighbors, TreeNodes, TreeSer, faces,
 };
 use crate::kernel::{BoundaryClass, DirichletParams, Element};
 use crate::{
@@ -15,27 +15,10 @@ use crate::{
     system::SystemBoundaryConds,
 };
 use datasize::DataSize;
-use num_traits::ToPrimitive;
 use rayon::iter::{IntoParallelIterator, ParallelBridge, ParallelIterator};
-use ron::ser::PrettyConfig;
 use std::collections::HashMap;
-use std::{
-    array,
-    cell::UnsafeCell,
-    fmt::Write,
-    fs::File,
-    io::{self, Read as _, Write as _},
-    ops::Range,
-    path::Path,
-};
+use std::{array, cell::UnsafeCell, fmt::Write, ops::Range};
 use thread_local::ThreadLocal;
-use vtkio::{
-    IOBuffer, Vtk,
-    model::{
-        Attribute, Attributes, ByteOrder, CellType, Cells, DataArrayBase, DataSet, ElementType,
-        Piece, UnstructuredGridPiece, VertexNumbers,
-    },
-};
 
 mod checkpoint;
 mod evaluate;
@@ -44,7 +27,7 @@ mod regrid;
 mod store;
 mod transfer;
 
-pub use checkpoint::{MeshCheckpoint, SystemCheckpoint};
+pub use checkpoint::{Checkpoint, ExportVtuConfig};
 pub use function::{Engine, Function, Gaussian, Projection};
 pub use store::MeshStore;
 
@@ -57,7 +40,8 @@ use crate::system::{System, SystemSlice};
 /// This abstraction also handles multithread dispatch and sharing nodes between threads in a
 /// an effecient manner. This allows the user to write generic, sequential, and straighforward code
 /// on the main thread, while still maximising performance and fully utilizing computational resources.
-#[derive(Debug)]
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
+#[serde(from = "MeshSer<N>", into = "MeshSer<N>")]
 pub struct Mesh<const N: usize> {
     /// Underlying Tree on which the mesh is built.
     tree: Tree<N>,
@@ -184,18 +168,25 @@ impl<const N: usize> Mesh<N> {
 
     /// Rebuilds mesh from current tree.
     fn build(&mut self) {
+        // Rebuild tree
         self.tree.build();
+        // Rebuild blocks
         self.blocks.build(&self.tree);
-
+        // Rebuild node offsets
+        self.nodes.width = [self.width; N];
+        self.nodes.ghost = self.ghost;
+        self.nodes.build(&self.blocks);
+        // Cache maximum level
         self.max_level = 0;
         for block in self.blocks.indices() {
             self.max_level = self.max_level.max(self.blocks.level(block));
         }
-
-        self.nodes.build(&self.blocks);
+        // Rebuild neighbors
         self.neighbors.build(&self.tree, &self.blocks);
+        // Rebuild interfaces
         self.interfaces
             .build(&self.tree, &self.blocks, &self.neighbors, &self.nodes);
+        // Resize flags, clearing value to false.
         self.build_flags();
     }
 
@@ -804,295 +795,37 @@ impl<const N: usize> DataSize for Mesh<N> {
     }
 }
 
-#[derive(Clone, Debug)]
-pub struct ExportVtuConfig {
-    pub title: String,
-    pub ghost: bool,
-    pub stride: usize,
+/// Helper for serializing meshes using minimal data.
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+struct MeshSer<const N: usize> {
+    tree: TreeSer<N>,
+    width: usize,
+    ghost: usize,
+    boundary: FaceArray<N, BoundaryClass>,
 }
 
-impl Default for ExportVtuConfig {
-    fn default() -> Self {
-        Self {
-            title: "Title".to_string(),
-            ghost: false,
-            stride: 1,
+impl<const N: usize> From<Mesh<N>> for MeshSer<N> {
+    fn from(value: Mesh<N>) -> Self {
+        MeshSer {
+            tree: value.tree.into(),
+            width: value.width,
+            ghost: value.ghost,
+            boundary: value.boundary,
         }
     }
 }
 
-impl<const N: usize> Mesh<N> {
-    /// Exports a copy of the mesh and associated fields to disk, stored as a dat file.
-    pub fn export_dat(
-        &self,
-        path: impl AsRef<Path>,
-        checkpoint: &SystemCheckpoint,
-    ) -> io::Result<()> {
-        let mut grid = MeshCheckpoint::default();
-        grid.save_mesh(self);
-
-        let data = ron::ser::to_string_pretty::<(MeshCheckpoint<N>, SystemCheckpoint)>(
-            &(grid, checkpoint.clone()),
-            PrettyConfig::default(),
-        )
-        .map_err(io::Error::other)?;
-        let mut file = File::create(path)?;
-        file.write_all(data.as_bytes())
-    }
-
-    /// Loads the mesh and any additional data from disk.
-    pub fn import_dat(
-        &mut self,
-        path: impl AsRef<Path>,
-        systems: &mut SystemCheckpoint,
-    ) -> io::Result<()> {
-        let mut contents: String = String::new();
-        let mut file = File::open(path)?;
-        file.read_to_string(&mut contents)?;
-
-        let (grid, checkpoint): (MeshCheckpoint<N>, SystemCheckpoint) =
-            ron::from_str(&contents).map_err(io::Error::other)?;
-
-        grid.load_mesh(self);
-        systems.clone_from(&checkpoint);
-
-        Ok(())
-    }
-
-    /// Exports the mesh and additional field data to a .vtu files, for visualisation in applications like
-    /// Paraview.
-    pub fn export_vtu(
-        &self,
-        path: impl AsRef<Path>,
-        checkpoint: &SystemCheckpoint,
-        config: ExportVtuConfig,
-    ) -> io::Result<()> {
-        const {
-            assert!(N > 0 && N <= 2, "Vtu Output only supported for 0 < N ≤ 2");
-        }
-
-        let mut stride = config.stride;
-
-        if config.stride == 0 {
-            stride = self.width;
-        }
-
-        assert!(self.width % stride == 0);
-        assert!(stride <= self.width);
-
-        if config.ghost {
-            assert!(self.ghost % stride == 0);
-        }
-
-        // Generate Cells
-        let mut connectivity = Vec::new();
-        let mut offsets = Vec::new();
-
-        let mut vertex_total = 0;
-        let mut cell_total = 0;
-
-        for block in self.blocks.indices() {
-            let space = self.block_space(block);
-
-            let mut cell_size = space.cell_size();
-            let mut vertex_size = space.vertex_size();
-
-            if config.ghost {
-                for axis in 0..N {
-                    cell_size[axis] += 2 * space.ghost();
-                    vertex_size[axis] += 2 * space.ghost();
-                }
-            }
-
-            for axis in 0..N {
-                debug_assert!(cell_size[axis] % stride == 0);
-                debug_assert!((vertex_size[axis] - 1) % stride == 0);
-
-                cell_size[axis] /= stride;
-                vertex_size[axis] = (vertex_size[axis] - 1) / stride + 1;
-            }
-
-            let cell_space = IndexSpace::new(cell_size);
-            let vertex_space = IndexSpace::new(vertex_size);
-
-            for cell in cell_space.iter() {
-                let mut vertex = [0; N];
-
-                if N == 1 {
-                    vertex[0] = cell[0];
-                    let v1 = vertex_space.linear_from_cartesian(vertex);
-                    vertex[0] = cell[0] + 1;
-                    let v2 = vertex_space.linear_from_cartesian(vertex);
-
-                    connectivity.push(vertex_total + v1 as u64);
-                    connectivity.push(vertex_total + v2 as u64);
-                } else if N == 2 {
-                    vertex[0] = cell[0];
-                    vertex[1] = cell[1];
-                    let v1 = vertex_space.linear_from_cartesian(vertex);
-                    vertex[0] = cell[0];
-                    vertex[1] = cell[1] + 1;
-                    let v2 = vertex_space.linear_from_cartesian(vertex);
-                    vertex[0] = cell[0] + 1;
-                    vertex[1] = cell[1] + 1;
-                    let v3 = vertex_space.linear_from_cartesian(vertex);
-                    vertex[0] = cell[0] + 1;
-                    vertex[1] = cell[1];
-                    let v4 = vertex_space.linear_from_cartesian(vertex);
-
-                    connectivity.push(vertex_total + v1 as u64);
-                    connectivity.push(vertex_total + v2 as u64);
-                    connectivity.push(vertex_total + v3 as u64);
-                    connectivity.push(vertex_total + v4 as u64);
-                }
-
-                offsets.push(connectivity.len() as u64);
-            }
-
-            cell_total += cell_space.index_count();
-            vertex_total += vertex_space.index_count() as u64;
-        }
-
-        let cells = Cells {
-            cell_verts: VertexNumbers::XML {
-                connectivity,
-                offsets,
-            },
-            types: vec![CellType::Quad; cell_total],
+impl<const N: usize> From<MeshSer<N>> for Mesh<N> {
+    fn from(value: MeshSer<N>) -> Self {
+        let mut result = Mesh {
+            tree: value.tree.into(),
+            width: value.width,
+            ghost: value.ghost,
+            boundary: value.boundary,
+            ..Default::default()
         };
-
-        // Generate point data
-        let mut vertices = Vec::new();
-
-        for block in self.blocks.indices() {
-            let space = self.block_space(block);
-            let window = if config.ghost {
-                space.full_window()
-            } else {
-                space.inner_window()
-            };
-
-            'window: for node in window {
-                for axis in 0..N {
-                    if node[axis] % (stride as isize) != 0 {
-                        continue 'window;
-                    }
-                }
-
-                let position = space.position(node);
-                let mut vertex = [0.0; 3];
-                vertex[..N].copy_from_slice(&position);
-                vertices.extend(vertex);
-            }
-        }
-
-        let points = IOBuffer::new(vertices);
-
-        // Attributes
-        let mut attributes = Attributes {
-            point: Vec::new(),
-            cell: Vec::new(),
-        };
-
-        for (name, system) in checkpoint.systems.iter() {
-            for (idx, field) in system.fields.iter().enumerate() {
-                let start = idx * system.count;
-                let end = idx * system.count + system.count;
-
-                attributes.point.push(self.field_attribute(
-                    format!("{}::{}", name, field),
-                    &system.buffer[start..end],
-                    config.ghost,
-                    stride,
-                ));
-            }
-        }
-
-        for (name, system) in checkpoint.fields.iter() {
-            attributes.point.push(self.field_attribute(
-                format!("Field::{}", name),
-                system,
-                config.ghost,
-                stride,
-            ));
-        }
-
-        for (name, system) in checkpoint.int_fields.iter() {
-            attributes.point.push(self.field_attribute(
-                format!("IntField::{}", name),
-                system,
-                config.ghost,
-                stride,
-            ));
-        }
-
-        let piece = UnstructuredGridPiece {
-            points,
-            cells,
-            data: attributes,
-        };
-
-        let model = Vtk {
-            version: (2, 2).into(),
-            title: config.title,
-            byte_order: ByteOrder::LittleEndian,
-            data: DataSet::UnstructuredGrid {
-                meta: None,
-                pieces: vec![Piece::Inline(Box::new(piece))],
-            },
-            file_path: None,
-        };
-
-        model.export(path).map_err(|i| match i {
-            vtkio::Error::IO(io) => io,
-            v => {
-                log::error!("Encountered error {:?} while exporting vtu", v);
-                io::Error::from(io::ErrorKind::Other)
-            }
-        })?;
-
-        Ok(())
-    }
-
-    fn field_attribute<T: ToPrimitive + Copy + 'static>(
-        &self,
-        name: String,
-        data: &[T],
-        ghost: bool,
-        stride: usize,
-    ) -> Attribute {
-        let mut buffer = Vec::new();
-
-        for block in self.blocks.indices() {
-            let space = self.block_space(block);
-            let nodes = self.block_nodes(block);
-            let window = if ghost {
-                space.full_window()
-            } else {
-                space.inner_window()
-            };
-
-            'window: for node in window {
-                for axis in 0..N {
-                    if node[axis] % (stride as isize) != 0 {
-                        continue 'window;
-                    }
-                }
-
-                let index = space.index_from_node(node);
-                let value = data[nodes.start + index];
-                buffer.push(value);
-            }
-        }
-
-        Attribute::DataArray(DataArrayBase {
-            name,
-            elem: ElementType::Scalars {
-                num_comp: 1,
-                lookup_table: None,
-            },
-            data: IOBuffer::new(buffer),
-        })
+        result.build();
+        result
     }
 }
 
@@ -1130,5 +863,52 @@ impl<const N: usize, I: SystemBoundaryConds<N>> SystemBoundaryConds<N>
         position: [f64; N],
     ) -> crate::prelude::RadiativeParams {
         self.inner.radiative(label, position)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rand::Rng;
+    #[test]
+    fn fuzzy_serialize() -> eyre::Result<()> {
+        let mut mesh = Mesh::<2>::new(
+            Rectangle::UNIT,
+            6,
+            3,
+            [
+                [BoundaryClass::Ghost, BoundaryClass::OneSided],
+                [BoundaryClass::Ghost, BoundaryClass::OneSided],
+            ]
+            .into(),
+        );
+        mesh.refine_global();
+
+        // Randomly refine mesh
+        let mut rng = rand::rng();
+        for _ in 0..4 {
+            // Randomaize refinement
+            rng.fill(mesh.refine_flags.as_mut_slice());
+            // Balance flags
+            mesh.balance_flags();
+            // Perform refinement
+            mesh.regrid();
+        }
+
+        // Serialize tree
+        let data = ron::to_string(&mesh)?;
+        let mesh2: Mesh<2> = ron::from_str(data.as_str())?;
+
+        assert_eq!(mesh.tree, mesh2.tree);
+        assert_eq!(mesh.width, mesh2.width);
+        assert_eq!(mesh.ghost, mesh2.ghost);
+        assert_eq!(mesh.boundary, mesh2.boundary);
+        assert_eq!(mesh.max_level, mesh2.max_level);
+        assert_eq!(mesh.blocks, mesh2.blocks);
+        assert_eq!(mesh.nodes, mesh2.nodes);
+        assert_eq!(mesh.neighbors, mesh2.neighbors);
+        assert_eq!(mesh.interfaces, mesh2.interfaces);
+
+        Ok(())
     }
 }

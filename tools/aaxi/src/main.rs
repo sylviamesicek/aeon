@@ -34,6 +34,13 @@ fn main() -> eyre::Result<()> {
     // Ensure path exists.
     std::fs::create_dir_all(&output_path)?;
 
+    // *********************************
+    // Arguments
+
+    // if matches. && output_path.join("cache").exists() {
+    //     std::fs::remove_dir_all(output_path.join("cache"))?;
+    // }
+
     // **********************************
 
     // Terminal output setup
@@ -69,12 +76,12 @@ fn main() -> eyre::Result<()> {
     // ***********************************
     // Initial data
 
-    let (mesh, fields) = initial_data(&config, &output_path)?;
+    let (mesh, system) = initial_data(&config, &output_path)?;
 
     // ************************************
     // Evolve data forwards
 
-    evolve_data(&config, &output_path, mesh, fields)?;
+    evolve_data(&config, &output_path, mesh, system)?;
 
     Ok(())
 }
@@ -117,15 +124,16 @@ impl CommandExt for Command {
                 .value_parser(value_parser!(PathBuf)),
         )
         .arg(
-            arg!(<positional> ... "positional arguments referenced in config file")
-                .trailing_var_arg(true)
+            Arg::new("clear-cache")
+                .long("clear-cache")
+                .help("Clears cache directory before running initial data/evolution")
+                .num_args(0)
                 .required(false),
         )
         .arg(
-            Arg::new("cache-init")
-                .long("cache-init")
-                .required(false)
-                .num_args(0),
+            arg!(<positional> ... "positional arguments referenced in config file")
+                .trailing_var_arg(true)
+                .required(false),
         )
     }
 }

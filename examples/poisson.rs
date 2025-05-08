@@ -82,25 +82,25 @@ impl SolverCallback<2, Scalar> for Callback {
 
         let i = iteration / 50;
 
-        let mut checkpoint = SystemCheckpoint::default();
+        let mut checkpoint = Checkpoint::default();
+        checkpoint.attach_mesh(&mesh);
         checkpoint.save_field("Solution", input.into_scalar());
         checkpoint.save_field("Derivative", output.into_scalar());
-
-        mesh.export_vtu(
-            PathBuf::from("output/poisson").join(format!(
-                "{}_level_{}_iter_{}.vtu",
-                "poisson",
-                mesh.max_level(),
-                i
-            )),
-            &checkpoint,
-            ExportVtuConfig {
-                title: "poisson".to_string(),
-                ghost: false,
-                stride: 1,
-            },
-        )
-        .unwrap()
+        checkpoint
+            .export_vtu(
+                PathBuf::from("output/poisson").join(format!(
+                    "{}_level_{}_iter_{}.vtu",
+                    "poisson",
+                    mesh.max_level(),
+                    i
+                )),
+                ExportVtuConfig {
+                    title: "poisson".to_string(),
+                    ghost: false,
+                    stride: 1,
+                },
+            )
+            .unwrap()
     }
 }
 
@@ -175,14 +175,13 @@ pub fn main() -> eyre::Result<()> {
         let mut flags = vec![0; mesh.num_nodes()];
         mesh.flags_debug(&mut flags);
 
-        let mut checkpoint = SystemCheckpoint::default();
+        let mut checkpoint = Checkpoint::default();
+        checkpoint.attach_mesh(&mesh);
         checkpoint.save_field("Source", &source);
         checkpoint.save_field("Solution", &solution);
         checkpoint.save_int_field("Flags", &flags);
-
-        mesh.export_vtu(
+        checkpoint.export_vtu(
             format!("output/poisson/poisson{i}.vtu"),
-            &checkpoint,
             ExportVtuConfig {
                 title: "Poisson Equation".to_string(),
                 ghost: false,

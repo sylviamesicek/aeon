@@ -19,6 +19,8 @@ pub struct Config {
     pub limits: Limits,
     pub regrid: Regrid,
     pub visualize: Visualize,
+    #[serde(default)]
+    pub cache: Cache,
 
     #[serde(default)]
     pub source: Vec<Source>,
@@ -44,6 +46,7 @@ impl Config {
             limits: self.limits,
             regrid: self.regrid,
             visualize: self.visualize,
+            cache: self.cache,
 
             source: sources,
         })
@@ -127,6 +130,22 @@ pub struct Visualize {
     pub save_relax_result: bool,
     /// Stride for saving visualizations.
     pub stride: usize,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct Cache {
+    pub initial: bool,
+    #[serde(default)]
+    pub evolve_interval: Option<usize>,
+}
+
+impl Default for Cache {
+    fn default() -> Self {
+        Self {
+            initial: false,
+            evolve_interval: None,
+        }
+    }
 }
 
 /// A floating point argument that can either be provided via a configuration file

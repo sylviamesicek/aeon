@@ -6,7 +6,7 @@ use std::{
 
 use crate::array::ArrayWrap;
 
-use super::{index::IndexWindow, AxisMask, Region, Side};
+use super::{AxisMask, Region, Side, index::IndexWindow};
 
 /// A face of a rectangular prism in `N` dimensional space.
 /// If `face.side` is true, than this face points in the positive direction along
@@ -140,6 +140,38 @@ impl<const N: usize, T> FaceArray<N, T> {
             [f(Face::negative(axis)), f(Face::positive(axis))]
         }))
     }
+
+    /// Retrieves the inner representation of `FaceArray`, i.e. an array of type
+    /// `[[T; 2]; N]` where the first index is axis and the second index is size.
+    pub fn into_inner(self) -> [[T; 2]; N] {
+        self.0
+    }
+}
+
+impl<const N: usize, T: Clone> FaceArray<N, T> {
+    /// Constructs a `FaceArray` by filling the whole array with `value`.
+    pub fn splat(value: T) -> Self {
+        Self::from_fn(|_| value.clone())
+    }
+
+    pub fn from_sides(negative: [T; N], positive: [T; N]) -> Self {
+        Self::from_fn(|face| match face.side {
+            true => positive[face.axis].clone(),
+            false => negative[face.axis].clone(),
+        })
+    }
+}
+
+impl<const N: usize, T> From<[[T; 2]; N]> for FaceArray<N, T> {
+    fn from(value: [[T; 2]; N]) -> Self {
+        Self(value)
+    }
+}
+
+impl<const N: usize, T> From<[(T, T); N]> for FaceArray<N, T> {
+    fn from(value: [(T, T); N]) -> Self {
+        Self(value.map(|(l, r)| [l, r]))
+    }
 }
 
 impl<const N: usize, T: serde::Serialize + Clone> serde::Serialize for FaceArray<N, T> {
@@ -164,19 +196,6 @@ where
     }
 }
 
-impl<const N: usize, T: Clone> FaceArray<N, T> {
-    /// Constructs a `FaceArray` by filling the whole array with `value`.
-    pub fn splat(value: T) -> Self {
-        Self::from_fn(|_| value.clone())
-    }
-
-    pub fn from_sides(negative: [T; N], positive: [T; N]) -> Self {
-        Self::from_fn(|face| match face.side {
-            true => positive[face.axis].clone(),
-            false => negative[face.axis].clone(),
-        })
-    }
-}
 impl<const N: usize, T: Default> Default for FaceArray<N, T> {
     fn default() -> Self {
         Self::from_fn(|_| T::default())

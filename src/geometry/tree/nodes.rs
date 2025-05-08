@@ -10,7 +10,7 @@ use std::{array, ops::Range};
 use super::BlockId;
 
 /// Associates vertices with each block in the `Tree`.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct TreeNodes<const N: usize> {
     /// Number of subdivisions for each axis.
     #[serde(with = "crate::array")]

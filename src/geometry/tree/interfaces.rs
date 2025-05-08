@@ -10,7 +10,7 @@ use crate::{
     prelude::{FaceArray, Rectangle},
 };
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TreeInterface<const N: usize> {
     /// Block to be filled
     pub block: BlockId,
@@ -42,7 +42,7 @@ struct TransferAABB<const N: usize> {
     size: [usize; N],
 }
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, PartialEq, Eq, Default)]
 pub struct TreeInterfaces<const N: usize> {
     /// Interfaces build from neighbors.
     interfaces: Vec<TreeInterface<N>>,
