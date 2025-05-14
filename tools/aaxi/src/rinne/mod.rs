@@ -47,9 +47,11 @@ impl<'a> SolverCallback<2, Scalar> for IterCallback<'a> {
         self.pb.set_message(format!("Step: {}", iteration));
         self.pb.inc(1);
 
-        let Some(visualize_interval) = self.config.visualize.save_relax_interval else {
+        if !self.config.visualize.save_relax {
             return;
-        };
+        }
+
+        let visualize_interval = self.config.visualize.save_relax_interval;
 
         if iteration % visualize_interval != 0 {
             return;
@@ -155,8 +157,8 @@ pub fn initial_data(config: &Config, output: &Path) -> eyre::Result<(Mesh<2>, Sy
     // Visualization
 
     // Path for all visualization data.
-    if config.visualize.save_relax_levels
-        || config.visualize.save_relax_interval.is_some()
+    if config.visualize.save_relax
+        || config.visualize.save_relax_levels
         || config.visualize.save_relax_result
     {
         std::fs::create_dir_all(&output.join("initial"))?;
@@ -592,7 +594,11 @@ pub fn evolve_data(
     let max_level = config.limits.max_levels;
 
     let mut time_since_save = 0.0;
-    let save_interval = config.visualize.save_evolve_interval.unwrap_or(f64::MAX);
+    let save_interval = if config.visualize.save_evolve {
+        config.visualize.save_evolve_interval
+    } else {
+        f64::MAX
+    };
     let visualize_stride = config.visualize.stride;
 
     // Does the simulation disperse?

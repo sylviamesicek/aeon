@@ -61,6 +61,14 @@ fn default_output() -> String {
     "output".to_string()
 }
 
+fn default_one() -> usize {
+    1
+}
+
+fn default_onef() -> f64 {
+    1.0
+}
+
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Domain {
     /// Size of domain along the ρ axis.
@@ -119,31 +127,44 @@ pub struct Regrid {
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Visualize {
-    /// How often do we save a visualization?
+    /// Should we save evolution data?
     #[serde(default)]
-    pub save_evolve_interval: Option<f64>,
+    pub save_evolve: bool,
+    /// How often do we save a visualization?
+    #[serde(default = "default_onef")]
+    pub save_evolve_interval: f64,
+    /// Should we save relaxation iterations.
+    #[serde(default)]
+    pub save_relax: bool,
+    /// How many iterations between each save?
+    #[serde(default = "default_one")]
+    pub save_relax_interval: usize,
+    /// Should we save the final result for relaxing each leve?
     #[serde(default)]
     pub save_relax_levels: bool,
-    #[serde(default)]
-    pub save_relax_interval: Option<usize>,
+    /// Should we save the final result?
     #[serde(default)]
     pub save_relax_result: bool,
     /// Stride for saving visualizations.
     pub stride: usize,
 }
 
+/// Config struct describing how we cache data.
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Cache {
     pub initial: bool,
-    #[serde(default)]
-    pub evolve_interval: Option<usize>,
+    /// Should we cache evolution
+    pub evolve: bool,
+    #[serde(default = "default_one")]
+    pub evolve_interval: usize,
 }
 
 impl Default for Cache {
     fn default() -> Self {
         Self {
             initial: false,
-            evolve_interval: None,
+            evolve: false,
+            evolve_interval: 1,
         }
     }
 }

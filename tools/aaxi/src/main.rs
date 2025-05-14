@@ -7,6 +7,8 @@ use std::path::{Path, PathBuf};
 mod config;
 mod misc;
 mod rinne;
+mod searches;
+mod transform;
 
 use config::*;
 use rinne::*;

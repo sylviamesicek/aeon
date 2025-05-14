@@ -35,14 +35,20 @@ global = 1
 flag_interval = 20
 
 [visualize]
+save_evolve = true
 save_evolve_interval = 0.07
-save_relax_levels = true
+
+save_relax = true
 save_relax_interval = 1000
+save_relax_levels = true
 save_relax_result = true
+
 stride = 6
 
 [cache]
 initial = true
+evolve = false
+evolve_interval = 100
 
 [[source]]
 type = "scalar_field"
