@@ -1,5 +1,13 @@
 name = "scalar"
-output = "output/scalar$0"
+output = "output/scalar${amplitude}"
+
+[execution]
+mode = "search"
+parameter_key = "amplitude"
+directory = "output/scalar_search"
+start = 0.0
+end = 1.0
+bifurcations = 1
 
 order = 4
 diss_order = 6
@@ -27,6 +35,7 @@ max_steps = 1_000_000
 [limits]
 max_levels = 15
 max_nodes = 16_000_000
+max_bytes = 10_000_000_000
 
 [regrid]
 refine_error = 1e-6
@@ -52,6 +61,6 @@ evolve_interval = 100
 
 [[source]]
 type = "scalar_field"
-amplitude = "$0"
+amplitude = "${amplitude}"
 sigma = [5.35, 5.35]
 mass = 0.0

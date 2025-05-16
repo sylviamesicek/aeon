@@ -1,13 +1,17 @@
-use eyre::{Context, eyre};
+use eyre::Context;
 use serde::{Deserialize, Serialize};
 
-#[derive(Serialize, Deserialize)]
+use crate::transform::{ConfigVars, transform};
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Config {
     #[serde(default = "default_name")]
     pub name: String,
     #[serde(default = "default_output")]
     pub output: String,
-
+    /// Are we simply running simulations or doing a critical search?
+    #[serde(default)]
+    pub execution: Execution,
     /// Order of stencil used to approximate derivatives
     pub order: usize,
     /// Order of stencil used to approximate dissipation.
@@ -27,15 +31,12 @@ pub struct Config {
 }
 
 impl Config {
-    pub fn apply_args(self, args: &[&str]) -> eyre::Result<Self> {
-        let mut sources = Vec::with_capacity(self.source.len());
-        for source in self.source {
-            sources.push(source.apply_args(args)?);
-        }
-
+    pub fn transform(self, vars: &ConfigVars) -> eyre::Result<Self> {
         Ok(Self {
-            name: template_str_apply_args(&self.name, args)?,
-            output: template_str_apply_args(&self.output, args)?,
+            name: transform(&self.name, vars)?,
+            output: transform(&self.output, vars)?,
+
+            execution: self.execution.transform(vars)?,
 
             order: self.order,
             diss_order: self.diss_order,
@@ -48,7 +49,11 @@ impl Config {
             visualize: self.visualize,
             cache: self.cache,
 
-            source: sources,
+            source: self
+                .source
+                .into_iter()
+                .map(|source| source.transform(vars))
+                .collect::<Result<_, _>>()?,
         })
     }
 }
@@ -111,6 +116,8 @@ pub struct Limits {
     pub max_levels: usize,
     /// Maximum number of nodes allowed before program crashes.
     pub max_nodes: usize,
+    /// Maximum amount of RAM avalable before the program crashes
+    pub max_memory: usize,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -125,7 +132,7 @@ pub struct Regrid {
     pub flag_interval: usize,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Visualize {
     /// Should we save evolution data?
     #[serde(default)]
@@ -150,7 +157,7 @@ pub struct Visualize {
 }
 
 /// Config struct describing how we cache data.
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Cache {
     pub initial: bool,
     /// Should we cache evolution
@@ -169,6 +176,68 @@ impl Default for Cache {
     }
 }
 
+#[derive(Serialize, Deserialize, Default, Debug, Clone)]
+#[serde(tag = "mode")]
+pub enum Execution {
+    #[serde(rename = "run")]
+    #[default]
+    Run,
+    #[serde(rename = "search")]
+    Search {
+        #[serde(flatten)]
+        search: Search,
+    },
+}
+
+impl Execution {
+    pub fn transform(self, vars: &ConfigVars) -> eyre::Result<Self> {
+        Ok(match self {
+            Execution::Run => Self::Run,
+            Execution::Search { search } => Execution::Search {
+                search: search.transform(vars)?,
+            },
+        })
+    }
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct Search {
+    pub directory: String,
+    pub parameter_key: String,
+    /// Start of range to search
+    start: FPos,
+    /// End of range to search
+    end: FPos,
+    /// Number of bifurcations to make
+    pub bifurcations: usize,
+}
+
+impl Search {
+    pub fn transform(self, vars: &ConfigVars) -> eyre::Result<Self> {
+        Ok(Self {
+            directory: transform(&self.directory, vars)?,
+            parameter_key: transform(&self.parameter_key, vars)?,
+            start: self.start.transform(&vars)?,
+            end: self.end.transform(&vars)?,
+            bifurcations: self.bifurcations,
+        })
+    }
+
+    pub fn start(&self) -> f64 {
+        let FPos::F64(start) = self.start else {
+            panic!("Search has not been properly transformed")
+        };
+        start
+    }
+
+    pub fn end(&self) -> f64 {
+        let FPos::F64(end) = self.end else {
+            panic!("Search has not been properly transformed")
+        };
+        end
+    }
+}
+
 /// A floating point argument that can either be provided via a configuration file
 /// or as a positional argument in the cli.
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -181,15 +250,12 @@ pub enum FPos {
 }
 
 impl FPos {
-    fn apply_args(self, args: &[&str]) -> eyre::Result<Self> {
+    fn transform(self, vars: &ConfigVars) -> eyre::Result<Self> {
         Ok(FPos::F64(match self {
             FPos::F64(v) => v,
-            FPos::Pos(pos) => {
-                let trans = template_str_apply_args(&pos, args)?;
-                trans
-                    .parse::<f64>()
-                    .context("failed to parse string as float")?
-            }
+            FPos::Pos(pos) => transform(&pos, &vars)?
+                .parse::<f64>()
+                .context("failed to parse string as float")?,
         }))
     }
 
@@ -199,6 +265,12 @@ impl FPos {
         };
 
         *v
+    }
+}
+
+impl From<f64> for FPos {
+    fn from(value: f64) -> Self {
+        Self::F64(value)
     }
 }
 
@@ -221,20 +293,20 @@ pub enum Source {
 }
 
 impl Source {
-    fn apply_args(self, args: &[&str]) -> eyre::Result<Self> {
+    fn transform(self, vars: &ConfigVars) -> eyre::Result<Self> {
         Ok(match self {
             Self::Brill { amplitude, sigma } => Self::Brill {
-                amplitude: amplitude.apply_args(args)?,
-                sigma: (sigma.0.apply_args(args)?, sigma.1.apply_args(args)?),
+                amplitude: amplitude.transform(vars)?,
+                sigma: (sigma.0.transform(vars)?, sigma.1.transform(vars)?),
             },
             Self::ScalarField {
                 amplitude,
                 sigma,
                 mass,
             } => Self::ScalarField {
-                amplitude: amplitude.apply_args(args)?,
-                sigma: (sigma.0.apply_args(args)?, sigma.1.apply_args(args)?),
-                mass: mass.apply_args(args)?,
+                amplitude: amplitude.transform(vars)?,
+                sigma: (sigma.0.transform(vars)?, sigma.1.transform(vars)?),
+                mass: mass.transform(vars)?,
             },
         })
     }
@@ -287,90 +359,90 @@ pub enum GaugeCondition {
     LogPlusOneZeroShift,
 }
 
-fn template_str_apply_args(data: &str, args: &[&str]) -> eyre::Result<String> {
-    let mut result = String::new();
-    let mut current = String::new();
-    let mut searching = false;
+// fn template_str_apply_args(data: &str, args: &[&str]) -> eyre::Result<String> {
+//     let mut result = String::new();
+//     let mut current = String::new();
+//     let mut searching = false;
 
-    let mut chars = data.char_indices();
+//     let mut chars = data.char_indices();
 
-    while let Some((pos, ch)) = chars.next() {
-        if searching {
-            if data[pos..].starts_with('}') {
-                searching = false;
-                let index = current.parse::<usize>()?;
+//     while let Some((pos, ch)) = chars.next() {
+//         if searching {
+//             if data[pos..].starts_with('}') {
+//                 searching = false;
+//                 let index = current.parse::<usize>()?;
 
-                if args.len() <= index as usize {
-                    return Err(eyre!(
-                        "{}th positional argument referenced in file but {} positional arguments were provided",
-                        index,
-                        args.len()
-                    ));
-                }
+//                 if args.len() <= index as usize {
+//                     return Err(eyre!(
+//                         "{}th positional argument referenced in file but {} positional arguments were provided",
+//                         index,
+//                         args.len()
+//                     ));
+//                 }
 
-                result.push_str(args[index as usize]);
-            }
+//                 result.push_str(args[index as usize]);
+//             }
 
-            current.push(ch);
+//             current.push(ch);
 
-            continue;
-        }
+//             continue;
+//         }
 
-        if data[pos..].starts_with("${") {
-            // Reset current search
-            current.clear();
+//         if data[pos..].starts_with("${") {
+//             // Reset current search
+//             current.clear();
 
-            let next = chars.next();
-            debug_assert_eq!(next.map(|(_, c)| c), Some('{'));
+//             let next = chars.next();
+//             debug_assert_eq!(next.map(|(_, c)| c), Some('{'));
 
-            searching = true;
+//             searching = true;
 
-            continue;
-        }
+//             continue;
+//         }
 
-        if data[pos..].starts_with('$') {
-            let (_, index) = chars
-                .next()
-                .ok_or_else(|| eyre!("invalid argument string"))?;
-            let index: u32 = index
-                .to_digit(10)
-                .ok_or_else(|| eyre!("invalid argument string"))?;
+//         if data[pos..].starts_with('$') {
+//             let (_, index) = chars
+//                 .next()
+//                 .ok_or_else(|| eyre!("invalid argument string"))?;
+//             let index: u32 = index
+//                 .to_digit(10)
+//                 .ok_or_else(|| eyre!("invalid argument string"))?;
 
-            if args.len() <= index as usize {
-                return Err(eyre!(
-                    "{}th positional argument referenced in file but {} positional arguments were provided",
-                    index,
-                    args.len()
-                ));
-            }
+//             if args.len() <= index as usize {
+//                 return Err(eyre!(
+//                     "{}th positional argument referenced in file but {} positional arguments were provided",
+//                     index,
+//                     args.len()
+//                 ));
+//             }
 
-            result.push_str(args[index as usize]);
+//             result.push_str(args[index as usize]);
 
-            continue;
-        }
+//             continue;
+//         }
 
-        result.push(ch);
-    }
+//         result.push(ch);
+//     }
 
-    Ok(result)
-}
+//     Ok(result)
+// }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+// #[cfg(test)]
+// mod tests {
+//     use super::*;
 
-    #[test]
-    fn template_str() {
-        let args = vec!["0.0", "hello world", "&&@"];
+// #[test]
+// fn template_str() {
+//     let args = vec!["0.0", "hello world", "&&@"];
 
-        assert_eq!(
-            template_str_apply_args("test$0123", &args).unwrap(),
-            "test0.0123"
-        );
-        assert_eq!(
-            template_str_apply_args("test${1}123", &args).unwrap(),
-            "testhello world123"
-        );
-        assert_eq!(template_str_apply_args("$2tst", &args).unwrap(), "&&@tst");
-    }
-}
+//     assert_eq!(
+//         template_str_apply_args("test$0123", &args).unwrap(),
+//         "test0.0123"
+//     );
+//     assert_eq!(
+//         template_str_apply_args("test${1}123", &args).unwrap(),
+//         "testhello world123"
+//     );
+//     assert_eq!(template_str_apply_args("$2tst", &args).unwrap(), "&&@tst");
+// }
+// }

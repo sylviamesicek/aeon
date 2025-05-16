@@ -660,6 +660,23 @@ pub fn evolve_data(
             break;
         }
 
+        let ram_usage = fields.estimate_heap_size()
+            + integrator.estimate_heap_size()
+            + mesh.estimate_heap_size();
+
+        if ram_usage >= config.limits.max_memory {
+            println!(
+                "{}",
+                style(format!(
+                    "RAM usage exceded maximum allocated bytes: {}",
+                    HumanBytes(ram_usage as u64),
+                ))
+                .red()
+            );
+            disperse = false;
+            break;
+        }
+
         // Get step size
         let h = mesh.min_spacing() * cfl;
 

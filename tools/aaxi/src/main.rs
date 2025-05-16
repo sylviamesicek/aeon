@@ -2,7 +2,11 @@ use clap::{Arg, ArgMatches, Command, arg, value_parser};
 use console::{Term, style};
 use eyre::WrapErr;
 use serde::de::DeserializeOwned;
-use std::path::{Path, PathBuf};
+use std::{
+    collections::HashMap,
+    num::ParseFloatError,
+    path::{Path, PathBuf},
+};
 
 mod config;
 mod misc;
@@ -12,6 +16,8 @@ mod transform;
 
 use config::*;
 use rinne::*;
+
+use transform::ConfigVars;
 
 fn main() -> eyre::Result<()> {
     // Set up nice error handing.
@@ -30,7 +36,47 @@ fn main() -> eyre::Result<()> {
     // *********************************
     // Configuration
 
-    let config = parse_config(&dir, &matches)?;
+    let (config, vars) = parse_config(&dir, &matches)?;
+
+    match config.execution {
+        // Just perform normal evolution
+        Execution::Run => run_simulation(&config.transform(&vars)?)?,
+        Execution::Search { ref search } => {
+            // Okay, we are doing a critical search instead
+
+            // Apply positional arguments
+            let search = search.clone().transform(&vars)?;
+            // Get parameter key
+            let param_key = search.parameter_key.clone();
+
+            let start = search.start();
+            let end = search.end();
+
+            let midpoint = (start + end) / 2.0;
+
+            // Helper function for running simulation
+            let run_search = |amplitude: f64| -> eyre::Result<()> {
+                let mut vars = vars.clone();
+                // Set the parameter variable to the given amplitude
+                vars.named.insert(param_key.clone(), amplitude);
+                // Transform config appropriately
+                let config = config.clone().transform(&vars)?;
+                // Run simulation
+                run_simulation(&config)
+            };
+
+            run_search(start)?;
+            run_search(midpoint)?;
+            run_search(end)?;
+        }
+    }
+
+    Ok(())
+}
+
+fn run_simulation(config: &Config) -> eyre::Result<()> {
+    // Find currect working directory
+    let dir = std::env::current_dir().context("Failed to find current working directory")?;
     // Compute output directory path.
     let output_path = abs_or_relative(&dir, &PathBuf::from(&config.output));
     // Ensure path exists.
@@ -92,7 +138,7 @@ fn main() -> eyre::Result<()> {
 // Helpers **********************
 // ******************************
 
-fn parse_config(dir: &Path, matches: &ArgMatches) -> eyre::Result<Config> {
+fn parse_config(dir: &Path, matches: &ArgMatches) -> eyre::Result<(Config, ConfigVars)> {
     // Compute config path.
     let config_path = matches
         .get_one::<PathBuf>("config")
@@ -103,14 +149,23 @@ fn parse_config(dir: &Path, matches: &ArgMatches) -> eyre::Result<Config> {
     // Parse config file from toml.
     let config = import_from_toml::<Config>(config_path)?;
 
-    let args: Vec<&str> = matches
+    // Read positional arguments
+    let positional_args: Vec<&str> = matches
         .get_many::<String>("positional")
         .into_iter()
         // .ok_or(eyre::eyre!("Unable to parse positional arguments"))?
         .flat_map(|v| v.into_iter().map(|s| s.as_str()))
         .collect();
 
-    config.apply_args(&args)
+    let vars = ConfigVars {
+        positional: positional_args
+            .into_iter()
+            .map(|sbuf| sbuf.parse::<f64>())
+            .collect::<Result<Vec<f64>, ParseFloatError>>()?,
+        named: HashMap::new(),
+    };
+
+    Ok((config, vars))
 }
 
 /// Extension trait for defining helper methods on `clap::Command`.
