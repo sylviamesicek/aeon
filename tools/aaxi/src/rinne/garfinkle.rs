@@ -139,10 +139,10 @@ impl<'a> Projection<2> for SeedProjection<'a> {
         for source in self.0 {
             match source {
                 Source::Brill { amplitude, sigma } => {
-                    let srho2 = sigma.0.as_f64() * sigma.0.as_f64();
-                    let sz2 = sigma.1.as_f64() * sigma.1.as_f64();
+                    let srho2 = sigma.0.unwrap() * sigma.0.unwrap();
+                    let sz2 = sigma.1.unwrap() * sigma.1.unwrap();
 
-                    result += rho * amplitude.as_f64() * (-rho2 / srho2 - z2 / sz2).exp()
+                    result += rho * amplitude.unwrap() * (-rho2 / srho2 - z2 / sz2).exp()
                 }
                 _ => {}
             }
@@ -293,8 +293,8 @@ where
             mesh.project(
                 ORDER,
                 Gaussian {
-                    amplitude: amplitude.as_f64(),
-                    sigma: [sigma.0.as_f64(), sigma.1.as_f64()],
+                    amplitude: amplitude.unwrap(),
+                    sigma: [sigma.0.unwrap(), sigma.1.unwrap()],
                     center: [0.0; 2],
                 },
                 context.field_mut(Context::Phi(scalar_field_index)),

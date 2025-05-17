@@ -8,6 +8,7 @@ use std::{
 
 use crate::{
     config::{Config, GaugeCondition, Source},
+    history::{RunHistory, RunRecord},
     misc,
 };
 use aeon::{
@@ -82,11 +83,12 @@ impl<'a> SolverCallback<2, Scalar> for IterCallback<'a> {
 }
 
 /// Solve rinne's initial data problem using Garfinkles variables.
-pub fn initial_data(config: &Config, output: &Path) -> eyre::Result<(Mesh<2>, SystemVec<Fields>)> {
+pub fn initial_data(config: &Config) -> eyre::Result<(Mesh<2>, SystemVec<Fields>)> {
     // Save initial time
     let start = Instant::now();
 
     // Cache directory
+    let output = config.output_dir()?;
     let cache = output.join("cache");
     let init_cache = cache.join(format!("{}_init.dat", config.name));
 
@@ -145,7 +147,7 @@ pub fn initial_data(config: &Config, output: &Path) -> eyre::Result<(Mesh<2>, Sy
             .iter()
             .flat_map(|source| {
                 if let Source::ScalarField { mass, .. } = source {
-                    Some(mass.as_f64())
+                    Some(mass.unwrap())
                 } else {
                     None
                 }
@@ -194,7 +196,7 @@ pub fn initial_data(config: &Config, output: &Path) -> eyre::Result<(Mesh<2>, Sy
                     IterCallback {
                         config,
                         pb: pb.clone(),
-                        output,
+                        output: &output,
                     },
                     &config.source,
                     system.as_mut_slice(),
@@ -208,7 +210,7 @@ pub fn initial_data(config: &Config, output: &Path) -> eyre::Result<(Mesh<2>, Sy
                     IterCallback {
                         config,
                         pb: pb.clone(),
-                        output,
+                        output: &output,
                     },
                     &config.source,
                     system.as_mut_slice(),
@@ -222,7 +224,7 @@ pub fn initial_data(config: &Config, output: &Path) -> eyre::Result<(Mesh<2>, Sy
                     IterCallback {
                         config,
                         pb: pb.clone(),
-                        output,
+                        output: &output,
                     },
                     &config.source,
                     system.as_mut_slice(),
@@ -563,12 +565,14 @@ impl Function<2> for FieldDerivs {
 
 pub fn evolve_data(
     config: &Config,
-    output: &Path,
+    history: &mut RunHistory,
     mut mesh: Mesh<2>,
     mut fields: SystemVec<Fields>,
 ) -> eyre::Result<()> {
     // Save initial time
     let start = Instant::now();
+
+    let output = config.output_dir()?;
     // Create output folder.
     std::fs::create_dir_all(output.join("evolve"))?;
     // Cache system
@@ -769,9 +773,20 @@ pub fn evolve_data(
             disperse = false;
             break;
         }
+
+        // Serialize those values
+        history.write_record(RunRecord {
+            step,
+            time,
+            proper_time,
+            lapse,
+        })?;
     }
 
     m.clear()?;
+
+    // Flush record at end of execution.
+    history.flush()?;
 
     if disperse {
         println!("{}", style(format!("System disperses")).cyan());
@@ -794,7 +809,11 @@ pub fn evolve_data(
     println!("Field Info...");
     println!(
         "- RAM usage: ~{}",
-        HumanBytes((fields.estimate_heap_size() + integrator.estimate_heap_size()) as u64)
+        HumanBytes(
+            (fields.estimate_heap_size()
+                + integrator.estimate_heap_size()
+                + mesh.estimate_heap_size()) as u64
+        )
     );
 
     Ok(())

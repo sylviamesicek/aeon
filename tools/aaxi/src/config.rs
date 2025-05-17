@@ -1,7 +1,12 @@
-use eyre::Context;
+use std::path::{Path, PathBuf};
+
+use eyre::{Context, eyre};
 use serde::{Deserialize, Serialize};
 
-use crate::transform::{ConfigVars, transform};
+use crate::{
+    misc,
+    transform::{ConfigVars, transform},
+};
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Config {
@@ -55,6 +60,26 @@ impl Config {
                 .map(|source| source.transform(vars))
                 .collect::<Result<_, _>>()?,
         })
+    }
+
+    pub fn output_dir(&self) -> eyre::Result<PathBuf> {
+        misc::abs_or_relative(Path::new(&self.output))
+    }
+
+    pub fn _search_dir(&self) -> eyre::Result<PathBuf> {
+        let Execution::Search { search } = &self.execution else {
+            return Err(eyre!("program is not running in search mode"));
+        };
+
+        search.search_dir()
+    }
+
+    pub fn _is_search_mode(&self) -> bool {
+        matches!(self.execution, Execution::Search { .. })
+    }
+
+    pub fn _is_run_mode(&self) -> bool {
+        matches!(self.execution, Execution::Run)
     }
 }
 
@@ -205,11 +230,13 @@ pub struct Search {
     pub directory: String,
     pub parameter_key: String,
     /// Start of range to search
-    start: FPos,
+    start: FloatVar,
     /// End of range to search
-    end: FPos,
-    /// Number of bifurcations to make
-    pub bifurcations: usize,
+    end: FloatVar,
+    /// How many levels of binary search before we quit?
+    pub max_depth: usize,
+    /// Finish search when end-start < min_error
+    pub min_error: f64,
 }
 
 impl Search {
@@ -219,22 +246,27 @@ impl Search {
             parameter_key: transform(&self.parameter_key, vars)?,
             start: self.start.transform(&vars)?,
             end: self.end.transform(&vars)?,
-            bifurcations: self.bifurcations,
+            max_depth: self.max_depth,
+            min_error: self.min_error,
         })
     }
 
     pub fn start(&self) -> f64 {
-        let FPos::F64(start) = self.start else {
+        let FloatVar::F64(start) = self.start else {
             panic!("Search has not been properly transformed")
         };
         start
     }
 
     pub fn end(&self) -> f64 {
-        let FPos::F64(end) = self.end else {
+        let FloatVar::F64(end) = self.end else {
             panic!("Search has not been properly transformed")
         };
         end
+    }
+
+    pub fn search_dir(&self) -> eyre::Result<PathBuf> {
+        misc::abs_or_relative(Path::new(&self.directory))
     }
 }
 
@@ -242,33 +274,33 @@ impl Search {
 /// or as a positional argument in the cli.
 #[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(untagged)]
-pub enum FPos {
+pub enum FloatVar {
     /// Fixed floating point input.
     F64(f64),
-    /// Positional argument passed to cli.
-    Pos(String),
+    /// Script that will be parsed by the transformer
+    Script(String),
 }
 
-impl FPos {
+impl FloatVar {
     fn transform(self, vars: &ConfigVars) -> eyre::Result<Self> {
-        Ok(FPos::F64(match self {
-            FPos::F64(v) => v,
-            FPos::Pos(pos) => transform(&pos, &vars)?
+        Ok(FloatVar::F64(match self {
+            FloatVar::F64(v) => v,
+            FloatVar::Script(pos) => transform(&pos, &vars)?
                 .parse::<f64>()
                 .context("failed to parse string as float")?,
         }))
     }
 
-    pub fn as_f64(&self) -> f64 {
+    pub fn unwrap(&self) -> f64 {
         let Self::F64(v) = self else {
-            panic!("failed to unwrap FPos");
+            panic!("failed to unwrap FloatVar");
         };
 
         *v
     }
 }
 
-impl From<f64> for FPos {
+impl From<f64> for FloatVar {
     fn from(value: f64) -> Self {
         Self::F64(value)
     }
@@ -280,15 +312,15 @@ pub enum Source {
     /// Instance generates Brill-type initial data with gunlach seed function.
     #[serde(rename = "brill")]
     Brill {
-        amplitude: FPos,
-        sigma: (FPos, FPos),
+        amplitude: FloatVar,
+        sigma: (FloatVar, FloatVar),
     },
     /// An axisymmetric scalar field with the given sigma.
     #[serde(rename = "scalar_field")]
     ScalarField {
-        amplitude: FPos,
-        sigma: (FPos, FPos),
-        mass: FPos,
+        amplitude: FloatVar,
+        sigma: (FloatVar, FloatVar),
+        mass: FloatVar,
     },
 }
 
@@ -316,9 +348,9 @@ impl Source {
             Source::Brill { amplitude, sigma } => {
                 println!(
                     "- Gunlach seed function: A = {}, σ = ({}, {})",
-                    amplitude.as_f64(),
-                    sigma.0.as_f64(),
-                    sigma.1.as_f64()
+                    amplitude.unwrap(),
+                    sigma.0.unwrap(),
+                    sigma.1.unwrap()
                 );
             }
             Source::ScalarField {
@@ -326,20 +358,20 @@ impl Source {
                 sigma,
                 mass,
             } => {
-                if mass.as_f64().abs() == 0.0 {
+                if mass.unwrap().abs() == 0.0 {
                     println!(
                         "- Massless Scalar Field: A = {}, σ = ({}, {})",
-                        amplitude.as_f64(),
-                        sigma.0.as_f64(),
-                        sigma.1.as_f64()
+                        amplitude.unwrap(),
+                        sigma.0.unwrap(),
+                        sigma.1.unwrap()
                     );
                 } else {
                     println!(
                         "- Massive Scalar Field: A = {}, σ = ({}, {}), m = {}",
-                        amplitude.as_f64(),
-                        sigma.0.as_f64(),
-                        sigma.1.as_f64(),
-                        mass.as_f64()
+                        amplitude.unwrap(),
+                        sigma.0.unwrap(),
+                        sigma.1.unwrap(),
+                        mass.unwrap()
                     );
                 }
             }

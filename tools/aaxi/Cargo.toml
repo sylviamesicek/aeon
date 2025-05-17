@@ -10,6 +10,7 @@ clap.workspace = true
 chumsky.workspace = true
 color-eyre.workspace = true
 console.workspace = true
+csv.workspace = true
 datasize.workspace = true
 eyre.workspace = true
 indicatif.workspace = true
@@ -18,3 +19,6 @@ reborrow.workspace = true
 serde.workspace = true
 serde_with.workspace = true
 toml.workspace = true
+
+[dev-dependencies]
+rand.workspace = true
