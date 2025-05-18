@@ -8,7 +8,7 @@ use std::{
 
 use crate::{
     config::{Config, GaugeCondition, Source},
-    history::{RunHistory, RunRecord},
+    history::{RunHistory, RunRecord, RunStatus},
     misc,
 };
 use aeon::{
@@ -639,6 +639,7 @@ pub fn evolve_data(
         if norm.is_nan() || norm >= 1e60 {
             println!("{}", style(format!("Norm diverges: {:.5e}", norm)).red());
             disperse = false;
+            history.set_status(RunStatus::NormDiverged);
             break;
         }
 
@@ -648,6 +649,7 @@ pub fn evolve_data(
                 style(format!("Steps exceded maximum allocated steps: {}", step)).red()
             );
             disperse = false;
+            history.set_status(RunStatus::MaxStepsReached);
             break;
         }
 
@@ -661,6 +663,7 @@ pub fn evolve_data(
                 .red()
             );
             disperse = false;
+            history.set_status(RunStatus::MaxNodesReached);
             break;
         }
 
@@ -678,6 +681,7 @@ pub fn evolve_data(
                 .red()
             );
             disperse = false;
+            history.set_status(RunStatus::MaxMemoryReached);
             break;
         }
 
@@ -771,6 +775,7 @@ pub fn evolve_data(
                 style(format!("Lapse Collapses, α = {:.5e}", lapse)).red()
             );
             disperse = false;
+            history.set_status(RunStatus::NormDiverged);
             break;
         }
 
@@ -790,6 +795,7 @@ pub fn evolve_data(
 
     if disperse {
         println!("{}", style(format!("System disperses")).cyan());
+        history.set_status(RunStatus::Dispersed);
     } else {
         println!("{}", style(format!("System collapses")).cyan());
     }

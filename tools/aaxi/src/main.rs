@@ -1,6 +1,7 @@
 use clap::{Arg, ArgMatches, Command, arg, value_parser};
 use console::{Term, style};
-use history::RunHistory;
+use eyre::eyre;
+use history::{RunHistory, RunStatus, SearchHistory};
 use std::{collections::HashMap, num::ParseFloatError, path::PathBuf};
 
 mod config;
@@ -41,41 +42,88 @@ fn main() -> eyre::Result<()> {
             // Okay, we are doing a critical search instead
             // Apply positional arguments
             let search = search.clone().transform(&vars)?;
-            // Get parameter key
-            let param_key = search.parameter_key.clone();
             // As well as search directory
             let search_dir = search.search_dir()?;
+            std::fs::create_dir_all(&search_dir)?;
 
-            let start = search.start();
-            let end = search.end();
+            // Setup range to search
+            let mut start = search.start();
+            let mut end = search.end();
 
-            let midpoint = (start + end) / 2.0;
+            let history_file = search_dir.join("history.csv");
+            let mut history =
+                SearchHistory::load_csv(&history_file).unwrap_or_else(|_| SearchHistory::new());
 
-            // Helper function for running simulation
-            let run_search = |amplitude: f64| -> eyre::Result<()> {
-                let mut vars = vars.clone();
-                // Set the parameter variable to the given amplitude
-                vars.named.insert(param_key.clone(), amplitude);
-                // Transform config appropriately
-                let config = config.clone().transform(&vars)?;
-                // Setup history file
-                let history_file =
-                    search_dir.join(format!("{}.csv", misc::encode_float(amplitude)));
-                let mut history = RunHistory::from_path(&history_file)?;
-                // Run simulation, keeping track of history
-                run_simulation(&config, &mut history)?;
-                // Save to file
-                history.flush()?;
-                Ok(())
-            };
+            let start_disperses = run_search(&mut history, &config, &vars, start)?.has_dispersed();
+            let end_disperses = run_search(&mut history, &config, &vars, end)?.has_dispersed();
 
-            run_search(start)?;
-            run_search(midpoint)?;
-            run_search(end)?;
+            if start_disperses == end_disperses {
+                if start_disperses {
+                    return Err(eyre!("both sides of the parameter range disperse"));
+                } else {
+                    return Err(eyre!("both sides of the parameter range collapse"));
+                }
+            }
+
+            for _ in 0..search.max_depth {
+                if (end - start).abs() <= search.min_error {
+                    break;
+                }
+
+                println!("Searching range {} to {}", start, end);
+
+                let midpoint = (start + end) / 2.0;
+
+                let midpoint_disperses =
+                    run_search(&mut history, &config, &vars, start)?.has_dispersed();
+
+                if midpoint_disperses == start_disperses {
+                    debug_assert!(midpoint_disperses != end_disperses);
+                    start = midpoint;
+                } else {
+                    debug_assert!(midpoint_disperses == end_disperses);
+                    end = midpoint;
+                }
+
+                history.save_csv(&history_file)?;
+            }
         }
     }
 
     Ok(())
+}
+
+fn run_search(
+    cache: &mut SearchHistory,
+    config: &Config,
+    vars: &ConfigVars,
+    amplitude: f64,
+) -> eyre::Result<RunStatus> {
+    if let Some(status) = cache.status(amplitude) {
+        return Ok(status);
+    }
+
+    let search = config.search_config().unwrap();
+
+    let mut vars = vars.clone();
+    // Set the parameter variable to the given amplitude
+    vars.named.insert(search.parameter_key.clone(), amplitude);
+    // Transform config appropriately
+    let config = config.clone().transform(&vars)?;
+    // Setup history file
+    let history_file = config
+        .search_dir()?
+        .join(format!("{}.csv", misc::encode_float(amplitude)));
+    let mut history = RunHistory::output(&history_file)?;
+    // Run simulation, keeping track of history
+    run_simulation(&config, &mut history)?;
+    // Save to file
+    history.flush()?;
+    // Get status
+    let status = history.status();
+    // Insert it into cache
+    cache.insert(amplitude, status);
+    return Ok(status);
 }
 
 fn run_simulation(config: &Config, history: &mut RunHistory) -> eyre::Result<()> {

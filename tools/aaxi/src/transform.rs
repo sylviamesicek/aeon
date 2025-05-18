@@ -1,3 +1,5 @@
+//! Handles applying configuration variables/arguments to a config struct.
+
 use chumsky::{prelude::*, text::digits};
 use eyre::eyre;
 use std::collections::HashMap;
@@ -6,12 +8,14 @@ use std::fmt::Write as _;
 /// Arguments in scope when transforming config strings.
 #[derive(Clone, Debug)]
 pub struct ConfigVars {
+    /// Positional arguments passed into cli invokation.
     pub positional: Vec<f64>,
+    /// Named arguments provided by search.
     pub named: HashMap<String, f64>,
 }
 
 /// Transforms a given input by parsing and substituting any patterns of the form
-/// "$<digit>", "${<number>}", "${<string>}". The former two map to positional arguments
+/// "$digit", "${number}", "${string}". The former two map to positional arguments
 /// and the latter references named arguments.
 pub fn transform<'a>(input: &'a str, vars: &ConfigVars) -> eyre::Result<String> {
     let parser = token_stream_parser();
@@ -49,15 +53,21 @@ pub fn transform<'a>(input: &'a str, vars: &ConfigVars) -> eyre::Result<String> 
     Ok(result)
 }
 
+/// A single token taken after parsing a string in the config file. The full string
+/// can be formed by concating all tokens.
 #[derive(Debug, PartialEq, Eq)]
 enum Token<'src> {
+    /// A unmatched string sequence without any `$` characters.
     String(&'src str),
+    /// A positional argument of the form `$0` (only allowed if single digit) or `${0}`.
     Positional(usize),
+    /// Named argument of the form `${name}`.
     Named(&'src str),
 }
 
 // type SimpleError<'a> = Err<Simple<'a, char>>;
 
+/// Parser of a string into a token.
 fn token_parser<'a>() -> impl Parser<'a, &'a str, Token<'a>> {
     let single_digit = one_of::<_, &str, _>("0123456789").map(|r| {
         let mut buffer = [0; 4];
@@ -100,6 +110,8 @@ fn token_parser<'a>() -> impl Parser<'a, &'a str, Token<'a>> {
     token
 }
 
+/// Parser for a input stream of strings into a set of tokens. It does this by
+/// repeated applying `token_parser()`.
 fn token_stream_parser<'a>() -> impl Parser<'a, &'a str, Vec<Token<'a>>> {
     token_parser()
         .repeated()

@@ -1,13 +1,12 @@
-use std::path::{Path, PathBuf};
-
-use eyre::{Context, eyre};
-use serde::{Deserialize, Serialize};
-
 use crate::{
     misc,
     transform::{ConfigVars, transform},
 };
+use eyre::{Context, eyre};
+use serde::{Deserialize, Serialize};
+use std::path::{Path, PathBuf};
 
+/// Global configuration struct for simulation run.
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Config {
     #[serde(default = "default_name")]
@@ -36,6 +35,7 @@ pub struct Config {
 }
 
 impl Config {
+    /// Applies variable transformation to `Config`.
     pub fn transform(self, vars: &ConfigVars) -> eyre::Result<Self> {
         Ok(Self {
             name: transform(&self.name, vars)?,
@@ -62,16 +62,24 @@ impl Config {
         })
     }
 
+    /// Retrieves output_director in absolution form.
     pub fn output_dir(&self) -> eyre::Result<PathBuf> {
         misc::abs_or_relative(Path::new(&self.output))
     }
 
-    pub fn _search_dir(&self) -> eyre::Result<PathBuf> {
+    pub fn search_dir(&self) -> eyre::Result<PathBuf> {
         let Execution::Search { search } = &self.execution else {
             return Err(eyre!("program is not running in search mode"));
         };
 
         search.search_dir()
+    }
+
+    pub fn search_config(&self) -> Option<&Search> {
+        match &self.execution {
+            Execution::Search { search } => Some(search),
+            _ => None,
+        }
     }
 
     pub fn _is_search_mode(&self) -> bool {
@@ -99,6 +107,7 @@ fn default_onef() -> f64 {
     1.0
 }
 
+/// Settings deciding domain of the mesh.
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Domain {
     /// Size of domain along the ρ axis.
@@ -111,6 +120,7 @@ pub struct Domain {
     pub cell_ghost: usize,
 }
 
+/// Relaxation settings for solving initial data.
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Relax {
     pub max_steps: usize,
@@ -119,6 +129,7 @@ pub struct Relax {
     pub dampening: f64,
 }
 
+/// Evolution settings for running evolution.
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Evolve {
     /// CFL factor for evolution
@@ -135,6 +146,7 @@ pub struct Evolve {
     pub gauge: GaugeCondition,
 }
 
+/// Limits before a given simulation crashes (or assumes collapse)
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Limits {
     /// Maximum number of levels allowed during refinement.
@@ -145,6 +157,7 @@ pub struct Limits {
     pub max_memory: usize,
 }
 
+/// Settings for regriding mesh.
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Regrid {
     /// Any cell with error larger than this will be refined.
@@ -157,6 +170,7 @@ pub struct Regrid {
     pub flag_interval: usize,
 }
 
+/// Visualization settings for initial data and evolution output.
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Visualize {
     /// Should we save evolution data?
@@ -201,6 +215,7 @@ impl Default for Cache {
     }
 }
 
+/// What subproduct should be executed.
 #[derive(Serialize, Deserialize, Default, Debug, Clone)]
 #[serde(tag = "mode")]
 pub enum Execution {
@@ -215,6 +230,7 @@ pub enum Execution {
 }
 
 impl Execution {
+    /// Performs variable transformation on `Execution`.
     pub fn transform(self, vars: &ConfigVars) -> eyre::Result<Self> {
         Ok(match self {
             Execution::Run => Self::Run,
@@ -225,6 +241,7 @@ impl Execution {
     }
 }
 
+/// Search subcommand.
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Search {
     pub directory: String,
@@ -251,6 +268,7 @@ impl Search {
         })
     }
 
+    /// Gets start of search range.
     pub fn start(&self) -> f64 {
         let FloatVar::F64(start) = self.start else {
             panic!("Search has not been properly transformed")
@@ -258,6 +276,7 @@ impl Search {
         start
     }
 
+    /// Gets end of search range.
     pub fn end(&self) -> f64 {
         let FloatVar::F64(end) = self.end else {
             panic!("Search has not been properly transformed")
@@ -265,6 +284,8 @@ impl Search {
         end
     }
 
+    /// Finds absolute value of search directory as provided by the search.directory element
+    /// in the toml fiile.
     pub fn search_dir(&self) -> eyre::Result<PathBuf> {
         misc::abs_or_relative(Path::new(&self.directory))
     }
@@ -291,6 +312,7 @@ impl FloatVar {
         }))
     }
 
+    /// Unwraps a float var into a float, assuming that it has already been transformed.
     pub fn unwrap(&self) -> f64 {
         let Self::F64(v) = self else {
             panic!("failed to unwrap FloatVar");
@@ -306,6 +328,7 @@ impl From<f64> for FloatVar {
     }
 }
 
+/// Source term for the simulated system.
 #[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(tag = "type")]
 pub enum Source {
@@ -382,11 +405,14 @@ impl Source {
 /// Gauge condition to use for evolution.
 #[derive(Clone, Copy, Debug, Default, serde::Serialize, serde::Deserialize)]
 pub enum GaugeCondition {
+    /// Pure generalized harmonic gauge conditions.
     #[default]
     #[serde(rename = "harmonic")]
     Harmonic,
+    /// Generalized harmonic gauge with no shift.
     #[serde(rename = "harmonic_zero_shift")]
     HarmonicZeroShift,
+    /// Log + 1 slicing with no shift.
     #[serde(rename = "log_plus_one_zero_shift")]
     LogPlusOneZeroShift,
 }
