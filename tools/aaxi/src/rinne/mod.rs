@@ -616,17 +616,22 @@ pub fn evolve_data(
     let node_pb = m.add(ProgressBar::new(config.limits.max_nodes as u64));
     node_pb.set_style(misc::node_style());
     node_pb.enable_steady_tick(Duration::from_millis(100));
-    node_pb.set_prefix("[Node] ");
+    node_pb.set_prefix("[Node]  ");
     // Max levels
     let level_pb = m.add(ProgressBar::new(config.limits.max_levels as u64));
     level_pb.set_style(misc::level_style());
     level_pb.enable_steady_tick(Duration::from_millis(100));
-    level_pb.set_prefix("[Level]");
+    level_pb.set_prefix("[Level] ");
+    // Memory usage
+    let memory_pb = m.add(ProgressBar::new(config.limits.max_memory as u64));
+    memory_pb.set_style(misc::byte_style());
+    memory_pb.enable_steady_tick(Duration::from_millis(100));
+    memory_pb.set_prefix("[Memory]");
     // Step spinner
     let step_pb = m.add(ProgressBar::no_length());
     step_pb.set_style(misc::spinner_style());
     step_pb.enable_steady_tick(Duration::from_millis(100));
-    step_pb.set_prefix("[Step]");
+    step_pb.set_prefix("[Step] ");
 
     while time < max_time && proper_time < max_proper_time {
         assert!(fields.len() == mesh.num_nodes());
@@ -667,16 +672,16 @@ pub fn evolve_data(
             break;
         }
 
-        let ram_usage = fields.estimate_heap_size()
+        let memory_usage = fields.estimate_heap_size()
             + integrator.estimate_heap_size()
             + mesh.estimate_heap_size();
 
-        if ram_usage >= config.limits.max_memory {
+        if memory_usage >= config.limits.max_memory {
             println!(
                 "{}",
                 style(format!(
                     "RAM usage exceded maximum allocated bytes: {}",
-                    HumanBytes(ram_usage as u64),
+                    HumanBytes(memory_usage as u64),
                 ))
                 .red()
             );
@@ -756,14 +761,12 @@ pub fn evolve_data(
 
         node_pb.set_position(mesh.num_nodes() as u64);
         level_pb.set_position(mesh.max_level() as u64);
+        memory_pb.set_position(memory_usage as u64);
 
         step_pb.inc(1);
         step_pb.set_message(format!(
-            "Step: {}, Max Level {}, Proper Time {:.8}, Lapse {:.5e}",
-            step,
-            mesh.max_level(),
-            proper_time,
-            lapse
+            "Step: {}, Proper Time {:.8}, Lapse {:.5e}",
+            step, proper_time, lapse
         ));
 
         // There is a chance that lapse is now NaN, which should trigger collapse,

@@ -1,6 +1,6 @@
 use clap::{Arg, ArgMatches, Command, arg, value_parser};
 use console::{Term, style};
-use eyre::eyre;
+use eyre::{Context, eyre};
 use history::{RunHistory, RunStatus, SearchHistory};
 use std::{collections::HashMap, num::ParseFloatError, path::PathBuf};
 
@@ -24,7 +24,7 @@ fn main() -> eyre::Result<()> {
         .author("Lukas Mesicek, lukas.m.mesicek@gmail.com")
         .version("0.1.0")
         .config_args();
-    // Check matches
+    // Check argument matches
     let matches = command.get_matches();
 
     // *********************************
@@ -38,8 +38,8 @@ fn main() -> eyre::Result<()> {
             let config = config.transform(&vars)?;
             run_simulation(&config, &mut RunHistory::empty())?
         }
+        // Okay, we are doing a critical search instead
         Execution::Search { ref search } => {
-            // Okay, we are doing a critical search instead
             // Apply positional arguments
             let search = search.clone().transform(&vars)?;
             // As well as search directory
@@ -65,8 +65,12 @@ fn main() -> eyre::Result<()> {
                 }
             }
 
-            for _ in 0..search.max_depth {
-                if (end - start).abs() <= search.min_error {
+            let mut depth = 0;
+            while depth < search.max_depth {
+                // Have we reached minimum tolerance
+                let tolerance = (end - start).abs();
+                if tolerance <= search.min_error {
+                    println!("Reached minimum critical parameter error {:.4e}", tolerance);
                     break;
                 }
 
@@ -85,7 +89,14 @@ fn main() -> eyre::Result<()> {
                     end = midpoint;
                 }
 
+                // Cache history file.
                 history.save_csv(&history_file)?;
+
+                depth += 1;
+                // Check maximum depth
+                if depth == search.max_depth {
+                    println!("Reached maximum critical search depth");
+                }
             }
         }
     }
@@ -93,6 +104,7 @@ fn main() -> eyre::Result<()> {
     Ok(())
 }
 
+/// Run a single iteration of a critical search
 fn run_search(
     cache: &mut SearchHistory,
     config: &Config,
@@ -107,7 +119,7 @@ fn run_search(
 
     let mut vars = vars.clone();
     // Set the parameter variable to the given amplitude
-    vars.named.insert(search.parameter_key.clone(), amplitude);
+    vars.named.insert(search.parameter.clone(), amplitude);
     // Transform config appropriately
     let config = config.clone().transform(&vars)?;
     // Setup history file
@@ -196,7 +208,8 @@ fn parse_config(matches: &ArgMatches) -> eyre::Result<(Config, ConfigVars)> {
     let config_path = misc::abs_or_relative(&config_path)?;
 
     // Parse config file from toml.
-    let config = misc::import_from_toml::<Config>(&config_path)?;
+    let config =
+        misc::import_from_toml::<Config>(&config_path).context("Failed to parse config file")?;
 
     // Read positional arguments
     let positional_args: Vec<&str> = matches

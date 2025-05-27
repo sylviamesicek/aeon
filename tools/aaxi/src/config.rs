@@ -245,7 +245,7 @@ impl Execution {
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Search {
     pub directory: String,
-    pub parameter_key: String,
+    pub parameter: String,
     /// Start of range to search
     start: FloatVar,
     /// End of range to search
@@ -260,7 +260,7 @@ impl Search {
     pub fn transform(self, vars: &ConfigVars) -> eyre::Result<Self> {
         Ok(Self {
             directory: transform(&self.directory, vars)?,
-            parameter_key: transform(&self.parameter_key, vars)?,
+            parameter: transform(&self.parameter, vars)?,
             start: self.start.transform(&vars)?,
             end: self.end.transform(&vars)?,
             max_depth: self.max_depth,
@@ -415,6 +415,9 @@ pub enum GaugeCondition {
     /// Log + 1 slicing with no shift.
     #[serde(rename = "log_plus_one_zero_shift")]
     LogPlusOneZeroShift,
+    /// Log + 1 slicing with harmonic shift.
+    #[serde(rename = "log_plus_one")]
+    LogPlusOne,
 }
 
 // fn template_str_apply_args(data: &str, args: &[&str]) -> eyre::Result<String> {

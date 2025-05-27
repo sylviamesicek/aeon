@@ -426,7 +426,7 @@ impl Decomposition {
         }
     }
 
-    fn harmonic_gauge(&self) -> GaugeEvolution {
+    fn harmonic(&self) -> GaugeEvolution {
         let Self {
             pos,
             metric,
@@ -516,6 +516,68 @@ impl Decomposition {
         };
 
         let shift_t = s.vector(|_| 0.0);
+
+        GaugeEvolution {
+            lapse: lapse_t,
+            shift: shift_t,
+        }
+    }
+
+    fn log_plus_one(&self) -> GaugeEvolution {
+        let Self {
+            pos,
+            metric,
+            twist,
+            k,
+            l,
+            theta,
+            z,
+            lapse,
+            lapse_partials,
+            shift,
+            shift_partials,
+            ..
+        } = self;
+
+        let on_axis = pos[0].abs() <= ON_AXIS;
+
+        const F: f64 = 1.0;
+        const A: f64 = 1.0;
+        const MU: f64 = 1.0;
+        const D: f64 = 1.0;
+        const M: f64 = 2.0;
+
+        let s = Space::<2>;
+
+        let k_trace = s.sum(|[i, j]| k[[i, j]] * metric.inv()[[i, j]]);
+        let lapse2 = lapse * lapse;
+
+        let lapse_t = {
+            let term1 = -2.0 * lapse * F * (k_trace + l - M * theta);
+            let term2 = s.sum(|i| shift[i] * lapse_partials[i]);
+            term1 + term2
+        };
+
+        let shift_t = s.vector(|i| {
+            let lamg_term = 0.5 / metric.det()
+                * s.sum(|[m]| metric.inv()[[i, m]] * metric.det_derivs()[[m]])
+                + twist.regular_con()[[i]];
+
+            let g_inv_term: f64 = s.sum(|[m]| metric.inv_derivs()[[i, m, m]]);
+
+            let term1 = -lapse2 * MU * g_inv_term;
+            let term2 = lapse2 * 2.0 * MU * s.sum(|[m]| metric.inv()[[i, m]] * z[[m]]);
+
+            let term3 = -lapse * A * s.sum(|[m]| metric.inv()[[i, m]] * lapse_partials[m]);
+            let term4 = s.sum(|[m]| shift[[m]] * shift_partials[[i, m]]);
+
+            let mut regular = -lapse2 * (2.0 * MU - D) * lamg_term;
+            if !on_axis && i == 0 {
+                regular += lapse2 * (2.0 * MU - D) * metric.inv()[[0, 0]] / pos[0];
+            }
+
+            term1 + term2 + term3 + term4 + regular
+        });
 
         GaugeEvolution {
             lapse: lapse_t,
@@ -997,8 +1059,9 @@ pub fn evolution(
     let decomp = Decomposition::new(pos, system.system(scalar_fields));
     let evolve = decomp.metric_evolution();
     let gauge = match gauge {
-        GaugeCondition::Harmonic => decomp.harmonic_gauge(),
+        GaugeCondition::Harmonic => decomp.harmonic(),
         GaugeCondition::HarmonicZeroShift => decomp.harmonic_gauge_zero_shift(),
+        GaugeCondition::LogPlusOne => decomp.log_plus_one(),
         GaugeCondition::LogPlusOneZeroShift => decomp.log_plus_one_zero_shift(),
     };
 

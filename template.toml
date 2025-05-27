@@ -1,16 +1,17 @@
 name = "scalar"
 output = "output/scalar${amplitude}"
 
-[execution]
-mode = "search"
-parameter_key = "amplitude"
-directory = "output/scalar_search"
-start = 0.0
-end = 1.0
-bifurcations = 1
-
 order = 4
 diss_order = 6
+
+[execution]
+mode = "search"
+directory = "output/scalar_search"
+parameter = "amplitude"
+start = 0.0
+end = 0.5
+max_depth = 10
+min_error = 1e-5
 
 [domain]
 radius = 48.0
@@ -27,15 +28,15 @@ dampening = 0.4
 [evolve]
 cfl = 0.2
 dissipation = 0.5
-gauge = "log_plus_one_zero_shift"
-max_time = 30.0
+gauge = "log_plus_one"
+max_time = 1000.0
 max_proper_time = 10.0
 max_steps = 1_000_000
 
 [limits]
 max_levels = 15
 max_nodes = 16_000_000
-max_bytes = 10_000_000_000
+max_memory = 5_000_000_000
 
 [regrid]
 refine_error = 1e-6

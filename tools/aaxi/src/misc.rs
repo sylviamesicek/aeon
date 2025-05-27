@@ -26,6 +26,13 @@ pub fn node_style() -> ProgressStyle {
     .unwrap()
 }
 
+pub fn byte_style() -> ProgressStyle {
+    ProgressStyle::with_template(
+        "{prefix:.bold.dim} {bar:.cyan/blue} {binary_bytes}/{binary_total_bytes}, {percent}%",
+    )
+    .unwrap()
+}
+
 pub fn level_style() -> ProgressStyle {
     ProgressStyle::with_template(
         "{prefix:.bold.dim} {bar:.cyan/blue} {human_pos}/{human_len} levels",

@@ -10,4 +10,4 @@
 
 module load rust
 cargo build --release
-cargo run --release --package critaxi -- "config/spherecrit.toml"
+cargo run --release --package aaxi

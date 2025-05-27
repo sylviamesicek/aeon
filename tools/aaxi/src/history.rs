@@ -15,13 +15,7 @@ pub enum RunStatus {
 
 impl RunStatus {
     pub fn _has_collapsed(self) -> bool {
-        matches!(
-            self,
-            Self::MaxMemoryReached { .. }
-                | Self::MaxStepsReached { .. }
-                | Self::MaxNodesReached { .. }
-                | Self::NormDiverged,
-        )
+        !self.has_dispersed()
     }
 
     pub fn has_dispersed(self) -> bool {
