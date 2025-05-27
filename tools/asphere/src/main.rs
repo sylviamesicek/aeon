@@ -5,25 +5,21 @@ use aeon::{
     prelude::*,
     solver::{Integrator, Method},
 };
-use clap::{Arg, Command};
+use clap::{Arg, ArgMatches, Command};
+use console::style;
 use core::f64;
 use eyre::{Context, Result, eyre};
 use std::fmt::Write as _;
-use std::{path::PathBuf, process::ExitCode};
+use std::path::PathBuf;
 
+mod cole;
 mod config;
+mod misc;
 mod system;
 
+use cole::*;
 use config::*;
 use system::*;
-
-#[derive(Clone)]
-struct RunConfig {
-    absolute: PathBuf,
-    amplitude: f64,
-    serial_id: Option<usize>,
-    visualize: bool,
-}
 
 struct Snapshot {
     mass: f64,
@@ -45,10 +41,14 @@ impl Diagnostics {
         self.data.push(data);
     }
 
-    fn flush(&self, config: RunConfig) -> Result<()> {
-        let Some(serial_id) = config.serial_id else {
+    fn flush(&self, config: &Config) -> Result<()> {
+        if !config.diagnostic.save {
             return Ok(());
-        };
+        }
+
+        let directory = config.directory()?;
+
+        let serial_id = config.diagnostic.serial_id;
 
         let file1 = format!("Mass-{}-{}", 4, serial_id);
         let file2 = format!("Al-{}-{}", 4, serial_id);
@@ -71,23 +71,17 @@ impl Diagnostics {
             )?;
         }
 
-        std::fs::write(file1, data1)?;
-        std::fs::write(file2, data2)?;
-        std::fs::write(file3, data3)?;
-        std::fs::write(file4, data4)?;
+        std::fs::write(directory.join(file1), data1)?;
+        std::fs::write(directory.join(file2), data2)?;
+        std::fs::write(directory.join(file3), data3)?;
+        std::fs::write(directory.join(file4), data4)?;
 
         Ok(())
     }
 }
 
-fn run(config: RunConfig, diagnostics: &mut Diagnostics) -> Result<()> {
-    // Unpack config
-    let RunConfig {
-        absolute,
-        amplitude,
-        serial_id,
-        visualize,
-    } = config;
+fn run(config: &Config, diagnostics: &mut Diagnostics) -> Result<()> {
+    let absolute = config.directory()?;
     // Log Header data.
     log::info!(
         "Output Directory: {}",
@@ -95,43 +89,34 @@ fn run(config: RunConfig, diagnostics: &mut Diagnostics) -> Result<()> {
             .to_str()
             .ok_or(eyre!("Failed to find absolute output directory"))?
     );
-    // As well as general information about the run
-    if let Some(id) = serial_id {
-        log::info!(
-            "Amplitude {:.6}, sigma: {:.6} Serial {}",
-            amplitude,
-            SIGMA,
-            id
-        );
-    } else {
-        log::info!("Amplitude {:.6}, sigma: {:.6}", amplitude, SIGMA);
-    }
+
+    let source = config.sources[0].clone();
 
     // Create output dir.
     std::fs::create_dir_all(&absolute)?;
 
     // Run brill simulation
-    log::trace!(
-        "Building Mesh with Radius {}, Cell Width {}, Ghost Nodes {}",
-        RADIUS,
-        CELL_WIDTH,
-        GHOST
-    );
+    log::trace!("Building Mesh with Radius {}", config.domain.radius);
 
     let mut mesh = Mesh::new(
         Rectangle {
-            size: [RADIUS],
+            size: [config.domain.radius],
             origin: [0.0],
         },
-        CELL_WIDTH,
-        GHOST,
+        6,
+        3,
         FaceArray::from_sides([BoundaryClass::Ghost], [BoundaryClass::OneSided]),
     );
 
-    log::trace!("Refining mesh globally {} times", REFINE_GLOBAL);
+    log::trace!("Refining mesh globally {} times", config.regrid.global);
 
-    for _ in 0..REFINE_GLOBAL {
+    for _ in 0..config.regrid.global {
         mesh.refine_global();
+    }
+
+    // Path for initial visualization data.
+    if config.visualize.save_initial || config.visualize.save_initial_levels {
+        std::fs::create_dir_all(&absolute.join("initial"))?;
     }
 
     let mut system = SystemVec::new(Fields);
@@ -140,7 +125,7 @@ fn run(config: RunConfig, diagnostics: &mut Diagnostics) -> Result<()> {
         system.resize(mesh.num_nodes());
 
         // Set initial data for scalar field.
-        let scalar_field = generate_initial_scalar_field(&mut mesh, amplitude);
+        let scalar_field = generate_initial_scalar_field(&mut mesh, source.amplitude, source.sigma);
 
         // Fill system using scalar field.
         mesh.evaluate(
@@ -157,12 +142,16 @@ fn run(config: RunConfig, diagnostics: &mut Diagnostics) -> Result<()> {
         log::info!("Scalar Field Norm {}", l2_norm);
 
         // Save visualization
-        if visualize {
+        if config.visualize.save_initial_levels {
             let mut checkpoint = Checkpoint::default();
             checkpoint.attach_mesh(&mesh);
             checkpoint.save_system(system.as_slice());
             checkpoint.export_vtu(
-                absolute.join(format!("initial{}.vtu", mesh.max_level())),
+                absolute.join("initial").join(format!(
+                    "{}_level{}.vtu",
+                    config.name,
+                    mesh.max_level()
+                )),
                 ExportVtuConfig {
                     title: "Massless Scalar Field Initial Data".to_string(),
                     ghost: false,
@@ -171,7 +160,7 @@ fn run(config: RunConfig, diagnostics: &mut Diagnostics) -> Result<()> {
             )?;
         }
 
-        if mesh.num_nodes() >= MAX_NODES {
+        if mesh.num_nodes() >= config.limits.max_nodes {
             log::error!(
                 "Failed to solve initial data, level: {}, nodes: {}",
                 mesh.max_level(),
@@ -180,14 +169,14 @@ fn run(config: RunConfig, diagnostics: &mut Diagnostics) -> Result<()> {
             return Err(eyre!("failed to refine within perscribed limits"));
         }
 
-        mesh.flag_wavelets(4, 0.0, MAX_ERROR_TOLERANCE, system.as_slice());
-        mesh.limit_level_range_flags(1, MAX_LEVELS);
+        mesh.flag_wavelets(4, 0.0, config.regrid.refine_error, system.as_slice());
+        mesh.limit_level_range_flags(1, config.limits.max_levels);
         mesh.balance_flags();
 
         if !mesh.requires_regridding() {
             log::trace!(
                 "Sucessfully refined mesh to give accuracy: {:.5e}",
-                MAX_ERROR_TOLERANCE
+                config.regrid.refine_error
             );
             break;
         } else {
@@ -201,7 +190,7 @@ fn run(config: RunConfig, diagnostics: &mut Diagnostics) -> Result<()> {
         }
     }
 
-    if visualize {
+    if config.visualize.save_initial {
         let mut checkpoint = Checkpoint::default();
         checkpoint.attach_mesh(&mesh);
         checkpoint.save_system(system.as_slice());
@@ -210,7 +199,21 @@ fn run(config: RunConfig, diagnostics: &mut Diagnostics) -> Result<()> {
             ExportVtuConfig {
                 title: "Massless Scalar Field Initial".to_string(),
                 ghost: false,
-                stride: 1,
+                stride: config.visualize.stride.into_int(),
+            },
+        )?;
+
+        let mut checkpoint = Checkpoint::default();
+        checkpoint.attach_mesh(&mesh);
+        checkpoint.save_system(system.as_slice());
+        checkpoint.export_vtu(
+            absolute
+                .join("initial")
+                .join(format!("{}.vtu", config.name)),
+            ExportVtuConfig {
+                title: "Massless Scalar Field Initial Data".to_string(),
+                ghost: false,
+                stride: config.visualize.stride.into_int(),
             },
         )?;
     }
@@ -218,7 +221,7 @@ fn run(config: RunConfig, diagnostics: &mut Diagnostics) -> Result<()> {
     // ****************************************
     // Run evolution
 
-    let mut integrator = Integrator::new(Method::RK4KO6(DISSIPATION));
+    let mut integrator = Integrator::new(Method::RK4KO6(config.evolve.dissipation));
     let mut time = 0.0;
     let mut step = 0;
 
@@ -239,7 +242,7 @@ fn run(config: RunConfig, diagnostics: &mut Diagnostics) -> Result<()> {
         },
     );
 
-    while proper_time < MAX_PROPER_TIME {
+    while proper_time < config.evolve.max_proper_time {
         assert!(system.len() == mesh.num_nodes());
         mesh.fill_boundary(Order::<4>, FieldConditions, system.as_mut_slice());
 
@@ -251,12 +254,12 @@ fn run(config: RunConfig, diagnostics: &mut Diagnostics) -> Result<()> {
             return Err(eyre!("exceded max allotted steps for evolution: {}", step));
         }
 
-        if step >= MAX_TIME_STEPS {
+        if step >= config.evolve.max_steps {
             log::error!("Evolution exceded maximum allocated steps: {}", step);
             return Err(eyre!("exceded max allotted steps for evolution: {}", step));
         }
 
-        if mesh.num_nodes() >= MAX_NODES {
+        if mesh.num_nodes() >= config.limits.max_nodes {
             log::error!(
                 "Evolution exceded maximum allocated nodes: {}",
                 mesh.num_nodes()
@@ -278,20 +281,19 @@ fn run(config: RunConfig, diagnostics: &mut Diagnostics) -> Result<()> {
         //     ));
         // }
 
-        let h = mesh.min_spacing() * CFL;
+        let h = mesh.min_spacing() * config.evolve.cfl;
 
-        if steps_since_regrid > REGRID_FLAG_INTERVAL {
+        if steps_since_regrid > config.regrid.flag_interval {
             steps_since_regrid = 0;
 
             mesh.flag_wavelets(
                 4,
-                MIN_ERROR_TOLERANCE,
-                MAX_ERROR_TOLERANCE,
+                config.regrid.coarsen_error,
+                config.regrid.refine_error,
                 system.as_slice(),
             );
-            mesh.limit_level_range_flags(1, MAX_LEVELS);
+            mesh.limit_level_range_flags(1, config.limits.max_levels);
             mesh.balance_flags();
-            mesh.limit_level_range_flags(1, MAX_LEVELS);
 
             mesh.regrid();
 
@@ -315,8 +317,9 @@ fn run(config: RunConfig, diagnostics: &mut Diagnostics) -> Result<()> {
             continue;
         }
 
-        if time_since_save >= SAVE_INTERVAL && visualize {
-            time_since_save -= SAVE_INTERVAL;
+        if time_since_save >= config.visualize.save_evolve_interval && config.visualize.save_evolve
+        {
+            time_since_save -= config.visualize.save_evolve_interval;
 
             log::trace!(
                 "Saving Checkpoint {save_step}, Time: {time:.5}, Dilated Time: {proper_time:.5}, Step: {step}, Norm: {norm:.5e}, Nodes: {}",
@@ -350,7 +353,7 @@ fn run(config: RunConfig, diagnostics: &mut Diagnostics) -> Result<()> {
         );
 
         let alpha = mesh.bottom_left_value(system.field(Field::Lapse));
-        if step % DIAGNOSTIC_STRIDE == 0 {
+        if config.diagnostic.save && step % config.diagnostic.save_interval == 0 {
             diagnostics.append(
                 proper_time,
                 Snapshot {
@@ -383,127 +386,131 @@ fn run(config: RunConfig, diagnostics: &mut Diagnostics) -> Result<()> {
 }
 
 // Main function that can return an error
-fn try_main() -> Result<()> {
+fn main() -> Result<()> {
+    // Set up nice colored error handing.
+    color_eyre::install()?;
     // Load configuration
-    let matches = Command::new("evsphere")
-        .about("A program for generating initial data for numerical relativity using hyperbolic relaxation.")
+    let command = Command::new("asphere")
+        .about("A program for simulating GR in spherical symmetry.")
         .author("Lukas Mesicek, lukas.m.mesicek@gmail.com")
-        .subcommand(Command::new("vis")
-            .arg(
-                Arg::new("amp")
-                    .short('a')
-                    .long("amp")
-                    .default_value("1.0")
-                    .value_name("FLOAT")
-            )
-            .arg(
-                Arg::new("output")
-                    .required(true)
-                    .help("Output directory")
-                    .value_name("DIR")
-                )
-            )
-        .subcommand(
-            Command::new("cole")
-                .arg(
-                    Arg::new("amp")
-                        .value_name("FLOAT")
-                        .required(true)
-                        .help("Amplitude of massless scalar field to simulate")
-                )
-                .arg(
-                    Arg::new("ser")
-                        .value_name("INT")
-                        .required(true)
-                        .help("Serialization number for massless scalar field data")
-                )
-        )
         .version("0.1.0")
-        .get_matches();
+        .config_args();
+    // Find matches
+    let matches = command.get_matches();
+    // Load configuration file.
+    let config = parse_config(&matches)?;
 
-    let mut config = RunConfig {
-        absolute: PathBuf::new(),
-        amplitude: 0.0,
-        serial_id: None,
-        visualize: false,
-    };
+    // Check that there is only one source term.
+    eyre::ensure!(
+        config.sources.len() == 1,
+        "asphere currently only supports one source term"
+    );
 
-    if let Some(matches) = matches.subcommand_matches("cole") {
-        config.amplitude = matches
-            .get_one::<String>("amp")
-            .ok_or(eyre!("Failed to find amplitude positional argument"))?
-            .parse::<f64>()
-            .map_err(|_| eyre!("Failed to parse amplitude as float"))?
-            .clone();
+    let source = config.sources[0].clone();
 
-        config.serial_id = Some(
-            matches
-                .get_one::<String>("ser")
-                .ok_or(eyre!("Failed to find serial_id positional argument"))?
-                .parse::<usize>()
-                .map_err(|_| eyre!("Failed to parse serial_id as int"))?
-                .clone(),
-        );
-
-        config.absolute =
-            std::env::current_dir().context("Failed to find current working directory")?;
-    } else if let Some(matches) = matches.subcommand_matches("vis") {
-        config.amplitude = matches
-            .get_one::<String>("amp")
-            .ok_or(eyre!("Could not find amplitude argument"))?
-            .parse::<f64>()
-            .map_err(|_| eyre!("Failed parse amplitude argument"))?
-            .clone();
-
-        let output = PathBuf::from(
-            matches
-                .get_one::<String>("output")
-                .ok_or(eyre!("Failed parse path argument"))?
-                .clone(),
-        );
-
-        if output.is_absolute() {
-            config.absolute = output
-        } else {
-            config.absolute = std::env::current_dir()
-                .context("Failed to find current working directory")?
-                .join(output);
-        }
-
-        config.visualize = true;
+    // Basic info dumping
+    println!("Simulation: {}", style(&config.name).green());
+    println!(
+        "Output Directory: {}",
+        style(config.directory()?.display()).green()
+    );
+    println!("Domain: {:.5}", config.domain.radius);
+    println!("Sources...");
+    for source in &config.sources {
+        source.println();
     }
-
-    // Build enviornment logger.
-    // env_logger::builder()
-    //     .filter_level(log::LevelFilter::Trace)
-    //     .init();
 
     // Diagnostic object
     let mut diagnostics = Diagnostics::default();
     // Run simulation
-    let result = run(config.clone(), &mut diagnostics);
+    let result = run(&config, &mut diagnostics);
     // Write diagnostics to file
-    diagnostics.flush(config.clone())?;
+    diagnostics.flush(&config)?;
 
     match result {
-        Ok(_) => eprintln!("A: {:.15} Disperses", config.amplitude),
-        Err(_) => eprintln!("A: {:.15} Collapses", config.amplitude),
+        Ok(_) => eprintln!("A: {:.15} Disperses", source.amplitude),
+        Err(_) => eprintln!("A: {:.15} Collapses", source.amplitude),
     }
 
     // Bubble up result
     result
 }
 
-fn main() -> ExitCode {
-    match try_main() {
-        Ok(()) => ExitCode::SUCCESS,
-        Err(err) => {
-            if log::log_enabled!(log::Level::Error) {
-                log::error!("{:?}", err);
-            } else {
-                eprintln!("{:?}", err);
-            }
-            ExitCode::FAILURE
-        }
+// ******************************
+// Helpers **********************
+// ******************************
+
+fn parse_config(matches: &ArgMatches) -> eyre::Result<Config> {
+    // First check if we are running the cole subcommand.
+    if let Some(matches) = matches.subcommand_matches("cole") {
+        let amplitude = matches
+            .get_one::<String>("amp")
+            .ok_or(eyre!("Failed to find amplitude positional argument"))?
+            .parse::<f64>()
+            .map_err(|_| eyre!("Failed to parse amplitude as float"))?
+            .clone();
+
+        let serial_id = matches
+            .get_one::<String>("ser")
+            .ok_or(eyre!("Failed to find serial_id positional argument"))?
+            .parse::<usize>()
+            .map_err(|_| eyre!("Failed to parse serial_id as int"))?
+            .clone();
+
+        return Ok(cole_config(amplitude, serial_id));
+    }
+
+    // Compute config path.
+    let config_path = matches
+        .get_one::<PathBuf>("config")
+        .cloned()
+        .unwrap_or("template.toml".to_string().into());
+    let config_path = misc::abs_or_relative(&config_path)?;
+
+    // Parse config file from toml.
+    let config =
+        misc::import_from_toml::<Config>(&config_path).context("Failed to parse config file")?;
+
+    Ok(config)
+}
+
+/// Extension trait for defining helper methods on `clap::Command`.
+trait CommandExt {
+    fn config_args(self) -> Self;
+}
+
+impl CommandExt for Command {
+    fn config_args(self) -> Self {
+        self.subcommand(
+            Command::new("vis")
+                .arg(
+                    Arg::new("amp")
+                        .short('a')
+                        .long("amp")
+                        .default_value("1.0")
+                        .value_name("FLOAT"),
+                )
+                .arg(
+                    Arg::new("output")
+                        .required(true)
+                        .help("Output directory")
+                        .value_name("DIR"),
+                ),
+        )
+        .subcommand(
+            Command::new("cole")
+                .arg(
+                    Arg::new("amp")
+                        .value_name("FLOAT")
+                        .required(true)
+                        .help("Amplitude of massless scalar field to simulate"),
+                )
+                .arg(
+                    Arg::new("ser")
+                        .value_name("INT")
+                        .required(true)
+                        .help("Serialization number for massless scalar field data"),
+                ),
+        )
     }
 }

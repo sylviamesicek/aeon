@@ -163,7 +163,7 @@ fn run_simulation(config: &Config, history: &mut RunHistory) -> eyre::Result<()>
         config.domain.radius, config.domain.height
     );
     println!("Sources...");
-    for source in &config.source {
+    for source in &config.sources {
         source.println();
     }
 
@@ -179,8 +179,6 @@ fn run_simulation(config: &Config, history: &mut RunHistory) -> eyre::Result<()>
         config.domain.cell_size >= 2 * config.domain.cell_ghost,
         "Domain cell nodes must be >= 2 * ghost"
     );
-
-    eyre::ensure!(config.visualize.stride >= 1, "Stride must be >= 1");
 
     // ***********************************
     // Initial data

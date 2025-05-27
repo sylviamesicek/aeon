@@ -1,23 +1,12 @@
 # Workspace configuration
 [workspace]
-members = [
-    "crates/*",
-
-    "tools/critaxi",
-    "tools/sharedaxi",
-
-    "tools/evsphere",
-    "tools/aaxi",
-]
+members = ["crates/*", "tools/asphere", "tools/aaxi"]
 default-members = [
     "crates/aeon_macros",
     "crates/aeon_tensor",
 
-    "tools/critaxi",
-    "tools/sharedaxi",
-
-    "tools/evsphere",
     "tools/aaxi",
+    "tools/asphere",
     ".",
 ]
 resolver = "2"
@@ -26,8 +15,6 @@ resolver = "2"
 aeon = { path = "." }
 aeon_macros = { path = "crates/aeon_macros" }
 aeon_tensor = { path = "crates/aeon_tensor" }
-
-sharedaxi = { path = "tools/sharedaxi" }
 
 bitvec = { version = "1.0.1", features = ["serde"] }
 bumpalo = "3.16.0"

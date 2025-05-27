@@ -3,7 +3,7 @@ use core::f64;
 use aeon::{kernel::Interpolation, mesh::Gaussian, prelude::*};
 use serde::{Deserialize, Serialize};
 
-use crate::config::SIGMA;
+// use crate::config::SIGMA;
 
 const KAPPA: f64 = 8.0 * f64::consts::PI;
 // const KAPPA: f64 = 1.0;
@@ -330,14 +330,14 @@ pub fn solve_constraints(mesh: &mut Mesh<1>, system: SystemSliceMut<Fields>) {
     mesh.fill_boundary(Order::<4>, ScalarConditions(SymCondition), lapse.into());
 }
 
-pub fn generate_initial_scalar_field(mesh: &mut Mesh<1>, amplitude: f64) -> Vec<f64> {
+pub fn generate_initial_scalar_field(mesh: &mut Mesh<1>, amplitude: f64, sigma: f64) -> Vec<f64> {
     let mut scalar_field = vec![0.0; mesh.num_nodes()];
 
     mesh.project(
         4,
         Gaussian {
             amplitude,
-            sigma: [SIGMA],
+            sigma: [sigma],
             center: [0.0],
         },
         &mut scalar_field,

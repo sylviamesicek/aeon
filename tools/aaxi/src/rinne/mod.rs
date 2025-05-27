@@ -75,7 +75,7 @@ impl<'a> SolverCallback<2, Scalar> for IterCallback<'a> {
                 ExportVtuConfig {
                     title: self.config.name.to_string(),
                     ghost: false,
-                    stride: self.config.visualize.stride,
+                    stride: self.config.visualize.stride.into_int(),
                 },
             )
             .unwrap();
@@ -143,7 +143,7 @@ pub fn initial_data(config: &Config) -> eyre::Result<(Mesh<2>, SystemVec<Fields>
     // Build fields from sources.
     let fields = Fields {
         scalar_fields: config
-            .source
+            .sources
             .iter()
             .flat_map(|source| {
                 if let Source::ScalarField { mass, .. } = source {
@@ -198,7 +198,7 @@ pub fn initial_data(config: &Config) -> eyre::Result<(Mesh<2>, SystemVec<Fields>
                         pb: pb.clone(),
                         output: &output,
                     },
-                    &config.source,
+                    &config.sources,
                     system.as_mut_slice(),
                 )?;
             }
@@ -212,7 +212,7 @@ pub fn initial_data(config: &Config) -> eyre::Result<(Mesh<2>, SystemVec<Fields>
                         pb: pb.clone(),
                         output: &output,
                     },
-                    &config.source,
+                    &config.sources,
                     system.as_mut_slice(),
                 )?;
             }
@@ -226,7 +226,7 @@ pub fn initial_data(config: &Config) -> eyre::Result<(Mesh<2>, SystemVec<Fields>
                         pb: pb.clone(),
                         output: &output,
                     },
-                    &config.source,
+                    &config.sources,
                     system.as_mut_slice(),
                 )?;
             }
@@ -253,7 +253,7 @@ pub fn initial_data(config: &Config) -> eyre::Result<(Mesh<2>, SystemVec<Fields>
                 ExportVtuConfig {
                     title: config.name.clone(),
                     ghost: false,
-                    stride: config.visualize.stride,
+                    stride: config.visualize.stride.into_int(),
                 },
             )?;
         }
@@ -309,7 +309,7 @@ pub fn initial_data(config: &Config) -> eyre::Result<(Mesh<2>, SystemVec<Fields>
             ExportVtuConfig {
                 title: config.name.clone(),
                 ghost: false,
-                stride: config.visualize.stride,
+                stride: config.visualize.stride.into_int(),
             },
         )?;
     }
@@ -730,7 +730,7 @@ pub fn evolve_data(
                 ExportVtuConfig {
                     title: config.name.clone(),
                     ghost: false,
-                    stride: visualize_stride,
+                    stride: visualize_stride.into_int(),
                 },
             )?;
 

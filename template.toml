@@ -53,14 +53,14 @@ save_relax_interval = 1000
 save_relax_levels = true
 save_relax_result = true
 
-stride = 6
+stride = "per_cell"
 
 [cache]
 initial = true
 evolve = false
 evolve_interval = 100
 
-[[source]]
+[[sources]]
 type = "scalar_field"
 amplitude = "${amplitude}"
 sigma = [5.35, 5.35]

@@ -31,7 +31,7 @@ pub struct Config {
     pub cache: Cache,
 
     #[serde(default)]
-    pub source: Vec<Source>,
+    pub sources: Vec<Source>,
 }
 
 impl Config {
@@ -54,8 +54,8 @@ impl Config {
             visualize: self.visualize,
             cache: self.cache,
 
-            source: self
-                .source
+            sources: self
+                .sources
                 .into_iter()
                 .map(|source| source.transform(vars))
                 .collect::<Result<_, _>>()?,
@@ -89,22 +89,6 @@ impl Config {
     pub fn _is_run_mode(&self) -> bool {
         matches!(self.execution, Execution::Run)
     }
-}
-
-fn default_name() -> String {
-    "axi_sim".to_string()
-}
-
-fn default_output() -> String {
-    "output".to_string()
-}
-
-fn default_one() -> usize {
-    1
-}
-
-fn default_onef() -> f64 {
-    1.0
 }
 
 /// Settings deciding domain of the mesh.
@@ -191,8 +175,28 @@ pub struct Visualize {
     /// Should we save the final result?
     #[serde(default)]
     pub save_relax_result: bool,
-    /// Stride for saving visualizations.
-    pub stride: usize,
+    /// How much data to poutput?
+    pub stride: Stride,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, Copy)]
+pub enum Stride {
+    /// Output data for every vertex in the simulation
+    #[serde(rename = "per_vertex")]
+    PerVertex,
+    /// Output data for each corner of a cell in the simulation
+    /// This is significantly more compressed
+    #[serde(rename = "per_cell")]
+    PerCell,
+}
+
+impl Stride {
+    pub fn into_int(self) -> usize {
+        match self {
+            Stride::PerVertex => 1,
+            Stride::PerCell => 0,
+        }
+    }
 }
 
 /// Config struct describing how we cache data.
@@ -420,90 +424,18 @@ pub enum GaugeCondition {
     LogPlusOne,
 }
 
-// fn template_str_apply_args(data: &str, args: &[&str]) -> eyre::Result<String> {
-//     let mut result = String::new();
-//     let mut current = String::new();
-//     let mut searching = false;
+fn default_name() -> String {
+    "axi_sim".to_string()
+}
 
-//     let mut chars = data.char_indices();
+fn default_output() -> String {
+    "output".to_string()
+}
 
-//     while let Some((pos, ch)) = chars.next() {
-//         if searching {
-//             if data[pos..].starts_with('}') {
-//                 searching = false;
-//                 let index = current.parse::<usize>()?;
+fn default_one() -> usize {
+    1
+}
 
-//                 if args.len() <= index as usize {
-//                     return Err(eyre!(
-//                         "{}th positional argument referenced in file but {} positional arguments were provided",
-//                         index,
-//                         args.len()
-//                     ));
-//                 }
-
-//                 result.push_str(args[index as usize]);
-//             }
-
-//             current.push(ch);
-
-//             continue;
-//         }
-
-//         if data[pos..].starts_with("${") {
-//             // Reset current search
-//             current.clear();
-
-//             let next = chars.next();
-//             debug_assert_eq!(next.map(|(_, c)| c), Some('{'));
-
-//             searching = true;
-
-//             continue;
-//         }
-
-//         if data[pos..].starts_with('$') {
-//             let (_, index) = chars
-//                 .next()
-//                 .ok_or_else(|| eyre!("invalid argument string"))?;
-//             let index: u32 = index
-//                 .to_digit(10)
-//                 .ok_or_else(|| eyre!("invalid argument string"))?;
-
-//             if args.len() <= index as usize {
-//                 return Err(eyre!(
-//                     "{}th positional argument referenced in file but {} positional arguments were provided",
-//                     index,
-//                     args.len()
-//                 ));
-//             }
-
-//             result.push_str(args[index as usize]);
-
-//             continue;
-//         }
-
-//         result.push(ch);
-//     }
-
-//     Ok(result)
-// }
-
-// #[cfg(test)]
-// mod tests {
-//     use super::*;
-
-// #[test]
-// fn template_str() {
-//     let args = vec!["0.0", "hello world", "&&@"];
-
-//     assert_eq!(
-//         template_str_apply_args("test$0123", &args).unwrap(),
-//         "test0.0123"
-//     );
-//     assert_eq!(
-//         template_str_apply_args("test${1}123", &args).unwrap(),
-//         "testhello world123"
-//     );
-//     assert_eq!(template_str_apply_args("$2tst", &args).unwrap(), "&&@tst");
-// }
-// }
+fn default_onef() -> f64 {
+    1.0
+}
