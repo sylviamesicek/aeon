@@ -5,6 +5,7 @@ edition = "2024"
 
 [dependencies]
 aeon.workspace = true
+aeon_config.workspace = true
 clap.workspace = true
 color-eyre.workspace = true
 console.workspace = true

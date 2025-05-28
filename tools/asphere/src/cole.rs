@@ -55,9 +55,9 @@ pub fn cole_config(amplitude: f64, serial: usize) -> Config {
             serial_id: serial,
         },
         sources: vec![Source {
-            amplitude,
-            sigma: SIGMA,
-            mass: 0.0,
+            amplitude: amplitude.into(),
+            sigma: SIGMA.into(),
+            mass: 0.0.into(),
         }],
     }
 }

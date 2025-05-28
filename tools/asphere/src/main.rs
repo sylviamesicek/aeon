@@ -5,12 +5,13 @@ use aeon::{
     prelude::*,
     solver::{Integrator, Method},
 };
-use clap::{Arg, ArgMatches, Command};
+use aeon_config::{ConfigVars, Transform as _};
+use clap::{Arg, ArgMatches, Command, arg, value_parser};
 use console::style;
 use core::f64;
 use eyre::{Context, Result, eyre};
-use std::fmt::Write as _;
-use std::path::PathBuf;
+use std::{collections::HashMap, path::PathBuf};
+use std::{fmt::Write as _, num::ParseFloatError};
 
 mod cole;
 mod config;
@@ -125,7 +126,11 @@ fn run(config: &Config, diagnostics: &mut Diagnostics) -> Result<()> {
         system.resize(mesh.num_nodes());
 
         // Set initial data for scalar field.
-        let scalar_field = generate_initial_scalar_field(&mut mesh, source.amplitude, source.sigma);
+        let scalar_field = generate_initial_scalar_field(
+            &mut mesh,
+            source.amplitude.unwrap(),
+            source.sigma.unwrap(),
+        );
 
         // Fill system using scalar field.
         mesh.evaluate(
@@ -138,9 +143,8 @@ fn run(config: &Config, diagnostics: &mut Diagnostics) -> Result<()> {
         // Solve for conformal and lapse
         solve_constraints(&mut mesh, system.as_mut_slice());
         // Compute norm
-        let l2_norm = mesh.l2_norm_system(system.as_slice());
+        let l2_norm: f64 = mesh.l2_norm_system(system.as_slice());
         log::info!("Scalar Field Norm {}", l2_norm);
-
         // Save visualization
         if config.visualize.save_initial_levels {
             let mut checkpoint = Checkpoint::default();
@@ -242,6 +246,11 @@ fn run(config: &Config, diagnostics: &mut Diagnostics) -> Result<()> {
         },
     );
 
+    // Path for evolution visualization data.
+    if config.visualize.save_evolve || config.visualize.save_initial_levels {
+        std::fs::create_dir_all(&absolute.join("evolve"))?;
+    }
+
     while proper_time < config.evolve.max_proper_time {
         assert!(system.len() == mesh.num_nodes());
         mesh.fill_boundary(Order::<4>, FieldConditions, system.as_mut_slice());
@@ -317,7 +326,7 @@ fn run(config: &Config, diagnostics: &mut Diagnostics) -> Result<()> {
             continue;
         }
 
-        if time_since_save >= config.visualize.save_evolve_interval && config.visualize.save_evolve
+        if config.visualize.save_evolve && time_since_save >= config.visualize.save_evolve_interval
         {
             time_since_save -= config.visualize.save_evolve_interval;
 
@@ -331,7 +340,9 @@ fn run(config: &Config, diagnostics: &mut Diagnostics) -> Result<()> {
             checkpoint.attach_mesh(&mesh);
             checkpoint.save_system(system.as_slice());
             checkpoint.export_vtu(
-                absolute.join(format!("evolve_{save_step}.vtu")),
+                absolute
+                    .join("evolve")
+                    .join(format!("{}_{save_step}.vtu", config.name)),
                 ExportVtuConfig {
                     title: "Masslesss Scalar Field Evolution".to_string(),
                     ghost: false,
@@ -398,7 +409,8 @@ fn main() -> Result<()> {
     // Find matches
     let matches = command.get_matches();
     // Load configuration file.
-    let config = parse_config(&matches)?;
+    let (config, vars) = parse_config(&matches)?;
+    let config = config.transform(&vars)?;
 
     // Check that there is only one source term.
     eyre::ensure!(
@@ -428,8 +440,8 @@ fn main() -> Result<()> {
     diagnostics.flush(&config)?;
 
     match result {
-        Ok(_) => eprintln!("A: {:.15} Disperses", source.amplitude),
-        Err(_) => eprintln!("A: {:.15} Collapses", source.amplitude),
+        Ok(_) => eprintln!("A = {:.15} Disperses", source.amplitude.unwrap()),
+        Err(_) => eprintln!("A = {:.15} Collapses", source.amplitude.unwrap()),
     }
 
     // Bubble up result
@@ -440,7 +452,7 @@ fn main() -> Result<()> {
 // Helpers **********************
 // ******************************
 
-fn parse_config(matches: &ArgMatches) -> eyre::Result<Config> {
+fn parse_config(matches: &ArgMatches) -> eyre::Result<(Config, ConfigVars)> {
     // First check if we are running the cole subcommand.
     if let Some(matches) = matches.subcommand_matches("cole") {
         let amplitude = matches
@@ -457,21 +469,37 @@ fn parse_config(matches: &ArgMatches) -> eyre::Result<Config> {
             .map_err(|_| eyre!("Failed to parse serial_id as int"))?
             .clone();
 
-        return Ok(cole_config(amplitude, serial_id));
+        return Ok((cole_config(amplitude, serial_id), ConfigVars::new()));
     }
 
     // Compute config path.
     let config_path = matches
         .get_one::<PathBuf>("config")
         .cloned()
-        .unwrap_or("template.toml".to_string().into());
+        .ok_or_else(|| eyre!("failed to specify config argument"))?;
     let config_path = misc::abs_or_relative(&config_path)?;
 
     // Parse config file from toml.
     let config =
         misc::import_from_toml::<Config>(&config_path).context("Failed to parse config file")?;
 
-    Ok(config)
+    // Read positional arguments
+    let positional_args: Vec<&str> = matches
+        .get_many::<String>("positional")
+        .into_iter()
+        // .ok_or(eyre::eyre!("Unable to parse positional arguments"))?
+        .flat_map(|v| v.into_iter().map(|s| s.as_str()))
+        .collect();
+
+    let vars = ConfigVars {
+        positional: positional_args
+            .into_iter()
+            .map(|sbuf| sbuf.parse::<f64>())
+            .collect::<Result<Vec<f64>, ParseFloatError>>()?,
+        named: HashMap::new(),
+    };
+
+    Ok((config, vars))
 }
 
 /// Extension trait for defining helper methods on `clap::Command`.
@@ -482,22 +510,6 @@ trait CommandExt {
 impl CommandExt for Command {
     fn config_args(self) -> Self {
         self.subcommand(
-            Command::new("vis")
-                .arg(
-                    Arg::new("amp")
-                        .short('a')
-                        .long("amp")
-                        .default_value("1.0")
-                        .value_name("FLOAT"),
-                )
-                .arg(
-                    Arg::new("output")
-                        .required(true)
-                        .help("Output directory")
-                        .value_name("DIR"),
-                ),
-        )
-        .subcommand(
             Command::new("cole")
                 .arg(
                     Arg::new("amp")
@@ -511,6 +523,16 @@ impl CommandExt for Command {
                         .required(true)
                         .help("Serialization number for massless scalar field data"),
                 ),
+        )
+        .arg(
+            arg!(-c --config <FILE> "Sets a custom config file")
+                .required(true)
+                .value_parser(value_parser!(PathBuf)),
+        )
+        .arg(
+            arg!(<positional> ... "positional arguments referenced in config file")
+                .trailing_var_arg(true)
+                .required(false),
         )
     }
 }

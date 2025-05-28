@@ -8,6 +8,6 @@
 #SBATCH -o ./output/spherecrit.out
 #SBATCH -e ./output/spherecrit.err
 
-module load rust
+module load rust/1.87.0
 cargo build --release
 cargo run --release --package aaxi

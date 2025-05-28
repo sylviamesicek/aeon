@@ -1,0 +1,67 @@
+name = "axiscalar"
+output = "output/crit/axiscalar-${amplitude}"
+
+order = 4
+diss_order = 6
+
+[execution]
+mode = "search"
+directory = "output/crit/axiscalar-search"
+parameter = "amplitude"
+start = 0.0
+end = 0.5
+max_depth = 10
+min_error = 1e-5
+
+[domain]
+radius = 48.0
+height = 48.0
+cell_size = 6
+cell_ghost = 3
+
+[relax]
+max_steps = 10_000_000
+error_tolerance = 1e-6
+cfl = 0.5
+dampening = 0.4
+
+[evolve]
+cfl = 0.2
+dissipation = 0.5
+gauge = "log_plus_one"
+max_time = 1000.0
+max_proper_time = 10.0
+max_steps = 1_000_000
+
+[limits]
+max_levels = 15
+max_nodes = 16_000_000
+max_memory = 5_000_000_000
+
+[regrid]
+refine_error = 1e-6
+coarsen_error = 1e-10
+global = 1
+flag_interval = 20
+
+[visualize]
+save_evolve = true
+save_evolve_interval = 0.07
+
+save_relax = true
+save_relax_interval = 1000
+save_relax_levels = true
+save_relax_result = true
+
+stride = "per_cell"
+
+[cache]
+initial = true
+evolve = false
+evolve_interval = 100
+
+[[sources]]
+type = "scalar_field"
+amplitude = "${amplitude}"
+sigma = [5.35, 5.35]
+mass = 0.0

@@ -1,17 +1,11 @@
-name = "scalar"
-output = "output/scalar${amplitude}"
+name = "axiscalar"
+output = "output/axiscalar-$0"
 
 order = 4
 diss_order = 6
 
 [execution]
-mode = "search"
-directory = "output/scalar_search"
-parameter = "amplitude"
-start = 0.0
-end = 0.5
-max_depth = 10
-min_error = 1e-5
+mode = "run"
 
 [domain]
 radius = 48.0
@@ -62,6 +56,6 @@ evolve_interval = 100
 
 [[sources]]
 type = "scalar_field"
-amplitude = "${amplitude}"
+amplitude = "$0"
 sigma = [5.35, 5.35]
 mass = 0.0

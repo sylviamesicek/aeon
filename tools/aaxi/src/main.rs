@@ -1,3 +1,4 @@
+use aeon_config::{ConfigVars, Transform as _};
 use clap::{Arg, ArgMatches, Command, arg, value_parser};
 use console::{Term, style};
 use eyre::{Context, eyre};
@@ -8,12 +9,9 @@ mod config;
 mod history;
 mod misc;
 mod rinne;
-mod transform;
 
 use config::*;
 use rinne::*;
-
-use transform::ConfigVars;
 
 fn main() -> eyre::Result<()> {
     // Set up nice error handing.
@@ -202,7 +200,7 @@ fn parse_config(matches: &ArgMatches) -> eyre::Result<(Config, ConfigVars)> {
     let config_path = matches
         .get_one::<PathBuf>("config")
         .cloned()
-        .unwrap_or("template.toml".to_string().into());
+        .ok_or_else(|| eyre!("failed to specify config argument"))?;
     let config_path = misc::abs_or_relative(&config_path)?;
 
     // Parse config file from toml.
@@ -237,7 +235,7 @@ impl CommandExt for Command {
     fn config_args(self) -> Self {
         self.arg(
             arg!(-c --config <FILE> "Sets a custom config file")
-                .required(false)
+                .required(true)
                 .value_parser(value_parser!(PathBuf)),
         )
         .arg(

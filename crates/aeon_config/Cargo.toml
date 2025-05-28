@@ -1,0 +1,11 @@
+[package]
+name = "aeon_config"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+clap.workspace = true
+chumsky.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+toml.workspace = true

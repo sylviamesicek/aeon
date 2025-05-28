@@ -1,8 +1,6 @@
-use crate::{
-    misc,
-    transform::{ConfigVars, transform},
-};
-use eyre::{Context, eyre};
+use crate::misc;
+use aeon_config::{ConfigVars, FloatVar, Transform};
+use eyre::eyre;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
@@ -38,8 +36,8 @@ impl Config {
     /// Applies variable transformation to `Config`.
     pub fn transform(self, vars: &ConfigVars) -> eyre::Result<Self> {
         Ok(Self {
-            name: transform(&self.name, vars)?,
-            output: transform(&self.output, vars)?,
+            name: self.name.transform(vars)?,
+            output: self.output.transform(vars)?,
 
             execution: self.execution.transform(vars)?,
 
@@ -54,11 +52,7 @@ impl Config {
             visualize: self.visualize,
             cache: self.cache,
 
-            sources: self
-                .sources
-                .into_iter()
-                .map(|source| source.transform(vars))
-                .collect::<Result<_, _>>()?,
+            sources: self.sources.transform(vars)?,
         })
     }
 
@@ -261,17 +255,6 @@ pub struct Search {
 }
 
 impl Search {
-    pub fn transform(self, vars: &ConfigVars) -> eyre::Result<Self> {
-        Ok(Self {
-            directory: transform(&self.directory, vars)?,
-            parameter: transform(&self.parameter, vars)?,
-            start: self.start.transform(&vars)?,
-            end: self.end.transform(&vars)?,
-            max_depth: self.max_depth,
-            min_error: self.min_error,
-        })
-    }
-
     /// Gets start of search range.
     pub fn start(&self) -> f64 {
         let FloatVar::F64(start) = self.start else {
@@ -295,40 +278,18 @@ impl Search {
     }
 }
 
-/// A floating point argument that can either be provided via a configuration file
-/// or as a positional argument in the cli.
-#[derive(Serialize, Deserialize, Debug, Clone)]
-#[serde(untagged)]
-pub enum FloatVar {
-    /// Fixed floating point input.
-    F64(f64),
-    /// Script that will be parsed by the transformer
-    Script(String),
-}
+impl Transform for Search {
+    type Output = Self;
 
-impl FloatVar {
-    fn transform(self, vars: &ConfigVars) -> eyre::Result<Self> {
-        Ok(FloatVar::F64(match self {
-            FloatVar::F64(v) => v,
-            FloatVar::Script(pos) => transform(&pos, &vars)?
-                .parse::<f64>()
-                .context("failed to parse string as float")?,
-        }))
-    }
-
-    /// Unwraps a float var into a float, assuming that it has already been transformed.
-    pub fn unwrap(&self) -> f64 {
-        let Self::F64(v) = self else {
-            panic!("failed to unwrap FloatVar");
-        };
-
-        *v
-    }
-}
-
-impl From<f64> for FloatVar {
-    fn from(value: f64) -> Self {
-        Self::F64(value)
+    fn transform(&self, vars: &ConfigVars) -> Result<Self::Output, aeon_config::TransformError> {
+        Ok(Self {
+            directory: self.directory.transform(vars)?,
+            parameter: self.parameter.transform(vars)?,
+            start: self.start.transform(&vars)?,
+            end: self.end.transform(&vars)?,
+            max_depth: self.max_depth,
+            min_error: self.min_error,
+        })
     }
 }
 
@@ -352,24 +313,6 @@ pub enum Source {
 }
 
 impl Source {
-    fn transform(self, vars: &ConfigVars) -> eyre::Result<Self> {
-        Ok(match self {
-            Self::Brill { amplitude, sigma } => Self::Brill {
-                amplitude: amplitude.transform(vars)?,
-                sigma: (sigma.0.transform(vars)?, sigma.1.transform(vars)?),
-            },
-            Self::ScalarField {
-                amplitude,
-                sigma,
-                mass,
-            } => Self::ScalarField {
-                amplitude: amplitude.transform(vars)?,
-                sigma: (sigma.0.transform(vars)?, sigma.1.transform(vars)?),
-                mass: mass.transform(vars)?,
-            },
-        })
-    }
-
     pub fn println(&self) {
         match self {
             Source::Brill { amplitude, sigma } => {
@@ -403,6 +346,28 @@ impl Source {
                 }
             }
         }
+    }
+}
+
+impl Transform for Source {
+    type Output = Self;
+
+    fn transform(&self, vars: &ConfigVars) -> Result<Self::Output, aeon_config::TransformError> {
+        Ok(match self {
+            Self::Brill { amplitude, sigma } => Self::Brill {
+                amplitude: amplitude.transform(vars)?,
+                sigma: (sigma.0.transform(vars)?, sigma.1.transform(vars)?),
+            },
+            Self::ScalarField {
+                amplitude,
+                sigma,
+                mass,
+            } => Self::ScalarField {
+                amplitude: amplitude.transform(vars)?,
+                sigma: (sigma.0.transform(vars)?, sigma.1.transform(vars)?),
+                mass: mass.transform(vars)?,
+            },
+        })
     }
 }
 

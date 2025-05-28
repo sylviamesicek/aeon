@@ -1,0 +1,39 @@
+name = "sphscalar"
+directory = "output/sphscalar$0"
+
+[domain]
+radius = 40.0
+
+[limits]
+max_levels = 21
+max_nodes = 10_000_000
+max_memory = 5_000_000_000
+
+[evolve]
+cfl = 0.3
+dissipation = 0.5
+max_proper_time = 7.6
+max_steps = 800_000
+
+[regrid]
+coarsen_error = 1e-10
+refine_error = 1e-8
+global = 2
+flag_interval = 20
+
+[visualize]
+save_initial = true
+save_initial_levels = true
+save_evolve = true
+save_evolve_interval = 0.05
+stride = "per_vertex"
+
+[diagnostic]
+save = false
+save_interval = 1
+serial_id = 0
+
+[[sources]]
+amplitude = "$0"
+sigma = 5.35
+mass = 0.0

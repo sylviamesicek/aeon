@@ -5,6 +5,7 @@ edition = "2024"
 
 [dependencies]
 aeon.workspace = true
+aeon_config.workspace = true
 aeon_tensor.workspace = true
 clap.workspace = true
 chumsky.workspace = true

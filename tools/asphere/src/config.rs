@@ -1,6 +1,6 @@
-use std::path::{Path, PathBuf};
-
+use aeon_config::{ConfigVars, FloatVar, Transform, TransformError};
 use serde::{Deserialize, Serialize};
+use std::path::{Path, PathBuf};
 
 #[derive(Serialize, Deserialize)]
 pub struct Config {
@@ -23,6 +23,24 @@ impl Config {
     /// Retrieves output_director in absolution form.
     pub fn directory(&self) -> eyre::Result<PathBuf> {
         crate::misc::abs_or_relative(Path::new(&self.directory))
+    }
+}
+
+impl Transform for Config {
+    type Output = Self;
+
+    fn transform(&self, vars: &ConfigVars) -> Result<Self::Output, TransformError> {
+        Ok(Self {
+            name: self.name.transform(vars)?,
+            directory: self.directory.transform(vars)?,
+            domain: self.domain.clone(),
+            limits: self.limits.clone(),
+            evolve: self.evolve.clone(),
+            regrid: self.regrid.clone(),
+            visualize: self.visualize.clone(),
+            diagnostic: self.diagnostic.clone(),
+            sources: self.sources.transform(vars)?,
+        })
     }
 }
 
@@ -113,24 +131,39 @@ pub struct Diagnostic {
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct Source {
-    pub amplitude: f64,
-    pub sigma: f64,
-    pub mass: f64,
+    pub amplitude: FloatVar,
+    pub sigma: FloatVar,
+    pub mass: FloatVar,
 }
 
 impl Source {
     pub fn println(&self) {
-        if self.mass.abs() == 0.0 {
+        if self.mass.unwrap().abs() == 0.0 {
             println!(
                 "- Massless Scalar Field: A = {}, σ = {}",
-                self.amplitude, self.sigma,
+                self.amplitude.unwrap(),
+                self.sigma.unwrap(),
             );
         } else {
             println!(
                 "- Massive Scalar Field: A = {}, σ = {}, m = {}",
-                self.amplitude, self.sigma, self.mass,
+                self.amplitude.unwrap(),
+                self.sigma.unwrap(),
+                self.mass.unwrap(),
             );
         }
+    }
+}
+
+impl Transform for Source {
+    type Output = Self;
+
+    fn transform(&self, vars: &ConfigVars) -> Result<Self::Output, TransformError> {
+        Ok(Self {
+            amplitude: self.amplitude.transform(vars)?,
+            sigma: self.sigma.transform(vars)?,
+            mass: self.mass.transform(vars)?,
+        })
     }
 }
 
