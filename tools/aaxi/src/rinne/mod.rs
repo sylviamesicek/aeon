@@ -818,11 +818,7 @@ pub fn evolve_data(
     println!("Field Info...");
     println!(
         "- RAM usage: ~{}",
-        HumanBytes(
-            (fields.estimate_heap_size()
-                + integrator.estimate_heap_size()
-                + mesh.estimate_heap_size()) as u64
-        )
+        HumanBytes((fields.estimate_heap_size() + integrator.estimate_heap_size()) as u64)
     );
 
     Ok(())

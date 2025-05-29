@@ -1,6 +1,6 @@
 [package]
 name = "asphere"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
 
 [dependencies]
@@ -9,8 +9,10 @@ aeon_config.workspace = true
 clap.workspace = true
 color-eyre.workspace = true
 console.workspace = true
+datasize.workspace = true
 eyre.workspace = true
 env_logger.workspace = true
+indicatif.workspace = true
 log.workspace = true
 reborrow.workspace = true
 serde.workspace = true

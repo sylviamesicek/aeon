@@ -9,8 +9,14 @@ use aeon_config::{ConfigVars, Transform as _};
 use clap::{Arg, ArgMatches, Command, arg, value_parser};
 use console::style;
 use core::f64;
-use eyre::{Context, Result, eyre};
-use std::{collections::HashMap, path::PathBuf};
+use datasize::DataSize;
+use eyre::{Context as _, eyre};
+use indicatif::{HumanBytes, HumanCount, HumanDuration, MultiProgress, ProgressBar};
+use std::{
+    collections::HashMap,
+    path::PathBuf,
+    time::{Duration, Instant},
+};
 use std::{fmt::Write as _, num::ParseFloatError};
 
 mod cole;
@@ -42,7 +48,7 @@ impl Diagnostics {
         self.data.push(data);
     }
 
-    fn flush(&self, config: &Config) -> Result<()> {
+    fn flush(&self, config: &Config) -> eyre::Result<()> {
         if !config.diagnostic.save {
             return Ok(());
         }
@@ -81,24 +87,29 @@ impl Diagnostics {
     }
 }
 
-fn run(config: &Config, diagnostics: &mut Diagnostics) -> Result<()> {
+/// Solve for initial conditions and adaptively refine mesh
+fn initial_data(config: &Config) -> eyre::Result<(Mesh<1>, SystemVec<Fields>)> {
+    // Save initial time
+    let start = Instant::now();
+    // Get output directory
     let absolute = config.directory()?;
-    // Log Header data.
-    log::info!(
-        "Output Directory: {}",
-        absolute
-            .to_str()
-            .ok_or(eyre!("Failed to find absolute output directory"))?
+
+    eyre::ensure!(
+        config.sources.len() == 1,
+        "asphere currently only supports a single source term"
     );
 
+    // Retrieve primary source
     let source = config.sources[0].clone();
 
     // Create output dir.
     std::fs::create_dir_all(&absolute)?;
+    // Path for initial visualization data.
+    if config.visualize.save_initial || config.visualize.save_initial_levels {
+        std::fs::create_dir_all(&absolute.join("initial"))?;
+    }
 
-    // Run brill simulation
-    log::trace!("Building Mesh with Radius {}", config.domain.radius);
-
+    // Build mesh
     let mut mesh = Mesh::new(
         Rectangle {
             size: [config.domain.radius],
@@ -108,22 +119,36 @@ fn run(config: &Config, diagnostics: &mut Diagnostics) -> Result<()> {
         3,
         FaceArray::from_sides([BoundaryClass::Ghost], [BoundaryClass::OneSided]),
     );
-
-    log::trace!("Refining mesh globally {} times", config.regrid.global);
-
+    // Perform global refinements
     for _ in 0..config.regrid.global {
         mesh.refine_global();
     }
 
-    // Path for initial visualization data.
-    if config.visualize.save_initial || config.visualize.save_initial_levels {
-        std::fs::create_dir_all(&absolute.join("initial"))?;
-    }
-
+    // Create system of fields
     let mut system = SystemVec::new(Fields);
 
+    println!("Relaxing Initial Data");
+
+    // Create progress bars
+    let m = MultiProgress::new();
+    let node_pb = m.add(ProgressBar::new(config.limits.max_nodes as u64));
+    node_pb.set_style(misc::node_style());
+    node_pb.set_prefix("[Nodes] ");
+    let memory_pb = m.add(ProgressBar::new(config.limits.max_memory as u64));
+    memory_pb.set_style(misc::byte_style());
+    memory_pb.set_prefix("[Memory]");
+    let level_pb = m.add(ProgressBar::new(config.limits.max_levels as u64));
+    level_pb.set_style(misc::level_style());
+    level_pb.set_prefix("[Level] ");
+
+    // Adaptively solve and refine until we satisfy error requirement
     loop {
+        // Resize system to current mesh
         system.resize(mesh.num_nodes());
+
+        node_pb.set_length(mesh.num_nodes() as u64);
+        memory_pb.set_length((mesh.estimate_heap_size() + system.estimate_heap_size()) as u64);
+        level_pb.set_length(mesh.max_level() as u64);
 
         // Set initial data for scalar field.
         let scalar_field = generate_initial_scalar_field(
@@ -143,8 +168,8 @@ fn run(config: &Config, diagnostics: &mut Diagnostics) -> Result<()> {
         // Solve for conformal and lapse
         solve_constraints(&mut mesh, system.as_mut_slice());
         // Compute norm
-        let l2_norm: f64 = mesh.l2_norm_system(system.as_slice());
-        log::info!("Scalar Field Norm {}", l2_norm);
+        // let l2_norm: f64 = mesh.l2_norm_system(system.as_slice());
+        // log::info!("Scalar Field Norm {}", l2_norm);
         // Save visualization
         if config.visualize.save_initial_levels {
             let mut checkpoint = Checkpoint::default();
@@ -183,16 +208,26 @@ fn run(config: &Config, diagnostics: &mut Diagnostics) -> Result<()> {
                 config.regrid.refine_error
             );
             break;
-        } else {
-            log::trace!(
-                "Regridding mesh from level {} to {}",
-                mesh.max_level(),
-                mesh.max_level() + 1
-            );
-
-            mesh.regrid();
         }
+
+        mesh.regrid();
     }
+
+    m.clear()?;
+
+    println!("Finished relaxing in {}", HumanDuration(start.elapsed()),);
+    println!("Mesh Info...");
+    println!("- Num Nodes: {}", mesh.num_nodes());
+    println!("- Active Cells: {}", mesh.num_active_cells());
+    println!(
+        "- RAM usage: ~{}",
+        HumanBytes(mesh.estimate_heap_size() as u64)
+    );
+    println!("Field Info...");
+    println!(
+        "- RAM usage: ~{}",
+        HumanBytes(system.estimate_heap_size() as u64)
+    );
 
     if config.visualize.save_initial {
         let mut checkpoint = Checkpoint::default();
@@ -222,8 +257,26 @@ fn run(config: &Config, diagnostics: &mut Diagnostics) -> Result<()> {
         )?;
     }
 
-    // ****************************************
-    // Run evolution
+    Ok((mesh, system))
+}
+
+fn evolve_data(
+    config: &Config,
+    diagnostics: &mut Diagnostics,
+    mut mesh: Mesh<1>,
+    mut system: SystemVec<Fields>,
+) -> eyre::Result<()> {
+    // Get start time of evolution
+    let start = Instant::now();
+    // Get output directory
+    let absolute = config.directory()?;
+
+    // Create output dir.
+    std::fs::create_dir_all(&absolute)?;
+    // Path for initial visualization data.
+    if config.visualize.save_evolve {
+        std::fs::create_dir_all(&absolute.join("evolve"))?;
+    }
 
     let mut integrator = Integrator::new(Method::RK4KO6(config.evolve.dissipation));
     let mut time = 0.0;
@@ -246,10 +299,29 @@ fn run(config: &Config, diagnostics: &mut Diagnostics) -> Result<()> {
         },
     );
 
-    // Path for evolution visualization data.
-    if config.visualize.save_evolve || config.visualize.save_initial_levels {
-        std::fs::create_dir_all(&absolute.join("evolve"))?;
-    }
+    println!("Evolving Data");
+
+    // Create progress bars
+    let m = MultiProgress::new();
+    let node_pb = m.add(ProgressBar::new(config.limits.max_nodes as u64));
+    node_pb.set_style(misc::node_style());
+    node_pb.set_prefix("[Nodes] ");
+    node_pb.enable_steady_tick(Duration::from_millis(100));
+    let memory_pb = m.add(ProgressBar::new(config.limits.max_memory as u64));
+    memory_pb.set_style(misc::byte_style());
+    memory_pb.set_prefix("[Memory]");
+    memory_pb.enable_steady_tick(Duration::from_millis(100));
+    let level_pb = m.add(ProgressBar::new(config.limits.max_levels as u64));
+    level_pb.set_style(misc::level_style());
+    level_pb.set_prefix("[Level] ");
+    level_pb.enable_steady_tick(Duration::from_millis(100));
+    // Step spinner
+    let step_pb = m.add(ProgressBar::no_length());
+    step_pb.set_style(misc::spinner_style());
+    step_pb.set_prefix("[Step] ");
+    step_pb.enable_steady_tick(Duration::from_millis(100));
+
+    let mut disperse = true;
 
     while proper_time < config.evolve.max_proper_time {
         assert!(system.len() == mesh.num_nodes());
@@ -259,25 +331,29 @@ fn run(config: &Config, diagnostics: &mut Diagnostics) -> Result<()> {
         let norm = mesh.l2_norm_system(system.as_slice());
 
         if norm.is_nan() || norm >= 1e60 {
-            log::trace!("Evolution collapses, norm: {}", norm);
-            return Err(eyre!("exceded max allotted steps for evolution: {}", step));
+            println!("Evolution collapses, norm: {}", norm);
+            disperse = false;
+            break;
         }
 
         if step >= config.evolve.max_steps {
-            log::error!("Evolution exceded maximum allocated steps: {}", step);
-            return Err(eyre!("exceded max allotted steps for evolution: {}", step));
+            println!("Evolution exceded maximum allocated steps: {}", step);
+            disperse = false;
+            break;
         }
 
         if mesh.num_nodes() >= config.limits.max_nodes {
-            log::error!(
+            println!(
                 "Evolution exceded maximum allocated nodes: {}",
                 mesh.num_nodes()
             );
-            return Err(eyre!(
-                "exceded max allotted nodes for evolution: {}",
-                mesh.num_nodes()
-            ));
+            disperse = false;
+            break;
         }
+
+        let memory_usage = system.estimate_heap_size()
+            + integrator.estimate_heap_size()
+            + mesh.estimate_heap_size();
 
         // if mesh.max_level() >= MAX_LEVELS {
         //     log::trace!(
@@ -303,7 +379,6 @@ fn run(config: &Config, diagnostics: &mut Diagnostics) -> Result<()> {
             );
             mesh.limit_level_range_flags(1, config.limits.max_levels);
             mesh.balance_flags();
-
             mesh.regrid();
 
             log::trace!(
@@ -385,19 +460,62 @@ fn run(config: &Config, diagnostics: &mut Diagnostics) -> Result<()> {
 
         proper_time += h * alpha;
 
+        node_pb.set_position(mesh.num_nodes() as u64);
+        level_pb.set_position(mesh.max_level() as u64);
+        memory_pb.set_position(memory_usage as u64);
+        step_pb.inc(1);
+        step_pb.set_message(format!("Step: {}, Proper Time {:.8}", step, proper_time));
+
         let norm = mesh.l2_norm_system(system.as_slice());
 
         if norm.is_nan() || norm >= 1e60 || alpha.is_nan() {
-            log::trace!("Evolution collapses after step, norm: {}", norm);
+            println!("Evolution collapses after step, norm: {}", norm);
             return Err(eyre!("exceded max allotted steps for evolution: {}", step));
         }
     }
+
+    m.clear()?;
+
+    println!(
+        "Final evolution takes {}, {} steps",
+        HumanDuration(start.elapsed()),
+        HumanCount(step as u64),
+    );
+
+    let status = if disperse {
+        style("Disperses").green()
+    } else {
+        style("Collapses").red()
+    };
+    println!("Run Status: {}", status);
+
+    println!("Mesh Info...");
+    println!("- Num Nodes: {}", mesh.num_nodes());
+    println!("- Active Cells: {}", mesh.num_active_cells());
+    println!(
+        "- RAM usage: ~{}",
+        HumanBytes(mesh.estimate_heap_size() as u64)
+    );
+    println!("Field Info...");
+    println!(
+        "- RAM usage: ~{}",
+        HumanBytes((system.estimate_heap_size() + integrator.estimate_heap_size()) as u64)
+    );
+
+    Ok(())
+}
+
+fn run(config: &Config, diagnostics: &mut Diagnostics) -> eyre::Result<()> {
+    // Solve for initial data
+    let (mesh, system) = initial_data(config)?;
+    // Run evolution
+    evolve_data(config, diagnostics, mesh, system)?;
 
     Ok(())
 }
 
 // Main function that can return an error
-fn main() -> Result<()> {
+fn main() -> eyre::Result<()> {
     // Set up nice colored error handing.
     color_eyre::install()?;
     // Load configuration

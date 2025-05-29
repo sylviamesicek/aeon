@@ -1,5 +1,5 @@
 name = "sphscalar"
-directory = "output/sphscalar$0"
+directory = "output/sphscalar-$0"
 
 [domain]
 radius = 40.0
