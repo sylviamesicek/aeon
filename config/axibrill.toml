@@ -1,17 +1,11 @@
-name = "axiscalar"
-output = "output/crit/axiscalar/${amplitude}"
+name = "axibrill"
+output = "output/axibrill/$0"
 
 order = 4
 diss_order = 6
 
 [execution]
-mode = "search"
-directory = "output/crit/axiscalar/search"
-parameter = "amplitude"
-start = 0.0
-end = 0.5
-max_depth = 10
-min_error = 1e-5
+mode = "run"
 
 [domain]
 radius = 48.0
@@ -41,7 +35,7 @@ max_memory = 5_000_000_000
 [regrid]
 refine_error = 1e-6
 coarsen_error = 1e-10
-global = 1
+global = 3
 flag_interval = 20
 
 [visualize]
@@ -61,7 +55,6 @@ evolve = false
 evolve_interval = 100
 
 [[sources]]
-type = "scalar_field"
-amplitude = "${amplitude}"
-sigma = [5.35, 5.35]
-mass = 0.0
+type = "brill"
+amplitude = "$0"
+sigma = [1.0, 1.0]

@@ -6,6 +6,7 @@ use aeon::{
     solver::{Integrator, Method},
 };
 use aeon_config::{ConfigVars, Transform as _};
+use circular_queue::CircularQueue;
 use clap::{Arg, ArgMatches, Command, arg, value_parser};
 use console::style;
 use core::f64;
@@ -323,6 +324,8 @@ fn evolve_data(
 
     let mut disperse = true;
 
+    let mut mass_queue = CircularQueue::with_capacity(20);
+
     while proper_time < config.evolve.max_proper_time {
         assert!(system.len() == mesh.num_nodes());
         mesh.fill_boundary(Order::<4>, FieldConditions, system.as_mut_slice());
@@ -439,11 +442,12 @@ fn evolve_data(
         );
 
         let alpha = mesh.bottom_left_value(system.field(Field::Lapse));
+        let mass = find_mass(&mesh, system.as_slice());
         if config.diagnostic.save && step % config.diagnostic.save_interval == 0 {
             diagnostics.append(
                 proper_time,
                 Snapshot {
-                    mass: find_mass(&mesh, system.as_slice()),
+                    mass,
                     alpha,
                     phi: mesh.bottom_left_value(system.field(Field::Phi)),
                     level: mesh.max_level(),
@@ -464,7 +468,11 @@ fn evolve_data(
         level_pb.set_position(mesh.max_level() as u64);
         memory_pb.set_position(memory_usage as u64);
         step_pb.inc(1);
-        step_pb.set_message(format!("Step: {}, Proper Time {:.8}", step, proper_time));
+        step_pb.set_message(format!(
+            "Step: {}, Proper Time {:.8}, Mass {:.8e}",
+            step, proper_time, mass
+        ));
+        mass_queue.push(mass);
 
         let norm = mesh.l2_norm_system(system.as_slice());
 
@@ -502,6 +510,10 @@ fn evolve_data(
         HumanBytes((system.estimate_heap_size() + integrator.estimate_heap_size()) as u64)
     );
 
+    // for mass in mass_queue.iter() {
+    //     println!("Previous Mass: {:.8e}", mass);
+    // }
+
     Ok(())
 }
 
@@ -536,7 +548,7 @@ fn main() -> eyre::Result<()> {
         "asphere currently only supports one source term"
     );
 
-    let source = config.sources[0].clone();
+    let _source = config.sources[0].clone();
 
     // Basic info dumping
     println!("Simulation: {}", style(&config.name).green());
@@ -557,10 +569,10 @@ fn main() -> eyre::Result<()> {
     // Write diagnostics to file
     diagnostics.flush(&config)?;
 
-    match result {
-        Ok(_) => eprintln!("A = {:.15} Disperses", source.amplitude.unwrap()),
-        Err(_) => eprintln!("A = {:.15} Collapses", source.amplitude.unwrap()),
-    }
+    // match result {
+    //     Ok(_) => eprintln!("A = {:.15} Disperses", source.amplitude.unwrap()),
+    //     Err(_) => eprintln!("A = {:.15} Collapses", source.amplitude.unwrap()),
+    // }
 
     // Bubble up result
     result

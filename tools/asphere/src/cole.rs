@@ -13,11 +13,12 @@ const RADIUS: f64 = 40.0;
 const REFINE_GLOBAL: usize = 2;
 const MAX_NODES: usize = 10_000_000;
 const REFINE_ERROR: f64 = 1e-8;
+const MAX_MEMORY: usize = 5_000_000_000;
 const COARSEN_ERROR: f64 = 1e-10;
 const DISSIPATION: f64 = 0.5;
 const REGRID_FLAG_INTERVAL: usize = 20;
 const CFL: f64 = 0.3;
-const DIAGNOSTIC_INTERVAL: usize = 2;
+const DIAGNOSTIC_INTERVAL: usize = 1;
 
 // Generates a configuration compatible with cole's critical searching code.
 pub fn cole_config(amplitude: f64, serial: usize) -> Config {
@@ -28,7 +29,7 @@ pub fn cole_config(amplitude: f64, serial: usize) -> Config {
         limits: Limits {
             max_levels: MAX_LEVELS,
             max_nodes: MAX_NODES,
-            max_memory: MAX_STEPS,
+            max_memory: MAX_MEMORY,
         },
         evolve: Evolve {
             cfl: CFL,

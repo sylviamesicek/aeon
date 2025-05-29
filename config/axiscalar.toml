@@ -1,5 +1,5 @@
 name = "axiscalar"
-output = "output/axiscalar-$0"
+output = "output/axiscalar/$0"
 
 order = 4
 diss_order = 6

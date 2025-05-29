@@ -27,18 +27,13 @@
     - Forward Euler
     - Runge-Kutta 4
 - Hyperbolic relaxation solver for elliptic equations
+    - Adaptive CFL stepping to accelerate relaxation
 - Saving and loading checkpoints of meshes and systems
 - Output to `.vtu` files (for viewing in ParaView or VisIt)
-
-## Future Improvements
-
-- [x] Adaptive CFL stepping to accelerating hyperbolic relaxation
 
 ## Tools
 
 The bulk of "interesting GR code" lies in the two binary crates `tools/aaxi` and `tools/asphere`. These implement necessary the initial data and evolution code for axisymmetric spacetimes and spherically symmetric spacetimes respectively. Both codebases pull settings from template config files, which support bash-style positional argument references to enable run-time injection of arguments. Example config scripts can be found in the `config/` subdirectory.
-
-
 
 ### `asphere`
 
@@ -50,6 +45,12 @@ Example `asphere` invokation:
 # as first positional argument, and referenced in the config file as `$0`.
 cargo run --release --package asphere -- --config="config/sphscalar.toml" 0.3
 ```
+
+The `cole` subcommand exists as compatibility glue between Cole's critical search code and the more generally configurable `asphere` command. This can be executed as follows.
+```bash
+cargo run --release --package asphere -- cole <AMPLITUDE> <SERIAL_ID>
+```
+This simulates a scalar field of the given amplitude, outputing the necessary info files in the current working directory.
 
 ### `aaxi`
 
