@@ -1,4 +1,4 @@
-use std::array;
+use std::{array, ops::Range};
 
 use super::{ActiveCellId, Tree};
 use crate::geometry::{Face, FaceMask, IndexSpace, Rectangle, faces};
@@ -11,7 +11,7 @@ use datasize::DataSize;
 pub struct BlockId(pub usize);
 
 /// Groups cells of a `Tree` into uniform blocks, for more efficient inter-cell communication and multithreading.
-#[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct TreeBlocks<const N: usize> {
     /// Stores each cell's position within its parent's block.
     #[serde(with = "crate::array::vec")]
@@ -32,9 +32,32 @@ pub struct TreeBlocks<const N: usize> {
     block_levels: Vec<usize>,
     /// Stores whether block face is on physical boundary.
     boundaries: BitVec,
+    /// Number of subdivisions for each axis.
+    #[serde(with = "crate::array")]
+    width: [usize; N],
+    /// Ghost vertices along each face.
+    ghost: usize,
+    /// Stores a map from blocks to ranges of vertices.
+    offsets: Vec<usize>,
 }
 
 impl<const N: usize> TreeBlocks<N> {
+    pub fn new(width: [usize; N], ghost: usize) -> Self {
+        Self {
+            active_cell_positions: Default::default(),
+            active_cell_to_block: Default::default(),
+            block_sizes: Default::default(),
+            block_active_indices: Default::default(),
+            block_active_offsets: Default::default(),
+            block_bounds: Default::default(),
+            block_levels: Default::default(),
+            boundaries: Default::default(),
+            width,
+            ghost,
+            offsets: Default::default(),
+        }
+    }
+
     /// Rebuilds the tree block structure from existing geometric information. Performs greedy meshing
     /// to group cells into blocks.
     pub fn build(&mut self, tree: &Tree<N>) {
@@ -42,6 +65,7 @@ impl<const N: usize> TreeBlocks<N> {
         self.build_bounds(tree);
         self.build_boundaries(tree);
         self.build_levels(tree);
+        self.build_nodes();
     }
 
     // Number of blocks in the mesh.
@@ -73,6 +97,7 @@ impl<const N: usize> TreeBlocks<N> {
         self.block_bounds[block.0]
     }
 
+    /// Returns the level of a block.
     pub fn level(&self, block: BlockId) -> usize {
         self.block_levels[block.0]
     }
@@ -94,8 +119,29 @@ impl<const N: usize> TreeBlocks<N> {
         self.active_cell_positions[cell.0]
     }
 
+    /// Retrieves the block associated with a given active cell.
     pub fn active_cell_block(&self, cell: ActiveCellId) -> BlockId {
         BlockId(self.active_cell_to_block[cell.0])
+    }
+
+    /// The width of each cell along each axis.
+    pub fn width(&self) -> [usize; N] {
+        self.width
+    }
+
+    /// Number of ghost nodes on each face.
+    pub fn ghost(&self) -> usize {
+        self.ghost
+    }
+
+    /// Returns the total number of nodes in the tree.
+    pub fn num_nodes(&self) -> usize {
+        *self.offsets.last().unwrap()
+    }
+
+    /// The range of dofs associated with the given block.
+    pub fn nodes(&self, block: BlockId) -> Range<usize> {
+        self.offsets[block.0]..self.offsets[block.0 + 1]
     }
 
     fn build_blocks(&mut self, tree: &Tree<N>) {
@@ -242,6 +288,30 @@ impl<const N: usize> TreeBlocks<N> {
             self.block_levels[block.0] = tree.active_level(active);
         }
     }
+
+    fn build_nodes(&mut self) {
+        for axis in 0..N {
+            assert!(self.width[axis] % 2 == 0);
+        }
+
+        // Reset map
+        self.offsets.clear();
+        self.offsets.reserve(self.len() + 1);
+
+        // Start cursor at 0.
+        let mut cursor = 0;
+        self.offsets.push(cursor);
+
+        for block in self.indices() {
+            let size = self.size(block);
+            // Width of block in nodes.
+            let block_width: [usize; N] =
+                array::from_fn(|axis| self.width[axis] * size[axis] + 1 + 2 * self.ghost);
+
+            cursor += block_width.iter().product::<usize>();
+            self.offsets.push(cursor);
+        }
+    }
 }
 
 impl<const N: usize> DataSize for TreeBlocks<N> {
@@ -257,6 +327,7 @@ impl<const N: usize> DataSize for TreeBlocks<N> {
             + self.block_bounds.estimate_heap_size()
             + self.block_levels.estimate_heap_size()
             + self.boundaries.capacity() / size_of::<usize>()
+            + self.offsets.estimate_heap_size()
     }
 }
 
@@ -271,7 +342,7 @@ mod tests {
         tree.refine(&[true]);
         tree.refine(&[true, false, false, false]);
 
-        let mut blocks = TreeBlocks::default();
+        let mut blocks = TreeBlocks::new([4; 2], 2);
         blocks.build(&tree);
 
         assert!(blocks.len() == 3);
@@ -320,5 +391,22 @@ mod tests {
             blocks.active_cells(BlockId(1)),
             [ActiveCellId(8), ActiveCellId(9),]
         );
+    }
+
+    #[test]
+    fn node_ranges() {
+        let mut tree = Tree::new(Rectangle::<2>::UNIT);
+        let mut blocks = TreeBlocks::new([8; 2], 3);
+        tree.refine(&[true]);
+        tree.refine(&[true, false, false, false]);
+        tree.build();
+
+        blocks.build(&tree);
+
+        assert_eq!(blocks.len(), 3);
+
+        assert_eq!(blocks.nodes(BlockId(0)), 0..529);
+        assert_eq!(blocks.nodes(BlockId(1)), 529..874);
+        assert_eq!(blocks.nodes(BlockId(2)), 874..1099);
     }
 }

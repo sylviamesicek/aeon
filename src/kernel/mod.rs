@@ -5,17 +5,18 @@
 mod boundary;
 mod convolution;
 mod element;
+mod element2;
 mod node;
 mod weights;
 
 pub use boundary::{
-    is_boundary_compatible, BoundaryClass, BoundaryConds, BoundaryKind, DirichletParams,
-    RadiativeParams,
+    BoundaryClass, BoundaryConds, BoundaryKind, DirichletParams, RadiativeParams,
+    is_boundary_compatible,
 };
 pub use convolution::{Convolution, Gradient, Hessian};
 pub use element::Element;
 pub use node::{
-    node_from_vertex, vertex_from_node, NodeCartesianIter, NodePlaneIter, NodeSpace, NodeWindow,
+    NodeCartesianIter, NodePlaneIter, NodeSpace, NodeWindow, node_from_vertex, vertex_from_node,
 };
 pub use weights::{
     Border, Derivative, Dissipation, Interpolation, SecondDerivative, Unimplemented, Value,

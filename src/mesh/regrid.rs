@@ -24,7 +24,6 @@ impl<const N: usize> Mesh<N> {
 
         // Save old information
         self.old_blocks.clone_from(&self.blocks);
-        self.old_nodes.clone_from(&self.nodes);
 
         self.old_cell_splits.clear();
         self.old_cell_splits.extend(

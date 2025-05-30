@@ -24,7 +24,7 @@ cfl = 0.2
 dissipation = 0.5
 gauge = "log_plus_one"
 max_time = 1000.0
-max_proper_time = 10.0
+max_proper_time = 7.0
 max_steps = 1_000_000
 
 [limits]

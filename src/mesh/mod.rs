@@ -7,7 +7,7 @@
 
 use crate::geometry::{
     ActiveCellId, AxisMask, BlockId, Face, FaceArray, FaceMask, Rectangle, Tree, TreeBlocks,
-    TreeInterfaces, TreeNeighbors, TreeNodes, TreeSer, faces,
+    TreeInterfaces, TreeNeighbors, TreeSer, faces,
 };
 use crate::kernel::{BoundaryClass, DirichletParams, Element};
 use crate::{
@@ -58,8 +58,6 @@ pub struct Mesh<const N: usize> {
 
     /// Block structure induced by the tree.
     blocks: TreeBlocks<N>,
-    /// Nodes assigned to each block
-    nodes: TreeNodes<N>,
     /// Neighbors of each block.
     neighbors: TreeNeighbors<N>,
     /// Neighbors translated into interfaces
@@ -75,8 +73,6 @@ pub struct Mesh<const N: usize> {
 
     /// Blocks before most recent refinement.
     old_blocks: TreeBlocks<N>,
-    /// Block node offsets from before most recent refinement.
-    old_nodes: TreeNodes<N>,
     /// Cell splits from before most recent refinement.
     ///
     /// May be temporary if I can find a more elegant solution.
@@ -126,8 +122,7 @@ impl<const N: usize> Mesh<N> {
 
             max_level: 0,
 
-            blocks: TreeBlocks::default(),
-            nodes: TreeNodes::new([width; N], ghost),
+            blocks: TreeBlocks::new([width; N], ghost),
             neighbors: TreeNeighbors::default(),
             interfaces: TreeInterfaces::default(),
 
@@ -135,8 +130,7 @@ impl<const N: usize> Mesh<N> {
             coarsen_flags: Vec::new(),
 
             regrid_map: Vec::default(),
-            old_blocks: TreeBlocks::default(),
-            old_nodes: TreeNodes::new([width; N], ghost),
+            old_blocks: TreeBlocks::new([width; N], ghost),
             old_cell_splits: Vec::default(),
 
             stores: ThreadLocal::new(),
@@ -148,23 +142,15 @@ impl<const N: usize> Mesh<N> {
         result
     }
 
+    /// Retrieves width of individual cells in this mesh.
     pub fn width(&self) -> usize {
         self.width
     }
 
+    /// Retrieves the number of ghost nodes on each cell of a mesh.
     pub fn ghost(&self) -> usize {
         self.ghost
     }
-
-    // pub fn set_boundary_class(&mut self, face: Face<N>, class: BoundaryClass) {
-    //     self.boundary[face] = class;
-    // }
-
-    // pub fn set_boundary_classes(&mut self, class: BoundaryClass) {
-    //     for face in faces() {
-    //         self.set_boundary_class(face, class);
-    //     }
-    // }
 
     /// Rebuilds mesh from current tree.
     fn build(&mut self) {
@@ -172,10 +158,6 @@ impl<const N: usize> Mesh<N> {
         self.tree.build();
         // Rebuild blocks
         self.blocks.build(&self.tree);
-        // Rebuild node offsets
-        self.nodes.width = [self.width; N];
-        self.nodes.ghost = self.ghost;
-        self.nodes.build(&self.blocks);
         // Cache maximum level
         self.max_level = 0;
         for block in self.blocks.indices() {
@@ -185,7 +167,7 @@ impl<const N: usize> Mesh<N> {
         self.neighbors.build(&self.tree, &self.blocks);
         // Rebuild interfaces
         self.interfaces
-            .build(&self.tree, &self.blocks, &self.neighbors, &self.nodes);
+            .build(&self.tree, &self.blocks, &self.neighbors);
         // Resize flags, clearing value to false.
         self.build_flags();
     }
@@ -226,12 +208,12 @@ impl<const N: usize> Mesh<N> {
 
     /// Returns the total number of nodes on the mesh.
     pub fn num_nodes(&self) -> usize {
-        self.nodes.len()
+        self.blocks.num_nodes()
     }
 
     /// Returns the total number of nodes on the mesh before the most recent refinement.
     pub(crate) fn num_old_nodes(&self) -> usize {
-        self.old_nodes.len()
+        self.old_blocks.num_nodes()
     }
 
     // *******************************
@@ -239,12 +221,12 @@ impl<const N: usize> Mesh<N> {
 
     /// The range of nodes assigned to a given block.
     pub fn block_nodes(&self, block: BlockId) -> Range<usize> {
-        self.nodes.range(block)
+        self.blocks.nodes(block)
     }
 
     /// The range of nodes assigned to a given block on the mesh before the most recent refinement.
     pub(crate) fn old_block_nodes(&self, block: BlockId) -> Range<usize> {
-        self.old_nodes.range(block)
+        self.old_blocks.nodes(block)
     }
 
     /// Computes the nodespace corresponding to a block.
@@ -726,7 +708,6 @@ impl<const N: usize> Clone for Mesh<N> {
             max_level: self.max_level,
 
             blocks: self.blocks.clone(),
-            nodes: self.nodes.clone(),
             neighbors: self.neighbors.clone(),
             interfaces: self.interfaces.clone(),
 
@@ -735,7 +716,6 @@ impl<const N: usize> Clone for Mesh<N> {
 
             regrid_map: self.regrid_map.clone(),
             old_blocks: self.old_blocks.clone(),
-            old_nodes: self.old_nodes.clone(),
             old_cell_splits: self.old_cell_splits.clone(),
 
             stores: ThreadLocal::new(),
@@ -754,8 +734,7 @@ impl<const N: usize> Default for Mesh<N> {
 
             max_level: 0,
 
-            blocks: TreeBlocks::default(),
-            nodes: TreeNodes::new([4; N], 1),
+            blocks: TreeBlocks::new([4; N], 1),
             neighbors: TreeNeighbors::default(),
             interfaces: TreeInterfaces::default(),
 
@@ -763,8 +742,7 @@ impl<const N: usize> Default for Mesh<N> {
             coarsen_flags: Vec::default(),
 
             regrid_map: Vec::default(),
-            old_blocks: TreeBlocks::default(),
-            old_nodes: TreeNodes::new([4; N], 1),
+            old_blocks: TreeBlocks::new([4; N], 1),
             old_cell_splits: Vec::default(),
 
             stores: ThreadLocal::new(),
@@ -784,7 +762,6 @@ impl<const N: usize> DataSize for Mesh<N> {
     fn estimate_heap_size(&self) -> usize {
         self.tree.estimate_heap_size()
             + self.blocks.estimate_heap_size()
-            + self.nodes.estimate_heap_size()
             + self.neighbors.estimate_heap_size()
             + self.interfaces.estimate_heap_size()
             + self.refine_flags.estimate_heap_size()
@@ -905,7 +882,6 @@ mod tests {
         assert_eq!(mesh.boundary, mesh2.boundary);
         assert_eq!(mesh.max_level, mesh2.max_level);
         assert_eq!(mesh.blocks, mesh2.blocks);
-        assert_eq!(mesh.nodes, mesh2.nodes);
         assert_eq!(mesh.neighbors, mesh2.neighbors);
         assert_eq!(mesh.interfaces, mesh2.interfaces);
 

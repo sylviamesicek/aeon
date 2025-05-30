@@ -11,12 +11,10 @@ use std::{array, ops::Range, slice};
 mod blocks;
 mod interfaces;
 mod neighbors;
-mod nodes;
 
 pub use blocks::{BlockId, TreeBlocks};
 pub use interfaces::{TreeInterface, TreeInterfaces};
 pub use neighbors::{NeighborId, TreeBlockNeighbor, TreeCellNeighbor, TreeNeighbors};
-pub use nodes::TreeNodes;
 
 /// Null index, used internally to make storage of `Option<usize>`` more efficent
 const NULL: usize = usize::MAX;

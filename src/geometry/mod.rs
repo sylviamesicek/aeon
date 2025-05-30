@@ -18,5 +18,5 @@ pub use rectangle::Rectangle;
 pub use region::{Region, RegionIter, Side, regions};
 pub use tree::{
     ActiveCellId, BlockId, CellId, NeighborId, Tree, TreeBlockNeighbor, TreeBlocks,
-    TreeCellNeighbor, TreeInterface, TreeInterfaces, TreeNeighbors, TreeNodes, TreeSer,
+    TreeCellNeighbor, TreeInterface, TreeInterfaces, TreeNeighbors, TreeSer,
 };

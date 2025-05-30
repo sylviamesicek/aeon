@@ -30,7 +30,10 @@ impl Basis for Monomial {
     }
 }
 
-/// A reference element defined on [-1, 1]^N.
+/// A reference element defined on [-1, 1]^N. This element implements code
+/// for wavelet transformations and general operator approximation, whereas
+/// `NodeSpace` implements a much stricter subset of operations with fixed
+/// precomputed weights.
 #[derive(Clone, Debug)]
 pub struct Element<const N: usize> {
     /// Order of basis functions used in element.

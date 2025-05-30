@@ -337,7 +337,7 @@ mod tests {
     #[test]
     fn neighbors() {
         let mut tree = Tree::new(Rectangle::<2>::UNIT);
-        let mut blocks = TreeBlocks::default();
+        let mut blocks = TreeBlocks::new([4; 2], 2);
         let mut interfaces = TreeNeighbors::default();
         tree.refine(&[true]);
         tree.refine(&[true, false, false, false]);

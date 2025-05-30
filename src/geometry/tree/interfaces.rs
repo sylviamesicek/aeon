@@ -1,7 +1,7 @@
 use std::{array, cmp::Ordering, ops::Range};
 
 use super::{
-    NeighborId, Tree, TreeBlockNeighbor, TreeBlocks, TreeCellNeighbor, TreeNeighbors, TreeNodes,
+    NeighborId, Tree, TreeBlockNeighbor, TreeBlocks, TreeCellNeighbor, TreeNeighbors,
     blocks::BlockId,
 };
 use crate::{
@@ -96,19 +96,13 @@ impl<const N: usize> TreeInterfaces<N> {
             .filter(move |&offset| mask[space.linear_from_cartesian(offset)])
     }
 
-    pub fn build(
-        &mut self,
-        tree: &Tree<N>,
-        blocks: &TreeBlocks<N>,
-        neighbors: &TreeNeighbors<N>,
-        nodes: &TreeNodes<N>,
-    ) {
+    pub fn build(&mut self, tree: &Tree<N>, blocks: &TreeBlocks<N>, neighbors: &TreeNeighbors<N>) {
         self.interfaces.clear();
         self.interface_node_offsets.clear();
         self.interface_masks.clear();
 
         for neighbor in neighbors.iter() {
-            let aabb = self.transfer_aabb(tree, blocks, nodes, neighbor);
+            let aabb = self.transfer_aabb(tree, blocks, neighbor);
 
             self.interfaces.push(TreeInterface {
                 block: neighbor.block,
@@ -142,8 +136,8 @@ impl<const N: usize> TreeInterfaces<N> {
             let block_size = blocks.size(block);
             let block_level = blocks.level(block);
             let block_space = NodeSpace {
-                size: array::from_fn(|axis| block_size[axis] * nodes.width[axis]),
-                ghost: nodes.ghost,
+                size: array::from_fn(|axis| block_size[axis] * blocks.width()[axis]),
+                ghost: blocks.ghost(),
                 bounds: Rectangle::<N>::UNIT,
                 boundary: FaceArray::default(),
             };
@@ -221,7 +215,6 @@ impl<const N: usize> TreeInterfaces<N> {
         &self,
         tree: &Tree<N>,
         blocks: &TreeBlocks<N>,
-        nodes: &TreeNodes<N>,
         neighbor: &TreeBlockNeighbor<N>,
     ) -> TransferAABB<N> {
         let a = neighbor.a.clone();
@@ -233,12 +226,12 @@ impl<const N: usize> TreeInterfaces<N> {
         // ********************************
         // Dest
 
-        let (mut anode, mut bnode) = self.transfer_dest(tree, blocks, nodes, neighbor);
+        let (mut anode, mut bnode) = self.transfer_dest(tree, blocks, neighbor);
 
         // **************************
         // Source
 
-        let mut source = self.transfer_source(tree, blocks, nodes, &neighbor.a);
+        let mut source = self.transfer_source(tree, blocks, &neighbor.a);
 
         for axis in 0..N {
             if b.region.side(axis) == Side::Left && block_level < neighbor_level {
@@ -274,7 +267,6 @@ impl<const N: usize> TreeInterfaces<N> {
         &self,
         tree: &Tree<N>,
         blocks: &TreeBlocks<N>,
-        nodes: &TreeNodes<N>,
         interface: &TreeBlockNeighbor<N>,
     ) -> ([isize; N], [isize; N]) {
         let a = interface.a.clone();
@@ -291,23 +283,24 @@ impl<const N: usize> TreeInterfaces<N> {
         // A node
 
         // Compute bottom left corner of A cell.
-        let mut anode: [_; N] = array::from_fn(|axis| (aindex[axis] * nodes.width[axis]) as isize);
+        let mut anode: [_; N] =
+            array::from_fn(|axis| (aindex[axis] * blocks.width()[axis]) as isize);
 
         if block_level < neighbor_level {
             let split = tree.most_recent_active_split(a.neighbor).unwrap();
             (0..N)
                 .filter(|&axis| a.region.side(axis) == Side::Middle && split.is_set(axis))
-                .for_each(|axis| anode[axis] += (nodes.width[axis] / 2) as isize);
+                .for_each(|axis| anode[axis] += (blocks.width()[axis] / 2) as isize);
         }
 
         // Offset by appropriate ghost nodes/width
         for axis in 0..N {
             match a.region.side(axis) {
                 Side::Left => {
-                    anode[axis] -= nodes.ghost as isize;
+                    anode[axis] -= blocks.ghost() as isize;
                 }
                 Side::Right => {
-                    anode[axis] += nodes.width[axis] as isize;
+                    anode[axis] += blocks.width()[axis] as isize;
                 }
                 Side::Middle => {}
             }
@@ -318,23 +311,23 @@ impl<const N: usize> TreeInterfaces<N> {
 
         // Compute top right corner of B cell
         let mut bnode: [_; N] =
-            array::from_fn(|axis| ((bindex[axis] + 1) * nodes.width[axis]) as isize);
+            array::from_fn(|axis| ((bindex[axis] + 1) * blocks.width()[axis]) as isize);
 
         if block_level < neighbor_level {
             let split = tree.most_recent_active_split(b.neighbor).unwrap();
             (0..N)
                 .filter(|&axis| b.region.side(axis) == Side::Middle && !split.is_set(axis))
-                .for_each(|axis| bnode[axis] -= (nodes.width[axis] / 2) as isize);
+                .for_each(|axis| bnode[axis] -= (blocks.width()[axis] / 2) as isize);
         }
 
         // Offset by appropriate ghost nodes/width
         for axis in 0..N {
             match b.region.side(axis) {
                 Side::Right => {
-                    bnode[axis] += nodes.ghost as isize;
+                    bnode[axis] += blocks.ghost() as isize;
                 }
                 Side::Left => {
-                    bnode[axis] -= nodes.width[axis] as isize;
+                    bnode[axis] -= blocks.width()[axis] as isize;
                 }
                 Side::Middle => {}
             }
@@ -349,7 +342,6 @@ impl<const N: usize> TreeInterfaces<N> {
         &self,
         tree: &Tree<N>,
         blocks: &TreeBlocks<N>,
-        nodes: &TreeNodes<N>,
         a: &TreeCellNeighbor<N>,
     ) -> [isize; N] {
         let block_level = tree.active_level(a.cell);
@@ -358,13 +350,13 @@ impl<const N: usize> TreeInterfaces<N> {
         // Find source node
         let nindex = blocks.active_cell_position(a.neighbor);
         let mut source: [isize; N] =
-            array::from_fn(|axis| (nindex[axis] * nodes.width[axis]) as isize);
+            array::from_fn(|axis| (nindex[axis] * blocks.width()[axis]) as isize);
 
         match block_level.cmp(&neighbor_level) {
             Ordering::Equal => {
                 for axis in 0..N {
                     if a.region.side(axis) == Side::Left {
-                        source[axis] += (nodes.width[axis] - nodes.ghost) as isize;
+                        source[axis] += (blocks.width()[axis] - blocks.ghost()) as isize;
                     }
                 }
             }
@@ -380,19 +372,20 @@ impl<const N: usize> TreeInterfaces<N> {
                     if split.is_set(axis) {
                         match a.region.side(axis) {
                             Side::Left => {
-                                source[axis] += nodes.width[axis] as isize - nodes.ghost as isize
+                                source[axis] +=
+                                    blocks.width()[axis] as isize - blocks.ghost() as isize
                             }
-                            Side::Middle => source[axis] += nodes.width[axis] as isize,
+                            Side::Middle => source[axis] += blocks.width()[axis] as isize,
                             Side::Right => {}
                         }
                     } else {
                         match a.region.side(axis) {
                             Side::Left => {
                                 source[axis] +=
-                                    2 * nodes.width[axis] as isize - nodes.ghost as isize
+                                    2 * blocks.width()[axis] as isize - blocks.ghost() as isize
                             }
                             Side::Middle => {}
-                            Side::Right => source[axis] += nodes.width[axis] as isize,
+                            Side::Right => source[axis] += blocks.width()[axis] as isize,
                         }
                     }
                 }
@@ -405,7 +398,7 @@ impl<const N: usize> TreeInterfaces<N> {
 
                 for axis in 0..N {
                     if a.region.side(axis) == Side::Left {
-                        source[axis] += nodes.width[axis] as isize / 2 - nodes.ghost as isize;
+                        source[axis] += blocks.width()[axis] as isize / 2 - blocks.ghost() as isize;
                     }
                 }
             }
