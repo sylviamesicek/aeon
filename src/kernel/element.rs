@@ -61,7 +61,7 @@ impl<const N: usize> Element<N> {
 
         let vandermonde = Monomial::vandermonde(&grid, order + 1);
 
-        let m = vandermonde.transpose().svd();
+        let m = vandermonde.transpose().svd().unwrap();
         let rhs = Self::uniform_rhs::<Monomial>(width, order);
         let stencils = m.pseudoinverse() * rhs;
 
