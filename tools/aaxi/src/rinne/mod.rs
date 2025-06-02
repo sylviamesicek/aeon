@@ -2,6 +2,7 @@
 //! These types are shared across crates, and thus moved here to prevent redundent definition.
 
 use std::{
+    convert::Infallible,
     path::Path,
     time::{Duration, Instant},
 };
@@ -362,13 +363,14 @@ pub struct FieldDerivs {
 impl Function<2> for FieldDerivs {
     type Input = Fields;
     type Output = Fields;
+    type Error = Infallible;
 
     fn evaluate(
         &self,
         engine: impl Engine<2>,
         input: SystemSlice<Self::Input>,
         mut output: SystemSliceMut<Self::Output>,
-    ) {
+    ) -> Result<(), Infallible> {
         let grr_f = input.field(Field::Metric(Metric::Grr));
         let grz_f = input.field(Field::Metric(Metric::Grz));
         let gzz_f = input.field(Field::Metric(Metric::Gzz));
@@ -560,6 +562,8 @@ impl Function<2> for FieldDerivs {
                 output.field_mut(Field::ScalarField(ScalarField::Pi, i))[index] = derivs.pi;
             }
         }
+
+        Ok(())
     }
 }
 
@@ -738,16 +742,18 @@ pub fn evolve_data(
         }
 
         // Compute step
-        integrator.step(
-            &mut mesh,
-            ORDER,
-            FieldConditions,
-            FieldDerivs {
-                gauge: config.evolve.gauge,
-            },
-            h,
-            fields.as_mut_slice(),
-        );
+        integrator
+            .step(
+                &mut mesh,
+                ORDER,
+                FieldConditions,
+                FieldDerivs {
+                    gauge: config.evolve.gauge,
+                },
+                h,
+                fields.as_mut_slice(),
+            )
+            .unwrap();
 
         let lapse = mesh.bottom_left_value(fields.field(Field::Gauge(Gauge::Lapse)));
 

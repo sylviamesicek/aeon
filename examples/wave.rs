@@ -1,4 +1,4 @@
-use std::{array, path::PathBuf};
+use std::{array, convert::Infallible, path::PathBuf};
 
 use aeon::{
     mesh::Gaussian,
@@ -43,13 +43,14 @@ struct WaveEquation {
 impl Function<2> for WaveEquation {
     type Input = Scalar;
     type Output = Scalar;
+    type Error = Infallible;
 
     fn evaluate(
         &self,
         engine: impl Engine<2>,
         input: SystemSlice<Self::Input>,
         mut output: SystemSliceMut<Self::Output>,
-    ) {
+    ) -> Result<(), Infallible> {
         let input = input.field(());
         let output = output.field_mut(());
 
@@ -61,6 +62,8 @@ impl Function<2> for WaveEquation {
 
             output[index] = -dr * self.speed[0] - dz * self.speed[1];
         }
+
+        Ok(())
     }
 }
 
@@ -281,14 +284,16 @@ pub fn main() -> eyre::Result<()> {
         }
 
         // Compute step with dissipation
-        integrator.step(
-            &mut mesh,
-            ORDER,
-            WaveConditions,
-            WaveEquation { speed: SPEED },
-            h,
-            system.as_mut_slice(),
-        );
+        integrator
+            .step(
+                &mut mesh,
+                ORDER,
+                WaveConditions,
+                WaveEquation { speed: SPEED },
+                h,
+                system.as_mut_slice(),
+            )
+            .unwrap();
 
         step += 1;
         steps_since_regrid += 1;

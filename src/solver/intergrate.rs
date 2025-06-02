@@ -45,11 +45,13 @@ impl Integrator {
         mesh: &mut Mesh<N>,
         order: K,
         conditions: C,
-        deriv: F,
+        mut deriv: F,
         h: f64,
         mut result: SystemSliceMut<C::System>,
-    ) where
+    ) -> Result<(), F::Error>
+    where
         C::System: Clone + Sync,
+        F::Error: Send,
     {
         assert!(mesh.num_nodes() == result.len());
 
@@ -68,8 +70,10 @@ impl Integrator {
 
                 // First step
                 Self::copy_from(tmp.rb_mut(), result.rb());
-                mesh.apply(order, conditions.clone(), deriv, tmp.rb_mut());
+                mesh.apply(order, conditions.clone(), deriv, tmp.rb_mut())?;
                 Self::fused_multiply_add_assign(result, h, tmp.rb());
+
+                Ok(())
             }
             Method::RK4 | Method::RK4KO6(..) => {
                 self.tmp.resize(2 * dimension, 0.0);
@@ -82,29 +86,29 @@ impl Integrator {
 
                 // K1
                 Self::copy_from(tmp.rb_mut(), result.rb());
-                deriv.preprocess(mesh, tmp.rb_mut());
-                mesh.apply(order, conditions.clone(), deriv.clone(), tmp.rb_mut());
+                deriv.preprocess(mesh, tmp.rb_mut())?;
+                mesh.apply(order, conditions.clone(), deriv.clone(), tmp.rb_mut())?;
                 Self::fused_multiply_add_assign(update.rb_mut(), 1. / 6., tmp.rb());
 
                 // K2
                 Self::fused_multiply_add_dest(tmp.rb_mut(), result.rb(), h / 2.0);
                 mesh.fill_boundary(order, conditions.clone(), tmp.rb_mut());
-                deriv.preprocess(mesh, tmp.rb_mut());
-                mesh.apply(order, conditions.clone(), deriv.clone(), tmp.rb_mut());
+                deriv.preprocess(mesh, tmp.rb_mut())?;
+                mesh.apply(order, conditions.clone(), deriv.clone(), tmp.rb_mut())?;
                 Self::fused_multiply_add_assign(update.rb_mut(), 1. / 3., tmp.rb());
 
                 // K3
                 Self::fused_multiply_add_dest(tmp.rb_mut(), result.rb(), h / 2.0);
                 mesh.fill_boundary(order, conditions.clone(), tmp.rb_mut());
-                deriv.preprocess(mesh, tmp.rb_mut());
-                mesh.apply(order, conditions.clone(), deriv.clone(), tmp.rb_mut());
+                deriv.preprocess(mesh, tmp.rb_mut())?;
+                mesh.apply(order, conditions.clone(), deriv.clone(), tmp.rb_mut())?;
                 Self::fused_multiply_add_assign(update.rb_mut(), 1. / 3., tmp.rb());
 
                 // K4
                 Self::fused_multiply_add_dest(tmp.rb_mut(), result.rb(), h);
                 mesh.fill_boundary(order, conditions.clone(), tmp.rb_mut());
-                deriv.preprocess(mesh, tmp.rb_mut());
-                mesh.apply(order, conditions.clone(), deriv.clone(), tmp.rb_mut());
+                deriv.preprocess(mesh, tmp.rb_mut())?;
+                mesh.apply(order, conditions.clone(), deriv.clone(), tmp.rb_mut())?;
                 Self::fused_multiply_add_assign(update.rb_mut(), 1. / 6., tmp.rb());
 
                 // Sum everything
@@ -112,9 +116,11 @@ impl Integrator {
 
                 if let Method::RK4KO6(diss) = self.method {
                     mesh.fill_boundary_to_extent(order, 3, conditions.clone(), result.rb_mut());
-                    deriv.preprocess(mesh, result.rb_mut());
+                    deriv.preprocess(mesh, result.rb_mut())?;
                     mesh.dissipation(Order::<6>, diss, result.rb_mut());
                 }
+
+                Ok(())
             }
         }
     }

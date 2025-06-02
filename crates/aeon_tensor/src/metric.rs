@@ -359,3 +359,6 @@ impl<const N: usize> SecondDerivatives<N> for f64 {
         partials.covariant_gradient(second_partials, metric)
     }
 }
+
+// *********************
+// Better API

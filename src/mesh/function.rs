@@ -4,7 +4,7 @@ use crate::{
     kernel::{NodeSpace, node_from_vertex},
     system::{System, SystemSlice, SystemSliceMut},
 };
-use std::ops::Range;
+use std::{error::Error, ops::Range};
 
 use super::Mesh;
 
@@ -104,6 +104,7 @@ impl<'a, const N: usize, E: Engine<N>> Engine<N> for &'a E {
 pub trait Function<const N: usize> {
     type Input: System;
     type Output: System;
+    type Error: Error;
 
     /// Action of the function on an individual finite different block.
     fn evaluate(
@@ -111,11 +112,17 @@ pub trait Function<const N: usize> {
         engine: impl Engine<N>,
         input: SystemSlice<Self::Input>,
         output: SystemSliceMut<Self::Output>,
-    );
+    ) -> Result<(), Self::Error>;
 
     /// An (optional) preprocessing step run immediately before a function is applied, after
     /// boundary conditions have been filled.
-    fn preprocess(&self, _mesh: &mut Mesh<N>, _input: SystemSliceMut<Self::Input>) {}
+    fn preprocess(
+        &mut self,
+        _mesh: &mut Mesh<N>,
+        _input: SystemSliceMut<Self::Input>,
+    ) -> Result<(), Self::Error> {
+        Ok(())
+    }
 }
 
 /// A projection takes in a position and returns a system of values.

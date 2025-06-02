@@ -1,3 +1,4 @@
+use std::convert::Infallible;
 use std::path::PathBuf;
 
 use aeon::solver::SolverCallback;
@@ -42,13 +43,14 @@ struct PoissonEquation<'a> {
 impl<'a> Function<2> for PoissonEquation<'a> {
     type Input = Scalar;
     type Output = Scalar;
+    type Error = Infallible;
 
     fn evaluate(
         &self,
         engine: impl Engine<2>,
         input: SystemSlice<Self::Input>,
         mut output: SystemSliceMut<Self::Output>,
-    ) {
+    ) -> Result<(), Infallible> {
         let input = input.field(());
         let output = output.field_mut(());
 
@@ -62,6 +64,8 @@ impl<'a> Function<2> for PoissonEquation<'a> {
 
             output[index] = ddr + ddz - source[index];
         }
+
+        Ok(())
     }
 }
 

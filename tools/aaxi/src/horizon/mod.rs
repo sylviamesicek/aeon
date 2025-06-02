@@ -1,7 +1,23 @@
+use crate::rinne::{Field, Fields, Metric};
+use aeon::{
+    element::UniformInterpolate,
+    kernel::{Hessian, Kernels, NodeWindow, node_from_vertex},
+    prelude::*,
+};
+use aeon_tensor::Tensor;
 use core::f64;
+use faer::linalg::svd::SvdError;
+use reborrow::Reborrow;
+use std::convert::Infallible;
+use thiserror::Error;
 
-use crate::rinne::Fields;
-use aeon::{element::ProlongEngine, prelude::*};
+#[derive(Debug, Error)]
+pub enum HorizonError {
+    #[error("surface point not contained in mesh: ${0:?}")]
+    SurfaceNotContained([f64; 2]),
+    #[error("interpolation didn't converge")]
+    InterpolateFailed,
+}
 
 #[derive(Clone)]
 pub struct ApparentHorizonFinder {
@@ -11,7 +27,7 @@ pub struct ApparentHorizonFinder {
     surface_to_cell: Vec<CellId>,
     surface_position: Vec<[f64; 2]>,
 
-    prolong: ProlongEngine<2>,
+    prolong: UniformInterpolate<2>,
 }
 
 impl ApparentHorizonFinder {
@@ -40,20 +56,40 @@ impl ApparentHorizonFinder {
 
             surface_to_cell,
             surface_position,
-            prolong: ProlongEngine::default(),
+            prolong: UniformInterpolate::default(),
         }
     }
 
     pub fn search(&mut self, mesh: &Mesh<2>, fields: SystemSlice<Fields>) -> eyre::Result<()> {
         Ok(())
     }
+}
 
-    pub fn build(&mut self, mesh: &Mesh<2>) {
-        for block in 0..self.surface.num_blocks() {
-            let nodes = self.surface.block_nodes(BlockId(block));
-            let space = self.surface.block_space(BlockId(block));
+struct HorizonRadialDerivs<'a, K> {
+    surface_to_cell: &'a mut Vec<CellId>,
+    surface_position: &'a mut Vec<[f64; 2]>,
+    mesh: &'a Mesh<2>,
+    fields: SystemSlice<'a, Fields>,
+    _phantom: std::marker::PhantomData<K>,
+}
 
-            let surface_radius = &self.surface_radius.field(())[nodes.clone()];
+impl<'a, K: Kernels> Function<1> for HorizonRadialDerivs<'a, K> {
+    type Input = Scalar;
+    type Output = Scalar;
+    type Error = HorizonError;
+
+    fn preprocess(
+        &mut self,
+        surface: &mut Mesh<1>,
+        mut input: SystemSliceMut<Self::Input>,
+    ) -> Result<(), Self::Error> {
+        let radius = input.field_mut(());
+
+        for block in 0..surface.num_blocks() {
+            let nodes = surface.block_nodes(BlockId(block));
+            let space = surface.block_space(BlockId(block));
+
+            let surface_radius = &radius[nodes.clone()];
             let surface_position = &mut self.surface_position[nodes.clone()];
             let surface_to_cell = &mut self.surface_to_cell[nodes.clone()];
 
@@ -64,12 +100,12 @@ impl ApparentHorizonFinder {
 
                 let point = position(radius, theta);
 
-                if mesh.tree().domain().contains(point) {
-                    // TODO Fail gracefully
-                    unimplemented!()
+                if self.mesh.tree().domain().contains(point) {
+                    return Err(HorizonError::SurfaceNotContained(point));
                 }
 
-                let cell = mesh
+                let cell = self
+                    .mesh
                     .tree()
                     .cell_from_point_cached(point, surface_to_cell[index]);
 
@@ -77,6 +113,150 @@ impl ApparentHorizonFinder {
                 surface_to_cell[index] = cell;
             }
         }
+
+        Ok(())
+    }
+
+    fn evaluate(
+        &self,
+        engine: impl Engine<1>,
+        input: SystemSlice<Self::Input>,
+        mut output: SystemSliceMut<Self::Output>,
+    ) -> Result<(), Self::Error> {
+        let mesh = self.mesh;
+        let fields = self.fields.rb();
+
+        let input = input.field(());
+        let deriv = output.field_mut(());
+
+        let nodes = engine.node_range();
+
+        let surface_positions = &self.surface_position[nodes.clone()];
+        let surface_to_cell = &self.surface_to_cell[nodes.clone()];
+
+        // Size of every cell along each axis
+        let cell_size = [mesh.width() + 1; 2];
+        // Number of support points per cell axis
+        let cell_support = mesh.width() + 1;
+
+        let num_nodes_per_cell = cell_size.iter().product();
+
+        let scratch: &mut [f64] = engine.alloc(num_nodes_per_cell);
+        let gamma_rrr_scratch: &mut [f64] = engine.alloc(num_nodes_per_cell);
+        let gamma_rrz_scratch: &mut [f64] = engine.alloc(num_nodes_per_cell);
+        let gamma_rzz_scratch: &mut [f64] = engine.alloc(num_nodes_per_cell);
+        let gamma_zrr_scratch: &mut [f64] = engine.alloc(num_nodes_per_cell);
+        let gamma_zrz_scratch: &mut [f64] = engine.alloc(num_nodes_per_cell);
+        let gamma_zzz_scratch: &mut [f64] = engine.alloc(num_nodes_per_cell);
+
+        let mut interpolate = UniformInterpolate::<2>::default();
+
+        for [vertex] in IndexSpace::new(engine.vertex_size()).iter() {
+            let index = engine.index_from_vertex([vertex]);
+
+            let surface_radius = input[index];
+            let surface_position = surface_positions[index];
+
+            let mesh_cell = surface_to_cell[index];
+            let mesh_active_cell = mesh.tree().active_index_from_cell(mesh_cell).unwrap();
+            let mesh_block = mesh.blocks().active_cell_block(mesh_active_cell);
+
+            let block_space = mesh.block_space(mesh_block);
+            let cell_space = NodeWindow {
+                origin: node_from_vertex(mesh.cell_node_origin(mesh_active_cell)),
+                size: cell_size,
+            };
+
+            interpolate
+                .build(cell_support, cell_support, surface_position)
+                .map_err(|_err| HorizonError::InterpolateFailed)?;
+
+            let block_fields = fields.slice(nodes.clone());
+
+            let grr_f = block_fields.field(Field::Metric(Metric::Grr));
+            let grz_f = block_fields.field(Field::Metric(Metric::Grz));
+            let gzz_f = block_fields.field(Field::Metric(Metric::Gzz));
+            let s_f = block_fields.field(Field::Metric(Metric::S));
+
+            let krr_f = block_fields.field(Field::Metric(Metric::Krr));
+            let krz_f = block_fields.field(Field::Metric(Metric::Krz));
+            let kzz_f = block_fields.field(Field::Metric(Metric::Kzz));
+            let y_f = block_fields.field(Field::Metric(Metric::Y));
+
+            // Handle metric values
+            macro_rules! interpolate_value {
+                ($output:ident, $field:ident) => {
+                    for (i, node) in cell_space.iter().enumerate() {
+                        scratch[i] = $field[block_space.index_from_node(node)];
+                    }
+                    let $output = interpolate.apply(&scratch);
+                };
+            }
+
+            macro_rules! interpolate_derivative {
+                ($output:ident, $field:ident, $axis:expr) => {
+                    for (i, node) in cell_space.iter().enumerate() {
+                        scratch[i] =
+                            block_space.evaluate_axis(K::derivative(), node, $field, $axis);
+                    }
+                    let $output = interpolate.apply(&scratch);
+                };
+            }
+
+            interpolate_value!(grr, grr_f);
+            interpolate_value!(grz, grz_f);
+            interpolate_value!(gzz, gzz_f);
+            interpolate_value!(s, s_f);
+            interpolate_derivative!(s_r, s_f, 0);
+            interpolate_derivative!(s_z, s_f, 1);
+
+            interpolate_value!(krr, krr_f);
+            interpolate_value!(krz, krz_f);
+            interpolate_value!(kzz, kzz_f);
+            interpolate_value!(y, y_f);
+
+            // Handle connection coefficients
+            for (i, node) in cell_space.iter().enumerate() {
+                let index = block_space.index_from_node(node);
+
+                macro_rules! derivatives {
+                    ($field:ident, $value:ident, $dr:ident, $dz:ident) => {
+                        let $value = $field[index];
+                        let $dr = block_space.evaluate_axis(K::derivative(), node, $field, 0);
+                        let $dz = block_space.evaluate_axis(K::derivative(), node, $field, 1);
+                    };
+                }
+
+                // Metric
+                derivatives!(grr_f, grr, grr_r, grr_z);
+                derivatives!(gzz_f, gzz, gzz_r, gzz_z);
+                derivatives!(grz_f, grz, grz_r, grz_z);
+
+                // Build refernce metric
+                let g = [[grr, grz], [grz, gzz]].into();
+                let g_partials = {
+                    let grr_par = [grr_r, grr_z];
+                    let grz_par = [grz_r, grz_z];
+                    let gzz_par = [gzz_r, gzz_z];
+
+                    [[grr_par, grz_par], [grz_par, gzz_par]].into()
+                };
+                let g_second_partials = Tensor::zeros();
+                let metric = aeon_tensor::Metric::new(g, g_partials, g_second_partials);
+
+                // Copy into scratch
+                gamma_rrr_scratch[i] = metric.christoffel_2nd()[[0, 0, 0]];
+                gamma_rrz_scratch[i] = metric.christoffel_2nd()[[0, 0, 1]];
+                gamma_rzz_scratch[i] = metric.christoffel_2nd()[[0, 1, 1]];
+                gamma_zrr_scratch[i] = metric.christoffel_2nd()[[1, 0, 0]];
+                gamma_zrz_scratch[i] = metric.christoffel_2nd()[[1, 0, 1]];
+                gamma_zzz_scratch[i] = metric.christoffel_2nd()[[1, 1, 1]];
+            }
+
+            let g = [[grr, grz], [grz, gzz]];
+        }
+
+        Ok(())
     }
 }
 

@@ -14,11 +14,13 @@ console.workspace = true
 csv.workspace = true
 datasize.workspace = true
 eyre.workspace = true
+faer.workspace = true
 indicatif.workspace = true
 log.workspace = true
 reborrow.workspace = true
 serde.workspace = true
 serde_with.workspace = true
+thiserror.workspace = true
 toml.workspace = true
 
 [dev-dependencies]

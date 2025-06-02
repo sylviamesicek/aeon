@@ -1,4 +1,5 @@
 use core::f64;
+use std::convert::Infallible;
 
 use aeon::{kernel::Interpolation, mesh::Gaussian, prelude::*};
 use serde::{Deserialize, Serialize};
@@ -125,13 +126,14 @@ pub struct InitialData;
 impl Function<1> for InitialData {
     type Input = Scalar;
     type Output = Fields;
+    type Error = Infallible;
 
     fn evaluate(
         &self,
         engine: impl Engine<1>,
         input: SystemSlice<Self::Input>,
         mut output: SystemSliceMut<Self::Output>,
-    ) {
+    ) -> Result<(), Infallible> {
         let scalar_field = input.into_scalar();
 
         for vertex in IndexSpace::new(engine.vertex_size()).iter() {
@@ -142,6 +144,8 @@ impl Function<1> for InitialData {
             output.field_mut(Field::Phi)[index] = engine.derivative(scalar_field, 0, vertex);
             output.field_mut(Field::Pi)[index] = 0.0;
         }
+
+        Ok(())
     }
 }
 
@@ -149,8 +153,17 @@ impl Function<1> for InitialData {
 pub struct TimeDerivs;
 
 impl Function<1> for TimeDerivs {
-    fn preprocess(&self, mesh: &mut Mesh<1>, input: SystemSliceMut<Self::Input>) {
+    type Input = Fields;
+    type Output = Fields;
+    type Error = Infallible;
+
+    fn preprocess(
+        &mut self,
+        mesh: &mut Mesh<1>,
+        input: SystemSliceMut<Self::Input>,
+    ) -> Result<(), Infallible> {
         solve_constraints(mesh, input);
+        Ok(())
     }
 
     fn evaluate(
@@ -158,7 +171,7 @@ impl Function<1> for TimeDerivs {
         engine: impl Engine<1>,
         input: SystemSlice<Self::Input>,
         mut output: SystemSliceMut<Self::Output>,
-    ) {
+    ) -> Result<(), Infallible> {
         let a = input.field(Field::Conformal);
         let alpha = input.field(Field::Lapse);
         let phi = input.field(Field::Phi);
@@ -190,10 +203,9 @@ impl Function<1> for TimeDerivs {
             output.field_mut(Field::Conformal)[index] = 0.0;
             output.field_mut(Field::Lapse)[index] = 0.0;
         }
-    }
 
-    type Input = Fields;
-    type Output = Fields;
+        Ok(())
+    }
 }
 
 pub fn solve_constraints(mesh: &mut Mesh<1>, system: SystemSliceMut<Fields>) {

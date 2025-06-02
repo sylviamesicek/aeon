@@ -1,3 +1,4 @@
+use std::convert::Infallible;
 use std::{array, ops::Range};
 
 use crate::geometry::{BlockId, Face, FaceMask, IndexSpace, faces};
@@ -140,19 +141,22 @@ struct ProjectionAsFunction<P>(P);
 impl<const N: usize, P: Projection<N>> Function<N> for ProjectionAsFunction<P> {
     type Input = Empty;
     type Output = Scalar;
+    type Error = Infallible;
 
     fn evaluate(
         &self,
         engine: impl Engine<N>,
         _input: SystemSlice<Self::Input>,
         mut output: SystemSliceMut<Self::Output>,
-    ) {
+    ) -> Result<(), Infallible> {
         let dest = output.field_mut(());
 
         for vertex in IndexSpace::new(engine.vertex_size()).iter() {
             let index = engine.index_from_vertex(vertex);
             dest[index] = self.0.project(engine.position(vertex))
         }
+
+        Ok(())
     }
 }
 
@@ -164,16 +168,18 @@ impl<const N: usize> Mesh<N> {
         function: P,
         source: SystemSlice<'_, P::Input>,
         dest: SystemSliceMut<'_, P::Output>,
-    ) where
+    ) -> Result<(), P::Error>
+    where
         P::Input: Sync,
         P::Output: Sync,
+        P::Error: Send,
     {
         // Make sure order is valid.
         assert!(matches!(order, 2 | 4 | 6));
 
         let dest = dest.into_shared();
 
-        self.block_compute(|mesh, store, block| {
+        self.try_block_compute(|mesh, store, block| {
             let space = mesh.block_space(block);
             let nodes = mesh.block_nodes(block);
 
@@ -225,7 +231,7 @@ impl<const N: usize> Mesh<N> {
                     _ => unreachable!(),
                 }
             }
-        });
+        })
     }
 
     pub fn is_block_in_interior(&self, block: BlockId) -> bool {
@@ -251,10 +257,13 @@ impl<const N: usize> Mesh<N> {
         order: K,
         function: P,
         dest: SystemSliceMut<'_, S>,
-    ) {
+    ) -> Result<(), P::Error>
+    where
+        P::Error: Send,
+    {
         let dest = dest.into_shared();
 
-        self.block_compute(|mesh, store, block| {
+        self.try_block_compute(|mesh, store, block| {
             let space = mesh.block_space(block);
             let nodes = mesh.block_nodes(block);
 
@@ -279,7 +288,7 @@ impl<const N: usize> Mesh<N> {
                     range: nodes.clone(),
                 };
 
-                function.evaluate(engine, block_source.rb(), block_dest);
+                function.evaluate(engine, block_source.rb(), block_dest)
             } else {
                 let engine = FdEngine {
                     space: space.clone(),
@@ -289,9 +298,9 @@ impl<const N: usize> Mesh<N> {
                     range: nodes.clone(),
                 };
 
-                function.evaluate(engine, block_source.rb(), block_dest);
+                function.evaluate(engine, block_source.rb(), block_dest)
             }
-        });
+        })
     }
 
     /// Applies an operator to a system in place, enforcing both strong and weak boundary conditions
@@ -304,10 +313,12 @@ impl<const N: usize> Mesh<N> {
         &mut self,
         order: O,
         bcs: C,
-        op: P,
+        mut op: P,
         mut f: SystemSliceMut<'_, C::System>,
-    ) where
+    ) -> Result<(), P::Error>
+    where
         C::System: Sync,
+        P::Error: Send,
     {
         for field in f.system().enumerate() {
             assert!(
@@ -319,11 +330,11 @@ impl<const N: usize> Mesh<N> {
         // Strong boundary condition
         self.fill_boundary(order, bcs.clone(), f.rb_mut());
         // Preprocess data
-        op.preprocess(self, f.rb_mut());
+        op.preprocess(self, f.rb_mut())?;
 
         let f = f.into_shared();
 
-        self.block_compute(|mesh, store, block| {
+        self.try_block_compute(|mesh, store, block| {
             let space = mesh.block_space(block);
             let nodes = mesh.block_nodes(block);
             let bcs = mesh.block_bcs(block, bcs.clone());
@@ -348,7 +359,7 @@ impl<const N: usize> Mesh<N> {
                     range: nodes.clone(),
                 };
 
-                op.evaluate(engine, block_source.rb(), block_dest.rb_mut());
+                op.evaluate(engine, block_source.rb(), block_dest.rb_mut())
             } else {
                 let engine = FdEngine {
                     space: space.clone(),
@@ -358,7 +369,7 @@ impl<const N: usize> Mesh<N> {
                     range: nodes.clone(),
                 };
 
-                op.evaluate(&engine, block_source.rb(), block_dest.rb_mut());
+                op.evaluate(&engine, block_source.rb(), block_dest.rb_mut())?;
 
                 // Weak boundary conditions.
                 for face in faces::<N>() {
@@ -447,8 +458,10 @@ impl<const N: usize> Mesh<N> {
                         }
                     }
                 }
+
+                Ok(())
             }
-        });
+        })
     }
 
     /// Copies an immutable src slice into a mutable dest slice.
@@ -469,7 +482,8 @@ impl<const N: usize> Mesh<N> {
             ProjectionAsFunction(projection),
             SystemSlice::empty(),
             SystemSliceMut::from_scalar(dest),
-        );
+        )
+        .unwrap();
     }
 
     /// Applies the projection to `source`, and stores the result in `dest`.
@@ -485,13 +499,14 @@ impl<const N: usize> Mesh<N> {
         impl<const N: usize> Function<N> for Dissipation {
             type Input = Scalar;
             type Output = Scalar;
+            type Error = Infallible;
 
             fn evaluate(
                 &self,
                 engine: impl Engine<N>,
                 input: SystemSlice<Self::Input>,
                 mut output: SystemSliceMut<Self::Output>,
-            ) {
+            ) -> Result<(), Infallible> {
                 let input = input.field(());
                 let output = output.field_mut(());
 
@@ -502,6 +517,8 @@ impl<const N: usize> Mesh<N> {
                         output[index] += self.0 * engine.dissipation(input, axis, vertex);
                     }
                 }
+
+                Ok(())
             }
         }
 
@@ -510,7 +527,8 @@ impl<const N: usize> Mesh<N> {
                 order,
                 Dissipation(amplitude),
                 SystemSliceMut::from_scalar(dest.field_mut(field)),
-            );
+            )
+            .unwrap();
         }
     }
 

@@ -219,6 +219,10 @@ impl<const N: usize> Mesh<N> {
     // *******************************
     // Data for each block ***********
 
+    pub fn blocks(&self) -> &TreeBlocks<N> {
+        &self.blocks
+    }
+
     /// The range of nodes assigned to a given block.
     pub fn block_nodes(&self, block: BlockId) -> Range<usize> {
         self.blocks.nodes(block)
@@ -454,6 +458,23 @@ impl<const N: usize> Mesh<N> {
                 f(self, store, block);
                 store.reset();
             });
+    }
+
+    /// Runs a (possibily failable) computation in parallel on every single block in the mesh.
+    pub fn try_block_compute<E: Send, F: Fn(&Self, &MeshStore, BlockId) -> Result<(), E> + Sync>(
+        &mut self,
+        f: F,
+    ) -> Result<(), E> {
+        self.blocks
+            .indices()
+            .par_bridge()
+            .into_par_iter()
+            .try_for_each(|block| {
+                let store = unsafe { &mut *self.stores.get_or_default().get() };
+                let result = f(self, store, block);
+                store.reset();
+                result
+            })
     }
 
     /// Runs a computation in parallel on every single old block in the mesh, providing

@@ -4,11 +4,11 @@
 //! the `NodeSpace`.
 
 use crate::geometry::{
-    faces, regions, CartesianIter, Face, FaceArray, IndexSpace, Rectangle, Region, Side,
+    CartesianIter, Face, FaceArray, IndexSpace, Rectangle, Region, Side, faces, regions,
 };
 use crate::kernel::{
-    boundary::is_boundary_compatible, Border, BoundaryClass, BoundaryConds, BoundaryKind,
-    CellKernel, Convolution, Kernel, Value, VertexKernel,
+    Border, BoundaryClass, BoundaryConds, BoundaryKind, CellKernel, Convolution, Kernel, Value,
+    VertexKernel, boundary::is_boundary_compatible,
 };
 use std::array::{self, from_fn};
 
@@ -193,6 +193,13 @@ impl<const N: usize> NodeSpace<N> {
 
         NodeWindow { origin, size }
     }
+
+    // pub fn copy_into_window(&self, window: NodeWindow<N>, src: &[f64], dest: &mut [f64]) {
+    //     debug_assert_eq!(src.len(), self.num_nodes());
+    //     debug_assert_eq!(dest.len(), window.num_nodes());
+
+    //     for node in
+    // }
 
     fn support_axis(&self, vertex: usize, border_width: usize, axis: usize) -> Support {
         debug_assert!(self.ghost >= border_width);
@@ -563,6 +570,10 @@ pub struct NodeWindow<const N: usize> {
 }
 
 impl<const N: usize> NodeWindow<N> {
+    pub fn num_nodes(&self) -> usize {
+        self.size.iter().product()
+    }
+
     /// Iterate over all nodes in the window.
     pub fn iter(&self) -> NodeCartesianIter<N> {
         NodeCartesianIter::new(self.origin, self.size)

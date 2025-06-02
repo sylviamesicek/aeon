@@ -14,13 +14,15 @@ use super::SolverCallback;
 
 /// Error which may be thrown during hyperbolic relaxation.
 #[derive(Error, Debug)]
-pub enum HyperRelaxError {
+pub enum HyperRelaxError<E> {
     #[error("failed to relax below tolerance in allotted number of steps")]
     FailedToMeetTolerance,
     #[error("norm diverged to NaN")]
     Diverged,
     #[error("failed to create and store visualizations of each iteration")]
     VisualizeFailed,
+    #[error("unknown error")]
+    Unknown(#[from] E),
 }
 
 /// A solver which implements the algorithm described in NRPyElliptic. This transforms the elliptic equation
@@ -77,9 +79,10 @@ impl HyperRelaxSolver {
         conditions: C,
         deriv: F,
         result: SystemSliceMut<C::System>,
-    ) -> Result<(), HyperRelaxError>
+    ) -> Result<(), HyperRelaxError<F::Error>>
     where
         C::System: Default + Clone + Sync,
+        F::Error: Send,
     {
         self.solve_with_callback(mesh, order, conditions, deriv, (), result)
     }
@@ -98,9 +101,10 @@ impl HyperRelaxSolver {
         deriv: F,
         callback: Call,
         mut result: SystemSliceMut<C::System>,
-    ) -> Result<(), HyperRelaxError>
+    ) -> Result<(), HyperRelaxError<F::Error>>
     where
         C::System: Default + Clone + Sync,
+        F::Error: Send,
     {
         // Total number of degreees of freedom in the whole system
         let dimension = result.system().count() * mesh.num_nodes();
@@ -153,7 +157,7 @@ impl HyperRelaxSolver {
             {
                 let u = SystemSlice::from_contiguous(&data[..dimension], &system.0);
                 mesh.copy_from_slice(result.rb_mut(), u.rb());
-                mesh.apply(order, conditions.clone(), deriv.clone(), result.rb_mut());
+                mesh.apply(order, conditions.clone(), deriv.clone(), result.rb_mut())?;
                 callback.callback(mesh, u.rb(), result.rb(), index);
             }
 
@@ -187,7 +191,7 @@ impl HyperRelaxSolver {
                 },
                 time_step,
                 SystemSliceMut::from_contiguous(&mut data, &system),
-            );
+            )?;
 
             if index == self.max_steps - 1 {
                 log::error!(
@@ -283,13 +287,14 @@ impl<const N: usize, S: System, F: Function<N, Input = S, Output = S>> Function<
 {
     type Input = (S, S);
     type Output = (S, S);
+    type Error = F::Error;
 
     fn evaluate(
         &self,
         engine: impl Engine<N>,
         input: SystemSlice<Self::Input>,
         output: SystemSliceMut<Self::Output>,
-    ) {
+    ) -> Result<(), F::Error> {
         let (uin, vin) = input.split_pair();
         let (mut uout, mut vout) = output.split_pair();
 
@@ -308,7 +313,7 @@ impl<const N: usize, S: System, F: Function<N, Input = S, Output = S>> Function<
 
         // dv/dt = c^2 Lu
         // TODO speed
-        self.function.evaluate(&engine, uin, vout.rb_mut());
+        self.function.evaluate(&engine, uin, vout.rb_mut())?;
 
         // Use adaptive timestep
         let block_spacing = &self.spacing_per_vertex[engine.node_range()];
@@ -328,6 +333,8 @@ impl<const N: usize, S: System, F: Function<N, Input = S, Output = S>> Function<
                 vout[index] *= block_spacing[index] / self.min_spacing;
             }
         }
+
+        Ok(())
     }
 }
 
@@ -344,7 +351,7 @@ mod tests {
         mesh::Projection,
         system::{Scalar, SystemBoundaryConds},
     };
-    use std::f64::consts;
+    use std::{convert::Infallible, f64::consts};
 
     #[derive(Clone)]
     struct PoissonConditions;
@@ -383,13 +390,14 @@ mod tests {
     impl Function<2> for PoissonEquation {
         type Input = Scalar;
         type Output = Scalar;
+        type Error = Infallible;
 
         fn evaluate(
             &self,
             engine: impl Engine<2>,
             input: SystemSlice<Self::Input>,
             output: SystemSliceMut<Self::Output>,
-        ) {
+        ) -> Result<(), Infallible> {
             let input = input.into_scalar();
             let output = output.into_scalar();
 
@@ -407,6 +415,8 @@ mod tests {
 
                 output[index] = laplacian - source;
             }
+
+            Ok(())
         }
     }
 

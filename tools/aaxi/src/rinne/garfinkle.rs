@@ -1,3 +1,5 @@
+use std::convert::Infallible;
+
 use crate::config::{Relax, Source};
 use crate::rinne::eqs;
 use aeon::prelude::*;
@@ -161,13 +163,14 @@ pub struct Hamiltonian<'a> {
 impl<'a> Function<2> for Hamiltonian<'a> {
     type Input = Scalar;
     type Output = Scalar;
+    type Error = Infallible;
 
     fn evaluate(
         &self,
         engine: impl Engine<2>,
         input: SystemSlice<Self::Input>,
         output: SystemSliceMut<Self::Output>,
-    ) {
+    ) -> Result<(), Infallible> {
         let context = self.context.slice(engine.node_range());
         let seed = context.field(Context::Seed);
 
@@ -215,6 +218,7 @@ impl<'a> Function<2> for Hamiltonian<'a> {
                 + psi[index] / 4.0 * (rho * seed_rr + 2.0 * seed_r + rho * seed_zz)
                 + psi[index] / 4.0 * source * eqs::KAPPA;
         }
+        Ok(())
     }
 }
 
@@ -228,13 +232,14 @@ pub struct FieldsFromGarfinkle<'a> {
 impl<'a> Function<2> for FieldsFromGarfinkle<'a> {
     type Input = Empty;
     type Output = Fields;
+    type Error = Infallible;
 
     fn evaluate(
         &self,
         engine: impl Engine<2>,
         _: SystemSlice<Self::Input>,
         mut output: SystemSliceMut<Self::Output>,
-    ) {
+    ) -> Result<(), Infallible> {
         let psi = &self.psi[engine.node_range()];
         let context = self.context.slice(engine.node_range());
         let seed = context.field(Context::Seed);
@@ -249,6 +254,8 @@ impl<'a> Function<2> for FieldsFromGarfinkle<'a> {
             output.field_mut(Field::Metric(Metric::Gzz))[index] = conformal;
             output.field_mut(Field::Metric(Metric::S))[index] = -seed[index];
         }
+
+        Ok(())
     }
 }
 
@@ -342,7 +349,8 @@ where
         },
         SystemSlice::empty(),
         system.rb_mut(),
-    );
+    )
+    .unwrap();
 
     // Copy scalar fields
     for i in 0..num_scalar_field {
