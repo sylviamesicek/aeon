@@ -28,7 +28,7 @@ mod store;
 mod transfer;
 
 pub use checkpoint::{Checkpoint, ExportVtuConfig};
-pub use function::{Engine, Function, Gaussian, Projection};
+pub use function::{Engine, Function, FunctionBorrowMut, Gaussian, Projection};
 pub use store::MeshStore;
 
 use crate::system::{System, SystemSlice};

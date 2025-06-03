@@ -1,5 +1,6 @@
 use crate::geometry::{Face, IndexSpace};
 use crate::kernel::{BoundaryKind, DirichletParams, Kernels, RadiativeParams};
+use crate::mesh::FunctionBorrowMut;
 use datasize::DataSize;
 use reborrow::{Reborrow, ReborrowMut};
 use thiserror::Error;
@@ -71,7 +72,7 @@ impl HyperRelaxSolver {
         const N: usize,
         K: Kernels + Sync,
         C: SystemBoundaryConds<N> + Sync,
-        F: Function<N, Input = C::System, Output = C::System> + Clone + Sync,
+        F: Function<N, Input = C::System, Output = C::System> + Sync,
     >(
         &mut self,
         mesh: &mut Mesh<N>,
@@ -91,14 +92,14 @@ impl HyperRelaxSolver {
         const N: usize,
         K: Kernels + Sync,
         C: SystemBoundaryConds<N> + Sync,
-        F: Function<N, Input = C::System, Output = C::System> + Clone + Sync,
+        F: Function<N, Input = C::System, Output = C::System> + Sync,
         Call: SolverCallback<N, C::System> + Sync,
     >(
         &mut self,
         mesh: &mut Mesh<N>,
         order: K,
         conditions: C,
-        deriv: F,
+        mut deriv: F,
         callback: Call,
         mut result: SystemSliceMut<C::System>,
     ) -> Result<(), HyperRelaxError<F::Error>>
@@ -157,7 +158,12 @@ impl HyperRelaxSolver {
             {
                 let u = SystemSlice::from_contiguous(&data[..dimension], &system.0);
                 mesh.copy_from_slice(result.rb_mut(), u.rb());
-                mesh.apply(order, conditions.clone(), deriv.clone(), result.rb_mut())?;
+                mesh.apply(
+                    order,
+                    conditions.clone(),
+                    FunctionBorrowMut(&mut deriv),
+                    result.rb_mut(),
+                )?;
                 callback.callback(mesh, u.rb(), result.rb(), index);
             }
 

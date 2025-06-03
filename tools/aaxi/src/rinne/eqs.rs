@@ -1087,3 +1087,165 @@ pub fn evolution(
         scalar_field_derivs[i].pi = scalar.pi;
     }
 }
+
+pub struct HorizonData {
+    pub grr: f64,
+    pub grz: f64,
+    pub gzz: f64,
+    pub grr_r: f64,
+    pub grr_z: f64,
+    pub grz_r: f64,
+    pub grz_z: f64,
+    pub gzz_r: f64,
+    pub gzz_z: f64,
+    pub s: f64,
+    pub s_r: f64,
+    pub s_z: f64,
+    pub krr: f64,
+    pub krz: f64,
+    pub kzz: f64,
+    pub y: f64,
+
+    pub theta: f64,
+    pub radius: f64,
+    pub radius_deriv: f64,
+    pub radius_second_deriv: f64,
+}
+
+impl HorizonData {
+    fn metric(&self) -> Matrix<2> {
+        Tensor::from([[self.grr, self.grz], [self.grz, self.gzz]])
+    }
+
+    fn metric_derivs(&self) -> Tensor3<2> {
+        let grr_par = [self.grr_r, self.grr_z];
+        let grz_par = [self.grz_r, self.grz_z];
+        let gzz_par = [self.gzz_r, self.gzz_z];
+
+        [[grr_par, grz_par], [grz_par, gzz_par]].into()
+    }
+
+    fn metric_second_derivs(&self) -> Tensor4<2> {
+        Tensor::zeros()
+    }
+
+    pub fn seed(&self) -> f64 {
+        self.s
+    }
+
+    pub fn seed_derivs(&self) -> Vector<2> {
+        [self.s_r, self.s_z].into()
+    }
+
+    pub fn seed_second_derivs(&self) -> Matrix<2> {
+        Tensor::zeros()
+    }
+
+    pub fn extrinsic(&self) -> Matrix<2> {
+        [[self.krr, self.krz], [self.krz, self.kzz]].into()
+    }
+}
+
+pub fn horizon(system: HorizonData, [r, z]: [f64; 2]) -> f64 {
+    // Prepare space for tensor computations
+    const S: Space<2> = Space::<2>;
+    // Perpare decomposition
+    let metric = Metric::new(
+        system.metric(),
+        system.metric_derivs(),
+        system.metric_second_derivs(),
+    );
+    let twist = Twist::new(
+        &metric,
+        [r, z],
+        system.seed(),
+        system.seed_derivs(),
+        system.seed_second_derivs(),
+    );
+    debug_assert!(metric.det() >= 0.0);
+    // Build levi_civita tensor
+    let levi_civita = metric.det().sqrt() * Matrix::from([[0., 1.], [-1., 0.]]);
+    // Decompose xᵐ(θ) into two derivatives
+    let theta = system.theta;
+    let radius = system.radius;
+    let radius_dtheta = system.radius_deriv;
+    let radius_ddtheta = system.radius_second_deriv;
+
+    // ρ = R cos(θ)
+    // z = R sin(θ)
+    let tau = {
+        let dr = radius_dtheta * theta.cos() - radius * theta.sin();
+        let dz = radius_dtheta * theta.sin() + radius * theta.cos();
+
+        Vector::from([dr, dz])
+    };
+    let tau2 = {
+        let drr =
+            radius_ddtheta * theta.cos() - 2.0 * radius_dtheta * theta.sin() - radius * theta.cos();
+        let dzz =
+            radius_ddtheta * theta.sin() + 2.0 * radius_dtheta * theta.cos() - radius * theta.sin();
+
+        Vector::from([drr, dzz])
+    };
+    // Normalization factor
+    let sigma = S
+        .sum(|[i, j]| metric.value()[[i, j]] * tau[[i]] * tau[[j]])
+        .sqrt()
+        .recip();
+
+    // let tangent = S.vector(|i| sigma * tau[[i]]);
+    // sᵅ = σ Hᵅᵝ εᵦᵧ (dxˠ/dθ)
+    let normal =
+        S.vector(|a| sigma * S.sum(|[b, c]| metric.inv()[[a, b]] * levi_civita[[b, c]] * tau[[c]]));
+
+    // Terms
+    let mut div_term = {
+        let term1 = S.sum(|[a, b]| levi_civita[[a, b]] * tau2[[a]] * tau[[b]]);
+        let term2 = S.sum(|[a, b, c, d]| {
+            levi_civita[[a, b]]
+                * tau[[b]]
+                * tau[[c]]
+                * tau[[d]]
+                * metric.christoffel_2nd()[[a, c, d]]
+        });
+        let term3 = S.sum(|[a]| twist.regular_co()[[a]] * normal[[a]]);
+
+        -sigma.powi(3) * (term1 + term2) + term3
+    };
+
+    // sᵅ = σ Hᵅᵝ εᵦᵧ (dxˠ/dθ)
+    // sʳ = σ Hʳᵝ εᵦᵧ (dxˠ/dθ) = σ / Hᵣᵣ εᵣᵧ (dxˠ/dθ) = σ / Hᵣᵣ εᵣₜ (dz/dθ)
+    if r.abs() <= ON_AXIS {
+        // // I think this reduces to zero
+        // let sigma_r =
+        //     -0.5 * sigma.powi(3) * S.sum(|[a, b]| metric.derivs()[[a, b, 0]] * tau[[a]] * tau[[b]]);
+
+        // div_lambda_term +=
+        //     sigma_r * S.sum(|[b, c]| metric.inv()[[0, b]] * levi_civita[[b, c]] * tau[[c]]);
+        // div_lambda_term += metric.det_derivs()[[]]
+
+        // I think everything becomes zero except for the dz/dθ / r term.
+        // This in turn becomes
+        // (dR/dθ sin θ + R cos θ) / R cos θ
+        // 1 + (dR/dθ / cos θ) (sin θ / R)
+        // Both dR/dθ and cos θ approach 0 on axis, therefore this term becomes d²R/dθ² / (-sin θ).
+        // This gives
+        // 1/r dz/dθ = 1 - d²R/dθ² / R
+
+        div_term +=
+            sigma / metric.value()[[0, 0]] * levi_civita[[0, 1]] * (1.0 - tau2[[1]] / radius);
+    }
+
+    // Extrinsic curvature terms
+    let extrinsic = system.extrinsic();
+    let l = extrinsic[[0, 0]] / metric.value()[[0, 0]] + r * system.y;
+
+    let ext_term = {
+        let term1 = S.sum(|[a, b]| extrinsic[[a, b]] * normal[[a]] * normal[[b]]);
+        let term2 = -metric.cotrace(&extrinsic) - l;
+
+        term1 + term2
+    };
+
+    div_term + ext_term
+}

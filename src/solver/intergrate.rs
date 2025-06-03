@@ -1,6 +1,6 @@
 use crate::{
     kernel::{Kernels, Order},
-    mesh::{Function, Mesh},
+    mesh::{Function, FunctionBorrowMut, Mesh},
     system::{System, SystemBoundaryConds, SystemSlice, SystemSliceMut},
 };
 use datasize::DataSize;
@@ -39,7 +39,7 @@ impl Integrator {
         const N: usize,
         K: Kernels + Sync,
         C: SystemBoundaryConds<N> + Sync,
-        F: Function<N, Input = C::System, Output = C::System> + Clone + Sync,
+        F: Function<N, Input = C::System, Output = C::System> + Sync,
     >(
         &mut self,
         mesh: &mut Mesh<N>,
@@ -87,28 +87,48 @@ impl Integrator {
                 // K1
                 Self::copy_from(tmp.rb_mut(), result.rb());
                 deriv.preprocess(mesh, tmp.rb_mut())?;
-                mesh.apply(order, conditions.clone(), deriv.clone(), tmp.rb_mut())?;
+                mesh.apply(
+                    order,
+                    conditions.clone(),
+                    FunctionBorrowMut(&mut deriv),
+                    tmp.rb_mut(),
+                )?;
                 Self::fused_multiply_add_assign(update.rb_mut(), 1. / 6., tmp.rb());
 
                 // K2
                 Self::fused_multiply_add_dest(tmp.rb_mut(), result.rb(), h / 2.0);
                 mesh.fill_boundary(order, conditions.clone(), tmp.rb_mut());
                 deriv.preprocess(mesh, tmp.rb_mut())?;
-                mesh.apply(order, conditions.clone(), deriv.clone(), tmp.rb_mut())?;
+                mesh.apply(
+                    order,
+                    conditions.clone(),
+                    FunctionBorrowMut(&mut deriv),
+                    tmp.rb_mut(),
+                )?;
                 Self::fused_multiply_add_assign(update.rb_mut(), 1. / 3., tmp.rb());
 
                 // K3
                 Self::fused_multiply_add_dest(tmp.rb_mut(), result.rb(), h / 2.0);
                 mesh.fill_boundary(order, conditions.clone(), tmp.rb_mut());
                 deriv.preprocess(mesh, tmp.rb_mut())?;
-                mesh.apply(order, conditions.clone(), deriv.clone(), tmp.rb_mut())?;
+                mesh.apply(
+                    order,
+                    conditions.clone(),
+                    FunctionBorrowMut(&mut deriv),
+                    tmp.rb_mut(),
+                )?;
                 Self::fused_multiply_add_assign(update.rb_mut(), 1. / 3., tmp.rb());
 
                 // K4
                 Self::fused_multiply_add_dest(tmp.rb_mut(), result.rb(), h);
                 mesh.fill_boundary(order, conditions.clone(), tmp.rb_mut());
                 deriv.preprocess(mesh, tmp.rb_mut())?;
-                mesh.apply(order, conditions.clone(), deriv.clone(), tmp.rb_mut())?;
+                mesh.apply(
+                    order,
+                    conditions.clone(),
+                    FunctionBorrowMut(&mut deriv),
+                    tmp.rb_mut(),
+                )?;
                 Self::fused_multiply_add_assign(update.rb_mut(), 1. / 6., tmp.rb());
 
                 // Sum everything

@@ -1,12 +1,11 @@
 #![allow(clippy::needless_range_loop)]
 
+use super::Mesh;
 use crate::{
     kernel::{NodeSpace, node_from_vertex},
     system::{System, SystemSlice, SystemSliceMut},
 };
 use std::{error::Error, ops::Range};
-
-use super::Mesh;
 
 /// An interface for computing values, gradients, and hessians of fields.
 pub trait Engine<const N: usize> {
@@ -144,5 +143,30 @@ impl<const N: usize> Projection<N> for Gaussian<N> {
             core::array::from_fn(|axis| (position[axis] - self.center[axis]) / self.sigma[axis]);
         let r2: f64 = offset.map(|v| v * v).iter().sum();
         self.amplitude * (-r2).exp()
+    }
+}
+
+pub struct FunctionBorrowMut<'a, I>(pub &'a mut I);
+
+impl<'a, const N: usize, F: Function<N>> Function<N> for FunctionBorrowMut<'a, F> {
+    type Input = F::Input;
+    type Output = F::Output;
+    type Error = F::Error;
+
+    fn preprocess(
+        &mut self,
+        mesh: &mut Mesh<N>,
+        input: SystemSliceMut<Self::Input>,
+    ) -> Result<(), Self::Error> {
+        self.0.preprocess(mesh, input)
+    }
+
+    fn evaluate(
+        &self,
+        engine: impl Engine<N>,
+        input: SystemSlice<Self::Input>,
+        output: SystemSliceMut<Self::Output>,
+    ) -> Result<(), Self::Error> {
+        self.0.evaluate(engine, input, output)
     }
 }
