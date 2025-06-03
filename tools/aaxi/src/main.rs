@@ -7,7 +7,6 @@ use std::{collections::HashMap, num::ParseFloatError, path::PathBuf};
 
 mod config;
 mod history;
-mod horizon;
 mod misc;
 mod rinne;
 

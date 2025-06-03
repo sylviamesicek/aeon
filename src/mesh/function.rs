@@ -1,11 +1,11 @@
 #![allow(clippy::needless_range_loop)]
 
-use super::Mesh;
+use crate::mesh::Mesh;
 use crate::{
     kernel::{NodeSpace, node_from_vertex},
     system::{System, SystemSlice, SystemSliceMut},
 };
-use std::{error::Error, ops::Range};
+use std::ops::Range;
 
 /// An interface for computing values, gradients, and hessians of fields.
 pub trait Engine<const N: usize> {
@@ -103,7 +103,7 @@ impl<'a, const N: usize, E: Engine<N>> Engine<N> for &'a E {
 pub trait Function<const N: usize> {
     type Input: System;
     type Output: System;
-    type Error: Error;
+    type Error;
 
     /// Action of the function on an individual finite different block.
     fn evaluate(

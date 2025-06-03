@@ -1,9 +1,12 @@
 #![allow(mixed_script_confusables)]
 
-use crate::rinne::{Field, Fields, HorizonData, Metric, horizon};
+use crate::rinne::eqs::{HorizonData, horizon};
+use crate::rinne::{Field, Fields, Metric};
+use aeon::solver::{HyperRelaxError, SolverCallback};
 use aeon::{
     element::UniformInterpolate,
     kernel::{Kernels, NodeWindow, node_from_vertex},
+    mesh::UnsafeThreadCache,
     prelude::*,
     solver::HyperRelaxSolver,
 };
@@ -12,23 +15,39 @@ use core::f64;
 use reborrow::Reborrow;
 use thiserror::Error;
 
+pub enum HorizonStatus {
+    CollapsedToZero,
+    Converged,
+}
+
 #[derive(Debug, Error)]
 pub enum HorizonError {
     #[error("surface point not contained in mesh: ${0:?}")]
     SurfaceNotContained([f64; 2]),
+    #[error("surface doesn't sucessfully relax")]
+    SurfaceDiverged,
     #[error("interpolation didn't converge")]
     InterpolateFailed,
 }
 
-#[derive(Clone)]
 pub struct ApparentHorizonFinder {
+    /// Error tolerance (relaxation stops once error goes below this value).
+    pub tolerance: f64,
+    /// Maximum number of relaxation steps to perform
+    pub max_steps: usize,
+    /// Dampening term η.
+    pub dampening: f64,
+    /// CFL factor for ficticuous time step.
+    pub cfl: f64,
+
     surface: Mesh<1>,
     surface_radius: SystemVec<Scalar>,
 
     surface_to_cell: Vec<CellId>,
     surface_position: Vec<[f64; 2]>,
 
-    pub solver: HyperRelaxSolver,
+    cache: UnsafeThreadCache<UniformInterpolate<2>>,
+    solver: HyperRelaxSolver,
 }
 
 impl ApparentHorizonFinder {
@@ -52,11 +71,19 @@ impl ApparentHorizonFinder {
         let surface_position = vec![[0.0; 2]; surface.num_nodes()];
 
         Self {
+            tolerance: 1e-5,
+            max_steps: 100000,
+            dampening: 1.0,
+            cfl: 0.1,
+
             surface,
             surface_radius,
 
             surface_to_cell,
             surface_position,
+
+            cache: UnsafeThreadCache::new(),
+
             solver: HyperRelaxSolver::default(),
         }
     }
@@ -66,7 +93,7 @@ impl ApparentHorizonFinder {
         mesh: &Mesh<2>,
         order: K,
         fields: SystemSlice<Fields>,
-    ) -> eyre::Result<()>
+    ) -> Result<HorizonStatus, HorizonError>
     where
         K: Sync,
     {
@@ -79,23 +106,54 @@ impl ApparentHorizonFinder {
         self.surface_position
             .resize(self.surface.num_nodes(), [0.0; 2]);
 
-        self.solver
-            .solve(
-                &mut self.surface,
-                order,
-                HorizonRadialBoundary,
-                HorizonRadialDerivs::<K> {
-                    surface_to_cell: &mut self.surface_to_cell,
-                    surface_position: &mut self.surface_position,
-                    mesh,
-                    fields,
-                    _phantom: std::marker::PhantomData,
-                },
-                self.surface_radius.as_mut_slice(),
-            )
-            .unwrap();
+        self.solver.tolerance = self.tolerance;
+        self.solver.max_steps = self.max_steps;
+        self.solver.dampening = self.dampening;
+        self.solver.cfl = self.cfl;
+        self.solver.adaptive = true;
+        // Run solver
+        let result = self.solver.solve_with_callback(
+            &mut self.surface,
+            order,
+            HorizonRadialBoundary,
+            HorizonRadialDerivs::<K> {
+                surface_to_cell: &mut self.surface_to_cell,
+                surface_position: &mut self.surface_position,
+                mesh,
+                fields,
+                _phantom: std::marker::PhantomData,
+            },
+            HorizonCallback { mesh },
+            self.surface_radius.as_mut_slice(),
+        );
 
-        Ok(())
+        match result {
+            Ok(()) => Ok(HorizonStatus::Converged),
+            Err(HyperRelaxError::CallbackFailed(HorizonCallbackError::CollapsedToZero)) => {
+                Ok(HorizonStatus::CollapsedToZero)
+            }
+            Err(HyperRelaxError::Diverged | HyperRelaxError::FailedToMeetTolerance) => {
+                Err(HorizonError::SurfaceDiverged)
+            }
+            Err(HyperRelaxError::FunctionFailed(err)) => Err(err),
+        }
+    }
+}
+
+impl Clone for ApparentHorizonFinder {
+    fn clone(&self) -> Self {
+        Self {
+            tolerance: self.tolerance,
+            max_steps: self.max_steps,
+            dampening: self.dampening,
+            cfl: self.cfl,
+            surface: self.surface.clone(),
+            surface_radius: self.surface_radius.clone(),
+            surface_to_cell: self.surface_to_cell.clone(),
+            surface_position: self.surface_position.clone(),
+            cache: UnsafeThreadCache::new(),
+            solver: self.solver.clone(),
+        }
     }
 }
 
@@ -293,6 +351,39 @@ impl<'a, K: Kernels> Function<1> for HorizonRadialDerivs<'a, K> {
             };
 
             surface_deriv[index] = horizon(system, [r, z]);
+        }
+
+        Ok(())
+    }
+}
+
+#[derive(Debug, Error)]
+enum HorizonCallbackError {
+    #[error("Coverged to zero")]
+    CollapsedToZero,
+}
+
+struct HorizonCallback<'a> {
+    mesh: &'a Mesh<2>,
+}
+
+impl<'a> SolverCallback<1, Scalar> for HorizonCallback<'a> {
+    type Error = HorizonCallbackError;
+
+    fn callback(
+        &self,
+        _surface: &Mesh<1>,
+        input: SystemSlice<Scalar>,
+        _output: SystemSlice<Scalar>,
+        _iteration: usize,
+    ) -> Result<(), Self::Error> {
+        let radius = input.field(());
+
+        let min_spacing = self.mesh.min_spacing();
+        let collapsed = radius.iter().all(|r| r.abs() <= min_spacing);
+
+        if collapsed {
+            return Err(HorizonCallbackError::CollapsedToZero);
         }
 
         Ok(())

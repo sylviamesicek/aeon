@@ -1,3 +1,5 @@
+use std::convert::Infallible;
+
 use crate::geometry::{Face, IndexSpace};
 use crate::kernel::{BoundaryKind, DirichletParams, Kernels, RadiativeParams};
 use crate::mesh::FunctionBorrowMut;
@@ -15,15 +17,17 @@ use super::SolverCallback;
 
 /// Error which may be thrown during hyperbolic relaxation.
 #[derive(Error, Debug)]
-pub enum HyperRelaxError<E> {
+pub enum HyperRelaxError<A, B> {
     #[error("failed to relax below tolerance in allotted number of steps")]
     FailedToMeetTolerance,
     #[error("norm diverged to NaN")]
     Diverged,
-    #[error("failed to create and store visualizations of each iteration")]
-    VisualizeFailed,
-    #[error("unknown error")]
-    Unknown(#[from] E),
+    // #[error("failed to create and store visualizations of each iteration")]
+    // VisualizeFailed,
+    #[error("function error")]
+    FunctionFailed(A),
+    #[error("callback error")]
+    CallbackFailed(B),
 }
 
 /// A solver which implements the algorithm described in NRPyElliptic. This transforms the elliptic equation
@@ -80,7 +84,7 @@ impl HyperRelaxSolver {
         conditions: C,
         deriv: F,
         result: SystemSliceMut<C::System>,
-    ) -> Result<(), HyperRelaxError<F::Error>>
+    ) -> Result<(), HyperRelaxError<F::Error, Infallible>>
     where
         C::System: Default + Clone + Sync,
         F::Error: Send,
@@ -102,10 +106,11 @@ impl HyperRelaxSolver {
         mut deriv: F,
         callback: Call,
         mut result: SystemSliceMut<C::System>,
-    ) -> Result<(), HyperRelaxError<F::Error>>
+    ) -> Result<(), HyperRelaxError<F::Error, Call::Error>>
     where
         C::System: Default + Clone + Sync,
         F::Error: Send,
+        Call::Error: Send,
     {
         // Total number of degreees of freedom in the whole system
         let dimension = result.system().count() * mesh.num_nodes();
@@ -163,8 +168,11 @@ impl HyperRelaxSolver {
                     conditions.clone(),
                     FunctionBorrowMut(&mut deriv),
                     result.rb_mut(),
-                )?;
-                callback.callback(mesh, u.rb(), result.rb(), index);
+                )
+                .map_err(|err| HyperRelaxError::FunctionFailed(err))?;
+                callback
+                    .callback(mesh, u.rb(), result.rb(), index)
+                    .map_err(|err| HyperRelaxError::CallbackFailed(err))?;
             }
 
             let norm = mesh.l2_norm_system(result.rb());
@@ -182,22 +190,24 @@ impl HyperRelaxSolver {
                 break;
             }
 
-            self.integrator.step(
-                mesh,
-                order,
-                FicticuousBoundaryConds {
-                    dampening: self.dampening,
-                    conditions: conditions.clone(),
-                },
-                FicticuousDerivs {
-                    dampening: self.dampening,
-                    function: &deriv,
-                    spacing_per_vertex: &spacing_per_vertex,
-                    min_spacing,
-                },
-                time_step,
-                SystemSliceMut::from_contiguous(&mut data, &system),
-            )?;
+            self.integrator
+                .step(
+                    mesh,
+                    order,
+                    FicticuousBoundaryConds {
+                        dampening: self.dampening,
+                        conditions: conditions.clone(),
+                    },
+                    FicticuousDerivs {
+                        dampening: self.dampening,
+                        function: &deriv,
+                        spacing_per_vertex: &spacing_per_vertex,
+                        min_spacing,
+                    },
+                    time_step,
+                    SystemSliceMut::from_contiguous(&mut data, &system),
+                )
+                .map_err(|err| HyperRelaxError::FunctionFailed(err))?;
 
             if index == self.max_steps - 1 {
                 log::error!(

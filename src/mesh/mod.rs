@@ -17,8 +17,7 @@ use crate::{
 use datasize::DataSize;
 use rayon::iter::{IntoParallelIterator, ParallelBridge, ParallelIterator};
 use std::collections::HashMap;
-use std::{array, cell::UnsafeCell, fmt::Write, ops::Range};
-use thread_local::ThreadLocal;
+use std::{array, fmt::Write, ops::Range};
 
 mod checkpoint;
 mod evaluate;
@@ -29,7 +28,7 @@ mod transfer;
 
 pub use checkpoint::{Checkpoint, ExportVtuConfig};
 pub use function::{Engine, Function, FunctionBorrowMut, Gaussian, Projection};
-pub use store::MeshStore;
+pub use store::{MeshStore, UnsafeThreadCache};
 
 use crate::system::{System, SystemSlice};
 
@@ -81,7 +80,7 @@ pub struct Mesh<const N: usize> {
     // ********************************
     // Caches *************************
     /// Thread-local stores used for allocation.
-    stores: ThreadLocal<UnsafeCell<MeshStore>>,
+    stores: UnsafeThreadCache<MeshStore>,
     /// Cache for uniform elements
     elements: HashMap<(usize, usize), Element<N>>,
 }
@@ -133,7 +132,7 @@ impl<const N: usize> Mesh<N> {
             old_blocks: TreeBlocks::new([width; N], ghost),
             old_cell_splits: Vec::default(),
 
-            stores: ThreadLocal::new(),
+            stores: UnsafeThreadCache::new(),
             elements: HashMap::default(),
         };
 
@@ -454,7 +453,7 @@ impl<const N: usize> Mesh<N> {
             .par_bridge()
             .into_par_iter()
             .for_each(|block| {
-                let store = unsafe { &mut *self.stores.get_or_default().get() };
+                let store = unsafe { self.stores.get_or_default() };
                 f(self, store, block);
                 store.reset();
             });
@@ -470,7 +469,7 @@ impl<const N: usize> Mesh<N> {
             .par_bridge()
             .into_par_iter()
             .try_for_each(|block| {
-                let store = unsafe { &mut *self.stores.get_or_default().get() };
+                let store = unsafe { self.stores.get_or_default() };
                 let result = f(self, store, block);
                 store.reset();
                 result
@@ -485,7 +484,7 @@ impl<const N: usize> Mesh<N> {
             .par_bridge()
             .into_par_iter()
             .for_each(|block| {
-                let store = unsafe { &mut *self.stores.get_or_default().get() };
+                let store = unsafe { self.stores.get_or_default() };
                 f(self, store, block);
                 store.reset();
             });
@@ -739,7 +738,7 @@ impl<const N: usize> Clone for Mesh<N> {
             old_blocks: self.old_blocks.clone(),
             old_cell_splits: self.old_cell_splits.clone(),
 
-            stores: ThreadLocal::new(),
+            stores: UnsafeThreadCache::default(),
             elements: HashMap::default(),
         }
     }
@@ -766,7 +765,7 @@ impl<const N: usize> Default for Mesh<N> {
             old_blocks: TreeBlocks::new([4; N], 1),
             old_cell_splits: Vec::default(),
 
-            stores: ThreadLocal::new(),
+            stores: UnsafeThreadCache::default(),
             elements: HashMap::default(),
         };
 

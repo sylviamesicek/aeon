@@ -27,6 +27,8 @@ pub struct Config {
     pub visualize: Visualize,
     #[serde(default)]
     pub cache: Cache,
+    #[serde(default)]
+    pub horizon: Horizon,
 
     #[serde(default)]
     pub sources: Vec<Source>,
@@ -51,6 +53,7 @@ impl Config {
             regrid: self.regrid,
             visualize: self.visualize,
             cache: self.cache,
+            horizon: self.horizon,
 
             sources: self.sources.transform(vars)?,
         })
@@ -290,6 +293,21 @@ impl Transform for Search {
             max_depth: self.max_depth,
             min_error: self.min_error,
         })
+    }
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct Horizon {
+    search: bool,
+    search_interval: usize,
+}
+
+impl Default for Horizon {
+    fn default() -> Self {
+        Self {
+            search: false,
+            search_interval: 1,
+        }
     }
 }
 
