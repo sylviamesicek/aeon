@@ -26,6 +26,7 @@ mod garfinkle;
 mod systems;
 
 use eqs::{DynamicalData, DynamicalDerivs, ScalarFieldData, ScalarFieldDerivs, evolution};
+pub use eqs::{ON_AXIS, Twist};
 pub use systems::*;
 
 // *******************************

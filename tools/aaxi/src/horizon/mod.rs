@@ -1,10 +1,12 @@
-use crate::rinne::{Field, Fields, Metric};
+#![allow(mixed_script_confusables)]
+
+use crate::rinne::{Field, Fields, Metric, ON_AXIS, Twist};
 use aeon::{
     element::UniformInterpolate,
     kernel::{Hessian, Kernels, NodeWindow, node_from_vertex},
     prelude::*,
 };
-use aeon_tensor::Tensor;
+use aeon_tensor::{Matrix, Space, Tensor, Vector};
 use core::f64;
 use faer::linalg::svd::SvdError;
 use reborrow::Reborrow;
@@ -123,11 +125,13 @@ impl<'a, K: Kernels> Function<1> for HorizonRadialDerivs<'a, K> {
         input: SystemSlice<Self::Input>,
         mut output: SystemSliceMut<Self::Output>,
     ) -> Result<(), Self::Error> {
+        const S: Space<2> = Space::<2>;
+
         let mesh = self.mesh;
         let fields = self.fields.rb();
 
-        let input = input.field(());
-        let deriv = output.field_mut(());
+        let surface_radius = input.field(());
+        let surface_deriv = output.field_mut(());
 
         let nodes = engine.node_range();
 
@@ -147,9 +151,26 @@ impl<'a, K: Kernels> Function<1> for HorizonRadialDerivs<'a, K> {
 
         for [vertex] in IndexSpace::new(engine.vertex_size()).iter() {
             let index = engine.index_from_vertex([vertex]);
+            let [θ] = engine.position([vertex]);
 
-            let surface_radius = input[index];
-            let surface_position = surface_positions[index];
+            let position = surface_positions[index];
+
+            // Compute r
+            let rad = surface_radius[index];
+            // Compute dr/dθ and d²r/dθ²
+            let rad_θ = engine.derivative(surface_radius, 0, [vertex]);
+            let rad_θθ = engine.second_derivative(surface_radius, 0, [vertex]);
+            // Compute dxᵃ/dθ
+            let r_θ = rad_θ * θ.cos() - rad * θ.sin();
+            let r_θθ = rad_θθ * θ.cos() - 2.0 * rad_θ * θ.sin() - rad * θ.cos();
+            let z_θ = rad_θ * θ.sin() + rad * θ.cos();
+            let z_θθ = rad_θθ * θ.sin() + 2.0 * rad_θ * θ.cos() - rad * θ.sin();
+
+            let x_θ: Vector<2> = [r_θ, z_θ].into();
+            let x_θθ: Vector<2> = [r_θθ, z_θθ].into();
+
+            // *********************************
+            // Interpolate values from Mesh ****
 
             let mesh_cell = surface_to_cell[index];
             let mesh_active_cell = mesh.tree().active_index_from_cell(mesh_cell).unwrap();
@@ -162,7 +183,7 @@ impl<'a, K: Kernels> Function<1> for HorizonRadialDerivs<'a, K> {
             };
 
             interpolate
-                .build(cell_support, cell_support, surface_position)
+                .build(cell_support, cell_support, position)
                 .map_err(|_err| HorizonError::InterpolateFailed)?;
 
             let block_fields = fields.slice(nodes.clone());
@@ -170,7 +191,7 @@ impl<'a, K: Kernels> Function<1> for HorizonRadialDerivs<'a, K> {
             let grr_f = block_fields.field(Field::Metric(Metric::Grr));
             let grz_f = block_fields.field(Field::Metric(Metric::Grz));
             let gzz_f = block_fields.field(Field::Metric(Metric::Gzz));
-            let s_f = block_fields.field(Field::Metric(Metric::S));
+            let seed_f = block_fields.field(Field::Metric(Metric::S));
 
             let krr_f = block_fields.field(Field::Metric(Metric::Krr));
             let krz_f = block_fields.field(Field::Metric(Metric::Krz));
@@ -206,9 +227,9 @@ impl<'a, K: Kernels> Function<1> for HorizonRadialDerivs<'a, K> {
             interpolate_derivative!(grz_z, grz_f, 1);
             interpolate_derivative!(gzz_r, gzz_f, 0);
             interpolate_derivative!(gzz_z, gzz_f, 1);
-            interpolate_value!(s, s_f);
-            interpolate_derivative!(s_r, s_f, 0);
-            interpolate_derivative!(s_z, s_f, 1);
+            interpolate_value!(seed, seed_f);
+            interpolate_derivative!(seed_r, seed_f, 0);
+            interpolate_derivative!(seed_z, seed_f, 1);
 
             interpolate_value!(krr, krr_f);
             interpolate_value!(krz, krz_f);
@@ -224,10 +245,59 @@ impl<'a, K: Kernels> Function<1> for HorizonRadialDerivs<'a, K> {
                 [[grr_par, grz_par], [grz_par, gzz_par]].into()
             };
             let g_second_partials = Tensor::zeros();
-
             let metric = aeon_tensor::Metric::new(g, g_partials, g_second_partials);
 
-            let g = [[grr, grz], [grz, gzz]];
+            let seed_derivs = [seed_r, seed_z].into();
+            let seed_second_derivs = Tensor::zeros();
+            let twist = Twist::new(&metric, position, seed, seed_derivs, seed_second_derivs);
+
+            // ****************************************
+            // Perform calculations
+
+            let levi_civita = metric.det().abs().sqrt() * Matrix::from([[0., 1.], [-1., 0.]]);
+
+            // Compute normalizing factor
+            let n = 1.0
+                / S.sum(|[i, j]| metric.value()[[i, j]] * x_θ[[i]] * x_θ[[j]])
+                    .sqrt();
+            // Compute the derivative of n (on axis)
+            let n_r = -n.powi(3) * metric.value()[[0, 1]] * x_θ[[0]] * x_θ[[1]];
+
+            // Compute normal vector
+            let s = n * S
+                .vector(|a| S.sum(|[b, c]| metric.inv()[[a, b]] * levi_civita[[b, c]] * x_θ[[c]]));
+
+            // Spatial divergence term
+            let divergence = {
+                let term1 = S.sum(|[a, b]| levi_civita[[a, b]] * x_θθ[[a]] * x_θ[[b]]);
+                let term2 = S.sum(|[a, b, c, d]| {
+                    levi_civita[[a, b]]
+                        * x_θ[[b]]
+                        * x_θ[[c]]
+                        * x_θ[[d]]
+                        * metric.christoffel_2nd()[[a, c, d]]
+                });
+
+                -n.powi(3) * (term1 + term2)
+            };
+
+            // Axisymmetric divergence term
+            let mut divergence_lambda = S.sum(|[a]| twist.regular_co()[[a]] * s[[a]]);
+
+            if position[0].abs() <= ON_AXIS {
+                divergence_lambda += n_r / metric.value()[[0, 0]] * levi_civita[[0, 1]] * x_θ[[1]];
+                divergence_lambda += n * S
+                    .sum(|[b, c]| metric.inv_derivs()[[0, b, 0]] * levi_civita[[b, c]] * x_θ[[c]]);
+                divergence_lambda += n / metric.value()[[0, 0]]
+                    * 0.5
+                    * (1.0 / metric.det().sqrt())
+                    * metric.det_derivs()[[0]]
+                    * x_θ[[1]];
+                divergence_lambda += 0.0; // TODO
+                todo!();
+            }
+
+            surface_deriv[index] = divergence + divergence_lambda;
         }
 
         Ok(())

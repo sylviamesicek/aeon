@@ -660,7 +660,7 @@ impl Decomposition {
 }
 
 /// Various tensors relating to the twist degree of freedom in a metric.
-struct Twist {
+pub struct Twist {
     /// λ⁻¹ ∂ₐ λ
     lam_regular_co: Vector<2>,
     /// λ⁻¹ ∂ᵃ λ
@@ -671,7 +671,7 @@ struct Twist {
 
 impl Twist {
     /// Computes components of the twist vector from the seed tensor field.
-    fn new(
+    pub fn new(
         metric: &Metric<2>,
         [r, _z]: [f64; 2],
         seed: f64,
