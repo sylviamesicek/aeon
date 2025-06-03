@@ -142,12 +142,6 @@ impl<'a, K: Kernels> Function<1> for HorizonRadialDerivs<'a, K> {
         let num_nodes_per_cell = cell_size.iter().product();
 
         let scratch: &mut [f64] = engine.alloc(num_nodes_per_cell);
-        let gamma_rrr_scratch: &mut [f64] = engine.alloc(num_nodes_per_cell);
-        let gamma_rrz_scratch: &mut [f64] = engine.alloc(num_nodes_per_cell);
-        let gamma_rzz_scratch: &mut [f64] = engine.alloc(num_nodes_per_cell);
-        let gamma_zrr_scratch: &mut [f64] = engine.alloc(num_nodes_per_cell);
-        let gamma_zrz_scratch: &mut [f64] = engine.alloc(num_nodes_per_cell);
-        let gamma_zzz_scratch: &mut [f64] = engine.alloc(num_nodes_per_cell);
 
         let mut interpolate = UniformInterpolate::<2>::default();
 
@@ -206,6 +200,12 @@ impl<'a, K: Kernels> Function<1> for HorizonRadialDerivs<'a, K> {
             interpolate_value!(grr, grr_f);
             interpolate_value!(grz, grz_f);
             interpolate_value!(gzz, gzz_f);
+            interpolate_derivative!(grr_r, grr_f, 0);
+            interpolate_derivative!(grr_z, grr_f, 1);
+            interpolate_derivative!(grz_r, grz_f, 0);
+            interpolate_derivative!(grz_z, grz_f, 1);
+            interpolate_derivative!(gzz_r, gzz_f, 0);
+            interpolate_derivative!(gzz_z, gzz_f, 1);
             interpolate_value!(s, s_f);
             interpolate_derivative!(s_r, s_f, 0);
             interpolate_derivative!(s_z, s_f, 1);
@@ -215,43 +215,17 @@ impl<'a, K: Kernels> Function<1> for HorizonRadialDerivs<'a, K> {
             interpolate_value!(kzz, kzz_f);
             interpolate_value!(y, y_f);
 
-            // Handle connection coefficients
-            for (i, node) in cell_space.iter().enumerate() {
-                let index = block_space.index_from_node(node);
+            let g = [[grr, grz], [grz, gzz]].into();
+            let g_partials = {
+                let grr_par = [grr_r, grr_z];
+                let grz_par = [grz_r, grz_z];
+                let gzz_par = [gzz_r, gzz_z];
 
-                macro_rules! derivatives {
-                    ($field:ident, $value:ident, $dr:ident, $dz:ident) => {
-                        let $value = $field[index];
-                        let $dr = block_space.evaluate_axis(K::derivative(), node, $field, 0);
-                        let $dz = block_space.evaluate_axis(K::derivative(), node, $field, 1);
-                    };
-                }
+                [[grr_par, grz_par], [grz_par, gzz_par]].into()
+            };
+            let g_second_partials = Tensor::zeros();
 
-                // Metric
-                derivatives!(grr_f, grr, grr_r, grr_z);
-                derivatives!(gzz_f, gzz, gzz_r, gzz_z);
-                derivatives!(grz_f, grz, grz_r, grz_z);
-
-                // Build refernce metric
-                let g = [[grr, grz], [grz, gzz]].into();
-                let g_partials = {
-                    let grr_par = [grr_r, grr_z];
-                    let grz_par = [grz_r, grz_z];
-                    let gzz_par = [gzz_r, gzz_z];
-
-                    [[grr_par, grz_par], [grz_par, gzz_par]].into()
-                };
-                let g_second_partials = Tensor::zeros();
-                let metric = aeon_tensor::Metric::new(g, g_partials, g_second_partials);
-
-                // Copy into scratch
-                gamma_rrr_scratch[i] = metric.christoffel_2nd()[[0, 0, 0]];
-                gamma_rrz_scratch[i] = metric.christoffel_2nd()[[0, 0, 1]];
-                gamma_rzz_scratch[i] = metric.christoffel_2nd()[[0, 1, 1]];
-                gamma_zrr_scratch[i] = metric.christoffel_2nd()[[1, 0, 0]];
-                gamma_zrz_scratch[i] = metric.christoffel_2nd()[[1, 0, 1]];
-                gamma_zzz_scratch[i] = metric.christoffel_2nd()[[1, 1, 1]];
-            }
+            let metric = aeon_tensor::Metric::new(g, g_partials, g_second_partials);
 
             let g = [[grr, grz], [grz, gzz]];
         }

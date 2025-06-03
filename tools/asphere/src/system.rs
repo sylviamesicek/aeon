@@ -92,8 +92,12 @@ impl SystemBoundaryConds<1> for FieldConditions {
 pub struct SymCondition;
 
 impl BoundaryConds<1> for SymCondition {
-    fn kind(&self, _face: Face<1>) -> BoundaryKind {
-        BoundaryKind::Symmetric
+    fn kind(&self, face: Face<1>) -> BoundaryKind {
+        if face.side {
+            BoundaryKind::Radiative
+        } else {
+            BoundaryKind::Symmetric
+        }
     }
 
     fn radiative(&self, _position: [f64; 1]) -> RadiativeParams {
@@ -108,8 +112,12 @@ impl BoundaryConds<1> for SymCondition {
 pub struct AntiSymCondition;
 
 impl BoundaryConds<1> for AntiSymCondition {
-    fn kind(&self, _face: Face<1>) -> BoundaryKind {
-        BoundaryKind::AntiSymmetric
+    fn kind(&self, face: Face<1>) -> BoundaryKind {
+        if face.side {
+            BoundaryKind::Radiative
+        } else {
+            BoundaryKind::AntiSymmetric
+        }
     }
 
     fn radiative(&self, _position: [f64; 1]) -> RadiativeParams {

@@ -3,7 +3,7 @@
 //! This module uses a combination of trait trickery and type transformers to
 //! create an ergonomic API for working with boundaries.
 
-use crate::geometry::{faces, Face, FaceArray};
+use crate::geometry::{Face, FaceArray, faces};
 
 /// Indicates what type of boundary condition is used along a particualr
 /// face of the domain. More specific boundary conditions are provided

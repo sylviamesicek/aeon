@@ -11,9 +11,6 @@ pub trait Convolution<const N: usize> {
 
     fn interior(&self, axis: usize) -> &[f64];
     fn free(&self, border: Border, axis: usize) -> &[f64];
-    // fn symmetric(&self, border: Border, axis: usize) -> &[f64];
-    // fn antisymmetric(&self, border: Border, axis: usize) -> &[f64];
-
     fn scale(&self, spacing: [f64; N]) -> f64;
 }
 
@@ -41,21 +38,6 @@ macro_rules! impl_convolution_for_tuples {
                         _ => panic!("Invalid Axis")
                     }
                 }
-
-                // fn symmetric(&self, border: Border, axis: usize) -> &[f64] {
-                //     match axis {
-                //         $($i => self.$i.symmetric(border),)*
-                //         _ => panic!("Invalid Axis")
-                //     }
-                // }
-
-
-                // fn antisymmetric(&self, border: Border, axis: usize) -> &[f64] {
-                //     match axis {
-                //         $($i => self.$i.antisymmetric(border),)*
-                //         _ => panic!("Invalid Axis")
-                //     }
-                // }
 
                 fn scale(&self, spacing: [f64; $N]) -> f64 {
                     let mut result = 1.0;

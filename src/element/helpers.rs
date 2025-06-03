@@ -23,7 +23,7 @@ impl Workspace {
     }
 
     pub fn stack(&mut self, req: StackReq) -> &mut MemStack {
-        if self.req.or(req) != req {
+        if self.req.or(req) != self.req {
             self.req = req;
             self.buffer = MemBuffer::new(req);
         }
@@ -64,12 +64,10 @@ impl Default for LeastSquares {
 }
 
 impl LeastSquares {
-    pub fn least_squares(
-        &mut self,
-        m: MatRef<f64>,
-        a: MatMut<f64>,
-        b: MatRef<f64>,
-    ) -> Result<(), SvdError> {
+    fn compute_psuedo_inverse(&mut self, m: MatRef<f64>) -> Result<(), SvdError> {
+        // We can only compute the psuedo inverse for overdetermined systems.
+        assert!(m.nrows() >= m.ncols());
+
         let compute = ComputeSvdVectors::Full;
         let par = Par::Seq;
 
@@ -105,6 +103,7 @@ impl LeastSquares {
             faer::prelude::default(),
         )?;
 
+        self.pinv.resize_with(ncols, nrows, |_, _| 0.0);
         pseudoinverse_from_svd(
             self.pinv.rb_mut(),
             Diag::from_slice(&mut self.s),
@@ -114,8 +113,49 @@ impl LeastSquares {
             stack,
         );
 
-        matmul(a, Accum::Replace, self.pinv.rb(), b, 1.0, par);
+        Ok(())
+    }
+
+    pub fn overdetermined(
+        &mut self,
+        m: MatRef<f64>,
+        a: MatMut<f64>,
+        b: MatRef<f64>,
+    ) -> Result<(), SvdError> {
+        assert!(a.nrows() == m.ncols() && a.ncols() == b.ncols() && b.nrows() == m.nrows());
+        assert!(m.nrows() >= m.ncols());
+
+        self.compute_psuedo_inverse(m)?;
+        matmul(a, Accum::Replace, self.pinv.rb(), b, 1.0, Par::Seq);
 
         Ok(())
+    }
+
+    pub fn underdetermined(
+        &mut self,
+        m: MatRef<f64>,
+        a: MatMut<f64>,
+        b: MatRef<f64>,
+    ) -> Result<(), SvdError> {
+        assert!(a.nrows() == m.ncols() && a.ncols() == b.ncols() && b.nrows() == m.nrows());
+        assert!(m.nrows() <= m.ncols());
+
+        self.compute_psuedo_inverse(m.transpose())?;
+        matmul(a, Accum::Replace, self.pinv.transpose(), b, 1.0, Par::Seq);
+
+        Ok(())
+    }
+
+    pub fn least_squares(
+        &mut self,
+        m: MatRef<f64>,
+        a: MatMut<f64>,
+        b: MatRef<f64>,
+    ) -> Result<(), SvdError> {
+        if m.nrows() >= m.ncols() {
+            self.overdetermined(m, a, b)
+        } else {
+            self.underdetermined(m, a, b)
+        }
     }
 }

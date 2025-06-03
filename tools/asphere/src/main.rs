@@ -164,7 +164,8 @@ fn initial_data(config: &Config) -> eyre::Result<(Mesh<1>, SystemVec<Fields>)> {
             InitialData,
             (&scalar_field).into(),
             system.as_mut_slice(),
-        );
+        )
+        .unwrap();
 
         // Solve for conformal and lapse
         solve_constraints(&mut mesh, system.as_mut_slice());
@@ -432,14 +433,16 @@ fn evolve_data(
         }
 
         // Compute step
-        integrator.step(
-            &mut mesh,
-            Order::<4>,
-            FieldConditions,
-            TimeDerivs,
-            h,
-            system.as_mut_slice(),
-        );
+        integrator
+            .step(
+                &mut mesh,
+                Order::<4>,
+                FieldConditions,
+                TimeDerivs,
+                h,
+                system.as_mut_slice(),
+            )
+            .unwrap();
 
         let alpha = mesh.bottom_left_value(system.field(Field::Lapse));
         let mass = find_mass(&mesh, system.as_slice());
@@ -639,30 +642,31 @@ trait CommandExt {
 
 impl CommandExt for Command {
     fn config_args(self) -> Self {
-        self.subcommand(
-            Command::new("cole")
-                .arg(
-                    Arg::new("amp")
-                        .value_name("FLOAT")
-                        .required(true)
-                        .help("Amplitude of massless scalar field to simulate"),
-                )
-                .arg(
-                    Arg::new("ser")
-                        .value_name("INT")
-                        .required(true)
-                        .help("Serialization number for massless scalar field data"),
-                ),
-        )
-        .arg(
-            arg!(-c --config <FILE> "Sets a custom config file")
-                .required(true)
-                .value_parser(value_parser!(PathBuf)),
-        )
-        .arg(
-            arg!(<positional> ... "positional arguments referenced in config file")
-                .trailing_var_arg(true)
-                .required(false),
-        )
+        self.subcommand_negates_reqs(true)
+            .subcommand(
+                Command::new("cole")
+                    .arg(
+                        Arg::new("amp")
+                            .value_name("FLOAT")
+                            .required(true)
+                            .help("Amplitude of massless scalar field to simulate"),
+                    )
+                    .arg(
+                        Arg::new("ser")
+                            .value_name("INT")
+                            .required(true)
+                            .help("Serialization number for massless scalar field data"),
+                    ),
+            )
+            .arg(
+                arg!(-c --config <FILE> "Sets a custom config file")
+                    .required(true)
+                    .value_parser(value_parser!(PathBuf)),
+            )
+            .arg(
+                arg!(<positional> ... "positional arguments referenced in config file")
+                    .trailing_var_arg(true)
+                    .required(false),
+            )
     }
 }

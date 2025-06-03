@@ -1,34 +1,9 @@
-use faer::{ColRef, Mat, MatRef};
+use crate::{
+    element::{ApproxOperator, Monomials, Uniform, Values},
+    geometry::{AxisMask, IndexSpace},
+};
+use faer::{ColRef, Mat};
 use std::array;
-
-use crate::geometry::{AxisMask, IndexSpace};
-
-/// A basis for storing functions on a single element.
-pub trait Basis {
-    /// The vandermonde matrix of the basis
-    fn vandermonde(grid: &[f64], order: usize) -> Mat<f64>;
-    /// The value of the basis function at a given point
-    fn evaluate(&self, point: f64) -> f64;
-    /// Constructs the `n`-th basis function.
-    fn degree(degree: usize) -> Self;
-}
-
-/// A monomial basis for an element.
-pub struct Monomial(pub usize);
-
-impl Basis for Monomial {
-    fn vandermonde(grid: &[f64], order: usize) -> Mat<f64> {
-        Mat::from_fn(grid.len(), order, |i, j| grid[i].powi(j as i32))
-    }
-
-    fn evaluate(&self, point: f64) -> f64 {
-        point.powi(self.0 as i32)
-    }
-
-    fn degree(degree: usize) -> Self {
-        Self(degree)
-    }
-}
 
 /// A reference element defined on [-1, 1]^N. This element implements code
 /// for wavelet transformations and general operator approximation, whereas
@@ -45,8 +20,6 @@ pub struct Element<const N: usize> {
     /// Positions of points within element
     /// after refinement
     grid_refined: Vec<f64>,
-    /// Vandermonde matrix on grid.
-    vandermonde: Mat<f64>,
     /// Interpolation stencils.
     stencils: Mat<f64>,
 }
@@ -59,11 +32,23 @@ impl<const N: usize> Element<N> {
         debug_assert!(grid.len() == width + 1);
         debug_assert!(grid_refined.len() == 2 * width + 1);
 
-        let vandermonde = Monomial::vandermonde(&grid, order + 1);
+        let spacing = 2.0 / width as f64;
+        let points = Vec::from_iter(
+            (0..width)
+                .into_iter()
+                .map(|j| [-1.0 + spacing * (j as f64 + 0.5)]),
+        );
 
-        let m = vandermonde.transpose().svd().unwrap();
-        let rhs = Self::uniform_rhs::<Monomial>(width, order);
-        let stencils = m.pseudoinverse() * rhs;
+        let mut approx = ApproxOperator::default();
+        approx
+            .build(
+                &Uniform::new([width + 1]),
+                &Monomials::new([order + 1]),
+                &Values(points.as_slice()),
+            )
+            .unwrap();
+
+        let stencils = approx.shape().to_owned();
 
         debug_assert!(stencils.nrows() == width + 1);
         debug_assert!(stencils.ncols() == width);
@@ -73,7 +58,6 @@ impl<const N: usize> Element<N> {
             order,
             grid,
             grid_refined,
-            vandermonde,
             stencils,
         }
     }
@@ -90,24 +74,6 @@ impl<const N: usize> Element<N> {
             .collect::<Vec<_>>();
 
         (grid, grid_refined)
-    }
-
-    fn uniform_rhs<B: Basis>(width: usize, order: usize) -> Mat<f64> {
-        let spacing = 2.0 / width as f64;
-
-        let mut result = Mat::zeros(order + 1, width);
-
-        for i in 0..=order {
-            let basis = B::degree(i);
-
-            for j in 0..width {
-                let point = -1.0 + spacing * (j as f64 + 0.5);
-
-                result[(i, j)] = basis.evaluate(point);
-            }
-        }
-
-        result
     }
 
     /// Number of support points in the reference element.
@@ -146,11 +112,6 @@ impl<const N: usize> Element<N> {
 
     pub fn position_refined(&self, index: [usize; N]) -> [f64; N] {
         array::from_fn(|axis| self.grid_refined[index[axis]])
-    }
-
-    /// Retrieves the vandermonde matrix for the basis functions along one axis.
-    pub fn vandermonde(&self) -> MatRef<f64> {
-        self.vandermonde.as_ref()
     }
 
     // *********************

@@ -1,6 +1,6 @@
 use crate::element::{Basis, BasisFunction as _, LeastSquares, LinearOperator, Support};
 use faer::{
-    Conj, Mat, RowRef,
+    Conj, Mat, MatRef, RowRef,
     col::generic::Col,
     linalg::{matmul::dot, svd::SvdError},
 };
@@ -30,6 +30,9 @@ impl ApproxOperator {
                 basis.func(j).value(point)
             });
 
+        self.shape
+            .resize_with(support.num_points(), ops.num_operations(), |_, _| 0.0);
+
         self.rhs
             .resize_with(basis.order(), ops.num_operations(), |deg, i| {
                 ops.apply(i, &basis.func(deg))
@@ -55,6 +58,10 @@ impl ApproxOperator {
 
     pub fn weights(&self, i: usize) -> RowRef<f64> {
         self.shape.row(i)
+    }
+
+    pub fn shape(&self) -> MatRef<f64> {
+        self.shape.rb()
     }
 }
 

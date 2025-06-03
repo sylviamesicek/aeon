@@ -23,6 +23,18 @@ impl<const N: usize> LinearOperator<N> for Value<N> {
     }
 }
 
+pub struct Values<'a, const N: usize>(pub &'a [[f64; N]]);
+
+impl<'a, const N: usize> LinearOperator<N> for Values<'a, N> {
+    fn num_operations(&self) -> usize {
+        self.0.len()
+    }
+
+    fn apply(&self, i: usize, basis: &impl BasisFunction<N>) -> f64 {
+        basis.value(self.0[i])
+    }
+}
+
 pub struct ProductValue<const N: usize>([f64; N]);
 
 impl<const N: usize> ProductValue<N> {
