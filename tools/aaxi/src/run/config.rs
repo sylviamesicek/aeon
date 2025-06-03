@@ -1,3 +1,4 @@
+use crate::eqs::GaugeCondition;
 use crate::misc;
 use aeon_config::{ConfigVars, FloatVar, Transform};
 use eyre::eyre;
@@ -387,24 +388,6 @@ impl Transform for Source {
             },
         })
     }
-}
-
-/// Gauge condition to use for evolution.
-#[derive(Clone, Copy, Debug, Default, serde::Serialize, serde::Deserialize)]
-pub enum GaugeCondition {
-    /// Pure generalized harmonic gauge conditions.
-    #[default]
-    #[serde(rename = "harmonic")]
-    Harmonic,
-    /// Generalized harmonic gauge with no shift.
-    #[serde(rename = "harmonic_zero_shift")]
-    HarmonicZeroShift,
-    /// Log + 1 slicing with no shift.
-    #[serde(rename = "log_plus_one_zero_shift")]
-    LogPlusOneZeroShift,
-    /// Log + 1 slicing with harmonic shift.
-    #[serde(rename = "log_plus_one")]
-    LogPlusOne,
 }
 
 fn default_name() -> String {

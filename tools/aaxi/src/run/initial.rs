@@ -1,7 +1,7 @@
-use crate::config::{Config, Relax, Source};
+use crate::eqs;
 use crate::misc;
-use crate::rinne::eqs;
-use crate::rinne::{Constraint, Field, FieldConditions, Fields, Gauge, Metric, ScalarField};
+use crate::run::config::{Config, Relax, Source};
+use crate::systems::{Constraint, Field, FieldConditions, Fields, Gauge, Metric, ScalarField};
 use aeon::prelude::*;
 use aeon::{
     kernel::Kernels,

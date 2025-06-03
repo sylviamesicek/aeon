@@ -1,7 +1,5 @@
-#![allow(mixed_script_confusables)]
-
-use crate::rinne::eqs::{HorizonData, horizon};
-use crate::rinne::{Field, Fields, Metric};
+use crate::eqs::{HorizonData, horizon};
+use crate::systems::{Field, Fields, Metric};
 use aeon::solver::{HyperRelaxError, SolverCallback};
 use aeon::{
     element::UniformInterpolate,

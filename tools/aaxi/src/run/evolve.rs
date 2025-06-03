@@ -1,12 +1,12 @@
 use crate::{
-    config::{Config, GaugeCondition},
-    history::{RunHistory, RunRecord, RunStatus},
-    misc,
-    rinne::{
-        Constraint, Field, FieldConditions, Fields, Gauge, Metric, ScalarField,
-        eqs::{DynamicalData, DynamicalDerivs, ScalarFieldData, ScalarFieldDerivs, evolution},
-        horizon::ApparentHorizonFinder,
+    eqs::{
+        DynamicalData, DynamicalDerivs, GaugeCondition, ScalarFieldData, ScalarFieldDerivs,
+        evolution,
     },
+    misc,
+    run::config::Config,
+    run::history::{RunHistory, RunRecord, RunStatus},
+    systems::{Constraint, Field, FieldConditions, Fields, Gauge, Metric, ScalarField},
 };
 use aeon::{
     prelude::*,

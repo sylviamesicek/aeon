@@ -1,6 +1,22 @@
 use aeon_tensor::{Matrix, Metric, Space, Tensor, Tensor3, Tensor4, Vector, lie_derivative};
 
-use crate::config::GaugeCondition;
+/// Gauge condition to use for evolution.
+#[derive(Clone, Copy, Debug, Default, serde::Serialize, serde::Deserialize)]
+pub enum GaugeCondition {
+    /// Pure generalized harmonic gauge conditions.
+    #[default]
+    #[serde(rename = "harmonic")]
+    Harmonic,
+    /// Generalized harmonic gauge with no shift.
+    #[serde(rename = "harmonic_zero_shift")]
+    HarmonicZeroShift,
+    /// Log + 1 slicing with no shift.
+    #[serde(rename = "log_plus_one_zero_shift")]
+    LogPlusOneZeroShift,
+    /// Log + 1 slicing with harmonic shift.
+    #[serde(rename = "log_plus_one")]
+    LogPlusOne,
+}
 
 pub const ON_AXIS: f64 = 1e-10;
 pub const KAPPA: f64 = 8.0 * std::f64::consts::PI;

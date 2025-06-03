@@ -73,15 +73,17 @@ struct Callback;
 
 // Implement visualization for hamiltonian.
 impl SolverCallback<2, Scalar> for Callback {
+    type Error = std::io::Error;
+
     fn callback(
         &self,
         mesh: &Mesh<2>,
         input: SystemSlice<Scalar>,
         output: SystemSlice<Scalar>,
         iteration: usize,
-    ) {
+    ) -> Result<(), Self::Error> {
         if iteration % 50 != 0 {
-            return;
+            return Ok(());
         }
 
         let i = iteration / 50;
@@ -90,21 +92,19 @@ impl SolverCallback<2, Scalar> for Callback {
         checkpoint.attach_mesh(&mesh);
         checkpoint.save_field("Solution", input.into_scalar());
         checkpoint.save_field("Derivative", output.into_scalar());
-        checkpoint
-            .export_vtu(
-                PathBuf::from("output/poisson").join(format!(
-                    "{}_level_{}_iter_{}.vtu",
-                    "poisson",
-                    mesh.max_level(),
-                    i
-                )),
-                ExportVtuConfig {
-                    title: "poisson".to_string(),
-                    ghost: false,
-                    stride: 1,
-                },
-            )
-            .unwrap()
+        checkpoint.export_vtu(
+            PathBuf::from("output/poisson").join(format!(
+                "{}_level_{}_iter_{}.vtu",
+                "poisson",
+                mesh.max_level(),
+                i
+            )),
+            ExportVtuConfig {
+                title: "poisson".to_string(),
+                ghost: false,
+                stride: 1,
+            },
+        )
     }
 }
 

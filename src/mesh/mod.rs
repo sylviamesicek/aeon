@@ -153,10 +153,16 @@ impl<const N: usize> Mesh<N> {
 
     /// Rebuilds mesh from current tree.
     fn build(&mut self) {
+        debug_assert_eq!(self.blocks.width(), [self.width; N]);
+        debug_assert_eq!(self.blocks.ghost(), self.ghost());
+        debug_assert_eq!(self.old_blocks.width(), [self.width; N]);
+        debug_assert_eq!(self.old_blocks.ghost(), self.ghost());
+
         // Rebuild tree
         self.tree.build();
         // Rebuild blocks
         self.blocks.build(&self.tree);
+
         // Cache maximum level
         self.max_level = 0;
         for block in self.blocks.indices() {
@@ -819,6 +825,9 @@ impl<const N: usize> From<MeshSer<N>> for Mesh<N> {
             width: value.width,
             ghost: value.ghost,
             boundary: value.boundary,
+            blocks: TreeBlocks::new([value.width; N], value.ghost),
+            old_blocks: TreeBlocks::new([value.width; N], value.ghost),
+
             ..Default::default()
         };
         result.build();

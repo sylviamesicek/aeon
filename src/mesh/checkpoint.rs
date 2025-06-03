@@ -452,7 +452,7 @@ impl<const N: usize> Checkpoint<N> {
                 }
 
                 let index = space.index_from_node(node);
-                let value = data[nodes.start + index];
+                let value = data[nodes.clone()][index];
                 buffer.push(value);
             }
         }
