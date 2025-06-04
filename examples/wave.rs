@@ -143,7 +143,7 @@ pub fn main() -> eyre::Result<()> {
             ExportVtuConfig {
                 title: "Initial Wave Mesh".to_string(),
                 ghost: false,
-                stride: 6,
+                stride: ExportStride::PerCell,
             },
         )?;
 
@@ -171,7 +171,7 @@ pub fn main() -> eyre::Result<()> {
                 ExportVtuConfig {
                     title: "Initial Wave Mesh".to_string(),
                     ghost: false,
-                    stride: 6,
+                    stride: ExportStride::PerCell,
                 },
             )?;
 
@@ -276,7 +276,7 @@ pub fn main() -> eyre::Result<()> {
                 ExportVtuConfig {
                     title: "evbrill".to_string(),
                     ghost: false,
-                    stride: 6,
+                    stride: ExportStride::PerCell,
                 },
             )?;
 

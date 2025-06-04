@@ -1,5 +1,7 @@
-name = "sphscalar"
-directory = "output/sphscalar/$0"
+# Config file compatible with Cole's code.
+
+name = "sphgauss2-cole"
+directory = "."
 
 [domain]
 radius = 40.0
@@ -22,18 +24,20 @@ global = 2
 flag_interval = 20
 
 [visualize]
-save_initial = true
-save_initial_levels = true
-save_evolve = true
+save_initial = false
+save_initial_levels = false
+save_evolve = false
 save_evolve_interval = 0.05
 stride = "per_vertex"
 
 [diagnostic]
-save = false
+save = true
 save_interval = 1
-serial_id = 0
+serial_id = "$1"
 
 [[sources]]
-amplitude = "$0"
-sigma = 5.35
 mass = 0.0
+profile.type = "gaussian"
+profile.amplitude = "$0"
+profile.sigma = 1.0
+profile.center = 3.0

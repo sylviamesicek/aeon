@@ -115,7 +115,7 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
             ExportVtuConfig {
                 title: "WAMR".to_string(),
                 ghost: false,
-                stride: 1,
+                stride: ExportStride::PerVertex,
             },
         )?;
 

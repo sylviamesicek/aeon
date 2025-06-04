@@ -1,5 +1,6 @@
 use crate::eqs::GaugeCondition;
 use crate::misc;
+use aeon::mesh::ExportStride;
 use aeon_config::{ConfigVars, FloatVar, Transform};
 use eyre::eyre;
 use serde::{Deserialize, Serialize};
@@ -174,27 +175,7 @@ pub struct Visualize {
     #[serde(default)]
     pub save_relax_result: bool,
     /// How much data to poutput?
-    pub stride: Stride,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone, Copy)]
-pub enum Stride {
-    /// Output data for every vertex in the simulation
-    #[serde(rename = "per_vertex")]
-    PerVertex,
-    /// Output data for each corner of a cell in the simulation
-    /// This is significantly more compressed
-    #[serde(rename = "per_cell")]
-    PerCell,
-}
-
-impl Stride {
-    pub fn into_int(self) -> usize {
-        match self {
-            Stride::PerVertex => 1,
-            Stride::PerCell => 0,
-        }
-    }
+    pub stride: ExportStride,
 }
 
 /// Config struct describing how we cache data.

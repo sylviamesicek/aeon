@@ -1,3 +1,4 @@
+use aeon::mesh::ExportStride;
 use aeon_config::{ConfigVars, FloatVar, Transform, TransformError, UnsignedVar};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
@@ -99,27 +100,7 @@ pub struct Visualize {
     #[serde(default = "default_onef")]
     pub save_evolve_interval: f64,
     /// Stride for saving visualizations.
-    pub stride: Stride,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone, Copy)]
-pub enum Stride {
-    /// Output data for every vertex in the simulation
-    #[serde(rename = "per_vertex")]
-    PerVertex,
-    /// Output data for each corner of a cell in the simulation
-    /// This is significantly more compressed
-    #[serde(rename = "per_cell")]
-    PerCell,
-}
-
-impl Stride {
-    pub fn into_int(self) -> usize {
-        match self {
-            Stride::PerVertex => 1,
-            Stride::PerCell => 0,
-        }
-    }
+    pub stride: ExportStride,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -141,28 +122,66 @@ impl Transform for Diagnostic {
     }
 }
 
+// #[derive(Serialize, Deserialize, Clone, Debug)]
+// pub struct Source {
+//     pub amplitude: FloatVar,
+//     pub sigma: FloatVar,
+//     pub mass: FloatVar,
+// }
+
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct Source {
-    pub amplitude: FloatVar,
-    pub sigma: FloatVar,
     pub mass: FloatVar,
+    pub profile: ScalarFieldProfile,
 }
 
 impl Source {
     pub fn println(&self) {
-        if self.mass.unwrap().abs() == 0.0 {
-            println!(
-                "- Massless Scalar Field: A = {}, σ = {}",
-                self.amplitude.unwrap(),
-                self.sigma.unwrap(),
-            );
-        } else {
-            println!(
-                "- Massive Scalar Field: A = {}, σ = {}, m = {}",
-                self.amplitude.unwrap(),
-                self.sigma.unwrap(),
-                self.mass.unwrap(),
-            );
+        match &self.profile {
+            ScalarFieldProfile::Gaussian {
+                amplitude,
+                sigma,
+                center,
+            } => {
+                if self.mass.unwrap().abs() == 0.0 {
+                    println!(
+                        "- Massless Scalar Field: Gaussian(A={}, σ={}, r₀={})",
+                        amplitude.unwrap(),
+                        sigma.unwrap(),
+                        center.unwrap(),
+                    );
+                } else {
+                    println!(
+                        "- Massive Scalar Field: Gaussian(A={}, σ={}, r₀={}), m = {}",
+                        amplitude.unwrap(),
+                        sigma.unwrap(),
+                        center.unwrap(),
+                        self.mass.unwrap(),
+                    );
+                }
+            }
+            ScalarFieldProfile::TanH {
+                amplitude,
+                sigma,
+                center,
+            } => {
+                if self.mass.unwrap().abs() == 0.0 {
+                    println!(
+                        "- Massless Scalar Field: Tanh(A={}, σ={}, r₀={})",
+                        amplitude.unwrap(),
+                        sigma.unwrap(),
+                        center.unwrap(),
+                    );
+                } else {
+                    println!(
+                        "- Massive Scalar Field: Tanh(A={}, σ={}, r₀={}), m = {}",
+                        amplitude.unwrap(),
+                        sigma.unwrap(),
+                        center.unwrap(),
+                        self.mass.unwrap(),
+                    );
+                }
+            }
         }
     }
 }
@@ -171,10 +190,55 @@ impl Transform for Source {
     type Output = Self;
 
     fn transform(&self, vars: &ConfigVars) -> Result<Self::Output, TransformError> {
-        Ok(Self {
-            amplitude: self.amplitude.transform(vars)?,
-            sigma: self.sigma.transform(vars)?,
+        Ok(Source {
             mass: self.mass.transform(vars)?,
+            profile: self.profile.transform(vars)?,
+        })
+    }
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+#[serde(tag = "type")]
+pub enum ScalarFieldProfile {
+    /// Initial profile of the form $ampl \exp{-(r - center)^2 / \sigma^2$.
+    #[serde(rename = "gaussian")]
+    Gaussian {
+        amplitude: FloatVar,
+        sigma: FloatVar,
+        center: FloatVar,
+    },
+    /// Initial profile of the form $amp * \tanh{(r - center)/\sigma}$.
+    #[serde(rename = "tanh")]
+    TanH {
+        amplitude: FloatVar,
+        sigma: FloatVar,
+        center: FloatVar,
+    },
+}
+
+impl Transform for ScalarFieldProfile {
+    type Output = Self;
+
+    fn transform(&self, vars: &ConfigVars) -> Result<Self::Output, TransformError> {
+        Ok(match self {
+            ScalarFieldProfile::Gaussian {
+                amplitude,
+                sigma,
+                center,
+            } => Self::Gaussian {
+                amplitude: amplitude.transform(vars)?,
+                sigma: sigma.transform(vars)?,
+                center: center.transform(vars)?,
+            },
+            ScalarFieldProfile::TanH {
+                amplitude,
+                sigma,
+                center,
+            } => Self::TanH {
+                amplitude: amplitude.transform(vars)?,
+                sigma: sigma.transform(vars)?,
+                center: center.transform(vars)?,
+            },
         })
     }
 }

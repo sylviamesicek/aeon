@@ -45,12 +45,11 @@ Example `asphere` invokation:
 # as first positional argument, and referenced in the config file as `$0`.
 cargo run --release --package asphere -- --config="config/sphscalar.toml" 0.3
 ```
-
-The `cole` subcommand exists as compatibility glue between Cole's critical search code and the more generally configurable `asphere` command. This can be executed as follows.
+To run `asphere` in a mode compatible with Cole's critical search code use
 ```bash
-cargo run --release --package asphere -- cole <AMPLITUDE> <SERIAL_ID>
+# $0 = 0.3 (amplitude), $1 = 1234 (searial_id)
+cargo run --release --package asphere -- --config="config/sphcole.toml" 0.3 1234
 ```
-This simulates a scalar field of the given amplitude, outputing the necessary info files in the current working directory.
 
 ### `aaxi`
 

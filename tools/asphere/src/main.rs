@@ -7,7 +7,7 @@ use aeon::{
 };
 use aeon_config::{ConfigVars, Transform as _};
 use circular_queue::CircularQueue;
-use clap::{Arg, ArgMatches, Command, arg, value_parser};
+use clap::{ArgMatches, Command, arg, value_parser};
 use console::style;
 use core::f64;
 use datasize::DataSize;
@@ -20,12 +20,12 @@ use std::{
 };
 use std::{fmt::Write as _, num::ParseFloatError};
 
-mod cole;
+// mod cole;
 mod config;
 mod misc;
 mod system;
 
-use cole::*;
+// use cole::*;
 use config::*;
 use system::*;
 
@@ -152,11 +152,7 @@ fn initial_data(config: &Config) -> eyre::Result<(Mesh<1>, SystemVec<Fields>)> {
         level_pb.set_length(mesh.max_level() as u64);
 
         // Set initial data for scalar field.
-        let scalar_field = generate_initial_scalar_field(
-            &mut mesh,
-            source.amplitude.unwrap(),
-            source.sigma.unwrap(),
-        );
+        let scalar_field = generate_initial_scalar_field(&mut mesh, &source.profile);
 
         // Fill system using scalar field.
         mesh.evaluate(
@@ -186,7 +182,7 @@ fn initial_data(config: &Config) -> eyre::Result<(Mesh<1>, SystemVec<Fields>)> {
                 ExportVtuConfig {
                     title: "Massless Scalar Field Initial Data".to_string(),
                     ghost: false,
-                    stride: 1,
+                    stride: config.visualize.stride,
                 },
             )?;
         }
@@ -240,7 +236,7 @@ fn initial_data(config: &Config) -> eyre::Result<(Mesh<1>, SystemVec<Fields>)> {
             ExportVtuConfig {
                 title: "Massless Scalar Field Initial".to_string(),
                 ghost: false,
-                stride: config.visualize.stride.into_int(),
+                stride: config.visualize.stride,
             },
         )?;
 
@@ -254,7 +250,7 @@ fn initial_data(config: &Config) -> eyre::Result<(Mesh<1>, SystemVec<Fields>)> {
             ExportVtuConfig {
                 title: "Massless Scalar Field Initial Data".to_string(),
                 ghost: false,
-                stride: config.visualize.stride.into_int(),
+                stride: config.visualize.stride,
             },
         )?;
     }
@@ -425,7 +421,7 @@ fn evolve_data(
                 ExportVtuConfig {
                     title: "Masslesss Scalar Field Evolution".to_string(),
                     ghost: false,
-                    stride: 1,
+                    stride: config.visualize.stride,
                 },
             )?;
 
@@ -586,25 +582,6 @@ fn main() -> eyre::Result<()> {
 // ******************************
 
 fn parse_config(matches: &ArgMatches) -> eyre::Result<(Config, ConfigVars)> {
-    // First check if we are running the cole subcommand.
-    if let Some(matches) = matches.subcommand_matches("cole") {
-        let amplitude = matches
-            .get_one::<String>("amp")
-            .ok_or(eyre!("Failed to find amplitude positional argument"))?
-            .parse::<f64>()
-            .map_err(|_| eyre!("Failed to parse amplitude as float"))?
-            .clone();
-
-        let serial_id = matches
-            .get_one::<String>("ser")
-            .ok_or(eyre!("Failed to find serial_id positional argument"))?
-            .parse::<usize>()
-            .map_err(|_| eyre!("Failed to parse serial_id as int"))?
-            .clone();
-
-        return Ok((cole_config(amplitude, serial_id), ConfigVars::new()));
-    }
-
     // Compute config path.
     let config_path = matches
         .get_one::<PathBuf>("config")
@@ -643,21 +620,6 @@ trait CommandExt {
 impl CommandExt for Command {
     fn config_args(self) -> Self {
         self.subcommand_negates_reqs(true)
-            .subcommand(
-                Command::new("cole")
-                    .arg(
-                        Arg::new("amp")
-                            .value_name("FLOAT")
-                            .required(true)
-                            .help("Amplitude of massless scalar field to simulate"),
-                    )
-                    .arg(
-                        Arg::new("ser")
-                            .value_name("INT")
-                            .required(true)
-                            .help("Serialization number for massless scalar field data"),
-                    ),
-            )
             .arg(
                 arg!(-c --config <FILE> "Sets a custom config file")
                     .required(true)

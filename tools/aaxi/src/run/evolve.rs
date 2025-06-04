@@ -403,7 +403,7 @@ pub fn evolve_data(
                 ExportVtuConfig {
                     title: config.name.clone(),
                     ghost: false,
-                    stride: visualize_stride.into_int(),
+                    stride: visualize_stride,
                 },
             )?;
 

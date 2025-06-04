@@ -102,7 +102,7 @@ impl SolverCallback<2, Scalar> for Callback {
             ExportVtuConfig {
                 title: "poisson".to_string(),
                 ghost: false,
-                stride: 1,
+                stride: ExportStride::PerVertex,
             },
         )
     }
@@ -189,7 +189,7 @@ pub fn main() -> eyre::Result<()> {
             ExportVtuConfig {
                 title: "Poisson Equation".to_string(),
                 ghost: false,
-                stride: 1,
+                stride: ExportStride::PerVertex,
             },
         )?;
 

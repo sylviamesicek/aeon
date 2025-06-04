@@ -1,7 +1,7 @@
 use crate::prelude::IndexSpace;
 use ron::ser::PrettyConfig;
-use serde::Serialize;
 use serde::de::DeserializeOwned;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::{Read as _, Write as _};
@@ -231,7 +231,7 @@ use vtkio::{
 pub struct ExportVtuConfig {
     pub title: String,
     pub ghost: bool,
-    pub stride: usize,
+    pub stride: ExportStride,
 }
 
 impl Default for ExportVtuConfig {
@@ -239,9 +239,20 @@ impl Default for ExportVtuConfig {
         Self {
             title: "Title".to_string(),
             ghost: false,
-            stride: 1,
+            stride: ExportStride::PerVertex,
         }
     }
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, Copy)]
+pub enum ExportStride {
+    /// Output data for every vertex in the simulation
+    #[serde(rename = "per_vertex")]
+    PerVertex,
+    /// Output data for each corner of a cell in the simulation
+    /// This is significantly more compressed
+    #[serde(rename = "per_cell")]
+    PerCell,
 }
 
 impl<const N: usize> Checkpoint<N> {
@@ -260,11 +271,10 @@ impl<const N: usize> Checkpoint<N> {
         // Uncompress mesh.
         let mesh: Mesh<N> = self.mesh.clone().unwrap().into();
 
-        let mut stride = config.stride;
-
-        if config.stride == 0 {
-            stride = mesh.width;
-        }
+        let stride = match config.stride {
+            ExportStride::PerVertex => 1,
+            ExportStride::PerCell => mesh.width,
+        };
 
         assert!(stride <= mesh.width, "Stride must be <= width");
         assert!(

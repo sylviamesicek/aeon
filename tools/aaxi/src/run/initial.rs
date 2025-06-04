@@ -443,7 +443,7 @@ impl<'a> SolverCallback<2, Scalar> for IterCallback<'a> {
             ExportVtuConfig {
                 title: self.config.name.to_string(),
                 ghost: false,
-                stride: self.config.visualize.stride.into_int(),
+                stride: self.config.visualize.stride,
             },
         )?;
 
@@ -622,7 +622,7 @@ pub fn initial_data(config: &Config) -> eyre::Result<(Mesh<2>, SystemVec<Fields>
                 ExportVtuConfig {
                     title: config.name.clone(),
                     ghost: false,
-                    stride: config.visualize.stride.into_int(),
+                    stride: config.visualize.stride,
                 },
             )?;
         }
@@ -678,7 +678,7 @@ pub fn initial_data(config: &Config) -> eyre::Result<(Mesh<2>, SystemVec<Fields>
             ExportVtuConfig {
                 title: config.name.clone(),
                 ghost: false,
-                stride: config.visualize.stride.into_int(),
+                stride: config.visualize.stride,
             },
         )?;
     }

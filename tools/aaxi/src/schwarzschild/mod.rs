@@ -121,7 +121,7 @@ impl<'a> SolverCallback<1, Scalar> for HorizonCallback<'a> {
             ExportVtuConfig {
                 title: "schwarzschild".into(),
                 ghost: false,
-                stride: 1,
+                stride: ExportStride::PerVertex,
             },
         )?;
 
@@ -207,7 +207,7 @@ pub fn schwarzschild(matches: &ArgMatches) -> eyre::Result<()> {
             ExportVtuConfig {
                 title: "schwarzschild".into(),
                 ghost: false,
-                stride: 1,
+                stride: ExportStride::PerVertex,
             },
         )?;
 
@@ -262,7 +262,7 @@ pub fn schwarzschild(matches: &ArgMatches) -> eyre::Result<()> {
         ExportVtuConfig {
             title: "schwarzschild".into(),
             ghost: false,
-            stride: 1,
+            stride: ExportStride::PerVertex,
         },
     )?;
 

@@ -1,8 +1,8 @@
-use core::f64;
-use std::convert::Infallible;
-
+use crate::config::ScalarFieldProfile;
 use aeon::{kernel::Interpolation, mesh::Gaussian, prelude::*};
+use core::f64;
 use serde::{Deserialize, Serialize};
+use std::convert::Infallible;
 
 // use crate::config::SIGMA;
 
@@ -350,18 +350,55 @@ pub fn solve_constraints(mesh: &mut Mesh<1>, system: SystemSliceMut<Fields>) {
     mesh.fill_boundary(Order::<4>, ScalarConditions(SymCondition), lapse.into());
 }
 
-pub fn generate_initial_scalar_field(mesh: &mut Mesh<1>, amplitude: f64, sigma: f64) -> Vec<f64> {
+struct TanH {
+    amplitude: f64,
+    sigma: f64,
+    center: f64,
+}
+
+impl Projection<1> for TanH {
+    fn project(&self, [r]: [f64; 1]) -> f64 {
+        let offset = (r - self.center) / self.sigma;
+        self.amplitude * offset.tanh()
+    }
+}
+
+pub fn generate_initial_scalar_field(mesh: &mut Mesh<1>, profile: &ScalarFieldProfile) -> Vec<f64> {
     let mut scalar_field = vec![0.0; mesh.num_nodes()];
 
-    mesh.project(
-        4,
-        Gaussian {
+    match profile {
+        ScalarFieldProfile::Gaussian {
             amplitude,
-            sigma: [sigma],
-            center: [0.0],
-        },
-        &mut scalar_field,
-    );
+            sigma,
+            center,
+        } => {
+            mesh.project(
+                4,
+                Gaussian {
+                    amplitude: amplitude.unwrap(),
+                    sigma: [sigma.unwrap()],
+                    center: [center.unwrap()],
+                },
+                &mut scalar_field,
+            );
+        }
+        ScalarFieldProfile::TanH {
+            amplitude,
+            sigma,
+            center,
+        } => {
+            mesh.project(
+                4,
+                TanH {
+                    amplitude: amplitude.unwrap(),
+                    sigma: sigma.unwrap(),
+                    center: center.unwrap(),
+                },
+                &mut scalar_field,
+            );
+        }
+    }
+
     mesh.fill_boundary(
         Order::<4>,
         ScalarConditions(SymCondition),
