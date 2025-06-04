@@ -340,10 +340,10 @@ where
         mesh,
         order,
         ScalarConditions(PsiCondition),
+        callback,
         Hamiltonian {
             context: context.as_slice(),
         },
-        callback,
         SystemSliceMut::from_scalar(&mut psi),
     )?;
 
@@ -408,7 +408,7 @@ impl<'a> SolverCallback<2, Scalar> for IterCallback<'a> {
     type Error = std::io::Error;
 
     fn callback(
-        &self,
+        &mut self,
         mesh: &Mesh<2>,
         input: SystemSlice<Scalar>,
         output: SystemSlice<Scalar>,

@@ -42,6 +42,8 @@ pub enum TransformError {
     FormatFailed(#[from] std::fmt::Error),
     #[error("failed to parse string as float: {0}")]
     FloatParseFailed(#[from] std::num::ParseFloatError),
+    #[error("failed to parse string as usize: {0}")]
+    IntParseFailed(#[from] std::num::ParseIntError),
 }
 
 /// Trait for applying config variable transformation for a struct.
@@ -140,6 +142,45 @@ impl Transform for FloatVar {
         Ok(FloatVar::F64(match self {
             FloatVar::F64(v) => *v,
             FloatVar::Script(pos) => pos.transform(vars)?.parse::<f64>()?,
+        }))
+    }
+}
+
+/// A unsigned integer argument that can either be provided via a configuration file
+/// or as a config variable.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(untagged)]
+pub enum UnsignedVar {
+    /// Fixed floating point input.
+    Usize(usize),
+    /// Script that will be parsed by the transformer
+    Script(String),
+}
+
+impl UnsignedVar {
+    /// Unwraps a float var into a float, assuming that it has already been transformed.
+    pub fn unwrap(&self) -> usize {
+        let Self::Usize(v) = self else {
+            panic!("failed to unwrap UnsignedVar");
+        };
+
+        *v
+    }
+}
+
+impl From<usize> for UnsignedVar {
+    fn from(value: usize) -> Self {
+        Self::Usize(value)
+    }
+}
+
+impl Transform for UnsignedVar {
+    type Output = Self;
+
+    fn transform(&self, vars: &ConfigVars) -> Result<Self::Output, TransformError> {
+        Ok(UnsignedVar::Usize(match self {
+            UnsignedVar::Usize(v) => *v,
+            UnsignedVar::Script(pos) => pos.transform(vars)?.parse::<usize>()?,
         }))
     }
 }

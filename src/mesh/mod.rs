@@ -221,6 +221,10 @@ impl<const N: usize> Mesh<N> {
         self.old_blocks.num_nodes()
     }
 
+    pub fn boundary_classes(&self) -> FaceArray<N, BoundaryClass> {
+        self.boundary.clone()
+    }
+
     // *******************************
     // Data for each block ***********
 

@@ -76,7 +76,7 @@ impl SolverCallback<2, Scalar> for Callback {
     type Error = std::io::Error;
 
     fn callback(
-        &self,
+        &mut self,
         mesh: &Mesh<2>,
         input: SystemSlice<Scalar>,
         output: SystemSlice<Scalar>,
@@ -164,8 +164,8 @@ pub fn main() -> eyre::Result<()> {
             &mut mesh,
             ORDER,
             Conditions,
-            PoissonEquation { source: &source },
             Callback,
+            PoissonEquation { source: &source },
             (&mut solution).into(),
         )?;
 

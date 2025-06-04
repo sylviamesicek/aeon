@@ -1,10 +1,15 @@
-use std::{convert::Infallible, path::PathBuf};
+use std::{
+    convert::Infallible,
+    io,
+    path::{Path, PathBuf},
+};
 
-use aeon::{mesh::Gaussian, prelude::*};
-use clap::{ArgMatches, Command, arg, value_parser};
+use aeon::{prelude::*, solver::SolverCallback};
+use clap::{Arg, ArgMatches, Command, arg, value_parser};
 
 use crate::{
-    eqs, misc,
+    horizon::{self, ApparentHorizonFinder},
+    misc,
     systems::{Constraint, Field, FieldConditions, Fields, Gauge, Metric, ScalarField},
 };
 
@@ -80,6 +85,50 @@ impl Function<2> for SchwarzschildData {
     }
 }
 
+const REFINEMENTS: usize = 10;
+
+struct HorizonCallback<'a> {
+    output: &'a Path,
+    positions: &'a mut Vec<[f64; 2]>,
+}
+
+impl<'a> SolverCallback<1, Scalar> for HorizonCallback<'a> {
+    type Error = io::Error;
+
+    fn callback(
+        &mut self,
+        surface: &Mesh<1>,
+        input: SystemSlice<Scalar>,
+        _output: SystemSlice<Scalar>,
+        iteration: usize,
+    ) -> Result<(), Self::Error> {
+        if iteration % 100 != 0 {
+            return Ok(());
+        }
+
+        let i = iteration / 100;
+        let radius = input.field(());
+
+        self.positions.resize(surface.num_nodes(), [0.0; 2]);
+        horizon::compute_position_from_radius(surface, radius, &mut self.positions);
+
+        let mut checkpoint = Checkpoint::default();
+        checkpoint.attach_mesh(&surface);
+        checkpoint.set_embedding(&self.positions);
+        checkpoint.save_field("radius", radius);
+        checkpoint.export_vtu(
+            self.output.join("horizons").join(format!("horizon{i}.vtu")),
+            ExportVtuConfig {
+                title: "schwarzschild".into(),
+                ghost: false,
+                stride: 1,
+            },
+        )?;
+
+        Ok(())
+    }
+}
+
 pub fn schwarzschild(matches: &ArgMatches) -> eyre::Result<()> {
     let output_directory = matches
         .get_one::<PathBuf>("directory")
@@ -88,8 +137,15 @@ pub fn schwarzschild(matches: &ArgMatches) -> eyre::Result<()> {
 
     let output = misc::abs_or_relative(&output_directory)?;
 
+    let mass = matches
+        .get_one::<f64>("mass")
+        .cloned()
+        .ok_or_else(|| eyre::eyre!("failed to specify mass argument"))?;
+
     // Create output directory
     std::fs::create_dir_all(&output)?;
+    std::fs::create_dir_all(&output.join("initial"))?;
+    std::fs::create_dir_all(&output.join("horizons"))?;
 
     let domain = Rectangle {
         origin: [0., 0.],
@@ -107,17 +163,18 @@ pub fn schwarzschild(matches: &ArgMatches) -> eyre::Result<()> {
     );
     mesh.refine_global();
 
+    let mut system = SystemVec::new(Fields {
+        scalar_fields: Vec::new(),
+    });
+
     // Run 10 refinements to reach a suitable mesh.
-    for _ in 0..10 {
-        let mut system = SystemVec::new(Fields {
-            scalar_fields: Vec::new(),
-        });
+    for i in 0..REFINEMENTS {
         system.resize(mesh.num_nodes());
         system.contigious_mut().fill(0.0);
 
         mesh.evaluate(
             4,
-            SchwarzschildData { mass: 1.0 },
+            SchwarzschildData { mass },
             SystemSlice::empty(),
             system.as_mut_slice(),
         )
@@ -144,7 +201,9 @@ pub fn schwarzschild(matches: &ArgMatches) -> eyre::Result<()> {
         checkpoint.save_int_field("Cell", &cell_debug);
 
         checkpoint.export_vtu(
-            output.join(format!("schwarzschild{}.vtu", mesh.max_level())),
+            output
+                .join("initial")
+                .join(format!("schwarzschild{}.vtu", mesh.max_level())),
             ExportVtuConfig {
                 title: "schwarzschild".into(),
                 ghost: false,
@@ -157,9 +216,55 @@ pub fn schwarzschild(matches: &ArgMatches) -> eyre::Result<()> {
             break;
         }
 
+        if i == REFINEMENTS - 1 {
+            println!("Refined to max levels");
+            break;
+        }
+
         // Otherwise regrid and loop
         mesh.regrid();
     }
+
+    let mut finder = ApparentHorizonFinder::new();
+    finder.solver.max_steps = 20000;
+    finder.solver.cfl = 0.3;
+    finder.solver.dampening = 0.4;
+    finder.solver.tolerance = 1e-3;
+    finder.solver.adaptive = true;
+
+    // Allocate horizon surface
+    let mut surface = horizon::surface();
+    for _ in 0..6 {
+        surface.refine_global();
+    }
+    let mut radius = vec![mass; surface.num_nodes()];
+
+    // Perform search
+    let search = finder.search_with_callback(
+        &mesh,
+        system.as_slice(),
+        Order::<4>,
+        &mut surface,
+        HorizonCallback {
+            output: &output,
+            positions: &mut Vec::new(),
+        },
+        &mut radius,
+    );
+
+    println!("Search Result {:?}", search);
+
+    let mut checkpoint = Checkpoint::default();
+    checkpoint.attach_mesh(&mesh);
+    checkpoint.save_system(system.as_slice());
+    checkpoint.export_vtu(
+        output.join(format!("schwarzschild.vtu")),
+        ExportVtuConfig {
+            title: "schwarzschild".into(),
+            ghost: false,
+            stride: 1,
+        },
+    )?;
 
     Ok(())
 }
@@ -178,6 +283,11 @@ impl CommandExt for Command {
                     arg!(--directory <FILE> "Sets the output directory")
                         .required(true)
                         .value_parser(value_parser!(PathBuf)),
+                )
+                .arg(
+                    Arg::new("mass")
+                        .value_parser(value_parser!(f64))
+                        .help("Mass of black hole to simulate"),
                 ),
         )
     }

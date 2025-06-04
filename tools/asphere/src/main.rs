@@ -56,7 +56,7 @@ impl Diagnostics {
 
         let directory = config.directory()?;
 
-        let serial_id = config.diagnostic.serial_id;
+        let serial_id = config.diagnostic.serial_id.unwrap();
 
         let file1 = format!("Mass-{}-{}", 4, serial_id);
         let file2 = format!("Al-{}-{}", 4, serial_id);
@@ -446,7 +446,7 @@ fn evolve_data(
 
         let alpha = mesh.bottom_left_value(system.field(Field::Lapse));
         let mass = find_mass(&mesh, system.as_slice());
-        if config.diagnostic.save && step % config.diagnostic.save_interval == 0 {
+        if config.diagnostic.save && step % config.diagnostic.save_interval.unwrap() == 0 {
             diagnostics.append(
                 proper_time,
                 Snapshot {

@@ -52,8 +52,8 @@ pub fn cole_config(amplitude: f64, serial: usize) -> Config {
         },
         diagnostic: Diagnostic {
             save: true,
-            save_interval: DIAGNOSTIC_INTERVAL,
-            serial_id: serial,
+            save_interval: DIAGNOSTIC_INTERVAL.into(),
+            serial_id: serial.into(),
         },
         sources: vec![Source {
             amplitude: amplitude.into(),

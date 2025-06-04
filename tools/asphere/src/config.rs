@@ -1,4 +1,4 @@
-use aeon_config::{ConfigVars, FloatVar, Transform, TransformError};
+use aeon_config::{ConfigVars, FloatVar, Transform, TransformError, UnsignedVar};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
@@ -38,7 +38,7 @@ impl Transform for Config {
             evolve: self.evolve.clone(),
             regrid: self.regrid.clone(),
             visualize: self.visualize.clone(),
-            diagnostic: self.diagnostic.clone(),
+            diagnostic: self.diagnostic.transform(vars)?,
             sources: self.sources.transform(vars)?,
         })
     }
@@ -125,8 +125,20 @@ impl Stride {
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct Diagnostic {
     pub save: bool,
-    pub save_interval: usize,
-    pub serial_id: usize,
+    pub save_interval: UnsignedVar,
+    pub serial_id: UnsignedVar,
+}
+
+impl Transform for Diagnostic {
+    type Output = Diagnostic;
+
+    fn transform(&self, vars: &ConfigVars) -> Result<Self::Output, TransformError> {
+        Ok(Self {
+            save: self.save,
+            save_interval: self.save_interval.transform(vars)?,
+            serial_id: self.save_interval.transform(vars)?,
+        })
+    }
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]

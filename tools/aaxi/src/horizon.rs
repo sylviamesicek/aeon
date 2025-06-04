@@ -8,121 +8,162 @@ use aeon::{
     prelude::*,
     solver::HyperRelaxSolver,
 };
-use aeon_tensor::Space;
+
 use core::f64;
 use reborrow::Reborrow;
+use std::convert::Infallible;
 use thiserror::Error;
 
+// Build new horizon surface
+pub fn surface() -> Mesh<1> {
+    Mesh::new(HORIZON_DOMAIN, 4, 2, FaceArray::splat(BoundaryClass::Ghost))
+}
+
+pub fn compute_position_from_radius(surface: &Mesh<1>, radius: &[f64], output: &mut [[f64; 2]]) {
+    assert_eq!(surface.tree().domain(), HORIZON_DOMAIN);
+    assert_eq!(surface.num_nodes(), output.len());
+
+    for block in surface.blocks().indices() {
+        let space = surface.block_space(block);
+        let nodes = surface.block_nodes(block);
+
+        let block_radius = &radius[nodes.clone()];
+        let block_result = &mut output[nodes.clone()];
+
+        for node in space.full_window() {
+            let index = space.index_from_node(node);
+            let [theta] = space.position(node);
+            let radius = block_radius[index];
+
+            block_result[index] = polar_to_cartesian(radius, theta);
+        }
+    }
+}
+
+const HORIZON_DOMAIN: Rectangle<1> = Rectangle {
+    size: [f64::consts::PI / 2.0],
+    origin: [0.0],
+};
+
+#[derive(Debug, Clone)]
 pub enum HorizonStatus {
     CollapsedToZero,
     Converged,
 }
 
-#[derive(Debug, Error)]
-pub enum HorizonError {
+#[derive(Debug, Error, Clone)]
+pub enum HorizonError<A> {
     #[error("surface point not contained in mesh: ${0:?}")]
     SurfaceNotContained([f64; 2]),
     #[error("surface doesn't sucessfully relax")]
-    SurfaceDiverged,
+    Diverged,
+    #[error("surface failed to meet given tolerence")]
+    FailedToMeetTolerance,
     #[error("interpolation didn't converge")]
     InterpolateFailed,
+    #[error("callback failed")]
+    CallbackFailed(#[from] A),
 }
 
-pub struct ApparentHorizonFinder {
-    /// Error tolerance (relaxation stops once error goes below this value).
-    pub tolerance: f64,
-    /// Maximum number of relaxation steps to perform
-    pub max_steps: usize,
-    /// Dampening term η.
-    pub dampening: f64,
-    /// CFL factor for ficticuous time step.
-    pub cfl: f64,
+impl<A> HorizonError<A> {
+    fn from_infaillable(other: HorizonError<Infallible>) -> Self {
+        match other {
+            HorizonError::SurfaceNotContained(pos) => Self::SurfaceNotContained(pos),
+            HorizonError::Diverged => Self::Diverged,
+            HorizonError::FailedToMeetTolerance => Self::FailedToMeetTolerance,
+            HorizonError::InterpolateFailed => Self::InterpolateFailed,
+            HorizonError::CallbackFailed(_) => unreachable!(),
+        }
+    }
+}
 
-    surface: Mesh<1>,
-    surface_radius: SystemVec<Scalar>,
+/// Implements a horizon finding algorithm in the manner of Rinne 2007. Functions with a
+/// similar interface to `aeon::solvers::*`, where the object serves as a public interface
+/// for setting configuration variables and as a memory cache.
+pub struct ApparentHorizonFinder {
+    pub solver: HyperRelaxSolver,
 
     surface_to_cell: Vec<CellId>,
     surface_position: Vec<[f64; 2]>,
 
     cache: UnsafeThreadCache<UniformInterpolate<2>>,
-    solver: HyperRelaxSolver,
 }
 
 impl ApparentHorizonFinder {
+    /// Constructs a new horizon finder with default solver settings.
     pub fn new() -> Self {
-        let mut surface = Mesh::new(
-            Rectangle::from_aabb([0.0], [f64::consts::PI / 2.0]),
-            4,
-            2,
-            FaceArray::from_fn(|_| BoundaryClass::Periodic),
-        );
-
-        for _ in 0..3 {
-            surface.refine_global();
-        }
-
-        let mut surface_radius = SystemVec::new(Scalar);
-        surface_radius.resize(surface.num_nodes());
-        surface_radius.field_mut(()).fill(1.0);
-
-        let surface_to_cell = vec![CellId(0); surface.num_nodes()];
-        let surface_position = vec![[0.0; 2]; surface.num_nodes()];
-
         Self {
-            tolerance: 1e-5,
-            max_steps: 100000,
-            dampening: 1.0,
-            cfl: 0.1,
+            solver: HyperRelaxSolver::default(),
 
-            surface,
-            surface_radius,
-
-            surface_to_cell,
-            surface_position,
+            surface_to_cell: Vec::new(),
+            surface_position: Vec::new(),
 
             cache: UnsafeThreadCache::new(),
-
-            solver: HyperRelaxSolver::default(),
         }
     }
 
-    pub fn search<K: Kernels>(
+    pub fn _search<K: Kernels>(
         &mut self,
         mesh: &Mesh<2>,
-        order: K,
         fields: SystemSlice<Fields>,
-    ) -> Result<HorizonStatus, HorizonError>
+        order: K,
+        surface: &mut Mesh<1>,
+        radius: &mut [f64],
+    ) -> Result<HorizonStatus, HorizonError<Infallible>>
     where
         K: Sync,
     {
-        self.surface_radius.resize(self.surface.num_nodes());
-        self.surface_radius.field_mut(()).fill(1.0);
-        self.surface_to_cell
-            .resize(self.surface.num_nodes(), CellId(0));
+        self.search_with_callback(mesh, fields, order, surface, (), radius)
+    }
+
+    /// Performs a horizon search on the given mesh, using the 1d surface mesh and radius
+    /// vector for the search. This passes the callback into the underlying solver to
+    /// allow for visualization of iterations, etc.
+    pub fn search_with_callback<K: Kernels, Call: SolverCallback<1, Scalar>>(
+        &mut self,
+        mesh: &Mesh<2>,
+        fields: SystemSlice<Fields>,
+        order: K,
+        surface: &mut Mesh<1>,
+        mut callback: Call,
+        radius: &mut [f64],
+    ) -> Result<HorizonStatus, HorizonError<Call::Error>>
+    where
+        K: Sync,
+        Call::Error: Send,
+    {
+        assert_eq!(fields.len(), mesh.num_nodes());
+        assert_eq!(radius.len(), surface.num_nodes());
+        assert_eq!(surface.tree().domain(), HORIZON_DOMAIN);
+        assert_eq!(
+            surface.boundary_classes(),
+            FaceArray::splat(BoundaryClass::Ghost)
+        );
+
+        self.surface_to_cell.resize(surface.num_nodes(), CellId(0));
         self.surface_to_cell.fill(CellId(0));
 
-        self.surface_position
-            .resize(self.surface.num_nodes(), [0.0; 2]);
+        self.surface_position.resize(surface.num_nodes(), [0.0; 2]);
+        self.surface_position.fill([0.0; 2]);
 
-        self.solver.tolerance = self.tolerance;
-        self.solver.max_steps = self.max_steps;
-        self.solver.dampening = self.dampening;
-        self.solver.cfl = self.cfl;
-        self.solver.adaptive = true;
         // Run solver
         let result = self.solver.solve_with_callback(
-            &mut self.surface,
+            surface,
             order,
             HorizonRadialBoundary,
-            HorizonRadialDerivs::<K> {
+            HorizonCallback {
+                mesh,
+                inner: &mut callback,
+            },
+            HorizonNullExpansion::<K> {
                 surface_to_cell: &mut self.surface_to_cell,
                 surface_position: &mut self.surface_position,
                 mesh,
                 fields,
+                cache: &mut self.cache,
                 _phantom: std::marker::PhantomData,
             },
-            HorizonCallback { mesh },
-            self.surface_radius.as_mut_slice(),
+            SystemSliceMut::from_scalar(radius),
         );
 
         match result {
@@ -130,10 +171,12 @@ impl ApparentHorizonFinder {
             Err(HyperRelaxError::CallbackFailed(HorizonCallbackError::CollapsedToZero)) => {
                 Ok(HorizonStatus::CollapsedToZero)
             }
-            Err(HyperRelaxError::Diverged | HyperRelaxError::FailedToMeetTolerance) => {
-                Err(HorizonError::SurfaceDiverged)
+            Err(HyperRelaxError::CallbackFailed(HorizonCallbackError::Inner(err))) => {
+                Err(HorizonError::CallbackFailed(err))
             }
-            Err(HyperRelaxError::FunctionFailed(err)) => Err(err),
+            Err(HyperRelaxError::Diverged) => Err(HorizonError::Diverged),
+            Err(HyperRelaxError::FailedToMeetTolerance) => Err(HorizonError::FailedToMeetTolerance),
+            Err(HyperRelaxError::FunctionFailed(err)) => Err(HorizonError::from_infaillable(err)),
         }
     }
 }
@@ -141,12 +184,6 @@ impl ApparentHorizonFinder {
 impl Clone for ApparentHorizonFinder {
     fn clone(&self) -> Self {
         Self {
-            tolerance: self.tolerance,
-            max_steps: self.max_steps,
-            dampening: self.dampening,
-            cfl: self.cfl,
-            surface: self.surface.clone(),
-            surface_radius: self.surface_radius.clone(),
             surface_to_cell: self.surface_to_cell.clone(),
             surface_position: self.surface_position.clone(),
             cache: UnsafeThreadCache::new(),
@@ -155,6 +192,7 @@ impl Clone for ApparentHorizonFinder {
     }
 }
 
+/// Symmetric boundary for radius function on surface.
 #[derive(Clone)]
 struct HorizonRadialBoundary;
 
@@ -166,18 +204,20 @@ impl SystemBoundaryConds<1> for HorizonRadialBoundary {
     }
 }
 
-struct HorizonRadialDerivs<'a, K> {
+/// Expansion of null paths
+struct HorizonNullExpansion<'a, K> {
     surface_to_cell: &'a mut [CellId],
     surface_position: &'a mut [[f64; 2]],
     mesh: &'a Mesh<2>,
     fields: SystemSlice<'a, Fields>,
+    cache: &'a mut UnsafeThreadCache<UniformInterpolate<2>>,
     _phantom: std::marker::PhantomData<K>,
 }
 
-impl<'a, K: Kernels> Function<1> for HorizonRadialDerivs<'a, K> {
+impl<'a, K: Kernels> Function<1> for HorizonNullExpansion<'a, K> {
     type Input = Scalar;
     type Output = Scalar;
-    type Error = HorizonError;
+    type Error = HorizonError<Infallible>;
 
     fn preprocess(
         &mut self,
@@ -199,9 +239,9 @@ impl<'a, K: Kernels> Function<1> for HorizonRadialDerivs<'a, K> {
                 let [theta] = space.position(node);
                 let radius = surface_radius[index];
 
-                let point = position(radius, theta);
+                let point = polar_to_cartesian(radius, theta);
 
-                if self.mesh.tree().domain().contains(point) {
+                if !self.mesh.tree().domain().contains(point) {
                     return Err(HorizonError::SurfaceNotContained(point));
                 }
 
@@ -224,8 +264,6 @@ impl<'a, K: Kernels> Function<1> for HorizonRadialDerivs<'a, K> {
         input: SystemSlice<Self::Input>,
         mut output: SystemSliceMut<Self::Output>,
     ) -> Result<(), Self::Error> {
-        const S: Space<2> = Space::<2>;
-
         let mesh = self.mesh;
         let fields = self.fields.rb();
 
@@ -246,7 +284,7 @@ impl<'a, K: Kernels> Function<1> for HorizonRadialDerivs<'a, K> {
 
         let scratch: &mut [f64] = engine.alloc(num_nodes_per_cell);
 
-        let mut interpolate = UniformInterpolate::<2>::default();
+        let interpolate = unsafe { self.cache.get_or_default() };
 
         for [vertex] in IndexSpace::new(engine.vertex_size()).iter() {
             let index = engine.index_from_vertex([vertex]);
@@ -270,12 +308,13 @@ impl<'a, K: Kernels> Function<1> for HorizonRadialDerivs<'a, K> {
                 origin: node_from_vertex(mesh.cell_node_origin(mesh_active_cell)),
                 size: cell_size,
             };
+            let block_nodes = mesh.block_nodes(mesh_block);
 
             interpolate
                 .build(cell_support, cell_support, [r, z])
                 .map_err(|_err| HorizonError::InterpolateFailed)?;
 
-            let block_fields = fields.slice(nodes.clone());
+            let block_fields = fields.slice(block_nodes.clone());
 
             let grr_f = block_fields.field(Field::Metric(Metric::Grr));
             let grz_f = block_fields.field(Field::Metric(Metric::Grz));
@@ -348,7 +387,7 @@ impl<'a, K: Kernels> Function<1> for HorizonRadialDerivs<'a, K> {
                 radius_second_deriv,
             };
 
-            surface_deriv[index] = horizon(system, [r, z]);
+            surface_deriv[index] = -horizon(system, [r, z]);
         }
 
         Ok(())
@@ -356,29 +395,34 @@ impl<'a, K: Kernels> Function<1> for HorizonRadialDerivs<'a, K> {
 }
 
 #[derive(Debug, Error)]
-enum HorizonCallbackError {
-    #[error("Coverged to zero")]
+enum HorizonCallbackError<I> {
+    #[error("coverged to zero")]
     CollapsedToZero,
+    #[error("inner error")]
+    Inner(#[from] I),
 }
 
-struct HorizonCallback<'a> {
+struct HorizonCallback<'a, I> {
     mesh: &'a Mesh<2>,
+    inner: &'a mut I,
 }
 
-impl<'a> SolverCallback<1, Scalar> for HorizonCallback<'a> {
-    type Error = HorizonCallbackError;
+impl<'a, I: SolverCallback<1, Scalar>> SolverCallback<1, Scalar> for HorizonCallback<'a, I> {
+    type Error = HorizonCallbackError<I::Error>;
 
     fn callback(
-        &self,
-        _surface: &Mesh<1>,
+        &mut self,
+        surface: &Mesh<1>,
         input: SystemSlice<Scalar>,
-        _output: SystemSlice<Scalar>,
-        _iteration: usize,
+        output: SystemSlice<Scalar>,
+        iteration: usize,
     ) -> Result<(), Self::Error> {
         let radius = input.field(());
 
         let min_spacing = self.mesh.min_spacing();
         let collapsed = radius.iter().all(|r| r.abs() <= min_spacing);
+
+        self.inner.callback(surface, input, output, iteration)?;
 
         if collapsed {
             return Err(HorizonCallbackError::CollapsedToZero);
@@ -388,7 +432,7 @@ impl<'a> SolverCallback<1, Scalar> for HorizonCallback<'a> {
     }
 }
 
-fn position(radius: f64, theta: f64) -> [f64; 2] {
+fn polar_to_cartesian(radius: f64, theta: f64) -> [f64; 2] {
     let x = radius * theta.cos();
     let y = radius * theta.sin();
 

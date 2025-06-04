@@ -89,7 +89,7 @@ impl HyperRelaxSolver {
         C::System: Default + Clone + Sync,
         F::Error: Send,
     {
-        self.solve_with_callback(mesh, order, conditions, deriv, (), result)
+        self.solve_with_callback(mesh, order, conditions, (), deriv, result)
     }
 
     pub fn solve_with_callback<
@@ -97,14 +97,14 @@ impl HyperRelaxSolver {
         K: Kernels + Sync,
         C: SystemBoundaryConds<N> + Sync,
         F: Function<N, Input = C::System, Output = C::System> + Sync,
-        Call: SolverCallback<N, C::System> + Sync,
+        Call: SolverCallback<N, C::System>,
     >(
         &mut self,
         mesh: &mut Mesh<N>,
         order: K,
         conditions: C,
+        mut callback: Call,
         mut deriv: F,
-        callback: Call,
         mut result: SystemSliceMut<C::System>,
     ) -> Result<(), HyperRelaxError<F::Error, Call::Error>>
     where
@@ -181,8 +181,8 @@ impl HyperRelaxSolver {
                 return Err(HyperRelaxError::Diverged);
             }
 
-            if index % 1000 == 0 {
-                log::trace!("Relaxed {}k steps, norm: {:.5e}", index / 1000, norm);
+            if index % 100 == 0 {
+                log::trace!("Relaxed {}k steps, norm: {:.5e}", index / 100, norm);
             }
 
             if norm <= self.tolerance {

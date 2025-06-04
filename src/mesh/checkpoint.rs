@@ -26,6 +26,8 @@ pub struct Checkpoint<const N: usize> {
     meta: HashMap<String, String>,
     /// Mesh data to be attached to checkpoint,
     mesh: Option<MeshSer<N>>,
+    /// Is this mesh embedded in a higher dimensional mesh?
+    embedding: Option<Embedding>,
     /// Systems which are stored in the checkpoint.
     systems: HashMap<String, SystemMeta>,
     /// Fields which are stored in the checkpoint
@@ -42,6 +44,14 @@ impl<const N: usize> Checkpoint<N> {
             width: mesh.width,
             ghost: mesh.ghost,
             boundary: mesh.boundary,
+        });
+    }
+
+    /// Sets the mesh as embedded in a higher dimensional space.
+    pub fn set_embedding<const S: usize>(&mut self, positions: &[[f64; S]]) {
+        self.embedding.replace(Embedding {
+            dimension: S,
+            positions: positions.iter().flatten().cloned().collect(),
         });
     }
 
@@ -195,6 +205,19 @@ pub struct SystemMeta {
     pub fields: Vec<String>,
 }
 
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct HyperSurface<const N: usize, const S: usize> {
+    pub surface: MeshSer<S>,
+    #[serde(with = "crate::array::vec")]
+    pub position: Vec<[f64; N]>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct Embedding {
+    dimension: usize,
+    positions: Vec<f64>,
+}
+
 use num_traits::ToPrimitive;
 use vtkio::{
     IOBuffer, Vtk,
@@ -254,6 +277,83 @@ impl<const N: usize> Checkpoint<N> {
         );
 
         // Generate Cells
+        let cells = Self::mesh_cells(&mesh, config.ghost, stride);
+        // Generate Point Data
+        let points = match self.embedding {
+            Some(ref embedding) => {
+                Self::mesh_points_embedded(&mesh, embedding, config.ghost, stride)
+            }
+            None => Self::mesh_points(&mesh, config.ghost, stride),
+        };
+        // Attributes
+        let mut attributes = Attributes {
+            point: Vec::new(),
+            cell: Vec::new(),
+        };
+
+        for (name, system) in self.systems.iter() {
+            for (idx, field) in system.fields.iter().enumerate() {
+                let start = idx * system.count;
+                let end = idx * system.count + system.count;
+
+                attributes.point.push(Self::field_attribute(
+                    &mesh,
+                    format!("{}::{}", name, field),
+                    &system.buffer[start..end],
+                    config.ghost,
+                    stride,
+                ));
+            }
+        }
+
+        for (name, system) in self.fields.iter() {
+            attributes.point.push(Self::field_attribute(
+                &mesh,
+                format!("Field::{}", name),
+                system,
+                config.ghost,
+                stride,
+            ));
+        }
+
+        for (name, system) in self.int_fields.iter() {
+            attributes.point.push(Self::field_attribute(
+                &mesh,
+                format!("IntField::{}", name),
+                system,
+                config.ghost,
+                stride,
+            ));
+        }
+
+        let mut pieces = Vec::new();
+        // Primary piece
+        pieces.push(Piece::Inline(Box::new(UnstructuredGridPiece {
+            points,
+            cells,
+            data: attributes,
+        })));
+
+        let model = Vtk {
+            version: Version::XML { major: 2, minor: 2 },
+            title: config.title,
+            byte_order: ByteOrder::LittleEndian,
+            data: DataSet::UnstructuredGrid { meta: None, pieces },
+            file_path: None,
+        };
+
+        model.export(path).map_err(|i| match i {
+            vtkio::Error::IO(io) => io,
+            v => {
+                log::error!("Encountered error {:?} while exporting vtu", v);
+                std::io::Error::from(std::io::ErrorKind::Other)
+            }
+        })?;
+
+        Ok(())
+    }
+
+    fn mesh_cells(mesh: &Mesh<N>, ghost: bool, stride: usize) -> Cells {
         let mut connectivity = Vec::new();
         let mut offsets = Vec::new();
 
@@ -266,7 +366,7 @@ impl<const N: usize> Checkpoint<N> {
             let mut cell_size = space.cell_size();
             let mut vertex_size = space.vertex_size();
 
-            if config.ghost {
+            if ghost {
                 for axis in 0..N {
                     cell_size[axis] += 2 * space.ghost();
                     vertex_size[axis] += 2 * space.ghost();
@@ -322,20 +422,29 @@ impl<const N: usize> Checkpoint<N> {
             vertex_total += vertex_space.index_count() as u64;
         }
 
-        let cells = Cells {
+        let cell_type = match N {
+            1 => CellType::Line,
+            2 => CellType::Quad,
+            // 3 => CellType::Hexahedron,
+            _ => panic!("Unsupported dimension"),
+        };
+
+        Cells {
             cell_verts: VertexNumbers::XML {
                 connectivity,
                 offsets,
             },
-            types: vec![CellType::Quad; cell_total],
-        };
+            types: vec![cell_type; cell_total],
+        }
+    }
 
+    fn mesh_points(mesh: &Mesh<N>, ghost: bool, stride: usize) -> IOBuffer {
         // Generate point data
         let mut vertices = Vec::new();
 
         for block in mesh.blocks.indices() {
             let space = mesh.block_space(block);
-            let window = if config.ghost {
+            let window = if ghost {
                 space.full_window()
             } else {
                 space.inner_window()
@@ -355,75 +464,49 @@ impl<const N: usize> Checkpoint<N> {
             }
         }
 
-        let points = IOBuffer::new(vertices);
+        IOBuffer::new(vertices)
+    }
 
-        // Attributes
-        let mut attributes = Attributes {
-            point: Vec::new(),
-            cell: Vec::new(),
-        };
+    fn mesh_points_embedded(
+        mesh: &Mesh<N>,
+        embedding: &Embedding,
+        ghost: bool,
+        stride: usize,
+    ) -> IOBuffer {
+        let dim = embedding.dimension;
+        assert!(dim <= 3);
 
-        for (name, system) in self.systems.iter() {
-            for (idx, field) in system.fields.iter().enumerate() {
-                let start = idx * system.count;
-                let end = idx * system.count + system.count;
+        // Generate point data
+        let mut vertices = Vec::new();
 
-                attributes.point.push(Self::field_attribute(
-                    &mesh,
-                    format!("{}::{}", name, field),
-                    &system.buffer[start..end],
-                    config.ghost,
-                    stride,
-                ));
+        for block in mesh.blocks.indices() {
+            let space = mesh.block_space(block);
+            let nodes = mesh.block_nodes(block);
+            let window = if ghost {
+                space.full_window()
+            } else {
+                space.inner_window()
+            };
+
+            let block_positions = &embedding.positions[nodes.start * dim..nodes.end * dim];
+
+            'window: for node in window {
+                let index = space.index_from_node(node);
+                let position = &block_positions[index * dim..(index + 1) * dim];
+
+                for axis in 0..N {
+                    if node[axis] % (stride as isize) != 0 {
+                        continue 'window;
+                    }
+                }
+
+                let mut vertex = [0.0; 3];
+                vertex[..dim].copy_from_slice(&position);
+                vertices.extend(vertex);
             }
         }
 
-        for (name, system) in self.fields.iter() {
-            attributes.point.push(Self::field_attribute(
-                &mesh,
-                format!("Field::{}", name),
-                system,
-                config.ghost,
-                stride,
-            ));
-        }
-
-        for (name, system) in self.int_fields.iter() {
-            attributes.point.push(Self::field_attribute(
-                &mesh,
-                format!("IntField::{}", name),
-                system,
-                config.ghost,
-                stride,
-            ));
-        }
-
-        let piece = UnstructuredGridPiece {
-            points,
-            cells,
-            data: attributes,
-        };
-
-        let model = Vtk {
-            version: Version::XML { major: 2, minor: 2 },
-            title: config.title,
-            byte_order: ByteOrder::LittleEndian,
-            data: DataSet::UnstructuredGrid {
-                meta: None,
-                pieces: vec![Piece::Inline(Box::new(piece))],
-            },
-            file_path: None,
-        };
-
-        model.export(path).map_err(|i| match i {
-            vtkio::Error::IO(io) => io,
-            v => {
-                log::error!("Encountered error {:?} while exporting vtu", v);
-                std::io::Error::from(std::io::ErrorKind::Other)
-            }
-        })?;
-
-        Ok(())
+        IOBuffer::new(vertices)
     }
 
     fn field_attribute<T: ToPrimitive + Copy + 'static>(

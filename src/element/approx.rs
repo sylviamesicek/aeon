@@ -1,6 +1,6 @@
 use crate::element::{Basis, BasisFunction as _, LeastSquares, LinearOperator, Support};
 use faer::{
-    Conj, Mat, MatRef, RowRef,
+    ColRef, Conj, Mat, MatRef,
     col::generic::Col,
     linalg::{matmul::dot, svd::SvdError},
 };
@@ -56,8 +56,8 @@ impl ApproxOperator {
         )
     }
 
-    pub fn weights(&self, i: usize) -> RowRef<f64> {
-        self.shape.row(i)
+    pub fn weights(&self, i: usize) -> ColRef<f64> {
+        self.shape.col(i)
     }
 
     pub fn shape(&self) -> MatRef<f64> {

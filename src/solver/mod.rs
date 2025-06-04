@@ -17,7 +17,7 @@ pub trait SolverCallback<const N: usize, S: System> {
 
     /// Called once for every iteration in a iterative solver.
     fn callback(
-        &self,
+        &mut self,
         _mesh: &Mesh<N>,
         _input: SystemSlice<S>,
         _output: SystemSlice<S>,
@@ -36,7 +36,7 @@ impl<const N: usize, S: System, F: Fn(&Mesh<N>, SystemSlice<S>, SystemSlice<S>, 
 {
     type Error = Infallible;
     fn callback(
-        &self,
+        &mut self,
         mesh: &Mesh<N>,
         input: SystemSlice<S>,
         output: SystemSlice<S>,

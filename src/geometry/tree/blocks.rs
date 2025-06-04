@@ -134,6 +134,16 @@ impl<const N: usize> TreeBlocks<N> {
         self.ghost
     }
 
+    // /// Sets the width of cells in the block.
+    // pub fn set_width(&mut self, width: [usize; N]) {
+    //     self.width = width;
+    // }
+
+    // /// Sets the number of ghost nodes in cells in the block.
+    // pub fn set_ghost(&mut self, ghost: usize) {
+    //     self.ghost = ghost;
+    // }
+
     /// Returns the total number of nodes in the tree.
     pub fn num_nodes(&self) -> usize {
         *self.offsets.last().unwrap()
