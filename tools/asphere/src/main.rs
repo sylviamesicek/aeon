@@ -149,7 +149,7 @@ fn initial_data(config: &Config) -> eyre::Result<(Mesh<1>, SystemVec<Fields>)> {
 
         node_pb.set_length(mesh.num_nodes() as u64);
         memory_pb.set_length((mesh.estimate_heap_size() + system.estimate_heap_size()) as u64);
-        level_pb.set_length(mesh.max_level() as u64);
+        level_pb.set_length(mesh.num_levels() as u64);
 
         // Set initial data for scalar field.
         let scalar_field = generate_initial_scalar_field(&mut mesh, &source.profile);
@@ -175,9 +175,9 @@ fn initial_data(config: &Config) -> eyre::Result<(Mesh<1>, SystemVec<Fields>)> {
             checkpoint.save_system(system.as_slice());
             checkpoint.export_vtu(
                 absolute.join("initial").join(format!(
-                    "{}_level{}.vtu",
+                    "{}_levels_{}.vtu",
                     config.name,
-                    mesh.max_level()
+                    mesh.num_levels()
                 )),
                 ExportVtuConfig {
                     title: "Massless Scalar Field Initial Data".to_string(),
@@ -190,7 +190,7 @@ fn initial_data(config: &Config) -> eyre::Result<(Mesh<1>, SystemVec<Fields>)> {
         if mesh.num_nodes() >= config.limits.max_nodes {
             log::error!(
                 "Failed to solve initial data, level: {}, nodes: {}",
-                mesh.max_level(),
+                mesh.num_levels(),
                 mesh.num_nodes()
             );
             return Err(eyre!("failed to refine within perscribed limits"));
@@ -292,7 +292,7 @@ fn evolve_data(
             mass: find_mass(&mesh, system.as_slice()),
             alpha: mesh.bottom_left_value(system.field(Field::Lapse)),
             phi: mesh.bottom_left_value(system.field(Field::Phi)),
-            level: mesh.max_level(),
+            level: mesh.num_levels(),
             nodes: mesh.num_nodes(),
         },
     );
@@ -377,13 +377,13 @@ fn evolve_data(
                 config.regrid.refine_error,
                 system.as_slice(),
             );
-            mesh.limit_level_range_flags(1, config.limits.max_levels);
+            mesh.limit_level_range_flags(1, config.limits.max_levels + 1);
             mesh.balance_flags();
             mesh.regrid();
 
             log::trace!(
                 "Regrided Mesh at time: {proper_time:.5}, Max Level {}, Num Nodes {}, Step: {}",
-                mesh.max_level(),
+                mesh.num_levels(),
                 mesh.num_nodes(),
                 step,
             );
@@ -449,7 +449,7 @@ fn evolve_data(
                     mass,
                     alpha,
                     phi: mesh.bottom_left_value(system.field(Field::Phi)),
-                    level: mesh.max_level(),
+                    level: mesh.num_levels(),
                     nodes: mesh.num_nodes(),
                 },
             );
@@ -464,7 +464,7 @@ fn evolve_data(
         proper_time += h * alpha;
 
         node_pb.set_position(mesh.num_nodes() as u64);
-        level_pb.set_position(mesh.max_level() as u64);
+        level_pb.set_position(mesh.num_levels() as u64);
         memory_pb.set_position(memory_usage as u64);
         step_pb.inc(1);
         step_pb.set_message(format!(

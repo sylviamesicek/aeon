@@ -245,7 +245,7 @@ pub struct HorizonCallback<'a> {
     directory: &'a Path,
     positions: &'a mut Vec<[f64; 2]>,
     config: &'a Config,
-    pb: ProgressBar,
+    pb: &'a mut ProgressBar,
 }
 
 impl<'a> SolverCallback<1, Scalar> for HorizonCallback<'a> {
@@ -258,11 +258,11 @@ impl<'a> SolverCallback<1, Scalar> for HorizonCallback<'a> {
         _output: SystemSlice<Scalar>,
         iteration: usize,
     ) -> Result<(), Self::Error> {
+        self.pb.set_position(iteration as u64);
+
         if !self.config.visualize.horizon_relax {
             return Ok(());
         }
-
-        self.pb.set_length(iteration as u64);
 
         let interval = self.config.visualize.horizon_relax_interval.unwrap_steps();
 
@@ -620,7 +620,7 @@ pub fn evolve_data(
                 std::fs::create_dir_all(&horizon_dir).map_err(eyre::Report::new)?;
             }
 
-            let horizon_pb = m.add(ProgressBar::new(config.horizon.relax.max_steps as u64));
+            let mut horizon_pb = m.add(ProgressBar::new(config.horizon.relax.max_steps as u64));
             horizon_pb.set_style(misc::node_style());
             horizon_pb.enable_steady_tick(Duration::from_millis(100));
             horizon_pb.set_prefix("- [Horizon Search]");
@@ -634,7 +634,7 @@ pub fn evolve_data(
                     directory: horizon_dir.as_path(),
                     positions: &mut search_positions,
                     config: &config,
-                    pb: horizon_pb.clone(),
+                    pb: &mut horizon_pb,
                 },
                 surface_radius,
             );
