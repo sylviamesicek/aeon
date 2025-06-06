@@ -19,11 +19,9 @@ use super::SolverCallback;
 #[derive(Error, Debug)]
 pub enum HyperRelaxError<A, B> {
     #[error("failed to relax below tolerance in allotted number of steps")]
-    FailedToMeetTolerance,
+    ReachedMaxSteps,
     #[error("norm diverged to NaN")]
-    Diverged,
-    // #[error("failed to create and store visualizations of each iteration")]
-    // VisualizeFailed,
+    NormDiverged,
     #[error("function error")]
     FunctionFailed(A),
     #[error("callback error")]
@@ -178,7 +176,7 @@ impl HyperRelaxSolver {
             let norm = mesh.l2_norm_system(result.rb());
 
             if !norm.is_finite() || norm >= 1e60 {
-                return Err(HyperRelaxError::Diverged);
+                return Err(HyperRelaxError::NormDiverged);
             }
 
             if index % 100 == 0 {

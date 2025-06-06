@@ -9,6 +9,9 @@ use eyre::Context as _;
 use indicatif::ProgressStyle;
 use serde::de::DeserializeOwned;
 
+// ***********************
+// Progress bar styles
+
 /// Progress bar in the style
 /// `<prefix> . <message>`
 pub fn spinner_style() -> ProgressStyle {
@@ -40,6 +43,9 @@ pub fn level_style() -> ProgressStyle {
     .unwrap()
 }
 
+// ******************************
+// File utils
+
 /// Returns the path if it is absolute, otherwise transform it into a
 /// absolute path by appending it to the current working directory.
 pub fn abs_or_relative(path: &Path) -> eyre::Result<PathBuf> {
@@ -57,6 +63,9 @@ pub fn import_from_toml<T: DeserializeOwned>(path: &Path) -> eyre::Result<T> {
     let string = std::fs::read_to_string(path)?;
     Ok(toml::from_str(&string)?)
 }
+
+// ********************************
+// Float encodings
 
 /// Encodes a float as a hexidecimal string
 pub fn encode_float(value: f64) -> String {

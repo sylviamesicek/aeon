@@ -96,7 +96,7 @@ impl SolverCallback<2, Scalar> for Callback {
             PathBuf::from("output/poisson").join(format!(
                 "{}_level_{}_iter_{}.vtu",
                 "poisson",
-                mesh.max_level(),
+                mesh.num_levels(),
                 i
             )),
             ExportVtuConfig {

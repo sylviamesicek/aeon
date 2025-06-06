@@ -52,9 +52,6 @@ pub struct Mesh<const N: usize> {
     /// (encoded in `BoundaryKind`) may be enforced on that face.
     boundary: FaceArray<N, BoundaryClass>,
 
-    /// Maximum level of cell on the mesh.
-    max_level: usize,
-
     /// Block structure induced by the tree.
     blocks: TreeBlocks<N>,
     /// Neighbors of each block.
@@ -119,8 +116,6 @@ impl<const N: usize> Mesh<N> {
             ghost,
             boundary,
 
-            max_level: 0,
-
             blocks: TreeBlocks::new([width; N], ghost),
             neighbors: TreeNeighbors::default(),
             interfaces: TreeInterfaces::default(),
@@ -163,11 +158,6 @@ impl<const N: usize> Mesh<N> {
         // Rebuild blocks
         self.blocks.build(&self.tree);
 
-        // Cache maximum level
-        self.max_level = 0;
-        for block in self.blocks.indices() {
-            self.max_level = self.max_level.max(self.blocks.level(block));
-        }
         // Rebuild neighbors
         self.neighbors.build(&self.tree, &self.blocks);
         // Rebuild interfaces
@@ -422,16 +412,16 @@ impl<const N: usize> Mesh<N> {
         false
     }
 
-    /// Returns the maximum level of cell on the mesh.
-    pub fn max_level(&self) -> usize {
-        self.max_level
+    /// Returns number of levels on the mesh.
+    pub fn num_levels(&self) -> usize {
+        self.tree().num_levels()
     }
 
     /// Returns the minimum spatial distance between any
     /// two nodes on the mesh. Commonly used in conjunction
     /// with a CFL factor to determine time step.
     pub fn min_spacing(&self) -> f64 {
-        let max_level = self.max_level();
+        let max_level = self.num_levels() - 1;
         let domain = self.tree.domain();
 
         array::from_fn::<_, N, _>(|axis| {
@@ -735,8 +725,6 @@ impl<const N: usize> Clone for Mesh<N> {
             ghost: self.ghost,
             boundary: self.boundary,
 
-            max_level: self.max_level,
-
             blocks: self.blocks.clone(),
             neighbors: self.neighbors.clone(),
             interfaces: self.interfaces.clone(),
@@ -761,8 +749,6 @@ impl<const N: usize> Default for Mesh<N> {
             width: 4,
             ghost: 1,
             boundary: FaceArray::default(),
-
-            max_level: 0,
 
             blocks: TreeBlocks::new([4; N], 1),
             neighbors: TreeNeighbors::default(),
@@ -913,7 +899,6 @@ mod tests {
         assert_eq!(mesh.width, mesh2.width);
         assert_eq!(mesh.ghost, mesh2.ghost);
         assert_eq!(mesh.boundary, mesh2.boundary);
-        assert_eq!(mesh.max_level, mesh2.max_level);
         assert_eq!(mesh.blocks, mesh2.blocks);
         assert_eq!(mesh.neighbors, mesh2.neighbors);
         assert_eq!(mesh.interfaces, mesh2.interfaces);

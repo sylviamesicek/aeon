@@ -47,7 +47,7 @@ const HORIZON_DOMAIN: Rectangle<1> = Rectangle {
 
 #[derive(Debug, Clone)]
 pub enum HorizonStatus {
-    CollapsedToZero,
+    ConvergedToZero,
     Converged,
 }
 
@@ -55,10 +55,10 @@ pub enum HorizonStatus {
 pub enum HorizonError<A> {
     #[error("surface point not contained in mesh: ${0:?}")]
     SurfaceNotContained([f64; 2]),
-    #[error("surface doesn't sucessfully relax")]
-    Diverged,
-    #[error("surface failed to meet given tolerence")]
-    FailedToMeetTolerance,
+    #[error("surface radial norm diverged")]
+    NormDiverged,
+    #[error("surface failed to converge in allotted number of steps")]
+    ReachedMaxSteps,
     #[error("interpolation didn't converge")]
     InterpolateFailed,
     #[error("callback failed")]
@@ -69,8 +69,8 @@ impl<A> HorizonError<A> {
     fn from_infaillable(other: HorizonError<Infallible>) -> Self {
         match other {
             HorizonError::SurfaceNotContained(pos) => Self::SurfaceNotContained(pos),
-            HorizonError::Diverged => Self::Diverged,
-            HorizonError::FailedToMeetTolerance => Self::FailedToMeetTolerance,
+            HorizonError::NormDiverged => Self::NormDiverged,
+            HorizonError::ReachedMaxSteps => Self::ReachedMaxSteps,
             HorizonError::InterpolateFailed => Self::InterpolateFailed,
             HorizonError::CallbackFailed(_) => unreachable!(),
         }
@@ -169,13 +169,13 @@ impl ApparentHorizonFinder {
         match result {
             Ok(()) => Ok(HorizonStatus::Converged),
             Err(HyperRelaxError::CallbackFailed(HorizonCallbackError::CollapsedToZero)) => {
-                Ok(HorizonStatus::CollapsedToZero)
+                Ok(HorizonStatus::ConvergedToZero)
             }
             Err(HyperRelaxError::CallbackFailed(HorizonCallbackError::Inner(err))) => {
                 Err(HorizonError::CallbackFailed(err))
             }
-            Err(HyperRelaxError::Diverged) => Err(HorizonError::Diverged),
-            Err(HyperRelaxError::FailedToMeetTolerance) => Err(HorizonError::FailedToMeetTolerance),
+            Err(HyperRelaxError::NormDiverged) => Err(HorizonError::NormDiverged),
+            Err(HyperRelaxError::ReachedMaxSteps) => Err(HorizonError::ReachedMaxSteps),
             Err(HyperRelaxError::FunctionFailed(err)) => Err(HorizonError::from_infaillable(err)),
         }
     }

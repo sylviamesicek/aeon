@@ -1,6 +1,6 @@
 use crate::eqs;
 use crate::misc;
-use crate::run::config::{Config, Relax, Source};
+use crate::run::config::{Config, Initial, Source};
 use crate::systems::{Constraint, Field, FieldConditions, Fields, Gauge, Metric, ScalarField};
 use aeon::prelude::*;
 use aeon::{
@@ -267,7 +267,7 @@ impl<'a> Function<2> for FieldsFromGarfinkle<'a> {
 fn solve_order<const ORDER: usize, S: SolverCallback<2, Scalar> + Send + Sync>(
     order: Order<ORDER>,
     mesh: &mut Mesh<2>,
-    relax: &Relax,
+    initial: &Initial,
     callback: S,
     sources: &[Source],
     mut system: SystemSliceMut<Fields>,
@@ -324,16 +324,16 @@ where
     psi.fill(1.0);
 
     log::trace!(
-        "Relaxing. Max Level {}, Nodes: {}",
-        mesh.max_level(),
+        "Relaxing. Num Levels {}, Nodes: {}",
+        mesh.num_levels(),
         mesh.num_nodes()
     );
 
     let mut solver = HyperRelaxSolver::new();
-    solver.dampening = relax.dampening;
-    solver.max_steps = relax.max_steps;
-    solver.tolerance = relax.error_tolerance;
-    solver.cfl = relax.cfl;
+    solver.dampening = initial.relax.dampening;
+    solver.max_steps = initial.relax.max_steps;
+    solver.tolerance = initial.relax.tolerance;
+    solver.cfl = initial.relax.cfl;
     solver.adaptive = true;
 
     solver.solve_with_callback(
@@ -417,11 +417,11 @@ impl<'a> SolverCallback<2, Scalar> for IterCallback<'a> {
         self.pb.set_message(format!("Step: {}", iteration));
         self.pb.inc(1);
 
-        if !self.config.visualize.save_relax {
+        if !self.config.visualize.initial_relax {
             return Ok(());
         }
 
-        let visualize_interval = self.config.visualize.save_relax_interval;
+        let visualize_interval = self.config.visualize.initial_relax_interval.unwrap_steps();
 
         if iteration % visualize_interval != 0 {
             return Ok(());
@@ -435,9 +435,9 @@ impl<'a> SolverCallback<2, Scalar> for IterCallback<'a> {
         checkpoint.save_field("Derivative", output.into_scalar());
         checkpoint.export_vtu(
             self.output.join("initial").join(format!(
-                "{}_level_{}_iter_{}.vtu",
+                "{}_levels_{}_iter_{}.vtu",
                 self.config.name,
-                mesh.max_level(),
+                mesh.num_levels(),
                 i
             )),
             ExportVtuConfig {
@@ -505,7 +505,12 @@ pub fn initial_data(config: &Config) -> eyre::Result<(Mesh<2>, SystemVec<Fields>
     );
 
     // Perform global refinements
-    for _ in 0..config.regrid.global {
+    for _ in 0..config.domain.global_refine {
+        // Ensure we don't go above max levels
+        if mesh.num_levels() >= config.limits.max_levels {
+            break;
+        }
+
         mesh.refine_global();
     }
 
@@ -528,9 +533,7 @@ pub fn initial_data(config: &Config) -> eyre::Result<(Mesh<2>, SystemVec<Fields>
     // Visualization
 
     // Path for all visualization data.
-    if config.visualize.save_relax
-        || config.visualize.save_relax_levels
-        || config.visualize.save_relax_result
+    if config.visualize.initial || config.visualize.initial_levels || config.visualize.initial_relax
     {
         std::fs::create_dir_all(&output.join("initial"))?;
     }
@@ -553,7 +556,7 @@ pub fn initial_data(config: &Config) -> eyre::Result<(Mesh<2>, SystemVec<Fields>
     loop {
         let pb = m.add(ProgressBar::no_length());
         pb.set_style(misc::spinner_style());
-        pb.set_prefix(format!("[Level {}]", mesh.max_level()));
+        pb.set_prefix(format!("[Level {}]", mesh.num_levels()));
         pb.enable_steady_tick(Duration::from_millis(100));
 
         match config.order {
@@ -561,7 +564,7 @@ pub fn initial_data(config: &Config) -> eyre::Result<(Mesh<2>, SystemVec<Fields>
                 solve_order(
                     Order::<2>,
                     &mut mesh,
-                    &config.relax,
+                    &config.initial,
                     IterCallback {
                         config,
                         pb: pb.clone(),
@@ -575,7 +578,7 @@ pub fn initial_data(config: &Config) -> eyre::Result<(Mesh<2>, SystemVec<Fields>
                 solve_order(
                     Order::<4>,
                     &mut mesh,
-                    &config.relax,
+                    &config.initial,
                     IterCallback {
                         config,
                         pb: pb.clone(),
@@ -589,7 +592,7 @@ pub fn initial_data(config: &Config) -> eyre::Result<(Mesh<2>, SystemVec<Fields>
                 solve_order(
                     Order::<6>,
                     &mut mesh,
-                    &config.relax,
+                    &config.initial,
                     IterCallback {
                         config,
                         pb: pb.clone(),
@@ -609,15 +612,15 @@ pub fn initial_data(config: &Config) -> eyre::Result<(Mesh<2>, SystemVec<Fields>
         ));
         step_count += pb.position();
 
-        if config.visualize.save_relax_levels {
+        if config.visualize.initial_levels {
             let mut checkpoint = Checkpoint::default();
             checkpoint.attach_mesh(&mesh);
             checkpoint.save_system(system.as_slice());
             checkpoint.export_vtu(
                 output.join("initial").join(format!(
-                    "{}_level{}.vtu",
+                    "{}_levels_{}.vtu",
                     &config.name,
-                    mesh.max_level()
+                    mesh.num_levels()
                 )),
                 ExportVtuConfig {
                     title: config.name.clone(),
@@ -627,49 +630,50 @@ pub fn initial_data(config: &Config) -> eyre::Result<(Mesh<2>, SystemVec<Fields>
             )?;
         }
 
-        if mesh.max_level() >= config.limits.max_levels
+        mesh.flag_wavelets(
+            config.order,
+            config.initial.coarsen_error,
+            config.initial.refine_error,
+            system.as_slice(),
+        );
+        mesh.balance_flags();
+
+        // Check if we are done regridding
+        if !mesh.requires_regridding() {
+            log::trace!(
+                "Sucessfully refined mesh to given accuracy: {:.5e}",
+                config.initial.refine_error
+            );
+            break;
+        }
+
+        if mesh.num_levels() >= config.limits.max_levels
             || mesh.num_nodes() >= config.limits.max_nodes
         {
             log::error!(
-                "Failed to solve initial data, level: {}, nodes: {}",
-                mesh.max_level(),
+                "Failed to solve initial data, levels: {}, nodes: {}",
+                mesh.num_levels(),
                 mesh.num_nodes()
             );
             return Err(eyre!("failed to refine within perscribed limits"));
         }
 
-        mesh.flag_wavelets(
-            config.order,
-            0.0,
-            config.regrid.refine_error,
-            system.as_slice(),
-        );
-        mesh.balance_flags();
+        transfer.resize(mesh.num_nodes());
+        transfer
+            .contigious_mut()
+            .clone_from_slice(system.contigious());
+        mesh.regrid();
+        system.resize(mesh.num_nodes());
 
-        if mesh.requires_regridding() {
-            transfer.resize(mesh.num_nodes());
-            transfer
-                .contigious_mut()
-                .clone_from_slice(system.contigious());
-            mesh.regrid();
-            system.resize(mesh.num_nodes());
-
-            match config.order {
-                2 => mesh.transfer_system(Order::<2>, transfer.as_slice(), system.as_mut_slice()),
-                4 => mesh.transfer_system(Order::<4>, transfer.as_slice(), system.as_mut_slice()),
-                6 => mesh.transfer_system(Order::<6>, transfer.as_slice(), system.as_mut_slice()),
-                _ => {}
-            };
-        } else {
-            log::trace!(
-                "Sucessfully refined mesh to give accuracy: {:.5e}",
-                config.regrid.refine_error
-            );
-            break;
-        }
+        match config.order {
+            2 => mesh.transfer_system(Order::<2>, transfer.as_slice(), system.as_mut_slice()),
+            4 => mesh.transfer_system(Order::<4>, transfer.as_slice(), system.as_mut_slice()),
+            6 => mesh.transfer_system(Order::<6>, transfer.as_slice(), system.as_mut_slice()),
+            _ => {}
+        };
     }
 
-    if config.visualize.save_relax_result {
+    if config.visualize.initial {
         let mut checkpoint = Checkpoint::default();
         checkpoint.attach_mesh(&mesh);
         checkpoint.save_system(system.as_slice());

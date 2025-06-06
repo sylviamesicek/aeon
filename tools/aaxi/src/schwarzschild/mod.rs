@@ -1,16 +1,14 @@
-use std::{
-    convert::Infallible,
-    io,
-    path::{Path, PathBuf},
-};
-
-use aeon::{prelude::*, solver::SolverCallback};
-use clap::{Arg, ArgMatches, Command, arg, value_parser};
-
 use crate::{
     horizon::{self, ApparentHorizonFinder},
     misc,
     systems::{Constraint, Field, FieldConditions, Fields, Gauge, Metric, ScalarField},
+};
+use aeon::{prelude::*, solver::SolverCallback};
+use clap::{Arg, ArgMatches, Command, arg, value_parser};
+use std::{
+    convert::Infallible,
+    io,
+    path::{Path, PathBuf},
 };
 
 struct SchwarzschildData {
@@ -203,7 +201,7 @@ pub fn schwarzschild(matches: &ArgMatches) -> eyre::Result<()> {
         checkpoint.export_vtu(
             output
                 .join("initial")
-                .join(format!("schwarzschild{}.vtu", mesh.max_level())),
+                .join(format!("schwarzschild_{}.vtu", mesh.num_levels())),
             ExportVtuConfig {
                 title: "schwarzschild".into(),
                 ghost: false,

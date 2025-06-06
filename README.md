@@ -43,12 +43,12 @@ Example `asphere` invokation:
 ```bash
 # Simulates a single massless scalar field. Amplitude argument is passed in
 # as first positional argument, and referenced in the config file as `$0`.
-cargo run --release --package asphere -- --config="config/sphscalar.toml" 0.3
+cargo run --release --package asphere -- --config="config/sphgauss1.toml" 0.3
 ```
 To run `asphere` in a mode compatible with Cole's critical search code use
 ```bash
 # $0 = 0.3 (amplitude), $1 = 1234 (searial_id)
-cargo run --release --package asphere -- --config="config/sphcole.toml" 0.3 1234
+cargo run --release --package asphere -- --config="config/sphgauss1-cole.toml" 0.3 1234
 ```
 
 ### `aaxi`

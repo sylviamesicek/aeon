@@ -240,7 +240,7 @@ pub fn main() -> eyre::Result<()> {
 
             log::info!(
                 "Regrided Mesh at time: {time:.5}, Max Level {}, {} R, {} C",
-                mesh.max_level(),
+                mesh.num_levels(),
                 num_refine,
                 num_coarsen,
             );

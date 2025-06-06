@@ -2,19 +2,21 @@
 //! any additional subcommands.
 use std::{collections::HashMap, num::ParseFloatError, path::PathBuf};
 
-use crate::misc;
+use crate::{misc, run::status::Status};
 use aeon_config::{ConfigVars, Transform as _};
 use clap::{Arg, ArgMatches, Command, arg, value_parser};
 use console::{Term, style};
-use eyre::{Context as _, eyre};
+use eyre::{Context, eyre};
 
 mod config;
 mod evolve;
 mod history;
 mod initial;
+mod interval;
+mod status;
 
 use config::{Config, Execution};
-use history::{RunHistory, RunStatus, SearchHistory};
+use history::{RunHistory, SearchHistory};
 
 pub fn run(matches: &ArgMatches) -> eyre::Result<()> {
     // *********************************
@@ -26,7 +28,7 @@ pub fn run(matches: &ArgMatches) -> eyre::Result<()> {
         // Just perform normal evolution
         Execution::Run => {
             let config = config.transform(&vars)?;
-            run_simulation(&config, &mut RunHistory::empty())?
+            let _ = run_simulation(&config, &mut RunHistory::empty())?;
         }
         // Okay, we are doing a critical search instead
         Execution::Search { ref search } => {
@@ -44,15 +46,17 @@ pub fn run(matches: &ArgMatches) -> eyre::Result<()> {
             let mut history =
                 SearchHistory::load_csv(&history_file).unwrap_or_else(|_| SearchHistory::new());
 
-            let start_disperses = run_search(&mut history, &config, &vars, start)?.has_dispersed();
-            let end_disperses = run_search(&mut history, &config, &vars, end)?.has_dispersed();
+            let start_status = run_search(&mut history, &config, &vars, start)?;
+            let end_status = run_search(&mut history, &config, &vars, end)?;
 
-            if start_disperses == end_disperses {
-                if start_disperses {
+            match (start_status, end_status) {
+                (Status::Disperse, Status::Disperse) => {
                     return Err(eyre!("both sides of the parameter range disperse"));
-                } else {
+                }
+                (Status::Collapse, Status::Collapse) => {
                     return Err(eyre!("both sides of the parameter range collapse"));
                 }
+                _ => {}
             }
 
             let mut depth = 0;
@@ -67,16 +71,22 @@ pub fn run(matches: &ArgMatches) -> eyre::Result<()> {
                 println!("Searching range {} to {}", start, end);
 
                 let midpoint = (start + end) / 2.0;
+                let midpoint_status = run_search(&mut history, &config, &vars, start)?;
 
-                let midpoint_disperses =
-                    run_search(&mut history, &config, &vars, start)?.has_dispersed();
-
-                if midpoint_disperses == start_disperses {
-                    debug_assert!(midpoint_disperses != end_disperses);
-                    start = midpoint;
-                } else {
-                    debug_assert!(midpoint_disperses == end_disperses);
-                    end = midpoint;
+                match (start_status, midpoint_status, end_status) {
+                    (Status::Disperse, Status::Disperse, Status::Collapse) => {
+                        start = midpoint;
+                    }
+                    (Status::Disperse, Status::Collapse, Status::Collapse) => {
+                        end = midpoint;
+                    }
+                    (Status::Collapse, Status::Disperse, Status::Disperse) => {
+                        end = midpoint;
+                    }
+                    (Status::Collapse, Status::Collapse, Status::Disperse) => {
+                        start = midpoint;
+                    }
+                    _ => unreachable!(),
                 }
 
                 // Cache history file.
@@ -100,7 +110,7 @@ fn run_search(
     config: &Config,
     vars: &ConfigVars,
     amplitude: f64,
-) -> eyre::Result<RunStatus> {
+) -> eyre::Result<Status> {
     if let Some(status) = cache.status(amplitude) {
         return Ok(status);
     }
@@ -118,17 +128,15 @@ fn run_search(
         .join(format!("{}.csv", misc::encode_float(amplitude)));
     let mut history = RunHistory::output(&history_file)?;
     // Run simulation, keeping track of history
-    run_simulation(&config, &mut history)?;
+    let status = run_simulation(&config, &mut history)?;
     // Save to file
     history.flush()?;
-    // Get status
-    let status = history.status();
     // Insert it into cache
     cache.insert(amplitude, status);
     return Ok(status);
 }
 
-fn run_simulation(config: &Config, history: &mut RunHistory) -> eyre::Result<()> {
+fn run_simulation(config: &Config, history: &mut RunHistory) -> eyre::Result<Status> {
     let output_path = config.output_dir()?;
     // Ensure path exists.
     std::fs::create_dir_all(&output_path)?;
@@ -160,15 +168,7 @@ fn run_simulation(config: &Config, history: &mut RunHistory) -> eyre::Result<()>
     // ***********************************
     // Validation
 
-    eyre::ensure!(
-        config.domain.radius > 0.0 && config.domain.height > 0.0,
-        "Domain must have positive non-zero radius and height"
-    );
-
-    eyre::ensure!(
-        config.domain.cell_size >= 2 * config.domain.cell_ghost,
-        "Domain cell nodes must be >= 2 * ghost"
-    );
+    config.validate()?;
 
     // ***********************************
     // Initial data
@@ -178,9 +178,9 @@ fn run_simulation(config: &Config, history: &mut RunHistory) -> eyre::Result<()>
     // ************************************
     // Evolve data forwards
 
-    evolve::evolve_data(&config, history, mesh, system)?;
+    let status = evolve::evolve_data(&config, history, mesh, system)?;
 
-    Ok(())
+    Ok(status)
 }
 
 // ******************************

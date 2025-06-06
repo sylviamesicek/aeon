@@ -113,7 +113,7 @@ impl<T: Transform> Transform for Vec<T> {
 #[serde(untagged)]
 pub enum FloatVar {
     /// Fixed floating point input.
-    F64(f64),
+    Inline(f64),
     /// Script that will be parsed by the transformer
     Script(String),
 }
@@ -121,17 +121,21 @@ pub enum FloatVar {
 impl FloatVar {
     /// Unwraps a float var into a float, assuming that it has already been transformed.
     pub fn unwrap(&self) -> f64 {
-        let Self::F64(v) = self else {
+        let Self::Inline(v) = self else {
             panic!("failed to unwrap FloatVar");
         };
 
         *v
     }
+
+    pub fn is_transformed(&self) -> bool {
+        matches!(self, FloatVar::Inline(_))
+    }
 }
 
 impl From<f64> for FloatVar {
     fn from(value: f64) -> Self {
-        Self::F64(value)
+        Self::Inline(value)
     }
 }
 
@@ -139,8 +143,8 @@ impl Transform for FloatVar {
     type Output = Self;
 
     fn transform(&self, vars: &ConfigVars) -> Result<Self::Output, TransformError> {
-        Ok(FloatVar::F64(match self {
-            FloatVar::F64(v) => *v,
+        Ok(FloatVar::Inline(match self {
+            FloatVar::Inline(v) => *v,
             FloatVar::Script(pos) => pos.transform(vars)?.parse::<f64>()?,
         }))
     }
@@ -152,7 +156,7 @@ impl Transform for FloatVar {
 #[serde(untagged)]
 pub enum UnsignedVar {
     /// Fixed floating point input.
-    Usize(usize),
+    Inline(usize),
     /// Script that will be parsed by the transformer
     Script(String),
 }
@@ -160,17 +164,21 @@ pub enum UnsignedVar {
 impl UnsignedVar {
     /// Unwraps a float var into a float, assuming that it has already been transformed.
     pub fn unwrap(&self) -> usize {
-        let Self::Usize(v) = self else {
+        let Self::Inline(v) = self else {
             panic!("failed to unwrap UnsignedVar");
         };
 
         *v
     }
+
+    pub fn is_transformed(&self) -> bool {
+        matches!(self, UnsignedVar::Inline(_))
+    }
 }
 
 impl From<usize> for UnsignedVar {
     fn from(value: usize) -> Self {
-        Self::Usize(value)
+        Self::Inline(value)
     }
 }
 
@@ -178,8 +186,8 @@ impl Transform for UnsignedVar {
     type Output = Self;
 
     fn transform(&self, vars: &ConfigVars) -> Result<Self::Output, TransformError> {
-        Ok(UnsignedVar::Usize(match self {
-            UnsignedVar::Usize(v) => *v,
+        Ok(UnsignedVar::Inline(match self {
+            UnsignedVar::Inline(v) => *v,
             UnsignedVar::Script(pos) => pos.transform(vars)?.parse::<usize>()?,
         }))
     }

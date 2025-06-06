@@ -3,20 +3,27 @@ use crate::{
         DynamicalData, DynamicalDerivs, GaugeCondition, ScalarFieldData, ScalarFieldDerivs,
         evolution,
     },
+    horizon::{self, ApparentHorizonFinder, HorizonError, HorizonStatus},
     misc,
-    run::config::Config,
-    run::history::{RunHistory, RunRecord, RunStatus},
+    run::{
+        config::Config,
+        history::{RunHistory, RunRecord},
+        interval::IntervalTracker,
+        status::{Status, Strategy},
+    },
     systems::{Constraint, Field, FieldConditions, Fields, Gauge, Metric, ScalarField},
 };
 use aeon::{
     prelude::*,
-    solver::{Integrator, Method},
+    solver::{Integrator, Method, SolverCallback},
 };
 use console::style;
 use datasize::DataSize as _;
+use eyre::eyre;
 use indicatif::{HumanBytes, HumanCount, HumanDuration, MultiProgress, ProgressBar};
 use std::{
     convert::Infallible,
+    path::Path,
     time::{Duration, Instant},
 };
 
@@ -234,52 +241,142 @@ impl Function<2> for FieldDerivs {
     }
 }
 
+pub struct HorizonCallback<'a> {
+    directory: &'a Path,
+    positions: &'a mut Vec<[f64; 2]>,
+    config: &'a Config,
+    pb: ProgressBar,
+}
+
+impl<'a> SolverCallback<1, Scalar> for HorizonCallback<'a> {
+    type Error = std::io::Error;
+
+    fn callback(
+        &mut self,
+        surface: &Mesh<1>,
+        radius: SystemSlice<Scalar>,
+        _output: SystemSlice<Scalar>,
+        iteration: usize,
+    ) -> Result<(), Self::Error> {
+        if !self.config.visualize.horizon_relax {
+            return Ok(());
+        }
+
+        self.pb.set_length(iteration as u64);
+
+        let interval = self.config.visualize.horizon_relax_interval.unwrap_steps();
+
+        if iteration % interval != 0 {
+            return Ok(());
+        }
+
+        let save_index = iteration / interval;
+        let radius = radius.field(());
+
+        self.positions.resize(surface.num_nodes(), [0.0; 2]);
+        horizon::compute_position_from_radius(surface, radius, &mut self.positions);
+
+        let checkpoint_file = self.directory.join(format!("horizon_{}.vtu", save_index));
+
+        let mut checkpoint = Checkpoint::default();
+        checkpoint.attach_mesh(&surface);
+        checkpoint.set_embedding(&self.positions);
+        checkpoint.save_field("radius", radius);
+        checkpoint.export_vtu(
+            checkpoint_file,
+            ExportVtuConfig {
+                title: "horizon".into(),
+                ghost: false,
+                stride: ExportStride::PerVertex,
+            },
+        )?;
+
+        Ok(())
+    }
+}
+
 pub fn evolve_data(
     config: &Config,
     history: &mut RunHistory,
     mut mesh: Mesh<2>,
     mut fields: SystemVec<Fields>,
-) -> eyre::Result<()> {
+) -> eyre::Result<Status> {
     // Save initial time
     let start = Instant::now();
 
     let output = config.output_dir()?;
     // Create output folder.
     std::fs::create_dir_all(output.join("evolve"))?;
+    // If we are outputing horizon data, create a folder for that too
+    if config.horizon.search && config.visualize.horizon_relax {
+        std::fs::create_dir_all(output.join("horizon"))?;
+    }
+
     // Cache system
     let system = fields.system().clone();
 
     // Integrate
     let mut integrator = Integrator::new(Method::RK4KO6(config.evolve.dissipation));
-    let mut time = 0.0;
-    let mut step = 0;
 
+    let mut step = 0;
+    let mut coord_time = 0.0;
     let mut proper_time = 0.0;
 
-    let mut save_step = 0;
-    let mut steps_since_regrid = 0;
+    let max_levels = config.limits.max_levels;
+    let max_nodes = config.limits.max_nodes;
+    let max_memory = config.limits.max_memory;
 
     let max_steps = config.evolve.max_steps;
-    let max_time = config.evolve.max_time;
+    let max_coord_time = config.evolve.max_coord_time;
     let max_proper_time = config.evolve.max_proper_time;
     let cfl = config.evolve.cfl;
-    let regrid_steps = config.regrid.flag_interval;
-    let lower = config.regrid.coarsen_error;
-    let upper = config.regrid.refine_error;
-    let max_level = config.limits.max_levels;
 
-    let mut time_since_save = 0.0;
-    let save_interval = if config.visualize.save_evolve {
-        config.visualize.save_evolve_interval
-    } else {
-        f64::MAX
-    };
+    // ************************
+    // Regridding
+
+    let mut regrid_tracker = IntervalTracker::new();
+    let regrid_interval = config.evolve.regrid_interval;
+    let lower = config.evolve.coarsen_error;
+    let upper = config.evolve.refine_error;
+
+    // *************************
+    // Visualization
+
+    let visualize = config.visualize.evolve;
+    let mut visualize_tracker = IntervalTracker::new();
+    let visualize_interval = config.visualize.evolve_interval;
     let visualize_stride = config.visualize.stride;
+    let mut visualize_index = 0;
 
-    // let mut finder = ApparentHorizonFinder::new();
+    // ***************************
+    // Apparent horizons
 
-    // Does the simulation disperse?
-    let mut disperse = true;
+    let mut search_tracker = IntervalTracker::new();
+    let search_interval = config.horizon.search_interval;
+    let mut search_index = 0;
+    let mut search_positions = Vec::new();
+    let mut search_surface = if config.horizon.search {
+        let mut surface = horizon::surface();
+
+        for _ in 0..config.horizon.global_refine {
+            surface.refine_global();
+        }
+        let radius = vec![0.0; surface.num_nodes()];
+
+        Some((surface, radius))
+    } else {
+        None
+    };
+
+    let mut finder = ApparentHorizonFinder::new();
+    finder.solver.cfl = config.horizon.relax.cfl;
+    finder.solver.dampening = config.horizon.relax.dampening;
+    finder.solver.max_steps = config.horizon.relax.max_steps;
+    finder.solver.tolerance = config.horizon.relax.tolerance;
+    finder.solver.adaptive = true;
+
+    // **************************
+    // Evolve
 
     println!("Evolving data");
 
@@ -306,32 +403,70 @@ pub fn evolve_data(
     step_pb.enable_steady_tick(Duration::from_millis(100));
     step_pb.set_prefix("[Step] ");
 
-    while time < max_time && proper_time < max_proper_time {
+    let status: Status = 'evolve: loop {
         assert!(fields.len() == mesh.num_nodes());
-        // Fill boundaries
-        mesh.fill_boundary(ORDER, FieldConditions, fields.as_mut_slice());
 
-        // Check norm for NaN
-        let norm = mesh.l2_norm_system(fields.as_slice());
+        // ****************************
+        // Coordinate time
 
-        if norm.is_nan() || norm >= 1e60 {
-            println!("{}", style(format!("Norm diverges: {:.5e}", norm)).red());
-            disperse = false;
-            history.set_status(RunStatus::NormDiverged);
-            break;
-        }
-
-        if step >= max_steps {
+        if coord_time > max_coord_time {
             println!(
                 "{}",
-                style(format!("Steps exceded maximum allocated steps: {}", step)).red()
+                style(format!(
+                    "Evolution reached max coordinate time: {}",
+                    coord_time
+                ))
+                .green()
             );
-            disperse = false;
-            history.set_status(RunStatus::MaxStepsReached);
-            break;
+
+            break 'evolve config
+                .error_handler
+                .on_max_evolve_coord_time
+                .status_or_crash(|| eyre!("evolution reached max coordinate time"))?;
         }
 
-        if mesh.num_nodes() >= config.limits.max_nodes {
+        // ******************************
+        // Proper time
+
+        if proper_time > max_proper_time {
+            println!(
+                "{}",
+                style(format!(
+                    "Evolution reached max proper time: {}",
+                    proper_time
+                ))
+                .green()
+            );
+
+            break 'evolve config
+                .error_handler
+                .on_max_evolve_proper_time
+                .status_or_crash(|| eyre!("evolution reached max proper time"))?;
+        }
+
+        // *******************************
+        // Steps
+
+        if step > max_steps {
+            println!(
+                "{}",
+                style(format!("Evolution reached max steps: {}", step)).green()
+            );
+
+            break 'evolve config
+                .error_handler
+                .on_max_evolve_steps
+                .status_or_crash(|| eyre!("evolution reached max steps"))?;
+        }
+
+        // *********************************
+        // Max nodes, levels, and memory
+
+        let memory_usage = fields.estimate_heap_size()
+            + integrator.estimate_heap_size()
+            + mesh.estimate_heap_size();
+
+        if mesh.num_nodes() > max_nodes {
             println!(
                 "{}",
                 style(format!(
@@ -340,16 +475,14 @@ pub fn evolve_data(
                 ))
                 .red()
             );
-            disperse = false;
-            history.set_status(RunStatus::MaxNodesReached);
-            break;
+
+            break 'evolve config
+                .error_handler
+                .on_max_nodes
+                .status_or_crash(|| eyre!("nodes excede maximum allocated nodes"))?;
         }
 
-        let memory_usage = fields.estimate_heap_size()
-            + integrator.estimate_heap_size()
-            + mesh.estimate_heap_size();
-
-        if memory_usage >= config.limits.max_memory {
+        if memory_usage > max_memory {
             println!(
                 "{}",
                 style(format!(
@@ -358,21 +491,70 @@ pub fn evolve_data(
                 ))
                 .red()
             );
-            disperse = false;
-            history.set_status(RunStatus::MaxMemoryReached);
-            break;
+
+            break 'evolve config
+                .error_handler
+                .on_max_nodes
+                .status_or_crash(|| eyre!("evolution exceded maximum allowed memory"))?;
         }
+
+        if mesh.num_levels() > max_levels {
+            if let Some(status) = config
+                .error_handler
+                .on_max_levels
+                .execute(|| eyre!("evolution exceded maximum allowed levels"))?
+            {
+                println!(
+                    "{}",
+                    style(format!(
+                        "Evolution exceded maxmimum allowed levels: {}",
+                        mesh.num_levels(),
+                    ))
+                    .red()
+                );
+
+                break 'evolve status;
+            }
+        }
+
+        // ******************************
+
+        // Fill boundaries
+        mesh.fill_boundary(ORDER, FieldConditions, fields.as_mut_slice());
+
+        // *******************************
+        // Norm
+
+        let norm = mesh.l2_norm_system(fields.as_slice());
+
+        if norm.is_nan() || norm >= 1e60 {
+            println!("{}", style(format!("Norm diverges: {:.5e}", norm)).red());
+
+            break 'evolve config
+                .error_handler
+                .on_norm_diverge
+                .status_or_crash(|| eyre!("norm diverges during evolution"))?;
+        }
+
+        // *******************************
 
         // Get step size
         let h = mesh.min_spacing() * cfl;
 
-        // Periodically regrid mesh.
-        if steps_since_regrid >= regrid_steps {
-            steps_since_regrid = 0;
+        // ****************************************
+        // Periodically regrid mesh
 
+        let mut regrid_flag = false;
+
+        regrid_tracker.every(regrid_interval, || {
             mesh.flag_wavelets(4, lower, upper, fields.as_slice());
-            mesh.limit_level_range_flags(1, max_level);
             mesh.balance_flags();
+
+            if config.error_handler.on_max_levels == Strategy::Ignore {
+                mesh.limit_level_range_flags(0, max_levels - 1);
+                mesh.balance_flags();
+            }
+
             mesh.regrid();
 
             // Copy system into tmp scratch space (provieded by dissipation).
@@ -385,12 +567,20 @@ pub fn evolve_data(
                 fields.as_mut_slice(),
             );
 
+            regrid_flag = true;
+        });
+
+        if regrid_flag {
             continue;
         }
 
+        // ******************************************
         // Periodically save output data
-        if time_since_save >= save_interval {
-            time_since_save -= save_interval;
+
+        visualize_tracker.try_every(visualize_interval, || -> std::io::Result<()> {
+            if !visualize {
+                return Ok(());
+            }
 
             // Output current system to disk
             let mut checkpoint = Checkpoint::default();
@@ -399,7 +589,7 @@ pub fn evolve_data(
             checkpoint.export_vtu(
                 output
                     .join("evolve")
-                    .join(format!("{}_{save_step}.vtu", config.name)),
+                    .join(format!("{}_{visualize_index}.vtu", config.name)),
                 ExportVtuConfig {
                     title: config.name.clone(),
                     ghost: false,
@@ -407,10 +597,101 @@ pub fn evolve_data(
                 },
             )?;
 
-            save_step += 1;
+            visualize_index += 1;
+
+            Ok(())
+        })?;
+
+        // ***********************************
+        // Periodically run horizon search
+
+        let mut search_status = None;
+
+        search_tracker.try_every(search_interval, || {
+            let Some((surface, surface_radius)) = search_surface.as_mut() else {
+                return Ok::<_, eyre::Report>(());
+            };
+
+            surface_radius.fill(config.horizon.search_initial_radius);
+
+            let horizon_dir = output.join("horizon").join(format!("{}", search_index));
+
+            if config.visualize.horizon_relax {
+                std::fs::create_dir_all(&horizon_dir).map_err(eyre::Report::new)?;
+            }
+
+            let horizon_pb = m.add(ProgressBar::new(config.horizon.relax.max_steps as u64));
+            horizon_pb.set_style(misc::node_style());
+            horizon_pb.enable_steady_tick(Duration::from_millis(100));
+            horizon_pb.set_prefix("- [Horizon Search]");
+
+            let result = finder.search_with_callback(
+                &mesh,
+                fields.as_slice(),
+                ORDER,
+                surface,
+                HorizonCallback {
+                    directory: horizon_dir.as_path(),
+                    positions: &mut search_positions,
+                    config: &config,
+                    pb: horizon_pb.clone(),
+                },
+                surface_radius,
+            );
+
+            horizon_pb.finish_and_clear();
+
+            if config.visualize.horizon_relax {
+                // Output current system to disk, for reference in horizon search.
+                let mut checkpoint = Checkpoint::default();
+                checkpoint.attach_mesh(&mesh);
+                checkpoint.save_system(fields.as_slice());
+                checkpoint.export_vtu(
+                    horizon_dir.join(format!("{}.vtu", config.name)),
+                    ExportVtuConfig {
+                        title: config.name.clone(),
+                        ghost: false,
+                        stride: visualize_stride,
+                    },
+                )?;
+            }
+
+            search_status = match result {
+                Ok(HorizonStatus::Converged) => config
+                    .horizon
+                    .on_search_converged
+                    .execute(|| eyre!("horizon search converged"))?,
+                Ok(HorizonStatus::ConvergedToZero) => config
+                    .horizon
+                    .on_search_converged_to_zero
+                    .execute(|| eyre!("horizon search converged to zero"))?,
+                Err(HorizonError::NormDiverged) => config
+                    .horizon
+                    .on_search_diverged
+                    .execute(|| eyre!("horizon search norm diverged"))?,
+                Err(HorizonError::SurfaceNotContained(pos)) => config
+                    .horizon
+                    .on_search_diverged
+                    .execute(|| eyre!("horizon search surface not contained: {:?}", pos))?,
+                Err(HorizonError::ReachedMaxSteps) => config
+                    .horizon
+                    .on_max_search_steps
+                    .execute(|| eyre!("horizon search reached max steps without converging"))?,
+                Err(other) => return Err(eyre::Report::new(other)),
+            };
+
+            search_index += 1;
+
+            Ok(())
+        })?;
+
+        if let Some(status) = search_status {
+            break 'evolve status;
         }
 
-        // Compute step
+        // ***********************************
+        // Step
+
         integrator
             .step(
                 &mut mesh,
@@ -427,15 +708,17 @@ pub fn evolve_data(
         let lapse = mesh.bottom_left_value(fields.field(Field::Gauge(Gauge::Lapse)));
 
         step += 1;
-        steps_since_regrid += 1;
-
-        time += h;
-        time_since_save += h;
-
+        coord_time += h;
         proper_time += h * lapse;
 
+        let proper_time_delta = h * lapse;
+        let coord_time_delta = h;
+        regrid_tracker.update(proper_time_delta, coord_time_delta, 1);
+        visualize_tracker.update(proper_time_delta, coord_time_delta, 1);
+        search_tracker.update(proper_time_delta, coord_time_delta, 1);
+
         node_pb.set_position(mesh.num_nodes() as u64);
-        level_pb.set_position(mesh.max_level() as u64);
+        level_pb.set_position(mesh.num_levels() as u64);
         memory_pb.set_position(memory_usage as u64);
 
         step_pb.inc(1);
@@ -448,34 +731,32 @@ pub fn evolve_data(
         // but might be interpreted as disspersion because `NaN > max_proper_time`
         // Check again
         if lapse.is_nan() || lapse.is_infinite() || lapse.abs() == 0.0 {
-            println!(
-                "{}",
-                style(format!("Lapse Collapses, α = {:.5e}", lapse)).red()
-            );
-            disperse = false;
-            history.set_status(RunStatus::NormDiverged);
-            break;
+            println!("{}", style(format!("lapse collapses: {:.5e}", norm)).red());
+
+            break 'evolve config
+                .error_handler
+                .on_norm_diverge
+                .status_or_crash(|| eyre!("norm diverges during evolution"))?;
         }
 
         // Serialize those values
         history.write_record(RunRecord {
             step,
-            time,
+            time: coord_time,
             proper_time,
             lapse,
         })?;
-    }
+    };
 
     m.clear()?;
 
     // Flush record at end of execution.
     history.flush()?;
 
-    if disperse {
-        println!("{}", style(format!("System disperses")).cyan());
-        history.set_status(RunStatus::Dispersed);
-    } else {
-        println!("{}", style(format!("System collapses")).cyan());
+    // Print status of run
+    match status {
+        Status::Disperse => println!("{}", style(format!("System disperses")).cyan()),
+        Status::Collapse => println!("{}", style(format!("System collapses")).cyan()),
     }
 
     println!(
@@ -496,5 +777,5 @@ pub fn evolve_data(
         HumanBytes((fields.estimate_heap_size() + integrator.estimate_heap_size()) as u64)
     );
 
-    Ok(())
+    Ok(status)
 }

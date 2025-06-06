@@ -1,10 +1,19 @@
 use crate::eqs::GaugeCondition;
 use crate::misc;
+use crate::run::interval::Interval;
+use crate::run::status::Strategy;
 use aeon::mesh::ExportStride;
 use aeon_config::{ConfigVars, FloatVar, Transform};
 use eyre::eyre;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
+
+mod execute;
+mod inline;
+mod validate;
+
+pub use execute::*;
+pub use inline::*;
 
 /// Global configuration struct for simulation run.
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -12,7 +21,7 @@ pub struct Config {
     #[serde(default = "default_name")]
     pub name: String,
     #[serde(default = "default_output")]
-    pub output: String,
+    pub directory: String,
     /// Are we simply running simulations or doing a critical search?
     #[serde(default)]
     pub execution: Execution,
@@ -22,13 +31,22 @@ pub struct Config {
     pub diss_order: usize,
 
     pub domain: Domain,
-    pub relax: Relax,
-    pub evolve: Evolve,
     pub limits: Limits,
-    pub regrid: Regrid,
+    pub initial: Initial,
+    pub evolve: Evolve,
+
+    // *******************
+    // Default fields
+    // *******************
+    /// Details for saving visualization files.
+    #[serde(default)]
     pub visualize: Visualize,
+    /// Details for saving cache files.
     #[serde(default)]
     pub cache: Cache,
+    /// Details for handling errors.
+    #[serde(default)]
+    pub error_handler: ErrorHandler,
     #[serde(default)]
     pub horizon: Horizon,
 
@@ -41,7 +59,7 @@ impl Config {
     pub fn transform(self, vars: &ConfigVars) -> eyre::Result<Self> {
         Ok(Self {
             name: self.name.transform(vars)?,
-            output: self.output.transform(vars)?,
+            directory: self.directory.transform(vars)?,
 
             execution: self.execution.transform(vars)?,
 
@@ -49,12 +67,12 @@ impl Config {
             diss_order: self.diss_order,
 
             domain: self.domain,
-            relax: self.relax,
+            initial: self.initial,
             evolve: self.evolve,
             limits: self.limits,
-            regrid: self.regrid,
             visualize: self.visualize,
             cache: self.cache,
+            error_handler: self.error_handler,
             horizon: self.horizon,
 
             sources: self.sources.transform(vars)?,
@@ -63,7 +81,7 @@ impl Config {
 
     /// Retrieves output_director in absolution form.
     pub fn output_dir(&self) -> eyre::Result<PathBuf> {
-        misc::abs_or_relative(Path::new(&self.output))
+        misc::abs_or_relative(Path::new(&self.directory))
     }
 
     pub fn search_dir(&self) -> eyre::Result<PathBuf> {
@@ -101,35 +119,11 @@ pub struct Domain {
     pub cell_size: usize,
     /// Number of ghost nodes on edge of cell.
     pub cell_ghost: usize,
+    /// Number of global refinements to perform when creating mesh.
+    pub global_refine: usize,
 }
 
-/// Relaxation settings for solving initial data.
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct Relax {
-    pub max_steps: usize,
-    pub error_tolerance: f64,
-    pub cfl: f64,
-    pub dampening: f64,
-}
-
-/// Evolution settings for running evolution.
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct Evolve {
-    /// CFL factor for evolution
-    pub cfl: f64,
-    /// Amount of Kriss-Olgier Dissipation to use
-    pub dissipation: f64,
-    /// Maximum amount of coordinate time to run (before assuming disspersion).
-    pub max_time: f64,
-    /// Maximum amount of proper time to run (before assuming disspersion).
-    pub max_proper_time: f64,
-    /// Maximum number of steps
-    pub max_steps: usize,
-    /// Gauge condition to use when evolving data.
-    pub gauge: GaugeCondition,
-}
-
-/// Limits before a given simulation crashes (or assumes collapse)
+/// Global limits before simulation fails
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Limits {
     /// Maximum number of levels allowed during refinement.
@@ -140,42 +134,80 @@ pub struct Limits {
     pub max_memory: usize,
 }
 
-/// Settings for regriding mesh.
+/// Settings for initial data solving.
 #[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct Regrid {
-    /// Any cell with error larger than this will be refined.
+pub struct Initial {
+    /// Relaxation settings for solving initial data.
+    pub relax: Relax,
+    /// Error threshold before triggering refinement.
     pub refine_error: f64,
-    /// Any cell with error smaller than this will be coarsened.
+    /// Error minimum before triggering coarsening.
     pub coarsen_error: f64,
-    /// Number of global regrids to do before solving.
-    pub global: usize,
-    /// How many steps do we take between regridding runs?
-    pub flag_interval: usize,
+}
+
+/// Evolution settings for running evolution.
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct Evolve {
+    /// CFL factor for evolution
+    pub cfl: f64,
+    /// Amount of Kriss-Olgier Dissipation to use
+    pub dissipation: f64,
+    /// Maximum amount of coordinate time to run (before assuming disspersion).
+    pub max_coord_time: f64,
+    /// Maximum amount of proper time to run (before assuming disspersion).
+    pub max_proper_time: f64,
+    /// Maximum number of steps of evolution
+    pub max_steps: usize,
+    /// Gauge condition to use when evolving data.
+    pub gauge: GaugeCondition,
+    /// Error threshold before triggering refinement.
+    pub refine_error: f64,
+    /// Error minimum before triggering coarsening.
+    pub coarsen_error: f64,
+    /// How often should we regrid the mesh?
+    pub regrid_interval: Interval,
 }
 
 /// Visualization settings for initial data and evolution output.
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Visualize {
-    /// Should we save evolution data?
-    #[serde(default)]
-    pub save_evolve: bool,
-    /// How often do we save a visualization?
-    #[serde(default = "default_onef")]
-    pub save_evolve_interval: f64,
-    /// Should we save relaxation iterations.
-    #[serde(default)]
-    pub save_relax: bool,
-    /// How many iterations between each save?
-    #[serde(default = "default_one")]
-    pub save_relax_interval: usize,
+    /// Should we save the final result for initial data?
+    pub initial: bool,
     /// Should we save the final result for relaxing each leve?
-    #[serde(default)]
-    pub save_relax_levels: bool,
-    /// Should we save the final result?
-    #[serde(default)]
-    pub save_relax_result: bool,
+    pub initial_levels: bool,
+    /// Should we save relaxation iterations.
+    pub initial_relax: bool,
+    /// How many iterations between each save?
+    pub initial_relax_interval: Interval,
+
+    /// Should we save evolution data?
+    pub evolve: bool,
+    /// How often do we save a visualization?
+    pub evolve_interval: Interval,
+
+    /// Should we save horizon search data
+    pub horizon_relax: bool,
+    /// How often do we save a horizon visualization
+    pub horizon_relax_interval: Interval,
+
     /// How much data to poutput?
     pub stride: ExportStride,
+}
+
+impl Default for Visualize {
+    fn default() -> Self {
+        Visualize {
+            evolve: false,
+            evolve_interval: Interval::default(),
+            initial: false,
+            initial_levels: false,
+            initial_relax: false,
+            initial_relax_interval: Interval::default(),
+            horizon_relax: false,
+            horizon_relax_interval: Interval::default(),
+            stride: ExportStride::PerVertex,
+        }
+    }
 }
 
 /// Config struct describing how we cache data.
@@ -184,8 +216,8 @@ pub struct Cache {
     pub initial: bool,
     /// Should we cache evolution
     pub evolve: bool,
-    #[serde(default = "default_one")]
-    pub evolve_interval: usize,
+    /// How often do we cache evolution
+    pub evolve_interval: Interval,
 }
 
 impl Default for Cache {
@@ -193,102 +225,73 @@ impl Default for Cache {
         Self {
             initial: false,
             evolve: false,
-            evolve_interval: 1,
+            evolve_interval: Default::default(),
         }
     }
 }
 
-/// What subproduct should be executed.
-#[derive(Serialize, Deserialize, Default, Debug, Clone)]
-#[serde(tag = "mode")]
-pub enum Execution {
-    #[serde(rename = "run")]
-    #[default]
-    Run,
-    #[serde(rename = "search")]
-    Search {
-        #[serde(flatten)]
-        search: Search,
-    },
+/// How should we handle possible errors in the code?
+#[derive(Serialize, Deserialize, Debug, Clone, Copy)]
+pub struct ErrorHandler {
+    pub on_max_levels: Strategy,
+    pub on_max_nodes: Strategy,
+    pub on_max_memory: Strategy,
+    pub on_max_initial_steps: Strategy,
+    pub on_max_evolve_steps: Strategy,
+    pub on_max_evolve_coord_time: Strategy,
+    pub on_max_evolve_proper_time: Strategy,
+    pub on_norm_diverge: Strategy,
 }
 
-impl Execution {
-    /// Performs variable transformation on `Execution`.
-    pub fn transform(self, vars: &ConfigVars) -> eyre::Result<Self> {
-        Ok(match self {
-            Execution::Run => Self::Run,
-            Execution::Search { search } => Execution::Search {
-                search: search.transform(vars)?,
-            },
-        })
-    }
-}
-
-/// Search subcommand.
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct Search {
-    pub directory: String,
-    pub parameter: String,
-    /// Start of range to search
-    start: FloatVar,
-    /// End of range to search
-    end: FloatVar,
-    /// How many levels of binary search before we quit?
-    pub max_depth: usize,
-    /// Finish search when end-start < min_error
-    pub min_error: f64,
-}
-
-impl Search {
-    /// Gets start of search range.
-    pub fn start(&self) -> f64 {
-        let FloatVar::F64(start) = self.start else {
-            panic!("Search has not been properly transformed")
-        };
-        start
-    }
-
-    /// Gets end of search range.
-    pub fn end(&self) -> f64 {
-        let FloatVar::F64(end) = self.end else {
-            panic!("Search has not been properly transformed")
-        };
-        end
-    }
-
-    /// Finds absolute value of search directory as provided by the search.directory element
-    /// in the toml fiile.
-    pub fn search_dir(&self) -> eyre::Result<PathBuf> {
-        misc::abs_or_relative(Path::new(&self.directory))
-    }
-}
-
-impl Transform for Search {
-    type Output = Self;
-
-    fn transform(&self, vars: &ConfigVars) -> Result<Self::Output, aeon_config::TransformError> {
-        Ok(Self {
-            directory: self.directory.transform(vars)?,
-            parameter: self.parameter.transform(vars)?,
-            start: self.start.transform(&vars)?,
-            end: self.end.transform(&vars)?,
-            max_depth: self.max_depth,
-            min_error: self.min_error,
-        })
+impl Default for ErrorHandler {
+    fn default() -> Self {
+        Self {
+            on_max_levels: Strategy::Ignore,
+            on_max_nodes: Strategy::Collapse,
+            on_max_memory: Strategy::Collapse,
+            on_max_initial_steps: Strategy::Crash,
+            on_max_evolve_steps: Strategy::Collapse,
+            on_max_evolve_coord_time: Strategy::Disperse,
+            on_max_evolve_proper_time: Strategy::Disperse,
+            on_norm_diverge: Strategy::Collapse,
+        }
     }
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Horizon {
-    search: bool,
-    search_interval: usize,
+    /// Should we search for apparent horizons?
+    pub search: bool,
+    /// If so, how often?
+    pub search_interval: Interval,
+    /// What should our first guess for radius be?
+    pub search_initial_radius: f64,
+    /// Number of global refinements of surface mesh.
+    pub global_refine: usize,
+    /// Settings for search hyperbolic relaxtion.
+    pub relax: Relax,
+
+    pub on_max_search_steps: Strategy,
+    pub on_search_not_contained: Strategy,
+    pub on_search_diverged: Strategy,
+    pub on_search_converged: Strategy,
+    pub on_search_converged_to_zero: Strategy,
 }
 
 impl Default for Horizon {
     fn default() -> Self {
         Self {
             search: false,
-            search_interval: 1,
+            search_interval: Interval::default(),
+            search_initial_radius: 1.0,
+            global_refine: 0,
+            relax: Relax::default(),
+
+            on_max_search_steps: Strategy::Ignore,
+            on_search_not_contained: Strategy::Ignore,
+            on_search_diverged: Strategy::Ignore,
+            on_search_converged: Strategy::Collapse,
+            on_search_converged_to_zero: Strategy::Ignore,
         }
     }
 }
@@ -377,12 +380,4 @@ fn default_name() -> String {
 
 fn default_output() -> String {
     "output".to_string()
-}
-
-fn default_one() -> usize {
-    1
-}
-
-fn default_onef() -> f64 {
-    1.0
 }
