@@ -165,27 +165,25 @@ impl<const N: usize> Iterator for CartesianIter<N> {
         // Store current cursor value (this is what we will return)
         let result = self.cursor;
 
-        let mut increment = [false; N];
-        increment[0] = true;
-
         for i in 0..N {
             if self.size[i] == 0 {
                 // Short circuit if any of the dimensions are zero.
                 return None;
             }
 
-            if increment[i] {
-                // If we need to increment this axis, we add to the cursor value
-                self.cursor[i] += 1;
-                // If the cursor is equal to size, we wrap.
-                // However, if we have reached the final axis,
-                // this indicates we are at the end of iteration,
-                // and will return None on the next call of next().
-                if self.cursor[i] == self.size[i] && i < N - 1 {
-                    self.cursor[i] = 0;
-                    increment[i + 1] = true;
-                }
+            // If we need to increment this axis, we add to the cursor value
+            self.cursor[i] += 1;
+            // If the cursor is equal to size, we wrap.
+            // However, if we have reached the final axis,
+            // this indicates we are at the end of iteration,
+            // and will return None on the next call of next().
+            if self.cursor[i] == self.size[i] && i < N - 1 {
+                self.cursor[i] = 0;
+                // Continue looping over axes
+                continue;
             }
+
+            break;
         }
 
         Some(result)

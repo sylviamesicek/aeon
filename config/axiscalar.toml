@@ -45,7 +45,7 @@ initial_relax = true
 initial_relax_interval.steps = 500
 
 evolve = true
-evolve_interval.coord_time = 0.07
+evolve_interval.steps = 2
 
 horizon_relax = false
 horizon_relax_interval.steps = 100

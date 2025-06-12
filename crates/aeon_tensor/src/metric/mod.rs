@@ -1,0 +1,409 @@
+use crate::{
+    Gen, Sym, SymSym, SymVec, Tensor, TensorIndex, TensorStorageOwned, TensorStorageRef, VecSym,
+    VecSymVec,
+};
+
+mod dims;
+
+pub use dims::d2;
+
+pub trait Space<const N: usize>: Clone + Copy {
+    type VecStore: TensorStorageOwned + Default + Clone;
+    type MatStore: TensorStorageOwned + Default + Clone;
+    type SymStore: TensorStorageOwned + Default + Clone;
+    type SymVecStore: TensorStorageOwned + Default + Clone;
+    type SymSymStore: TensorStorageOwned + Default + Clone;
+    type SymVecVecStore: TensorStorageOwned + Default + Clone;
+
+    fn sum<const R: usize>(f: impl Fn([usize; R]) -> f64) -> f64 {
+        let mut result = 0.0;
+        <Gen as TensorIndex<N, R>>::for_each_index(|idx| result += f(idx));
+        result
+    }
+
+    fn vector(f: impl Fn([usize; 1]) -> f64) -> Tensor<N, 1, Gen, Self::VecStore> {
+        Tensor::from_fn(f)
+    }
+
+    fn symmetric(f: impl Fn([usize; 2]) -> f64) -> Tensor<N, 2, Sym, Self::SymStore> {
+        Tensor::from_fn(f)
+    }
+
+    fn matrix(f: impl Fn([usize; 2]) -> f64) -> Tensor<N, 2, Gen, Self::MatStore> {
+        Tensor::from_fn(f)
+    }
+}
+
+#[derive(Clone, Copy)]
+pub struct Static;
+
+const fn sym(n: usize) -> usize {
+    n * (n + 1) / 2
+}
+
+macro_rules! impl_space {
+    ($N:literal) => {
+        impl Space<$N> for Static {
+            type VecStore = [f64; const { $N }];
+            type MatStore = [f64; const { $N * $N }];
+            type SymStore = [f64; const { sym($N) }];
+            type SymVecStore = [f64; const { sym($N) * $N }];
+            type SymSymStore = [f64; const { sym($N) * sym($N) }];
+            type SymVecVecStore = [f64; const { sym($N) * $N * $N }];
+        }
+    };
+}
+
+impl_space!(1);
+impl_space!(2);
+
+pub struct Metric<const N: usize, S: Space<N>> {
+    pub value: Tensor<N, 2, Sym, S::SymStore>,
+    pub derivs: Tensor<N, 3, SymVec, S::SymVecStore>,
+    pub derivs2: Tensor<N, 4, SymSym, S::SymSymStore>,
+}
+
+impl<const N: usize, S: Space<N>> Metric<N, S> {
+    pub fn new(
+        value: Tensor<N, 2, Sym, S::SymStore>,
+        derivs: Tensor<N, 3, SymVec, S::SymVecStore>,
+        derivs2: Tensor<N, 4, SymSym, S::SymSymStore>,
+    ) -> Self {
+        Self {
+            value,
+            derivs,
+            derivs2,
+        }
+    }
+}
+
+impl<S: Space<2>> Metric<2, S> {
+    pub fn det(&self) -> MetricDet<2, S> {
+        let value = self.value[[0, 0]] * self.value[[1, 1]] - self.value[[0, 1]].powi(2);
+        let derivs = Tensor::from_fn(|[a]| {
+            self.derivs[[0, 0, a]] * self.value[[1, 1]]
+                + self.value[[0, 0]] * self.derivs[[1, 1, a]]
+                - 2.0 * self.value[[0, 1]] * self.derivs[[0, 1, a]]
+        });
+
+        MetricDet { value, derivs }
+    }
+
+    pub fn inv(&self, det: &MetricDet<2, S>) -> MetricInv<2, S> {
+        let factor = det.value.recip();
+        let factor_derivs: Tensor<2, 1, Gen, S::VecStore> =
+            Tensor::from_fn(|[a]| -factor.powi(2) * det.derivs[[a]]);
+
+        let mut value = Tensor::new();
+        value[[0, 0]] = factor * self.value[[1, 1]];
+        value[[1, 0]] = -factor * self.value[[1, 0]];
+        value[[0, 0]] = factor * self.value[[0, 0]];
+
+        let mut derivs = Tensor::new();
+
+        for a in 0..2 {
+            derivs[[0, 0, a]] =
+                factor_derivs[[a]] * self.value[[1, 1]] + factor * self.derivs[[1, 1, a]];
+            derivs[[1, 0, a]] =
+                -factor_derivs[[a]] * self.value[[1, 0]] - factor * self.derivs[[1, 0, a]];
+            derivs[[0, 0, a]] =
+                factor_derivs[[a]] * self.value[[0, 0]] + factor * self.derivs[[0, 0, a]];
+        }
+
+        MetricInv { value, derivs }
+    }
+}
+
+impl<const N: usize, S: Space<N>> Metric<N, S> {
+    // Computes killing's equation 𝓛ₓgₐᵦ for the given vector field X.
+    pub fn killing(&self, vector: &VectorC1<N, S>) -> Tensor<N, 2, Sym, S::SymStore> {
+        SymmetricC1 {
+            value: self.value.clone(),
+            derivs: self.derivs.clone(),
+        }
+        .lie_derivative(vector)
+    }
+}
+
+pub struct MetricDet<const N: usize, S: Space<N>> {
+    pub value: f64,
+    pub derivs: Tensor<N, 1, Gen, S::VecStore>,
+}
+
+pub struct MetricInv<const N: usize, S: Space<N>> {
+    pub value: Tensor<N, 2, Sym, S::SymStore>,
+    pub derivs: Tensor<N, 3, SymVec, S::SymVecStore>,
+}
+
+impl<const N: usize, S: Space<N>> MetricInv<N, S> {
+    pub fn cotrace<I: TensorIndex<N, 2>, St: TensorStorageRef>(
+        &self,
+        matrix: &Tensor<N, 2, I, St>,
+    ) -> f64 {
+        S::sum(|[a, b]| self.value[[a, b]] * matrix[[a, b]])
+    }
+
+    pub fn raise_first<const R: usize, I: TensorIndex<N, R>, St: TensorStorageOwned + Default>(
+        &self,
+        tensor: &Tensor<N, R, I, St>,
+    ) -> Tensor<N, R, I, St> {
+        const {
+            if R == 0 {
+                panic!("R must be > 0");
+            }
+        }
+
+        Tensor::from_fn(|idx| {
+            S::sum(|[a]| {
+                let mut tidx = idx;
+                tidx[0] = a;
+                self.value[[idx[0], a]] * tensor[tidx]
+            })
+        })
+    }
+
+    pub fn raise_last<const R: usize, I: TensorIndex<N, R>, St: TensorStorageOwned + Default>(
+        &self,
+        tensor: &Tensor<N, R, I, St>,
+    ) -> Tensor<N, R, I, St> {
+        const {
+            if R == 0 {
+                panic!("R must be > 0");
+            }
+        }
+
+        Tensor::from_fn(|idx| {
+            S::sum(|[a]| {
+                let mut tidx = idx;
+                tidx[R - 1] = a;
+                self.value[[idx[R - 1], a]] * tensor[tidx]
+            })
+        })
+    }
+}
+
+pub struct ChristoffelSymbol<const N: usize, S: Space<N>> {
+    pub first_kind: Tensor<N, 3, VecSym, S::SymVecStore>,
+    pub first_kind_derivs: Tensor<N, 4, VecSymVec, S::SymVecVecStore>,
+    pub second_kind: Tensor<N, 3, VecSym, S::SymVecStore>,
+    pub second_kind_derivs: Tensor<N, 4, VecSymVec, S::SymVecVecStore>,
+}
+
+impl<const N: usize, S: Space<N>> ChristoffelSymbol<N, S> {
+    pub fn ricci(&self) -> Tensor<N, 2, Sym, S::SymStore> {
+        Tensor::from_eq(|[i, j], [a]| {
+            let term1: f64 =
+                self.second_kind_derivs[[a, i, j, a]] - self.second_kind_derivs[[a, a, i, j]];
+            let term2 = S::sum(|[b]| {
+                self.second_kind[[a, a, b]] * self.second_kind[[b, i, j]]
+                    - self.second_kind[[a, i, b]] * self.second_kind[[b, a, j]]
+            });
+
+            term1 + term2
+        })
+    }
+}
+
+impl<const N: usize, S: Space<N>> Metric<N, S> {
+    pub fn chirstoffel_symbol(&self, inv: &MetricInv<N, S>) -> ChristoffelSymbol<N, S> {
+        let first_kind = Tensor::from_fn(|[a, b, c]| {
+            0.5 * (self.derivs[[a, c, b]] + self.derivs[[b, a, c]] - self.derivs[[b, c, a]])
+        });
+        let first_kind_derivs = Tensor::from_fn(|[a, b, c, d]| {
+            0.5 * (self.derivs2[[a, c, b, d]] + self.derivs2[[b, a, c, d]]
+                - self.derivs2[[b, c, a, d]])
+        });
+
+        let second_kind =
+            Tensor::from_eq(|[a, b, c], [m]| inv.value[[a, m]] * first_kind[[m, b, c]]);
+
+        let second_kind_derivs = Tensor::from_eq(|[a, b, c, d], [m]| {
+            inv.derivs[[a, m, d]] * first_kind[[m, b, c]]
+                + inv.value[[a, m]] * first_kind_derivs[[m, b, c, d]]
+        });
+
+        ChristoffelSymbol {
+            first_kind,
+            first_kind_derivs,
+            second_kind,
+            second_kind_derivs,
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct ScalarC1<const N: usize, S: Space<N>> {
+    pub value: f64,
+    pub derivs: Tensor<N, 1, Gen, S::VecStore>,
+}
+
+impl<const N: usize, S: Space<N>> ScalarC1<N, S> {
+    pub fn gradient(&self, _connect: &ChristoffelSymbol<N, S>) -> Tensor<N, 1, Gen, S::VecStore> {
+        self.derivs.clone()
+    }
+
+    pub fn lie_derivative(&self, flow: &VectorC1<N, S>) -> f64 {
+        S::sum(|[a]| flow.value[[a]] * self.derivs[[a]])
+    }
+}
+
+impl<const N: usize, S: Space<N>> From<ScalarC2<N, S>> for ScalarC1<N, S> {
+    fn from(value: ScalarC2<N, S>) -> Self {
+        Self {
+            value: value.value,
+            derivs: value.derivs,
+        }
+    }
+}
+
+impl<const N: usize, S: Space<N>> Default for ScalarC1<N, S> {
+    fn default() -> Self {
+        Self {
+            value: Default::default(),
+            derivs: Default::default(),
+        }
+    }
+}
+
+impl<const N: usize, S: Space<N>> Clone for ScalarC1<N, S> {
+    fn clone(&self) -> Self {
+        Self {
+            value: self.value.clone(),
+            derivs: self.derivs.clone(),
+        }
+    }
+}
+
+pub struct ScalarC2<const N: usize, S: Space<N>> {
+    pub value: f64,
+    pub derivs: Tensor<N, 1, Gen, S::VecStore>,
+    pub derivs2: Tensor<N, 2, Sym, S::SymStore>,
+}
+
+impl<const N: usize, S: Space<N>> ScalarC2<N, S> {
+    pub fn gradient(&self, _connect: &ChristoffelSymbol<N, S>) -> Tensor<N, 1, Gen, S::VecStore> {
+        self.derivs.clone()
+    }
+
+    pub fn lie_derivative(&self, flow: &VectorC1<N, S>) -> f64 {
+        S::sum(|[a]| flow.value[[a]] * self.derivs[[a]])
+    }
+
+    pub fn hessian(&self, connect: &ChristoffelSymbol<N, S>) -> Tensor<N, 2, Sym, S::SymStore> {
+        Tensor::from_fn(|[a, b]| {
+            let term1 = self.derivs2[[a, b]];
+            let term2 = S::sum(|[d]| -connect.second_kind[[d, a, b]] * self.derivs[[d]]);
+            term1 + term2
+        })
+    }
+}
+
+impl<const N: usize, S: Space<N>> Default for ScalarC2<N, S> {
+    fn default() -> Self {
+        Self {
+            value: Default::default(),
+            derivs: Default::default(),
+            derivs2: Default::default(),
+        }
+    }
+}
+
+impl<const N: usize, S: Space<N>> Clone for ScalarC2<N, S> {
+    fn clone(&self) -> Self {
+        Self {
+            value: self.value.clone(),
+            derivs: self.derivs.clone(),
+            derivs2: self.derivs2.clone(),
+        }
+    }
+}
+
+pub struct VectorC1<const N: usize, S: Space<N>> {
+    pub value: Tensor<N, 1, Gen, S::VecStore>,
+    pub derivs: Tensor<N, 2, Gen, S::MatStore>,
+}
+
+impl<const N: usize, S: Space<N>> VectorC1<N, S> {
+    pub fn gradient(&self, connect: &ChristoffelSymbol<N, S>) -> Tensor<N, 2, Gen, S::MatStore> {
+        Tensor::from_fn(|[a, c]| {
+            let term1 = self.derivs[[a, c]];
+            let term2 = S::sum(|[d]| -connect.second_kind[[d, a, c]] * self.value[[d]]);
+            term1 + term2
+        })
+    }
+
+    pub fn lie_derivative(&self, flow: &VectorC1<N, S>) -> Tensor<N, 1, Gen, S::VecStore> {
+        Tensor::from_fn(|[a]| {
+            S::sum(|[i]| {
+                flow.value[[i]] * self.derivs[[a, i]] + flow.derivs[[i, a]] * self.value[[i]]
+            })
+        })
+    }
+}
+
+impl<const N: usize, S: Space<N>> Default for VectorC1<N, S> {
+    fn default() -> Self {
+        Self {
+            value: Default::default(),
+            derivs: Default::default(),
+        }
+    }
+}
+
+impl<const N: usize, S: Space<N>> Clone for VectorC1<N, S> {
+    fn clone(&self) -> Self {
+        Self {
+            value: self.value.clone(),
+            derivs: self.derivs.clone(),
+        }
+    }
+}
+
+pub struct SymmetricC1<const N: usize, S: Space<N>> {
+    pub value: Tensor<N, 2, Sym, S::SymStore>,
+    pub derivs: Tensor<N, 3, SymVec, S::SymVecStore>,
+}
+
+impl<const N: usize, S: Space<N>> SymmetricC1<N, S> {
+    pub fn gradient(
+        &self,
+        connect: &ChristoffelSymbol<N, S>,
+    ) -> Tensor<N, 3, SymVec, S::SymVecStore> {
+        Tensor::from_fn(|[a, b, c]| {
+            let term1 = self.derivs[[a, b, c]];
+            let term2 = S::sum(|[i]| {
+                -connect.second_kind[[i, a, c]] * self.value[[i, b]]
+                    - connect.second_kind[[i, b, c]] * self.value[[a, i]]
+            });
+            term1 + term2
+        })
+    }
+
+    pub fn lie_derivative(&self, flow: &VectorC1<N, S>) -> Tensor<N, 2, Sym, S::SymStore> {
+        Tensor::from_fn(|[a, b]| {
+            S::sum(|[i]| {
+                flow.value[[i]] * self.derivs[[a, b, i]]
+                    + flow.derivs[[i, a]] * self.value[[i, b]]
+                    + flow.derivs[[i, b]] * self.value[[a, i]]
+            })
+        })
+    }
+}
+
+impl<const N: usize, S: Space<N>> Default for SymmetricC1<N, S> {
+    fn default() -> Self {
+        Self {
+            value: Default::default(),
+            derivs: Default::default(),
+        }
+    }
+}
+
+impl<const N: usize, S: Space<N>> Clone for SymmetricC1<N, S> {
+    fn clone(&self) -> Self {
+        Self {
+            value: self.value.clone(),
+            derivs: self.derivs.clone(),
+        }
+    }
+}
