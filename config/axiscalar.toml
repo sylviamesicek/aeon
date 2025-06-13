@@ -47,8 +47,8 @@ initial_relax_interval.steps = 500
 evolve = true
 evolve_interval.steps = 20
 
-horizon_relax = false
-horizon_relax_interval.steps = 100
+horizon_relax = true
+horizon_relax_interval.steps = 20
 
 stride = "per_cell"
 
@@ -58,8 +58,8 @@ evolve = false
 evolve_interval.steps = 100
 
 [horizon]
-search = false
-search_interval.steps = 200
+search = true
+search_interval.steps = 500
 search_initial_radius = 5.0
 global_refine = 6
 relax.cfl = 0.5
