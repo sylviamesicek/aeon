@@ -79,7 +79,7 @@ impl<const N: usize, S: Space<N>> Metric<N, S> {
 
 impl<S: Space<2>> Metric<2, S> {
     pub fn det(&self) -> MetricDet<2, S> {
-        let value = self.value[[0, 0]] * self.value[[1, 1]] - self.value[[0, 1]].powi(2);
+        let value = self.value[[0, 0]] * self.value[[1, 1]] - self.value[[1, 0]].powi(2);
         let derivs = Tensor::from_fn(|[a]| {
             self.derivs[[0, 0, a]] * self.value[[1, 1]]
                 + self.value[[0, 0]] * self.derivs[[1, 1, a]]
@@ -97,7 +97,8 @@ impl<S: Space<2>> Metric<2, S> {
         let mut value = Tensor::new();
         value[[0, 0]] = factor * self.value[[1, 1]];
         value[[1, 0]] = -factor * self.value[[1, 0]];
-        value[[0, 0]] = factor * self.value[[0, 0]];
+        debug_assert_eq!(value[[1, 0]], value[[0, 1]]);
+        value[[1, 1]] = factor * self.value[[0, 0]];
 
         let mut derivs = Tensor::new();
 
@@ -106,7 +107,8 @@ impl<S: Space<2>> Metric<2, S> {
                 factor_derivs[[a]] * self.value[[1, 1]] + factor * self.derivs[[1, 1, a]];
             derivs[[1, 0, a]] =
                 -factor_derivs[[a]] * self.value[[1, 0]] - factor * self.derivs[[1, 0, a]];
-            derivs[[0, 0, a]] =
+            debug_assert_eq!(derivs[[0, 1, a]], derivs[[1, 0, a]]);
+            derivs[[1, 1, a]] =
                 factor_derivs[[a]] * self.value[[0, 0]] + factor * self.derivs[[0, 0, a]];
         }
 

@@ -1,12 +1,18 @@
 use aeon_tensor::Tensor;
 use aeon_tensor::metric::Space;
 use aeon_tensor::metric::d2::{
-    ChristoffelSymbol, Matrix, Metric, MetricDet, MetricInv, ScalarC1, ScalarC2, Static as S,
-    Symmetric, SymmetricC1, Vector, VectorC1,
+    ChristoffelSymbol, Metric, MetricDet, MetricInv, ScalarC1, ScalarC2, Static as S, Symmetric,
+    SymmetricC1, Vector, VectorC1,
 };
 
 mod api;
-pub use api::*;
+pub mod old;
+
+// pub use api::*;
+pub use old::{
+    DynamicalData, DynamicalDerivs, GaugeCondition, HorizonData, KAPPA, ON_AXIS, ScalarFieldData,
+    ScalarFieldDerivs, evolution, horizon,
+};
 
 /// All degrees of freedom wrapped in one struct.
 struct DynamicalSystem {
@@ -67,8 +73,8 @@ impl Twist {
         Manifold {
             metric,
             inv,
-            det,
             symbols,
+            ..
         }: &Manifold,
         [r, _z]: [f64; 2],
         seed: ScalarC2,
@@ -117,14 +123,13 @@ impl Twist {
 
             if on_axis {
                 gamma_regular[[0, 0]] += 0.5 * metric.derivs2[[0, 0, 0, 0]] / metric.value[[0, 0]];
-                gamma_regular[[0, 1]] += 0.0; // + 0.5 * g_par[0][0][1] / (r * g[0][0])
+                gamma_regular[[1, 0]] += 0.0; // + 0.5 * g_par[0][0][1] / (r * g[0][0])
                 gamma_regular[[1, 1]] += 0.5
                     * (2.0 * metric.derivs2[[0, 1, 0, 1]] - metric.derivs2[[1, 1, 0, 0]])
                     / metric.value[[0, 0]];
             }
 
             let lam_rr = {
-                // Plus a -1/r^2 term that gets cancelled by lam_r * lam_r
                 let term1 = 2.0 * seed.derivs[[0]]
                     + r * seed.derivs2[[0, 0]]
                     + 0.5 * g_second_derivs_term[[0, 0]]; // -1.0 / pos[0].powi(2)
@@ -151,7 +156,7 @@ impl Twist {
                 } else {
                     lam_z / r
                 };
-                term1 + term2 + term3 - gamma_regular[[0, 1]]
+                term1 + term2 + term3 - gamma_regular[[1, 0]]
             };
 
             let lam_zz =
@@ -527,7 +532,6 @@ impl Decomposition {
         };
 
         let z_lie_shift = z.lie_derivative(shift);
-
         let z_t = S::vector(|[i]| {
             let term1 = lapse.value * momentum[[i]];
             let term2 = -2.0 * lapse.value * S::sum(|[m]| k.value[[i, m]] * z_con[[m]]);
@@ -750,11 +754,11 @@ impl Decomposition {
         } = self;
         let phi_hess = field.phi.hessian(symbols);
         let phi_grad = field.phi.gradient(symbols);
-        let pi_grad = field.pi.gradient(symbols);
 
         let lapse_grad = lapse.gradient(symbols);
 
-        let phi_t = lapse.value * field.pi.value + S::sum(|[i]| phi_grad[[i]] * shift.value[[i]]);
+        let phi_t =
+            lapse.value * field.pi.value + S::sum(|[i]| field.phi.derivs[[i]] * shift.value[[i]]);
 
         let pi_t = {
             let term1 = lapse.value * inv.cotrace(&phi_hess)
@@ -767,7 +771,7 @@ impl Decomposition {
             }
 
             let term4 = -lapse.value * field.mass.powi(2) * field.phi.value;
-            let term5 = S::sum(|[i]| pi_grad[[i]] * shift.value[[i]]);
+            let term5 = S::sum(|[i]| field.pi.derivs[[i]] * shift.value[[i]]);
 
             term1 + term2 + term3 + term4 + term5
         };

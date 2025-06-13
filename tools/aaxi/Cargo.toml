@@ -22,6 +22,7 @@ serde.workspace = true
 serde_with.workspace = true
 thiserror.workspace = true
 toml.workspace = true
+paste.workspace = true
 
 [dev-dependencies]
 rand.workspace = true
