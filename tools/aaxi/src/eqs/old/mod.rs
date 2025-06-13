@@ -145,6 +145,8 @@ struct MetricEvolution {
 
     pub theta: f64,
     pub z: Vector<2>,
+
+    pub debug: Matrix<2>,
 }
 
 /// Time derivatives for gauge variables.
@@ -378,6 +380,11 @@ impl Decomposition {
             term1 + term2 + term3 + term4 + term5 + k_lie_shift
         };
 
+        let debug = {
+            //
+            lie_derivative(k, k_partials, shift, shift_partials)
+        };
+
         let l_t = {
             let term1 = lapse * l * (k_trace + l - 2.0 * theta);
             let term2 = -lapse * metric.cotrace(twist.hess());
@@ -442,6 +449,8 @@ impl Decomposition {
 
             theta: theta_t,
             z: z_t,
+
+            debug,
         }
     }
 
@@ -1055,6 +1064,10 @@ pub struct DynamicalDerivs {
     pub theta_t: f64,
     pub zr_t: f64,
     pub zz_t: f64,
+
+    pub debugrr: f64,
+    pub debugrz: f64,
+    pub debugzz: f64,
 }
 
 #[derive(Clone, Default)]
@@ -1096,6 +1109,10 @@ pub fn evolution(
     derivs.theta_t = evolve.theta;
     derivs.zr_t = evolve.z[[0]];
     derivs.zz_t = evolve.z[[1]];
+
+    derivs.debugrr = evolve.debug[[0, 0]];
+    derivs.debugrz = evolve.debug[[0, 1]];
+    derivs.debugzz = evolve.debug[[1, 1]];
 
     for i in 0..scalar_fields.len() {
         let scalar = decomp.scalar_field_evolution(scalar_fields[i].system());

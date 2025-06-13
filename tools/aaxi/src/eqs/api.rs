@@ -1,4 +1,4 @@
-use crate::eqs::{Decomposition, DynamicalSystem, Manifold, ScalarFieldSystem, Twist};
+use crate::eqs::{self, Decomposition, DynamicalSystem, Manifold, ScalarFieldSystem, Twist};
 use aeon_tensor::Tensor;
 use aeon_tensor::metric::Space;
 use aeon_tensor::metric::d2::{
@@ -286,11 +286,11 @@ pub fn evolution(
     };
 
     derivs.grr_t = evolve.g[[0, 0]];
-    derivs.grz_t = evolve.g[[0, 1]];
+    derivs.grz_t = evolve.g[[1, 0]];
     derivs.gzz_t = evolve.g[[1, 1]];
     derivs.s_t = evolve.seed;
     derivs.krr_t = evolve.k[[0, 0]];
-    derivs.krz_t = evolve.k[[0, 1]];
+    derivs.krz_t = evolve.k[[1, 0]];
     derivs.kzz_t = evolve.k[[1, 1]];
     derivs.y_t = evolve.y;
     derivs.lapse_t = gauge.lapse;
@@ -306,6 +306,140 @@ pub fn evolution(
         scalar_field_derivs[i].phi = scalar.phi;
         scalar_field_derivs[i].pi = scalar.pi;
     }
+
+    // // Compare to old
+
+    // let old_system = eqs::old::DynamicalData {
+    //     grr: system.grr,
+    //     grr_r: system.grr_r,
+    //     grr_z: system.grr_z,
+    //     grr_rr: system.grr_rr,
+    //     grr_rz: system.grr_rz,
+    //     grr_zz: system.grr_zz,
+    //     grz: system.grz,
+    //     grz_r: system.grz_r,
+    //     grz_z: system.grz_z,
+    //     grz_rr: system.grz_rr,
+    //     grz_rz: system.grz_rz,
+    //     grz_zz: system.grz_zz,
+    //     gzz: system.gzz,
+    //     gzz_r: system.gzz_r,
+    //     gzz_z: system.gzz_z,
+    //     gzz_rr: system.gzz_rr,
+    //     gzz_rz: system.gzz_rz,
+    //     gzz_zz: system.gzz_zz,
+    //     s: system.s,
+    //     s_r: system.s_r,
+    //     s_z: system.s_z,
+    //     s_rr: system.s_rr,
+    //     s_rz: system.s_rz,
+    //     s_zz: system.s_zz,
+    //     krr: system.krr,
+    //     krr_r: system.krr_r,
+    //     krr_z: system.krr_z,
+    //     krz: system.krz,
+    //     krz_r: system.krz_r,
+    //     krz_z: system.krz_z,
+    //     kzz: system.kzz,
+    //     kzz_r: system.kzz_r,
+    //     kzz_z: system.kzz_z,
+    //     y: system.y,
+    //     y_r: system.y_r,
+    //     y_z: system.y_z,
+    //     lapse: system.lapse,
+    //     lapse_r: system.lapse_r,
+    //     lapse_z: system.lapse_z,
+    //     lapse_rr: system.lapse_rr,
+    //     lapse_rz: system.lapse_rz,
+    //     lapse_zz: system.lapse_zz,
+    //     shiftr: system.shiftr,
+    //     shiftr_r: system.shiftr_r,
+    //     shiftr_z: system.shiftr_z,
+    //     shiftz: system.shiftz,
+    //     shiftz_r: system.shiftz_r,
+    //     shiftz_z: system.shiftz_z,
+    //     theta: system.theta,
+    //     theta_r: system.theta_r,
+    //     theta_z: system.theta_z,
+    //     zr: system.zr,
+    //     zr_r: system.zr_r,
+    //     zr_z: system.zr_z,
+    //     zz: system.zz,
+    //     zz_r: system.zz_r,
+    //     zz_z: system.zz_z,
+    // };
+
+    // let mut old_derivs = eqs::old::DynamicalDerivs::default();
+
+    // let old_scalar_fields = scalar_fields
+    //     .iter()
+    //     .map(|sf| eqs::old::ScalarFieldData {
+    //         phi: sf.phi,
+    //         phi_r: sf.phi_r,
+    //         phi_z: sf.phi_z,
+    //         phi_rr: sf.phi_rr,
+    //         phi_rz: sf.phi_rz,
+    //         phi_zz: sf.phi_zz,
+    //         pi: sf.pi,
+    //         pi_r: sf.pi_r,
+    //         pi_z: sf.pi_z,
+    //         mass: sf.mass,
+    //     })
+    //     .collect::<Vec<_>>();
+
+    // let mut old_scalar_field_derivs =
+    //     vec![eqs::old::ScalarFieldDerivs::default(); old_scalar_fields.len()];
+
+    // eqs::old::evolution(
+    //     old_system,
+    //     &old_scalar_fields,
+    //     pos,
+    //     &mut old_derivs,
+    //     &mut old_scalar_field_derivs,
+    //     eqs::old::GaugeCondition::Harmonic,
+    // );
+
+    // let mut flag = false;
+
+    // macro_rules! check_derivs {
+    //     ($new:expr, $old:expr, $name:literal) => {
+    //         if ($new - $old).abs() >= 1e-6 {
+    //             println!(
+    //                 "Evolution for {} is incorrect, diff: {:.5e}, pos: {:?}",
+    //                 $name,
+    //                 ($new - $old).abs(),
+    //                 pos,
+    //             );
+    //             flag = true;
+    //         }
+    //     };
+    // }
+
+    // check_derivs!(derivs.grr_t, old_derivs.grr_t, "Grr");
+    // check_derivs!(derivs.grz_t, old_derivs.grz_t, "Grz");
+    // check_derivs!(derivs.gzz_t, old_derivs.gzz_t, "Gzz");
+    // check_derivs!(derivs.s_t, old_derivs.s_t, "S");
+
+    // check_derivs!(derivs.krr_t, old_derivs.krr_t, "Krr");
+    // check_derivs!(derivs.krz_t, old_derivs.krz_t, "Krz");
+    // check_derivs!(derivs.kzz_t, old_derivs.kzz_t, "Kzz");
+    // check_derivs!(derivs.y_t, old_derivs.y_t, "Y");
+
+    // check_derivs!(derivs.lapse_t, old_derivs.lapse_t, "Lapse");
+    // check_derivs!(derivs.shiftr_t, old_derivs.shiftr_t, "Shiftr");
+    // check_derivs!(derivs.shiftz_t, old_derivs.shiftz_t, "Shiftz");
+
+    // check_derivs!(derivs.theta_t, old_derivs.theta_t, "Theta");
+    // check_derivs!(derivs.zr_t, old_derivs.zr_t, "Zr");
+    // check_derivs!(derivs.zz_t, old_derivs.zz_t, "Zz");
+
+    // check_derivs!(derivs.debugrr, old_derivs.debugrr, "Debugrr");
+    // check_derivs!(derivs.debugrz, old_derivs.debugrz, "Debugrz");
+    // check_derivs!(derivs.debugzz, old_derivs.debugzz, "Debugzz");
+
+    // if flag {
+    //     panic!("Check failed");
+    // }
 }
 
 pub struct HorizonData {

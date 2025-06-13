@@ -371,22 +371,19 @@ impl<const N: usize, S: Space<N>> SymmetricC1<N, S> {
         &self,
         connect: &ChristoffelSymbol<N, S>,
     ) -> Tensor<N, 3, SymVec, S::SymVecStore> {
-        Tensor::from_fn(|[a, b, c]| {
-            let term1 = self.derivs[[a, b, c]];
-            let term2 = S::sum(|[i]| {
-                -connect.second_kind[[i, a, c]] * self.value[[i, b]]
-                    - connect.second_kind[[i, b, c]] * self.value[[a, i]]
-            });
-            term1 + term2
+        Tensor::from_fn(|[i, j, k]| {
+            self.derivs[[i, j, k]]
+                - S::sum(|[m]| connect.second_kind[[m, i, k]] * self.value[[m, j]])
+                - S::sum(|[m]| connect.second_kind[[m, j, k]] * self.value[[m, i]])
         })
     }
 
     pub fn lie_derivative(&self, flow: &VectorC1<N, S>) -> Tensor<N, 2, Sym, S::SymStore> {
-        Tensor::from_fn(|[a, b]| {
-            S::sum(|[i]| {
-                flow.value[[i]] * self.derivs[[a, b, i]]
-                    + flow.derivs[[i, a]] * self.value[[i, b]]
-                    + flow.derivs[[i, b]] * self.value[[a, i]]
+        Tensor::from_fn(|[i, j]| {
+            S::sum(|[m]| {
+                flow.value[[m]] * self.derivs[[i, j, m]]
+                    + self.value[[m, j]] * flow.derivs[[m, i]]
+                    + self.value[[i, m]] * flow.derivs[[m, j]]
             })
         })
     }

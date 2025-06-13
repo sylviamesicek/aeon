@@ -8,11 +8,11 @@ use aeon_tensor::metric::d2::{
 mod api;
 pub mod old;
 
-// pub use api::*;
-pub use old::{
-    DynamicalData, DynamicalDerivs, GaugeCondition, HorizonData, KAPPA, ON_AXIS, ScalarFieldData,
-    ScalarFieldDerivs, evolution, horizon,
-};
+pub use api::*;
+// pub use old::{
+//     DynamicalData, DynamicalDerivs, GaugeCondition, HorizonData, KAPPA, ON_AXIS, ScalarFieldData,
+//     ScalarFieldDerivs, evolution, horizon,
+// };
 
 /// All degrees of freedom wrapped in one struct.
 struct DynamicalSystem {
@@ -337,9 +337,8 @@ impl Decomposition {
             source.momentum[[1]] += sf.momentum[[1]];
 
             source.stress[[0, 0]] += sf.stress[[0, 0]];
-            source.stress[[0, 1]] += sf.stress[[0, 1]];
-            source.stress[[1, 1]] += sf.stress[[1, 1]];
             source.stress[[1, 0]] += sf.stress[[1, 0]];
+            source.stress[[1, 1]] += sf.stress[[1, 1]];
 
             source.angular_momentum += sf.angular_momentum;
             source.angular_shear[[0]] += sf.angular_shear[[0]];
@@ -752,26 +751,35 @@ impl Decomposition {
             shift,
             ..
         } = self;
+
+        let mass = field.mass;
+
         let phi_hess = field.phi.hessian(symbols);
         let phi_grad = field.phi.gradient(symbols);
+        let phi = field.phi.value;
+
+        let pi_derivs = field.pi.derivs;
+        let pi = field.pi.value;
+
+        let k_trace = inv.cotrace(&k.value);
+        let l = l.value;
 
         let lapse_grad = lapse.gradient(symbols);
+        let lapse = lapse.value;
 
-        let phi_t =
-            lapse.value * field.pi.value + S::sum(|[i]| field.phi.derivs[[i]] * shift.value[[i]]);
+        let phi_t = lapse * pi + S::sum(|[i]| field.phi.derivs[[i]] * shift.value[[i]]);
 
         let pi_t = {
-            let term1 = lapse.value * inv.cotrace(&phi_hess)
-                + lapse.value * field.pi.value * (inv.cotrace(&k.value) + l.value);
+            let term1 = lapse * inv.cotrace(&phi_hess) + lapse * pi * (k_trace + l);
             let term2 = S::sum(|[i, j]| phi_grad[[i]] * inv.value[[i, j]] * lapse_grad[[j]]);
 
-            let mut term3 = lapse.value * S::sum(|[i]| phi_grad[[i]] * twist.regular_con()[[i]]);
+            let mut term3 = lapse * S::sum(|[i]| phi_grad[[i]] * twist.regular_con()[[i]]);
             if self.on_axis() {
-                term3 += lapse.value * field.phi.derivs2[[0, 0]] / metric.value[[0, 0]];
+                term3 += lapse * field.phi.derivs2[[0, 0]] / metric.value[[0, 0]];
             }
 
-            let term4 = -lapse.value * field.mass.powi(2) * field.phi.value;
-            let term5 = S::sum(|[i]| field.pi.derivs[[i]] * shift.value[[i]]);
+            let term4 = -lapse * mass.powi(2) * phi;
+            let term5 = S::sum(|[i]| pi_derivs[[i]] * shift.value[[i]]);
 
             term1 + term2 + term3 + term4 + term5
         };
