@@ -556,7 +556,7 @@ impl<const N: usize> Mesh<N> {
 
             for &cell in mesh.blocks.active_cells(block) {
                 let node_size = mesh.cell_node_size(cell);
-                let node_origin = mesh.cell_node_origin(cell);
+                let node_origin = mesh.active_node_origin(cell);
 
                 let mut flags = FaceMask::empty();
 

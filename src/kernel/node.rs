@@ -201,6 +201,13 @@ impl<const N: usize> NodeSpace<N> {
     //     for node in
     // }
 
+    pub fn contains_window(&self, window: NodeWindow<N>) -> bool {
+        (0..N).into_iter().all(|axis| {
+            window.origin[axis] >= -(self.ghost as isize)
+                && window.size[axis] < self.size[axis] + 1 + 2 * self.ghost
+        })
+    }
+
     fn support_axis(&self, vertex: usize, border_width: usize, axis: usize) -> Support {
         debug_assert!(self.ghost >= border_width);
         debug_assert!(self.size[axis] + 1 >= border_width);
@@ -563,7 +570,7 @@ impl<const N: usize> NodeSpace<N> {
 // ****************************
 
 /// Defines a rectagular region of a larger `NodeSpace`.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct NodeWindow<const N: usize> {
     pub origin: [isize; N],
     pub size: [usize; N],

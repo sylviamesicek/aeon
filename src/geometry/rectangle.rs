@@ -75,4 +75,12 @@ impl<const N: usize> Rectangle<N> {
     pub fn bb(&self) -> [f64; N] {
         from_fn(|i| self.origin[i] + self.size[i])
     }
+
+    pub fn local_to_global(&self, local: [f64; N]) -> [f64; N] {
+        array::from_fn(|axis| local[axis] * self.size[axis] + self.origin[axis])
+    }
+
+    pub fn global_to_local(&self, global: [f64; N]) -> [f64; N] {
+        array::from_fn(|axis| (global[axis] - self.origin[axis]) / self.size[axis])
+    }
 }

@@ -1,4 +1,4 @@
-use crate::eqs::{self, Decomposition, DynamicalSystem, Manifold, ScalarFieldSystem, Twist};
+use crate::eqs::{Decomposition, DynamicalSystem, Manifold, ScalarFieldSystem, Twist};
 use aeon_tensor::Tensor;
 use aeon_tensor::metric::Space;
 use aeon_tensor::metric::d2::{

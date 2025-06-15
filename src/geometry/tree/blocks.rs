@@ -92,6 +92,11 @@ impl<const N: usize> TreeBlocks<N> {
         self.block_sizes[block.0]
     }
 
+    /// Number of nodes along each axis of a given block, not including ghost nodes.
+    pub fn node_size(&self, block: BlockId) -> [usize; N] {
+        array::from_fn(|axis| self.block_sizes[block.0][axis] * self.width[axis] + 1)
+    }
+
     /// Returns the bounds of the given block.
     pub fn bounds(&self, block: BlockId) -> Rectangle<N> {
         self.block_bounds[block.0]

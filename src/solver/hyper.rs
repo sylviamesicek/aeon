@@ -185,7 +185,15 @@ impl HyperRelaxSolver {
 
             if norm <= self.tolerance {
                 log::trace!("Converged in {} steps.", index);
-                break;
+
+                // Copy solution back to system vector
+                mesh.copy_from_slice(
+                    result.rb_mut(),
+                    SystemSlice::from_contiguous(&data[..dimension], &system.0),
+                );
+                mesh.fill_boundary(order, conditions, result.rb_mut());
+
+                return Ok(());
             }
 
             self.integrator
@@ -222,7 +230,7 @@ impl HyperRelaxSolver {
         );
         mesh.fill_boundary(order, conditions, result.rb_mut());
 
-        Ok(())
+        Err(HyperRelaxError::ReachedMaxSteps)
     }
 }
 

@@ -5,6 +5,7 @@ pub trait Support<const N: usize> {
     fn point(&self, i: usize) -> [f64; N];
 }
 
+/// A [-1, 1]ᴺ hypercube with uniformly placed support points along each axis.
 pub struct Uniform<const N: usize>([usize; N]);
 
 impl<const N: usize> Uniform<N> {

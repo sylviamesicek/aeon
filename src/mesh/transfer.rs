@@ -59,7 +59,7 @@ impl<const N: usize> Mesh<N> {
                         }
 
                         let node_size = mesh.cell_node_size(new_cell);
-                        let node_origin = mesh.cell_node_origin(new_cell);
+                        let node_origin = mesh.active_node_origin(new_cell);
 
                         for node_offset in IndexSpace::new(node_size).iter() {
                             let source_node = array::from_fn(|axis| {
@@ -89,7 +89,7 @@ impl<const N: usize> Mesh<N> {
                     let mut block_dest = unsafe { dest.slice_mut(new_nodes.clone()) };
 
                     let node_size = mesh.cell_node_size(new_cell);
-                    let node_origin = mesh.cell_node_origin(new_cell);
+                    let node_origin = mesh.active_node_origin(new_cell);
 
                     for node_offset in IndexSpace::new(node_size).iter() {
                         let source_node =

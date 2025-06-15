@@ -9,7 +9,7 @@ use crate::geometry::{
     ActiveCellId, AxisMask, BlockId, Face, FaceArray, FaceMask, Rectangle, Tree, TreeBlocks,
     TreeInterfaces, TreeNeighbors, TreeSer, faces,
 };
-use crate::kernel::{BoundaryClass, DirichletParams, Element};
+use crate::kernel::{BoundaryClass, DirichletParams, Element, node_from_vertex};
 use crate::{
     kernel::{BoundaryKind, NodeSpace, NodeWindow},
     system::SystemBoundaryConds,
@@ -319,7 +319,52 @@ impl<const N: usize> Mesh<N> {
     }
 
     // *******************************
-    // Elements **********************
+    // Node windows ******************
+
+    /// Finds bounds associated with a node window.
+    pub fn window_bounds(&self, block: BlockId, window: NodeWindow<N>) -> Rectangle<N> {
+        debug_assert!(self.block_space(block).contains_window(window));
+        let block_size = self.blocks.node_size(block);
+        let bounds = self.blocks.bounds(block);
+
+        Rectangle {
+            size: array::from_fn(|axis| {
+                bounds.size[axis] * window.size[axis] as f64 / block_size[axis] as f64
+            }),
+            origin: array::from_fn(|axis| {
+                bounds.size[axis] * window.origin[axis] as f64 / block_size[axis] as f64
+            }),
+        }
+    }
+
+    /// Retrieves the node window associated with a certain active cell on its block.
+    pub fn active_window(&self, cell: ActiveCellId) -> NodeWindow<N> {
+        NodeWindow {
+            origin: node_from_vertex(self.active_node_origin(cell)),
+            size: [self.width + 1; N],
+        }
+    }
+
+    /// Retrieves the node window that is optimal for interpolating values to the given position,
+    /// lying within the given active cell.
+    pub fn interpolate_window(&self, cell: ActiveCellId, position: [f64; N]) -> NodeWindow<N> {
+        let cell_offset = self.blocks.active_cell_position(cell);
+        let cell_bounds = self.tree().active_bounds(cell);
+        let cell_origin: [_; N] = array::from_fn(|axis| (self.width * cell_offset[axis]) as isize);
+
+        debug_assert!(cell_bounds.contains(position));
+
+        let local = cell_bounds.global_to_local(position);
+        let local_node: [_; N] =
+            array::from_fn(|axis| (local[axis] * self.width as f64).round() as isize);
+        let local_origin: [_; N] =
+            array::from_fn(|axis| local_node[axis] - self.width as isize / 2);
+
+        NodeWindow {
+            origin: array::from_fn(|axis| cell_origin[axis] + local_origin[axis]),
+            size: [self.width + 1; N],
+        }
+    }
 
     /// Element associated with a given cell.
     pub fn element_window(&self, cell: ActiveCellId) -> NodeWindow<N> {
@@ -381,8 +426,8 @@ impl<const N: usize> Mesh<N> {
         })
     }
 
-    /// Returns the origin of a cell in its block's `NodeSpace<N>`.
-    pub fn cell_node_origin(&self, cell: ActiveCellId) -> [usize; N] {
+    /// Returns the origin of an active cell in its block's `NodeSpace<N>`.
+    pub fn active_node_origin(&self, cell: ActiveCellId) -> [usize; N] {
         let position = self.blocks.active_cell_position(cell);
         array::from_fn(|axis| position[axis] * self.width)
     }
@@ -411,6 +456,9 @@ impl<const N: usize> Mesh<N> {
 
         false
     }
+
+    // ***********************************
+    // Global info
 
     /// Returns number of levels on the mesh.
     pub fn num_levels(&self) -> usize {

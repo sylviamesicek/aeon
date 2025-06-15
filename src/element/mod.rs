@@ -1,4 +1,4 @@
-use crate::geometry::IndexSpace;
+use crate::{geometry::IndexSpace, prelude::Rectangle};
 use faer::linalg::svd::SvdError;
 use std::array;
 
@@ -14,6 +14,7 @@ pub use helpers::*;
 pub use operations::*;
 pub use support::*;
 
+/// Performs uniform interpolation on a [-1, 1]ᴺ hypercube.
 #[derive(Default, Clone)]
 pub struct UniformInterpolate<const N: usize> {
     approx: ApproxOperator,
@@ -21,11 +22,20 @@ pub struct UniformInterpolate<const N: usize> {
 }
 
 impl<const N: usize> UniformInterpolate<N> {
-    pub fn build(&mut self, support: usize, order: usize, point: [f64; N]) -> Result<(), SvdError> {
+    pub fn build(
+        &mut self,
+        support: usize,
+        order: usize,
+        bounds: Rectangle<N>,
+        point: [f64; N],
+    ) -> Result<(), SvdError> {
+        let local = bounds.global_to_local(point);
+        let cube: [f64; N] = array::from_fn(|axis| local[axis] * 2.0 - 1.0);
+
         self.approx.build(
             &Uniform::new([support]),
             &Monomials::new([order]),
-            &ProductValue::new(point),
+            &ProductValue::new(cube),
         )?;
         self.num_points = support;
         Ok(())

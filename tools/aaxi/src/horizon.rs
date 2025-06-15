@@ -2,10 +2,7 @@ use crate::eqs::{HorizonData, horizon};
 use crate::systems::{Field, Fields, Metric};
 use aeon::solver::{HyperRelaxError, SolverCallback};
 use aeon::{
-    element::UniformInterpolate,
-    kernel::{Kernels, NodeWindow, node_from_vertex},
-    mesh::UnsafeThreadCache,
-    prelude::*,
+    element::UniformInterpolate, kernel::Kernels, mesh::UnsafeThreadCache, prelude::*,
     solver::HyperRelaxSolver,
 };
 
@@ -300,18 +297,17 @@ impl<'a, K: Kernels> Function<1> for HorizonNullExpansion<'a, K> {
             // Interpolate values from Mesh ****
 
             let mesh_cell = surface_to_cell[index];
-            let mesh_active_cell = mesh.tree().active_index_from_cell(mesh_cell).unwrap();
-            let mesh_block = mesh.blocks().active_cell_block(mesh_active_cell);
+            let mesh_active = mesh.tree().active_index_from_cell(mesh_cell).unwrap();
+            let mesh_block = mesh.blocks().active_cell_block(mesh_active);
 
             let block_space = mesh.block_space(mesh_block);
-            let cell_space = NodeWindow {
-                origin: node_from_vertex(mesh.cell_node_origin(mesh_active_cell)),
-                size: cell_size,
-            };
             let block_nodes = mesh.block_nodes(mesh_block);
 
+            let active_window = mesh.active_window(mesh_active);
+            let active_bounds = mesh.tree().active_bounds(mesh_active);
+
             interpolate
-                .build(cell_support, cell_support, [r, z])
+                .build(cell_support, cell_support, active_bounds, [r, z])
                 .map_err(|_err| HorizonError::InterpolateFailed)?;
 
             let block_fields = fields.slice(block_nodes.clone());
@@ -329,7 +325,7 @@ impl<'a, K: Kernels> Function<1> for HorizonNullExpansion<'a, K> {
             // Handle metric values
             macro_rules! interpolate_value {
                 ($output:ident, $field:ident) => {
-                    for (i, node) in cell_space.iter().enumerate() {
+                    for (i, node) in active_window.iter().enumerate() {
                         scratch[i] = $field[block_space.index_from_node(node)];
                     }
                     let $output = interpolate.apply(&scratch);
@@ -338,7 +334,7 @@ impl<'a, K: Kernels> Function<1> for HorizonNullExpansion<'a, K> {
 
             macro_rules! interpolate_derivative {
                 ($output:ident, $field:ident, $axis:expr) => {
-                    for (i, node) in cell_space.iter().enumerate() {
+                    for (i, node) in active_window.iter().enumerate() {
                         scratch[i] =
                             block_space.evaluate_axis(K::derivative(), node, $field, $axis);
                     }
