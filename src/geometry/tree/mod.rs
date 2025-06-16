@@ -711,6 +711,9 @@ impl<const N: usize> Tree<N> {
         self.neighbor_region(cell, region)
     }
 
+    /// Returns the neighboring cell in the given region. If the neighboring cell is more refined, this
+    /// returns the cell index of the adjacent cell with `tree.level(neighbor) == tree.level(cell)`.
+    /// If this passes over a nonperiodic boundary then it returns `None`.
     pub fn neighbor_region(&self, cell: CellId, region: Region<N>) -> Option<CellId> {
         let active_indices = ActiveCellId(self.cells[cell.0].active_offset);
         debug_assert!(self.active_level(active_indices) >= self.level(cell));
@@ -1132,6 +1135,40 @@ mod tests {
         let tree2: Tree<2> = ron::from_str(data.as_str())?;
 
         assert_eq!(tree, tree2);
+
+        Ok(())
+    }
+
+    #[test]
+    fn cell_from_point() -> eyre::Result<()> {
+        let mut tree = Tree::<2>::new(Rectangle::UNIT);
+        tree.refine(&[true]);
+        tree.refine(&[true, false, false, false]);
+
+        assert_eq!(tree.cell_from_point([0.0, 0.0]), CellId(5));
+        assert_eq!(
+            tree.active_index_from_cell(CellId(5)),
+            Some(ActiveCellId(0))
+        );
+
+        assert_eq!(tree.cell_from_point([0.51, 0.67]), CellId(4));
+        assert_eq!(
+            tree.active_index_from_cell(CellId(4)),
+            Some(ActiveCellId(6))
+        );
+
+        let mut rng = rand::rng();
+        for _ in 0..50 {
+            let x: f64 = rng.random_range(0.0..1.0);
+            let y: f64 = rng.random_range(0.0..1.0);
+
+            let cache: usize = rng.random_range(..tree.num_cells());
+
+            assert_eq!(
+                tree.cell_from_point_cached([x, y], CellId(cache)),
+                tree.cell_from_point([x, y])
+            );
+        }
 
         Ok(())
     }

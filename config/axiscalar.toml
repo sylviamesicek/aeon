@@ -30,9 +30,9 @@ relax.tolerance = 1e-6
 [evolve]
 cfl = 0.2
 dissipation = 0.5
-gauge = "harmonic_zero_shift"
+gauge = "log_plus_one_zero_shift"
 max_coord_time = 1000.0
-max_proper_time = 10.0
+max_proper_time = 7.6
 max_steps = 1_000_000
 refine_error = 1e-6
 coarsen_error = 1e-10
@@ -48,7 +48,7 @@ evolve = true
 evolve_interval.steps = 20
 
 horizon_relax = true
-horizon_relax_interval.steps = 20
+horizon_relax_interval.steps = 1
 
 stride = "per_cell"
 
@@ -67,10 +67,10 @@ relax.dampening = 0.4
 relax.max_steps = 10_000
 relax.tolerance = 1e-4
 
-on_max_search_steps = "ignore"
+on_max_search_steps = "collapse"
 on_search_not_contained = "ignore"
 on_search_diverged = "ignore"
-on_search_converged = "ignore"
+on_search_converged = "collapse"
 on_search_converged_to_zero = "ignore"
 
 [[sources]]

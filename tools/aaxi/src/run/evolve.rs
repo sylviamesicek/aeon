@@ -3,7 +3,7 @@ use crate::{
         DynamicalData, DynamicalDerivs, GaugeCondition, ScalarFieldData, ScalarFieldDerivs,
         evolution,
     },
-    horizon::{self, ApparentHorizonFinder, HorizonError, HorizonStatus},
+    horizon::{self, ApparentHorizonFinder, HorizonError, HorizonProjection, HorizonStatus},
     misc,
     run::{
         config::Config,
@@ -375,6 +375,8 @@ pub fn evolve_data(
     finder.solver.tolerance = config.horizon.relax.tolerance;
     finder.solver.adaptive = true;
 
+    let mut horizon_field = Vec::new();
+
     // **************************
     // Evolve
 
@@ -642,10 +644,20 @@ pub fn evolve_data(
             horizon_pb.finish_and_clear();
 
             if config.visualize.horizon_relax {
+                horizon_field.resize(mesh.num_nodes(), 0.0);
+
+                mesh.evaluate(
+                    4,
+                    HorizonProjection,
+                    fields.as_slice(),
+                    SystemSliceMut::from_scalar(&mut horizon_field),
+                )?;
+
                 // Output current system to disk, for reference in horizon search.
                 let mut checkpoint = Checkpoint::default();
                 checkpoint.attach_mesh(&mesh);
                 checkpoint.save_system(fields.as_slice());
+                checkpoint.save_field("Horizon", &horizon_field);
                 checkpoint.export_vtu(
                     horizon_dir.join(format!("{}.vtu", config.name)),
                     ExportVtuConfig {

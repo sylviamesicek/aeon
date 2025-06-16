@@ -143,14 +143,27 @@ impl ApparentHorizonFinder {
         self.surface_position.resize(surface.num_nodes(), [0.0; 2]);
         self.surface_position.fill([0.0; 2]);
 
+        // Find cell at origin
+        let origin_cell = mesh.tree().cell_from_point([0.0, 0.0]);
+        let origin_bounds = mesh.tree().bounds(origin_cell);
+
+        // Compute stopping radius from this cell.
+        let mut min_radius = mesh.min_spacing();
+
+        for axis in 0..2 {
+            if origin_bounds.size[axis] > min_radius {
+                min_radius = origin_bounds.size[axis];
+            }
+        }
+
         // Run solver
         let result = self.solver.solve_with_callback(
             surface,
             order,
             HorizonRadialBoundary,
             HorizonCallback {
-                mesh,
                 inner: &mut callback,
+                min_radius,
             },
             HorizonNullExpansion::<K> {
                 surface_to_cell: &mut self.surface_to_cell,
@@ -399,8 +412,8 @@ enum HorizonCallbackError<I> {
 }
 
 struct HorizonCallback<'a, I> {
-    mesh: &'a Mesh<2>,
     inner: &'a mut I,
+    min_radius: f64,
 }
 
 impl<'a, I: SolverCallback<1, Scalar>> SolverCallback<1, Scalar> for HorizonCallback<'a, I> {
@@ -415,8 +428,7 @@ impl<'a, I: SolverCallback<1, Scalar>> SolverCallback<1, Scalar> for HorizonCall
     ) -> Result<(), Self::Error> {
         let radius = input.field(());
 
-        let min_spacing = self.mesh.min_spacing();
-        let collapsed = radius.iter().all(|r| r.abs() <= min_spacing);
+        let collapsed = radius.iter().all(|r| r.abs() <= self.min_radius);
 
         self.inner.callback(surface, input, output, iteration)?;
 
@@ -433,4 +445,88 @@ fn polar_to_cartesian(radius: f64, theta: f64) -> [f64; 2] {
     let y = radius * theta.sin();
 
     [x.max(0.0), y.max(0.0)]
+}
+
+pub struct HorizonProjection;
+
+impl Function<2> for HorizonProjection {
+    type Input = Fields;
+    type Output = Scalar;
+    type Error = Infallible;
+
+    fn evaluate(
+        &self,
+        engine: impl Engine<2>,
+        input: SystemSlice<Self::Input>,
+        mut output: SystemSliceMut<Self::Output>,
+    ) -> Result<(), Self::Error> {
+        let grr_f = input.field(Field::Metric(Metric::Grr));
+        let grz_f = input.field(Field::Metric(Metric::Grz));
+        let gzz_f = input.field(Field::Metric(Metric::Gzz));
+        let s_f = input.field(Field::Metric(Metric::S));
+
+        let krr_f = input.field(Field::Metric(Metric::Krr));
+        let krz_f = input.field(Field::Metric(Metric::Krz));
+        let kzz_f = input.field(Field::Metric(Metric::Kzz));
+        let y_f = input.field(Field::Metric(Metric::Y));
+
+        for vertex in IndexSpace::new(engine.vertex_size()).iter() {
+            let pos = engine.position(vertex);
+            let index = engine.index_from_vertex(vertex);
+
+            macro_rules! derivatives {
+                ($field:ident, $value:ident, $dr:ident, $dz:ident) => {
+                    let $value = $field[index];
+                    let $dr = engine.derivative($field, 0, vertex);
+                    let $dz = engine.derivative($field, 1, vertex);
+                };
+            }
+
+            // Metric
+            derivatives!(grr_f, grr, grr_r, grr_z);
+            derivatives!(gzz_f, gzz, gzz_r, gzz_z);
+            derivatives!(grz_f, grz, grz_r, grz_z);
+
+            // S
+            derivatives!(s_f, s, s_r, s_z);
+
+            // K
+            let krr = krr_f[index];
+            let krz = krz_f[index];
+            let kzz = kzz_f[index];
+
+            // Y
+            let y = y_f[index];
+
+            let radius = (pos[0].powi(2) + pos[1].powi(1)).sqrt();
+            let theta = pos[1].atan2(pos[0]);
+
+            let horizon_system = HorizonData {
+                grr,
+                grz,
+                gzz,
+                grr_r,
+                grr_z,
+                grz_r,
+                grz_z,
+                gzz_r,
+                gzz_z,
+                s,
+                s_r,
+                s_z,
+                krr,
+                krz,
+                kzz,
+                y,
+                theta,
+                radius,
+                radius_deriv: 0.0,
+                radius_second_deriv: 0.0,
+            };
+
+            output.field_mut(())[index] = horizon(horizon_system, pos);
+        }
+
+        Ok(())
+    }
 }
