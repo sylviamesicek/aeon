@@ -498,7 +498,7 @@ impl Function<2> for HorizonProjection {
             // Y
             let y = y_f[index];
 
-            let radius = (pos[0].powi(2) + pos[1].powi(1)).sqrt();
+            let radius = (pos[0].powi(2) + pos[1].powi(2)).sqrt();
             let theta = pos[1].atan2(pos[0]);
 
             let horizon_system = HorizonData {

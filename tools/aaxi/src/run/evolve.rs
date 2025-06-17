@@ -354,7 +354,7 @@ pub fn evolve_data(
     let mut search_tracker = IntervalTracker::new();
     let search_interval = config.horizon.search_interval;
     let mut search_index = 0;
-    let mut search_positions = Vec::new();
+    let mut search_positions = Vec::<[f64; 2]>::new();
     let mut search_surface = if config.horizon.search {
         let mut surface = horizon::surface();
 
@@ -584,9 +584,20 @@ pub fn evolve_data(
                 return Ok(());
             }
 
+            horizon_field.resize(mesh.num_nodes(), 0.0);
+
+            mesh.evaluate(
+                4,
+                HorizonProjection,
+                fields.as_slice(),
+                SystemSliceMut::from_scalar(&mut horizon_field),
+            )
+            .unwrap();
+
             // Output current system to disk
             let mut checkpoint = Checkpoint::default();
             checkpoint.attach_mesh(&mesh);
+            checkpoint.save_field("Horizon", &horizon_field);
             checkpoint.save_system(fields.as_slice());
             checkpoint.export_vtu(
                 output
@@ -663,7 +674,7 @@ pub fn evolve_data(
                     ExportVtuConfig {
                         title: config.name.clone(),
                         ghost: false,
-                        stride: visualize_stride,
+                        stride: ExportStride::PerCell,
                     },
                 )?;
             }

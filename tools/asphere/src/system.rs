@@ -1,4 +1,4 @@
-use crate::config::ScalarFieldProfile;
+use crate::run::config::ScalarFieldProfile;
 use aeon::{kernel::Interpolation, mesh::Gaussian, prelude::*};
 use core::f64;
 use serde::{Deserialize, Serialize};

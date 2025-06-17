@@ -261,4 +261,20 @@ mod tests {
         assert_eq!(indices.next(), Some([1, 1, 1, 1]));
         assert_eq!(indices.next(), None);
     }
+
+    #[test]
+    fn general() {
+        let tensor =
+            Tensor::<3, 2, Gen, [f64; 9]>::from([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0]);
+
+        assert_eq!(tensor[[0, 0]], 1.0);
+        assert_eq!(tensor[[0, 1]], 2.0);
+        assert_eq!(tensor[[0, 2]], 3.0);
+        assert_eq!(tensor[[1, 0]], 4.0);
+        assert_eq!(tensor[[1, 1]], 5.0);
+        assert_eq!(tensor[[1, 2]], 6.0);
+        assert_eq!(tensor[[2, 0]], 7.0);
+        assert_eq!(tensor[[2, 1]], 8.0);
+        assert_eq!(tensor[[2, 2]], 9.0);
+    }
 }

@@ -527,6 +527,7 @@ pub fn horizon(system: HorizonData, [r, z]: [f64; 2]) -> f64 {
     // Build levi_civita tensor
     let levi_civita_factor = det.value.sqrt();
     let levi_civita = Matrix::from([0., levi_civita_factor, -levi_civita_factor, 0.]);
+
     // Decompose xᵐ(θ) into two derivatives
     let theta = system.theta;
     let radius = system.radius;
@@ -571,6 +572,8 @@ pub fn horizon(system: HorizonData, [r, z]: [f64; 2]) -> f64 {
         -sigma.powi(3) * (term1 + term2) + term3
     };
 
+    // let mut div_term = S::sum(|[a]| twist.regular_co()[[a]] * normal[[a]]);
+
     // sᵅ = σ Hᵅᵝ εᵦᵧ (dxˠ/dθ)
     // sʳ = σ Hʳᵝ εᵦᵧ (dxˠ/dθ) = σ / Hᵣᵣ εᵣᵧ (dxˠ/dθ) = σ / Hᵣᵣ εᵣₜ (dz/dθ)
     if r.abs() <= ON_AXIS {
@@ -590,7 +593,16 @@ pub fn horizon(system: HorizonData, [r, z]: [f64; 2]) -> f64 {
         // This gives
         // 1/r dz/dθ = 1 - d²R/dθ² / R
 
-        div_term += sigma / metric.value[[0, 0]] * levi_civita[[0, 1]] * (1.0 - tau2[[1]] / radius);
+        // div_term +=
+        //     sigma * inv.value[[0, 0]] * levi_civita[[0, 1]] * (1.0 - radius_ddtheta / radius);
+        // div_term += sigma * levi_civita[[1, 0]] * tau[[0]] * inv.derivs[[0, 1, 0]];
+
+        // div_term = tau2[[1]] / tau[[0]];
+
+        let dthetadr = -z / radius.powi(2);
+
+        div_term += sigma * inv.value[[0, 0]] * levi_civita[[0, 1]] * (dthetadr * tau2[[1]]);
+        div_term += sigma * levi_civita[[1, 0]] * tau[[0]] * inv.derivs[[0, 1, 0]];
     }
 
     // Extrinsic curvature terms

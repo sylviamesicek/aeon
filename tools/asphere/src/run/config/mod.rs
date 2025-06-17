@@ -3,12 +3,18 @@ use aeon_config::{ConfigVars, FloatVar, Transform, TransformError, UnsignedVar};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
+mod execute;
+
+pub use execute::*;
+
 #[derive(Serialize, Deserialize)]
 pub struct Config {
     #[serde(default = "default_name")]
     pub name: String,
     #[serde(default = "default_directory")]
     pub directory: String,
+    #[serde(default)]
+    pub execution: Execution,
 
     pub domain: Domain,
     pub limits: Limits,
@@ -25,6 +31,13 @@ impl Config {
     pub fn directory(&self) -> eyre::Result<PathBuf> {
         crate::misc::abs_or_relative(Path::new(&self.directory))
     }
+
+    pub fn search_config(&self) -> Option<&Search> {
+        match &self.execution {
+            Execution::Search { search } => Some(search),
+            _ => None,
+        }
+    }
 }
 
 impl Transform for Config {
@@ -34,6 +47,7 @@ impl Transform for Config {
         Ok(Self {
             name: self.name.transform(vars)?,
             directory: self.directory.transform(vars)?,
+            execution: self.execution.transform(vars)?,
             domain: self.domain.clone(),
             limits: self.limits.clone(),
             evolve: self.evolve.clone(),

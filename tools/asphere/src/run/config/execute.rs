@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use aeon_config::{ConfigVars, FloatVar, Transform};
+use aeon_config::{ConfigVars, FloatVar, Transform, TransformError};
 use serde::{Deserialize, Serialize};
 
 use crate::misc;
@@ -21,7 +21,7 @@ pub enum Execution {
 
 impl Execution {
     /// Performs variable transformation on `Execution`.
-    pub fn transform(self, vars: &ConfigVars) -> eyre::Result<Self> {
+    pub fn transform(&self, vars: &ConfigVars) -> Result<Self, TransformError> {
         Ok(match self {
             Execution::Run => Self::Run,
             Execution::Search { search } => Execution::Search {
@@ -73,7 +73,7 @@ impl Search {
 impl Transform for Search {
     type Output = Self;
 
-    fn transform(&self, vars: &ConfigVars) -> Result<Self::Output, aeon_config::TransformError> {
+    fn transform(&self, vars: &ConfigVars) -> Result<Self::Output, TransformError> {
         Ok(Self {
             directory: self.directory.transform(vars)?,
             parameter: self.parameter.transform(vars)?,
