@@ -6,7 +6,6 @@ use aeon_tensor::metric::d2::{
 };
 
 mod api;
-pub mod old;
 
 pub use api::*;
 // pub use old::{
