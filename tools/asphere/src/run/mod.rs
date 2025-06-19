@@ -1,9 +1,9 @@
-use std::{collections::HashMap, num::ParseFloatError, path::PathBuf};
-
+use crate::misc;
 use aeon_config::{ConfigVars, Transform as _};
 use clap::{ArgMatches, Command, arg, value_parser};
 use console::style;
 use eyre::{Context as _, eyre};
+use std::{collections::HashMap, num::ParseFloatError, path::PathBuf};
 
 pub mod config;
 mod evolve;
@@ -11,9 +11,8 @@ mod history;
 mod initial;
 
 use config::*;
-use history::{SearchHistory, Status};
-
-use crate::misc;
+use evolve::{EvolveInfo, Status};
+use history::{FillHistory, SearchHistory};
 
 pub fn run(matches: &ArgMatches) -> eyre::Result<()> {
     // *********************************
@@ -25,7 +24,7 @@ pub fn run(matches: &ArgMatches) -> eyre::Result<()> {
         // Just perform normal evolution
         Execution::Run => {
             let config = config.transform(&vars)?;
-            let _ = run_simulation(&config)?;
+            let _ = run_simulation(&config, None)?;
         }
         // Okay, we are doing a critical search instead
         Execution::Search { ref search } => {
@@ -34,17 +33,17 @@ pub fn run(matches: &ArgMatches) -> eyre::Result<()> {
             // As well as search directory
             let search_dir = search.search_dir()?;
             std::fs::create_dir_all(&search_dir)?;
+            // Load history file
+            let history_file = search_dir.join("history.csv");
+            let mut history =
+                SearchHistory::load_csv(&history_file).unwrap_or_else(|_| SearchHistory::new());
 
             // Setup range to search
             let mut start = search.start();
             let mut end = search.end();
 
-            let history_file = search_dir.join("history.csv");
-            let mut history =
-                SearchHistory::load_csv(&history_file).unwrap_or_else(|_| SearchHistory::new());
-
-            let start_status = run_search(&mut history, &config, &vars, start)?;
-            let end_status = run_search(&mut history, &config, &vars, end)?;
+            let mut start_status = run_search(&mut history, &config, &vars, start)?;
+            let mut end_status = run_search(&mut history, &config, &vars, end)?;
 
             match (start_status, end_status) {
                 (Status::Disperse, Status::Disperse) => {
@@ -68,20 +67,24 @@ pub fn run(matches: &ArgMatches) -> eyre::Result<()> {
                 println!("Searching range {} to {}", start, end);
 
                 let midpoint = (start + end) / 2.0;
-                let midpoint_status = run_search(&mut history, &config, &vars, start)?;
+                let midpoint_status = run_search(&mut history, &config, &vars, midpoint)?;
 
                 match (start_status, midpoint_status, end_status) {
                     (Status::Disperse, Status::Disperse, Status::Collapse) => {
                         start = midpoint;
+                        start_status = midpoint_status;
                     }
                     (Status::Disperse, Status::Collapse, Status::Collapse) => {
                         end = midpoint;
+                        end_status = midpoint_status;
                     }
                     (Status::Collapse, Status::Disperse, Status::Disperse) => {
                         end = midpoint;
+                        end_status = midpoint_status;
                     }
                     (Status::Collapse, Status::Collapse, Status::Disperse) => {
                         start = midpoint;
+                        start_status = midpoint_status;
                     }
                     _ => unreachable!(),
                 }
@@ -91,10 +94,30 @@ pub fn run(matches: &ArgMatches) -> eyre::Result<()> {
 
                 depth += 1;
                 // Check maximum depth
-                if depth == search.max_depth {
+                if depth >= search.max_depth {
                     println!("Reached maximum critical search depth");
                 }
             }
+        }
+        // Run a fill operation
+        Execution::Fill { ref fill } => {
+            // Apply positional arguments
+            let fill = fill.clone().transform(&vars)?;
+            // As well as search directory
+            let fill_dir = fill.fill_dir()?;
+            std::fs::create_dir_all(&fill_dir)?;
+            // Load history file
+            let history_file = fill_dir.join("history.csv");
+            let mut history =
+                FillHistory::load_csv(&history_file).unwrap_or_else(|_| FillHistory::new());
+
+            fill.try_for_each(|amp| -> eyre::Result<()> {
+                run_fill(&mut history, &config, &vars, amp)?;
+                // Cache history
+                history.save_csv(&history_file)?;
+
+                Ok(())
+            })?;
         }
     }
 
@@ -103,12 +126,13 @@ pub fn run(matches: &ArgMatches) -> eyre::Result<()> {
 
 /// Run a single iteration of a critical search
 fn run_search(
-    cache: &mut SearchHistory,
+    history: &mut SearchHistory,
     config: &Config,
     vars: &ConfigVars,
     amplitude: f64,
 ) -> eyre::Result<Status> {
-    if let Some(status) = cache.status(amplitude) {
+    if let Some(status) = history.status(amplitude) {
+        println!("Using cached status for amplitude: {}", amplitude);
         return Ok(status);
     }
 
@@ -120,17 +144,45 @@ fn run_search(
     // Transform config appropriately
     let config = config.transform(&vars)?;
 
-    let status = match run_simulation(&config) {
-        Ok(()) => Status::Disperse,
-        Err(_) => Status::Collapse,
-    };
+    println!("Performing search for amplitude: {}", amplitude);
+
+    let status = run_simulation(&config, None)?;
 
     // Insert it into cache
-    cache.insert(amplitude, status);
+    history.insert(amplitude, status);
     return Ok(status);
 }
 
-fn run_simulation(config: &Config) -> eyre::Result<()> {
+/// Run a single iteration of a fill operation
+fn run_fill(
+    history: &mut FillHistory,
+    config: &Config,
+    vars: &ConfigVars,
+    amplitude: f64,
+) -> eyre::Result<()> {
+    if let Some(mass) = history.mass(amplitude) {
+        println!("Using cached mass: {} for amplitude: {}", mass, amplitude);
+        return Ok(());
+    }
+
+    let fill = config.fill_config().unwrap();
+
+    let mut vars = vars.clone();
+    // Set the parameter variable to the given amplitude
+    vars.named.insert(fill.parameter.clone(), amplitude);
+    // Transform config appropriately
+    let config = config.transform(&vars)?;
+
+    println!("Performing fill for amplitude: {}", amplitude);
+
+    let mut info = EvolveInfo::default();
+    let _ = run_simulation(&config, Some(&mut info))?;
+    // Insert it into history
+    history.insert(amplitude, info.mass);
+    Ok(())
+}
+
+fn run_simulation(config: &Config, info: Option<&mut EvolveInfo>) -> eyre::Result<Status> {
     // Check that there is only one source term.
     eyre::ensure!(
         config.sources.len() == 1,
@@ -155,7 +207,7 @@ fn run_simulation(config: &Config) -> eyre::Result<()> {
     let (mesh, system) = initial::initial_data(config)?;
 
     // Run evolution
-    evolve::evolve_data(config, mesh, system)
+    evolve::evolve_data(config, mesh, system, info)
 }
 
 // ******************************

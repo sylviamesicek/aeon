@@ -67,3 +67,101 @@ pub fn decode_float(value: &str) -> Result<f64, ParseIntError> {
     let bits = u64::from_str_radix(value, 16)?;
     Ok(unsafe { std::mem::transmute(bits) })
 }
+
+use core::f64;
+
+pub fn logspace(base: f64, start: f64, end: f64, n: usize) -> Logspace {
+    let step = if n > 1 {
+        (end - start) / (n - 1) as f64
+    } else {
+        0.0
+    };
+
+    Logspace {
+        sign: base.signum(),
+        base: base.abs(),
+        start,
+        step,
+        index: 0,
+        len: n,
+    }
+}
+
+pub struct Logspace {
+    sign: f64,
+    base: f64,
+    start: f64,
+    step: f64,
+    index: usize,
+    len: usize,
+}
+
+impl Iterator for Logspace {
+    type Item = f64;
+
+    #[inline]
+    fn next(&mut self) -> Option<f64> {
+        if self.index >= self.len {
+            None
+        } else {
+            let i = self.index;
+            self.index += 1;
+
+            let exponent = self.start + self.step * i as f64;
+
+            Some(self.sign * self.base.powf(exponent))
+        }
+    }
+
+    #[inline]
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let n = self.len - self.index;
+
+        (n, Some(n))
+    }
+}
+
+pub fn linspace(start: f64, end: f64, n: usize) -> Linspace {
+    let step = if n > 1 {
+        (end - start) / (n - 1) as f64
+    } else {
+        0.0
+    };
+
+    Linspace {
+        start,
+        step,
+        index: 0,
+        len: n,
+    }
+}
+
+pub struct Linspace {
+    start: f64,
+    step: f64,
+    index: usize,
+    len: usize,
+}
+
+impl Iterator for Linspace {
+    type Item = f64;
+
+    #[inline]
+    fn next(&mut self) -> Option<f64> {
+        if self.index >= self.len {
+            None
+        } else {
+            let i = self.index;
+            self.index += 1;
+
+            Some(self.start + self.step * i as f64)
+        }
+    }
+
+    #[inline]
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let n = self.len - self.index;
+
+        (n, Some(n))
+    }
+}

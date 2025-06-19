@@ -38,6 +38,13 @@ impl Config {
             _ => None,
         }
     }
+
+    pub fn fill_config(&self) -> Option<&Fill> {
+        match &self.execution {
+            Execution::Fill { fill } => Some(fill),
+            _ => None,
+        }
+    }
 }
 
 impl Transform for Config {

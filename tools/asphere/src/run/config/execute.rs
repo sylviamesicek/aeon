@@ -1,9 +1,7 @@
-use std::path::{Path, PathBuf};
-
+use crate::misc;
 use aeon_config::{ConfigVars, FloatVar, Transform, TransformError};
 use serde::{Deserialize, Serialize};
-
-use crate::misc;
+use std::path::{Path, PathBuf};
 
 /// What subcommand should be executed.
 #[derive(Serialize, Deserialize, Default, Debug, Clone)]
@@ -17,6 +15,11 @@ pub enum Execution {
         #[serde(flatten)]
         search: Search,
     },
+    #[serde(rename = "fill")]
+    Fill {
+        #[serde(flatten)]
+        fill: Fill,
+    },
 }
 
 impl Execution {
@@ -26,6 +29,9 @@ impl Execution {
             Execution::Run => Self::Run,
             Execution::Search { search } => Execution::Search {
                 search: search.transform(vars)?,
+            },
+            Execution::Fill { fill } => Execution::Fill {
+                fill: fill.transform(vars)?,
             },
         })
     }
@@ -83,4 +89,70 @@ impl Transform for Search {
             min_error: self.min_error,
         })
     }
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct Fill {
+    pub directory: String,
+    pub parameter: String,
+    pub start: FloatVar,
+    pub end: FloatVar,
+    pub samples: Samples,
+}
+
+impl Fill {
+    /// Finds absolute value of search directory as provided by the search.directory element
+    /// in the toml fiile.
+    pub fn fill_dir(&self) -> eyre::Result<PathBuf> {
+        misc::abs_or_relative(Path::new(&self.directory))
+    }
+
+    pub fn try_for_each<E, F: FnMut(f64) -> Result<(), E>>(&self, mut f: F) -> Result<(), E> {
+        let start = self.start.unwrap();
+        let end = self.end.unwrap();
+
+        match self.samples {
+            Samples::Log { base, log } => {
+                assert!(start.signum() == end.signum());
+                assert!(base.signum() > 0.0);
+
+                let sign = start >= 0.0;
+                let start = start.abs().log(base);
+                let end = end.abs().log(base);
+                let base = if sign { base } else { -base };
+
+                for amplitude in misc::logspace(base, start, end, log) {
+                    f(amplitude)?
+                }
+            }
+            Samples::Linear { linear } => {
+                for amplitude in misc::linspace(start, end, linear) {
+                    f(amplitude)?
+                }
+            }
+        }
+
+        Ok(())
+    }
+}
+
+impl Transform for Fill {
+    type Output = Self;
+
+    fn transform(&self, vars: &ConfigVars) -> Result<Self::Output, TransformError> {
+        Ok(Fill {
+            directory: self.directory.clone(),
+            parameter: self.parameter.clone(),
+            samples: self.samples.clone(),
+            start: self.start.transform(vars)?,
+            end: self.end.transform(vars)?,
+        })
+    }
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, Copy)]
+#[serde(untagged)]
+pub enum Samples {
+    Log { base: f64, log: usize },
+    Linear { linear: usize },
 }

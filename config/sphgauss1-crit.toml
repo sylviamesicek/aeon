@@ -5,10 +5,10 @@ directory = "output/crit/sphgauss1/${amplitude}"
 mode = "search"
 directory = "output/crit/sphgauss1/search"
 parameter = "amplitude"
-start = 0.0
-end = 0.5
+start = 0.3
+end = 0.35
 max_depth = 20
-min_error = 1e-5
+min_error = 1e-10
 
 [domain]
 radius = 40.0
@@ -22,7 +22,7 @@ max_memory = 5_000_000_000
 cfl = 0.3
 dissipation = 0.5
 max_proper_time = 7.6
-max_steps = 800_000
+max_steps = 400_000
 
 [regrid]
 coarsen_error = 1e-10

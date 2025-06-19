@@ -12,73 +12,33 @@ use console::style;
 use datasize::DataSize as _;
 use eyre::eyre;
 use indicatif::{HumanBytes, HumanCount, HumanDuration, MultiProgress, ProgressBar};
+use serde::{Deserialize, Serialize};
 use std::fmt::Write as _;
 use std::time::{Duration, Instant};
 
-struct Snapshot {
-    mass: f64,
-    alpha: f64,
-    phi: f64,
-    level: usize,
-    nodes: usize,
+/// Status of an indivdual run.
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq)]
+pub enum Status {
+    Disperse,
+    Collapse,
 }
 
-#[derive(Default)]
-struct Diagnostics {
-    times: Vec<f64>,
-    data: Vec<Snapshot>,
+/// Additional info about a particular evolution.
+#[derive(Clone, Default, Debug)]
+pub struct EvolveInfo {
+    pub mass: f64,
 }
 
-impl Diagnostics {
-    fn append(&mut self, time: f64, data: Snapshot) {
-        self.times.push(time);
-        self.data.push(data);
-    }
-
-    fn flush(&self, config: &Config) -> eyre::Result<()> {
-        if !config.diagnostic.save {
-            return Ok(());
-        }
-
-        let directory = config.directory()?;
-
-        let serial_id = config.diagnostic.serial_id.unwrap();
-
-        let file1 = format!("Mass-{}-{}", 4, serial_id);
-        let file2 = format!("Al-{}-{}", 4, serial_id);
-        let file3 = format!("Level-{}-{}", 4, serial_id);
-        let file4 = format!("Origin-{}.txt", serial_id);
-
-        let mut data1 = String::new();
-        let mut data2 = String::new();
-        let mut data3 = String::new();
-        let mut data4 = String::new();
-
-        for (&time, data) in self.times.iter().zip(self.data.iter()) {
-            writeln!(data1, "{} {}", time, data.mass)?;
-            writeln!(data2, "{} {}", time, data.alpha)?;
-            writeln!(data3, "{} {} {}", time, data.level, data.nodes)?;
-            writeln!(
-                data4,
-                "{} {} {} {} {} {}",
-                time, 0.0, data.alpha, data.alpha, data.phi, 0.0
-            )?;
-        }
-
-        std::fs::write(directory.join(file1), data1)?;
-        std::fs::write(directory.join(file2), data2)?;
-        std::fs::write(directory.join(file3), data3)?;
-        std::fs::write(directory.join(file4), data4)?;
-
-        Ok(())
-    }
-}
-
-pub fn evolve_data(config: &Config, mesh: Mesh<1>, system: SystemVec<Fields>) -> eyre::Result<()> {
+pub fn evolve_data(
+    config: &Config,
+    mesh: Mesh<1>,
+    system: SystemVec<Fields>,
+    info: Option<&mut EvolveInfo>,
+) -> eyre::Result<Status> {
     // Load diagnostics
     let mut diagnostics = Diagnostics::default();
     // Evolve
-    let result = evolve_data_with_diagnostics(config, &mut diagnostics, mesh, system);
+    let result = evolve_data_with_diagnostics(config, &mut diagnostics, mesh, system, info);
     // Flush diagnostics
     diagnostics.flush(config)?;
     // Bubble up result
@@ -90,7 +50,8 @@ fn evolve_data_with_diagnostics(
     diagnostics: &mut Diagnostics,
     mut mesh: Mesh<1>,
     mut system: SystemVec<Fields>,
-) -> eyre::Result<()> {
+    info: Option<&mut EvolveInfo>,
+) -> eyre::Result<Status> {
     // Get start time of evolution
     let start = Instant::now();
     // Get output directory
@@ -340,5 +301,71 @@ fn evolve_data_with_diagnostics(
     //     println!("Previous Mass: {:.8e}", mass);
     // }
 
-    Ok(())
+    if let Some(info) = info {
+        info.mass = find_mass(&mesh, system.as_slice());
+    }
+
+    Ok(match disperse {
+        true => Status::Disperse,
+        false => Status::Collapse,
+    })
+}
+
+struct Snapshot {
+    mass: f64,
+    alpha: f64,
+    phi: f64,
+    level: usize,
+    nodes: usize,
+}
+
+#[derive(Default)]
+struct Diagnostics {
+    times: Vec<f64>,
+    data: Vec<Snapshot>,
+}
+
+impl Diagnostics {
+    fn append(&mut self, time: f64, data: Snapshot) {
+        self.times.push(time);
+        self.data.push(data);
+    }
+
+    fn flush(&self, config: &Config) -> eyre::Result<()> {
+        if !config.diagnostic.save {
+            return Ok(());
+        }
+
+        let directory = config.directory()?;
+
+        let serial_id = config.diagnostic.serial_id.unwrap();
+
+        let file1 = format!("Mass-{}-{}", 4, serial_id);
+        let file2 = format!("Al-{}-{}", 4, serial_id);
+        let file3 = format!("Level-{}-{}", 4, serial_id);
+        let file4 = format!("Origin-{}.txt", serial_id);
+
+        let mut data1 = String::new();
+        let mut data2 = String::new();
+        let mut data3 = String::new();
+        let mut data4 = String::new();
+
+        for (&time, data) in self.times.iter().zip(self.data.iter()) {
+            writeln!(data1, "{} {}", time, data.mass)?;
+            writeln!(data2, "{} {}", time, data.alpha)?;
+            writeln!(data3, "{} {} {}", time, data.level, data.nodes)?;
+            writeln!(
+                data4,
+                "{} {} {} {} {} {}",
+                time, 0.0, data.alpha, data.alpha, data.phi, 0.0
+            )?;
+        }
+
+        std::fs::write(directory.join(file1), data1)?;
+        std::fs::write(directory.join(file2), data2)?;
+        std::fs::write(directory.join(file3), data3)?;
+        std::fs::write(directory.join(file4), data4)?;
+
+        Ok(())
+    }
 }

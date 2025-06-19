@@ -17,7 +17,7 @@ fn main() -> eyre::Result<()> {
     let command = Command::new("aaxi")
         .about("A program for running axisymmetric simulations using numerical relativity")
         .author("Lukas Mesicek, lukas.m.mesicek@gmail.com")
-        .version("0.1.0")
+        .version("0.2.1")
         .subcommand_negates_reqs(true)
         .run_args()
         .schwarzschild_args();
