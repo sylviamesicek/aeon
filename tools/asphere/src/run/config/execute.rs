@@ -112,21 +112,15 @@ impl Fill {
         let end = self.end.unwrap();
 
         match self.samples {
-            Samples::Log { base, log } => {
-                assert!(start.signum() == end.signum());
-                assert!(base.signum() > 0.0);
+            Samples::Log { log } => {
+                assert!(start > 0.0 && end > 0.0);
 
-                let sign = start >= 0.0;
-                let start = start.abs().log(base);
-                let end = end.abs().log(base);
-                let base = if sign { base } else { -base };
-
-                for amplitude in misc::logspace(base, start, end, log) {
+                for amplitude in misc::log_range(start, end, log) {
                     f(amplitude)?
                 }
             }
             Samples::Linear { linear } => {
-                for amplitude in misc::linspace(start, end, linear) {
+                for amplitude in misc::lin_range(start, end, linear) {
                     f(amplitude)?
                 }
             }
@@ -153,6 +147,6 @@ impl Transform for Fill {
 #[derive(Serialize, Deserialize, Debug, Clone, Copy)]
 #[serde(untagged)]
 pub enum Samples {
-    Log { base: f64, log: usize },
+    Log { log: usize },
     Linear { linear: usize },
 }

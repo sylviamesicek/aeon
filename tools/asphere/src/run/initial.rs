@@ -6,7 +6,7 @@ use crate::{
 use aeon::prelude::*;
 use datasize::DataSize as _;
 use eyre::eyre;
-use indicatif::{HumanBytes, HumanDuration, MultiProgress, ProgressBar};
+use indicatif::{HumanDuration, MultiProgress, ProgressBar};
 use std::time::Instant;
 
 /// Solve for initial conditions and adaptively refine mesh
@@ -135,18 +135,18 @@ pub fn initial_data(config: &Config) -> eyre::Result<(Mesh<1>, SystemVec<Fields>
     m.clear()?;
 
     println!("Finished relaxing in {}", HumanDuration(start.elapsed()),);
-    println!("Mesh Info...");
-    println!("- Num Nodes: {}", mesh.num_nodes());
-    println!("- Active Cells: {}", mesh.num_active_cells());
-    println!(
-        "- RAM usage: ~{}",
-        HumanBytes(mesh.estimate_heap_size() as u64)
-    );
-    println!("Field Info...");
-    println!(
-        "- RAM usage: ~{}",
-        HumanBytes(system.estimate_heap_size() as u64)
-    );
+    // println!("Mesh Info...");
+    // println!("- Num Nodes: {}", mesh.num_nodes());
+    // println!("- Active Cells: {}", mesh.num_active_cells());
+    // println!(
+    //     "- RAM usage: ~{}",
+    //     HumanBytes(mesh.estimate_heap_size() as u64)
+    // );
+    // println!("Field Info...");
+    // println!(
+    //     "- RAM usage: ~{}",
+    //     HumanBytes(system.estimate_heap_size() as u64)
+    // );
 
     if config.visualize.save_initial {
         let mut checkpoint = Checkpoint::default();

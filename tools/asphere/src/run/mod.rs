@@ -56,7 +56,7 @@ pub fn run(matches: &ArgMatches) -> eyre::Result<()> {
             }
 
             let mut depth = 0;
-            while depth < search.max_depth {
+            loop {
                 // Have we reached minimum tolerance
                 let tolerance = (end - start).abs();
                 if tolerance <= search.min_error {
@@ -64,7 +64,10 @@ pub fn run(matches: &ArgMatches) -> eyre::Result<()> {
                     break;
                 }
 
-                println!("Searching range {} to {}", start, end);
+                println!(
+                    "Searching range: {} to {}, diff: {:.4e}",
+                    start, end, tolerance
+                );
 
                 let midpoint = (start + end) / 2.0;
                 let midpoint_status = run_search(&mut history, &config, &vars, midpoint)?;
@@ -96,8 +99,16 @@ pub fn run(matches: &ArgMatches) -> eyre::Result<()> {
                 // Check maximum depth
                 if depth >= search.max_depth {
                     println!("Reached maximum critical search depth");
+                    break;
                 }
             }
+
+            println!(
+                "Final search range: {} to {}, diff: {:.4e}",
+                start,
+                end,
+                (end - start).abs()
+            );
         }
         // Run a fill operation
         Execution::Fill { ref fill } => {
@@ -132,7 +143,10 @@ fn run_search(
     amplitude: f64,
 ) -> eyre::Result<Status> {
     if let Some(status) = history.status(amplitude) {
-        println!("Using cached status for amplitude: {}", amplitude);
+        println!(
+            "Using cached status: {:?} for amplitude: {}",
+            status, amplitude
+        );
         return Ok(status);
     }
 
@@ -176,7 +190,13 @@ fn run_fill(
     println!("Performing fill for amplitude: {}", amplitude);
 
     let mut info = EvolveInfo::default();
-    let _ = run_simulation(&config, Some(&mut info))?;
+    let status = run_simulation(&config, Some(&mut info))?;
+
+    if status == Status::Disperse {
+        println!("Simulation disperses during fill {}", amplitude);
+        return Err(eyre!("dispersion during fill {}", amplitude));
+    }
+
     // Insert it into history
     history.insert(amplitude, info.mass);
     Ok(())

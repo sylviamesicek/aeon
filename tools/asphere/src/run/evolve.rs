@@ -10,8 +10,7 @@ use aeon::{
 use circular_queue::CircularQueue;
 use console::style;
 use datasize::DataSize as _;
-use eyre::eyre;
-use indicatif::{HumanBytes, HumanCount, HumanDuration, MultiProgress, ProgressBar};
+use indicatif::{HumanCount, HumanDuration, MultiProgress, ProgressBar};
 use serde::{Deserialize, Serialize};
 use std::fmt::Write as _;
 use std::time::{Duration, Instant};
@@ -109,7 +108,10 @@ fn evolve_data_with_diagnostics(
 
     let mut disperse = true;
 
-    let mut mass_queue = CircularQueue::with_capacity(20);
+    let mut mass_queue = CircularQueue::with_capacity(50);
+
+    let mut mass = 1.0;
+    let mut alpha = 1.0;
 
     while proper_time < config.evolve.max_proper_time {
         assert!(system.len() == mesh.num_nodes());
@@ -165,12 +167,12 @@ fn evolve_data_with_diagnostics(
                 config.regrid.refine_error,
                 system.as_slice(),
             );
-            mesh.limit_level_range_flags(1, config.limits.max_levels + 1);
+            mesh.limit_level_range_flags(1, config.limits.max_levels - 1);
             mesh.balance_flags();
             mesh.regrid();
 
             log::trace!(
-                "Regrided Mesh at time: {proper_time:.5}, Max Level {}, Num Nodes {}, Step: {}",
+                "Regrided Mesh at time: {proper_time:.5}, Num Levels {}, Num Nodes {}, Step: {}",
                 mesh.num_levels(),
                 mesh.num_nodes(),
                 step,
@@ -216,20 +218,10 @@ fn evolve_data_with_diagnostics(
             save_step += 1;
         }
 
-        // Compute step
-        integrator
-            .step(
-                &mut mesh,
-                Order::<4>,
-                FieldConditions,
-                TimeDerivs,
-                h,
-                system.as_mut_slice(),
-            )
-            .unwrap();
+        // Compute lapse and mass before running diagnostic
+        alpha = mesh.bottom_left_value(system.field(Field::Lapse));
+        mass = find_mass(&mesh, system.as_slice());
 
-        let alpha = mesh.bottom_left_value(system.field(Field::Lapse));
-        let mass = find_mass(&mesh, system.as_slice());
         if config.diagnostic.save && step % config.diagnostic.save_interval.unwrap() == 0 {
             diagnostics.append(
                 proper_time,
@@ -242,6 +234,18 @@ fn evolve_data_with_diagnostics(
                 },
             );
         }
+
+        // Compute step
+        integrator
+            .step(
+                &mut mesh,
+                Order::<4>,
+                FieldConditions,
+                TimeDerivs,
+                h,
+                system.as_mut_slice(),
+            )
+            .unwrap();
 
         step += 1;
         steps_since_regrid += 1;
@@ -263,13 +267,19 @@ fn evolve_data_with_diagnostics(
 
         let norm = mesh.l2_norm_system(system.as_slice());
 
-        if norm.is_nan() || norm >= 1e60 || alpha.is_nan() {
-            println!("Evolution collapses after step, norm: {}", norm);
-            return Err(eyre!("exceded max allotted steps for evolution: {}", step));
+        if norm.is_nan() || norm >= 1e60 || alpha.is_nan() || alpha <= 0.0 {
+            eprintln!(
+                "Evolution collapses after step: {}, norm: {}, lapse {}",
+                step, norm, alpha
+            );
+            disperse = false;
+            break;
         }
     }
 
     m.clear()?;
+
+    mass = *mass_queue.asc_iter().next().unwrap();
 
     println!(
         "Final evolution takes {}, {} steps",
@@ -282,27 +292,27 @@ fn evolve_data_with_diagnostics(
     } else {
         style("Collapses").red()
     };
-    println!("Run Status: {}", status);
+    println!("Run Status: {}, Mass: {}, Lapse: {}", status, mass, alpha);
 
-    println!("Mesh Info...");
-    println!("- Num Nodes: {}", mesh.num_nodes());
-    println!("- Active Cells: {}", mesh.num_active_cells());
-    println!(
-        "- RAM usage: ~{}",
-        HumanBytes(mesh.estimate_heap_size() as u64)
-    );
-    println!("Field Info...");
-    println!(
-        "- RAM usage: ~{}",
-        HumanBytes((system.estimate_heap_size() + integrator.estimate_heap_size()) as u64)
-    );
+    // println!("Mesh Info...");
+    // println!("- Num Nodes: {}", mesh.num_nodes());
+    // println!("- Active Cells: {}", mesh.num_active_cells());
+    // println!(
+    //     "- RAM usage: ~{}",
+    //     HumanBytes(mesh.estimate_heap_size() as u64)
+    // );
+    // println!("Field Info...");
+    // println!(
+    //     "- RAM usage: ~{}",
+    //     HumanBytes((system.estimate_heap_size() + integrator.estimate_heap_size()) as u64)
+    // );
 
     // for mass in mass_queue.iter() {
     //     println!("Previous Mass: {:.8e}", mass);
     // }
 
     if let Some(info) = info {
-        info.mass = find_mass(&mesh, system.as_slice());
+        info.mass = mass;
     }
 
     Ok(match disperse {

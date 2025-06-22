@@ -32,8 +32,11 @@ impl SearchHistory {
     }
 
     pub fn save_csv(&self, path: &Path) -> eyre::Result<()> {
+        let mut records = self.map.values().collect::<Vec<_>>();
+        records.sort_unstable_by(|&a, &b| a.param.total_cmp(&b.param));
+
         let mut writer = csv::Writer::from_path(path)?;
-        for record in self.map.values() {
+        for record in records {
             writer.serialize(record)?;
         }
         writer.flush()?;
@@ -92,8 +95,11 @@ impl FillHistory {
     }
 
     pub fn save_csv(&self, path: &Path) -> eyre::Result<()> {
+        let mut records = self.map.values().collect::<Vec<_>>();
+        records.sort_unstable_by(|&a, &b| a.param.total_cmp(&b.param));
+
         let mut writer = csv::Writer::from_path(path)?;
-        for record in self.map.values() {
+        for record in records {
             writer.serialize(record)?;
         }
         writer.flush()?;

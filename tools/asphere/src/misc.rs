@@ -70,33 +70,29 @@ pub fn decode_float(value: &str) -> Result<f64, ParseIntError> {
 
 use core::f64;
 
-pub fn logspace(base: f64, start: f64, end: f64, n: usize) -> Logspace {
-    let step = if n > 1 {
-        (end - start) / (n - 1) as f64
-    } else {
-        0.0
-    };
+pub fn log_range(start: f64, end: f64, n: usize) -> LogRange {
+    assert!(n >= 2);
+    assert!(start >= 0.0 && end >= 0.0);
 
-    Logspace {
-        sign: base.signum(),
-        base: base.abs(),
-        start,
-        step,
+    let loga = start.log2() / (n - 1) as f64;
+    let logb = end.log2() / (n - 1) as f64;
+
+    LogRange {
         index: 0,
         len: n,
+        loga,
+        logb,
     }
 }
 
-pub struct Logspace {
-    sign: f64,
-    base: f64,
-    start: f64,
-    step: f64,
-    index: usize,
+pub struct LogRange {
     len: usize,
+    index: usize,
+    loga: f64,
+    logb: f64,
 }
 
-impl Iterator for Logspace {
+impl Iterator for LogRange {
     type Item = f64;
 
     #[inline]
@@ -107,9 +103,8 @@ impl Iterator for Logspace {
             let i = self.index;
             self.index += 1;
 
-            let exponent = self.start + self.step * i as f64;
-
-            Some(self.sign * self.base.powf(exponent))
+            let logx = (self.len - 1 - i) as f64 * self.loga + i as f64 * self.logb;
+            Some(logx.exp2())
         }
     }
 
@@ -121,14 +116,14 @@ impl Iterator for Logspace {
     }
 }
 
-pub fn linspace(start: f64, end: f64, n: usize) -> Linspace {
+pub fn lin_range(start: f64, end: f64, n: usize) -> LinRange {
     let step = if n > 1 {
         (end - start) / (n - 1) as f64
     } else {
         0.0
     };
 
-    Linspace {
+    LinRange {
         start,
         step,
         index: 0,
@@ -136,14 +131,14 @@ pub fn linspace(start: f64, end: f64, n: usize) -> Linspace {
     }
 }
 
-pub struct Linspace {
+pub struct LinRange {
     start: f64,
     step: f64,
-    index: usize,
     len: usize,
+    index: usize,
 }
 
-impl Iterator for Linspace {
+impl Iterator for LinRange {
     type Item = f64;
 
     #[inline]
@@ -163,5 +158,35 @@ impl Iterator for Linspace {
         let n = self.len - self.index;
 
         (n, Some(n))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ranges() {
+        let mut space = log_range(2.0, 128.0, 7);
+        macro_rules! assert_nearly_eq {
+            ($term:expr, $value:expr) => {
+                let tup = ($term, $value);
+                if let (Some(t), Some(v)) = tup {
+                    assert!((t - v as f64).abs() <= 1e-8);
+                } else if let (None, None) = tup {
+                } else {
+                    panic!()
+                }
+            };
+        }
+
+        assert_nearly_eq!(space.next(), Some(2.0));
+        assert_nearly_eq!(space.next(), Some(4.0));
+        assert_nearly_eq!(space.next(), Some(8.0));
+        assert_nearly_eq!(space.next(), Some(16.0));
+        assert_nearly_eq!(space.next(), Some(32.0));
+        assert_nearly_eq!(space.next(), Some(64.0));
+        assert_nearly_eq!(space.next(), Some(128.0));
+        assert_nearly_eq!(space.next(), None::<f64>);
     }
 }

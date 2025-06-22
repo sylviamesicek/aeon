@@ -1,14 +1,13 @@
 name = "sphgauss1"
-directory = "output/crit/sphgauss1/${amplitude}"
+directory = "output/sphgauss1/${amplitude}"
 
 [execution]
-mode = "search"
-directory = "output/crit/sphgauss1/search"
+mode = "fill"
+directory = "output/sphgauss1/fill"
 parameter = "amplitude"
-start = 0.33603529551364775
-end = 0.33603529551382966
-max_depth = 20
-min_error = 1e-14
+start = 0.33603529551382966
+end = 0.33603529623522393
+samples.log = 200
 
 [domain]
 radius = 40.0
@@ -22,7 +21,7 @@ max_memory = 5_000_000_000
 cfl = 0.3
 dissipation = 0.5
 max_proper_time = 7.6
-max_steps = 10_000_000
+max_steps = 1_000_000
 
 [regrid]
 coarsen_error = 1e-10

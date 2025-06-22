@@ -22,3 +22,5 @@ examples/output
 
 # Jupyter Notebooks
 **/.ipynb_checkpoints/
+
+**/.venv/
