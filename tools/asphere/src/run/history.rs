@@ -1,8 +1,7 @@
-use std::{collections::HashMap, path::Path};
-
+use crate::run::evolve::Status;
+use aeon_app::float;
 use serde::{Deserialize, Serialize};
-
-use crate::{misc, run::evolve::Status};
+use std::{collections::HashMap, path::Path};
 
 #[derive(Clone)]
 pub struct SearchHistory {
@@ -49,7 +48,7 @@ impl SearchHistory {
             bits,
             SearchRecord {
                 param: key,
-                encode: misc::encode_float(key),
+                encode: float::encode_float(key),
                 status,
             },
         );

@@ -1,9 +1,9 @@
 use crate::{
     horizon::{self, ApparentHorizonFinder},
-    misc,
     systems::{Constraint, Field, FieldConditions, Fields, Gauge, Metric, ScalarField},
 };
 use aeon::{prelude::*, solver::SolverCallback};
+use aeon_app::file;
 use clap::{Arg, ArgMatches, Command, arg, value_parser};
 use std::{
     convert::Infallible,
@@ -133,7 +133,7 @@ pub fn schwarzschild(matches: &ArgMatches) -> eyre::Result<()> {
         .cloned()
         .ok_or_else(|| eyre::eyre!("failed to specify directory argument"))?;
 
-    let output = misc::abs_or_relative(&output_directory)?;
+    let output = file::abs_or_relative(&output_directory)?;
 
     let mass = matches
         .get_one::<f64>("mass")

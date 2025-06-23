@@ -1,11 +1,15 @@
 [package]
-name = "aeon_config"
-version = "0.2.1"
+name = "aeon_app"
+version = "0.2.2"
 edition = "2021"
 
 [dependencies]
 clap.workspace = true
 chumsky.workspace = true
+indicatif.workspace = true
 serde.workspace = true
 thiserror.workspace = true
 toml.workspace = true
+
+[dev-dependencies]
+rand.workspace = true

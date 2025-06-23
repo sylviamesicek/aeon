@@ -4,10 +4,7 @@ use core::f64;
 use serde::{Deserialize, Serialize};
 use std::convert::Infallible;
 
-// use crate::config::SIGMA;
-
 const KAPPA: f64 = 8.0 * f64::consts::PI;
-// const KAPPA: f64 = 1.0;
 
 /// System for storing all fields necessary for axisymmetric evolution.
 #[derive(Clone, Serialize, Deserialize)]
@@ -59,6 +56,7 @@ pub enum Field {
     Lapse,
 }
 
+/// Boundary conditions for a system of fields.
 #[derive(Clone)]
 pub struct FieldConditions;
 
@@ -88,6 +86,7 @@ impl SystemBoundaryConds<1> for FieldConditions {
     }
 }
 
+/// Symmetric condition across inner boundary.
 #[derive(Clone)]
 pub struct SymCondition;
 
@@ -108,6 +107,7 @@ impl BoundaryConds<1> for SymCondition {
     }
 }
 
+/// AntiSymmetric condition across inner boundary.
 #[derive(Clone)]
 pub struct AntiSymCondition;
 
@@ -128,6 +128,7 @@ impl BoundaryConds<1> for AntiSymCondition {
     }
 }
 
+/// Projection for initial data.
 #[derive(Clone)]
 pub struct InitialData;
 
@@ -157,6 +158,7 @@ impl Function<1> for InitialData {
     }
 }
 
+/// Temporal derivative of the scalar system.
 #[derive(Clone)]
 pub struct TimeDerivs;
 
@@ -216,6 +218,8 @@ impl Function<1> for TimeDerivs {
     }
 }
 
+/// Solves for the metric and lapse given a set of scalar fields. This uses a simple outwards-inwards
+/// ODE solver to compute solutions to the first order elliptic equations used for these two variables.
 pub fn solve_constraints(mesh: &mut Mesh<1>, system: SystemSliceMut<Fields>) {
     let shared = system.into_shared();
     // Unpack individual fields
@@ -245,7 +249,7 @@ pub fn solve_constraints(mesh: &mut Mesh<1>, system: SystemSliceMut<Fields>) {
         debug_assert!(phi.len() == space.num_nodes());
 
         let derivative = |r: f64, a: f64, phi: f64, pi: f64| {
-            if r < 10e-15 || r.is_nan() || r.is_infinite() {
+            if r < 1e-15 || r.is_nan() || r.is_infinite() {
                 return 0.0;
             }
 
@@ -350,6 +354,7 @@ pub fn solve_constraints(mesh: &mut Mesh<1>, system: SystemSliceMut<Fields>) {
     mesh.fill_boundary(Order::<4>, ScalarConditions(SymCondition), lapse.into());
 }
 
+/// Tanh initial data.
 struct TanH {
     amplitude: f64,
     sigma: f64,
@@ -363,6 +368,7 @@ impl Projection<1> for TanH {
     }
 }
 
+/// Comverrts a profile into a scalar field.
 pub fn generate_initial_scalar_field(mesh: &mut Mesh<1>, profile: &ScalarFieldProfile) -> Vec<f64> {
     let mut scalar_field = vec![0.0; mesh.num_nodes()];
 

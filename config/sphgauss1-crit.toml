@@ -1,12 +1,12 @@
 name = "sphgauss1"
-directory = "output/crit/sphgauss1/${amplitude}"
+directory = "output/sphgauss1/${amplitude}"
 
 [execution]
 mode = "search"
-directory = "output/crit/sphgauss1/search"
+directory = "output/sphgauss1/search"
 parameter = "amplitude"
-start = 0.33603529551364775
-end = 0.33603529551382966
+start = 0.3360352955
+end = 0.3360352956
 max_depth = 20
 min_error = 1e-14
 
@@ -14,7 +14,7 @@ min_error = 1e-14
 radius = 40.0
 
 [limits]
-max_levels = 21
+max_levels = 24
 max_nodes = 10_000_000
 max_memory = 5_000_000_000
 
@@ -33,7 +33,7 @@ flag_interval = 20
 [visualize]
 save_initial = false
 save_initial_levels = false
-save_evolve = true
+save_evolve = false
 save_evolve_interval = 0.2
 stride = "per_vertex"
 

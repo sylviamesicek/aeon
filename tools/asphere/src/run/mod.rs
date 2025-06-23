@@ -1,5 +1,5 @@
-use crate::misc;
-use aeon_config::{ConfigVars, Transform as _};
+use aeon_app::config::{ConfigVars, Transform as _};
+use aeon_app::file;
 use clap::{ArgMatches, Command, arg, value_parser};
 use console::style;
 use eyre::{Context as _, eyre};
@@ -123,11 +123,11 @@ pub fn run(matches: &ArgMatches) -> eyre::Result<()> {
                 pstar: f64,
             }
             let info_file = fill_dir.join("info.toml");
-            std::fs::write(
-                info_file,
-                toml::to_string_pretty(&FillInfo {
+            file::export_toml(
+                &info_file,
+                &FillInfo {
                     pstar: fill.pstar.unwrap(),
-                })?,
+                },
             )?;
             // Load history file
             let history_file = fill_dir.join("history.csv");
@@ -252,11 +252,11 @@ fn parse_config(matches: &ArgMatches) -> eyre::Result<(Config, ConfigVars)> {
         .get_one::<PathBuf>("config")
         .cloned()
         .ok_or_else(|| eyre!("failed to specify config argument"))?;
-    let config_path = misc::abs_or_relative(&config_path)?;
+    let config_path = file::abs_or_relative(&config_path)?;
 
     // Parse config file from toml.
     let config =
-        misc::import_from_toml::<Config>(&config_path).context("Failed to parse config file")?;
+        file::import_toml::<Config>(&config_path).context("Failed to parse config file")?;
 
     // Read positional arguments
     let positional_args: Vec<&str> = matches

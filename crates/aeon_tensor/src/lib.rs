@@ -1,7 +1,9 @@
-use std::fmt::Debug;
-use std::{marker::PhantomData, ops};
+//! Crate for manipulating tensors and tensorial quantaties in Rust.
 
 extern crate self as aeon_tensor;
+
+use std::fmt::Debug;
+use std::{marker::PhantomData, ops};
 
 mod compound;
 mod indices;
@@ -12,7 +14,10 @@ pub use compound::{Compound, CompoundIndices, SymSym, SymVec, VecSym, VecSymVec}
 pub use indices::{Gen, GenIndices, Sym, SymIndices, TensorIndex};
 pub use storage::{TensorStorageMut, TensorStorageOwned, TensorStorageRef};
 
+/// Basic tensor object. Depends on dimension (`N`), rank (`R`), Symmetries
+/// (`I`) and storage array (`S`).
 pub struct Tensor<const N: usize, const R: usize, I, S> {
+    /// Internal storage for tensor, simply wraps around `S`.
     storage: S,
     _marker: PhantomData<I>,
 }
@@ -90,11 +95,13 @@ impl<const N: usize, const R: usize, I: TensorIndex<N, R>, S: TensorStorageRef> 
 }
 
 impl<const N: usize, const R: usize, I: TensorIndex<N, R>, S: TensorStorageMut> Tensor<N, R, I, S> {
+    /// Sets all free components of the tensor to v.
     pub fn fill(&mut self, v: f64) {
         let buffer = self.storage.buffer_mut();
         buffer[..I::count()].fill(v);
     }
 
+    /// Sets values of components of the tensor be invoking the given function.
     pub fn fill_from_fn(&mut self, f: impl Fn([usize; R]) -> f64) {
         let buffer = self.storage.buffer_mut();
 
@@ -108,6 +115,7 @@ impl<const N: usize, const R: usize, I: TensorIndex<N, R>, S: TensorStorageMut> 
 }
 
 impl<const N: usize, const R: usize, I: TensorIndex<N, R>, S: TensorStorageRef> Tensor<N, R, I, S> {
+    /// Retrieves the component at the given index of the tensor.
     pub fn get(&self, index: [usize; R]) -> &f64 {
         let offset = I::offset_from_index(index);
         let buffer = self.storage.buffer();
@@ -116,6 +124,8 @@ impl<const N: usize, const R: usize, I: TensorIndex<N, R>, S: TensorStorageRef> 
 }
 
 impl<const N: usize, const R: usize, I: TensorIndex<N, R>, S: TensorStorageMut> Tensor<N, R, I, S> {
+    /// Retrieves a mutable reference to the degree of freedom corresponding to the given index
+    /// of the tensor.
     pub fn get_mut(&mut self, index: [usize; R]) -> &mut f64 {
         let offset = I::offset_from_index(index);
         let buffer = self.storage.buffer_mut();

@@ -1,5 +1,3 @@
-//! Handles applying configuration variables/arguments to a config struct.
-
 use chumsky::{extra::Err, prelude::*, text::digits};
 use std::collections::HashMap;
 use std::fmt::Write as _;

@@ -1,9 +1,7 @@
 use std::path::{Path, PathBuf};
 
-use aeon_config::{ConfigVars, FloatVar, Transform};
+use aeon_app::config::{ConfigVars, FloatVar, Transform};
 use serde::{Deserialize, Serialize};
-
-use crate::misc;
 
 /// What subcommand should be executed.
 #[derive(Serialize, Deserialize, Default, Debug, Clone)]
@@ -66,14 +64,17 @@ impl Search {
     /// Finds absolute value of search directory as provided by the search.directory element
     /// in the toml fiile.
     pub fn search_dir(&self) -> eyre::Result<PathBuf> {
-        misc::abs_or_relative(Path::new(&self.directory))
+        Ok(aeon_app::file::abs_or_relative(Path::new(&self.directory))?)
     }
 }
 
 impl Transform for Search {
     type Output = Self;
 
-    fn transform(&self, vars: &ConfigVars) -> Result<Self::Output, aeon_config::TransformError> {
+    fn transform(
+        &self,
+        vars: &ConfigVars,
+    ) -> Result<Self::Output, aeon_app::config::TransformError> {
         Ok(Self {
             directory: self.directory.transform(vars)?,
             parameter: self.parameter.transform(vars)?,

@@ -1,12 +1,13 @@
 //! Submodule representing default `run` command (that is, `aaxi`) invoked without
 //! any additional subcommands.
-use std::{collections::HashMap, num::ParseFloatError, path::PathBuf};
 
-use crate::{misc, run::status::Status};
-use aeon_config::{ConfigVars, Transform as _};
+use crate::run::status::Status;
+use aeon_app::config::{ConfigVars, Transform as _};
+use aeon_app::{file, float};
 use clap::{Arg, ArgMatches, Command, arg, value_parser};
 use console::{Term, style};
 use eyre::{Context, eyre};
+use std::{collections::HashMap, num::ParseFloatError, path::PathBuf};
 
 mod config;
 mod evolve;
@@ -125,7 +126,7 @@ fn run_search(
     // Setup history file
     let history_file = config
         .search_dir()?
-        .join(format!("{}.csv", misc::encode_float(amplitude)));
+        .join(format!("{}.csv", float::encode_float(amplitude)));
     let mut history = RunHistory::output(&history_file)?;
     // Run simulation, keeping track of history
     let status = run_simulation(&config, &mut history)?;
@@ -193,11 +194,11 @@ fn parse_config(matches: &ArgMatches) -> eyre::Result<(Config, ConfigVars)> {
         .get_one::<PathBuf>("config")
         .cloned()
         .ok_or_else(|| eyre!("failed to specify config argument"))?;
-    let config_path = misc::abs_or_relative(&config_path)?;
+    let config_path = file::abs_or_relative(&config_path)?;
 
     // Parse config file from toml.
     let config =
-        misc::import_from_toml::<Config>(&config_path).context("Failed to parse config file")?;
+        file::import_toml::<Config>(&config_path).context("Failed to parse config file")?;
 
     // Read positional arguments
     let positional_args: Vec<&str> = matches

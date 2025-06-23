@@ -1,5 +1,5 @@
 use aeon::mesh::ExportStride;
-use aeon_config::{ConfigVars, FloatVar, Transform, TransformError, UnsignedVar};
+use aeon_app::config::{ConfigVars, FloatVar, Transform, TransformError, UnsignedVar};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
@@ -29,7 +29,8 @@ pub struct Config {
 impl Config {
     /// Retrieves output_director in absolution form.
     pub fn directory(&self) -> eyre::Result<PathBuf> {
-        crate::misc::abs_or_relative(Path::new(&self.directory))
+        let result = aeon_app::file::abs_or_relative(Path::new(&self.directory))?;
+        Ok(result)
     }
 
     pub fn search_config(&self) -> Option<&Search> {

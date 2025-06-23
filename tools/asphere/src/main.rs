@@ -3,7 +3,6 @@
 
 use clap::Command;
 
-mod misc;
 mod run;
 mod system;
 
@@ -22,7 +21,6 @@ fn main() -> eyre::Result<()> {
         .run_args();
     // Find matches
     let matches = command.get_matches();
-
     // Run default subcommand
     println!("Running default subcommand");
     run::run(&matches)

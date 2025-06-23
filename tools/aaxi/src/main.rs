@@ -2,7 +2,6 @@ use clap::Command;
 
 mod eqs;
 mod horizon;
-mod misc;
 mod run;
 mod schwarzschild;
 mod systems;

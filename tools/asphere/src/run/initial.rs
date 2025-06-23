@@ -1,18 +1,12 @@
 use crate::{
-    misc,
     run::config::Config,
     system::{Fields, InitialData, generate_initial_scalar_field, solve_constraints},
 };
 use aeon::prelude::*;
-use datasize::DataSize as _;
 use eyre::eyre;
-use indicatif::{HumanDuration, MultiProgress, ProgressBar};
-use std::time::Instant;
 
 /// Solve for initial conditions and adaptively refine mesh
 pub fn initial_data(config: &Config) -> eyre::Result<(Mesh<1>, SystemVec<Fields>)> {
-    // Save initial time
-    let start = Instant::now();
     // Get output directory
     let absolute = config.directory()?;
 
@@ -49,28 +43,10 @@ pub fn initial_data(config: &Config) -> eyre::Result<(Mesh<1>, SystemVec<Fields>
     // Create system of fields
     let mut system = SystemVec::new(Fields);
 
-    println!("Relaxing Initial Data");
-
-    // Create progress bars
-    let m = MultiProgress::new();
-    let node_pb = m.add(ProgressBar::new(config.limits.max_nodes as u64));
-    node_pb.set_style(misc::node_style());
-    node_pb.set_prefix("[Nodes] ");
-    let memory_pb = m.add(ProgressBar::new(config.limits.max_memory as u64));
-    memory_pb.set_style(misc::byte_style());
-    memory_pb.set_prefix("[Memory]");
-    let level_pb = m.add(ProgressBar::new(config.limits.max_levels as u64));
-    level_pb.set_style(misc::level_style());
-    level_pb.set_prefix("[Level] ");
-
     // Adaptively solve and refine until we satisfy error requirement
     loop {
         // Resize system to current mesh
         system.resize(mesh.num_nodes());
-
-        node_pb.set_length(mesh.num_nodes() as u64);
-        memory_pb.set_length((mesh.estimate_heap_size() + system.estimate_heap_size()) as u64);
-        level_pb.set_length(mesh.num_levels() as u64);
 
         // Set initial data for scalar field.
         let scalar_field = generate_initial_scalar_field(&mut mesh, &source.profile);
@@ -131,22 +107,6 @@ pub fn initial_data(config: &Config) -> eyre::Result<(Mesh<1>, SystemVec<Fields>
 
         mesh.regrid();
     }
-
-    m.clear()?;
-
-    println!("Finished relaxing in {}", HumanDuration(start.elapsed()),);
-    // println!("Mesh Info...");
-    // println!("- Num Nodes: {}", mesh.num_nodes());
-    // println!("- Active Cells: {}", mesh.num_active_cells());
-    // println!(
-    //     "- RAM usage: ~{}",
-    //     HumanBytes(mesh.estimate_heap_size() as u64)
-    // );
-    // println!("Field Info...");
-    // println!(
-    //     "- RAM usage: ~{}",
-    //     HumanBytes(system.estimate_heap_size() as u64)
-    // );
 
     if config.visualize.save_initial {
         let mut checkpoint = Checkpoint::default();

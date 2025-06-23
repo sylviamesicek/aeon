@@ -10,4 +10,4 @@
 
 module load rust/1.87.0
 cargo build --release
-cargo run --release --package aaxi
+cargo run --release --package asphere -- --config="config/sphgauss1-fill.toml"

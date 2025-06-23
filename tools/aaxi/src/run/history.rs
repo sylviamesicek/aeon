@@ -1,7 +1,7 @@
+use crate::run::status::Status;
+use aeon_app::float;
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, fs::File, path::Path};
-
-use crate::{misc, run::status::Status};
 
 #[derive(Debug)]
 pub struct RunHistory {
@@ -89,7 +89,7 @@ impl SearchHistory {
             bits,
             SearchRecord {
                 param: key,
-                encode: misc::encode_float(key),
+                encode: float::encode_float(key),
                 status,
             },
         );

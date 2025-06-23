@@ -1,9 +1,8 @@
 use crate::eqs::GaugeCondition;
-use crate::misc;
 use crate::run::interval::Interval;
 use crate::run::status::Strategy;
 use aeon::mesh::ExportStride;
-use aeon_config::{ConfigVars, FloatVar, Transform};
+use aeon_app::config::{ConfigVars, FloatVar, Transform};
 use eyre::eyre;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
@@ -81,7 +80,7 @@ impl Config {
 
     /// Retrieves output_director in absolution form.
     pub fn output_dir(&self) -> eyre::Result<PathBuf> {
-        misc::abs_or_relative(Path::new(&self.directory))
+        Ok(aeon_app::file::abs_or_relative(Path::new(&self.directory))?)
     }
 
     pub fn search_dir(&self) -> eyre::Result<PathBuf> {
@@ -355,7 +354,10 @@ impl Source {
 impl Transform for Source {
     type Output = Self;
 
-    fn transform(&self, vars: &ConfigVars) -> Result<Self::Output, aeon_config::TransformError> {
+    fn transform(
+        &self,
+        vars: &ConfigVars,
+    ) -> Result<Self::Output, aeon_app::config::TransformError> {
         Ok(match self {
             Self::Brill { amplitude, sigma } => Self::Brill {
                 amplitude: amplitude.transform(vars)?,

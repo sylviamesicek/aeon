@@ -2,9 +2,9 @@
 [workspace]
 members = ["crates/*", "tools/asphere", "tools/aaxi"]
 default-members = [
+    "crates/aeon_app",
     "crates/aeon_macros",
     "crates/aeon_tensor",
-    "crates/aeon_config",
 
     "tools/aaxi",
     "tools/asphere",
@@ -14,7 +14,7 @@ resolver = "2"
 
 [workspace.dependencies]
 aeon = { path = "." }
-aeon_config = { path = "crates/aeon_config" }
+aeon_app = { path = "crates/aeon_app" }
 aeon_macros = { path = "crates/aeon_macros" }
 aeon_tensor = { path = "crates/aeon_tensor" }
 
@@ -49,7 +49,7 @@ toml = "0.8.19"
 # Main package (`aeon`) configuration.
 [package]
 name = "aeon"
-version = "0.2.1"
+version = "0.2.2"
 edition = "2024"
 exclude = ["crates/", "tools/"]
 readme = "README.md"

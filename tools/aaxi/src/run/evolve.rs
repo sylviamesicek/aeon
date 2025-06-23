@@ -4,7 +4,6 @@ use crate::{
         evolution,
     },
     horizon::{self, ApparentHorizonFinder, HorizonError, HorizonProjection, HorizonStatus},
-    misc,
     run::{
         config::Config,
         history::{RunHistory, RunRecord},
@@ -17,6 +16,7 @@ use aeon::{
     prelude::*,
     solver::{Integrator, Method, SolverCallback},
 };
+use aeon_app::progress;
 use console::style;
 use datasize::DataSize as _;
 use eyre::eyre;
@@ -386,22 +386,22 @@ pub fn evolve_data(
     let m = MultiProgress::new();
     // Max nodes
     let node_pb = m.add(ProgressBar::new(config.limits.max_nodes as u64));
-    node_pb.set_style(misc::node_style());
+    node_pb.set_style(progress::node_style());
     node_pb.enable_steady_tick(Duration::from_millis(100));
     node_pb.set_prefix("[Node]  ");
     // Max levels
     let level_pb = m.add(ProgressBar::new(config.limits.max_levels as u64));
-    level_pb.set_style(misc::level_style());
+    level_pb.set_style(progress::level_style());
     level_pb.enable_steady_tick(Duration::from_millis(100));
     level_pb.set_prefix("[Level] ");
     // Memory usage
     let memory_pb = m.add(ProgressBar::new(config.limits.max_memory as u64));
-    memory_pb.set_style(misc::byte_style());
+    memory_pb.set_style(progress::byte_style());
     memory_pb.enable_steady_tick(Duration::from_millis(100));
     memory_pb.set_prefix("[Memory]");
     // Step spinner
     let step_pb = m.add(ProgressBar::no_length());
-    step_pb.set_style(misc::spinner_style());
+    step_pb.set_style(progress::spinner_style());
     step_pb.enable_steady_tick(Duration::from_millis(100));
     step_pb.set_prefix("[Step] ");
 
@@ -634,7 +634,7 @@ pub fn evolve_data(
             }
 
             let mut horizon_pb = m.add(ProgressBar::new(config.horizon.relax.max_steps as u64));
-            horizon_pb.set_style(misc::node_style());
+            horizon_pb.set_style(progress::node_style());
             horizon_pb.enable_steady_tick(Duration::from_millis(100));
             horizon_pb.set_prefix("- [Horizon Search]");
 

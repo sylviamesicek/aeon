@@ -1,3 +1,5 @@
+//! Module containing common operations on manifolds with metrics.
+
 use crate::{
     Gen, Sym, SymSym, SymVec, Tensor, TensorIndex, TensorStorageOwned, TensorStorageRef, VecSym,
     VecSymVec,
@@ -15,28 +17,34 @@ pub trait Space<const N: usize>: Clone + Copy {
     type SymSymStore: TensorStorageOwned + Default + Clone;
     type SymVecVecStore: TensorStorageOwned + Default + Clone;
 
+    /// Sums over all indices of the given rank.
     fn sum<const R: usize>(f: impl Fn([usize; R]) -> f64) -> f64 {
         let mut result = 0.0;
         <Gen as TensorIndex<N, R>>::for_each_index(|idx| result += f(idx));
         result
     }
 
+    /// Constructs an `N` dimensional vector.
     fn vector(f: impl Fn([usize; 1]) -> f64) -> Tensor<N, 1, Gen, Self::VecStore> {
         Tensor::from_fn(f)
     }
 
+    /// Constructs an `N` dimensional symmetric matrix.
     fn symmetric(f: impl Fn([usize; 2]) -> f64) -> Tensor<N, 2, Sym, Self::SymStore> {
         Tensor::from_fn(f)
     }
 
+    /// Constructs an `N` dimensional general matrix.
     fn matrix(f: impl Fn([usize; 2]) -> f64) -> Tensor<N, 2, Gen, Self::MatStore> {
         Tensor::from_fn(f)
     }
 }
 
+/// Space where all tensors are stored statically and unboxed.
 #[derive(Clone, Copy)]
 pub struct Static;
 
+/// The number of components of an `n` dimensional symmetric matrix.
 const fn sym(n: usize) -> usize {
     n * (n + 1) / 2
 }
@@ -57,6 +65,7 @@ macro_rules! impl_space {
 impl_space!(1);
 impl_space!(2);
 
+/// A metric (along with first and second derivatives) defined on a point on a manifold.
 pub struct Metric<const N: usize, S: Space<N>> {
     pub value: Tensor<N, 2, Sym, S::SymStore>,
     pub derivs: Tensor<N, 3, SymVec, S::SymVecStore>,
@@ -64,6 +73,7 @@ pub struct Metric<const N: usize, S: Space<N>> {
 }
 
 impl<const N: usize, S: Space<N>> Metric<N, S> {
+    /// Constructs a new metric from the constituent components and partial derivatives.
     pub fn new(
         value: Tensor<N, 2, Sym, S::SymStore>,
         derivs: Tensor<N, 3, SymVec, S::SymVecStore>,
@@ -78,6 +88,7 @@ impl<const N: usize, S: Space<N>> Metric<N, S> {
 }
 
 impl<S: Space<2>> Metric<2, S> {
+    /// Computes the determinate of a metric.
     pub fn det(&self) -> MetricDet<2, S> {
         let value = self.value[[0, 0]] * self.value[[1, 1]] - self.value[[1, 0]].powi(2);
         let derivs = Tensor::from_fn(|[a]| {
@@ -89,6 +100,7 @@ impl<S: Space<2>> Metric<2, S> {
         MetricDet { value, derivs }
     }
 
+    /// Computes the inverse of a metric.
     pub fn inv(&self, det: &MetricDet<2, S>) -> MetricInv<2, S> {
         let factor = det.value.recip();
         let factor_derivs: Tensor<2, 1, Gen, S::VecStore> =
@@ -127,17 +139,20 @@ impl<const N: usize, S: Space<N>> Metric<N, S> {
     }
 }
 
+/// The determinate of a metric, along with partial derivatives.
 pub struct MetricDet<const N: usize, S: Space<N>> {
     pub value: f64,
     pub derivs: Tensor<N, 1, Gen, S::VecStore>,
 }
 
+/// The inverse of a metric, along with partial derivatives.
 pub struct MetricInv<const N: usize, S: Space<N>> {
     pub value: Tensor<N, 2, Sym, S::SymStore>,
     pub derivs: Tensor<N, 3, SymVec, S::SymVecStore>,
 }
 
 impl<const N: usize, S: Space<N>> MetricInv<N, S> {
+    /// Computes the trace of a fully covariant 2-tensor.
     pub fn cotrace<I: TensorIndex<N, 2>, St: TensorStorageRef>(
         &self,
         matrix: &Tensor<N, 2, I, St>,
@@ -145,6 +160,7 @@ impl<const N: usize, S: Space<N>> MetricInv<N, S> {
         S::sum(|[a, b]| self.value[[a, b]] * matrix[[a, b]])
     }
 
+    /// Raises the first index of a general r-tensor.
     pub fn raise_first<const R: usize, I: TensorIndex<N, R>, St: TensorStorageOwned + Default>(
         &self,
         tensor: &Tensor<N, R, I, St>,
@@ -164,6 +180,7 @@ impl<const N: usize, S: Space<N>> MetricInv<N, S> {
         })
     }
 
+    /// Raises the last index of a general r-tensor.
     pub fn raise_last<const R: usize, I: TensorIndex<N, R>, St: TensorStorageOwned + Default>(
         &self,
         tensor: &Tensor<N, R, I, St>,
@@ -184,6 +201,8 @@ impl<const N: usize, S: Space<N>> MetricInv<N, S> {
     }
 }
 
+/// Christoffel connection symbols and their derivatives defined on
+/// a general metric.
 pub struct ChristoffelSymbol<const N: usize, S: Space<N>> {
     pub first_kind: Tensor<N, 3, VecSym, S::SymVecStore>,
     pub first_kind_derivs: Tensor<N, 4, VecSymVec, S::SymVecVecStore>,
@@ -192,6 +211,7 @@ pub struct ChristoffelSymbol<const N: usize, S: Space<N>> {
 }
 
 impl<const N: usize, S: Space<N>> ChristoffelSymbol<N, S> {
+    /// Computes the ricci tensor from the christoffel symbols.
     pub fn ricci(&self) -> Tensor<N, 2, Sym, S::SymStore> {
         Tensor::from_eq(|[i, j], [a]| {
             let term1: f64 =
@@ -207,7 +227,8 @@ impl<const N: usize, S: Space<N>> ChristoffelSymbol<N, S> {
 }
 
 impl<const N: usize, S: Space<N>> Metric<N, S> {
-    pub fn chirstoffel_symbol(&self, inv: &MetricInv<N, S>) -> ChristoffelSymbol<N, S> {
+    /// Computes Christoffel_symbols for a given metric.
+    pub fn christoffel_symbol(&self, inv: &MetricInv<N, S>) -> ChristoffelSymbol<N, S> {
         let first_kind = Tensor::from_fn(|[a, b, c]| {
             0.5 * (self.derivs[[a, c, b]] + self.derivs[[b, a, c]] - self.derivs[[b, c, a]])
         });

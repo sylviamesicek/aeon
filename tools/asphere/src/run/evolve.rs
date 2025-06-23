@@ -1,5 +1,4 @@
 use crate::{
-    misc,
     run::config::Config,
     system::{Field, FieldConditions, Fields, TimeDerivs, find_mass},
 };
@@ -7,6 +6,7 @@ use aeon::{
     prelude::*,
     solver::{Integrator, Method},
 };
+use aeon_app::progress;
 use circular_queue::CircularQueue;
 use console::style;
 use datasize::DataSize as _;
@@ -87,24 +87,29 @@ fn evolve_data_with_diagnostics(
     println!("Evolving Data");
 
     // Create progress bars
-    let m = MultiProgress::new();
-    let node_pb = m.add(ProgressBar::new(config.limits.max_nodes as u64));
-    node_pb.set_style(misc::node_style());
-    node_pb.set_prefix("[Nodes] ");
-    node_pb.enable_steady_tick(Duration::from_millis(100));
-    let memory_pb = m.add(ProgressBar::new(config.limits.max_memory as u64));
-    memory_pb.set_style(misc::byte_style());
-    memory_pb.set_prefix("[Memory]");
-    memory_pb.enable_steady_tick(Duration::from_millis(100));
-    let level_pb = m.add(ProgressBar::new(config.limits.max_levels as u64));
-    level_pb.set_style(misc::level_style());
-    level_pb.set_prefix("[Level] ");
-    level_pb.enable_steady_tick(Duration::from_millis(100));
-    // Step spinner
-    let step_pb = m.add(ProgressBar::no_length());
-    step_pb.set_style(misc::spinner_style());
-    step_pb.set_prefix("[Step] ");
-    step_pb.enable_steady_tick(Duration::from_millis(100));
+    #[cfg(feature = "progress")]
+    let (m, node_pb, memory_pb, level_pb, step_pb) = {
+        let m = MultiProgress::new();
+        let node_pb = m.add(ProgressBar::new(config.limits.max_nodes as u64));
+        node_pb.set_style(progress::node_style());
+        node_pb.set_prefix("[Nodes] ");
+        node_pb.enable_steady_tick(Duration::from_millis(100));
+        let memory_pb = m.add(ProgressBar::new(config.limits.max_memory as u64));
+        memory_pb.set_style(progress::byte_style());
+        memory_pb.set_prefix("[Memory]");
+        memory_pb.enable_steady_tick(Duration::from_millis(100));
+        let level_pb = m.add(ProgressBar::new(config.limits.max_levels as u64));
+        level_pb.set_style(progress::level_style());
+        level_pb.set_prefix("[Level] ");
+        level_pb.enable_steady_tick(Duration::from_millis(100));
+        // Step spinner
+        let step_pb = m.add(ProgressBar::no_length());
+        step_pb.set_style(progress::spinner_style());
+        step_pb.set_prefix("[Step] ");
+        step_pb.enable_steady_tick(Duration::from_millis(100));
+        // Output progress bars.
+        (m, node_pb, memory_pb, level_pb, step_pb)
+    };
 
     let mut disperse = true;
 
@@ -144,17 +149,6 @@ fn evolve_data_with_diagnostics(
         let memory_usage = system.estimate_heap_size()
             + integrator.estimate_heap_size()
             + mesh.estimate_heap_size();
-
-        // if mesh.max_level() >= MAX_LEVELS {
-        //     log::trace!(
-        //         "Evolution collapses, Reached maximum allowed level of refinement: {}",
-        //         mesh.max_level()
-        //     );
-        //     return Err(anyhow!(
-        //         "reached maximum allowed level of refinement: {}",
-        //         mesh.max_level()
-        //     ));
-        // }
 
         let h = mesh.min_spacing() * config.evolve.cfl;
 
@@ -255,20 +249,24 @@ fn evolve_data_with_diagnostics(
 
         proper_time += h * alpha;
 
-        node_pb.set_position(mesh.num_nodes() as u64);
-        level_pb.set_position(mesh.num_levels() as u64);
-        memory_pb.set_position(memory_usage as u64);
-        step_pb.inc(1);
-        step_pb.set_message(format!(
-            "Step: {}, Proper Time {:.8}, Mass {:.8e}",
-            step, proper_time, mass
-        ));
+        #[cfg(feature = "progress")]
+        {
+            node_pb.set_position(mesh.num_nodes() as u64);
+            level_pb.set_position(mesh.num_levels() as u64);
+            memory_pb.set_position(memory_usage as u64);
+            step_pb.inc(1);
+            step_pb.set_message(format!(
+                "Step: {}, Proper Time {:.8}, Mass {:.8e}",
+                step, proper_time, mass
+            ));
+        }
+
         mass_queue.push(mass);
 
         let norm = mesh.l2_norm_system(system.as_slice());
 
         if norm.is_nan() || norm >= 1e60 || alpha.is_nan() || alpha <= 0.0 {
-            eprintln!(
+            println!(
                 "Evolution collapses after step: {}, norm: {}, lapse {}",
                 step, norm, alpha
             );

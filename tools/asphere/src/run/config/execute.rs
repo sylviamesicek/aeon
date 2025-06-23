@@ -1,5 +1,5 @@
-use crate::misc;
-use aeon_config::{ConfigVars, FloatVar, Transform, TransformError};
+use aeon_app::config::{ConfigVars, FloatVar, Transform, TransformError};
+use aeon_app::{file, float};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
@@ -72,7 +72,8 @@ impl Search {
     /// Finds absolute value of search directory as provided by the search.directory element
     /// in the toml fiile.
     pub fn search_dir(&self) -> eyre::Result<PathBuf> {
-        misc::abs_or_relative(Path::new(&self.directory))
+        let result = file::abs_or_relative(Path::new(&self.directory))?;
+        Ok(result)
     }
 }
 
@@ -105,7 +106,7 @@ impl Fill {
     /// Finds absolute value of search directory as provided by the search.directory element
     /// in the toml fiile.
     pub fn fill_dir(&self) -> eyre::Result<PathBuf> {
-        misc::abs_or_relative(Path::new(&self.directory))
+        Ok(file::abs_or_relative(Path::new(&self.directory))?)
     }
 
     pub fn try_for_each<E, F: FnMut(f64) -> Result<(), E>>(&self, mut f: F) -> Result<(), E> {
@@ -116,12 +117,12 @@ impl Fill {
         match self.samples {
             Samples::Log { log } => {
                 assert!(start > 0.0 && end > 0.0);
-                for amplitude in misc::log_range(start, end, log) {
+                for amplitude in float::log_range(start, end, log) {
                     f(pstar + amplitude)?
                 }
             }
             Samples::Linear { linear } => {
-                for amplitude in misc::lin_range(start, end, linear) {
+                for amplitude in float::lin_range(start, end, linear) {
                     f(pstar + amplitude)?
                 }
             }

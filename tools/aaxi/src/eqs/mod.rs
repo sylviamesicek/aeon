@@ -46,7 +46,7 @@ impl Manifold {
     fn new(metric: Metric) -> Self {
         let det = metric.det();
         let inv = metric.inv(&det);
-        let symbols = metric.chirstoffel_symbol(&inv);
+        let symbols = metric.christoffel_symbol(&inv);
         Self {
             metric,
             inv,

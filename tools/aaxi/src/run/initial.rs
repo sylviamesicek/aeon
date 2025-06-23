@@ -1,5 +1,4 @@
 use crate::eqs;
-use crate::misc;
 use crate::run::config::{Config, Initial, Source};
 use crate::systems::{Constraint, Field, FieldConditions, Fields, Gauge, Metric, ScalarField};
 use aeon::prelude::*;
@@ -9,6 +8,7 @@ use aeon::{
     solver::{HyperRelaxSolver, SolverCallback},
     system::System,
 };
+use aeon_app::progress;
 use console::style;
 use datasize::DataSize as _;
 use eyre::eyre;
@@ -555,7 +555,7 @@ pub fn initial_data(config: &Config) -> eyre::Result<(Mesh<2>, SystemVec<Fields>
 
     loop {
         let pb = m.add(ProgressBar::no_length());
-        pb.set_style(misc::spinner_style());
+        pb.set_style(progress::spinner_style());
         pb.set_prefix(format!("[Level {}]", mesh.num_levels()));
         pb.enable_steady_tick(Duration::from_millis(100));
 
