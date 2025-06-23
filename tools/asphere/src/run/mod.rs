@@ -117,11 +117,23 @@ pub fn run(matches: &ArgMatches) -> eyre::Result<()> {
             // As well as search directory
             let fill_dir = fill.fill_dir()?;
             std::fs::create_dir_all(&fill_dir)?;
+            // Write info into fill directory
+            #[derive(serde::Serialize)]
+            struct FillInfo {
+                pstar: f64,
+            }
+            let info_file = fill_dir.join("info.toml");
+            std::fs::write(
+                info_file,
+                toml::to_string_pretty(&FillInfo {
+                    pstar: fill.pstar.unwrap(),
+                })?,
+            )?;
             // Load history file
             let history_file = fill_dir.join("history.csv");
             let mut history =
                 FillHistory::load_csv(&history_file).unwrap_or_else(|_| FillHistory::new());
-
+            // Run fill
             fill.try_for_each(|amp| -> eyre::Result<()> {
                 run_fill(&mut history, &config, &vars, amp)?;
                 // Cache history

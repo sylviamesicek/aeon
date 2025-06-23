@@ -1,0 +1,26 @@
+using CSV
+using DataFrames
+using LaTeXStrings
+using Plots
+using TOML
+
+function massfill(historyfile::String, infofile::String)::AbstractPlot
+    # Load infofile
+    info = TOML.parsefile(infofile)
+    # Get pstar
+    pstar = Float64(info["pstar"])
+    # As well as dataframe
+    df = DataFrame(CSV.File(historyfile))
+    # Load parameters and masses
+    param::Vector{Float64} = df[:, :param]
+    mass::Vector{Float64} = df[:, :mass]
+    # Plot resulting data
+    sc = scatter(param .- pstar, mass, label="Final Mass", markershape=:cross, markersize=3)
+    plot!(sc, xscale=:log10, yscale=:log10, minorgrid=true)
+    title!(sc, "Mass Scaling Relation")
+    xlabel!(sc, L"|p - p_*|")
+    ylabel!(sc, "Mass [Natural Units]")
+    xlims!(sc, 10^(-12), 10^(-9))
+    ylims!(sc, 10^(-3.75), 10^(-3.25))
+    return sc
+end

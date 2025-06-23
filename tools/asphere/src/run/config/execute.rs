@@ -95,6 +95,7 @@ impl Transform for Search {
 pub struct Fill {
     pub directory: String,
     pub parameter: String,
+    pub pstar: FloatVar,
     pub start: FloatVar,
     pub end: FloatVar,
     pub samples: Samples,
@@ -108,20 +109,20 @@ impl Fill {
     }
 
     pub fn try_for_each<E, F: FnMut(f64) -> Result<(), E>>(&self, mut f: F) -> Result<(), E> {
+        let pstar = self.pstar.unwrap();
         let start = self.start.unwrap();
         let end = self.end.unwrap();
 
         match self.samples {
             Samples::Log { log } => {
                 assert!(start > 0.0 && end > 0.0);
-
                 for amplitude in misc::log_range(start, end, log) {
-                    f(amplitude)?
+                    f(pstar + amplitude)?
                 }
             }
             Samples::Linear { linear } => {
                 for amplitude in misc::lin_range(start, end, linear) {
-                    f(amplitude)?
+                    f(pstar + amplitude)?
                 }
             }
         }
@@ -138,6 +139,7 @@ impl Transform for Fill {
             directory: self.directory.clone(),
             parameter: self.parameter.clone(),
             samples: self.samples.clone(),
+            pstar: self.pstar.transform(vars)?,
             start: self.start.transform(vars)?,
             end: self.end.transform(vars)?,
         })

@@ -1,6 +1,5 @@
 using LinearAlgebra
 
-
 function vandermonde(grid::Vector{Rational{Int128}})::Matrix{Rational{Int128}}
     N = length(grid)
     return [

@@ -5,8 +5,9 @@ directory = "output/sphgauss1/${amplitude}"
 mode = "fill"
 directory = "output/sphgauss1/fill"
 parameter = "amplitude"
-start = 0.33603529551382966
-end = 0.33603529623522393
+pstar = 0.33603529551382966
+start = 1e-15
+end = 1e-8
 samples.log = 200
 
 [domain]
