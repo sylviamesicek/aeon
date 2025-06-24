@@ -1,3 +1,6 @@
+# A script for computing stencils for various operations using rational arithmatic (to minimize
+# floating point round-off).
+
 using LinearAlgebra
 
 function vandermonde(grid::Vector{Rational{Int128}})::Matrix{Rational{Int128}}

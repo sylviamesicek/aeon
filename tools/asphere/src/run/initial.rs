@@ -18,8 +18,6 @@ pub fn initial_data(config: &Config) -> eyre::Result<(Mesh<1>, SystemVec<Fields>
     // Retrieve primary source
     let source = config.sources[0].clone();
 
-    // Create output dir.
-    std::fs::create_dir_all(&absolute)?;
     // Path for initial visualization data.
     if config.visualize.save_initial || config.visualize.save_initial_levels {
         std::fs::create_dir_all(&absolute.join("initial"))?;

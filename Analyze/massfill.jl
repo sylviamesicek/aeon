@@ -1,3 +1,5 @@
+# A simple script for plotting the result of a massfill operation.
+
 using CSV
 using DataFrames
 using LaTeXStrings
@@ -20,7 +22,7 @@ function massfill(historyfile::String, infofile::String)::AbstractPlot
     title!(sc, "Mass Scaling Relation")
     xlabel!(sc, L"|p - p_*|")
     ylabel!(sc, "Mass [Natural Units]")
-    xlims!(sc, 10^(-12), 10^(-9))
-    ylims!(sc, 10^(-3.75), 10^(-3.25))
+    xlims!(sc, 10^(-13), 10^(-11))
+    ylims!(sc, 10^(-4), 10^(-3.5))
     return sc
 end

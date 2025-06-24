@@ -2,7 +2,7 @@ use crate::eqs::GaugeCondition;
 use crate::run::interval::Interval;
 use crate::run::status::Strategy;
 use aeon::mesh::ExportStride;
-use aeon_app::config::{ConfigVars, FloatVar, Transform};
+use aeon_app::config::{VarDefs, FloatVar, Transform};
 use eyre::eyre;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
@@ -55,7 +55,7 @@ pub struct Config {
 
 impl Config {
     /// Applies variable transformation to `Config`.
-    pub fn transform(self, vars: &ConfigVars) -> eyre::Result<Self> {
+    pub fn transform(self, vars: &VarDefs) -> eyre::Result<Self> {
         Ok(Self {
             name: self.name.transform(vars)?,
             directory: self.directory.transform(vars)?,
@@ -356,7 +356,7 @@ impl Transform for Source {
 
     fn transform(
         &self,
-        vars: &ConfigVars,
+        vars: &VarDefs,
     ) -> Result<Self::Output, aeon_app::config::TransformError> {
         Ok(match self {
             Self::Brill { amplitude, sigma } => Self::Brill {

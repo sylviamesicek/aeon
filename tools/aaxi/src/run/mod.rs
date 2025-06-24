@@ -2,12 +2,12 @@
 //! any additional subcommands.
 
 use crate::run::status::Status;
-use aeon_app::config::{ConfigVars, Transform as _};
+use aeon_app::config::{Transform as _, VarDef, VarDefs};
 use aeon_app::{file, float};
-use clap::{Arg, ArgMatches, Command, arg, value_parser};
+use clap::{Arg, ArgAction, ArgMatches, Command, arg, value_parser};
 use console::{Term, style};
 use eyre::{Context, eyre};
-use std::{collections::HashMap, num::ParseFloatError, path::PathBuf};
+use std::path::PathBuf;
 
 mod config;
 mod evolve;
@@ -109,7 +109,7 @@ pub fn run(matches: &ArgMatches) -> eyre::Result<()> {
 fn run_search(
     cache: &mut SearchHistory,
     config: &Config,
-    vars: &ConfigVars,
+    vars: &VarDefs,
     amplitude: f64,
 ) -> eyre::Result<Status> {
     if let Some(status) = cache.status(amplitude) {
@@ -120,7 +120,8 @@ fn run_search(
 
     let mut vars = vars.clone();
     // Set the parameter variable to the given amplitude
-    vars.named.insert(search.parameter.clone(), amplitude);
+    vars.defs
+        .insert(search.parameter.clone(), amplitude.to_string());
     // Transform config appropriately
     let config = config.clone().transform(&vars)?;
     // Setup history file
@@ -188,7 +189,7 @@ fn run_simulation(config: &Config, history: &mut RunHistory) -> eyre::Result<Sta
 // Helpers **********************
 // ******************************
 
-fn parse_config(matches: &ArgMatches) -> eyre::Result<(Config, ConfigVars)> {
+fn parse_config(matches: &ArgMatches) -> eyre::Result<(Config, VarDefs)> {
     // Compute config path.
     let config_path = matches
         .get_one::<PathBuf>("config")
@@ -200,21 +201,13 @@ fn parse_config(matches: &ArgMatches) -> eyre::Result<(Config, ConfigVars)> {
     let config =
         file::import_toml::<Config>(&config_path).context("Failed to parse config file")?;
 
-    // Read positional arguments
-    let positional_args: Vec<&str> = matches
-        .get_many::<String>("positional")
-        .into_iter()
-        // .ok_or(eyre::eyre!("Unable to parse positional arguments"))?
-        .flat_map(|v| v.into_iter().map(|s| s.as_str()))
-        .collect();
-
-    let vars = ConfigVars {
-        positional: positional_args
-            .into_iter()
-            .map(|sbuf| sbuf.parse::<f64>())
-            .collect::<Result<Vec<f64>, ParseFloatError>>()?,
-        named: HashMap::new(),
-    };
+    // Collection of cli invokation variable definitions.
+    let mut vars = VarDefs::new();
+    if let Some(defines) = matches.get_many::<String>("define") {
+        for def in defines {
+            vars.insert(VarDef::parse(def)?);
+        }
+    }
 
     Ok((config, vars))
 }
@@ -239,9 +232,11 @@ impl CommandExt for Command {
                 .required(false),
         )
         .arg(
-            arg!(<positional> ... "positional arguments referenced in config file")
-                .trailing_var_arg(true)
-                .required(false),
+            Arg::new("define")
+                .long("define")
+                .short('D')
+                .help("Define variable to be referenced in config files via ${} syntax")
+                .action(ArgAction::Append),
         )
     }
 }

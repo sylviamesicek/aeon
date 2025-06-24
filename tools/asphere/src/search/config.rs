@@ -1,50 +1,24 @@
-use std::path::{Path, PathBuf};
-
-use aeon_app::config::{FloatVar, Transform, VarDefs};
+use aeon_app::config::{FloatVar, Transform, TransformError, VarDefs};
+use aeon_app::file;
 use serde::{Deserialize, Serialize};
-
-/// What subcommand should be executed.
-#[derive(Serialize, Deserialize, Default, Debug, Clone)]
-#[serde(tag = "mode")]
-pub enum Execution {
-    #[serde(rename = "run")]
-    #[default]
-    Run,
-    #[serde(rename = "search")]
-    Search {
-        #[serde(flatten)]
-        search: Search,
-    },
-}
-
-impl Execution {
-    /// Performs variable transformation on `Execution`.
-    pub fn transform(self, vars: &VarDefs) -> eyre::Result<Self> {
-        Ok(match self {
-            Execution::Run => Self::Run,
-            Execution::Search { search } => Execution::Search {
-                search: search.transform(vars)?,
-            },
-        })
-    }
-}
+use std::path::{Path, PathBuf};
 
 /// Search subcommand.
 #[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct Search {
+pub struct Config {
     pub directory: String,
     pub parameter: String,
     /// Start of range to search
-    start: FloatVar,
+    pub start: FloatVar,
     /// End of range to search
-    end: FloatVar,
+    pub end: FloatVar,
     /// How many levels of binary search before we quit?
     pub max_depth: usize,
     /// Finish search when end-start < min_error
     pub min_error: f64,
 }
 
-impl Search {
+impl Config {
     /// Gets start of search range.
     pub fn start(&self) -> f64 {
         let FloatVar::Inline(start) = self.start else {
@@ -64,14 +38,15 @@ impl Search {
     /// Finds absolute value of search directory as provided by the search.directory element
     /// in the toml fiile.
     pub fn search_dir(&self) -> eyre::Result<PathBuf> {
-        Ok(aeon_app::file::abs_or_relative(Path::new(&self.directory))?)
+        let result = file::abs_or_relative(Path::new(&self.directory))?;
+        Ok(result)
     }
 }
 
-impl Transform for Search {
+impl Transform for Config {
     type Output = Self;
 
-    fn transform(&self, vars: &VarDefs) -> Result<Self::Output, aeon_app::config::TransformError> {
+    fn transform(&self, vars: &VarDefs) -> Result<Self::Output, TransformError> {
         Ok(Self {
             directory: self.directory.transform(vars)?,
             parameter: self.parameter.transform(vars)?,

@@ -254,6 +254,7 @@ impl<const N: usize, S: Space<N>> Metric<N, S> {
     }
 }
 
+/// A C1 scalar field at a single point.
 #[derive(Debug)]
 pub struct ScalarC1<const N: usize, S: Space<N>> {
     pub value: f64,
@@ -297,6 +298,7 @@ impl<const N: usize, S: Space<N>> Clone for ScalarC1<N, S> {
     }
 }
 
+/// A C2 scalar field at a single point.
 pub struct ScalarC2<const N: usize, S: Space<N>> {
     pub value: f64,
     pub derivs: Tensor<N, 1, Gen, S::VecStore>,
@@ -341,6 +343,7 @@ impl<const N: usize, S: Space<N>> Clone for ScalarC2<N, S> {
     }
 }
 
+/// A C1 vector field at a single point.
 pub struct VectorC1<const N: usize, S: Space<N>> {
     pub value: Tensor<N, 1, Gen, S::VecStore>,
     pub derivs: Tensor<N, 2, Gen, S::MatStore>,
@@ -382,6 +385,7 @@ impl<const N: usize, S: Space<N>> Clone for VectorC1<N, S> {
     }
 }
 
+/// A C1 symmetric matrix field at a single point.
 pub struct SymmetricC1<const N: usize, S: Space<N>> {
     pub value: Tensor<N, 2, Sym, S::SymStore>,
     pub derivs: Tensor<N, 3, SymVec, S::SymVecStore>,

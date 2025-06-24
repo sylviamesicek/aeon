@@ -1,11 +1,11 @@
 name = "sphgauss1"
-directory = "output/sphgauss1/$0"
+directory = "output/sphgauss1/${amplitude}"
 
 [domain]
 radius = 40.0
 
 [limits]
-max_levels = 21
+max_levels = 22
 max_nodes = 10_000_000
 max_memory = 5_000_000_000
 
@@ -13,7 +13,7 @@ max_memory = 5_000_000_000
 cfl = 0.3
 dissipation = 0.5
 max_proper_time = 7.6
-max_steps = 800_000
+max_steps = 10_000_000
 
 [regrid]
 coarsen_error = 1e-10
@@ -36,6 +36,6 @@ serial_id = 0
 [[sources]]
 mass = 0.0
 profile.type = "gaussian"
-profile.amplitude = "$0"
+profile.amplitude = "${amplitude}"
 profile.sigma = 5.35
 profile.center = 0.0

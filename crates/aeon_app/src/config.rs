@@ -1,27 +1,68 @@
-use chumsky::{extra::Err, prelude::*, text::digits};
+use chumsky::{extra::Err, prelude::*};
 use std::collections::HashMap;
 use std::fmt::Write as _;
 use thiserror::Error;
 
-/// Arguments in scope when transforming config strings.
-#[derive(Clone, Debug)]
-pub struct ConfigVars {
-    /// Positional arguments passed into cli invokation.
-    pub positional: Vec<f64>,
-    /// Named arguments provided by search.
-    pub named: HashMap<String, f64>,
+/// Simple error used in chumsky parsers.
+type SimpleError<'a> = Err<Simple<'a, char>>;
+
+/// Error while parsing and transforming strings in a struct.
+#[derive(Error, Debug, PartialEq, Eq)]
+pub enum VarDefParseError {
+    #[error("parsing variable definition threw error: {0}")]
+    ParseFailed(String),
 }
 
-impl ConfigVars {
-    pub fn new() -> Self {
-        Self {
-            positional: Vec::new(),
-            named: HashMap::new(),
-        }
+/// A variable definition of the form "<KEY>=<VALUE>".
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct VarDef<'a> {
+    /// Name of the variable (referenced via ${<KEY>}).
+    pub key: &'a str,
+    /// Value of the variable (replaces ${<KEY>} on parse).
+    pub value: &'a str,
+}
+
+impl<'a> VarDef<'a> {
+    pub fn parse(value: &'a str) -> Result<Self, VarDefParseError> {
+        def_var_parser().parse(value).into_result().map_err(|err| {
+            assert!(err.len() > 0);
+            return VarDefParseError::ParseFailed(err[0].to_string());
+        })
     }
 }
 
-impl Default for ConfigVars {
+/// Parses a string into a variable definition.
+fn def_var_parser<'a>() -> impl Parser<'a, &'a str, VarDef<'a>, SimpleError<'a>> {
+    let string = none_of("$=").repeated().at_least(1).to_slice();
+
+    string
+        .then_ignore(one_of('='))
+        .then(string)
+        .map(|(a, b)| VarDef { key: a, value: b })
+}
+
+/// Collection of variables defined intrinsicly or via `-Dvar=value`.
+#[derive(Clone, Debug)]
+pub struct VarDefs {
+    /// Named arguments.
+    pub defs: HashMap<String, String>,
+}
+
+impl VarDefs {
+    /// Constructs a new empty set of var definitions.
+    pub fn new() -> Self {
+        Self {
+            defs: HashMap::new(),
+        }
+    }
+
+    /// Registers a new var definition.
+    pub fn insert(&mut self, def: VarDef) {
+        self.defs.insert(def.key.to_string(), def.value.to_string());
+    }
+}
+
+impl Default for VarDefs {
     fn default() -> Self {
         Self::new()
     }
@@ -30,11 +71,9 @@ impl Default for ConfigVars {
 /// Error while parsing and transforming strings in a struct.
 #[derive(Error, Debug)]
 pub enum TransformError {
-    #[error("positional argument {0} out of bounds for arguments length {1}")]
-    PositionalOutOfBounds(usize, usize),
-    #[error("named argument {0} does not exist")]
-    NameDoesNotExist(String),
-    #[error("failed to parse config string as sequence of tokens: {0}")]
+    #[error("key {0} is not defined")]
+    KeyDoesNotExist(String),
+    #[error("parsing string failed with: {0}")]
     TokenParseFailed(String),
     #[error("string format failed")]
     FormatFailed(#[from] std::fmt::Error),
@@ -50,19 +89,17 @@ pub trait Transform {
     /// Transforms a given input by parsing and substituting any patterns of the form
     /// "$digit", "${number}", "${string}". The former two map to positional arguments
     /// and the latter references named arguments.
-    fn transform(&self, vars: &ConfigVars) -> Result<Self::Output, TransformError>;
+    fn transform(&self, vars: &VarDefs) -> Result<Self::Output, TransformError>;
 }
 
 impl Transform for str {
     type Output = String;
 
-    fn transform(&self, vars: &ConfigVars) -> Result<Self::Output, TransformError> {
+    fn transform(&self, vars: &VarDefs) -> Result<Self::Output, TransformError> {
         let parser = token_stream_parser();
-        // TODO properly propogate errors
         let tokens = parser.parse(self).into_result().map_err(|err| {
             assert!(err.len() > 0);
-
-            return TransformError::TokenParseFailed(self.to_string());
+            return TransformError::TokenParseFailed(err[0].to_string());
         })?;
 
         let mut result = String::new();
@@ -70,18 +107,9 @@ impl Transform for str {
         for token in tokens {
             match token {
                 Token::String(string) => result.push_str(string),
-                Token::Positional(idx) => {
-                    let Some(name) = vars.positional.get(idx) else {
-                        return Err(TransformError::PositionalOutOfBounds(
-                            idx,
-                            vars.positional.len(),
-                        ));
-                    };
-                    write!(result, "{}", name)?;
-                }
-                Token::Named(key) => {
-                    let Some(name) = vars.named.get(key) else {
-                        return Err(TransformError::NameDoesNotExist(key.to_string()));
+                Token::Ref(key) => {
+                    let Some(name) = vars.defs.get(key) else {
+                        return Err(TransformError::KeyDoesNotExist(key.to_string()));
                     };
                     write!(result, "{}", name)?;
                 }
@@ -95,7 +123,7 @@ impl Transform for str {
 impl<T: Transform> Transform for Vec<T> {
     type Output = Vec<T::Output>;
 
-    fn transform(&self, vars: &ConfigVars) -> Result<Vec<T::Output>, TransformError> {
+    fn transform(&self, vars: &VarDefs) -> Result<Vec<T::Output>, TransformError> {
         self.iter()
             .map(|source| {
                 let v = source.transform(vars);
@@ -140,7 +168,7 @@ impl From<f64> for FloatVar {
 impl Transform for FloatVar {
     type Output = Self;
 
-    fn transform(&self, vars: &ConfigVars) -> Result<Self::Output, TransformError> {
+    fn transform(&self, vars: &VarDefs) -> Result<Self::Output, TransformError> {
         Ok(FloatVar::Inline(match self {
             FloatVar::Inline(v) => *v,
             FloatVar::Script(pos) => pos.transform(vars)?.parse::<f64>()?,
@@ -183,7 +211,7 @@ impl From<usize> for UnsignedVar {
 impl Transform for UnsignedVar {
     type Output = Self;
 
-    fn transform(&self, vars: &ConfigVars) -> Result<Self::Output, TransformError> {
+    fn transform(&self, vars: &VarDefs) -> Result<Self::Output, TransformError> {
         Ok(UnsignedVar::Inline(match self {
             UnsignedVar::Inline(v) => *v,
             UnsignedVar::Script(pos) => pos.transform(vars)?.parse::<usize>()?,
@@ -197,30 +225,12 @@ impl Transform for UnsignedVar {
 enum Token<'src> {
     /// A unmatched string sequence without any `$` characters.
     String(&'src str),
-    /// A positional argument of the form `$0` (only allowed if single digit) or `${0}`.
-    Positional(usize),
-    /// Named argument of the form `${name}`.
-    Named(&'src str),
+    /// Reference to variable of the form `${name}`.
+    Ref(&'src str),
 }
-
-type SimpleError<'a> = Err<Simple<'a, char>>;
 
 /// Parser of a string into a token.
 fn token_parser<'a>() -> impl Parser<'a, &'a str, Token<'a>, SimpleError<'a>> {
-    let single_digit = one_of::<_, &str, _>("0123456789").map(|r| {
-        let mut buffer = [0; 4];
-        let slice = r.encode_utf8(&mut buffer);
-        usize::from_str_radix(slice, 10).unwrap()
-    });
-
-    let singledigit_positional = just('$')
-        .ignore_then(single_digit)
-        .map(|v| Token::Positional(v));
-
-    let multidigit_positional = just('$')
-        .ignore_then(digits(10).to_slice().delimited_by(just('{'), just('}')))
-        .map(|r| Token::Positional(usize::from_str_radix(r, 10).unwrap()));
-
     let multidigit_named = just('$')
         .ignore_then(
             none_of('}')
@@ -228,7 +238,7 @@ fn token_parser<'a>() -> impl Parser<'a, &'a str, Token<'a>, SimpleError<'a>> {
                 .to_slice()
                 .delimited_by(just('{'), just('}')),
         )
-        .map(|r| Token::Named(r));
+        .map(|r| Token::Ref(r));
 
     // let string = none_of('$').repeated().to_slice().map(|r| Token::String(r));
 
@@ -238,12 +248,7 @@ fn token_parser<'a>() -> impl Parser<'a, &'a str, Token<'a>, SimpleError<'a>> {
         .to_slice()
         .map(|r| Token::String(r));
 
-    let token = choice((
-        singledigit_positional,
-        multidigit_positional,
-        multidigit_named,
-        misc_string,
-    ));
+    let token = choice((multidigit_named, misc_string));
 
     token
 }
@@ -262,17 +267,35 @@ mod tests {
     use super::*;
 
     #[test]
+    fn var_def_parsing() {
+        assert_eq!(
+            VarDef::parse("key=value"),
+            Ok(VarDef {
+                key: "key",
+                value: "value"
+            })
+        );
+        assert_eq!(
+            VarDef::parse(" 1@e^ ^9( = DFFS"),
+            Ok(VarDef {
+                key: " 1@e^ ^9( ",
+                value: " DFFS"
+            })
+        );
+
+        assert!(VarDef::parse("$$=value").is_err());
+        assert!(VarDef::parse("=value").is_err());
+        assert!(VarDef::parse("=").is_err());
+    }
+
+    #[test]
     fn token_parsing() {
         let token = token_parser();
 
-        assert_eq!(token.parse("$3").into_result(), Ok(Token::Positional(3)));
-        assert_eq!(
-            token.parse("${100}").into_result(),
-            Ok(Token::Positional(100))
-        );
+        assert_eq!(token.parse("${100}").into_result(), Ok(Token::Ref("100")));
         assert_eq!(
             token.parse("${1hello}").into_result(),
-            Ok(Token::Named("1hello"))
+            Ok(Token::Ref("1hello"))
         );
         assert_eq!(
             token.parse("Hello").into_result(),
@@ -285,43 +308,32 @@ mod tests {
         let tokens = token_stream_parser();
 
         assert_eq!(
-            tokens.parse("hello$1${name}").into_result(),
+            tokens.parse("hello${1}${name}").into_result(),
             Ok(vec![
                 Token::String("hello"),
-                Token::Positional(1),
-                Token::Named("name")
+                Token::Ref("1"),
+                Token::Ref("name")
             ])
         );
         assert_eq!(
-            tokens.parse("$100na${}").into_result(),
-            Ok(vec![
-                Token::Positional(1),
-                Token::String("00na"),
-                Token::Named("")
-            ])
+            tokens.parse("${1}00na${}").into_result(),
+            Ok(vec![Token::Ref("1"), Token::String("00na"), Token::Ref("")])
         );
     }
 
     #[test]
     fn basic_transform() {
         // Set up context
-        let mut positional = Vec::new();
-        positional.push(0.0);
-        positional.push(1.1);
-        positional.push(2.2);
+
         let mut named = HashMap::new();
-        named.insert("arg1".to_string(), 10.0);
-        named.insert("0h@!!".to_string(), 11.0);
-        let ctx = ConfigVars { positional, named };
+        named.insert("arg1".to_string(), "10.0".to_string());
+        named.insert("0h@!!".to_string(), "11.0".to_string());
+        let ctx = VarDefs { defs: named };
 
         assert_eq!(
             "some/${arg1}".transform(&ctx).unwrap(),
             "some/10".to_string()
         );
-
-        assert_eq!(
-            "$0$1${02}${0h@!!}".transform(&ctx).unwrap(),
-            "01.12.211".to_string()
-        );
+        assert_eq!("${0h@!!}".transform(&ctx).unwrap(), "11".to_string());
     }
 }

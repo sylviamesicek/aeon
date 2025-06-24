@@ -4,11 +4,15 @@ use std::path::{Path, PathBuf};
 /// Returns the path if it is absolute, otherwise transform it into a
 /// absolute path by appending it to the current working directory.
 pub fn abs_or_relative(path: &Path) -> std::io::Result<PathBuf> {
+    abs_or_relative_to(&std::env::current_dir()?, path)
+}
+
+pub fn abs_or_relative_to(dir: &Path, path: &Path) -> std::io::Result<PathBuf> {
     if path.is_absolute() {
         return Ok(path.to_path_buf());
     }
 
-    Ok(std::env::current_dir()?.join(path))
+    Ok(dir.join(path))
 }
 
 /// Deserialize data from toml file.

@@ -1,20 +1,14 @@
 use aeon::mesh::ExportStride;
-use aeon_app::config::{ConfigVars, FloatVar, Transform, TransformError, UnsignedVar};
+use aeon_app::config::{FloatVar, Transform, TransformError, UnsignedVar, VarDefs};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
-mod execute;
-
-pub use execute::*;
-
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct Config {
     #[serde(default = "default_name")]
     pub name: String,
     #[serde(default = "default_directory")]
     pub directory: String,
-    #[serde(default)]
-    pub execution: Execution,
 
     pub domain: Domain,
     pub limits: Limits,
@@ -32,30 +26,15 @@ impl Config {
         let result = aeon_app::file::abs_or_relative(Path::new(&self.directory))?;
         Ok(result)
     }
-
-    pub fn search_config(&self) -> Option<&Search> {
-        match &self.execution {
-            Execution::Search { search } => Some(search),
-            _ => None,
-        }
-    }
-
-    pub fn fill_config(&self) -> Option<&Fill> {
-        match &self.execution {
-            Execution::Fill { fill } => Some(fill),
-            _ => None,
-        }
-    }
 }
 
 impl Transform for Config {
     type Output = Self;
 
-    fn transform(&self, vars: &ConfigVars) -> Result<Self::Output, TransformError> {
+    fn transform(&self, vars: &VarDefs) -> Result<Self::Output, TransformError> {
         Ok(Self {
             name: self.name.transform(vars)?,
             directory: self.directory.transform(vars)?,
-            execution: self.execution.transform(vars)?,
             domain: self.domain.clone(),
             limits: self.limits.clone(),
             evolve: self.evolve.clone(),
@@ -135,7 +114,7 @@ pub struct Diagnostic {
 impl Transform for Diagnostic {
     type Output = Diagnostic;
 
-    fn transform(&self, vars: &ConfigVars) -> Result<Self::Output, TransformError> {
+    fn transform(&self, vars: &VarDefs) -> Result<Self::Output, TransformError> {
         Ok(Self {
             save: self.save,
             save_interval: self.save_interval.transform(vars)?,
@@ -211,7 +190,7 @@ impl Source {
 impl Transform for Source {
     type Output = Self;
 
-    fn transform(&self, vars: &ConfigVars) -> Result<Self::Output, TransformError> {
+    fn transform(&self, vars: &VarDefs) -> Result<Self::Output, TransformError> {
         Ok(Source {
             mass: self.mass.transform(vars)?,
             profile: self.profile.transform(vars)?,
@@ -241,7 +220,7 @@ pub enum ScalarFieldProfile {
 impl Transform for ScalarFieldProfile {
     type Output = Self;
 
-    fn transform(&self, vars: &ConfigVars) -> Result<Self::Output, TransformError> {
+    fn transform(&self, vars: &VarDefs) -> Result<Self::Output, TransformError> {
         Ok(match self {
             ScalarFieldProfile::Gaussian {
                 amplitude,

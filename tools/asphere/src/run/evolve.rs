@@ -1,5 +1,5 @@
 use crate::{
-    run::config::Config,
+    run::{SimulationInfo, Status, config::Config},
     system::{Field, FieldConditions, Fields, TimeDerivs, find_mass},
 };
 use aeon::{
@@ -11,33 +11,18 @@ use circular_queue::CircularQueue;
 use console::style;
 use datasize::DataSize as _;
 use indicatif::{HumanCount, HumanDuration, MultiProgress, ProgressBar};
-use serde::{Deserialize, Serialize};
 use std::fmt::Write as _;
 use std::time::{Duration, Instant};
-
-/// Status of an indivdual run.
-#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq)]
-pub enum Status {
-    Disperse,
-    Collapse,
-}
-
-/// Additional info about a particular evolution.
-#[derive(Clone, Default, Debug)]
-pub struct EvolveInfo {
-    pub mass: f64,
-}
 
 pub fn evolve_data(
     config: &Config,
     mesh: Mesh<1>,
     system: SystemVec<Fields>,
-    info: Option<&mut EvolveInfo>,
-) -> eyre::Result<Status> {
+) -> eyre::Result<SimulationInfo> {
     // Load diagnostics
     let mut diagnostics = Diagnostics::default();
     // Evolve
-    let result = evolve_data_with_diagnostics(config, &mut diagnostics, mesh, system, info);
+    let result = evolve_data_with_diagnostics(config, &mut diagnostics, mesh, system);
     // Flush diagnostics
     diagnostics.flush(config)?;
     // Bubble up result
@@ -49,15 +34,12 @@ fn evolve_data_with_diagnostics(
     diagnostics: &mut Diagnostics,
     mut mesh: Mesh<1>,
     mut system: SystemVec<Fields>,
-    info: Option<&mut EvolveInfo>,
-) -> eyre::Result<Status> {
+) -> eyre::Result<SimulationInfo> {
     // Get start time of evolution
     let start = Instant::now();
     // Get output directory
     let absolute = config.directory()?;
 
-    // Create output dir.
-    std::fs::create_dir_all(&absolute)?;
     // Path for initial visualization data.
     if config.visualize.save_evolve {
         std::fs::create_dir_all(&absolute.join("evolve"))?;
@@ -112,11 +94,7 @@ fn evolve_data_with_diagnostics(
     };
 
     let mut disperse = true;
-
     let mut mass_queue = CircularQueue::with_capacity(50);
-
-    let mut mass = 1.0;
-    let mut alpha = 1.0;
 
     while proper_time < config.evolve.max_proper_time {
         assert!(system.len() == mesh.num_nodes());
@@ -213,8 +191,8 @@ fn evolve_data_with_diagnostics(
         }
 
         // Compute lapse and mass before running diagnostic
-        alpha = mesh.bottom_left_value(system.field(Field::Lapse));
-        mass = find_mass(&mesh, system.as_slice());
+        let alpha = mesh.bottom_left_value(system.field(Field::Lapse));
+        let mass = find_mass(&mesh, system.as_slice());
 
         if config.diagnostic.save && step % config.diagnostic.save_interval.unwrap() == 0 {
             diagnostics.append(
@@ -256,8 +234,8 @@ fn evolve_data_with_diagnostics(
             memory_pb.set_position(memory_usage as u64);
             step_pb.inc(1);
             step_pb.set_message(format!(
-                "Step: {}, Proper Time {:.8}, Mass {:.8e}",
-                step, proper_time, mass
+                "Step: {}, Proper Time {:.8}, Mass {:.8e}, Lapse: {:.8e}",
+                step, proper_time, mass, alpha
             ));
         }
 
@@ -277,7 +255,7 @@ fn evolve_data_with_diagnostics(
 
     m.clear()?;
 
-    mass = *mass_queue.asc_iter().next().unwrap();
+    let mass = *mass_queue.asc_iter().next().unwrap();
 
     println!(
         "Final evolution takes {}, {} steps",
@@ -290,6 +268,7 @@ fn evolve_data_with_diagnostics(
     } else {
         style("Collapses").red()
     };
+    let alpha = mesh.bottom_left_value(system.field(Field::Lapse));
     println!("Run Status: {}, Mass: {}, Lapse: {}", status, mass, alpha);
 
     // println!("Mesh Info...");
@@ -309,13 +288,15 @@ fn evolve_data_with_diagnostics(
     //     println!("Previous Mass: {:.8e}", mass);
     // }
 
-    if let Some(info) = info {
-        info.mass = mass;
-    }
-
     Ok(match disperse {
-        true => Status::Disperse,
-        false => Status::Collapse,
+        true => SimulationInfo {
+            status: Status::Disperse,
+            mass,
+        },
+        false => SimulationInfo {
+            status: Status::Collapse,
+            mass: 0.0,
+        },
     })
 }
 
