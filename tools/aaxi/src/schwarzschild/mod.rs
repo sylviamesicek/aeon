@@ -268,11 +268,11 @@ pub fn schwarzschild(matches: &ArgMatches) -> eyre::Result<()> {
 }
 
 pub trait CommandExt {
-    fn schwarzschild_args(self) -> Self;
+    fn schwarzschild_cmd(self) -> Self;
 }
 
 impl CommandExt for Command {
-    fn schwarzschild_args(self) -> Self {
+    fn schwarzschild_cmd(self) -> Self {
         self.subcommand(
             Command::new("schwarzschild")
                 .name("schwarzschild")
@@ -284,9 +284,16 @@ impl CommandExt for Command {
                 )
                 .arg(
                     Arg::new("mass")
+                        .required(true)
+                        .index(1)
                         .value_parser(value_parser!(f64))
+                        .value_name("FLOAT")
                         .help("Mass of black hole to simulate"),
                 ),
         )
     }
+}
+
+pub fn parse_schwarzschild_cmd(matches: &ArgMatches) -> Option<&ArgMatches> {
+    matches.subcommand_matches("schwarzschild")
 }

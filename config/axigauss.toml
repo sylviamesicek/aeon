@@ -1,11 +1,9 @@
 name = "axiscalar"
-directory = "output/axiscalar/$0"
+directory = "output/axiscalar/${amplitude}"
 
 order = 4
 diss_order = 6
 
-[execution]
-mode = "run"
 
 [domain]
 radius = 48.0
@@ -75,6 +73,6 @@ on_search_converged_to_zero = "ignore"
 
 [[sources]]
 type = "scalar_field"
-amplitude = "$0"
+amplitude = "${amplitude}"
 sigma = [5.35, 5.35]
 mass = 0.0

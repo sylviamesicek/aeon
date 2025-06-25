@@ -5,8 +5,8 @@
 ## Capabilities
 
 - Gradient and Hessian operators up to 6th order accuracy
-- Nonuniform quadtree based meshes
-- Ghost node filling
+- Nonuniform axis-aligned quadtree based meshes
+- Inter-cell continuity enforced via ghost nodes
     - Coarse-fine interpolating
     - Direct Injection
 - Strongly enforced boundary conditions
@@ -28,12 +28,16 @@
     - Runge-Kutta 4
 - Hyperbolic relaxation solver for elliptic equations
     - Adaptive CFL stepping to accelerate relaxation
+- Kreiss-Oliger dissipation
+- Finite point method style interpolation on individual cells
 - Saving and loading checkpoints of meshes and systems
 - Output to `.vtu` files (for viewing in ParaView or VisIt)
 
 ## Tools
 
-The bulk of "interesting GR code" lies in the two binary crates `tools/aaxi` and `tools/asphere`. These implement necessary the initial data and evolution code for axisymmetric spacetimes and spherically symmetric spacetimes respectively. Both codebases pull settings from template config files, which support bash-style positional argument references to enable run-time injection of arguments. Example config scripts can be found in the `config/` subdirectory.
+The bulk of "interesting GR code" lies in the two binary crates `tools/aaxi` and `tools/asphere`. These implement necessary the initial data and evolution code for axisymmetric spacetimes and spherically symmetric spacetimes respectively. Both codebases pull settings from template config files, which support bash-style variable references to enable run-time injection of arguments. Example config scripts can be found in the `config/` subdirectory.
+
+Both `asphere` and `aaxi` can execute a number of different subcommands for more specific usecases. For instance, searching for critical points, or producing mass-fill black hole plots. These subcommands follow the same convention as the standard `run` subcommand, but require additional configuration files. For instance, running a fill command such as `asphere fill <name>` requires there to exist a `<name>.toml` file (storing basic run configuration data) and a `<name>.fill.toml` file containing fill parameters.
 
 ### `asphere`
 
@@ -42,32 +46,21 @@ The bulk of "interesting GR code" lies in the two binary crates `tools/aaxi` and
 Example `asphere` invokation:
 ```bash
 # Simulates a single massless scalar field. Amplitude argument is passed in
-# as first positional argument, and referenced in the config file as `$0`.
-cargo run --release --package asphere -- --config="config/sphgauss1.toml" 0.3
-```
-To run `asphere` in a mode compatible with Cole's critical search code use
-```bash
-# $0 = 0.3 (amplitude), $1 = 1234 (searial_id)
-cargo run --release --package asphere -- --config="config/sphgauss1-cole.toml" 0.3 1234
+# via "amplitude variable
+cargo run --release --package asphere -- run -Damplitude=0.3 config/sphgauss1
 ```
 
 ### `aaxi`
 
-`aaxi` adapts the axisymmetric evolution scheme of Rinne 2006 to second-order in space, first-order in time. This scheme is purely hyperbolic during evolution, and solves for initial data using a hyperbolic relaxation solver (modelled after NRPyElliptic's solver). This is significantly more complex and numerically expensive than spherical symmetry. This code also supports critical searches directly via the `search` execution mode.
-```toml
-# ...
-[execution]
-mode = "search"
-parameter = "amplitude"
-start = 0.1
-# etc
-```
+`aaxi` adapts the axisymmetric evolution scheme of Rinne 2006 to second-order in space, first-order in time. This scheme is purely hyperbolic during evolution, and solves for initial data using a hyperbolic relaxation solver (modelled after NRPyElliptic's solver). This is significantly more complex and numerically expensive than spherical symmetry.
 
-Example `aaxi` invokation:
+Example `aaxi` invokations:
 ```bash
+# Runs a single simulation for a 0.3 amplitude scalar field.
+cargo run --release --package aaxi -- run -Damplitude=0.3 config/axiscalar
 # Performs a critical search for a single massless scalar field between
 # amplitudes 0.0 and 0.5.
-cargo run --release --package aaxi -- --config="config/axiscalar-crit.toml"
+cargo run --release --package aaxi -- search config/axiscalar
 ```
 
 

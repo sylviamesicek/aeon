@@ -1,0 +1,6 @@
+directory = "output/axiscalar/search"
+parameter = "amplitude"
+start = 0.0
+end = 0.5
+max_depth = 10
+min_error = 1e-5

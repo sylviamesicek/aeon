@@ -2,16 +2,13 @@ use crate::eqs::GaugeCondition;
 use crate::run::interval::Interval;
 use crate::run::status::Strategy;
 use aeon::mesh::ExportStride;
-use aeon_app::config::{VarDefs, FloatVar, Transform};
-use eyre::eyre;
+use aeon_app::config::{FloatVar, Transform, VarDefs};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
-mod execute;
 mod inline;
 mod validate;
 
-pub use execute::*;
 pub use inline::*;
 
 /// Global configuration struct for simulation run.
@@ -21,9 +18,7 @@ pub struct Config {
     pub name: String,
     #[serde(default = "default_output")]
     pub directory: String,
-    /// Are we simply running simulations or doing a critical search?
-    #[serde(default)]
-    pub execution: Execution,
+
     /// Order of stencil used to approximate derivatives
     pub order: usize,
     /// Order of stencil used to approximate dissipation.
@@ -55,24 +50,22 @@ pub struct Config {
 
 impl Config {
     /// Applies variable transformation to `Config`.
-    pub fn transform(self, vars: &VarDefs) -> eyre::Result<Self> {
+    pub fn transform(&self, vars: &VarDefs) -> eyre::Result<Self> {
         Ok(Self {
             name: self.name.transform(vars)?,
             directory: self.directory.transform(vars)?,
 
-            execution: self.execution.transform(vars)?,
-
             order: self.order,
             diss_order: self.diss_order,
 
-            domain: self.domain,
-            initial: self.initial,
-            evolve: self.evolve,
-            limits: self.limits,
-            visualize: self.visualize,
-            cache: self.cache,
+            domain: self.domain.clone(),
+            initial: self.initial.clone(),
+            evolve: self.evolve.clone(),
+            limits: self.limits.clone(),
+            visualize: self.visualize.clone(),
+            cache: self.cache.clone(),
             error_handler: self.error_handler,
-            horizon: self.horizon,
+            horizon: self.horizon.clone(),
 
             sources: self.sources.transform(vars)?,
         })
@@ -81,29 +74,6 @@ impl Config {
     /// Retrieves output_director in absolution form.
     pub fn output_dir(&self) -> eyre::Result<PathBuf> {
         Ok(aeon_app::file::abs_or_relative(Path::new(&self.directory))?)
-    }
-
-    pub fn search_dir(&self) -> eyre::Result<PathBuf> {
-        let Execution::Search { search } = &self.execution else {
-            return Err(eyre!("program is not running in search mode"));
-        };
-
-        search.search_dir()
-    }
-
-    pub fn search_config(&self) -> Option<&Search> {
-        match &self.execution {
-            Execution::Search { search } => Some(search),
-            _ => None,
-        }
-    }
-
-    pub fn _is_search_mode(&self) -> bool {
-        matches!(self.execution, Execution::Search { .. })
-    }
-
-    pub fn _is_run_mode(&self) -> bool {
-        matches!(self.execution, Execution::Run)
     }
 }
 
@@ -354,10 +324,7 @@ impl Source {
 impl Transform for Source {
     type Output = Self;
 
-    fn transform(
-        &self,
-        vars: &VarDefs,
-    ) -> Result<Self::Output, aeon_app::config::TransformError> {
+    fn transform(&self, vars: &VarDefs) -> Result<Self::Output, aeon_app::config::TransformError> {
         Ok(match self {
             Self::Brill { amplitude, sigma } => Self::Brill {
                 amplitude: amplitude.transform(vars)?,
