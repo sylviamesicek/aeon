@@ -25,6 +25,8 @@ pub enum GaugeCondition {
     /// Log + 1 slicing with harmonic shift.
     #[serde(rename = "log_plus_one")]
     LogPlusOne,
+    #[serde(rename = "k_driver_zero_shift")]
+    KDriverZeroShift,
 }
 
 pub const ON_AXIS: f64 = 1e-10;
@@ -277,13 +279,7 @@ pub fn evolution(
         system.system(),
         scalar_fields.iter().map(|sf| sf.system()),
     );
-    let evolve = decomp.metric_evolution();
-    let gauge = match gauge {
-        GaugeCondition::Harmonic => decomp.harmonic(),
-        GaugeCondition::HarmonicZeroShift => decomp.harmonic_gauge_zero_shift(),
-        GaugeCondition::LogPlusOne => decomp.log_plus_one(),
-        GaugeCondition::LogPlusOneZeroShift => decomp.log_plus_one_zero_shift(),
-    };
+    let evolve = decomp.dynamic_evolution(gauge);
 
     derivs.grr_t = evolve.g[[0, 0]];
     derivs.grz_t = evolve.g[[1, 0]];
@@ -293,9 +289,9 @@ pub fn evolution(
     derivs.krz_t = evolve.k[[1, 0]];
     derivs.kzz_t = evolve.k[[1, 1]];
     derivs.y_t = evolve.y;
-    derivs.lapse_t = gauge.lapse;
-    derivs.shiftr_t = gauge.shift[[0]];
-    derivs.shiftz_t = gauge.shift[[1]];
+    derivs.lapse_t = evolve.lapse;
+    derivs.shiftr_t = evolve.shift[[0]];
+    derivs.shiftz_t = evolve.shift[[1]];
     derivs.theta_t = evolve.theta;
     derivs.zr_t = evolve.z[[0]];
     derivs.zz_t = evolve.z[[1]];

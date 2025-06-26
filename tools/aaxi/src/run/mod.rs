@@ -14,6 +14,7 @@ mod interval;
 mod status;
 
 pub use config::Config;
+use eyre::Context;
 pub use history::RunHistory;
 pub use status::Status;
 
@@ -23,7 +24,8 @@ pub fn run(matches: &ArgMatches) -> eyre::Result<()> {
     // Find config file
     let config_run_file = std::env::current_dir()?.join(format!("{}.toml", invoke));
     // Load and apply variable transformation
-    let config = file::import_toml::<Config>(&config_run_file)?;
+    let config = file::import_toml::<Config>(&config_run_file)
+        .with_context(|| format!("failed to find run config file: {:?}", config_run_file))?;
     let config = config.transform(&vars)?;
     // Run simulation
     let _ = run_simulation(&config, &mut RunHistory::empty());

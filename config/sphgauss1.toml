@@ -5,7 +5,7 @@ directory = "output/sphgauss1/${amplitude}"
 radius = 40.0
 
 [limits]
-max_levels = 22
+max_levels = 21
 max_nodes = 10_000_000
 max_memory = 5_000_000_000
 
@@ -16,7 +16,7 @@ max_proper_time = 7.6
 max_steps = 10_000_000
 
 [regrid]
-coarsen_error = 1e-10
+coarsen_error = 1e-12
 refine_error = 1e-8
 global = 2
 flag_interval = 20

@@ -7,7 +7,7 @@ use aeon_app::{
     file,
 };
 use clap::{ArgMatches, Command};
-use eyre::eyre;
+use eyre::{Context as _, eyre};
 
 mod config;
 mod history;
@@ -23,10 +23,16 @@ pub fn search(matches: &ArgMatches) -> eyre::Result<()> {
     let config_search_file = std::env::current_dir()?.join(format!("{}.search.toml", invoke));
 
     // Load search configuration
-    let search_config = file::import_toml::<Config>(&config_search_file)?;
+    let search_config = file::import_toml::<Config>(&config_search_file).with_context(|| {
+        format!(
+            "failed to find search config file: {:?}",
+            config_search_file
+        )
+    })?;
     let search_config = search_config.transform(&vars)?;
     // Load run configuration
-    let run_config = file::import_toml::<run::Config>(&config_run_file)?;
+    let run_config = file::import_toml::<run::Config>(&config_run_file)
+        .with_context(|| format!("failed to find run config file: {:?}", config_run_file))?;
 
     // Find search directory
     let search_dir = search_config.search_dir()?;

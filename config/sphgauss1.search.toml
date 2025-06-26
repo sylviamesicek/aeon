@@ -1,6 +1,6 @@
 directory = "output/sphgauss1/search"
 parameter = "amplitude"
-start = 0.3360352955114746            # Disperses 
-end = 0.33603529551208494             # Collapses
+start = 0.33603529                    # Disperses 
+end = 0.33603523                      # Collapses
 max_depth = 20
 min_error = 1e-14

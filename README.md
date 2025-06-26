@@ -46,7 +46,7 @@ Both `asphere` and `aaxi` can execute a number of different subcommands for more
 Example `asphere` invokation:
 ```bash
 # Simulates a single massless scalar field. Amplitude argument is passed in
-# via "amplitude variable
+# via "amplitude" variable
 cargo run --release --package asphere -- run -Damplitude=0.3 config/sphgauss1
 ```
 

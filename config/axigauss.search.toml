@@ -1,4 +1,4 @@
-directory = "output/axiscalar/search"
+directory = "output/axigauss/search"
 parameter = "amplitude"
 start = 0.0
 end = 0.5

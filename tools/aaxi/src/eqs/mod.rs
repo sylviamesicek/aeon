@@ -256,7 +256,7 @@ impl StressEnergy {
 }
 
 /// Time derivatives for metric dynamical variables.
-struct MetricEvolution {
+struct DynamicEvolution {
     g: Symmetric,
     seed: f64,
 
@@ -265,10 +265,7 @@ struct MetricEvolution {
 
     theta: f64,
     z: Vector,
-}
 
-/// Time derivatives for gauge variables.
-struct GaugeEvolution {
     lapse: f64,
     shift: Vector,
 }
@@ -364,7 +361,9 @@ impl Decomposition {
         self.pos[0].abs() <= ON_AXIS
     }
 
-    fn metric_evolution(&self) -> MetricEvolution {
+    fn dynamic_evolution(&self, gauge: GaugeCondition) -> DynamicEvolution {
+        let on_axis = self.on_axis();
+
         // Destructure self
         let Self {
             pos,
@@ -373,7 +372,7 @@ impl Decomposition {
                     metric,
                     inv,
                     symbols,
-                    ..
+                    det,
                 },
             twist,
             k,
@@ -393,8 +392,6 @@ impl Decomposition {
                 },
             y,
         } = self;
-
-        let on_axis = pos[0].abs() <= ON_AXIS;
 
         let ricci = symbols.ricci();
         let ricci_trace = inv.cotrace(&ricci);
@@ -419,6 +416,7 @@ impl Decomposition {
 
         let lapse_grad = lapse.gradient(symbols);
         let lapse_hess = lapse.hessian(symbols);
+        let lapse2 = lapse.value.powi(2);
 
         let stress_trace = inv.cotrace(stress);
 
@@ -514,9 +512,7 @@ impl Decomposition {
         // Constraint *************************
         // ************************************
 
-        let theta_t = {
-            let theta_lie_shift = theta.lie_derivative(shift);
-
+        let theta_lie_n_times_lapse = {
             let term1 = lapse.value * hamiltonian - lapse.value * (k_trace + l.value) * theta.value;
             let term2 = lapse.value * inv.cotrace(&z_grad);
             let term3 = -S::sum(|[i]| lapse_grad[[i]] * z_con[[i]]);
@@ -526,8 +522,9 @@ impl Decomposition {
                 regular += lapse.value * z.derivs[[0, 0]] / metric.value[[0, 0]];
             }
 
-            term1 + term2 + term3 + theta_lie_shift + regular
+            term1 + term2 + term3 + regular
         };
+        let theta_t = theta_lie_n_times_lapse + theta.lie_derivative(shift);
 
         let z_lie_shift = z.lie_derivative(shift);
         let z_t = S::vector(|[i]| {
@@ -547,7 +544,84 @@ impl Decomposition {
             seed_t = (lam_lt - 0.5 * g_t[[0, 0]] / metric.value[[0, 0]]) / pos[0];
         }
 
-        MetricEvolution {
+        // ************************************
+        // Gauge conditions *******************
+        // ************************************
+
+        let mut lapse_t = 0.0;
+        let mut shift_t = Vector::zeros();
+
+        const F: f64 = 1.0;
+        const A: f64 = 1.0;
+        const MU: f64 = 1.0;
+        const D: f64 = 1.0;
+        const M: f64 = 2.0;
+
+        if matches!(
+            gauge,
+            GaugeCondition::Harmonic | GaugeCondition::HarmonicZeroShift
+        ) {
+            // Use harmonic condition for lapse
+            let term1 = -lapse2 * F * (k_trace + l.value - M * theta.value);
+            let term2 = S::sum(|i| shift.value[i] * lapse.derivs[i]);
+            lapse_t = term1 + term2;
+        }
+
+        if matches!(
+            gauge,
+            GaugeCondition::LogPlusOne | GaugeCondition::LogPlusOneZeroShift
+        ) {
+            let term1 = -2.0 * lapse.value * F * (k_trace + l.value - M * theta.value);
+            let term2 = S::sum(|i| shift.value[i] * lapse.derivs[i]);
+            lapse_t = term1 + term2;
+        }
+
+        if matches!(gauge, GaugeCondition::Harmonic | GaugeCondition::LogPlusOne) {
+            shift_t = S::vector(|[i]| {
+                let lamg_term = 0.5 / det.value * S::sum(|[m]| inv.value[[i, m]] * det.derivs[[m]])
+                    + twist.regular_con()[[i]];
+
+                let g_inv_term: f64 = S::sum(|[m]| inv.derivs[[i, m, m]]);
+
+                let term1 = -lapse2 * MU * g_inv_term;
+                let term2 = lapse2 * 2.0 * MU * S::sum(|[m]| inv.value[[i, m]] * z.value[[m]]);
+
+                let term3 = -lapse.value * A * S::sum(|[m]| inv.value[[i, m]] * lapse.derivs[[m]]);
+                let term4 = S::sum(|[m]| shift.value[[m]] * shift.derivs[[i, m]]);
+
+                let mut regular = -lapse2 * (2.0 * MU - D) * lamg_term;
+                if !on_axis && i == 0 {
+                    regular += lapse2 * (2.0 * MU - D) * inv.value[[0, 0]] / pos[0];
+                }
+
+                term1 + term2 + term3 + term4 + regular
+            });
+        }
+
+        if matches!(gauge, GaugeCondition::KDriverZeroShift) {
+            const EPS: f64 = 1.0;
+            const C: f64 = 1.0;
+
+            let k_trace_t = {
+                let term1 = lapse.value * S::sum(|[a, b]| k.value[[a, b]] * k_con[[a, b]])
+                    + lapse.value * l.value * l.value;
+                let term2 = -inv.cotrace(&lapse_hess);
+                let term3 = KAPPA / 2.0 * lapse.value * (energy + stress_trace + angular_stress);
+                let term4 = 2.0 * theta_lie_n_times_lapse
+                    + 2.0 * S::sum(|[a]| z_con[[a]] * lapse_grad[[a]]);
+
+                let mut regular = -S::sum(|[m]| twist.regular_con()[[m]] * -lapse_grad[[m]]);
+
+                if on_axis {
+                    regular += -lapse.derivs2[[0, 0]] / metric.value[[0, 0]];
+                };
+                term1 + term2 + term3 + term4 + regular
+            };
+
+            lapse_t = EPS * (-k_trace_t - C * k_trace);
+        }
+
+        DynamicEvolution {
             g: g_t,
             seed: seed_t,
 
@@ -556,181 +630,9 @@ impl Decomposition {
 
             theta: theta_t,
             z: z_t,
-        }
-    }
 
-    fn harmonic(&self) -> GaugeEvolution {
-        let Self {
-            pos,
-            manifold: Manifold { inv, det, .. },
-            twist,
-            k,
-            l,
-            theta,
-            z,
-            lapse,
-            shift,
-            ..
-        } = self;
-
-        let on_axis = pos[0].abs() <= ON_AXIS;
-
-        const F: f64 = 1.0;
-        const A: f64 = 1.0;
-        const MU: f64 = 1.0;
-        const D: f64 = 1.0;
-        const M: f64 = 2.0;
-
-        let k_trace = inv.cotrace(&k.value);
-        let lapse2 = lapse.value.powi(2);
-
-        let lapse_t = {
-            let term1 = -lapse2 * F * (k_trace + l.value - M * theta.value);
-            let term2 = S::sum(|i| shift.value[i] * lapse.derivs[i]);
-            term1 + term2
-        };
-
-        let shift_t = S::vector(|[i]| {
-            let lamg_term = 0.5 / det.value * S::sum(|[m]| inv.value[[i, m]] * det.derivs[[m]])
-                + twist.regular_con()[[i]];
-
-            let g_inv_term: f64 = S::sum(|[m]| inv.derivs[[i, m, m]]);
-
-            let term1 = -lapse2 * MU * g_inv_term;
-            let term2 = lapse2 * 2.0 * MU * S::sum(|[m]| inv.value[[i, m]] * z.value[[m]]);
-
-            let term3 = -lapse.value * A * S::sum(|[m]| inv.value[[i, m]] * lapse.derivs[[m]]);
-            let term4 = S::sum(|[m]| shift.value[[m]] * shift.derivs[[i, m]]);
-
-            let mut regular = -lapse2 * (2.0 * MU - D) * lamg_term;
-            if !on_axis && i == 0 {
-                regular += lapse2 * (2.0 * MU - D) * inv.value[[0, 0]] / pos[0];
-            }
-
-            term1 + term2 + term3 + term4 + regular
-        });
-
-        GaugeEvolution {
             lapse: lapse_t,
             shift: shift_t,
-        }
-    }
-
-    fn harmonic_gauge_zero_shift(&self) -> GaugeEvolution {
-        let Self {
-            manifold: Manifold { inv, .. },
-
-            k,
-            l,
-            theta,
-
-            lapse,
-            shift,
-            ..
-        } = self;
-
-        const F: f64 = 1.0;
-        const M: f64 = 2.0;
-
-        let k_trace = inv.cotrace(&k.value);
-        let lapse2 = lapse.value.powi(2);
-
-        let lapse_t = {
-            let term1 = -lapse2 * F * (k_trace + l.value - M * theta.value);
-            let term2 = S::sum(|i| shift.value[i] * lapse.derivs[i]);
-            term1 + term2
-        };
-
-        GaugeEvolution {
-            lapse: lapse_t,
-            shift: Tensor::zeros(),
-        }
-    }
-
-    fn log_plus_one(&self) -> GaugeEvolution {
-        let Self {
-            pos,
-            manifold: Manifold { inv, det, .. },
-            twist,
-            k,
-            l,
-            theta,
-            z,
-            lapse,
-            shift,
-            ..
-        } = self;
-
-        let on_axis = pos[0].abs() <= ON_AXIS;
-
-        const F: f64 = 1.0;
-        const A: f64 = 1.0;
-        const MU: f64 = 1.0;
-        const D: f64 = 1.0;
-        const M: f64 = 2.0;
-
-        let k_trace = inv.cotrace(&k.value);
-        let lapse2 = lapse.value.powi(2);
-
-        let lapse_t = {
-            let term1 = -2.0 * lapse.value * F * (k_trace + l.value - M * theta.value);
-            let term2 = S::sum(|i| shift.value[i] * lapse.derivs[i]);
-            term1 + term2
-        };
-
-        let shift_t = S::vector(|[i]| {
-            let lamg_term = 0.5 / det.value * S::sum(|[m]| inv.value[[i, m]] * det.derivs[[m]])
-                + twist.regular_con()[[i]];
-
-            let g_inv_term: f64 = S::sum(|[m]| inv.derivs[[i, m, m]]);
-
-            let term1 = -lapse2 * MU * g_inv_term;
-            let term2 = lapse2 * 2.0 * MU * S::sum(|[m]| inv.value[[i, m]] * z.value[[m]]);
-
-            let term3 = -lapse.value * A * S::sum(|[m]| inv.value[[i, m]] * lapse.derivs[[m]]);
-            let term4 = S::sum(|[m]| shift.value[[m]] * shift.derivs[[i, m]]);
-
-            let mut regular = -lapse2 * (2.0 * MU - D) * lamg_term;
-            if !on_axis && i == 0 {
-                regular += lapse2 * (2.0 * MU - D) * inv.value[[0, 0]] / pos[0];
-            }
-
-            term1 + term2 + term3 + term4 + regular
-        });
-
-        GaugeEvolution {
-            lapse: lapse_t,
-            shift: shift_t,
-        }
-    }
-
-    fn log_plus_one_zero_shift(&self) -> GaugeEvolution {
-        let Self {
-            manifold: Manifold { inv, .. },
-
-            k,
-            l,
-            theta,
-
-            lapse,
-            shift,
-            ..
-        } = self;
-
-        const F: f64 = 1.0;
-        const M: f64 = 2.0;
-
-        let k_trace = inv.cotrace(&k.value);
-
-        let lapse_t = {
-            let term1 = -2.0 * lapse.value * F * (k_trace + l.value - M * theta.value);
-            let term2 = S::sum(|i| shift.value[i] * lapse.derivs[i]);
-            term1 + term2
-        };
-
-        GaugeEvolution {
-            lapse: lapse_t,
-            shift: Tensor::zeros(),
         }
     }
 

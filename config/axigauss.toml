@@ -1,5 +1,5 @@
-name = "axiscalar"
-directory = "output/axiscalar/${amplitude}"
+name = "axigauss"
+directory = "output/axigauss/${amplitude}"
 
 order = 4
 diss_order = 6
