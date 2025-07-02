@@ -1,6 +1,6 @@
 use crate::{
     run::config::Config,
-    system::{Fields, InitialData, generate_initial_scalar_field, solve_constraints},
+    system::{Field, Fields, generate_initial_phi, solve_constraints},
 };
 use aeon::prelude::*;
 use eyre::eyre;
@@ -47,16 +47,12 @@ pub fn initial_data(config: &Config) -> eyre::Result<(Mesh<1>, SystemVec<Fields>
         system.resize(mesh.num_nodes());
 
         // Set initial data for scalar field.
-        let scalar_field = generate_initial_scalar_field(&mut mesh, &source.profile);
+        let phi = generate_initial_phi(&mut mesh, &source.profile, &source.smooth);
 
-        // Fill system using scalar field.
-        mesh.evaluate(
-            4,
-            InitialData,
-            (&scalar_field).into(),
-            system.as_mut_slice(),
-        )
-        .unwrap();
+        system.field_mut(Field::Conformal).fill(1.0);
+        system.field_mut(Field::Lapse).fill(1.0);
+        system.field_mut(Field::Phi).copy_from_slice(&phi);
+        system.field_mut(Field::Pi).fill(0.0);
 
         // Solve for conformal and lapse
         solve_constraints(&mut mesh, system.as_mut_slice());
@@ -92,7 +88,7 @@ pub fn initial_data(config: &Config) -> eyre::Result<(Mesh<1>, SystemVec<Fields>
         }
 
         mesh.flag_wavelets(4, 0.0, config.regrid.refine_error, system.as_slice());
-        mesh.limit_level_range_flags(1, config.limits.max_levels);
+        mesh.limit_level_range_flags(1, config.limits.max_levels - 1);
         mesh.balance_flags();
 
         if !mesh.requires_regridding() {

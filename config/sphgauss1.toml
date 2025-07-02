@@ -13,18 +13,18 @@ max_memory = 5_000_000_000
 cfl = 0.3
 dissipation = 0.5
 max_proper_time = 7.0
-max_steps = 10_000_000
+max_steps = 700_000
 
 [regrid]
-coarsen_error = 1e-12
+coarsen_error = 1e-10
 refine_error = 1e-8
 global = 2
 flag_interval = 20
 
 [visualize]
-save_initial = true
-save_initial_levels = true
-save_evolve = true
+save_initial = false
+save_initial_levels = false
+save_evolve = false
 save_evolve_interval = 0.05
 stride = "per_vertex"
 

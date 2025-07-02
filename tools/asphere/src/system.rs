@@ -1,5 +1,5 @@
-use crate::run::config::ScalarFieldProfile;
-use aeon::{kernel::Interpolation, mesh::Gaussian, prelude::*};
+use crate::run::config::{ScalarFieldProfile, Smooth};
+use aeon::{kernel::Interpolation, prelude::*};
 use core::f64;
 use serde::{Deserialize, Serialize};
 use std::convert::Infallible;
@@ -125,36 +125,6 @@ impl BoundaryConds<1> for AntiSymCondition {
             target: 0.0,
             speed: 1.0,
         }
-    }
-}
-
-/// Projection for initial data.
-#[derive(Clone)]
-pub struct InitialData;
-
-impl Function<1> for InitialData {
-    type Input = Scalar;
-    type Output = Fields;
-    type Error = Infallible;
-
-    fn evaluate(
-        &self,
-        engine: impl Engine<1>,
-        input: SystemSlice<Self::Input>,
-        mut output: SystemSliceMut<Self::Output>,
-    ) -> Result<(), Infallible> {
-        let scalar_field = input.into_scalar();
-
-        for vertex in IndexSpace::new(engine.vertex_size()).iter() {
-            let index = engine.index_from_vertex(vertex);
-
-            output.field_mut(Field::Conformal)[index] = 1.0;
-            output.field_mut(Field::Lapse)[index] = 1.0;
-            output.field_mut(Field::Phi)[index] = engine.derivative(scalar_field, 0, vertex);
-            output.field_mut(Field::Pi)[index] = 0.0;
-        }
-
-        Ok(())
     }
 }
 
@@ -354,23 +324,65 @@ pub fn solve_constraints(mesh: &mut Mesh<1>, system: SystemSliceMut<Fields>) {
     mesh.fill_boundary(Order::<4>, ScalarConditions(SymCondition), lapse.into());
 }
 
-/// Tanh initial data.
-struct TanH {
+fn smooth(s: f64, n: f64, r: f64) -> f64 {
+    if s.abs() <= 1e-15 {
+        return 1.0;
+    }
+
+    let inner = s / r.powf(n);
+    if inner.is_infinite() || inner.is_nan() {
+        return 0.0;
+    }
+
+    1.0 - inner.tanh()
+}
+
+/// Gaussian initial data.
+struct GaussGrad {
     amplitude: f64,
     sigma: f64,
     center: f64,
+
+    sstrength: f64,
+    spower: f64,
 }
 
-impl Projection<1> for TanH {
+impl Projection<1> for GaussGrad {
     fn project(&self, [r]: [f64; 1]) -> f64 {
         let offset = (r - self.center) / self.sigma;
-        self.amplitude * offset.tanh()
+
+        let f = -2.0 * self.amplitude * offset / self.sigma * (-offset * offset).exp();
+
+        f * smooth(self.sstrength, self.spower, r)
     }
 }
 
-/// Comverrts a profile into a scalar field.
-pub fn generate_initial_scalar_field(mesh: &mut Mesh<1>, profile: &ScalarFieldProfile) -> Vec<f64> {
-    let mut scalar_field = vec![0.0; mesh.num_nodes()];
+/// Tanh initial data.
+struct TanHGrad {
+    amplitude: f64,
+    sigma: f64,
+    center: f64,
+
+    sstrength: f64,
+    spower: f64,
+}
+
+impl Projection<1> for TanHGrad {
+    fn project(&self, [r]: [f64; 1]) -> f64 {
+        let offset = (r - self.center) / self.sigma;
+        let f = self.amplitude * offset.cosh().powi(-2) / self.sigma;
+
+        f * smooth(self.sstrength, self.spower, r)
+    }
+}
+
+/// Comverts a profile into a scalar field.
+pub fn generate_initial_phi(
+    mesh: &mut Mesh<1>,
+    profile: &ScalarFieldProfile,
+    smooth: &Smooth,
+) -> Vec<f64> {
+    let mut phi = vec![0.0; mesh.num_nodes()];
 
     match profile {
         ScalarFieldProfile::Gaussian {
@@ -380,12 +392,14 @@ pub fn generate_initial_scalar_field(mesh: &mut Mesh<1>, profile: &ScalarFieldPr
         } => {
             mesh.project(
                 4,
-                Gaussian {
+                GaussGrad {
                     amplitude: amplitude.unwrap(),
-                    sigma: [sigma.unwrap()],
-                    center: [center.unwrap()],
+                    sigma: sigma.unwrap(),
+                    center: center.unwrap(),
+                    spower: smooth.power,
+                    sstrength: smooth.strength,
                 },
-                &mut scalar_field,
+                &mut phi,
             );
         }
         ScalarFieldProfile::TanH {
@@ -395,23 +409,25 @@ pub fn generate_initial_scalar_field(mesh: &mut Mesh<1>, profile: &ScalarFieldPr
         } => {
             mesh.project(
                 4,
-                TanH {
+                TanHGrad {
                     amplitude: amplitude.unwrap(),
                     sigma: sigma.unwrap(),
                     center: center.unwrap(),
+                    spower: smooth.power,
+                    sstrength: smooth.strength,
                 },
-                &mut scalar_field,
+                &mut phi,
             );
         }
     }
 
     mesh.fill_boundary(
         Order::<4>,
-        ScalarConditions(SymCondition),
-        (&mut scalar_field).into(),
+        ScalarConditions(AntiSymCondition),
+        (&mut phi).into(),
     );
 
-    scalar_field
+    phi
 }
 
 pub fn find_mass(mesh: &Mesh<1>, system: SystemSlice<Fields>) -> f64 {

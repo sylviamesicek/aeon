@@ -134,6 +134,8 @@ impl Transform for Diagnostic {
 pub struct Source {
     pub mass: FloatVar,
     pub profile: ScalarFieldProfile,
+    #[serde(default)]
+    pub smooth: Smooth,
 }
 
 impl Source {
@@ -194,6 +196,7 @@ impl Transform for Source {
         Ok(Source {
             mass: self.mass.transform(vars)?,
             profile: self.profile.transform(vars)?,
+            smooth: self.smooth.clone(),
         })
     }
 }
@@ -241,6 +244,21 @@ impl Transform for ScalarFieldProfile {
                 center: center.transform(vars)?,
             },
         })
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Smooth {
+    pub strength: f64,
+    pub power: f64,
+}
+
+impl Default for Smooth {
+    fn default() -> Self {
+        Self {
+            strength: 0.0,
+            power: 1.0,
+        }
     }
 }
 

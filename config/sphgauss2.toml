@@ -1,11 +1,11 @@
 name = "sphgauss2"
-directory = "output/sphgauss2/$0"
+directory = "output/sphgauss2/${amplitude}"
 
 [domain]
 radius = 40.0
 
 [limits]
-max_levels = 21
+max_levels = 19
 max_nodes = 10_000_000
 max_memory = 5_000_000_000
 
@@ -23,9 +23,9 @@ flag_interval = 20
 
 [visualize]
 save_initial = true
-save_initial_levels = true
+save_initial_levels = false
 save_evolve = true
-save_evolve_interval = 0.05
+save_evolve_interval = 0.01
 stride = "per_vertex"
 
 [diagnostic]
@@ -36,6 +36,8 @@ serial_id = 0
 [[sources]]
 mass = 0.0
 profile.type = "gaussian"
-profile.amplitude = "$0"
+profile.amplitude = "${amplitude}"
 profile.sigma = 1.0
 profile.center = 3.0
+smooth.strength = 0.001
+smooth.power = 1.4

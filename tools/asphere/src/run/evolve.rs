@@ -291,11 +291,11 @@ fn evolve_data_with_diagnostics(
     Ok(match disperse {
         true => SimulationInfo {
             status: Status::Disperse,
-            mass,
+            mass: 0.0,
         },
         false => SimulationInfo {
             status: Status::Collapse,
-            mass: 0.0,
+            mass,
         },
     })
 }
