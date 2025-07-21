@@ -210,6 +210,7 @@ pub struct ErrorHandler {
     pub on_max_evolve_coord_time: Strategy,
     pub on_max_evolve_proper_time: Strategy,
     pub on_norm_diverge: Strategy,
+    pub on_min_lapse: Strategy,
 }
 
 impl Default for ErrorHandler {
@@ -223,6 +224,7 @@ impl Default for ErrorHandler {
             on_max_evolve_coord_time: Strategy::Disperse,
             on_max_evolve_proper_time: Strategy::Disperse,
             on_norm_diverge: Strategy::Collapse,
+            on_min_lapse: Strategy::Collapse,
         }
     }
 }
