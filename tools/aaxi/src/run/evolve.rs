@@ -762,6 +762,19 @@ pub fn evolve_data(
                 .status_or_crash(|| eyre!("norm diverges during evolution"))?;
         }
 
+        // Check if lapse is too small, which indicates collapse
+        if lapse < 1e-7 {
+            println!(
+                "{}",
+                style(format!("lapse too small: {:.5e}", lapse)).red()
+            );
+
+            break 'evolve config
+                .error_handler
+                .on_min_lapse
+                .status_or_crash(|| eyre!("lapse is too small during evolution"))?;
+        }
+
         // Serialize those values
         history.write_record(RunRecord {
             step,
