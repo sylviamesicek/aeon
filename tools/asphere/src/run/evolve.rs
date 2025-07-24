@@ -55,6 +55,7 @@ pub fn evolve_data_full(
     let mut save_step = 0;
     let mut steps_since_regrid = 0;
     let mut time_since_save = 0.0;
+    let mut fixed_grid = false;
 
     // Create progress bars, if we are not performing a subrun
     let bars = if subrun.is_none() {
