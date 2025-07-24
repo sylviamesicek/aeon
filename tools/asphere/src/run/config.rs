@@ -88,6 +88,10 @@ pub struct Regrid {
     pub global: usize,
     /// How many steps do we take between regridding runs?
     pub flag_interval: usize,
+    /// Fix the grid after a certain proper time?
+    pub fix_grid: bool,
+    /// At what proper time do we fix the grid?
+    pub fix_grid_time: f64,
 }
 
 /// Visualization settings for initial data and evolution output.
