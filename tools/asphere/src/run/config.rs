@@ -1,7 +1,10 @@
 use aeon::mesh::ExportStride;
 use aeon_app::config::{FloatVar, Transform, TransformError, UnsignedVar, VarDefs};
 use serde::{Deserialize, Serialize};
-use std::path::{Path, PathBuf};
+use std::{
+    default,
+    path::{Path, PathBuf},
+};
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct Config {
@@ -91,9 +94,15 @@ pub struct Regrid {
     /// How many steps do we take between regridding runs?
     pub flag_interval: usize,
     /// Fix the grid after a certain proper time?
+    #[serde(default)]
     pub fix_grid: bool,
     /// At what proper time do we fix the grid?
+    #[serde(default = "zero_f64")]
     pub fix_grid_time: f64,
+}
+
+fn zero_f64() -> f64 {
+    0.0
 }
 
 /// Visualization settings for initial data and evolution output.
