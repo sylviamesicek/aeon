@@ -44,7 +44,7 @@ impl FillHistory {
         self.map.insert(bits, FillRecord { param: key, mass });
     }
 
-    pub fn mass(&mut self, key: f64) -> Option<f64> {
+    pub fn mass(&self, key: f64) -> Option<f64> {
         let bits: u64 = unsafe { std::mem::transmute(key) };
         self.map.get(&bits).map(|v| v.mass)
     }

@@ -12,7 +12,7 @@ pub mod mesh;
 pub mod shared;
 pub mod solver;
 pub mod system;
-mod uniform;
+// mod uniform;
 
 pub use aeon_macros as macros;
 

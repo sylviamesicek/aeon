@@ -1,13 +1,16 @@
 use crate::{
     CommandExt as _, parse_define_args, parse_invoke_arg,
-    run::{self, Status},
+    run::{self, Status, Subrun},
 };
 use aeon_app::{
     config::{Transform as _, VarDefs},
     file,
 };
 use clap::{ArgMatches, Command};
+use console::style;
 use eyre::eyre;
+use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
+use std::sync::RwLock;
 
 mod config;
 mod history;
@@ -34,7 +37,9 @@ pub fn fill(matches: &ArgMatches) -> eyre::Result<()> {
     std::fs::create_dir_all(&fill_dir)?;
     // Load history file
     let history_file = fill_dir.join("history.csv");
-    let mut history = FillHistory::load_csv(&history_file).unwrap_or_else(|_| FillHistory::new());
+    let history = FillHistory::load_csv(&history_file).unwrap_or_else(|_| FillHistory::new());
+    let history = RwLock::new(history);
+
     // Name of parameter
     let parameter = fill_config.parameter.clone();
 
@@ -50,14 +55,22 @@ pub fn fill(matches: &ArgMatches) -> eyre::Result<()> {
             pstar: fill_config.pstar.unwrap(),
         },
     )?;
+
+    let multi = MultiProgress::new();
+
     // Run fill
     fill_config.try_for_each(|amp| -> eyre::Result<()> {
-        fill_iteration(&vars, &run_config, &parameter, amp, &mut history)?;
+        fill_iteration(&vars, &run_config, &parameter, amp, &history, &multi)?;
+
         // Cache history
+        let history = history.write().unwrap();
         history.save_csv(&history_file)?;
+        drop(history);
 
         Ok(())
     })?;
+
+    drop(multi);
 
     Ok(())
 }
@@ -68,10 +81,22 @@ fn fill_iteration(
     config: &run::Config,
     parameter: &str,
     amplitude: f64,
-    history: &mut FillHistory,
+    history: &RwLock<FillHistory>,
+    multi: &MultiProgress,
 ) -> eyre::Result<()> {
-    if let Some(mass) = history.mass(amplitude) {
-        println!("Using cached mass: {} for amplitude: {}", mass, amplitude);
+    if let Some(mass) = history.read().unwrap().mass(amplitude) {
+        let bar = multi
+            .add(ProgressBar::no_length().with_style(
+                ProgressStyle::with_template("{prefix:.bold.dim} {wide_msg}").unwrap(),
+            ));
+
+        bar.set_prefix(format!("[P = {:.16}]", amplitude));
+        bar.finish_with_message(format!(
+            "Cached - {}, Mass: {}",
+            style("Collapses").red(),
+            mass
+        ));
+
         return Ok(());
     }
 
@@ -82,9 +107,13 @@ fn fill_iteration(
     // Transform config appropriately
     let config = config.transform(&vars)?;
 
-    println!("Performing fill for amplitude: {}", amplitude);
-
-    let sim = run::run_simulation(&config)?;
+    let sim = run::subrun(
+        &config,
+        &Subrun {
+            multi: multi.clone(),
+            parameter: amplitude,
+        },
+    )?;
 
     if sim.status == Status::Disperse {
         println!("Simulation disperses during fill {}", amplitude);
@@ -92,7 +121,10 @@ fn fill_iteration(
     }
 
     // Insert it into history
+    let mut history = history.write().unwrap();
     history.insert(amplitude, sim.mass);
+    drop(history);
+
     Ok(())
 }
 

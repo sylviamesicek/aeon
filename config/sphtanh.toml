@@ -13,8 +13,10 @@ max_memory = 5_000_000_000
 [evolve]
 cfl = 0.3
 dissipation = 0.5
-max_proper_time = 7.6
-max_steps = 800_000
+max_proper_time = 5.0
+max_steps = 2_000_000
+max_constraint = 1.0
+min_lapse = 1e-8
 
 [regrid]
 coarsen_error = 1e-10
@@ -23,7 +25,7 @@ global = 2
 flag_interval = 20
 
 [visualize]
-save_initial = true
+save_initial = false
 save_initial_levels = false
 save_evolve = false
 save_evolve_interval = 0.01
@@ -40,5 +42,5 @@ profile.type = "tanh"
 profile.amplitude = "${amplitude}"
 profile.sigma = 1.0
 profile.center = 3.0
-smooth.strength = 0.01
+smooth.strength = 0.001
 smooth.power = 1.4

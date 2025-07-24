@@ -1,0 +1,7 @@
+directory = "output/sphtanh/fill"
+parameter = "amplitude"
+pstar = 0.09545428876233998
+start = 1e-12
+end = 1e-2
+samples.log = 200
+parallel = 16

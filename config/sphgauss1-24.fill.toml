@@ -1,0 +1,10 @@
+directory = "output/sphgauss1-24/fill"
+parameter = "amplitude"
+pstar = 0.33603529605433935
+# start = 1e-16 # Continue
+# end = 1e-2
+# samples.log = 280
+start = 1e-10
+end = 1e-5
+samples.log = 400
+parallel = 16

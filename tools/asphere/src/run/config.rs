@@ -15,7 +15,6 @@ pub struct Config {
     pub evolve: Evolve,
     pub regrid: Regrid,
     pub visualize: Visualize,
-    pub diagnostic: Diagnostic,
 
     pub sources: Vec<Source>,
 }
@@ -40,7 +39,6 @@ impl Transform for Config {
             evolve: self.evolve.clone(),
             regrid: self.regrid.clone(),
             visualize: self.visualize.clone(),
-            diagnostic: self.diagnostic.transform(vars)?,
             sources: self.sources.transform(vars)?,
         })
     }
@@ -64,6 +62,10 @@ pub struct Evolve {
     pub max_proper_time: f64,
     /// Maximum number of steps
     pub max_steps: usize,
+    /// Maximum violation of the momentum constraint before program assumes collapse.
+    pub max_constraint: f64,
+    /// Minimum lapse at origin before program assumes collapse.
+    pub min_lapse: f64,
 }
 
 /// Limits before a given simulation crashes (or assumes collapse)
@@ -71,9 +73,9 @@ pub struct Evolve {
 pub struct Limits {
     /// Maximum number of levels allowed during refinement.
     pub max_levels: usize,
-    /// Maximum number of nodes allowed before program crashes.
+    /// Maximum number of nodes allowed before program assumes collapse.
     pub max_nodes: usize,
-    /// Maximum amount of RAM avalable before the program crashes
+    /// Maximum amount of RAM avalable before the program assumes collapse
     pub max_memory: usize,
 }
 

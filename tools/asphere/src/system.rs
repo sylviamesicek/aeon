@@ -455,3 +455,33 @@ pub fn find_mass(mesh: &Mesh<1>, system: SystemSlice<Fields>) -> f64 {
 
     r_max / 2.0
 }
+
+pub struct ConstraintRhs;
+
+impl Function<1> for ConstraintRhs {
+    type Input = Fields;
+    type Output = Scalar;
+    type Error = Infallible;
+
+    fn evaluate(
+        &self,
+        engine: impl Engine<1>,
+        input: SystemSlice<Self::Input>,
+        mut output: SystemSliceMut<Self::Output>,
+    ) -> Result<(), Self::Error> {
+        let lapse = input.field(Field::Lapse);
+        let phi = input.field(Field::Phi);
+        let pi = input.field(Field::Pi);
+
+        let output = output.field_mut(());
+
+        for vertex in IndexSpace::new(engine.vertex_size()).iter() {
+            let index = engine.index_from_vertex(vertex);
+            let [r] = engine.position(vertex);
+
+            output[index] = 4.0 * f64::consts::PI * r * lapse[index] * phi[index] * pi[index];
+        }
+
+        Ok(())
+    }
+}

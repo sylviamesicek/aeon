@@ -25,6 +25,7 @@ pub enum GaugeCondition {
     /// Log + 1 slicing with harmonic shift.
     #[serde(rename = "log_plus_one")]
     LogPlusOne,
+    /// K Driver slicing condiiton with no shift
     #[serde(rename = "k_driver_zero_shift")]
     KDriverZeroShift,
 }

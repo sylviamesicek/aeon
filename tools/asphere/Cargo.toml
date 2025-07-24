@@ -8,17 +8,18 @@ default = ["progress"]
 progress = []
 
 [dependencies]
-aeon.workspace = true
+aeon = { path = "../../", default-features = false }
 aeon_app.workspace = true
 clap.workspace = true
 color-eyre.workspace = true
 console.workspace = true
-circular-queue.workspace = true
 csv.workspace = true
 datasize.workspace = true
 eyre.workspace = true
 env_logger.workspace = true
 indicatif.workspace = true
 log.workspace = true
+rayon.workspace = true
 reborrow.workspace = true
+ringbuffer.workspace = true
 serde.workspace = true

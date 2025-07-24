@@ -1,0 +1,7 @@
+directory = "output/sphgauss1-24/search"
+parameter = "amplitude"
+parallel = 9
+start = 0.3360352960543392               # Disperses 
+end = 0.33603529605433935                # Collapses
+max_depth = 40
+min_error = 1e-16

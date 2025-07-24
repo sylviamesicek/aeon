@@ -3,6 +3,7 @@ use aeon_app::config::Transform as _;
 use aeon_app::file;
 use clap::{ArgMatches, Command};
 use console::style;
+use indicatif::MultiProgress;
 use serde::{Deserialize, Serialize};
 
 pub mod config;
@@ -18,6 +19,7 @@ pub enum Status {
     Collapse,
 }
 
+#[derive(Clone, Copy)]
 pub struct SimulationInfo {
     pub status: Status,
     pub mass: f64,
@@ -63,6 +65,25 @@ pub fn run_simulation(config: &Config) -> eyre::Result<SimulationInfo> {
 
     // Run evolution
     evolve::evolve_data(config, mesh, system)
+}
+
+pub struct Subrun {
+    pub multi: MultiProgress,
+    pub parameter: f64,
+}
+
+pub fn subrun(config: &Config, s: &Subrun) -> eyre::Result<SimulationInfo> {
+    // Check that there is only one source term.
+    eyre::ensure!(
+        config.sources.len() == 1,
+        "asphere currently only supports one source term"
+    );
+
+    // Solve for initial data
+    let (mesh, system) = initial::initial_data(config)?;
+
+    // Run evolution
+    evolve::evolve_data_full(config, mesh, system, Some(s))
 }
 
 /// Extension trait for defining helper methods on `clap::Command`.

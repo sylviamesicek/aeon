@@ -2,6 +2,10 @@ use aeon_app::{
     config::{FloatVar, Transform, TransformError, VarDefs},
     file, float,
 };
+use rayon::{
+    ThreadPoolBuilder,
+    iter::{IntoParallelIterator as _, ParallelBridge, ParallelIterator},
+};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
@@ -9,6 +13,8 @@ use std::path::{Path, PathBuf};
 pub struct Config {
     pub directory: String,
     pub parameter: String,
+    // How many simulations to run in parallel at a given time.
+    pub parallel: usize,
     pub pstar: FloatVar,
     pub start: FloatVar,
     pub end: FloatVar,
@@ -22,26 +28,39 @@ impl Config {
         Ok(file::abs_or_relative(Path::new(&self.directory))?)
     }
 
-    pub fn try_for_each<E, F: FnMut(f64) -> Result<(), E>>(&self, mut f: F) -> Result<(), E> {
+    pub fn try_for_each<E: Send, F: Fn(f64) -> Result<(), E> + Send + Sync>(
+        &self,
+        f: F,
+    ) -> Result<(), E> {
         let pstar = self.pstar.unwrap();
         let start = self.start.unwrap();
         let end = self.end.unwrap();
 
-        match self.samples {
-            Samples::Log { log } => {
-                assert!(start > 0.0 && end > 0.0);
-                for amplitude in float::log_range(start, end, log) {
-                    f(pstar + amplitude)?
-                }
-            }
-            Samples::Linear { linear } => {
-                for amplitude in float::lin_range(start, end, linear) {
-                    f(pstar + amplitude)?
-                }
-            }
-        }
+        let thread_pool = ThreadPoolBuilder::new()
+            .num_threads(self.parallel)
+            .build()
+            .unwrap();
 
-        Ok(())
+        thread_pool.install(|| {
+            match self.samples {
+                Samples::Log { log } => {
+                    assert!(start > 0.0 && end > 0.0);
+
+                    float::log_range(start, end, log)
+                        .par_bridge()
+                        .into_par_iter()
+                        .try_for_each(|amplitude| f(pstar + amplitude))?;
+                }
+                Samples::Linear { linear } => {
+                    float::lin_range(start, end, linear)
+                        .par_bridge()
+                        .into_par_iter()
+                        .try_for_each(|amplitude| f(pstar + amplitude))?;
+                }
+            }
+
+            Ok(())
+        })
     }
 }
 
@@ -52,6 +71,7 @@ impl Transform for Config {
         Ok(Config {
             directory: self.directory.clone(),
             parameter: self.parameter.clone(),
+            parallel: self.parallel,
             samples: self.samples.clone(),
             pstar: self.pstar.transform(vars)?,
             start: self.start.transform(vars)?,

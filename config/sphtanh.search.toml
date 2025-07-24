@@ -4,3 +4,5 @@ start = 0.05                        # Disperses
 end = 0.10                          # Collapses
 max_depth = 100
 min_error = 1e-16
+parallel = 9
+# Critical Search result 0.09545428876233998

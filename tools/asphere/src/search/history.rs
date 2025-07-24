@@ -1,4 +1,4 @@
-use crate::run::Status;
+use crate::run::{SimulationInfo, Status};
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, path::Path};
 
@@ -41,27 +41,30 @@ impl SearchHistory {
         Ok(())
     }
 
-    pub fn insert(&mut self, key: f64, status: Status) {
+    pub fn insert(&mut self, key: f64, status: Status, mass: f64) {
         let bits: u64 = unsafe { std::mem::transmute(key) };
         self.map.insert(
             bits,
             SearchRecord {
                 param: key,
-                // encode: float::encode_float(key),
                 status,
+                mass,
             },
         );
     }
 
-    pub fn status(&mut self, key: f64) -> Option<Status> {
+    pub fn status(&self, key: f64) -> Option<SimulationInfo> {
         let bits: u64 = unsafe { std::mem::transmute(key) };
-        self.map.get(&bits).map(|v| v.status)
+        self.map.get(&bits).map(|v| SimulationInfo {
+            status: v.status,
+            mass: v.mass,
+        })
     }
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct SearchRecord {
     param: f64,
-    // encode: String,
     status: Status,
+    mass: f64,
 }

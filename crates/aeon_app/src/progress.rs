@@ -1,5 +1,12 @@
 use indicatif::ProgressStyle;
 
+pub fn run_style() -> ProgressStyle {
+    ProgressStyle::with_template(
+        "{prefix:.bold.dim} {bar:.cyan/blue} {human_pos}/{human_len} Steps, {wide_msg}",
+    )
+    .unwrap()
+}
+
 /// Progress bar in the style
 /// `<prefix> . <message>`
 pub fn spinner_style() -> ProgressStyle {

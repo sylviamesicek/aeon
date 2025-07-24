@@ -10,12 +10,16 @@ use crate::geometry::{
     TreeInterfaces, TreeNeighbors, TreeSer, faces,
 };
 use crate::kernel::{BoundaryClass, DirichletParams, Element, node_from_vertex};
+use crate::prelude::IndexSpace;
 use crate::{
     kernel::{BoundaryKind, NodeSpace, NodeWindow},
     system::SystemBoundaryConds,
 };
 use datasize::DataSize;
+
+#[cfg(feature = "parallel")]
 use rayon::iter::{IntoParallelIterator, ParallelBridge, ParallelIterator};
+
 use std::collections::HashMap;
 use std::{array, fmt::Write, ops::Range};
 
@@ -496,6 +500,7 @@ impl<const N: usize> Mesh<N> {
     /// Runs a computation in parallel on every single block in the mesh, providing
     /// a `MeshStore` object for allocating scratch data.
     pub fn block_compute<F: Fn(&Self, &MeshStore, BlockId) + Sync>(&mut self, f: F) {
+        #[cfg(feature = "parallel")]
         self.blocks
             .indices()
             .par_bridge()
@@ -505,6 +510,13 @@ impl<const N: usize> Mesh<N> {
                 f(self, store, block);
                 store.reset();
             });
+
+        #[cfg(not(feature = "parallel"))]
+        self.blocks.indices().for_each(|block| {
+            let store = unsafe { self.stores.get_or_default() };
+            f(self, store, block);
+            store.reset();
+        });
     }
 
     /// Runs a (possibily failable) computation in parallel on every single block in the mesh.
@@ -512,7 +524,9 @@ impl<const N: usize> Mesh<N> {
         &mut self,
         f: F,
     ) -> Result<(), E> {
-        self.blocks
+        #[cfg(feature = "parallel")]
+        return self
+            .blocks
             .indices()
             .par_bridge()
             .into_par_iter()
@@ -521,12 +535,21 @@ impl<const N: usize> Mesh<N> {
                 let result = f(self, store, block);
                 store.reset();
                 result
-            })
+            });
+
+        #[cfg(not(feature = "parallel"))]
+        return self.blocks.indices().try_for_each(|block| {
+            let store = unsafe { self.stores.get_or_default() };
+            let result = f(self, store, block);
+            store.reset();
+            result
+        });
     }
 
     /// Runs a computation in parallel on every single old block in the mesh, providing
     /// a `MeshStore` object for allocating scratch data.
     pub(crate) fn old_block_compute<F: Fn(&Self, &MeshStore, BlockId) + Sync>(&mut self, f: F) {
+        #[cfg(feature = "parallel")]
         (0..self.num_old_blocks())
             .map(BlockId)
             .par_bridge()
@@ -536,6 +559,13 @@ impl<const N: usize> Mesh<N> {
                 f(self, store, block);
                 store.reset();
             });
+
+        #[cfg(not(feature = "parallel"))]
+        (0..self.num_old_blocks()).map(BlockId).for_each(|block| {
+            let store = unsafe { self.stores.get_or_default() };
+            f(self, store, block);
+            store.reset();
+        });
     }
 
     /// Computes the maximum l2 norm of all fields in the system.
@@ -544,7 +574,7 @@ impl<const N: usize> Mesh<N> {
             .system()
             .enumerate()
             .map(|label| self.l2_norm(source.field(label)))
-            .max_by(|a, b| a.total_cmp(b))
+            .max_by(f64::total_cmp)
             .unwrap()
     }
 
@@ -554,7 +584,7 @@ impl<const N: usize> Mesh<N> {
             .system()
             .enumerate()
             .map(|label| self.max_norm(source.field(label)))
-            .max_by(|a, b| a.total_cmp(b))
+            .max_by(f64::total_cmp)
             .unwrap()
     }
 
@@ -600,6 +630,48 @@ impl<const N: usize> Mesh<N> {
         }
 
         result.sqrt()
+    }
+
+    pub fn oscillation_heuristic(&mut self, src: &[f64]) -> f64 {
+        let mut result: f64 = 0.0;
+
+        for block in self.blocks.indices() {
+            let space = self.block_space(block);
+            let cell_size = self.blocks.size(block);
+
+            let data = &src[self.block_nodes(block)];
+
+            for cell in IndexSpace::new(cell_size).iter() {
+                let node_offset: [usize; N] = array::from_fn(|i| self.width * cell[i]);
+                let node_size = [self.width + 1; N];
+
+                let mut maximum = f64::NEG_INFINITY;
+                let mut minimum = f64::INFINITY;
+
+                for local in IndexSpace::new(node_size).iter() {
+                    let global: [_; N] = array::from_fn(|axis| node_offset[axis] + local[axis]);
+                    let index = space.index_from_vertex(global);
+
+                    minimum = minimum.min(data[index]);
+                    maximum = maximum.max(data[index]);
+                }
+
+                let cell_result = (maximum - minimum).abs();
+
+                result += cell_result;
+            }
+        }
+
+        result
+    }
+
+    pub fn oscillation_heuristic_system<S: System>(&mut self, source: SystemSlice<S>) -> f64 {
+        source
+            .system()
+            .enumerate()
+            .map(|label| self.oscillation_heuristic(source.field(label)))
+            .max_by(f64::total_cmp)
+            .unwrap()
     }
 
     /// Computes the l-infinity norm of a field on a mesh.
