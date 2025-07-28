@@ -163,7 +163,19 @@ pub fn evolve_data_full(
 
         let h = mesh.min_spacing() * config.evolve.cfl;
 
-        if steps_since_regrid > config.regrid.flag_interval {
+        // Fix refinement if past a certain proper time (and configured as such)
+        if proper_time >= config.regrid.fix_grid_time && config.regrid.fix_grid && !fixed_grid {
+            fixed_grid = true;
+
+            // for cell in mesh.tree().active_cell_indices() {
+            //     println!("Cell {}", mesh.tree().cell_center(cell));
+            // }
+
+            continue;
+
+        }
+
+        if steps_since_regrid > config.regrid.flag_interval && !fixed_grid {
             steps_since_regrid = 0;
 
             // Perform constraint assement
