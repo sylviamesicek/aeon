@@ -165,52 +165,22 @@ pub fn evolve_data_full(
 
         // Fix refinement if past a certain proper time (and configured as such)
         if proper_time >= config.regrid.fix_grid_time && config.regrid.fix_grid && !fixed_grid {
-            fixed_grid = false;  // FIXME: change to true
-            // TODO: add radius and refinement threshold to config file
-
-            // loop until desired refinement is achieved
-            // // check if desired refinement is achieved (within the radius)
-            // // add refinement flags
-            // // balance refinement flags
-            // // refine any active cells (within the radius) that are below the refinement threshold
-            // // refine active index map?
-            // // coarsen?
-
-            // where to go from here: add flags to all cells in a certain radius if they are below the threshold
-            // refine all those cells
-            // might need to loop through until they are all refined the correct amount
-            // do the same thing with coarsening to make sure there are none that are overly refined
-
-            // Loop throug the active cells and flag any that need to be refined
-            let mut flags = vec![false; mesh.tree().num_active_cells()];
-            let mut cellnum = 0;
-            for cell in mesh.tree().active_cell_indices() {
-
-                // Get some information about the cell
-                let cell_bounds = mesh.tree().active_bounds(cell);
-                let cell_center = cell_bounds.center()[0]; // get 1st element because we only have 1 dimension
-                let cell_level = mesh.tree().active_level(cell);
-
-                // Set flags if necessary
-                if cell_center < config.regrid.fix_grid_radius
-                    && cell_level < config.regrid.fix_grid_level
-                {
-                    flags[cellnum] = true
-                }
-
-                println!("center: {}, level: {}", cell_center, cell_level);
-
-                cellnum += 1;
-
-            }
-
-            // Refine the grid based on the flags
-            mesh.refine_flags = flags;
-
-
+            fixed_grid = true;
+            mesh.refine_in_radius(config.regrid.fix_grid_radius, config.regrid.fix_grid_level);
+            let scratch = integrator.scratch(system.contigious().len());
+            scratch.copy_from_slice(system.contigious());
+            system.resize(mesh.num_nodes());
+            mesh.transfer_system(
+                Order::<4>,
+                SystemSlice::from_contiguous(&scratch, &Fields),
+                system.as_mut_slice(),
+            );
+            // TODO: I think there's other stuff in Sylvia's code below that needs to be done here
+            // TODO: ...maybe just put my code down there
+            buffers_filled.fill(false);
             continue;
-
         }
+        // println!("max refinement level = {}", mesh.num_levels());
 
         if steps_since_regrid > config.regrid.flag_interval && !fixed_grid {
             steps_since_regrid = 0;
