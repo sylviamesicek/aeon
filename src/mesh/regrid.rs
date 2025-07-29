@@ -69,6 +69,10 @@ impl<const N: usize> Mesh<N> {
         self.regrid();
     }
 
+    pub fn refine_in_radius(&mut self, radius: f64) {
+
+    }
+
     /// Flags cells for refinement using a wavelet criterion. The system must have filled
     /// boundaries. This function tags any cell that is insufficiently refined to approximate
     /// operators of the given `order` within the range of error.

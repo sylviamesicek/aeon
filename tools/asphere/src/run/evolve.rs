@@ -165,11 +165,48 @@ pub fn evolve_data_full(
 
         // Fix refinement if past a certain proper time (and configured as such)
         if proper_time >= config.regrid.fix_grid_time && config.regrid.fix_grid && !fixed_grid {
-            fixed_grid = true;
+            fixed_grid = false;  // FIXME: change to true
+            // TODO: add radius and refinement threshold to config file
 
-            // for cell in mesh.tree().active_cell_indices() {
-            //     println!("Cell {}", mesh.tree().cell_center(cell));
-            // }
+            // loop until desired refinement is achieved
+            // // check if desired refinement is achieved (within the radius)
+            // // add refinement flags
+            // // balance refinement flags
+            // // refine any active cells (within the radius) that are below the refinement threshold
+            // // refine active index map?
+            // // coarsen?
+
+            // where to go from here: add flags to all cells in a certain radius if they are below the threshold
+            // refine all those cells
+            // might need to loop through until they are all refined the correct amount
+            // do the same thing with coarsening to make sure there are none that are overly refined
+
+            // Loop throug the active cells and flag any that need to be refined
+            let mut flags = vec![false; mesh.tree().num_active_cells()];
+            let mut cellnum = 0;
+            for cell in mesh.tree().active_cell_indices() {
+
+                // Get some information about the cell
+                let cell_bounds = mesh.tree().active_bounds(cell);
+                let cell_center = cell_bounds.center()[0]; // get 1st element because we only have 1 dimension
+                let cell_level = mesh.tree().active_level(cell);
+
+                // Set flags if necessary
+                if cell_center < config.regrid.fix_grid_radius
+                    && cell_level < config.regrid.fix_grid_level
+                {
+                    flags[cellnum] = true
+                }
+
+                println!("center: {}, level: {}", cell_center, cell_level);
+
+                cellnum += 1;
+
+            }
+
+            // Refine the grid based on the flags
+            mesh.refine_flags = flags;
+
 
             continue;
 
@@ -220,13 +257,13 @@ pub fn evolve_data_full(
             mesh.regrid();
 
             log::trace!(
-                "Regrided Mesh at time: {proper_time:.5}, Num Levels {}, Num Nodes {}, Step: {}",
+                "Regridded Mesh at time: {proper_time:.5}, Num Levels {}, Num Nodes {}, Step: {}",
                 mesh.num_levels(),
                 mesh.num_nodes(),
                 step,
             );
 
-            // Copy system into tmp scratch space (provieded by dissipation).
+            // Copy system into tmp scratch space (provided by dissipation).
             let scratch = integrator.scratch(system.contigious().len());
             scratch.copy_from_slice(system.contigious());
             system.resize(mesh.num_nodes());
@@ -335,9 +372,9 @@ pub fn evolve_data_full(
         }
     }
 
-    if let Some((m, _, _, _, _)) = &bars {
-        m.clear()?;
-    }
+    // if let Some((m, _, _, _, _)) = &bars {
+    //     m.clear()?;
+    // }
 
     let alpha = min_alpha;
     let mut mass = min_alpha_mass;
