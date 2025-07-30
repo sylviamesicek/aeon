@@ -69,8 +69,8 @@ impl<const N: usize> Mesh<N> {
         self.regrid();
     }
 
-    pub fn refine_in_radius(&mut self, radius: f64, fgl: usize) {
-        // TODO: also coarsen, don't just refine
+    /// Refines or coarsens cells one level (towards target level fgl) within a given radius
+    pub fn regrid_in_radius(&mut self, radius: f64, fgl: usize) {
         // loop {
         //
         //     // Check if we have hit the required refinement
@@ -91,10 +91,11 @@ impl<const N: usize> Mesh<N> {
         //     if min_level==fgl {//&& max_level==level {
         //         break;
         //     }
-
-        // Loop through the active cells and flag any that need to be refined
+        // Loop through the active cells and flag any that need to be refined or coarsened
         self.refine_flags.fill(false);
+        self.coarsen_flags.fill(false);
         let mut temp_rflags = vec![false; self.tree().num_active_cells()];
+        let mut temp_cflags = vec![false; self.tree().num_active_cells()];
         for cell in self.tree().active_cell_indices() {
             // Get some information about the cell
             let cell_bounds = self.tree().active_bounds(cell);
@@ -102,15 +103,21 @@ impl<const N: usize> Mesh<N> {
             let cell_level = self.tree().active_level(cell);
             let cell_index = cell.0;
             // Set flags if necessary
-            if cell_center < radius && cell_level < fgl
-            {
-                temp_rflags[cell_index] = true;
+            if cell_center < radius {
+                if cell_level < fgl {
+                    temp_rflags[cell_index] = true;
+                }
+                if cell_level > fgl {
+                    temp_cflags[cell_index] = true;
+                }
             }
-            // println!("center: {}, level: {}", cell_center, cell_level);
         }
+        // Update the meshes flags
         self.refine_flags = temp_rflags;
-
-        // }
+        self.coarsen_flags = temp_cflags;
+        // Perform the regridding
+        self.balance_flags();
+        self.regrid();
     }
 
     /// Flags cells for refinement using a wavelet criterion. The system must have filled
