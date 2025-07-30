@@ -163,6 +163,7 @@ pub fn evolve_data_full(
 
         let h = mesh.min_spacing() * config.evolve.cfl;
 
+        // Perform regridding to a fixed value if configured as such, and if at a late enough time
         if proper_time >= config.regrid.fix_grid_time && config.regrid.fix_grid && !fixed_grid {
             fixed_grid = true;
 
@@ -237,8 +238,10 @@ pub fn evolve_data_full(
             }
 
             continue;
+
         }
 
+        // Perform normal regridding step
         if steps_since_regrid > config.regrid.flag_interval && !fixed_grid {
             steps_since_regrid = 0;
 
