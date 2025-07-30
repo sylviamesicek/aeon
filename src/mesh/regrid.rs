@@ -71,26 +71,6 @@ impl<const N: usize> Mesh<N> {
 
     /// Refines or coarsens cells one level (towards target level fgl) within a given radius
     pub fn regrid_in_radius(&mut self, radius: f64, fgl: usize) {
-        // loop {
-        //
-        //     // Check if we have hit the required refinement
-        //     let mut min_level= usize::MAX;
-        //     let mut max_level = usize::MIN;
-        //     for cell in self.tree().active_cell_indices() {
-        //         let ll = self.tree().active_level(cell);
-        //         let cc = self.tree().active_bounds(cell).center()[0]; // get 1st element because we only have 1 dimension
-        //         if cc < radius {
-        //             if ll < min_level {
-        //                 min_level = ll;
-        //             }
-        //             if ll > max_level {
-        //                 max_level = ll;
-        //             }
-        //         }
-        //     }
-        //     if min_level==fgl {//&& max_level==level {
-        //         break;
-        //     }
         // Loop through the active cells and flag any that need to be refined or coarsened
         self.refine_flags.fill(false);
         self.coarsen_flags.fill(false);
@@ -112,7 +92,7 @@ impl<const N: usize> Mesh<N> {
                 }
             }
         }
-        // Update the meshes flags
+        // Update the mesh's flags
         self.refine_flags = temp_rflags;
         self.coarsen_flags = temp_cflags;
         // Perform the regridding

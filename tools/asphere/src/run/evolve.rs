@@ -163,8 +163,6 @@ pub fn evolve_data_full(
 
         let h = mesh.min_spacing() * config.evolve.cfl;
 
-        // println!("max refinement level = {}", mesh.num_levels());
-
         if proper_time >= config.regrid.fix_grid_time && config.regrid.fix_grid && !fixed_grid {
             fixed_grid = true;
 
