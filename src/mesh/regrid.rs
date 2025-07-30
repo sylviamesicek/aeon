@@ -70,49 +70,47 @@ impl<const N: usize> Mesh<N> {
     }
 
     pub fn refine_in_radius(&mut self, radius: f64, fgl: usize) {
-        // Loop until desired refinement is achieved
-        loop {
+        // TODO: also coarsen, don't just refine
+        // loop {
+        //
+        //     // Check if we have hit the required refinement
+        //     let mut min_level= usize::MAX;
+        //     let mut max_level = usize::MIN;
+        //     for cell in self.tree().active_cell_indices() {
+        //         let ll = self.tree().active_level(cell);
+        //         let cc = self.tree().active_bounds(cell).center()[0]; // get 1st element because we only have 1 dimension
+        //         if cc < radius {
+        //             if ll < min_level {
+        //                 min_level = ll;
+        //             }
+        //             if ll > max_level {
+        //                 max_level = ll;
+        //             }
+        //         }
+        //     }
+        //     if min_level==fgl {//&& max_level==level {
+        //         break;
+        //     }
 
-            // Check if we have hit the required refinement
-            let mut min_level= usize::MAX;
-            let mut max_level = usize::MIN;
-            for cell in self.tree().active_cell_indices() {
-                let ll = self.tree().active_level(cell);
-                let cc = self.tree().active_bounds(cell).center()[0]; // get 1st element because we only have 1 dimension
-                if cc < radius {
-                    if ll < min_level {
-                        min_level = ll;
-                    }
-                    if ll > max_level {
-                        max_level = ll;
-                    }
-                }
+        // Loop through the active cells and flag any that need to be refined
+        self.refine_flags.fill(false);
+        let mut temp_rflags = vec![false; self.tree().num_active_cells()];
+        for cell in self.tree().active_cell_indices() {
+            // Get some information about the cell
+            let cell_bounds = self.tree().active_bounds(cell);
+            let cell_center = cell_bounds.center()[0]; // get 1st element because we only have 1 dimension
+            let cell_level = self.tree().active_level(cell);
+            let cell_index = cell.0;
+            // Set flags if necessary
+            if cell_center < radius && cell_level < fgl
+            {
+                temp_rflags[cell_index] = true;
             }
-            if min_level==fgl {//&& max_level==level {
-                break;
-            }
-
-            // Loop through the active cells and flag any that need to be refined
-            let mut rflags = vec![false; self.tree().num_active_cells()];
-            let mut cellnum = 0;
-            for cell in self.tree().active_cell_indices() {
-                // Get some information about the cell
-                let cell_bounds = self.tree().active_bounds(cell);
-                let cell_center = cell_bounds.center()[0]; // get 1st element because we only have 1 dimension
-                let cell_level = self.tree().active_level(cell);
-                // Set flags if necessary
-                if cell_center < radius && cell_level < fgl
-                {
-                    rflags[cellnum] = true;
-                }
-                // println!("center: {}, level: {}", cell_center, cell_level);
-                cellnum += 1;
-            }
-            self.refine_flags = rflags;
-            self.balance_flags();
-            self.regrid();
-
+            // println!("center: {}, level: {}", cell_center, cell_level);
         }
+        self.refine_flags = temp_rflags;
+
+        // }
     }
 
     /// Flags cells for refinement using a wavelet criterion. The system must have filled
