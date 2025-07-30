@@ -163,10 +163,89 @@ pub fn evolve_data_full(
 
         let h = mesh.min_spacing() * config.evolve.cfl;
 
-        if steps_since_regrid > config.regrid.flag_interval {
+        // Perform regridding to a fixed value if configured as such, and if at a late enough time
+        if proper_time >= config.regrid.fix_grid_time && config.regrid.fix_grid && !fixed_grid {
+            fixed_grid = true;
+
+            // Loop through regridding steps until we reach the desired level
+            loop {
+
+                // Check if we are at the desired level
+                let mut min_level = usize::MAX;
+                let mut max_level = usize::MIN;
+                for cell in mesh.tree().active_cell_indices() {
+                    let ll = mesh.tree().active_level(cell);
+                    let cc = mesh.tree().active_bounds(cell).center()[0]; // get 1st element because we only have 1 dimension
+                    if cc < config.regrid.fix_grid_radius {
+                        if ll < min_level {
+                            min_level = ll;
+                        }
+                        if ll > max_level {
+                            max_level = ll;
+                        }
+                    }
+                }
+                if min_level==config.regrid.fix_grid_level && max_level==config.regrid.fix_grid_level {
+                    break;
+                }
+
+                // Perform constraint assessment
+                if buffers_filled.iter().all(|&f| f) {
+                    deriv_buffer.resize(mesh.num_nodes(), 0.0);
+                    deriv_buffer.fill(0.0);
+
+                    const WEIGHTS: [f64; 5] = [-1. / 12., 2. / 3., 0.0, -2. / 3., 1. / 12.];
+
+                    for si in 0..5 {
+                        let part = deriv_buffers[(buffer_index - si) % 5].as_slice();
+
+                        assert!(part.len() == deriv_buffer.len());
+
+                        for i in 0..deriv_buffer.len() {
+                            deriv_buffer[i] += WEIGHTS[si] * part[i]
+                        }
+                    }
+
+                    for i in 0..deriv_buffer.len() {
+                        deriv_buffer[i] /= h;
+                    }
+
+                    let constraint_buffer = constraint_buffers[(buffer_index - 2) % 5].as_slice();
+                    assert!(deriv_buffer.len() == constraint_buffer.len());
+
+                    for i in 0..deriv_buffer.len() {
+                        deriv_buffer[i] -= constraint_buffer[i];
+                    }
+
+                    constraint = mesh.l2_norm(&deriv_buffer);
+                }
+
+                // Take one regridding step towards desired level
+                mesh.regrid_in_radius(config.regrid.fix_grid_radius, config.regrid.fix_grid_level);
+
+                // Copy system into tmp scratch space (provided by dissipation).
+                let scratch = integrator.scratch(system.contigious().len());
+                scratch.copy_from_slice(system.contigious());
+                system.resize(mesh.num_nodes());
+                mesh.transfer_system(
+                    Order::<4>,
+                    SystemSlice::from_contiguous(&scratch, &Fields),
+                    system.as_mut_slice(),
+                );
+
+                buffers_filled.fill(false);
+
+            }
+
+            continue;
+
+        }
+
+        // Perform normal regridding step
+        if steps_since_regrid > config.regrid.flag_interval && !fixed_grid {
             steps_since_regrid = 0;
 
-            // Perform constraint assement
+            // Perform constraint assessment
             if buffers_filled.iter().all(|&f| f) {
                 deriv_buffer.resize(mesh.num_nodes(), 0.0);
                 deriv_buffer.fill(0.0);
@@ -208,13 +287,13 @@ pub fn evolve_data_full(
             mesh.regrid();
 
             log::trace!(
-                "Regrided Mesh at time: {proper_time:.5}, Num Levels {}, Num Nodes {}, Step: {}",
+                "Regridded Mesh at time: {proper_time:.5}, Num Levels {}, Num Nodes {}, Step: {}",
                 mesh.num_levels(),
                 mesh.num_nodes(),
                 step,
             );
 
-            // Copy system into tmp scratch space (provieded by dissipation).
+            // Copy system into tmp scratch space (provided by dissipation).
             let scratch = integrator.scratch(system.contigious().len());
             scratch.copy_from_slice(system.contigious());
             system.resize(mesh.num_nodes());
@@ -323,9 +402,9 @@ pub fn evolve_data_full(
         }
     }
 
-    if let Some((m, _, _, _, _)) = &bars {
-        m.clear()?;
-    }
+    // if let Some((m, _, _, _, _)) = &bars {
+    //     m.clear()?;
+    // }
 
     let alpha = min_alpha;
     let mut mass = min_alpha_mass;

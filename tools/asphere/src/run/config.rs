@@ -99,6 +99,10 @@ pub struct Regrid {
     /// At what proper time do we fix the grid?
     #[serde(default = "zero_f64")]
     pub fix_grid_time: f64,
+    /// Within what radius do we fix the grid?
+    pub fix_grid_radius: f64,
+    /// At what refinement level do we fix the grid?
+    pub fix_grid_level: usize,
 }
 
 fn zero_f64() -> f64 {

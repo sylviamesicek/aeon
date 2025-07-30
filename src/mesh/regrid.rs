@@ -69,6 +69,37 @@ impl<const N: usize> Mesh<N> {
         self.regrid();
     }
 
+    /// Refines or coarsens cells one level (towards target level fgl) within a given radius
+    pub fn regrid_in_radius(&mut self, radius: f64, fgl: usize) {
+        // Loop through the active cells and flag any that need to be refined or coarsened
+        self.refine_flags.fill(false);
+        self.coarsen_flags.fill(false);
+        let mut temp_rflags = vec![false; self.tree().num_active_cells()];
+        let mut temp_cflags = vec![false; self.tree().num_active_cells()];
+        for cell in self.tree().active_cell_indices() {
+            // Get some information about the cell
+            let cell_bounds = self.tree().active_bounds(cell);
+            let cell_center = cell_bounds.center()[0]; // get 1st element because we only have 1 dimension
+            let cell_level = self.tree().active_level(cell);
+            let cell_index = cell.0;
+            // Set flags if necessary
+            if cell_center < radius {
+                if cell_level < fgl {
+                    temp_rflags[cell_index] = true;
+                }
+                if cell_level > fgl {
+                    temp_cflags[cell_index] = true;
+                }
+            }
+        }
+        // Update the mesh's flags
+        self.refine_flags = temp_rflags;
+        self.coarsen_flags = temp_cflags;
+        // Perform the regridding
+        self.balance_flags();
+        self.regrid();
+    }
+
     /// Flags cells for refinement using a wavelet criterion. The system must have filled
     /// boundaries. This function tags any cell that is insufficiently refined to approximate
     /// operators of the given `order` within the range of error.
