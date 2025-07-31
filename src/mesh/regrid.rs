@@ -69,6 +69,44 @@ impl<const N: usize> Mesh<N> {
         self.regrid();
     }
 
+    /// Refines innermost cell
+    pub fn refine_innermost(&mut self) {
+        let mut temp_rflags = vec![false; self.tree().num_active_cells()];
+        // Find the innermost cell and flag it for refinement
+        let cell_inner_index = 0;
+        let cell_inner_center = f64::MAX;
+        for cell in self.tree().active_cell_indices() {
+            let cell_bounds = self.tree().active_bounds(cell);
+            let cell_center = cell_bounds.center()[0]; // get 1st element because we only have 1 dimension
+            if cell_center < cell_inner_center {
+                temp_rflags[cell.0] = true;
+            }
+        }
+        // Set flag and refine
+        self.refine_flags = temp_rflags;
+        self.balance_flags();
+        self.regrid();
+    }
+
+    /// Coarsens innermost cell
+    pub fn coarsen_innermost(&mut self) {
+        let mut temp_cflags = vec![false; self.tree().num_active_cells()];
+        // Find the innermost cell and flag it for coarsening
+        let cell_inner_index = 0;
+        let cell_inner_center = f64::MAX;
+        for cell in self.tree().active_cell_indices() {
+            let cell_bounds = self.tree().active_bounds(cell);
+            let cell_center = cell_bounds.center()[0]; // get 1st element because we only have 1 dimension
+            if cell_center < cell_inner_center {
+                temp_cflags[cell.0] = true;
+            }
+        }
+        // Set flag and refine
+        self.coarsen_flags = temp_cflags;
+        self.balance_flags();
+        self.regrid();
+    }
+
     /// Refines or coarsens cells one level (towards target level fgl) within a given radius
     pub fn regrid_in_radius(&mut self, radius: f64, fgl: usize) {
         // Loop through the active cells and flag any that need to be refined or coarsened

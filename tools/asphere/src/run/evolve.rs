@@ -188,12 +188,22 @@ pub fn evolve_data_full(
                 if min_level==config.regrid.fix_grid_level && max_level==config.regrid.fix_grid_level {
                     break;
                 }
-                // // Contingency in case the user-set radius is too small
+                // // If radius is smaller than the smallest cell, what do we do?
+                let mut refine_inner = false;
+                let mut coarsen_inner = false;
                 if min_level == usize::MAX || max_level == usize::MIN {
-                    log::warn!(
-                        "Could not force regridding because user-set radius is too small"
-                    );
-                    break;
+                    // If too refined, then coarsen the innermost
+                    if mesh.num_levels() > config.regrid.fix_grid_level {
+                        coarsen_inner = true;
+                    // If too coarse, then refine the innermost
+                    } else if mesh.num_levels() < config.regrid.fix_grid_level {
+                        refine_inner = true;
+                    // If at max refinement, then just stop
+                    } else {
+                        break;
+                    }
+
+                    continue;
                 }
 
                 // Perform constraint assessment
@@ -228,7 +238,13 @@ pub fn evolve_data_full(
                 }
 
                 // Take one regridding step towards desired level
-                mesh.regrid_in_radius(config.regrid.fix_grid_radius, config.regrid.fix_grid_level);
+                if refine_inner {
+                    mesh.refine_innermost();
+                } else if coarsen_inner {
+                    mesh.coarsen_innermost();
+                } else {
+                    mesh.regrid_in_radius(config.regrid.fix_grid_radius, config.regrid.fix_grid_level);
+                }
 
                 // Copy system into tmp scratch space (provided by dissipation).
                 let scratch = integrator.scratch(system.contigious().len());
