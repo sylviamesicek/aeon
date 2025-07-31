@@ -188,6 +188,13 @@ pub fn evolve_data_full(
                 if min_level==config.regrid.fix_grid_level && max_level==config.regrid.fix_grid_level {
                     break;
                 }
+                // // Contingency in case the user-set radius is too small
+                if min_level == usize::MAX || max_level == usize::MIN {
+                    log::warn!(
+                        "Could not force regridding because user-set radius is too small"
+                    );
+                    break;
+                }
 
                 // Perform constraint assessment
                 if buffers_filled.iter().all(|&f| f) {
