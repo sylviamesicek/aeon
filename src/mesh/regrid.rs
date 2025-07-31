@@ -79,10 +79,11 @@ impl<const N: usize> Mesh<N> {
             let cell_bounds = self.tree().active_bounds(cell);
             let cell_center = cell_bounds.center()[0]; // get 1st element because we only have 1 dimension
             if cell_center < cell_inner_center {
-                temp_rflags[cell.0] = true;
+                cell_inner_index = cell.0;
             }
         }
         // Set flag and refine
+        temp_rflags[cell_inner_index] = true;
         self.refine_flags = temp_rflags;
         self.balance_flags();
         self.regrid();
@@ -98,10 +99,11 @@ impl<const N: usize> Mesh<N> {
             let cell_bounds = self.tree().active_bounds(cell);
             let cell_center = cell_bounds.center()[0]; // get 1st element because we only have 1 dimension
             if cell_center < cell_inner_center {
-                temp_cflags[cell.0] = true;
+                cell_inner_index = cell.0;
             }
         }
         // Set flag and refine
+        temp_cflags[cell_inner_index] = true;
         self.coarsen_flags = temp_cflags;
         self.balance_flags();
         self.regrid();
