@@ -73,12 +73,13 @@ impl<const N: usize> Mesh<N> {
     pub fn refine_innermost(&mut self) {
         let mut temp_rflags = vec![false; self.tree().num_active_cells()];
         // Find the innermost cell and flag it for refinement
-        let cell_inner_index = 0;
-        let cell_inner_center = f64::MAX;
+        let mut cell_inner_index = 0;
+        let mut cell_inner_center = f64::MAX;
         for cell in self.tree().active_cell_indices() {
             let cell_bounds = self.tree().active_bounds(cell);
             let cell_center = cell_bounds.center()[0]; // get 1st element because we only have 1 dimension
             if cell_center < cell_inner_center {
+                cell_inner_center = cell_center;
                 cell_inner_index = cell.0;
             }
         }
@@ -93,12 +94,13 @@ impl<const N: usize> Mesh<N> {
     pub fn coarsen_innermost(&mut self) {
         let mut temp_cflags = vec![false; self.tree().num_active_cells()];
         // Find the innermost cell and flag it for coarsening
-        let cell_inner_index = 0;
-        let cell_inner_center = f64::MAX;
+        let mut cell_inner_index = 0;
+        let mut cell_inner_center = f64::MAX;
         for cell in self.tree().active_cell_indices() {
             let cell_bounds = self.tree().active_bounds(cell);
             let cell_center = cell_bounds.center()[0]; // get 1st element because we only have 1 dimension
             if cell_center < cell_inner_center {
+                cell_inner_center = cell_center;
                 cell_inner_index = cell.0;
             }
         }

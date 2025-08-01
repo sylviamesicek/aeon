@@ -202,8 +202,6 @@ pub fn evolve_data_full(
                     } else {
                         break;
                     }
-
-                    continue;
                 }
 
                 // Perform constraint assessment
