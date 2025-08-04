@@ -14,8 +14,7 @@ function timevsdofs(diagfile::String)::AbstractPlot
     sc = plot(proper_time, dofs, label="Final Mass")
     plot!(sc, minorgrid=true)
     title!(sc, "Nodes vs Proper Time")
-    xlabel!(sc, L"\\tau")
+    xlabel!(sc, "Proper Time ($(L"\tau"))")
     ylabel!(sc, "Degrees of Freedom")
-    xlims!(sc, 6.0, 7.0)
     return sc
 end
