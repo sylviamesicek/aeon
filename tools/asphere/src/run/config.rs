@@ -1,10 +1,7 @@
 use aeon::mesh::ExportStride;
-use aeon_app::config::{FloatVar, Transform, TransformError, UnsignedVar, VarDefs};
+use aeon_app::config::{FloatVar, Transform, TransformError, VarDefs};
 use serde::{Deserialize, Serialize};
-use std::{
-    default,
-    path::{Path, PathBuf},
-};
+use std::path::{Path, PathBuf};
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct Config {
@@ -18,6 +15,9 @@ pub struct Config {
     pub evolve: Evolve,
     pub regrid: Regrid,
     pub visualize: Visualize,
+
+    #[serde(default)]
+    pub diagnostic: Diagnostic,
 
     pub sources: Vec<Source>,
 }
@@ -42,6 +42,7 @@ impl Transform for Config {
             evolve: self.evolve.clone(),
             regrid: self.regrid.clone(),
             visualize: self.visualize.clone(),
+            diagnostic: self.diagnostic.clone(),
             sources: self.sources.transform(vars)?,
         })
     }
@@ -100,13 +101,19 @@ pub struct Regrid {
     #[serde(default = "zero_f64")]
     pub fix_grid_time: f64,
     /// Within what radius do we fix the grid?
+    #[serde(default = "zero_f64")]
     pub fix_grid_radius: f64,
     /// At what refinement level do we fix the grid?
+    #[serde(default = "zero_usize")]
     pub fix_grid_level: usize,
 }
 
 fn zero_f64() -> f64 {
     0.0
+}
+
+fn zero_usize() -> usize {
+    0
 }
 
 /// Visualization settings for initial data and evolution output.
@@ -125,20 +132,18 @@ pub struct Visualize {
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct Diagnostic {
-    pub save: bool,
-    pub save_interval: UnsignedVar,
-    pub serial_id: UnsignedVar,
+    /// Should we save diagnostic info for evolution runs
+    pub save_evolve: bool,
+    /// How often do we save diagnostic info for evolution runs
+    pub save_evolve_interval: usize,
 }
 
-impl Transform for Diagnostic {
-    type Output = Diagnostic;
-
-    fn transform(&self, vars: &VarDefs) -> Result<Self::Output, TransformError> {
-        Ok(Self {
-            save: self.save,
-            save_interval: self.save_interval.transform(vars)?,
-            serial_id: self.save_interval.transform(vars)?,
-        })
+impl Default for Diagnostic {
+    fn default() -> Self {
+        Self {
+            save_evolve: false,
+            save_evolve_interval: 1,
+        }
     }
 }
 

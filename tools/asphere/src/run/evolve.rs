@@ -11,7 +11,30 @@ use console::style;
 use datasize::DataSize as _;
 use indicatif::{HumanBytes, HumanCount, HumanDuration, MultiProgress, ProgressBar};
 use ringbuffer::{AllocRingBuffer, RingBuffer};
-use std::time::{Duration, Instant};
+use std::{
+    path::Path,
+    time::{Duration, Instant},
+};
+
+#[derive(Clone, Debug, serde::Serialize)]
+pub struct DiagnosticInfo {
+    proper_time: f64,
+    time: f64,
+    nodes: usize,
+    dofs: usize,
+    levels: usize,
+    alpha: f64,
+    mass: f64,
+}
+
+pub fn save_csv_table<T: serde::Serialize>(records: &[T], path: &Path) -> eyre::Result<()> {
+    let mut writer = csv::Writer::from_path(path)?;
+    for record in records {
+        writer.serialize(record)?;
+    }
+    writer.flush()?;
+    Ok(())
+}
 
 pub fn evolve_data(
     config: &Config,
@@ -42,7 +65,7 @@ pub fn evolve_data_full(
     let absolute = config.directory()?;
 
     // Path for initial visualization data.
-    if config.visualize.save_evolve {
+    if config.visualize.save_evolve || config.diagnostic.save_evolve {
         std::fs::create_dir_all(&absolute.join("evolve"))?;
     }
 
@@ -109,6 +132,9 @@ pub fn evolve_data_full(
     let mut constraint: f64 = 0.0;
     let mut max_constraint: f64 = 0.0;
 
+    let mut diagnostic = Vec::new();
+    let mut collapse_msg = "".to_string();
+
     while proper_time < config.evolve.max_proper_time {
         assert!(system.len() == mesh.num_nodes());
         mesh.fill_boundary(Order::<4>, FieldConditions, system.as_mut_slice());
@@ -132,27 +158,29 @@ pub fn evolve_data_full(
 
         if norm.is_nan() || norm >= 1e60 {
             // println!("Evolution collapses, norm: {}", norm);
+            collapse_msg = format!("Norm blows up: {}", norm);
             disperse = false;
             break;
         }
 
         max_constraint = max_constraint.max(constraint);
         if constraint >= config.evolve.max_constraint {
+            collapse_msg = format!("Max constraint reached: {}", max_constraint);
             disperse = false;
             break;
         }
 
         if step >= config.evolve.max_steps {
-            // println!("Evolution exceded maximum allocated steps: {}", step);
+            collapse_msg = format!("Evolution exceded maximum allocated steps: {}", step);
             disperse = false;
             break;
         }
 
         if mesh.num_nodes() >= config.limits.max_nodes {
-            // println!(
-            //     "Evolution exceded maximum allocated nodes: {}",
-            //     mesh.num_nodes()
-            // );
+            collapse_msg = format!(
+                "Evolution exceded maximum allocated nodes: {}",
+                mesh.num_nodes()
+            );
             disperse = false;
             break;
         }
@@ -164,103 +192,105 @@ pub fn evolve_data_full(
         let h = mesh.min_spacing() * config.evolve.cfl;
 
         // Perform regridding to a fixed value if configured as such, and if at a late enough time
-        if proper_time >= config.regrid.fix_grid_time && config.regrid.fix_grid && !fixed_grid {
-            fixed_grid = true;
+        // if config.regrid.fix_grid && proper_time >= config.regrid.fix_grid_time && !fixed_grid {
+        //     fixed_grid = true;
 
-            // Loop through regridding steps until we reach the desired level
-            loop {
+        //     // Loop through regridding steps until we reach the desired level
+        //     loop {
+        //         // Check if we are at the desired level
+        //         let mut min_level = usize::MAX;
+        //         let mut max_level = usize::MIN;
+        //         for cell in mesh.tree().active_cell_indices() {
+        //             let ll = mesh.tree().active_level(cell);
+        //             let cc = mesh.tree().active_bounds(cell).center()[0]; // get 1st element because we only have 1 dimension
+        //             if cc < config.regrid.fix_grid_radius {
+        //                 if ll < min_level {
+        //                     min_level = ll;
+        //                 }
+        //                 if ll > max_level {
+        //                     max_level = ll;
+        //                 }
+        //             }
+        //         }
+        //         if min_level == config.regrid.fix_grid_level
+        //             && max_level == config.regrid.fix_grid_level
+        //         {
+        //             break;
+        //         }
+        //         // // If radius is smaller than the smallest cell, what do we do?
+        //         let mut refine_inner = false;
+        //         let mut coarsen_inner = false;
+        //         if min_level == usize::MAX || max_level == usize::MIN {
+        //             // If too refined, then coarsen the innermost
+        //             if mesh.num_levels() > config.regrid.fix_grid_level {
+        //                 coarsen_inner = true;
+        //             // If too coarse, then refine the innermost
+        //             } else if mesh.num_levels() < config.regrid.fix_grid_level {
+        //                 refine_inner = true;
+        //             // If at max refinement, then just stop
+        //             } else {
+        //                 break;
+        //             }
+        //         }
 
-                // Check if we are at the desired level
-                let mut min_level = usize::MAX;
-                let mut max_level = usize::MIN;
-                for cell in mesh.tree().active_cell_indices() {
-                    let ll = mesh.tree().active_level(cell);
-                    let cc = mesh.tree().active_bounds(cell).center()[0]; // get 1st element because we only have 1 dimension
-                    if cc < config.regrid.fix_grid_radius {
-                        if ll < min_level {
-                            min_level = ll;
-                        }
-                        if ll > max_level {
-                            max_level = ll;
-                        }
-                    }
-                }
-                if min_level==config.regrid.fix_grid_level && max_level==config.regrid.fix_grid_level {
-                    break;
-                }
-                // // If radius is smaller than the smallest cell, what do we do?
-                let mut refine_inner = false;
-                let mut coarsen_inner = false;
-                if min_level == usize::MAX || max_level == usize::MIN {
-                    // If too refined, then coarsen the innermost
-                    if mesh.num_levels() > config.regrid.fix_grid_level {
-                        coarsen_inner = true;
-                    // If too coarse, then refine the innermost
-                    } else if mesh.num_levels() < config.regrid.fix_grid_level {
-                        refine_inner = true;
-                    // If at max refinement, then just stop
-                    } else {
-                        break;
-                    }
-                }
+        //         // Perform constraint assessment
+        //         if buffers_filled.iter().all(|&f| f) {
+        //             deriv_buffer.resize(mesh.num_nodes(), 0.0);
+        //             deriv_buffer.fill(0.0);
 
-                // Perform constraint assessment
-                if buffers_filled.iter().all(|&f| f) {
-                    deriv_buffer.resize(mesh.num_nodes(), 0.0);
-                    deriv_buffer.fill(0.0);
+        //             const WEIGHTS: [f64; 5] = [-1. / 12., 2. / 3., 0.0, -2. / 3., 1. / 12.];
 
-                    const WEIGHTS: [f64; 5] = [-1. / 12., 2. / 3., 0.0, -2. / 3., 1. / 12.];
+        //             for si in 0..5 {
+        //                 let part = deriv_buffers[(buffer_index - si) % 5].as_slice();
 
-                    for si in 0..5 {
-                        let part = deriv_buffers[(buffer_index - si) % 5].as_slice();
+        //                 assert!(part.len() == deriv_buffer.len());
 
-                        assert!(part.len() == deriv_buffer.len());
+        //                 for i in 0..deriv_buffer.len() {
+        //                     deriv_buffer[i] += WEIGHTS[si] * part[i]
+        //                 }
+        //             }
 
-                        for i in 0..deriv_buffer.len() {
-                            deriv_buffer[i] += WEIGHTS[si] * part[i]
-                        }
-                    }
+        //             for i in 0..deriv_buffer.len() {
+        //                 deriv_buffer[i] /= h;
+        //             }
 
-                    for i in 0..deriv_buffer.len() {
-                        deriv_buffer[i] /= h;
-                    }
+        //             let constraint_buffer = constraint_buffers[(buffer_index - 2) % 5].as_slice();
+        //             assert!(deriv_buffer.len() == constraint_buffer.len());
 
-                    let constraint_buffer = constraint_buffers[(buffer_index - 2) % 5].as_slice();
-                    assert!(deriv_buffer.len() == constraint_buffer.len());
+        //             for i in 0..deriv_buffer.len() {
+        //                 deriv_buffer[i] -= constraint_buffer[i];
+        //             }
 
-                    for i in 0..deriv_buffer.len() {
-                        deriv_buffer[i] -= constraint_buffer[i];
-                    }
+        //             constraint = mesh.l2_norm(&deriv_buffer);
+        //         }
 
-                    constraint = mesh.l2_norm(&deriv_buffer);
-                }
+        //         // Take one regridding step towards desired level
+        //         if refine_inner {
+        //             mesh.refine_innermost();
+        //         } else if coarsen_inner {
+        //             mesh.coarsen_innermost();
+        //         } else {
+        //             mesh.regrid_in_radius(
+        //                 config.regrid.fix_grid_radius,
+        //                 config.regrid.fix_grid_level,
+        //             );
+        //         }
 
-                // Take one regridding step towards desired level
-                if refine_inner {
-                    mesh.refine_innermost();
-                } else if coarsen_inner {
-                    mesh.coarsen_innermost();
-                } else {
-                    mesh.regrid_in_radius(config.regrid.fix_grid_radius, config.regrid.fix_grid_level);
-                }
+        //         // Copy system into tmp scratch space (provided by dissipation).
+        //         let scratch = integrator.scratch(system.contigious().len());
+        //         scratch.copy_from_slice(system.contigious());
+        //         system.resize(mesh.num_nodes());
+        //         mesh.transfer_system(
+        //             Order::<4>,
+        //             SystemSlice::from_contiguous(&scratch, &Fields),
+        //             system.as_mut_slice(),
+        //         );
 
-                // Copy system into tmp scratch space (provided by dissipation).
-                let scratch = integrator.scratch(system.contigious().len());
-                scratch.copy_from_slice(system.contigious());
-                system.resize(mesh.num_nodes());
-                mesh.transfer_system(
-                    Order::<4>,
-                    SystemSlice::from_contiguous(&scratch, &Fields),
-                    system.as_mut_slice(),
-                );
+        //         buffers_filled.fill(false);
+        //     }
 
-                buffers_filled.fill(false);
-
-            }
-
-            continue;
-
-        }
+        //     continue;
+        // }
 
         // Perform normal regridding step
         if steps_since_regrid > config.regrid.flag_interval && !fixed_grid {
@@ -360,6 +390,18 @@ pub fn evolve_data_full(
         let alpha = mesh.bottom_left_value(system.field(Field::Lapse));
         let mass = find_mass(&mesh, system.as_slice());
 
+        if config.diagnostic.save_evolve && step % config.diagnostic.save_evolve_interval == 0 {
+            diagnostic.push(DiagnosticInfo {
+                proper_time,
+                time,
+                nodes: mesh.num_nodes(),
+                dofs: mesh.num_dofs(),
+                alpha,
+                mass,
+                levels: mesh.num_levels(),
+            });
+        }
+
         if alpha.abs() <= min_alpha {
             min_alpha = alpha.abs();
             min_alpha_mass = mass;
@@ -367,7 +409,8 @@ pub fn evolve_data_full(
         }
 
         // Crash if min lapse achieved
-        if alpha.abs() <= config.evolve.min_lapse {
+        if alpha <= config.evolve.min_lapse {
+            collapse_msg = format!("Minimum Lapse achieved {}", alpha);
             disperse = false;
             break;
         }
@@ -400,8 +443,8 @@ pub fn evolve_data_full(
             memory_pb.set_position(memory_usage as u64);
             step_pb.inc(1);
             step_pb.set_message(format!(
-                "Step: {}, τ: {:.8}, M: {:.8e}, α: {:.8e}",
-                step, proper_time, mass, alpha
+                "Step: {}, τ: {:.8}, M: {:.8e}, α: {:.8e}, ℂ: {:.4e}",
+                step, proper_time, mass, alpha, constraint
             ));
         }
 
@@ -418,14 +461,21 @@ pub fn evolve_data_full(
         let norm = mesh.l2_norm_system(system.as_slice());
 
         if norm.is_nan() || norm >= 1e60 || alpha.is_nan() || alpha <= 0.0 {
+            collapse_msg = format!(
+                "Invalid Fields after update. Norm: {}, Alpha: {}",
+                norm, alpha
+            );
             disperse = false;
             break;
         }
     }
 
-    // if let Some((m, _, _, _, _)) = &bars {
-    //     m.clear()?;
-    // }
+    if config.diagnostic.save_evolve {
+        save_csv_table(
+            &diagnostic,
+            &absolute.join("evolve").join("diagnostics.csv"),
+        )?;
+    }
 
     let alpha = min_alpha;
     let mut mass = min_alpha_mass;
@@ -470,6 +520,9 @@ pub fn evolve_data_full(
             style("Collapses").red()
         };
         println!("Run Status: {}, Mass: {}, Lapse: {}", status, mass, alpha);
+        if !disperse {
+            println!("Reason for Collapse: {}", collapse_msg);
+        }
 
         println!("Mesh Info...");
         println!("- Num Nodes: {}", mesh.num_nodes());
@@ -478,15 +531,14 @@ pub fn evolve_data_full(
             "- RAM usage: ~{}",
             HumanBytes(mesh.estimate_heap_size() as u64)
         );
+        println!("Something else");
         println!("Field Info...");
         println!(
             "- RAM usage: ~{}",
             HumanBytes((system.estimate_heap_size() + integrator.estimate_heap_size()) as u64)
         );
 
-        for mass in mass_queue.iter() {
-            println!("Previous Mass: {:.8e}", mass);
-        }
+        println!("Something else");
     }
 
     Ok(match disperse {

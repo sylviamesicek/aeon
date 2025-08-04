@@ -23,6 +23,7 @@ coarsen_error = 1e-10
 refine_error = 1e-8
 global = 2
 flag_interval = 20
+fix_grid = false
 
 [visualize]
 save_initial = false
@@ -32,9 +33,9 @@ save_evolve_interval = 0.05
 stride = "per_vertex"
 
 [diagnostic]
-save = false
-save_interval = 1
-serial_id = 0
+save_evolve = true
+save_evolve_interval = 20
+
 
 [[sources]]
 mass = 0.0

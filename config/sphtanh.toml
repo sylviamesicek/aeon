@@ -31,11 +31,6 @@ save_evolve = false
 save_evolve_interval = 0.01
 stride = "per_vertex"
 
-[diagnostic]
-save = false
-save_interval = 1
-serial_id = 0
-
 [[sources]]
 mass = 0.0
 profile.type = "tanh"

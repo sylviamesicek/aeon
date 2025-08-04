@@ -210,6 +210,30 @@ impl<const N: usize> Mesh<N> {
         self.blocks.num_nodes()
     }
 
+    pub fn num_dofs(&self) -> usize {
+        let mut result = 0;
+
+        for block in 0..self.num_blocks() {
+            let mut size = self.blocks.size(BlockId(block));
+
+            for axis in 0..N {
+                size[axis] *= self.width;
+
+                if self
+                    .blocks
+                    .boundary_flags(BlockId(block))
+                    .is_set(Face::positive(axis))
+                {
+                    size[axis] += 1;
+                }
+            }
+
+            result += size.iter().product::<usize>();
+        }
+
+        result
+    }
+
     /// Returns the total number of nodes on the mesh before the most recent refinement.
     pub(crate) fn num_old_nodes(&self) -> usize {
         self.old_blocks.num_nodes()
