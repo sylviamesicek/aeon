@@ -146,6 +146,25 @@ impl<const N: usize> Projection<N> for Gaussian<N> {
     }
 }
 
+#[derive(Clone, Copy)]
+pub struct TanH<const N: usize> {
+    pub amplitude: f64,
+    pub sigma: f64,
+    pub center: [f64; N],
+}
+
+impl<const N: usize> Projection<N> for TanH<N> {
+    fn project(&self, position: [f64; N]) -> f64 {
+        let offset =
+            core::array::from_fn::<_, N, _>(|axis| (position[axis] - self.center[axis]).powi(2))
+                .iter()
+                .sum::<f64>()
+                .sqrt()
+                / self.sigma;
+        self.amplitude * offset.tanh()
+    }
+}
+
 pub struct FunctionBorrowMut<'a, I>(pub &'a mut I);
 
 impl<'a, const N: usize, F: Function<N>> Function<N> for FunctionBorrowMut<'a, F> {

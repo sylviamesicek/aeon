@@ -10,8 +10,12 @@ function timevsdofs(diagfile::String)::AbstractPlot
     # Load parameters and masses
     proper_time::Vector{Float64} = df[:, :proper_time]
     dofs::Vector{Float64} = df[:, :dofs]
+    nodes::Vector{Float64} = df[:, :nodes]
+
     # Plot resulting data
-    sc = plot(proper_time, dofs, label="Final Mass")
+    sc = plot(proper_time, dofs, label="Dofs (no ghost)")
+    plot!(sc, proper_time, nodes, label="Nodes (with ghost)")
+
     plot!(sc, minorgrid=true)
     title!(sc, "Nodes vs Proper Time")
     xlabel!(sc, "Proper Time ($(L"\tau"))")

@@ -25,6 +25,8 @@ pub struct DiagnosticInfo {
     levels: usize,
     alpha: f64,
     mass: f64,
+    phi: f64,
+    constraint: f64,
 }
 
 pub fn save_csv_table<T: serde::Serialize>(records: &[T], path: &Path) -> eyre::Result<()> {
@@ -388,6 +390,7 @@ pub fn evolve_data_full(
 
         // Compute lapse and mass before running diagnostic
         let alpha = mesh.bottom_left_value(system.field(Field::Lapse));
+        let phi = 0.0;
         let mass = find_mass(&mesh, system.as_slice());
 
         if config.diagnostic.save_evolve && step % config.diagnostic.save_evolve_interval == 0 {
@@ -398,7 +401,9 @@ pub fn evolve_data_full(
                 dofs: mesh.num_dofs(),
                 alpha,
                 mass,
+                phi,
                 levels: mesh.num_levels(),
+                constraint,
             });
         }
 
@@ -535,14 +540,11 @@ pub fn evolve_data_full(
             "- RAM usage: ~{}",
             HumanBytes(mesh.estimate_heap_size() as u64)
         );
-        println!("Something else");
         println!("Field Info...");
         println!(
             "- RAM usage: ~{}",
             HumanBytes((system.estimate_heap_size() + integrator.estimate_heap_size()) as u64)
         );
-
-        println!("Something else");
     }
 
     Ok(match disperse {

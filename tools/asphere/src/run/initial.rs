@@ -1,6 +1,6 @@
 use crate::{
     run::config::Config,
-    system::{Field, Fields, generate_initial_phi, solve_constraints},
+    system::{self, Fields, solve_constraints},
 };
 use aeon::prelude::*;
 use eyre::eyre;
@@ -47,12 +47,12 @@ pub fn initial_data(config: &Config) -> eyre::Result<(Mesh<1>, SystemVec<Fields>
         system.resize(mesh.num_nodes());
 
         // Set initial data for scalar field.
-        let phi = generate_initial_phi(&mut mesh, &source.profile, &source.smooth);
-
-        system.field_mut(Field::Conformal).fill(1.0);
-        system.field_mut(Field::Lapse).fill(1.0);
-        system.field_mut(Field::Phi).copy_from_slice(&phi);
-        system.field_mut(Field::Pi).fill(0.0);
+        system::intial_data(
+            &mut mesh,
+            &source.profile,
+            &source.smooth,
+            system.as_mut_slice(),
+        );
 
         // Solve for conformal and lapse
         solve_constraints(&mut mesh, system.as_mut_slice());

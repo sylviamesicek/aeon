@@ -1,5 +1,9 @@
 use crate::run::config::{ScalarFieldProfile, Smooth};
-use aeon::{kernel::Interpolation, prelude::*};
+use aeon::{
+    kernel::Interpolation,
+    mesh::{Gaussian, TanH},
+    prelude::*,
+};
 use core::f64;
 use serde::{Deserialize, Serialize};
 use std::convert::Infallible;
@@ -16,7 +20,14 @@ impl System for Fields {
     type Label = Field;
 
     fn enumerate(&self) -> impl Iterator<Item = Self::Label> {
-        [Field::Phi, Field::Pi, Field::Conformal, Field::Lapse].into_iter()
+        [
+            Field::Phi,
+            Field::Pi,
+            Field::Conformal,
+            Field::Lapse,
+            Field::Psi,
+        ]
+        .into_iter()
     }
 
     fn count(&self) -> usize {
@@ -24,7 +35,13 @@ impl System for Fields {
     }
 
     fn label_from_index(&self, index: usize) -> Self::Label {
-        [Field::Phi, Field::Pi, Field::Conformal, Field::Lapse][index]
+        [
+            Field::Phi,
+            Field::Pi,
+            Field::Conformal,
+            Field::Lapse,
+            Field::Psi,
+        ][index]
     }
 
     fn label_index(&self, label: Self::Label) -> usize {
@@ -33,6 +50,7 @@ impl System for Fields {
             Field::Pi => 1,
             Field::Conformal => 2,
             Field::Lapse => 3,
+            Field::Psi => 4,
         }
     }
 
@@ -42,6 +60,7 @@ impl System for Fields {
             Field::Pi => "Pi",
             Field::Conformal => "Conformal",
             Field::Lapse => "Lapse",
+            Field::Psi => "Psi",
         }
         .to_string()
     }
@@ -54,6 +73,7 @@ pub enum Field {
     Pi,
     Conformal,
     Lapse,
+    Psi,
 }
 
 /// Boundary conditions for a system of fields.
@@ -69,7 +89,7 @@ impl SystemBoundaryConds<1> for FieldConditions {
         } else {
             match label {
                 Field::Phi => BoundaryKind::AntiSymmetric,
-                Field::Pi | Field::Conformal | Field::Lapse => BoundaryKind::Symmetric,
+                Field::Pi | Field::Conformal | Field::Lapse | Field::Psi => BoundaryKind::Symmetric,
             }
         }
     }
@@ -377,12 +397,15 @@ impl Projection<1> for TanHGrad {
 }
 
 /// Comverts a profile into a scalar field.
-pub fn generate_initial_phi(
+pub fn intial_data(
     mesh: &mut Mesh<1>,
     profile: &ScalarFieldProfile,
     smooth: &Smooth,
-) -> Vec<f64> {
-    let mut phi = vec![0.0; mesh.num_nodes()];
+    mut output: SystemSliceMut<'_, Fields>,
+) {
+    output.field_mut(Field::Conformal).fill(1.0);
+    output.field_mut(Field::Lapse).fill(1.0);
+    output.field_mut(Field::Pi).fill(0.0);
 
     match profile {
         ScalarFieldProfile::Gaussian {
@@ -399,7 +422,16 @@ pub fn generate_initial_phi(
                     spower: smooth.power,
                     sstrength: smooth.strength,
                 },
-                &mut phi,
+                output.field_mut(Field::Phi),
+            );
+            mesh.project(
+                4,
+                Gaussian {
+                    amplitude: amplitude.unwrap(),
+                    sigma: [sigma.unwrap()],
+                    center: [center.unwrap()],
+                },
+                output.field_mut(Field::Phi),
             );
         }
         ScalarFieldProfile::TanH {
@@ -416,18 +448,21 @@ pub fn generate_initial_phi(
                     spower: smooth.power,
                     sstrength: smooth.strength,
                 },
-                &mut phi,
+                output.field_mut(Field::Phi),
+            );
+            mesh.project(
+                4,
+                TanH {
+                    amplitude: amplitude.unwrap(),
+                    sigma: sigma.unwrap(),
+                    center: [center.unwrap()],
+                },
+                output.field_mut(Field::Phi),
             );
         }
     }
 
-    mesh.fill_boundary(
-        Order::<4>,
-        ScalarConditions(AntiSymCondition),
-        (&mut phi).into(),
-    );
-
-    phi
+    mesh.fill_boundary(Order::<4>, FieldConditions, output);
 }
 
 pub fn find_mass(mesh: &Mesh<1>, system: SystemSlice<Fields>) -> f64 {
