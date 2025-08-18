@@ -197,8 +197,11 @@ impl Function<1> for TimeDerivs {
                 pi_t += alpha / a * phi * 2.0 / r;
             }
 
+            let psi_t = alpha / a * pi;
+
             output.field_mut(Field::Phi)[index] = phi_t;
             output.field_mut(Field::Pi)[index] = pi_t;
+            output.field_mut(Field::Psi)[index] = psi_t;
 
             output.field_mut(Field::Conformal)[index] = 0.0;
             output.field_mut(Field::Lapse)[index] = 0.0;

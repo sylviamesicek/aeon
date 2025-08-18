@@ -25,7 +25,7 @@ pub struct DiagnosticInfo {
     levels: usize,
     alpha: f64,
     mass: f64,
-    phi: f64,
+    psi: f64,
     constraint: f64,
 }
 
@@ -390,7 +390,7 @@ pub fn evolve_data_full(
 
         // Compute lapse and mass before running diagnostic
         let alpha = mesh.bottom_left_value(system.field(Field::Lapse));
-        let phi = 0.0;
+        let psi = mesh.bottom_left_value(system.field(Field::Psi));
         let mass = find_mass(&mesh, system.as_slice());
 
         if config.diagnostic.save_evolve && step % config.diagnostic.save_evolve_interval == 0 {
@@ -401,7 +401,7 @@ pub fn evolve_data_full(
                 dofs: mesh.num_dofs(),
                 alpha,
                 mass,
-                phi,
+                psi,
                 levels: mesh.num_levels(),
                 constraint,
             });
