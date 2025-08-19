@@ -7,7 +7,7 @@ use crate::geometry::{
     CartesianIter, Face, FaceArray, IndexSpace, HyperBox, Region, Side, regions,
 };
 use crate::kernel::{
-    Border, BoundaryClass, BoundaryConds, BoundaryKind, CellKernel, Convolution, Kernel, Value,
+    Border, BoundaryClass, Boundary, BoundaryKind, CellKernel, Convolution, Kernel, Value,
     VertexKernel, boundary::is_boundary_compatible,
 };
 use std::array::{self, from_fn};
@@ -244,7 +244,7 @@ impl<const N: usize> NodeSpace<N> {
 
     /// Set strongly enforced boundary conditions. This enforces parity and dirichlet boundary
     /// conditions on this particular `NodeSpace`.
-    pub fn fill_boundary(&self, extent: usize, cond: impl BoundaryConds<N>, dest: &mut [f64]) {
+    pub fn fill_boundary(&self, extent: usize, cond: impl Boundary<N>, dest: &mut [f64]) {
         debug_assert!(is_boundary_compatible(&self.boundary, &cond));
 
         // Loop over faces

@@ -5,7 +5,7 @@ use crate::geometry::{BlockId, Face, FaceMask, IndexSpace};
 use crate::kernel::is_boundary_compatible;
 use crate::{
     kernel::{
-        BoundaryConds as _, BoundaryKind, Hessian, Kernels, NodeSpace, Order, VertexKernel,
+        Boundary as _, BoundaryKind, Hessian, Kernels, NodeSpace, Order, VertexKernel,
         node_from_vertex, vertex_from_node,
     },
     system::Empty,

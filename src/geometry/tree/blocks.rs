@@ -349,7 +349,7 @@ impl<const N: usize> DataSize for TreeBlocks<N> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{geometry::Tree, prelude::HyperBox};
+    use crate::{geometry::HyperBox, geometry::Tree};
 
     #[test]
     fn greedy_meshing() {

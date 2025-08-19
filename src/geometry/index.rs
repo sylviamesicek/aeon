@@ -19,7 +19,7 @@ impl<const N: usize> IndexSpace<N> {
     }
 
     /// Returns the number of indices in the index space.
-    pub fn index_count(&self) -> usize {
+    pub fn count(&self) -> usize {
         let mut result = 1;
 
         for i in 0..N {
@@ -153,6 +153,29 @@ impl<const N: usize> IndexWindow<N> {
             origin: self.origin,
             inner: IndexSpace::new(self.size).iter(),
         }
+    }
+
+    /// Returns the subwindow containing all points along a plane in this window.
+    pub fn plane(self, axis: usize, intercept: usize) -> IndexWindow<N> {
+        debug_assert!(intercept < self.size[axis]);
+
+        let mut origin = self.origin;
+        origin[axis] += intercept;
+
+        let mut size = self.size;
+        size[axis] = 1;
+
+        IndexWindow::new(origin, size)
+    }
+
+    /// Returns the window containing all points along a face in this window
+    pub fn boundary(self, face: Face<N>) -> IndexWindow<N> {
+        let intercept = if face.side {
+            self.size[face.axis] - 1
+        } else {
+            0
+        };
+        self.plane(face.axis, intercept)
     }
 }
 

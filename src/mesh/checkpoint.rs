@@ -428,8 +428,8 @@ impl<const N: usize> Checkpoint<N> {
                 offsets.push(connectivity.len() as u64);
             }
 
-            cell_total += cell_space.index_count();
-            vertex_total += vertex_space.index_count() as u64;
+            cell_total += cell_space.count();
+            vertex_total += vertex_space.count() as u64;
         }
 
         let cell_type = match N {

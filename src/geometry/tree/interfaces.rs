@@ -5,9 +5,8 @@ use super::{
     blocks::BlockId,
 };
 use crate::{
+    geometry::{FaceArray, HyperBox},
     geometry::{IndexSpace, Side},
-    kernel::NodeSpace,
-    prelude::{FaceArray, HyperBox},
 };
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -120,7 +119,7 @@ impl<const N: usize> TreeInterfaces<N> {
 
         for interface in self.interfaces.iter() {
             self.interface_node_offsets.push(cursor);
-            cursor += IndexSpace::new(interface.size).index_count();
+            cursor += IndexSpace::new(interface.size).count();
         }
 
         self.interface_node_offsets.push(cursor);

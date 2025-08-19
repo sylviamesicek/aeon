@@ -1,19 +1,19 @@
 #![allow(clippy::needless_range_loop)]
 
 use crate::{
+    geometry::{Face, HyperBox, IndexSpace},
     geometry::{Region, Side, Split, regions},
-    prelude::{Face, HyperBox, IndexSpace},
 };
 use bitvec::{order::Lsb0, slice::BitSlice, vec::BitVec};
 use datasize::DataSize;
 use std::{array, ops::Range, slice};
 
 mod blocks;
-mod interfaces;
+// mod interfaces;
 mod neighbors;
 
 pub use blocks::{BlockId, TreeBlocks};
-pub use interfaces::{TreeInterface, TreeInterfaces};
+// pub use interfaces::{TreeInterface, TreeInterfaces};
 pub use neighbors::{NeighborId, TreeBlockNeighbor, TreeCellNeighbor, TreeNeighbors};
 
 /// Null index, used internally to make storage of `Option<usize>`` more efficent

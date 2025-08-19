@@ -18,5 +18,5 @@ pub use index::{CartesianIter, CartesianWindowIter, IndexSpace, IndexWindow};
 pub use region::{Region, RegionIter, Side, regions};
 pub use tree::{
     ActiveCellId, BlockId, CellId, NeighborId, Tree, TreeBlockNeighbor, TreeBlocks,
-    TreeCellNeighbor, TreeInterface, TreeInterfaces, TreeNeighbors, TreeSer,
+    TreeCellNeighbor, TreeNeighbors, TreeSer,
 };

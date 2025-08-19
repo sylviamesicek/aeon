@@ -1,5 +1,5 @@
 use crate::geometry::Face;
-use crate::kernel::{BoundaryConds, BoundaryKind, DirichletParams, RadiativeParams};
+use crate::kernel::{Boundary, BoundaryKind, DirichletParams, RadiativeParams};
 use crate::system::{Empty, Pair, Scalar, System};
 
 /// A generalization of `Condition<N>` for a coupled systems of scalar fields.
@@ -57,7 +57,7 @@ impl<const N: usize, C: SystemBoundaryConds<N>> Clone for FieldBoundaryConds<N, 
     }
 }
 
-impl<const N: usize, C: SystemBoundaryConds<N>> BoundaryConds<N> for FieldBoundaryConds<N, C> {
+impl<const N: usize, C: SystemBoundaryConds<N>> Boundary<N> for FieldBoundaryConds<N, C> {
     fn kind(&self, face: Face<N>) -> BoundaryKind {
         self.conditions.kind(self.field, face)
     }
@@ -85,7 +85,7 @@ impl<I> ScalarConditions<I> {
     }
 }
 
-impl<const N: usize, I: BoundaryConds<N>> SystemBoundaryConds<N> for ScalarConditions<I> {
+impl<const N: usize, I: Boundary<N>> SystemBoundaryConds<N> for ScalarConditions<I> {
     type System = Scalar;
 
     fn kind(&self, _label: <Self::System as System>::Label, face: Face<N>) -> BoundaryKind {
