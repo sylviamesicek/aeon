@@ -492,7 +492,7 @@ pub fn initial_data(config: &Config) -> eyre::Result<(Mesh<2>, SystemVec<Fields>
 
     // Build mesh
     let mut mesh = Mesh::new(
-        Rectangle {
+        HyperBox {
             size: [config.domain.radius, config.domain.height],
             origin: [0.0, 0.0],
         },

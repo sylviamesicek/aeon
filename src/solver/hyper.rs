@@ -363,7 +363,7 @@ impl<const N: usize, S: System, F: Function<N, Input = S, Output = S>> Function<
 #[cfg(test)]
 mod tests {
     use crate::{
-        geometry::{FaceArray, Rectangle},
+        geometry::{FaceArray, HyperBox},
         kernel::{BoundaryClass, DirichletParams},
     };
 
@@ -445,7 +445,7 @@ mod tests {
     #[test]
     fn poisson() {
         let mut mesh = Mesh::new(
-            Rectangle::from_aabb([0.0, 0.0], [1.0, 1.0]),
+            HyperBox::from_aabb([0.0, 0.0], [1.0, 1.0]),
             4,
             2,
             FaceArray::splat(BoundaryClass::Ghost),

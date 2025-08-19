@@ -1,4 +1,4 @@
-use crate::{geometry::IndexSpace, prelude::Rectangle};
+use crate::{geometry::IndexSpace, prelude::HyperBox};
 use faer::linalg::svd::SvdError;
 use std::array;
 
@@ -26,7 +26,7 @@ impl<const N: usize> UniformInterpolate<N> {
         &mut self,
         support: usize,
         order: usize,
-        bounds: Rectangle<N>,
+        bounds: HyperBox<N>,
         point: [f64; N],
     ) -> Result<(), SvdError> {
         let local = bounds.global_to_local(point);

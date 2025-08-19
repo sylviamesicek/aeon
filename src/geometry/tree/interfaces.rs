@@ -7,7 +7,7 @@ use super::{
 use crate::{
     geometry::{IndexSpace, Side},
     kernel::NodeSpace,
-    prelude::{FaceArray, Rectangle},
+    prelude::{FaceArray, HyperBox},
 };
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -138,7 +138,7 @@ impl<const N: usize> TreeInterfaces<N> {
             let block_space = NodeSpace {
                 size: array::from_fn(|axis| block_size[axis] * blocks.width()[axis]),
                 ghost: blocks.ghost(),
-                bounds: Rectangle::<N>::UNIT,
+                bounds: HyperBox::<N>::UNIT,
                 boundary: FaceArray::default(),
             };
 

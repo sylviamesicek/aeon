@@ -1,4 +1,4 @@
-use crate::geometry::{ActiveCellId, AxisMask, IndexSpace, NeighborId};
+use crate::geometry::{ActiveCellId, Split, IndexSpace, NeighborId};
 use crate::kernel::Kernels;
 use reborrow::ReborrowMut;
 use std::array;
@@ -40,7 +40,7 @@ impl<const N: usize> Mesh<N> {
                 #[allow(clippy::comparison_chain)]
                 if new_level > level {
                     // Loop over every child of the recently refined cell.
-                    for child in AxisMask::<N>::enumerate() {
+                    for child in Split::<N>::enumerate() {
                         // Retrieves new cell.
                         let new_cell = ActiveCellId(new_cell.0 + child.to_linear());
 

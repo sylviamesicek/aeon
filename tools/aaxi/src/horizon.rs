@@ -37,7 +37,7 @@ pub fn compute_position_from_radius(surface: &Mesh<1>, radius: &[f64], output: &
     }
 }
 
-const HORIZON_DOMAIN: Rectangle<1> = Rectangle {
+const HORIZON_DOMAIN: HyperBox<1> = HyperBox {
     size: [f64::consts::PI / 2.0],
     origin: [0.0],
 };

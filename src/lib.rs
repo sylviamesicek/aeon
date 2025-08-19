@@ -19,7 +19,7 @@ pub use aeon_macros as macros;
 /// Provides common types used for most `aeon` applications.
 pub mod prelude {
     pub use crate::geometry::{
-        ActiveCellId, BlockId, CellId, Face, FaceArray, FaceMask, IndexSpace, NeighborId, Rectangle,
+        ActiveCellId, BlockId, CellId, Face, FaceArray, FaceMask, IndexSpace, NeighborId, HyperBox,
     };
     pub use crate::kernel::{
         BoundaryClass, BoundaryConds, BoundaryKind, DirichletParams, Order, RadiativeParams,

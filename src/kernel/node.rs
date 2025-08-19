@@ -4,7 +4,7 @@
 //! the `NodeSpace`.
 
 use crate::geometry::{
-    CartesianIter, Face, FaceArray, IndexSpace, Rectangle, Region, Side, faces, regions,
+    CartesianIter, Face, FaceArray, IndexSpace, HyperBox, Region, Side, regions,
 };
 use crate::kernel::{
     Border, BoundaryClass, BoundaryConds, BoundaryKind, CellKernel, Convolution, Kernel, Value,
@@ -37,7 +37,7 @@ pub struct NodeSpace<const N: usize> {
     /// Number of ghost nodes along each face.
     pub ghost: usize,
     /// Position of the node space.
-    pub bounds: Rectangle<N>,
+    pub bounds: HyperBox<N>,
     pub boundary: FaceArray<N, BoundaryClass>,
 }
 
@@ -248,7 +248,7 @@ impl<const N: usize> NodeSpace<N> {
         debug_assert!(is_boundary_compatible(&self.boundary, &cond));
 
         // Loop over faces
-        for face in faces::<N>() {
+        for face in Face::<N>::iterate() {
             // Enforce zeros if boundary condition is odd
             if cond.kind(face) == BoundaryKind::AntiSymmetric {
                 // Iterate over face
@@ -663,7 +663,7 @@ impl<const N: usize> Iterator for NodePlaneIter<N> {
 
 #[cfg(test)]
 mod tests {
-    use crate::geometry::Rectangle;
+    use crate::geometry::HyperBox;
 
     use super::*;
     use crate::kernel::{Kernels as _, Order};
@@ -683,7 +683,7 @@ mod tests {
         let space = NodeSpace {
             size: [8],
             ghost: 3,
-            bounds: Rectangle::UNIT,
+            bounds: HyperBox::UNIT,
             boundary: boundary(),
         };
 
@@ -711,7 +711,7 @@ mod tests {
         let space = NodeSpace {
             size: [8],
             ghost: 3,
-            bounds: Rectangle::UNIT,
+            bounds: HyperBox::UNIT,
             boundary: boundary(),
         };
 
@@ -737,7 +737,7 @@ mod tests {
         let space = NodeSpace {
             size,
             ghost: 2,
-            bounds: Rectangle::UNIT,
+            bounds: HyperBox::UNIT,
             boundary: boundary(),
         };
 
@@ -785,13 +785,13 @@ mod tests {
             size,
             ghost: 2,
             boundary: boundary(),
-            bounds: Rectangle::UNIT,
+            bounds: HyperBox::UNIT,
         };
         let rspace = NodeSpace {
             size: size.map(|v| v * 2),
             ghost: 2,
             boundary: boundary(),
-            bounds: Rectangle::UNIT,
+            bounds: HyperBox::UNIT,
         };
 
         let mut field = vec![0.0; cspace.num_nodes()];
@@ -831,7 +831,7 @@ mod tests {
             size: [10; 2],
             ghost: 2,
             boundary: boundary(),
-            bounds: Rectangle::UNIT,
+            bounds: HyperBox::UNIT,
         };
 
         // Regions

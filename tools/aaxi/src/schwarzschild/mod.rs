@@ -145,7 +145,7 @@ pub fn schwarzschild(matches: &ArgMatches) -> eyre::Result<()> {
     std::fs::create_dir_all(&output.join("initial"))?;
     std::fs::create_dir_all(&output.join("horizons"))?;
 
-    let domain = Rectangle {
+    let domain = HyperBox {
         origin: [0., 0.],
         size: [10.0, 10.0],
     };

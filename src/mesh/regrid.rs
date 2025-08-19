@@ -348,14 +348,14 @@ impl<const N: usize> Mesh<N> {
 
 #[cfg(test)]
 mod tests {
-    use crate::geometry::{ActiveCellId, FaceArray, Rectangle};
+    use crate::geometry::{ActiveCellId, FaceArray, HyperBox};
     use crate::kernel::BoundaryClass;
     use crate::mesh::Mesh;
 
     #[test]
     fn element_windows() {
         let mut mesh = Mesh::new(
-            Rectangle::UNIT,
+            HyperBox::UNIT,
             4,
             2,
             FaceArray::from_sides([BoundaryClass::Ghost; 2], [BoundaryClass::OneSided; 2]),

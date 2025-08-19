@@ -32,7 +32,7 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Generate initial mesh
     let mut mesh = Mesh::new(
-        Rectangle::from_aabb([-10., -10.], [10., 10.]),
+        HyperBox::from_aabb([-10., -10.], [10., 10.]),
         4,
         2,
         FaceArray::splat(BoundaryClass::OneSided),

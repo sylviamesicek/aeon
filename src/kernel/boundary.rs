@@ -3,7 +3,41 @@
 //! This module uses a combination of trait trickery and type transformers to
 //! create an ergonomic API for working with boundaries.
 
-use crate::geometry::{Face, FaceArray, faces};
+use crate::geometry::{Face, FaceArray};
+
+// #[derive(Clone, Copy, Debug, PartialEq, Default, serde::Serialize, serde::Deserialize)]
+// pub enum Boundary {
+//     Symmetric,
+//     AntiSymmetric,
+//     Dirichlet(f64),
+//     #[default]
+//     Free,
+//     Custom,
+// }
+
+// impl Boundary {
+//     pub fn is_one_sided(self) -> bool {
+//         matches!(self, Self::Free)
+//     }
+// }
+
+// pub trait BoundaryConds<const N: usize> {
+//     fn boundary(&self, channel: usize, position: [f64; N]) -> Boundary;
+// }
+
+// #[derive(Clone, Copy, Debug, PartialEq, Default, serde::Serialize, serde::Deserialize)]
+// pub enum Penalty {
+//     #[default]
+//     Free,
+//     Radiative {
+//         target: f64,
+//         strength: f64,
+//     },
+// }
+
+// pub trait PenaltyTerms<const N: usize> {
+//     fn penalty(&self, channel: usize, position: [f64; N]) -> Penalty;
+// }
 
 /// Indicates what type of boundary condition is used along a particualr
 /// face of the domain. More specific boundary conditions are provided
@@ -120,7 +154,7 @@ pub fn is_boundary_compatible<const N: usize, B: BoundaryConds<N>>(
     boundary: &FaceArray<N, BoundaryClass>,
     conditions: &B,
 ) -> bool {
-    faces::<N>()
+    Face::iterate()
         .map(|face| conditions.kind(face).class() == boundary[face])
         .all(|x| x)
 }

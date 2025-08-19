@@ -119,7 +119,7 @@ pub fn main() -> eyre::Result<()> {
 
     // Generate initial mesh
     let mut mesh = Mesh::new(
-        Rectangle::from_aabb([-20., -20.], [20., 20.]),
+        HyperBox::from_aabb([-20., -20.], [20., 20.]),
         4,
         2,
         FaceArray::splat(BoundaryClass::OneSided),

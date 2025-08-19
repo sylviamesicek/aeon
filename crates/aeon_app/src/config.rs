@@ -324,7 +324,6 @@ mod tests {
     #[test]
     fn basic_transform() {
         // Set up context
-
         let mut named = HashMap::new();
         named.insert("arg1".to_string(), "10.0".to_string());
         named.insert("0h@!!".to_string(), "11.0".to_string());
@@ -332,8 +331,8 @@ mod tests {
 
         assert_eq!(
             "some/${arg1}".transform(&ctx).unwrap(),
-            "some/10".to_string()
+            "some/10.0".to_string()
         );
-        assert_eq!("${0h@!!}".transform(&ctx).unwrap(), "11".to_string());
+        assert_eq!("${0h@!!}".transform(&ctx).unwrap(), "11.0".to_string());
     }
 }

@@ -25,7 +25,7 @@ pub fn initial_data(config: &Config) -> eyre::Result<(Mesh<1>, SystemVec<Fields>
 
     // Build mesh
     let mut mesh = Mesh::new(
-        Rectangle {
+        HyperBox {
             size: [config.domain.radius],
             origin: [0.0],
         },
@@ -53,7 +53,6 @@ pub fn initial_data(config: &Config) -> eyre::Result<(Mesh<1>, SystemVec<Fields>
             &source.smooth,
             system.as_mut_slice(),
         );
-
         // Solve for conformal and lapse
         solve_constraints(&mut mesh, system.as_mut_slice());
         // Compute norm

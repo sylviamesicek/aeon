@@ -6,8 +6,8 @@
 //! filling interior interfaces, and adaptively regridding a domain based on various error heuristics.
 
 use crate::geometry::{
-    ActiveCellId, AxisMask, BlockId, Face, FaceArray, FaceMask, Rectangle, Tree, TreeBlocks,
-    TreeInterfaces, TreeNeighbors, TreeSer, faces,
+    ActiveCellId, BlockId, Face, FaceArray, FaceMask, HyperBox, Split, Tree, TreeBlocks,
+    TreeInterfaces, TreeNeighbors, TreeSer,
 };
 use crate::kernel::{BoundaryClass, DirichletParams, Element, node_from_vertex};
 use crate::prelude::IndexSpace;
@@ -76,7 +76,7 @@ pub struct Mesh<const N: usize> {
     /// Cell splits from before most recent refinement.
     ///
     /// May be temporary if I can find a more elegant solution.
-    old_cell_splits: Vec<AxisMask<N>>,
+    old_cell_splits: Vec<Split<N>>,
 
     // ********************************
     // Caches *************************
@@ -90,7 +90,7 @@ impl<const N: usize> Mesh<N> {
     /// Constructs a new `Mesh` covering the domain, with a number of nodes
     /// defined by `width` and `ghost`.
     pub fn new(
-        bounds: Rectangle<N>,
+        bounds: HyperBox<N>,
         width: usize,
         ghost: usize,
         boundary: FaceArray<N, BoundaryClass>,
@@ -281,13 +281,13 @@ impl<const N: usize> Mesh<N> {
         NodeSpace {
             size: cell_size,
             ghost: self.ghost,
-            bounds: Rectangle::UNIT,
+            bounds: HyperBox::UNIT,
             boundary: self.old_block_boundary_classes(block),
         }
     }
 
     /// The bounds of a block.
-    pub fn block_bounds(&self, block: BlockId) -> Rectangle<N> {
+    pub fn block_bounds(&self, block: BlockId) -> HyperBox<N> {
         self.blocks.bounds(block)
     }
 
@@ -350,12 +350,12 @@ impl<const N: usize> Mesh<N> {
     // Node windows ******************
 
     /// Finds bounds associated with a node window.
-    pub fn window_bounds(&self, block: BlockId, window: NodeWindow<N>) -> Rectangle<N> {
+    pub fn window_bounds(&self, block: BlockId, window: NodeWindow<N>) -> HyperBox<N> {
         debug_assert!(self.block_space(block).contains_window(window));
         let block_size = self.blocks.node_size(block);
         let bounds = self.blocks.bounds(block);
 
-        Rectangle {
+        HyperBox {
             size: array::from_fn(|axis| {
                 bounds.size[axis] * window.size[axis] as f64 / block_size[axis] as f64
             }),
@@ -469,7 +469,7 @@ impl<const N: usize> Mesh<N> {
         let boundary = self.block_boundary_classes(block);
         let position = self.blocks.active_cell_position(cell);
 
-        for face in faces::<N>() {
+        for face in Face::iterate() {
             let border = if face.side {
                 block_size[face.axis] - 1
             } else {
@@ -889,7 +889,7 @@ impl<const N: usize> Clone for Mesh<N> {
 impl<const N: usize> Default for Mesh<N> {
     fn default() -> Self {
         let mut result = Self {
-            tree: Tree::new(Rectangle::UNIT),
+            tree: Tree::new(HyperBox::UNIT),
             width: 4,
             ghost: 1,
             boundary: FaceArray::default(),
@@ -1013,7 +1013,7 @@ mod tests {
     #[test]
     fn fuzzy_serialize() -> eyre::Result<()> {
         let mut mesh = Mesh::<2>::new(
-            Rectangle::UNIT,
+            HyperBox::UNIT,
             6,
             3,
             [

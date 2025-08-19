@@ -76,8 +76,16 @@ impl<const N: usize> IndexSpace<N> {
         }
     }
 
+    /// Returns an index window corresponding to the entire IndexSpace.
+    pub fn window(self) -> IndexWindow<N> {
+        IndexWindow {
+            origin: [0; N],
+            size: self.size,
+        }
+    }
+
     /// Returns the window containing all points along a plane in the index space.
-    pub fn plane(self, axis: usize, intercept: usize) -> IndexWindow<N> {
+    pub fn plane_window(self, axis: usize, intercept: usize) -> IndexWindow<N> {
         debug_assert!(intercept < self.size[axis]);
 
         let mut origin = [0; N];
@@ -90,17 +98,17 @@ impl<const N: usize> IndexSpace<N> {
     }
 
     /// Returns the window containing all points along a face in index space.
-    pub fn face(self, face: Face<N>) -> IndexWindow<N> {
+    pub fn face_window(self, face: Face<N>) -> IndexWindow<N> {
         let intercept = if face.side {
             self.size[face.axis] - 1
         } else {
             0
         };
-        self.plane(face.axis, intercept)
+        self.plane_window(face.axis, intercept)
     }
 
     /// The window of all indices that border the given region.
-    pub fn adjacent(self, region: Region<N>) -> IndexWindow<N> {
+    pub fn region_adjacent_window(self, region: Region<N>) -> IndexWindow<N> {
         let origin = array::from_fn(|axis| match region.side(axis) {
             Side::Left | Side::Middle => 0,
             Side::Right => self.size[axis] - 1,
@@ -115,10 +123,21 @@ impl<const N: usize> IndexSpace<N> {
     }
 }
 
+impl<const N: usize> IntoIterator for IndexSpace<N> {
+    type IntoIter = CartesianIter<N>;
+    type Item = [usize; N];
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter()
+    }
+}
+
 /// Represents a subset of an index space, and provides utilities for iterating over this window.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct IndexWindow<const N: usize> {
+    /// Stores the origin (bottom-left corner) of the index window
     pub origin: [usize; N],
+    /// Stores the size along each axis of the index window.
     pub size: [usize; N],
 }
 
@@ -188,17 +207,6 @@ impl<const N: usize> Iterator for CartesianIter<N> {
 
         Some(result)
     }
-
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        let count = self.len();
-        (count, Some(count))
-    }
-}
-
-impl<const N: usize> ExactSizeIterator for CartesianIter<N> {
-    fn len(&self) -> usize {
-        IndexSpace::new(self.size).index_count()
-    }
 }
 
 #[derive(Debug, Clone)]
@@ -214,17 +222,6 @@ impl<const N: usize> Iterator for CartesianWindowIter<N> {
     fn next(&mut self) -> Option<Self::Item> {
         let offset = self.inner.next()?;
         Some(array::from_fn(|i| self.origin[i] + offset[i]))
-    }
-
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        let count = self.len();
-        (count, Some(count))
-    }
-}
-
-impl<const N: usize> ExactSizeIterator for CartesianWindowIter<N> {
-    fn len(&self) -> usize {
-        self.inner.len()
     }
 }
 
@@ -251,7 +248,7 @@ mod tests {
         assert_eq!(indices.next(), None);
 
         let space = IndexSpace::new([2, 3, 10]);
-        let mut plane = space.plane(2, 5).iter();
+        let mut plane = space.plane_window(2, 5).iter();
 
         assert_eq!(plane.next(), Some([0, 0, 5]));
         assert_eq!(plane.next(), Some([1, 0, 5]));

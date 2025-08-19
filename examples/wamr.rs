@@ -39,7 +39,7 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     std::fs::create_dir_all("output/wamr")?;
 
-    let domain = Rectangle {
+    let domain = HyperBox {
         origin: [0., 0.],
         size: [2. * PI, 2. * PI],
     };

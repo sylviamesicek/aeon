@@ -1,18 +1,18 @@
-use crate::geometry::{Face, faces};
+use crate::geometry::Face;
 
 use super::{Region, Side};
 
-/// Stores a flag for each axis.
+/// Stores a bitset flag for each axis
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub struct AxisMask<const N: usize>(usize);
+pub struct Split<const N: usize>(usize);
 
-impl<const N: usize> AxisMask<N> {
+impl<const N: usize> Split<N> {
     /// Total permutations of axis maskes for a given dimension.
     pub const COUNT: usize = 2usize.pow(N as u32);
 
     /// Iterates of all axis maskes of a given dimension.
-    pub const fn enumerate() -> AxisMaskIter<N> {
-        AxisMaskIter { cursor: 0 }
+    pub const fn enumerate() -> SplitIter<N> {
+        SplitIter { cursor: 0 }
     }
 
     /// Constructs an empty axis mask.
@@ -98,11 +98,11 @@ impl<const N: usize> AxisMask<N> {
     }
 
     pub fn inner_faces(self) -> impl Iterator<Item = Face<N>> {
-        faces::<N>().filter(move |&face| self.is_inner_face(face))
+        Face::<N>::iterate().filter(move |&face| self.is_inner_face(face))
     }
 
     pub fn outer_faces(self) -> impl Iterator<Item = Face<N>> {
-        faces::<N>().filter(move |&face| self.is_outer_face(face))
+        Face::<N>::iterate().filter(move |&face| self.is_outer_face(face))
     }
 
     pub fn as_inner_face(mut self, face: Face<N>) -> Self {
@@ -156,7 +156,7 @@ impl<const N: usize> AxisMask<N> {
     }
 }
 
-impl<const N: usize> datasize::DataSize for AxisMask<N> {
+impl<const N: usize> datasize::DataSize for Split<N> {
     const IS_DYNAMIC: bool = false;
     const STATIC_HEAP_SIZE: usize = 0;
 
@@ -166,21 +166,21 @@ impl<const N: usize> datasize::DataSize for AxisMask<N> {
 }
 
 /// Iterates over all possible axis masks for a given dimension.
-pub struct AxisMaskIter<const N: usize> {
+pub struct SplitIter<const N: usize> {
     cursor: usize,
 }
 
-impl<const N: usize> Iterator for AxisMaskIter<N> {
-    type Item = AxisMask<N>;
+impl<const N: usize> Iterator for SplitIter<N> {
+    type Item = Split<N>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.cursor >= AxisMask::<N>::COUNT {
+        if self.cursor >= Split::<N>::COUNT {
             return None;
         }
 
         let result = self.cursor;
         self.cursor += 1;
-        Some(AxisMask::from_linear(result))
+        Some(Split::from_linear(result))
     }
 }
 
@@ -190,14 +190,14 @@ mod tests {
 
     #[test]
     fn masks() {
-        let mut masks = AxisMask::<2>::enumerate();
-        assert_eq!(masks.next(), Some(AxisMask::pack([false, false])));
-        assert_eq!(masks.next(), Some(AxisMask::pack([true, false])));
-        assert_eq!(masks.next(), Some(AxisMask::pack([false, true])));
-        assert_eq!(masks.next(), Some(AxisMask::pack([true, true])));
-        assert_eq!(masks.next(), None);
+        let mut splits = Split::<2>::enumerate();
+        assert_eq!(splits.next(), Some(Split::pack([false, false])));
+        assert_eq!(splits.next(), Some(Split::pack([true, false])));
+        assert_eq!(splits.next(), Some(Split::pack([false, true])));
+        assert_eq!(splits.next(), Some(Split::pack([true, true])));
+        assert_eq!(splits.next(), None);
 
-        let mut faces = AxisMask::<2>::pack([false, true]).outer_faces();
+        let mut faces = Split::<2>::pack([false, true]).outer_faces();
         assert_eq!(faces.next(), Some(Face::<2>::negative(0)));
         assert_eq!(faces.next(), Some(Face::<2>::positive(1)));
         assert_eq!(faces.next(), None);

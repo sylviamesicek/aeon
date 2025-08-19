@@ -1,7 +1,7 @@
 use std::convert::Infallible;
 use std::{array, ops::Range};
 
-use crate::geometry::{BlockId, Face, FaceMask, IndexSpace, faces};
+use crate::geometry::{BlockId, Face, FaceMask, IndexSpace};
 use crate::kernel::is_boundary_compatible;
 use crate::{
     kernel::{
@@ -372,7 +372,7 @@ impl<const N: usize> Mesh<N> {
                 op.evaluate(&engine, block_source.rb(), block_dest.rb_mut())?;
 
                 // Weak boundary conditions.
-                for face in faces::<N>() {
+                for face in Face::<N>::iterate() {
                     for field in f.system().enumerate() {
                         let boundary = bcs.field(field);
                         let source = block_source.field(field);
@@ -560,7 +560,7 @@ impl<const N: usize> Mesh<N> {
 
                 let mut flags = FaceMask::empty();
 
-                for face in faces() {
+                for face in Face::iterate() {
                     let Some(neighbor) = mesh
                         .tree
                         .neighbor(mesh.tree.cell_from_active_index(cell), face)

@@ -216,7 +216,7 @@ impl<const N: usize> TreeNeighbors<N> {
             }
 
             // Find all cells adjacent to the given region.
-            for index in block_space.adjacent(region) {
+            for index in block_space.region_adjacent_window(region) {
                 let active = block_active_cells[block_space.linear_from_cartesian(index)];
                 let cell = tree.cell_from_active_index(active);
                 let periodic = tree.boundary_region(cell, region);
@@ -299,7 +299,7 @@ impl InterfaceKind {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::geometry::Rectangle;
+    use crate::geometry::HyperBox;
 
     #[test]
     fn regions_and_faces() {
@@ -336,7 +336,7 @@ mod tests {
 
     #[test]
     fn neighbors() {
-        let mut tree = Tree::new(Rectangle::<2>::UNIT);
+        let mut tree = Tree::new(HyperBox::<2>::UNIT);
         let mut blocks = TreeBlocks::new([4; 2], 2);
         let mut interfaces = TreeNeighbors::default();
         tree.refine(&[true]);

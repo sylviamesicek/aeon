@@ -6,7 +6,7 @@ use std::{
 
 use crate::array::ArrayWrap;
 
-use super::{AxisMask, Region, Side, index::IndexWindow};
+use super::{Region, Side, Split, index::IndexWindow};
 
 /// A face of a rectangular prism in `N` dimensional space.
 /// If `face.side` is true, than this face points in the positive direction along
@@ -18,6 +18,13 @@ pub struct Face<const N: usize> {
 }
 
 impl<const N: usize> Face<N> {
+    pub fn iterate() -> FaceIter<N> {
+        FaceIter {
+            axis: 0,
+            side: false,
+        }
+    }
+
     /// Face on negative side of axis.
     pub fn negative(axis: usize) -> Self {
         debug_assert!(axis < N);
@@ -54,15 +61,15 @@ impl<const N: usize> Face<N> {
     }
 
     /// Finds a split adjacent to the given face (all other axes default to negative).
-    pub fn adjacent_split(self) -> AxisMask<N> {
-        let mut result = AxisMask::empty();
+    pub fn adjacent_split(self) -> Split<N> {
+        let mut result = Split::empty();
         result.set_to(self.axis, self.side);
         result
     }
 
     /// Iterates over all splits adjacent to the given face.
-    pub fn adjacent_splits(self) -> impl Iterator<Item = AxisMask<N>> {
-        AxisMask::<N>::enumerate().filter(move |split| split.is_set(self.axis) == self.side)
+    pub fn adjacent_splits(self) -> impl Iterator<Item = Split<N>> {
+        Split::<N>::enumerate().filter(move |split| split.is_set(self.axis) == self.side)
     }
 }
 
@@ -118,14 +125,6 @@ impl<const N: usize> Iterator for FaceIter<N> {
 impl<const N: usize> ExactSizeIterator for FaceIter<N> {
     fn len(&self) -> usize {
         2 * N
-    }
-}
-
-/// Iterates over all faces in a given number of dimensions.
-pub fn faces<const N: usize>() -> FaceIter<N> {
-    FaceIter {
-        axis: 0,
-        side: false,
     }
 }
 
@@ -289,7 +288,7 @@ mod tests {
 
     #[test]
     fn face_iteration() {
-        let mut list = faces::<3>();
+        let mut list = Face::<3>::iterate();
         assert_eq!(list.next(), Some(Face::negative(0)));
         assert_eq!(list.next(), Some(Face::positive(0)));
         assert_eq!(list.next(), Some(Face::negative(1)));
