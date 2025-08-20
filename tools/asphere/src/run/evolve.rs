@@ -132,7 +132,12 @@ pub fn evolve_data_full(
     let mut buffer_index = 0;
 
     let mut constraint: f64 = 0.0;
+    let mut constraint_linf: f64 = 0.0;
     let mut max_constraint: f64 = 0.0;
+    let mut max_constraint_linf: f64 = 0.0;
+
+    let mut max_nodes = 0;
+    let mut max_dofs = 0;
 
     let mut diagnostic = Vec::new();
     let mut collapse_msg = "".to_string();
@@ -166,6 +171,9 @@ pub fn evolve_data_full(
         }
 
         max_constraint = max_constraint.max(constraint);
+        max_constraint_linf = max_constraint_linf.max(constraint_linf);
+        max_nodes = max_nodes.max(mesh.num_nodes());
+        max_dofs = max_dofs.max(mesh.num_dofs());
         if constraint >= config.evolve.max_constraint {
             collapse_msg = format!("Max constraint reached: {}", max_constraint);
             disperse = false;
@@ -264,6 +272,7 @@ pub fn evolve_data_full(
                     }
 
                     constraint = mesh.l2_norm(&deriv_buffer);
+                    constraint_linf = mesh.max_norm(&deriv_buffer);
                 }
 
                 // Take one regridding step towards desired level
@@ -327,6 +336,7 @@ pub fn evolve_data_full(
                 }
 
                 constraint = mesh.l2_norm(&deriv_buffer);
+                constraint_linf = mesh.max_norm(&deriv_buffer);
             }
 
             mesh.flag_wavelets(
@@ -532,6 +542,11 @@ pub fn evolve_data_full(
         if !disperse {
             println!("Reason for Collapse: {}", collapse_msg);
         }
+
+        println!(
+            "Nodes: {}, Dofs: {}, Max constraint: {}",
+            max_nodes, max_dofs, max_constraint
+        );
 
         println!("Mesh Info...");
         println!("- Num Nodes: {}", mesh.num_nodes());
