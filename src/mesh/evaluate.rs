@@ -1,12 +1,12 @@
 use std::convert::Infallible;
 use std::{array, ops::Range};
 
+use crate::IRef;
 use crate::geometry::{BlockId, Face, FaceMask, IndexSpace};
-use crate::kernel::is_boundary_compatible;
+use crate::kernel::{Derivative, Dissipation, Kernel, SecondDerivative, is_boundary_compatible};
 use crate::{
     kernel::{
-        BoundaryConds as _, BoundaryKind, Hessian, Kernels, NodeSpace, Order, VertexKernel,
-        node_from_vertex, vertex_from_node,
+        BoundaryConds as _, BoundaryKind, Hessian, NodeSpace, node_from_vertex, vertex_from_node,
     },
     system::Empty,
 };
@@ -21,19 +21,18 @@ use crate::{
 use super::{Mesh, MeshStore};
 
 /// A finite difference engine of a given order, but potentially bordering a free boundary.
-struct FdEngine<'store, const N: usize, K: Kernels> {
+struct FdEngine<'store, const N: usize, const ORDER: usize> {
     space: NodeSpace<N>,
-    _order: K,
     store: &'store MeshStore,
     range: Range<usize>,
 }
 
-impl<'store, const N: usize, K: Kernels> FdEngine<'store, N, K> {
+impl<'store, const N: usize, const ORDER: usize> FdEngine<'store, N, ORDER> {
     fn evaluate_axis(
         &self,
         field: &[f64],
         axis: usize,
-        kernel: &impl VertexKernel,
+        kernel: &impl Kernel,
         vertex: [usize; N],
     ) -> f64 {
         self.space
@@ -41,7 +40,7 @@ impl<'store, const N: usize, K: Kernels> FdEngine<'store, N, K> {
     }
 }
 
-impl<'store, const N: usize, K: Kernels> Engine<N> for FdEngine<'store, N, K> {
+impl<'store, const N: usize, const ORDER: usize> Engine<N> for FdEngine<'store, N, ORDER> {
     fn space(&self) -> &NodeSpace<N> {
         &self.space
     }
@@ -60,37 +59,36 @@ impl<'store, const N: usize, K: Kernels> Engine<N> for FdEngine<'store, N, K> {
     }
 
     fn derivative(&self, field: &[f64], axis: usize, vertex: [usize; N]) -> f64 {
-        self.evaluate_axis(field, axis, K::derivative(), vertex)
+        self.evaluate_axis(field, axis, Derivative::<ORDER>, vertex)
     }
 
     fn second_derivative(&self, field: &[f64], axis: usize, vertex: [usize; N]) -> f64 {
-        self.evaluate_axis(field, axis, K::second_derivative(), vertex)
+        self.evaluate_axis(field, axis, SecondDerivative::<ORDER>, vertex)
     }
 
     fn mixed_derivative(&self, field: &[f64], i: usize, j: usize, vertex: [usize; N]) -> f64 {
         self.space
-            .evaluate(Hessian::<K>::new(i, j), node_from_vertex(vertex), field)
+            .evaluate(Hessian::<ORDER>::new(i, j), node_from_vertex(vertex), field)
     }
 
     fn dissipation(&self, field: &[f64], axis: usize, vertex: [usize; N]) -> f64 {
-        self.evaluate_axis(field, axis, K::dissipation(), vertex)
+        self.evaluate_axis(field, axis, Dissipation::<ORDER>, vertex)
     }
 }
 
 /// A finite difference engine that only every relies on interior support (and can thus use better optimized stencils).
-struct FdIntEngine<'store, const N: usize, K: Kernels> {
+struct FdIntEngine<'store, const N: usize, const ORDER: usize> {
     space: NodeSpace<N>,
-    _order: K,
     store: &'store MeshStore,
     range: Range<usize>,
 }
 
-impl<'store, const N: usize, K: Kernels> FdIntEngine<'store, N, K> {
+impl<'store, const N: usize, const ORDER: usize> FdIntEngine<'store, N, ORDER> {
     fn evaluate(
         &self,
         field: &[f64],
         axis: usize,
-        kernel: &impl VertexKernel,
+        kernel: &impl Kernel,
         vertex: [usize; N],
     ) -> f64 {
         self.space
@@ -98,7 +96,7 @@ impl<'store, const N: usize, K: Kernels> FdIntEngine<'store, N, K> {
     }
 }
 
-impl<'store, const N: usize, K: Kernels> Engine<N> for FdIntEngine<'store, N, K> {
+impl<'store, const N: usize, const ORDER: usize> Engine<N> for FdIntEngine<'store, N, ORDER> {
     fn space(&self) -> &NodeSpace<N> {
         &self.space
     }
@@ -117,20 +115,20 @@ impl<'store, const N: usize, K: Kernels> Engine<N> for FdIntEngine<'store, N, K>
     }
 
     fn derivative(&self, field: &[f64], axis: usize, vertex: [usize; N]) -> f64 {
-        self.evaluate(field, axis, K::derivative(), vertex)
+        self.evaluate(field, axis, Derivative::<ORDER>, vertex)
     }
 
     fn second_derivative(&self, field: &[f64], axis: usize, vertex: [usize; N]) -> f64 {
-        self.evaluate(field, axis, K::second_derivative(), vertex)
+        self.evaluate(field, axis, SecondDerivative::<ORDER>, vertex)
     }
 
     fn mixed_derivative(&self, field: &[f64], i: usize, j: usize, vertex: [usize; N]) -> f64 {
         self.space
-            .evaluate_interior(Hessian::<K>::new(i, j), node_from_vertex(vertex), field)
+            .evaluate_interior(Hessian::<ORDER>::new(i, j), node_from_vertex(vertex), field)
     }
 
     fn dissipation(&self, field: &[f64], axis: usize, vertex: [usize; N]) -> f64 {
-        self.evaluate(field, axis, K::dissipation(), vertex)
+        self.evaluate(field, axis, Dissipation::<ORDER>, vertex)
     }
 }
 
@@ -190,9 +188,8 @@ impl<const N: usize> Mesh<N> {
                 macro_rules! evaluate_int {
                     ($order:literal) => {
                         function.evaluate(
-                            FdIntEngine {
+                            FdIntEngine::<N, $order> {
                                 space: space.clone(),
-                                _order: Order::<$order>,
                                 store,
                                 range: nodes.clone(),
                             },
@@ -212,9 +209,8 @@ impl<const N: usize> Mesh<N> {
                 macro_rules! evaluate {
                     ($order:literal) => {
                         function.evaluate(
-                            FdEngine {
+                            FdEngine::<N, $order> {
                                 space: space.clone(),
-                                _order: Order::<$order>,
                                 store,
                                 range: nodes.clone(),
                             },
@@ -249,12 +245,11 @@ impl<const N: usize> Mesh<N> {
 
     /// Evaluates the given function on a system in place.
     fn evaluate_mut<
+        const ORDER: usize,
         S: System + Sync,
-        K: Kernels + Sync,
         P: Function<N, Input = S, Output = S> + Sync,
     >(
         &mut self,
-        order: K,
         function: P,
         dest: SystemSliceMut<'_, S>,
     ) -> Result<(), P::Error>
@@ -280,20 +275,16 @@ impl<const N: usize> Mesh<N> {
             }
 
             if mesh.is_block_in_interior(block) {
-                let engine = FdIntEngine {
+                let engine = FdIntEngine::<N, ORDER> {
                     space: space.clone(),
-
-                    _order: order,
                     store,
                     range: nodes.clone(),
                 };
 
                 function.evaluate(engine, block_source.rb(), block_dest)
             } else {
-                let engine = FdEngine {
+                let engine = FdEngine::<N, ORDER> {
                     space: space.clone(),
-
-                    _order: order,
                     store,
                     range: nodes.clone(),
                 };
@@ -306,12 +297,11 @@ impl<const N: usize> Mesh<N> {
     /// Applies an operator to a system in place, enforcing both strong and weak boundary conditions
     /// and running necessary preprocessing.
     pub fn apply<
-        O: Kernels + Sync,
         C: SystemBoundaryConds<N> + Sync,
         P: Function<N, Input = C::System, Output = C::System> + Sync,
     >(
         &mut self,
-        order: O,
+        order: usize,
         bcs: C,
         mut op: P,
         mut f: SystemSliceMut<'_, C::System>,
@@ -328,7 +318,7 @@ impl<const N: usize> Mesh<N> {
         }
 
         // Strong boundary condition
-        self.fill_boundary(order, bcs.clone(), f.rb_mut());
+        self.fill_boundary::<ORDER, _>(bcs.clone(), f.rb_mut());
         // Preprocess data
         op.preprocess(self, f.rb_mut())?;
 
@@ -352,24 +342,35 @@ impl<const N: usize> Mesh<N> {
             }
 
             if mesh.is_block_in_interior(block) {
-                let engine = FdIntEngine {
-                    space: space.clone(),
-                    _order: order,
-                    store,
-                    range: nodes.clone(),
-                };
+                macro_rules! evaluate_int {
+                    ($order:literal) => {
+                        op.evaluate(
+                            FdIntEngine::<N, $order> {
+                                space: space.clone(),
+                                store,
+                                range: nodes.clone(),
+                            },
+                            block_source.rb(),
+                            block_dest.rb_mut(),
+                        )
+                    };
+                }
 
-                op.evaluate(engine, block_source.rb(), block_dest.rb_mut())
+                match order {
+                    2 => evaluate_int!(2),
+                    4 => evaluate_int!(4),
+                    6 => evaluate_int!(6),
+                    _ => unreachable!(),
+                }
             } else {
-                let engine = FdEngine {
+                let engine = FdEngine::<N, ORDER> {
                     space: space.clone(),
 
-                    _order: order,
                     store,
                     range: nodes.clone(),
                 };
 
-                op.evaluate(&engine, block_source.rb(), block_dest.rb_mut())?;
+                op.evaluate(IRef(&engine), block_source.rb(), block_dest.rb_mut())?;
 
                 // Weak boundary conditions.
                 for face in Face::<N>::iterate() {
@@ -487,9 +488,8 @@ impl<const N: usize> Mesh<N> {
     }
 
     /// Applies the projection to `source`, and stores the result in `dest`.
-    pub fn dissipation<K: Kernels + Sync, S: System>(
+    pub fn dissipation<const ORDER: usize, S: System>(
         &mut self,
-        order: K,
         amplitude: f64,
         mut dest: SystemSliceMut<S>,
     ) {
@@ -523,8 +523,7 @@ impl<const N: usize> Mesh<N> {
         }
 
         for field in dest.system().enumerate() {
-            self.evaluate_mut(
-                order,
+            self.evaluate_mut::<ORDER, _, _>(
                 Dissipation(amplitude),
                 SystemSliceMut::from_scalar(dest.field_mut(field)),
             )

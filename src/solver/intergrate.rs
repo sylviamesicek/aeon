@@ -1,5 +1,4 @@
 use crate::{
-    kernel::{Kernels, Order},
     mesh::{Function, FunctionBorrowMut, Mesh},
     system::{System, SystemBoundaryConds, SystemSlice, SystemSliceMut},
 };
@@ -37,13 +36,12 @@ impl Integrator {
     /// Step the integrator forwards in time.
     pub fn step<
         const N: usize,
-        K: Kernels + Sync,
         C: SystemBoundaryConds<N> + Sync,
         F: Function<N, Input = C::System, Output = C::System> + Sync,
     >(
         &mut self,
         mesh: &mut Mesh<N>,
-        order: K,
+        order: usize,
         conditions: C,
         mut deriv: F,
         h: f64,
@@ -137,7 +135,7 @@ impl Integrator {
                 if let Method::RK4KO6(diss) = self.method {
                     mesh.fill_boundary_to_extent(order, 3, conditions.clone(), result.rb_mut());
                     deriv.preprocess(mesh, result.rb_mut())?;
-                    mesh.dissipation(Order::<6>, diss, result.rb_mut());
+                    mesh.dissipation::<6, _>(diss, result.rb_mut());
                 }
 
                 Ok(())

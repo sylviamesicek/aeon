@@ -1,5 +1,6 @@
 #![allow(clippy::needless_range_loop)]
 
+use crate::IRef;
 use crate::mesh::Mesh;
 use crate::{
     kernel::{NodeSpace, node_from_vertex},
@@ -46,56 +47,37 @@ pub trait Engine<const N: usize> {
     fn dissipation(&self, field: &[f64], axis: usize, vertex: [usize; N]) -> f64;
 }
 
-impl<'a, const N: usize, E: Engine<N>> Engine<N> for &'a E {
+impl<'a, const N: usize, E: Engine<N>> Engine<N> for IRef<'a, E> {
     fn space(&self) -> &NodeSpace<N> {
-        (&**self).space()
-    }
-    fn num_nodes(&self) -> usize {
-        (**self).num_nodes()
+        self.0.space()
     }
 
     fn node_range(&self) -> Range<usize> {
-        (**self).node_range()
-    }
-
-    fn vertex_size(&self) -> [usize; N] {
-        (**self).vertex_size()
+        self.0.node_range()
     }
 
     fn alloc<T: Default>(&self, len: usize) -> &mut [T] {
-        (**self).alloc(len)
-    }
-
-    fn position(&self, vertex: [usize; N]) -> [f64; N] {
-        (**self).position(vertex)
-    }
-
-    fn index_from_vertex(&self, vertex: [usize; N]) -> usize {
-        (**self).index_from_vertex(vertex)
-    }
-
-    fn min_spacing(&self) -> f64 {
-        (**self).min_spacing()
+        self.0.alloc(len)
     }
 
     fn value(&self, field: &[f64], vertex: [usize; N]) -> f64 {
-        (**self).value(field, vertex)
+        self.0.value(field, vertex)
     }
 
     fn derivative(&self, field: &[f64], axis: usize, vertex: [usize; N]) -> f64 {
-        (**self).derivative(field, axis, vertex)
+        self.0.derivative(field, axis, vertex)
     }
 
     fn second_derivative(&self, field: &[f64], axis: usize, vertex: [usize; N]) -> f64 {
-        (**self).second_derivative(field, axis, vertex)
+        self.0.second_derivative(field, axis, vertex)
     }
 
     fn mixed_derivative(&self, field: &[f64], i: usize, j: usize, vertex: [usize; N]) -> f64 {
-        (**self).mixed_derivative(field, i, j, vertex)
+        self.0.mixed_derivative(field, i, j, vertex)
     }
 
     fn dissipation(&self, field: &[f64], axis: usize, vertex: [usize; N]) -> f64 {
-        (**self).dissipation(field, axis, vertex)
+        self.0.dissipation(field, axis, vertex)
     }
 }
 

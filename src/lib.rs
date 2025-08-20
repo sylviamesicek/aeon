@@ -16,13 +16,16 @@ pub mod system;
 
 pub use aeon_macros as macros;
 
+/// A common helper wrapper for implementing a trait T for types of the form &impl T
+pub struct IRef<'a, B>(pub &'a B);
+
 /// Provides common types used for most `aeon` applications.
 pub mod prelude {
     pub use crate::geometry::{
-        ActiveCellId, BlockId, CellId, Face, FaceArray, FaceMask, IndexSpace, NeighborId, HyperBox,
+        ActiveCellId, BlockId, CellId, Face, FaceArray, FaceMask, HyperBox, IndexSpace, NeighborId,
     };
     pub use crate::kernel::{
-        BoundaryClass, BoundaryConds, BoundaryKind, DirichletParams, Order, RadiativeParams,
+        BoundaryClass, BoundaryConds, BoundaryKind, DirichletParams, RadiativeParams,
     };
     pub use crate::mesh::{
         Checkpoint, Engine, ExportStride, ExportVtuConfig, Function, Mesh, Projection,

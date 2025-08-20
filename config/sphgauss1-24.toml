@@ -5,7 +5,7 @@ directory = "output/sphgauss1-24/${amplitude}"
 radius = 40.0
 
 [limits]
-max_levels = 7
+max_levels = 24
 max_nodes = 10_000_000
 max_memory = 5_000_000_000
 
@@ -13,7 +13,7 @@ max_memory = 5_000_000_000
 [evolve]
 cfl = 0.3
 dissipation = 0.5
-max_proper_time = 6.4
+max_proper_time = 7.0
 max_steps = 10_000_000
 max_constraint = 1.0
 min_lapse = 0.0

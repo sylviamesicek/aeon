@@ -1,5 +1,6 @@
-use crate::geometry::{ActiveCellId, Split, IndexSpace, NeighborId};
-use crate::kernel::Kernels;
+use crate::IRef;
+use crate::geometry::{ActiveCellId, IndexSpace, NeighborId, Split};
+use crate::kernel::Interpolation;
 use reborrow::ReborrowMut;
 use std::array;
 
@@ -11,9 +12,8 @@ use crate::{
 
 impl<const N: usize> Mesh<N> {
     /// Transfers data from an old version of the mesh to the new refined version.
-    pub fn transfer_system<K: Kernels, S: System + Sync>(
+    pub fn transfer_system<const ORDER: usize, S: System + Sync>(
         &mut self,
-        _order: K,
         source: SystemSlice<S>,
         dest: SystemSliceMut<S>,
     ) {
@@ -71,7 +71,7 @@ impl<const N: usize> Mesh<N> {
 
                             for field in dest.system().enumerate() {
                                 let v = space.prolong(
-                                    K::interpolation().clone(),
+                                    Interpolation::<ORDER>,
                                     source_node,
                                     block_source.field(field),
                                 );
@@ -152,9 +152,9 @@ impl<const N: usize> Mesh<N> {
 
     /// Enforces strong boundary conditions. This includes strong physical boundary conditions, as well
     /// as handling interior boundaries (same level, coarse-fine, or fine-coarse).
-    pub fn fill_boundary<K: Kernels, BCs: SystemBoundaryConds<N> + Sync>(
+    pub fn fill_boundary<BCs: SystemBoundaryConds<N> + Sync>(
         &mut self,
-        order: K,
+        order: usize,
         bcs: BCs,
         system: SystemSliceMut<'_, BCs::System>,
     ) {
@@ -164,9 +164,9 @@ impl<const N: usize> Mesh<N> {
     /// Enforces strong boundary conditions, only filling ghost nodes if those nodes are within `extent`
     /// of a physical node. This is useful if one is using Kriss-Olgier dissipation, where dissipation
     /// and derivatives use different order stencils.
-    pub fn fill_boundary_to_extent<K: Kernels, C: SystemBoundaryConds<N> + Sync>(
+    pub fn fill_boundary_to_extent<C: SystemBoundaryConds<N> + Sync>(
         &mut self,
-        order: K,
+        order: usize,
         extent: usize,
         bcs: C,
         mut system: SystemSliceMut<'_, C::System>,
@@ -177,7 +177,12 @@ impl<const N: usize> Mesh<N> {
         self.fill_direct(extent, system.rb_mut());
 
         self.fill_physical(extent, &bcs, system.rb_mut());
-        self.fill_prolong(order, extent, system.rb_mut());
+        match order {
+            2 => self.fill_prolong::<2, _>(extent, system.rb_mut()),
+            4 => self.fill_prolong::<4, _>(extent, system.rb_mut()),
+            6 => self.fill_prolong::<6, _>(extent, system.rb_mut()),
+            _ => unimplemented!("Fill order not implemented"),
+        }
         self.fill_physical(extent, &bcs, system.rb_mut());
     }
 
@@ -268,9 +273,8 @@ impl<const N: usize> Mesh<N> {
         });
     }
 
-    fn fill_prolong<K: Kernels, S: System>(
+    fn fill_prolong<const ORDER: usize, S: System>(
         &mut self,
-        _order: K,
         extent: usize,
         result: SystemSliceMut<S>,
     ) {
@@ -295,7 +299,7 @@ impl<const N: usize> Mesh<N> {
 
                 for field in shared.system().enumerate() {
                     let value = neighbor_space.prolong(
-                        K::interpolation().clone(),
+                        Interpolation::<ORDER>,
                         neighbor_node,
                         neighbor_system.field(field),
                     );

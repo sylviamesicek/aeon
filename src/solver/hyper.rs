@@ -1,7 +1,8 @@
 use std::convert::Infallible;
 
+use crate::IRef;
 use crate::geometry::{Face, IndexSpace};
-use crate::kernel::{BoundaryKind, DirichletParams, Kernels, RadiativeParams};
+use crate::kernel::{BoundaryKind, DirichletParams, RadiativeParams};
 use crate::mesh::FunctionBorrowMut;
 use datasize::DataSize;
 use reborrow::{Reborrow, ReborrowMut};
@@ -72,13 +73,12 @@ impl HyperRelaxSolver {
     /// Solves a given elliptic system
     pub fn solve<
         const N: usize,
-        K: Kernels + Sync,
         C: SystemBoundaryConds<N> + Sync,
         F: Function<N, Input = C::System, Output = C::System> + Sync,
     >(
         &mut self,
         mesh: &mut Mesh<N>,
-        order: K,
+        order: usize,
         conditions: C,
         deriv: F,
         result: SystemSliceMut<C::System>,
@@ -92,14 +92,13 @@ impl HyperRelaxSolver {
 
     pub fn solve_with_callback<
         const N: usize,
-        K: Kernels + Sync,
         C: SystemBoundaryConds<N> + Sync,
         F: Function<N, Input = C::System, Output = C::System> + Sync,
         Call: SolverCallback<N, C::System>,
     >(
         &mut self,
         mesh: &mut Mesh<N>,
-        order: K,
+        order: usize,
         conditions: C,
         mut callback: Call,
         mut deriv: F,
@@ -335,7 +334,7 @@ impl<const N: usize, S: System, F: Function<N, Input = S, Output = S>> Function<
 
         // dv/dt = c^2 Lu
         // TODO speed
-        self.function.evaluate(&engine, uin, vout.rb_mut())?;
+        self.function.evaluate(IRef(&engine), uin, vout.rb_mut())?;
 
         // Use adaptive timestep
         let block_spacing = &self.spacing_per_vertex[engine.node_range()];

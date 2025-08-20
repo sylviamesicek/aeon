@@ -4,11 +4,11 @@
 //! the `NodeSpace`.
 
 use crate::geometry::{
-    CartesianIter, Face, FaceArray, IndexSpace, HyperBox, Region, Side, regions,
+    CartesianIter, Face, FaceArray, HyperBox, IndexSpace, Region, Side, regions,
 };
 use crate::kernel::{
-    Border, BoundaryClass, BoundaryConds, BoundaryKind, CellKernel, Convolution, Kernel, Value,
-    VertexKernel, boundary::is_boundary_compatible,
+    Border, BoundaryClass, BoundaryConds, BoundaryKind, Convolution, Interpolant, Kernel, Value,
+    boundary::is_boundary_compatible,
 };
 use std::array::{self, from_fn};
 
@@ -194,13 +194,6 @@ impl<const N: usize> NodeSpace<N> {
         NodeWindow { origin, size }
     }
 
-    // pub fn copy_into_window(&self, window: NodeWindow<N>, src: &[f64], dest: &mut [f64]) {
-    //     debug_assert_eq!(src.len(), self.num_nodes());
-    //     debug_assert_eq!(dest.len(), window.num_nodes());
-
-    //     for node in
-    // }
-
     pub fn contains_window(&self, window: NodeWindow<N>) -> bool {
         (0..N).into_iter().all(|axis| {
             window.origin[axis] >= -(self.ghost as isize)
@@ -283,8 +276,6 @@ impl<const N: usize> NodeSpace<N> {
 
             for face in region.adjacent_faces() {
                 // Flip parity if boundary is antisymmetric
-                // parity ^= self.boundary[face] == BoundaryKind::Parity && !boundary.parity(face);
-
                 parity ^= cond.kind(face) == BoundaryKind::AntiSymmetric;
             }
 
@@ -378,7 +369,7 @@ impl<const N: usize> NodeSpace<N> {
 
     pub fn evaluate_axis_interior(
         &self,
-        kernel: &impl VertexKernel,
+        kernel: &impl Kernel,
         node: [isize; N],
         field: &[f64],
         axis: usize,
@@ -473,7 +464,7 @@ impl<const N: usize> NodeSpace<N> {
     /// Evaluates the operation of a kernel along an axis at a given vertex.
     pub fn evaluate_axis(
         &self,
-        kernel: &impl VertexKernel,
+        kernel: &impl Kernel,
         node: [isize; N],
         field: &[f64],
         axis: usize,
@@ -502,7 +493,7 @@ impl<const N: usize> NodeSpace<N> {
     }
 
     /// Applies an interpolation kernel to the field at a given supernode.
-    pub fn prolong(&self, kernel: impl CellKernel, supernode: [isize; N], field: &[f64]) -> f64 {
+    pub fn prolong(&self, kernel: impl Interpolant, supernode: [isize; N], field: &[f64]) -> f64 {
         for axis in 0..N {
             debug_assert!(supernode[axis] <= 2 * self.size[axis] as isize);
             debug_assert!(supernode[axis] >= 0);
@@ -663,10 +654,12 @@ impl<const N: usize> Iterator for NodePlaneIter<N> {
 
 #[cfg(test)]
 mod tests {
-    use crate::geometry::HyperBox;
+    use crate::{
+        geometry::HyperBox,
+        kernel::{Derivative, Interpolation},
+    };
 
     use super::*;
-    use crate::kernel::{Kernels as _, Order};
 
     fn boundary<const N: usize>() -> FaceArray<N, BoundaryClass> {
         FaceArray::from_fn(|face| {
@@ -753,14 +746,7 @@ mod tests {
 
         for node in space.inner_window().iter() {
             let [x, y] = space.position(node);
-            let numerical = space.evaluate(
-                (
-                    Order::<4>::derivative().clone(),
-                    Order::<4>::derivative().clone(),
-                ),
-                node,
-                &field,
-            );
+            let numerical = space.evaluate((Derivative::<4>, Derivative::<4>), node, &field);
             let analytical = x.cos() * y.cos();
             // dbg!(numerical - analytical);
             let error: f64 = (numerical - analytical).abs();
@@ -806,7 +792,7 @@ mod tests {
 
         for node in rspace.inner_window().iter() {
             let [x, y] = rspace.position(node);
-            let numerical = cspace.prolong(Order::<4>::interpolation().clone(), node, &field);
+            let numerical = cspace.prolong(Interpolation::<4>, node, &field);
             let analytical = x.sin() * y.sin();
             let error: f64 = (numerical - analytical).abs();
             result = result.max(error);
