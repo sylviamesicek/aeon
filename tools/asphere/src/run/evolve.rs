@@ -293,7 +293,7 @@ pub fn evolve_data_full(
         }
 
         // Perform normal regridding step
-        if steps_since_regrid > config.regrid.flag_interval && !fixed_grid {
+        if steps_since_regrid > config.regrid.flag_interval {
             steps_since_regrid = 0;
 
             // Perform constraint assessment
@@ -327,9 +327,14 @@ pub fn evolve_data_full(
                 constraint = mesh.l2_norm(&deriv_buffer);
             }
 
+            let mut coarsen_error = config.regrid.coarsen_error;
+            if fixed_grid {
+                // If we are at a fixed grid, then we do not coarsen
+                coarsen_error = 0.0;
+            }
             mesh.flag_wavelets(
                 4,
-                config.regrid.coarsen_error,
+                coarsen_error,
                 config.regrid.refine_error,
                 system.as_slice(),
             );
