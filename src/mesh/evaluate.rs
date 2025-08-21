@@ -2,19 +2,19 @@ use std::convert::Infallible;
 use std::{array, ops::Range};
 
 use crate::geometry::{BlockId, Face, FaceMask, IndexSpace};
-use crate::kernel::{Derivative, Dissipation, Kernel, SecondDerivative, is_boundary_compatible};
+use crate::image::ImageShared;
+use crate::kernel::{is_boundary_compatible, Derivative, Dissipation, Kernel, SecondDerivative, SystemBoundaryConds};
 use crate::{
     kernel::{
         BoundaryConds as _, BoundaryKind, Hessian, NodeSpace, node_from_vertex, vertex_from_node,
     },
-    system::Empty,
 };
 use reborrow::{Reborrow, ReborrowMut as _};
 
 use crate::{
     mesh::{Engine, Function, Projection},
     shared::SharedSlice,
-    system::{Scalar, System, SystemBoundaryConds, SystemSlice, SystemSliceMut},
+    image::{ImageRef, ImageMut},
 };
 
 use super::{Mesh, MeshStore};
@@ -130,17 +130,15 @@ impl<'store, const N: usize, const ORDER: usize> Engine<N> for FdIntEngine<'stor
 struct ProjectionAsFunction<P>(P);
 
 impl<const N: usize, P: Projection<N>> Function<N> for ProjectionAsFunction<P> {
-    type Input = Empty;
-    type Output = Scalar;
     type Error = Infallible;
 
     fn evaluate(
         &self,
         engine: impl Engine<N>,
-        _input: SystemSlice<Self::Input>,
-        mut output: SystemSliceMut<Self::Output>,
+        _input: ImageRef,
+        mut output: ImageMut,
     ) -> Result<(), Infallible> {
-        let dest = output.field_mut(());
+        let dest = output.channel_mut(0);
 
         for vertex in IndexSpace::new(engine.vertex_size()).iter() {
             let index = engine.index_from_vertex(vertex);
@@ -157,18 +155,19 @@ impl<const N: usize> Mesh<N> {
         &mut self,
         order: usize,
         function: P,
-        source: SystemSlice<'_, P::Input>,
-        dest: SystemSliceMut<'_, P::Output>,
+        source: ImageRef,
+        dest: ImageMut,
     ) -> Result<(), P::Error>
     where
-        P::Input: Sync,
-        P::Output: Sync,
         P::Error: Send,
     {
+        assert!(dest.num_nodes() == source.num_nodes() || source.num_channels() == 0);
+        assert_eq!(dest.num_nodes(), self.num_nodes());
+
         // Make sure order is valid.
         assert!(matches!(order, 2 | 4 | 6));
 
-        let dest = dest.into_shared();
+        let dest = ImageShared::from(dest);
 
         self.try_block_compute(|mesh, store, block| {
             let space = mesh.block_space(block);
@@ -239,32 +238,29 @@ impl<const N: usize> Mesh<N> {
     /// Evaluates the given function on a system in place.
     fn evaluate_mut<
         const ORDER: usize,
-        S: System + Sync,
-        P: Function<N, Input = S, Output = S> + Sync,
+        P: Function<N> + Sync,
     >(
         &mut self,
         function: P,
-        dest: SystemSliceMut<'_, S>,
+        dest: ImageMut,
     ) -> Result<(), P::Error>
     where
         P::Error: Send,
     {
-        let dest = dest.into_shared();
+        let dest = ImageShared::from(dest);
 
         self.try_block_compute(|mesh, store, block| {
             let space = mesh.block_space(block);
             let nodes = mesh.block_nodes(block);
 
             let block_dest = unsafe { dest.slice_mut(nodes.clone()) };
-
-            let num_nodes = block_dest.len() * dest.system().count();
             let mut block_source =
-                SystemSliceMut::from_contiguous(store.scratch(num_nodes), dest.system());
+                ImageMut::from_storage(store.scratch(block_dest.num_nodes() * block_dest.num_channels()), block_dest.num_channels());
 
-            for field in dest.system().enumerate() {
+            for field in dest.channels() {
                 block_source
-                    .field_mut(field)
-                    .copy_from_slice(block_dest.field(field));
+                    .channel_mut(field)
+                    .copy_from_slice(block_dest.channel(field));
             }
 
             if mesh.is_block_in_interior(block) {
@@ -291,19 +287,20 @@ impl<const N: usize> Mesh<N> {
     /// and running necessary preprocessing.
     pub fn apply<
         C: SystemBoundaryConds<N> + Sync,
-        P: Function<N, Input = C::System, Output = C::System> + Sync,
+        P: Function<N> + Sync,
     >(
         &mut self,
         order: usize,
         bcs: C,
         mut op: P,
-        mut f: SystemSliceMut<'_, C::System>,
+        mut f: ImageMut<'_>,
     ) -> Result<(), P::Error>
     where
-        C::System: Sync,
         P::Error: Send,
     {
-        for field in f.system().enumerate() {
+        assert_eq!(f.num_nodes(), self.num_nodes());
+
+        for field in f.channels() {
             assert!(
                 is_boundary_compatible(&self.boundary, &bcs.field(field)),
                 "Boundary Conditions incompatible with set boundary classes"
@@ -315,7 +312,7 @@ impl<const N: usize> Mesh<N> {
         // Preprocess data
         op.preprocess(self, f.rb_mut())?;
 
-        let f = f.into_shared();
+        let f: ImageShared = f.into();
 
         self.try_block_compute(|mesh, store, block| {
             let space = mesh.block_space(block);
@@ -324,14 +321,13 @@ impl<const N: usize> Mesh<N> {
 
             let mut block_dest = unsafe { f.slice_mut(nodes.clone()) };
 
-            let num_nodes = block_dest.len() * f.system().count();
             let mut block_source =
-                SystemSliceMut::from_contiguous(store.scratch(num_nodes), f.system());
+                ImageMut::from_storage(store.scratch(block_dest.num_nodes() * block_dest.num_channels()), block_dest.num_channels());
 
-            for field in f.system().enumerate() {
+            for field in f.channels() {
                 block_source
-                    .field_mut(field)
-                    .copy_from_slice(block_dest.field(field));
+                    .channel_mut(field)
+                    .copy_from_slice(block_dest.channel(field));
             }
 
             if mesh.is_block_in_interior(block) {
@@ -377,21 +373,12 @@ impl<const N: usize> Mesh<N> {
                     _ => unreachable!(),
                 }
 
-                // let engine = FdEngine::<N, ORDER> {
-                //     space: space.clone(),
-
-                //     store,
-                //     range: nodes.clone(),
-                // };
-
-                // op.evaluate(IRef(&engine), block_source.rb(), block_dest.rb_mut())?;
-
                 // Weak boundary conditions.
                 for face in Face::<N>::iterate() {
-                    for field in f.system().enumerate() {
+                    for field in f.channels() {
                         let boundary = bcs.field(field);
-                        let source = block_source.field(field);
-                        let dest = block_dest.field_mut(field);
+                        let source = block_source.channel(field);
+                        let dest = block_dest.channel_mut(field);
 
                         // Apply weak dirichlet boundary conditions
                         if boundary.kind(face) == BoundaryKind::WeakDirichlet {
@@ -497,9 +484,11 @@ impl<const N: usize> Mesh<N> {
     }
 
     /// Copies an immutable src slice into a mutable dest slice.
-    pub fn copy_from_slice<S: System>(&mut self, mut dest: SystemSliceMut<S>, src: SystemSlice<S>) {
-        for label in dest.system().enumerate() {
-            dest.field_mut(label).copy_from_slice(src.field(label));
+    pub fn copy_from_slice(&mut self, mut dest: ImageMut, src: ImageRef) {
+        assert_eq!(dest.num_nodes(), src.num_nodes());
+
+        for label in dest.channels() {
+            dest.channel_mut(label).copy_from_slice(src.channel(label));
         }
     }
 
@@ -509,37 +498,38 @@ impl<const N: usize> Mesh<N> {
         projection: P,
         dest: &mut [f64],
     ) {
+        assert_eq!(dest.len(), self.num_nodes());
         self.evaluate(
             order,
             ProjectionAsFunction(projection),
-            SystemSlice::empty(),
-            SystemSliceMut::from_scalar(dest),
+            ImageRef::empty(),
+            ImageMut::from(dest),
         )
         .unwrap();
     }
 
     /// Applies the projection to `source`, and stores the result in `dest`.
-    pub fn dissipation<const ORDER: usize, S: System>(
+    pub fn dissipation<const ORDER: usize>(
         &mut self,
         amplitude: f64,
-        mut dest: SystemSliceMut<S>,
+        mut dest: ImageMut,
     ) {
+        assert_eq!(dest.num_nodes(), self.num_nodes());
+
         #[derive(Clone)]
         struct Dissipation(f64);
 
         impl<const N: usize> Function<N> for Dissipation {
-            type Input = Scalar;
-            type Output = Scalar;
             type Error = Infallible;
 
             fn evaluate(
                 &self,
                 engine: impl Engine<N>,
-                input: SystemSlice<Self::Input>,
-                mut output: SystemSliceMut<Self::Output>,
+                input: ImageRef,
+                mut output: ImageMut,
             ) -> Result<(), Infallible> {
-                let input = input.field(());
-                let output = output.field_mut(());
+                let input = input.channel(0);
+                let output = output.channel_mut(0);
 
                 for vertex in IndexSpace::new(engine.vertex_size()).iter() {
                     let index = engine.index_from_vertex(vertex);
@@ -553,10 +543,10 @@ impl<const N: usize> Mesh<N> {
             }
         }
 
-        for field in dest.system().enumerate() {
-            self.evaluate_mut::<ORDER, _, _>(
+        for field in dest.channels() {
+            self.evaluate_mut::<ORDER, _>(
                 Dissipation(amplitude),
-                SystemSliceMut::from_scalar(dest.field_mut(field)),
+                ImageMut::from(dest.channel_mut(field)),
             )
             .unwrap();
         }
@@ -625,12 +615,12 @@ impl<const N: usize> Mesh<N> {
         });
     }
 
-    pub fn adaptive_cfl<S: System + Sync>(
+    pub fn adaptive_cfl(
         &mut self,
         spacing_per_vertex: &[f64],
-        dest: SystemSliceMut<S>,
+        dest: ImageMut,
     ) {
-        let dest = dest.into_shared();
+        let dest = ImageShared::from(dest);
         let min_spacing = self.min_spacing();
 
         self.block_compute(|mesh, _, block| {
@@ -640,8 +630,8 @@ impl<const N: usize> Mesh<N> {
             let block_spacings = &spacing_per_vertex[block_nodes.clone()];
             let mut block_dest = unsafe { dest.slice_mut(block_nodes.clone()) };
 
-            for field in block_dest.system().enumerate() {
-                let block_dest = block_dest.field_mut(field);
+            for field in block_dest.channels() {
+                let block_dest = block_dest.channel_mut(field);
 
                 for vertex in IndexSpace::new(block_space.vertex_size()).iter() {
                     let index = block_space.index_from_vertex(vertex);

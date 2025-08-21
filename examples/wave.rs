@@ -10,7 +10,7 @@ const MAX_TIME: f64 = 10.0;
 const MAX_STEPS: usize = 10000;
 
 const CFL: f64 = 0.1;
-const ORDER: Order<4> = Order::<4>;
+const ORDER: usize = 4;
 
 const SAVE_CHECKPOINT: f64 = 0.01;
 const FORCE_SAVE: bool = false;
@@ -24,13 +24,11 @@ const SPEED: [f64; 2] = [1.0, 0.0];
 struct WaveConditions;
 
 impl SystemBoundaryConds<2> for WaveConditions {
-    type System = Scalar;
-
-    fn kind(&self, _label: <Self::System as System>::Label, _face: Face<2>) -> BoundaryKind {
+    fn kind(&self, _channel: usize, _face: Face<2>) -> BoundaryKind {
         BoundaryKind::Radiative
     }
 
-    fn radiative(&self, _field: (), _position: [f64; 2]) -> RadiativeParams {
+    fn radiative(&self, _channel: usize, _position: [f64; 2]) -> RadiativeParams {
         RadiativeParams::lightlike(0.0)
     }
 }
@@ -41,18 +39,16 @@ struct WaveEquation {
 }
 
 impl Function<2> for WaveEquation {
-    type Input = Scalar;
-    type Output = Scalar;
     type Error = Infallible;
 
     fn evaluate(
         &self,
         engine: impl Engine<2>,
-        input: SystemSlice<Self::Input>,
-        mut output: SystemSliceMut<Self::Output>,
+        input: ImageRef,
+        mut output: ImageMut,
     ) -> Result<(), Infallible> {
-        let input = input.field(());
-        let output = output.field_mut(());
+        let input = input.channel(0);
+        let output = output.channel_mut(0);
 
         for vertex in IndexSpace::new(engine.vertex_size()).iter() {
             let index = engine.index_from_vertex(vertex);
@@ -100,7 +96,7 @@ pub fn main() -> eyre::Result<()> {
     );
     mesh.refine_global();
     // Allocate space for system
-    let mut system = SystemVec::<Scalar>::default();
+    let mut system = Image::default();
 
     log::info!("Performing Initial Adaptive Mesh Refinement.");
 
@@ -118,12 +114,12 @@ pub fn main() -> eyre::Result<()> {
 
         log::trace!("Projecting System");
 
-        mesh.project(4, profile, system.field_mut(()));
-        mesh.fill_boundary(ORDER, WaveConditions, system.as_mut_slice());
+        mesh.project(4, profile, system.channel_mut(0));
+        mesh.fill_boundary(ORDER, WaveConditions, system.as_mut());
 
         log::trace!("Flagging Wavelets");
 
-        mesh.flag_wavelets(4, LOWER, UPPER, system.as_slice());
+        mesh.flag_wavelets(4, LOWER, UPPER, system.as_ref());
         mesh.limit_level_range_flags(1, 10);
 
         log::trace!("Balancing Flags");
@@ -136,7 +132,7 @@ pub fn main() -> eyre::Result<()> {
 
         let mut checkpoint = Checkpoint::default();
         checkpoint.attach_mesh(&mesh);
-        checkpoint.save_field("Wave", system.contigious());
+        checkpoint.save_field("Wave", system.storage());
         checkpoint.save_int_field("Flags", &flags);
         checkpoint.export_vtu(
             format!("output/waves/initial{i}.vtu"),
@@ -185,9 +181,9 @@ pub fn main() -> eyre::Result<()> {
     log::info!("Evolving wave forwards");
 
     // Allocate vectors
-    let mut tmp = SystemVec::default();
-    let mut exact = SystemVec::default();
-    let mut error = SystemVec::<Scalar>::default();
+    let mut tmp = Image::new(1, 0);
+    let mut exact = Image::new(1, 0);
+    let mut error = Image::new(1, 0);
 
     // Integrate
     let mut integrator = Integrator::new(Method::RK4KO6(0.5));
@@ -200,7 +196,7 @@ pub fn main() -> eyre::Result<()> {
     let mut steps_since_regrid = 0;
 
     while step < MAX_STEPS && time < MAX_TIME {
-        assert!(system.len() == mesh.num_nodes());
+        assert!(system.num_nodes() == mesh.num_nodes());
 
         // Get step size
         let h = mesh.min_spacing() * CFL;
@@ -213,22 +209,22 @@ pub fn main() -> eyre::Result<()> {
         mesh.project(
             4,
             AnalyticSolution { speed: SPEED, time },
-            exact.field_mut(()),
+            exact.channel_mut(0),
         );
 
         // Fill boundaries
-        mesh.fill_boundary(ORDER, WaveConditions, system.as_mut_slice());
-        mesh.fill_boundary(ORDER, WaveConditions, exact.as_mut_slice());
+        mesh.fill_boundary(ORDER, WaveConditions, system.as_mut());
+        mesh.fill_boundary(ORDER, WaveConditions, exact.as_mut());
 
         for i in 0..mesh.num_nodes() {
-            error.contigious_mut()[i] = exact.contigious()[i] - system.contigious()[i];
+            error.storage_mut()[i] = exact.storage()[i] - system.storage()[i];
         }
 
         if steps_since_regrid > REGRID_SKIP {
             steps_since_regrid = 0;
 
-            mesh.fill_boundary(ORDER, WaveConditions, system.as_mut_slice());
-            mesh.flag_wavelets(4, LOWER, UPPER, system.as_slice());
+            mesh.fill_boundary(ORDER, WaveConditions, system.as_mut());
+            mesh.flag_wavelets(4, LOWER, UPPER, system.as_ref());
             mesh.limit_level_range_flags(1, 10);
 
             mesh.balance_flags();
@@ -246,15 +242,15 @@ pub fn main() -> eyre::Result<()> {
             );
 
             // Copy system into tmp.
-            tmp.contigious_mut().copy_from_slice(system.contigious());
+            tmp.storage_mut().copy_from_slice(system.storage());
 
             system.resize(mesh.num_nodes());
-            mesh.transfer_system(ORDER, tmp.as_slice(), system.as_mut_slice());
+            mesh.transfer_system(ORDER, tmp.as_ref(), system.as_mut());
 
             continue;
         }
 
-        mesh.fill_boundary(ORDER, WaveConditions, system.as_mut_slice());
+        mesh.fill_boundary(ORDER, WaveConditions, system.as_mut());
 
         if time_since_save >= SAVE_CHECKPOINT || FORCE_SAVE {
             time_since_save = 0.0;
@@ -268,9 +264,9 @@ pub fn main() -> eyre::Result<()> {
             // Output current system to disk
             let mut checkpoint = Checkpoint::default();
             checkpoint.attach_mesh(&mesh);
-            checkpoint.save_field("Wave", system.contigious());
-            checkpoint.save_field("Analytic", exact.contigious());
-            checkpoint.save_field("Error", error.contigious());
+            checkpoint.save_field("Wave", system.storage());
+            checkpoint.save_field("Analytic", exact.storage());
+            checkpoint.save_field("Error", error.storage());
             checkpoint.export_vtu(
                 format!("output/waves/evolution{save_step}.vtu"),
                 ExportVtuConfig {
@@ -291,7 +287,7 @@ pub fn main() -> eyre::Result<()> {
                 WaveConditions,
                 WaveEquation { speed: SPEED },
                 h,
-                system.as_mut_slice(),
+                system.as_mut(),
             )
             .unwrap();
 

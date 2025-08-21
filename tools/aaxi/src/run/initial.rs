@@ -1,11 +1,11 @@
 use crate::eqs;
 use crate::run::config::{Config, Initial, Source};
-use crate::systems::{Constraint, Field, FieldConditions, Fields, Gauge, Metric, ScalarField};
+use crate::systems::{self, FieldConditions, save_image};
+use aeon::kernel::ScalarConditions;
 use aeon::prelude::*;
 use aeon::{
     mesh::{Gaussian, Mesh},
     solver::{HyperRelaxSolver, SolverCallback},
-    system::System,
 };
 use aeon_app::progress;
 use console::style;
@@ -22,66 +22,16 @@ use std::time::{Duration, Instant};
 // Garfinkle variables *****
 // *************************
 
-#[derive(Clone)]
-struct ContextSystem {
-    /// scalar field masses.
-    pub scalar_fields: Vec<f64>,
-}
+mod garfinkle {
+    pub const S_CH: usize = 0;
 
-impl ContextSystem {
-    /// Returns the number of scalar fields.
-    pub fn num_scalar_fields(&self) -> usize {
-        self.scalar_fields.len()
+    pub fn phi_ch(i: usize) -> usize {
+        1 + 2 * i
     }
 
-    /// Returns an interator over the scalar fields in this system.
-    pub fn scalar_fields(&self) -> impl Iterator<Item = f64> + '_ {
-        self.scalar_fields.iter().cloned()
+    pub fn num_channels(scalar_fields: usize) -> usize {
+        1 + scalar_fields
     }
-}
-
-impl System for ContextSystem {
-    const NAME: &'static str = "Context";
-
-    type Label = Context;
-
-    fn count(&self) -> usize {
-        1 + self.num_scalar_fields()
-    }
-
-    fn enumerate(&self) -> impl Iterator<Item = Self::Label> {
-        std::iter::once(Context::Seed).chain((0..self.num_scalar_fields()).map(Context::Phi))
-    }
-
-    fn label_index(&self, label: Self::Label) -> usize {
-        match label {
-            Context::Seed => 0,
-            Context::Phi(id) => id + 1,
-        }
-    }
-
-    fn label_name(&self, label: Self::Label) -> String {
-        match label {
-            Context::Seed => "Seed".to_string(),
-            Context::Phi(id) => format!("Phi{id}"),
-        }
-    }
-
-    fn label_from_index(&self, mut index: usize) -> Self::Label {
-        if index < 1 {
-            return Context::Seed;
-        }
-        index -= 1;
-
-        Context::Phi(index)
-    }
-}
-
-/// Context system label.
-#[derive(Clone, Copy)]
-enum Context {
-    Seed,
-    Phi(usize),
 }
 
 // ***********************
@@ -111,22 +61,20 @@ impl BoundaryConds<2> for PsiCondition {
 struct ContextConditions;
 
 impl SystemBoundaryConds<2> for ContextConditions {
-    type System = ContextSystem;
-
-    fn kind(&self, label: <Self::System as System>::Label, face: Face<2>) -> BoundaryKind {
+    fn kind(&self, channel: usize, face: Face<2>) -> BoundaryKind {
         if face.side {
             return BoundaryKind::Radiative;
         }
 
-        let axes = match label {
-            Context::Seed => [BoundaryKind::AntiSymmetric, BoundaryKind::Symmetric],
-            Context::Phi(_) => [BoundaryKind::Symmetric, BoundaryKind::Symmetric],
+        let axes = match channel {
+            garfinkle::S_CH => [BoundaryKind::AntiSymmetric, BoundaryKind::Symmetric],
+            _ => [BoundaryKind::Symmetric, BoundaryKind::Symmetric],
         };
 
         axes[face.axis]
     }
 
-    fn radiative(&self, _field: Context, _position: [f64; 2]) -> RadiativeParams {
+    fn radiative(&self, _channel: usize, _position: [f64; 2]) -> RadiativeParams {
         RadiativeParams::lightlike(0.0)
     }
 }
@@ -161,25 +109,24 @@ impl<'a> Projection<2> for SeedProjection<'a> {
 /// Hamiltonian elliptic equation.
 #[derive(Clone)]
 struct Hamiltonian<'a> {
-    context: SystemSlice<'a, ContextSystem>,
+    context: ImageRef<'a>,
+    scalar_fields: &'a [f64],
 }
 
 impl<'a> Function<2> for Hamiltonian<'a> {
-    type Input = Scalar;
-    type Output = Scalar;
     type Error = Infallible;
 
     fn evaluate(
         &self,
         engine: impl Engine<2>,
-        input: SystemSlice<Self::Input>,
-        output: SystemSliceMut<Self::Output>,
+        input: ImageRef,
+        mut output: ImageMut,
     ) -> Result<(), Infallible> {
         let context = self.context.slice(engine.node_range());
-        let seed = context.field(Context::Seed);
+        let seed = context.channel(garfinkle::S_CH);
 
-        let psi = input.into_scalar();
-        let dest = output.into_scalar();
+        let psi = input.channel(0);
+        let dest = output.channel_mut(0);
 
         // Iterate over vertices in block.
         for vertex in IndexSpace::new(engine.vertex_size()).iter() {
@@ -203,9 +150,9 @@ impl<'a> Function<2> for Hamiltonian<'a> {
 
             let mut source = 0.0;
 
-            for (i, mass) in context.system().scalar_fields().enumerate() {
+            for (i, &mass) in self.scalar_fields.iter().enumerate() {
                 let mass2 = mass * mass;
-                let phi = context.field(Context::Phi(i));
+                let phi = context.channel(garfinkle::phi_ch(i));
 
                 let phi2 = phi[index] * phi[index];
                 let phi_r = engine.derivative(phi, 0, vertex);
@@ -230,23 +177,20 @@ impl<'a> Function<2> for Hamiltonian<'a> {
 #[derive(Clone)]
 struct FieldsFromGarfinkle<'a> {
     psi: &'a [f64],
-    context: SystemSlice<'a, ContextSystem>,
+    scalar_fields: &'a [f64],
 }
 
 impl<'a> Function<2> for FieldsFromGarfinkle<'a> {
-    type Input = Empty;
-    type Output = Fields;
     type Error = Infallible;
 
     fn evaluate(
         &self,
         engine: impl Engine<2>,
-        _: SystemSlice<Self::Input>,
-        mut output: SystemSliceMut<Self::Output>,
+        context: ImageRef,
+        mut output: ImageMut,
     ) -> Result<(), Infallible> {
         let psi = &self.psi[engine.node_range()];
-        let context = self.context.slice(engine.node_range());
-        let seed = context.field(Context::Seed);
+        let seed = context.channel(garfinkle::S_CH);
 
         for vertex in IndexSpace::new(engine.vertex_size()).iter() {
             let index = engine.index_from_vertex(vertex);
@@ -254,51 +198,72 @@ impl<'a> Function<2> for FieldsFromGarfinkle<'a> {
 
             let conformal = psi[index].powi(4) * (2.0 * rho * seed[index]).exp();
 
-            output.field_mut(Field::Metric(Metric::Grr))[index] = conformal;
-            output.field_mut(Field::Metric(Metric::Gzz))[index] = conformal;
-            output.field_mut(Field::Metric(Metric::S))[index] = -seed[index];
+            output.channel_mut(systems::GRR_CH)[index] = conformal;
+            output.channel_mut(systems::GRZ_CH)[index] = 0.0;
+            output.channel_mut(systems::GZZ_CH)[index] = conformal;
+            output.channel_mut(systems::S_CH)[index] = -seed[index];
+
+            output.channel_mut(systems::KRR_CH)[index] = 0.0;
+            output.channel_mut(systems::KRZ_CH)[index] = 0.0;
+            output.channel_mut(systems::KZZ_CH)[index] = 0.0;
+            output.channel_mut(systems::Y_CH)[index] = 0.0;
+
+            output.channel_mut(systems::THETA_CH)[index] = 0.0;
+            output.channel_mut(systems::ZR_CH)[index] = 0.0;
+            output.channel_mut(systems::ZZ_CH)[index] = 0.0;
+
+            output.channel_mut(systems::LAPSE_CH)[index] = 1.0;
+            output.channel_mut(systems::SHIFTR_CH)[index] = 0.0;
+            output.channel_mut(systems::SHIFTZ_CH)[index] = 0.0;
+
+            for (i, _) in self.scalar_fields.iter().enumerate() {
+                output.channel_mut(systems::phi_ch(i))[index] =
+                    context.channel(garfinkle::phi_ch(i))[index];
+                output.channel_mut(systems::pi_ch(i))[index] = 0.0;
+            }
         }
 
         Ok(())
     }
 }
 
-fn solve_order<S: SolverCallback<2, Scalar> + Send + Sync>(
+fn solve_order<S: SolverCallback<2> + Send + Sync>(
     order: usize,
     mesh: &mut Mesh<2>,
     initial: &Initial,
     callback: S,
     sources: &[Source],
-    mut system: SystemSliceMut<Fields>,
+    mut system: ImageMut,
 ) -> eyre::Result<()>
 where
     S::Error: Error + Send + Sync + 'static,
 {
-    let num_scalar_field = system.system().num_scalar_fields();
+    let num_scalar_field = sources
+        .iter()
+        .filter(|&source| matches!(source, Source::ScalarField { .. }))
+        .count();
 
     // Retrieve number of nodes in current version of mesh.
     let num_nodes = mesh.num_nodes();
 
     let mut psi = vec![0.0; num_nodes];
-    let mut context = SystemVec::with_length(
-        num_nodes,
-        ContextSystem {
-            scalar_fields: system.system().scalar_fields.clone(),
-        },
-    );
+    let mut context = Image::new(garfinkle::num_channels(num_scalar_field), num_nodes);
 
     // Compute seed values.
     mesh.project(
         order,
         SeedProjection(sources),
-        context.field_mut(Context::Seed),
+        context.channel_mut(garfinkle::S_CH),
     );
 
     // Compute scalar field values.
+    let mut scalar_fields = Vec::new();
     let mut scalar_field_index = 0;
     for source in sources {
         if let Source::ScalarField {
-            amplitude, sigma, ..
+            amplitude,
+            sigma,
+            mass,
         } = source
         {
             mesh.project(
@@ -308,15 +273,16 @@ where
                     sigma: [sigma.0.unwrap(), sigma.1.unwrap()],
                     center: [0.0; 2],
                 },
-                context.field_mut(Context::Phi(scalar_field_index)),
+                context.channel_mut(garfinkle::phi_ch(scalar_field_index)),
             );
 
+            scalar_fields.push(mass.unwrap());
             scalar_field_index += 1;
         }
     }
 
     // Fill boundary conditions for context fields.
-    mesh.fill_boundary(order, ContextConditions, context.as_mut_slice());
+    mesh.fill_boundary(order, ContextConditions, context.as_mut());
 
     // Initial Guess for Psi
     psi.fill(1.0);
@@ -340,52 +306,22 @@ where
         ScalarConditions(PsiCondition),
         callback,
         Hamiltonian {
-            context: context.as_slice(),
+            context: context.as_ref(),
+            scalar_fields: &scalar_fields,
         },
-        SystemSliceMut::from_scalar(&mut psi),
+        psi.as_mut_slice().into(),
     )?;
 
     mesh.evaluate(
         order,
         FieldsFromGarfinkle {
             psi: &psi,
-            context: context.as_slice(),
+            scalar_fields: &scalar_fields,
         },
-        SystemSlice::empty(),
+        context.as_ref(),
         system.rb_mut(),
     )
     .unwrap();
-
-    // Copy scalar fields
-    for i in 0..num_scalar_field {
-        system
-            .field_mut(Field::ScalarField(ScalarField::Phi, i))
-            .copy_from_slice(context.field(Context::Phi(i)));
-        system
-            .field_mut(Field::ScalarField(ScalarField::Pi, i))
-            .fill(0.0);
-    }
-
-    // Metric
-    system.field_mut(Field::Metric(Metric::Grz)).fill(0.0);
-    system.field_mut(Field::Metric(Metric::Krr)).fill(0.0);
-    system.field_mut(Field::Metric(Metric::Kzz)).fill(0.0);
-    system.field_mut(Field::Metric(Metric::Krz)).fill(0.0);
-    system.field_mut(Field::Metric(Metric::Y)).fill(0.0);
-    // Constraint
-    system
-        .field_mut(Field::Constraint(Constraint::Theta))
-        .fill(0.0);
-    system
-        .field_mut(Field::Constraint(Constraint::Zr))
-        .fill(0.0);
-    system
-        .field_mut(Field::Constraint(Constraint::Zz))
-        .fill(0.0);
-    // Gauge
-    system.field_mut(Field::Gauge(Gauge::Lapse)).fill(1.0);
-    system.field_mut(Field::Gauge(Gauge::Shiftr)).fill(0.0);
-    system.field_mut(Field::Gauge(Gauge::Shiftz)).fill(0.0);
 
     mesh.fill_boundary(order, FieldConditions, system.rb_mut());
 
@@ -402,14 +338,14 @@ struct IterCallback<'a> {
     output: &'a Path,
 }
 
-impl<'a> SolverCallback<2, Scalar> for IterCallback<'a> {
+impl<'a> SolverCallback<2> for IterCallback<'a> {
     type Error = std::io::Error;
 
     fn callback(
         &mut self,
         mesh: &Mesh<2>,
-        input: SystemSlice<Scalar>,
-        output: SystemSlice<Scalar>,
+        input: ImageRef,
+        output: ImageRef,
         iteration: usize,
     ) -> Result<(), Self::Error> {
         self.pb.set_message(format!("Step: {}", iteration));
@@ -429,8 +365,8 @@ impl<'a> SolverCallback<2, Scalar> for IterCallback<'a> {
 
         let mut checkpoint = Checkpoint::default();
         checkpoint.attach_mesh(&mesh);
-        checkpoint.save_field("Solution", input.into_scalar());
-        checkpoint.save_field("Derivative", output.into_scalar());
+        checkpoint.save_field("Solution", input.channel(0));
+        checkpoint.save_field("Derivative", output.channel(0));
         checkpoint.export_vtu(
             self.output.join("initial").join(format!(
                 "{}_levels_{}_iter_{}.vtu",
@@ -450,7 +386,7 @@ impl<'a> SolverCallback<2, Scalar> for IterCallback<'a> {
 }
 
 /// Solve rinne's initial data problem using Garfinkles variables.
-pub fn initial_data(config: &Config) -> eyre::Result<(Mesh<2>, SystemVec<Fields>)> {
+pub fn initial_data(config: &Config) -> eyre::Result<(Mesh<2>, Image)> {
     // Save initial time
     let start = Instant::now();
 
@@ -471,7 +407,7 @@ pub fn initial_data(config: &Config) -> eyre::Result<(Mesh<2>, SystemVec<Fields>
         };
 
         let mesh = checkpoint.read_mesh();
-        let system = checkpoint.read_system::<Fields>();
+        let system = checkpoint.read_image("Data");
 
         println!(
             "Successfully read cached initial data: {}",
@@ -512,21 +448,6 @@ pub fn initial_data(config: &Config) -> eyre::Result<(Mesh<2>, SystemVec<Fields>
         mesh.refine_global();
     }
 
-    // Build fields from sources.
-    let fields = Fields {
-        scalar_fields: config
-            .sources
-            .iter()
-            .flat_map(|source| {
-                if let Source::ScalarField { mass, .. } = source {
-                    Some(mass.unwrap())
-                } else {
-                    None
-                }
-            })
-            .collect(),
-    };
-
     // ************************************
     // Visualization
 
@@ -539,9 +460,17 @@ pub fn initial_data(config: &Config) -> eyre::Result<(Mesh<2>, SystemVec<Fields>
     // ************************************
     // Solve
 
+    let num_scalar_field = config
+        .sources
+        .iter()
+        .filter(|&source| matches!(source, Source::ScalarField { .. }))
+        .count();
+
+    let num_channels = systems::num_channels(num_scalar_field);
+
     // Allocate memory for system and transfer buffers.
-    let mut transfer = SystemVec::new(fields.clone());
-    let mut system = SystemVec::new(fields.clone());
+    let mut transfer = Image::new(num_channels, 0);
+    let mut system = Image::new(num_channels, 0);
     system.resize(mesh.num_nodes());
 
     println!("Relaxing Initial Data");
@@ -567,7 +496,7 @@ pub fn initial_data(config: &Config) -> eyre::Result<(Mesh<2>, SystemVec<Fields>
                 output: &output,
             },
             &config.sources,
-            system.as_mut_slice(),
+            system.as_mut(),
         )?;
 
         pb.finish_with_message(format!(
@@ -580,7 +509,7 @@ pub fn initial_data(config: &Config) -> eyre::Result<(Mesh<2>, SystemVec<Fields>
         if config.visualize.initial_levels {
             let mut checkpoint = Checkpoint::default();
             checkpoint.attach_mesh(&mesh);
-            checkpoint.save_system(system.as_slice());
+            save_image(&mut checkpoint, system.as_ref());
             checkpoint.export_vtu(
                 output.join("initial").join(format!(
                     "{}_levels_{}.vtu",
@@ -599,7 +528,7 @@ pub fn initial_data(config: &Config) -> eyre::Result<(Mesh<2>, SystemVec<Fields>
             config.order,
             config.initial.coarsen_error,
             config.initial.refine_error,
-            system.as_slice(),
+            system.as_ref(),
         );
         mesh.balance_flags();
 
@@ -624,19 +553,17 @@ pub fn initial_data(config: &Config) -> eyre::Result<(Mesh<2>, SystemVec<Fields>
         }
 
         transfer.resize(mesh.num_nodes());
-        transfer
-            .contigious_mut()
-            .clone_from_slice(system.contigious());
+        transfer.storage_mut().clone_from_slice(system.storage());
         mesh.regrid();
         system.resize(mesh.num_nodes());
 
-        mesh.transfer_system(config.order, transfer.as_slice(), system.as_mut_slice());
+        mesh.transfer_system(config.order, transfer.as_ref(), system.as_mut());
     }
 
     if config.visualize.initial {
         let mut checkpoint = Checkpoint::default();
         checkpoint.attach_mesh(&mesh);
-        checkpoint.save_system(system.as_slice());
+        save_image(&mut checkpoint, system.as_ref());
         checkpoint.export_vtu(
             output.join("initial").join(format!("{}.vtu", config.name)),
             ExportVtuConfig {
@@ -673,7 +600,7 @@ pub fn initial_data(config: &Config) -> eyre::Result<(Mesh<2>, SystemVec<Fields>
         // Create checkpoint
         let mut checkpoint = Checkpoint::default();
         checkpoint.attach_mesh(&mesh);
-        checkpoint.save_system::<Fields>(system.as_slice());
+        checkpoint.save_image("Data", system.as_ref());
         checkpoint.export_dat(&init_cache)?;
 
         println!(

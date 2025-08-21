@@ -1,6 +1,6 @@
 use crate::run::config::{ScalarFieldProfile, Smooth};
 use aeon::{
-    kernel::Interpolation,
+    kernel::{Interpolation, ScalarConditions},
     mesh::{Gaussian, TanH},
     prelude::*,
 };
@@ -10,70 +10,19 @@ use std::convert::Infallible;
 
 const KAPPA: f64 = 8.0 * f64::consts::PI;
 
-/// System for storing all fields necessary for axisymmetric evolution.
-#[derive(Clone, Serialize, Deserialize)]
-pub struct Fields;
+pub const PHI_CH: usize = 0;
+pub const PI_CH: usize = 1;
+pub const CONFORMAL_CH: usize = 2;
+pub const LAPSE_CH: usize = 3;
+pub const PSI_CH: usize = 4;
+pub const NUM_CHANNELS: usize = 5;
 
-impl System for Fields {
-    const NAME: &'static str = "Fields";
-
-    type Label = Field;
-
-    fn enumerate(&self) -> impl Iterator<Item = Self::Label> {
-        [
-            Field::Phi,
-            Field::Pi,
-            Field::Conformal,
-            Field::Lapse,
-            Field::Psi,
-        ]
-        .into_iter()
-    }
-
-    fn count(&self) -> usize {
-        5
-    }
-
-    fn label_from_index(&self, index: usize) -> Self::Label {
-        [
-            Field::Phi,
-            Field::Pi,
-            Field::Conformal,
-            Field::Lapse,
-            Field::Psi,
-        ][index]
-    }
-
-    fn label_index(&self, label: Self::Label) -> usize {
-        match label {
-            Field::Phi => 0,
-            Field::Pi => 1,
-            Field::Conformal => 2,
-            Field::Lapse => 3,
-            Field::Psi => 4,
-        }
-    }
-
-    fn label_name(&self, label: Self::Label) -> String {
-        match label {
-            Field::Phi => "Phi",
-            Field::Pi => "Pi",
-            Field::Conformal => "Conformal",
-            Field::Lapse => "Lapse",
-            Field::Psi => "Psi",
-        }
-        .to_string()
-    }
-}
-
-/// Label for indexing fields in `Fields`.
-#[derive(Clone, Copy)]
-pub enum Field {
-    Phi,
-    Pi,
-    Conformal,
-    Lapse,
-    Psi,
+pub fn save_image(checkpoint: &mut Checkpoint<1>, image: ImageRef) {
+    checkpoint.save_field("Phi", image.channel(PHI_CH));
+    checkpoint.save_field("Pi", image.channel(PI_CH));
+    checkpoint.save_field("Conformal", image.channel(CONFORMAL_CH));
+    checkpoint.save_field("Lapse", image.channel(LAPSE_CH));
+    checkpoint.save_field("Psi", image.channel(PSI_CH));
 }
 
 /// Boundary conditions for a system of fields.
@@ -81,24 +30,19 @@ pub enum Field {
 pub struct FieldConditions;
 
 impl SystemBoundaryConds<1> for FieldConditions {
-    type System = Fields;
-
-    fn kind(&self, label: <Self::System as System>::Label, face: Face<1>) -> BoundaryKind {
+    fn kind(&self, channel: usize, face: Face<1>) -> BoundaryKind {
         if face.side {
             BoundaryKind::Radiative
         } else {
-            match label {
-                Field::Phi => BoundaryKind::AntiSymmetric,
-                Field::Pi | Field::Conformal | Field::Lapse | Field::Psi => BoundaryKind::Symmetric,
+            match channel {
+                PHI_CH => BoundaryKind::AntiSymmetric,
+                PI_CH | CONFORMAL_CH | LAPSE_CH | PSI_CH => BoundaryKind::Symmetric,
+                _ => unimplemented!("Unimplemented channel"),
             }
         }
     }
 
-    fn radiative(
-        &self,
-        _label: <Self::System as System>::Label,
-        _position: [f64; 1],
-    ) -> RadiativeParams {
+    fn radiative(&self, _channel: usize, _position: [f64; 1]) -> RadiativeParams {
         RadiativeParams {
             target: 0.0,
             speed: 1.0,
@@ -153,15 +97,9 @@ impl BoundaryConds<1> for AntiSymCondition {
 pub struct TimeDerivs;
 
 impl Function<1> for TimeDerivs {
-    type Input = Fields;
-    type Output = Fields;
     type Error = Infallible;
 
-    fn preprocess(
-        &mut self,
-        mesh: &mut Mesh<1>,
-        input: SystemSliceMut<Self::Input>,
-    ) -> Result<(), Infallible> {
+    fn preprocess(&mut self, mesh: &mut Mesh<1>, input: ImageMut) -> Result<(), Infallible> {
         solve_constraints(mesh, input);
         Ok(())
     }
@@ -169,13 +107,13 @@ impl Function<1> for TimeDerivs {
     fn evaluate(
         &self,
         engine: impl Engine<1>,
-        input: SystemSlice<Self::Input>,
-        mut output: SystemSliceMut<Self::Output>,
+        input: ImageRef,
+        mut output: ImageMut,
     ) -> Result<(), Infallible> {
-        let a = input.field(Field::Conformal);
-        let alpha = input.field(Field::Lapse);
-        let phi = input.field(Field::Phi);
-        let pi = input.field(Field::Pi);
+        let a = input.channel(CONFORMAL_CH);
+        let alpha = input.channel(LAPSE_CH);
+        let phi = input.channel(PHI_CH);
+        let pi = input.channel(PI_CH);
 
         for vertex in IndexSpace::new(engine.vertex_size()).iter() {
             let index = engine.index_from_vertex(vertex);
@@ -199,12 +137,12 @@ impl Function<1> for TimeDerivs {
 
             let psi_t = alpha / a * pi;
 
-            output.field_mut(Field::Phi)[index] = phi_t;
-            output.field_mut(Field::Pi)[index] = pi_t;
-            output.field_mut(Field::Psi)[index] = psi_t;
+            output.channel_mut(PHI_CH)[index] = phi_t;
+            output.channel_mut(PI_CH)[index] = pi_t;
+            output.channel_mut(PSI_CH)[index] = psi_t;
 
-            output.field_mut(Field::Conformal)[index] = 0.0;
-            output.field_mut(Field::Lapse)[index] = 0.0;
+            output.channel_mut(CONFORMAL_CH)[index] = 0.0;
+            output.channel_mut(LAPSE_CH)[index] = 0.0;
         }
 
         Ok(())
@@ -213,17 +151,17 @@ impl Function<1> for TimeDerivs {
 
 /// Solves for the metric and lapse given a set of scalar fields. This uses a simple outwards-inwards
 /// ODE solver to compute solutions to the first order elliptic equations used for these two variables.
-pub fn solve_constraints(mesh: &mut Mesh<1>, system: SystemSliceMut<Fields>) {
-    let shared = system.into_shared();
+pub fn solve_constraints(mesh: &mut Mesh<1>, system: ImageMut) {
+    let shared: ImageShared = system.into();
     // Unpack individual fields
-    let phi = unsafe { shared.field_mut(Field::Phi) };
-    let pi = unsafe { shared.field_mut(Field::Pi) };
+    let phi = unsafe { shared.channel_mut(PHI_CH) };
+    let pi = unsafe { shared.channel_mut(PI_CH) };
 
     mesh.fill_boundary(4, ScalarConditions(AntiSymCondition), phi.into());
     mesh.fill_boundary(4, ScalarConditions(SymCondition), pi.into());
 
-    let conformal = unsafe { shared.field_mut(Field::Conformal) };
-    let lapse = unsafe { shared.field_mut(Field::Lapse) };
+    let conformal = unsafe { shared.channel_mut(CONFORMAL_CH) };
+    let lapse = unsafe { shared.channel_mut(LAPSE_CH) };
 
     // Perform radial quadrature for conformal factor
     let mut conformal_prev = 1.0;
@@ -404,11 +342,11 @@ pub fn intial_data(
     mesh: &mut Mesh<1>,
     profile: &ScalarFieldProfile,
     smooth: &Smooth,
-    mut output: SystemSliceMut<'_, Fields>,
+    mut output: ImageMut<'_>,
 ) {
-    output.field_mut(Field::Conformal).fill(1.0);
-    output.field_mut(Field::Lapse).fill(1.0);
-    output.field_mut(Field::Pi).fill(0.0);
+    output.channel_mut(CONFORMAL_CH).fill(1.0);
+    output.channel_mut(LAPSE_CH).fill(1.0);
+    output.channel_mut(PI_CH).fill(0.0);
 
     match profile {
         ScalarFieldProfile::Gaussian {
@@ -425,7 +363,7 @@ pub fn intial_data(
                     spower: smooth.power,
                     sstrength: smooth.strength,
                 },
-                output.field_mut(Field::Phi),
+                output.channel_mut(PHI_CH),
             );
             mesh.project(
                 4,
@@ -434,7 +372,7 @@ pub fn intial_data(
                     sigma: [sigma.unwrap()],
                     center: [center.unwrap()],
                 },
-                output.field_mut(Field::Psi),
+                output.channel_mut(PSI_CH),
             );
         }
         ScalarFieldProfile::TanH {
@@ -451,7 +389,7 @@ pub fn intial_data(
                     spower: smooth.power,
                     sstrength: smooth.strength,
                 },
-                output.field_mut(Field::Phi),
+                output.channel_mut(PHI_CH),
             );
             mesh.project(
                 4,
@@ -460,7 +398,7 @@ pub fn intial_data(
                     sigma: sigma.unwrap(),
                     center: [center.unwrap()],
                 },
-                output.field_mut(Field::Psi),
+                output.channel_mut(PI_CH),
             );
         }
     }
@@ -468,7 +406,7 @@ pub fn intial_data(
     mesh.fill_boundary(4, FieldConditions, output);
 }
 
-pub fn find_mass(mesh: &Mesh<1>, system: SystemSlice<Fields>) -> f64 {
+pub fn find_mass(mesh: &Mesh<1>, system: ImageRef) -> f64 {
     let mut a_max = 0.0;
     let mut r_max = 0.0;
 
@@ -477,7 +415,7 @@ pub fn find_mass(mesh: &Mesh<1>, system: SystemSlice<Fields>) -> f64 {
         let nodes = mesh.block_nodes(BlockId(block));
 
         let vertex_size = space.vertex_size()[0];
-        let a = &system.field(Field::Conformal)[nodes.clone()];
+        let a = &system.channel(CONFORMAL_CH)[nodes.clone()];
 
         for vertex in 0..vertex_size {
             let index = space.index_from_vertex([vertex]);
@@ -497,21 +435,19 @@ pub fn find_mass(mesh: &Mesh<1>, system: SystemSlice<Fields>) -> f64 {
 pub struct ConstraintRhs;
 
 impl Function<1> for ConstraintRhs {
-    type Input = Fields;
-    type Output = Scalar;
     type Error = Infallible;
 
     fn evaluate(
         &self,
         engine: impl Engine<1>,
-        input: SystemSlice<Self::Input>,
-        mut output: SystemSliceMut<Self::Output>,
+        input: ImageRef,
+        mut output: ImageMut,
     ) -> Result<(), Self::Error> {
-        let lapse = input.field(Field::Lapse);
-        let phi = input.field(Field::Phi);
-        let pi = input.field(Field::Pi);
+        let lapse = input.channel(LAPSE_CH);
+        let phi = input.channel(PHI_CH);
+        let pi = input.channel(PI_CH);
 
-        let output = output.field_mut(());
+        let output = output.channel_mut(0);
 
         for vertex in IndexSpace::new(engine.vertex_size()).iter() {
             let index = engine.index_from_vertex(vertex);

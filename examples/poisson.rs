@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use aeon::solver::SolverCallback;
 use aeon::{mesh::Gaussian, prelude::*, solver::HyperRelaxSolver};
 
-const ORDER: Order<4> = Order::<4>;
+const ORDER: usize = 4;
 
 const LOWER: f64 = 1e-8;
 const UPPER: f64 = 1e-6;
@@ -13,24 +13,18 @@ const UPPER: f64 = 1e-6;
 struct Conditions;
 
 impl SystemBoundaryConds<2> for Conditions {
-    type System = Scalar;
-
-    fn kind(&self, _label: <Self::System as System>::Label, _face: Face<2>) -> BoundaryKind {
+    fn kind(&self, _: usize, _face: Face<2>) -> BoundaryKind {
         BoundaryKind::StrongDirichlet
     }
 
-    fn dirichlet(
-        &self,
-        _label: <Self::System as System>::Label,
-        _position: [f64; 2],
-    ) -> DirichletParams {
+    fn dirichlet(&self, _channel: usize, _position: [f64; 2]) -> DirichletParams {
         DirichletParams {
             target: 0.0,
             strength: 1.0,
         }
     }
 
-    fn radiative(&self, _field: (), _position: [f64; 2]) -> RadiativeParams {
+    fn radiative(&self, _channel: usize, _position: [f64; 2]) -> RadiativeParams {
         RadiativeParams::lightlike(0.0)
     }
 }
@@ -41,18 +35,16 @@ struct PoissonEquation<'a> {
 }
 
 impl<'a> Function<2> for PoissonEquation<'a> {
-    type Input = Scalar;
-    type Output = Scalar;
     type Error = Infallible;
 
     fn evaluate(
         &self,
         engine: impl Engine<2>,
-        input: SystemSlice<Self::Input>,
-        mut output: SystemSliceMut<Self::Output>,
+        input: ImageRef,
+        mut output: ImageMut,
     ) -> Result<(), Infallible> {
-        let input = input.field(());
-        let output = output.field_mut(());
+        let input = input.channel(0);
+        let output = output.channel_mut(0);
 
         let source = &self.source[engine.node_range()];
 
@@ -72,14 +64,14 @@ impl<'a> Function<2> for PoissonEquation<'a> {
 struct Callback;
 
 // Implement visualization for hamiltonian.
-impl SolverCallback<2, Scalar> for Callback {
+impl SolverCallback<2> for Callback {
     type Error = std::io::Error;
 
     fn callback(
         &mut self,
         mesh: &Mesh<2>,
-        input: SystemSlice<Scalar>,
-        output: SystemSlice<Scalar>,
+        input: ImageRef,
+        output: ImageRef,
         iteration: usize,
     ) -> Result<(), Self::Error> {
         if iteration % 50 != 0 {
@@ -90,8 +82,8 @@ impl SolverCallback<2, Scalar> for Callback {
 
         let mut checkpoint = Checkpoint::default();
         checkpoint.attach_mesh(&mesh);
-        checkpoint.save_field("Solution", input.into_scalar());
-        checkpoint.save_field("Derivative", output.into_scalar());
+        checkpoint.save_field("Solution", input.channel(0));
+        checkpoint.save_field("Derivative", output.channel(0));
         checkpoint.export_vtu(
             PathBuf::from("output/poisson").join(format!(
                 "{}_level_{}_iter_{}.vtu",
@@ -148,7 +140,7 @@ pub fn main() -> eyre::Result<()> {
             },
             &mut source,
         );
-        mesh.fill_boundary(ORDER, Conditions, (&mut source).into());
+        mesh.fill_boundary(ORDER, Conditions, source.as_mut_slice().into());
 
         // Set initial guess
         solution.fill(0.0);
@@ -166,10 +158,10 @@ pub fn main() -> eyre::Result<()> {
             Conditions,
             Callback,
             PoissonEquation { source: &source },
-            (&mut solution).into(),
+            solution.as_mut_slice().into(),
         )?;
 
-        mesh.flag_wavelets(4, LOWER, UPPER, (&solution).into());
+        mesh.flag_wavelets(4, LOWER, UPPER, solution.as_slice().into());
 
         mesh.limit_level_range_flags(1, 10);
         mesh.balance_flags();

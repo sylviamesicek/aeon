@@ -1,8 +1,6 @@
 use aeon::{mesh::Gaussian, prelude::*};
 
-const ORDER: Order<4> = Order::<4>;
-// const REGRID_SKIP: usize = 10;
-
+const ORDER: usize = 4;
 const LOWER: f64 = 1e-10;
 const UPPER: f64 = 1e-6;
 
@@ -10,13 +8,11 @@ const UPPER: f64 = 1e-6;
 pub struct WaveConditions;
 
 impl SystemBoundaryConds<2> for WaveConditions {
-    type System = Scalar;
-
-    fn kind(&self, _label: <Self::System as System>::Label, _face: Face<2>) -> BoundaryKind {
+    fn kind(&self, _channel: usize, _face: Face<2>) -> BoundaryKind {
         BoundaryKind::Radiative
     }
 
-    fn radiative(&self, _field: (), _position: [f64; 2]) -> RadiativeParams {
+    fn radiative(&self, _channel: usize, _position: [f64; 2]) -> RadiativeParams {
         RadiativeParams::lightlike(0.0)
     }
 }
@@ -40,11 +36,11 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
     mesh.refine_global();
 
     // Allocate space for system
-    let mut system = SystemVec::default();
+    let mut system = Image::new(1, 0);
 
     // Comparison
-    let mut transfered = SystemVec::default();
-    let mut error = SystemVec::<Scalar>::default();
+    let mut transfered = Image::new(1, 0);
+    let mut error = Image::new(1, 0);
 
     log::info!("Performing Initial Adaptive Mesh Refinement.");
 
@@ -60,10 +56,10 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         system.resize(mesh.num_nodes());
 
-        mesh.project(4, profile, system.field_mut(()));
-        mesh.fill_boundary(ORDER, WaveConditions, system.as_mut_slice());
+        mesh.project(4, profile, system.channel_mut(0));
+        mesh.fill_boundary(ORDER, WaveConditions, system.as_mut());
 
-        mesh.flag_wavelets(4, LOWER, UPPER, system.as_slice());
+        mesh.flag_wavelets(4, LOWER, UPPER, system.as_ref());
 
         mesh.limit_level_range_flags(1, 10);
         mesh.balance_flags();
@@ -75,16 +71,16 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         let mut checkpoint = Checkpoint::default();
         checkpoint.attach_mesh(&mesh);
-        checkpoint.save_field("Wave", system.contigious());
+        checkpoint.save_field("Wave", system.storage());
         checkpoint.save_int_field("Flags", &flags);
 
-        if error.len() == mesh.num_nodes() {
+        if error.num_nodes() == mesh.num_nodes() {
             for i in 0..mesh.num_nodes() {
-                error.contigious_mut()[i] = system.contigious()[i] - transfered.contigious()[i]
+                error.storage_mut()[i] = system.storage()[i] - transfered.storage()[i]
             }
 
-            checkpoint.save_field("Transfered", transfered.contigious());
-            checkpoint.save_field("Error", error.contigious());
+            checkpoint.save_field("Transfered", transfered.storage());
+            checkpoint.save_field("Error", error.storage());
         }
 
         let path = format!("output/transfer/iteration{i}.vtu");
@@ -112,7 +108,7 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
             transfered.resize(mesh.num_nodes());
             error.resize(mesh.num_nodes());
 
-            mesh.transfer_system(ORDER, system.as_slice(), transfered.as_mut_slice());
+            mesh.transfer_system(ORDER, system.as_ref(), transfered.as_mut());
 
             continue;
         } else {

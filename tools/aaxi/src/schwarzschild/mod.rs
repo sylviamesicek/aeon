@@ -1,6 +1,6 @@
 use crate::{
     horizon::{self, ApparentHorizonFinder},
-    systems::{Constraint, Field, FieldConditions, Fields, Gauge, Metric, ScalarField},
+    systems::*,
 };
 use aeon::{prelude::*, solver::SolverCallback};
 use aeon_app::file;
@@ -16,46 +16,29 @@ struct SchwarzschildData {
 }
 
 impl Function<2> for SchwarzschildData {
-    type Input = Empty;
-    type Output = Fields;
     type Error = Infallible;
 
     fn evaluate(
         &self,
         engine: impl Engine<2>,
-        _: SystemSlice<Self::Input>,
-        mut output: SystemSliceMut<Self::Output>,
+        _: ImageRef,
+        mut output: ImageMut,
     ) -> Result<(), Self::Error> {
         let mass = self.mass;
 
-        assert!(output.len() == engine.num_nodes());
+        assert!(output.num_nodes() == engine.num_nodes());
 
-        output.field_mut(Field::Metric(Metric::Grz)).fill(0.0);
-        output.field_mut(Field::Metric(Metric::S)).fill(0.0);
-        output.field_mut(Field::Metric(Metric::Krr)).fill(0.0);
-        output.field_mut(Field::Metric(Metric::Krz)).fill(0.0);
-        output.field_mut(Field::Metric(Metric::Kzz)).fill(0.0);
-        output.field_mut(Field::Metric(Metric::Y)).fill(0.0);
-        output.field_mut(Field::Gauge(Gauge::Shiftr)).fill(0.0);
-        output.field_mut(Field::Gauge(Gauge::Shiftz)).fill(0.0);
-        output
-            .field_mut(Field::Constraint(Constraint::Theta))
-            .fill(0.0);
-        output
-            .field_mut(Field::Constraint(Constraint::Zr))
-            .fill(0.0);
-        output
-            .field_mut(Field::Constraint(Constraint::Zz))
-            .fill(0.0);
-
-        for i in 0..output.system().num_scalar_fields() {
-            output
-                .field_mut(Field::ScalarField(ScalarField::Phi, i))
-                .fill(0.0);
-            output
-                .field_mut(Field::ScalarField(ScalarField::Pi, i))
-                .fill(0.0);
-        }
+        output.channel_mut(GRZ_CH).fill(0.0);
+        output.channel_mut(S_CH).fill(0.0);
+        output.channel_mut(KRR_CH).fill(0.0);
+        output.channel_mut(KRZ_CH).fill(0.0);
+        output.channel_mut(KZZ_CH).fill(0.0);
+        output.channel_mut(Y_CH).fill(0.0);
+        output.channel_mut(SHIFTR_CH).fill(0.0);
+        output.channel_mut(SHIFTZ_CH).fill(0.0);
+        output.channel_mut(THETA_CH).fill(0.0);
+        output.channel_mut(ZR_CH).fill(0.0);
+        output.channel_mut(ZZ_CH).fill(0.0);
 
         for vertex in IndexSpace::new(engine.vertex_size()).iter() {
             let index = engine.index_from_vertex(vertex);
@@ -74,9 +57,9 @@ impl Function<2> for SchwarzschildData {
                 println!("What");
             }
 
-            output.field_mut(Field::Metric(Metric::Grr))[index] = conformal;
-            output.field_mut(Field::Metric(Metric::Gzz))[index] = conformal;
-            output.field_mut(Field::Gauge(Gauge::Lapse))[index] = lapse;
+            output.channel_mut(GRR_CH)[index] = conformal;
+            output.channel_mut(GZZ_CH)[index] = conformal;
+            output.channel_mut(LAPSE_CH)[index] = lapse;
         }
 
         Ok(())
@@ -90,14 +73,14 @@ struct HorizonCallback<'a> {
     positions: &'a mut Vec<[f64; 2]>,
 }
 
-impl<'a> SolverCallback<1, Scalar> for HorizonCallback<'a> {
+impl<'a> SolverCallback<1> for HorizonCallback<'a> {
     type Error = io::Error;
 
     fn callback(
         &mut self,
         surface: &Mesh<1>,
-        input: SystemSlice<Scalar>,
-        _output: SystemSlice<Scalar>,
+        input: ImageRef,
+        _output: ImageRef,
         iteration: usize,
     ) -> Result<(), Self::Error> {
         if iteration % 100 != 0 {
@@ -105,7 +88,7 @@ impl<'a> SolverCallback<1, Scalar> for HorizonCallback<'a> {
         }
 
         let i = iteration / 100;
-        let radius = input.field(());
+        let radius = input.channel(0);
 
         self.positions.resize(surface.num_nodes(), [0.0; 2]);
         horizon::compute_position_from_radius(surface, radius, &mut self.positions);
@@ -161,26 +144,24 @@ pub fn schwarzschild(matches: &ArgMatches) -> eyre::Result<()> {
     );
     mesh.refine_global();
 
-    let mut system = SystemVec::new(Fields {
-        scalar_fields: Vec::new(),
-    });
+    let mut system = Image::new(mesh.num_nodes(), num_channels(0));
 
     // Run 10 refinements to reach a suitable mesh.
     for i in 0..REFINEMENTS {
         system.resize(mesh.num_nodes());
-        system.contigious_mut().fill(0.0);
+        system.storage_mut().fill(0.0);
 
         mesh.evaluate(
             4,
             SchwarzschildData { mass },
-            SystemSlice::empty(),
-            system.as_mut_slice(),
+            ImageRef::empty(),
+            system.as_mut(),
         )
         .unwrap();
-        mesh.fill_boundary(4, FieldConditions, system.as_mut_slice());
+        mesh.fill_boundary(4, FieldConditions, system.as_mut());
 
         // Perform amr
-        mesh.flag_wavelets(4, 1e-13, 1e-6, system.as_slice());
+        mesh.flag_wavelets(4, 1e-13, 1e-6, system.as_ref());
         mesh.balance_flags();
 
         let mut flag_debug = vec![0; mesh.num_nodes()];
@@ -193,7 +174,7 @@ pub fn schwarzschild(matches: &ArgMatches) -> eyre::Result<()> {
 
         let mut checkpoint = Checkpoint::default();
         checkpoint.attach_mesh(&mesh);
-        checkpoint.save_system(system.as_slice());
+        save_image(&mut checkpoint, system.as_ref());
         checkpoint.save_int_field("Flags", &flag_debug);
         checkpoint.save_int_field("Blocks", &block_debug);
         checkpoint.save_int_field("Cell", &cell_debug);
@@ -240,7 +221,7 @@ pub fn schwarzschild(matches: &ArgMatches) -> eyre::Result<()> {
     // Perform search
     let search = finder.search_with_callback(
         &mesh,
-        system.as_slice(),
+        system.as_ref(),
         4,
         &mut surface,
         HorizonCallback {
@@ -254,7 +235,7 @@ pub fn schwarzschild(matches: &ArgMatches) -> eyre::Result<()> {
 
     let mut checkpoint = Checkpoint::default();
     checkpoint.attach_mesh(&mesh);
-    checkpoint.save_system(system.as_slice());
+    save_image(&mut checkpoint, system.as_ref());
     checkpoint.export_vtu(
         output.join(format!("schwarzschild.vtu")),
         ExportVtuConfig {

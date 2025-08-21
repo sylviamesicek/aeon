@@ -3,8 +3,8 @@
 use crate::IRef;
 use crate::mesh::Mesh;
 use crate::{
+    image::{ImageMut, ImageRef},
     kernel::{NodeSpace, node_from_vertex},
-    system::{System, SystemSlice, SystemSliceMut},
 };
 use std::ops::Range;
 
@@ -83,25 +83,19 @@ impl<'a, const N: usize, E: Engine<N>> Engine<N> for IRef<'a, E> {
 
 /// A function maps one set of scalar fields to another.
 pub trait Function<const N: usize> {
-    type Input: System;
-    type Output: System;
     type Error;
 
     /// Action of the function on an individual finite different block.
     fn evaluate(
         &self,
         engine: impl Engine<N>,
-        input: SystemSlice<Self::Input>,
-        output: SystemSliceMut<Self::Output>,
+        input: ImageRef,
+        output: ImageMut,
     ) -> Result<(), Self::Error>;
 
     /// An (optional) preprocessing step run immediately before a function is applied, after
     /// boundary conditions have been filled.
-    fn preprocess(
-        &mut self,
-        _mesh: &mut Mesh<N>,
-        _input: SystemSliceMut<Self::Input>,
-    ) -> Result<(), Self::Error> {
+    fn preprocess(&mut self, _mesh: &mut Mesh<N>, _input: ImageMut) -> Result<(), Self::Error> {
         Ok(())
     }
 }
@@ -150,23 +144,17 @@ impl<const N: usize> Projection<N> for TanH<N> {
 pub struct FunctionBorrowMut<'a, I>(pub &'a mut I);
 
 impl<'a, const N: usize, F: Function<N>> Function<N> for FunctionBorrowMut<'a, F> {
-    type Input = F::Input;
-    type Output = F::Output;
     type Error = F::Error;
 
-    fn preprocess(
-        &mut self,
-        mesh: &mut Mesh<N>,
-        input: SystemSliceMut<Self::Input>,
-    ) -> Result<(), Self::Error> {
+    fn preprocess(&mut self, mesh: &mut Mesh<N>, input: ImageMut<'_>) -> Result<(), Self::Error> {
         self.0.preprocess(mesh, input)
     }
 
     fn evaluate(
         &self,
         engine: impl Engine<N>,
-        input: SystemSlice<Self::Input>,
-        output: SystemSliceMut<Self::Output>,
+        input: ImageRef<'_>,
+        output: ImageMut<'_>,
     ) -> Result<(), Self::Error> {
         self.0.evaluate(engine, input, output)
     }

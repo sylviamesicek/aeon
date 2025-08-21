@@ -10,7 +10,7 @@ use crate::{
         interval::IntervalTracker,
         status::{Status, Strategy},
     },
-    systems::{Constraint, Field, FieldConditions, Fields, Gauge, Metric, ScalarField},
+    systems::*,
 };
 use aeon::{
     prelude::*,
@@ -28,40 +28,39 @@ use std::{
 };
 
 #[derive(Clone)]
-struct FieldDerivs {
+struct FieldDerivs<'a> {
     gauge: GaugeCondition,
+    masses: &'a [f64],
 }
 
-impl Function<2> for FieldDerivs {
-    type Input = Fields;
-    type Output = Fields;
+impl<'a> Function<2> for FieldDerivs<'a> {
     type Error = Infallible;
 
     fn evaluate(
         &self,
         engine: impl Engine<2>,
-        input: SystemSlice<Self::Input>,
-        mut output: SystemSliceMut<Self::Output>,
+        input: ImageRef,
+        mut output: ImageMut,
     ) -> Result<(), Infallible> {
-        let grr_f = input.field(Field::Metric(Metric::Grr));
-        let grz_f = input.field(Field::Metric(Metric::Grz));
-        let gzz_f = input.field(Field::Metric(Metric::Gzz));
-        let s_f = input.field(Field::Metric(Metric::S));
+        let grr_f = input.channel(GRR_CH);
+        let grz_f = input.channel(GRZ_CH);
+        let gzz_f = input.channel(GZZ_CH);
+        let s_f = input.channel(S_CH);
 
-        let krr_f = input.field(Field::Metric(Metric::Krr));
-        let krz_f = input.field(Field::Metric(Metric::Krz));
-        let kzz_f = input.field(Field::Metric(Metric::Kzz));
-        let y_f = input.field(Field::Metric(Metric::Y));
+        let krr_f = input.channel(KRR_CH);
+        let krz_f = input.channel(KRZ_CH);
+        let kzz_f = input.channel(KZZ_CH);
+        let y_f = input.channel(Y_CH);
 
-        let lapse_f = input.field(Field::Gauge(Gauge::Lapse));
-        let shiftr_f = input.field(Field::Gauge(Gauge::Shiftr));
-        let shiftz_f = input.field(Field::Gauge(Gauge::Shiftz));
+        let lapse_f = input.channel(LAPSE_CH);
+        let shiftr_f = input.channel(SHIFTR_CH);
+        let shiftz_f = input.channel(SHIFTZ_CH);
 
-        let theta_f = input.field(Field::Constraint(Constraint::Theta));
-        let zr_f = input.field(Field::Constraint(Constraint::Zr));
-        let zz_f = input.field(Field::Constraint(Constraint::Zz));
+        let theta_f = input.channel(THETA_CH);
+        let zr_f = input.channel(ZR_CH);
+        let zz_f = input.channel(ZZ_CH);
 
-        let num_scalar_fields = output.system().num_scalar_fields();
+        let num_scalar_fields = self.masses.len();
         let scalar_fields = engine.alloc::<ScalarFieldData>(num_scalar_fields);
         let scalar_field_derivs = engine.alloc::<ScalarFieldDerivs>(num_scalar_fields);
 
@@ -117,9 +116,9 @@ impl Function<2> for FieldDerivs {
             derivatives!(zr_f, zr, zr_r, zr_z);
             derivatives!(zz_f, zz, zz_r, zz_z);
 
-            for (i, mass) in output.system().scalar_fields().enumerate() {
-                let phi = input.field(Field::ScalarField(ScalarField::Phi, i));
-                let pi = input.field(Field::ScalarField(ScalarField::Pi, i));
+            for (i, &mass) in self.masses.iter().enumerate() {
+                let phi = input.channel(phi_ch(i));
+                let pi = input.channel(pi_ch(i));
 
                 let scalar_field = &mut scalar_fields[i];
 
@@ -210,28 +209,28 @@ impl Function<2> for FieldDerivs {
                 self.gauge,
             );
 
-            output.field_mut(Field::Metric(Metric::Grr))[index] = derivs.grr_t;
-            output.field_mut(Field::Metric(Metric::Grz))[index] = derivs.grz_t;
-            output.field_mut(Field::Metric(Metric::Gzz))[index] = derivs.gzz_t;
-            output.field_mut(Field::Metric(Metric::S))[index] = derivs.s_t;
+            output.channel_mut(GRR_CH)[index] = derivs.grr_t;
+            output.channel_mut(GRZ_CH)[index] = derivs.grz_t;
+            output.channel_mut(GZZ_CH)[index] = derivs.gzz_t;
+            output.channel_mut(S_CH)[index] = derivs.s_t;
 
-            output.field_mut(Field::Metric(Metric::Krr))[index] = derivs.krr_t;
-            output.field_mut(Field::Metric(Metric::Krz))[index] = derivs.krz_t;
-            output.field_mut(Field::Metric(Metric::Kzz))[index] = derivs.kzz_t;
-            output.field_mut(Field::Metric(Metric::Y))[index] = derivs.y_t;
+            output.channel_mut(KRR_CH)[index] = derivs.krr_t;
+            output.channel_mut(KRZ_CH)[index] = derivs.krz_t;
+            output.channel_mut(KZZ_CH)[index] = derivs.kzz_t;
+            output.channel_mut(Y_CH)[index] = derivs.y_t;
 
-            output.field_mut(Field::Constraint(Constraint::Theta))[index] = derivs.theta_t;
-            output.field_mut(Field::Constraint(Constraint::Zr))[index] = derivs.zr_t;
-            output.field_mut(Field::Constraint(Constraint::Zz))[index] = derivs.zz_t;
+            output.channel_mut(THETA_CH)[index] = derivs.theta_t;
+            output.channel_mut(ZR_CH)[index] = derivs.zr_t;
+            output.channel_mut(ZZ_CH)[index] = derivs.zz_t;
 
-            output.field_mut(Field::Gauge(Gauge::Lapse))[index] = derivs.lapse_t;
-            output.field_mut(Field::Gauge(Gauge::Shiftr))[index] = derivs.shiftr_t;
-            output.field_mut(Field::Gauge(Gauge::Shiftz))[index] = derivs.shiftz_t;
+            output.channel_mut(LAPSE_CH)[index] = derivs.lapse_t;
+            output.channel_mut(SHIFTR_CH)[index] = derivs.shiftr_t;
+            output.channel_mut(SHIFTZ_CH)[index] = derivs.shiftz_t;
 
             for i in 0..num_scalar_fields {
                 let derivs = &scalar_field_derivs[i];
-                output.field_mut(Field::ScalarField(ScalarField::Phi, i))[index] = derivs.phi;
-                output.field_mut(Field::ScalarField(ScalarField::Pi, i))[index] = derivs.pi;
+                output.channel_mut(phi_ch(i))[index] = derivs.phi;
+                output.channel_mut(pi_ch(i))[index] = derivs.pi;
             }
         }
 
@@ -246,14 +245,14 @@ pub struct HorizonCallback<'a> {
     pb: &'a mut ProgressBar,
 }
 
-impl<'a> SolverCallback<1, Scalar> for HorizonCallback<'a> {
+impl<'a> SolverCallback<1> for HorizonCallback<'a> {
     type Error = std::io::Error;
 
     fn callback(
         &mut self,
         surface: &Mesh<1>,
-        radius: SystemSlice<Scalar>,
-        _output: SystemSlice<Scalar>,
+        radius: ImageRef,
+        _output: ImageRef,
         iteration: usize,
     ) -> Result<(), Self::Error> {
         self.pb.set_position(iteration as u64);
@@ -269,7 +268,7 @@ impl<'a> SolverCallback<1, Scalar> for HorizonCallback<'a> {
         }
 
         let save_index = iteration / interval;
-        let radius = radius.field(());
+        let radius = radius.channel(0);
 
         self.positions.resize(surface.num_nodes(), [0.0; 2]);
         horizon::compute_position_from_radius(surface, radius, &mut self.positions);
@@ -297,7 +296,7 @@ pub fn evolve_data(
     config: &Config,
     history: &mut RunHistory,
     mut mesh: Mesh<2>,
-    mut fields: SystemVec<Fields>,
+    mut fields: Image,
 ) -> eyre::Result<Status> {
     // Save initial time
     let start = Instant::now();
@@ -311,7 +310,9 @@ pub fn evolve_data(
     }
 
     // Cache system
-    let system = fields.system().clone();
+    let scalar_fields = config.scalar_field_masses();
+    let num_scalar_fields = scalar_fields.len();
+    let num_channels = num_channels(num_scalar_fields);
 
     // Integrate
     let mut integrator = Integrator::new(Method::RK4KO6(config.evolve.dissipation));
@@ -404,7 +405,7 @@ pub fn evolve_data(
     step_pb.set_prefix("[Step] ");
 
     let status: Status = 'evolve: loop {
-        assert!(fields.len() == mesh.num_nodes());
+        assert!(fields.num_nodes() == mesh.num_nodes());
 
         // ****************************
         // Coordinate time
@@ -520,12 +521,12 @@ pub fn evolve_data(
         // ******************************
 
         // Fill boundaries
-        mesh.fill_boundary(4, FieldConditions, fields.as_mut_slice());
+        mesh.fill_boundary(4, FieldConditions, fields.as_mut());
 
         // *******************************
         // Norm
 
-        let norm = mesh.l2_norm_system(fields.as_slice());
+        let norm = mesh.l2_norm_system(fields.as_ref());
 
         if norm.is_nan() || norm >= 1e60 {
             println!("{}", style(format!("Norm diverges: {:.5e}", norm)).red());
@@ -547,7 +548,7 @@ pub fn evolve_data(
         let mut regrid_flag = false;
 
         regrid_tracker.every(regrid_interval, || {
-            mesh.flag_wavelets(4, lower, upper, fields.as_slice());
+            mesh.flag_wavelets(4, lower, upper, fields.as_ref());
             mesh.balance_flags();
 
             if config.error_handler.on_max_levels == Strategy::Ignore {
@@ -558,13 +559,13 @@ pub fn evolve_data(
             mesh.regrid();
 
             // Copy system into tmp scratch space (provieded by dissipation).
-            let scratch = integrator.scratch(fields.contigious().len());
-            scratch.copy_from_slice(fields.contigious());
+            let scratch = integrator.scratch(fields.storage().len());
+            scratch.copy_from_slice(fields.storage());
             fields.resize(mesh.num_nodes());
             mesh.transfer_system(
                 4,
-                SystemSlice::from_contiguous(&scratch, &system),
-                fields.as_mut_slice(),
+                ImageRef::from_storage(&scratch, num_channels),
+                fields.as_mut(),
             );
 
             regrid_flag = true;
@@ -587,8 +588,8 @@ pub fn evolve_data(
             mesh.evaluate(
                 4,
                 HorizonProjection,
-                fields.as_slice(),
-                SystemSliceMut::from_scalar(&mut horizon_field),
+                fields.as_ref(),
+                ImageMut::from(horizon_field.as_mut_slice()),
             )
             .unwrap();
 
@@ -596,7 +597,7 @@ pub fn evolve_data(
             let mut checkpoint = Checkpoint::default();
             checkpoint.attach_mesh(&mesh);
             checkpoint.save_field("Horizon", &horizon_field);
-            checkpoint.save_system(fields.as_slice());
+            save_image(&mut checkpoint, fields.as_ref());
             checkpoint.export_vtu(
                 output
                     .join("evolve")
@@ -638,7 +639,7 @@ pub fn evolve_data(
 
             let result = finder.search_with_callback(
                 &mesh,
-                fields.as_slice(),
+                fields.as_ref(),
                 4,
                 surface,
                 HorizonCallback {
@@ -658,14 +659,14 @@ pub fn evolve_data(
                 mesh.evaluate(
                     4,
                     HorizonProjection,
-                    fields.as_slice(),
-                    SystemSliceMut::from_scalar(&mut horizon_field),
+                    fields.as_ref(),
+                    horizon_field.as_mut_slice().into(),
                 )?;
 
                 // Output current system to disk, for reference in horizon search.
                 let mut checkpoint = Checkpoint::default();
                 checkpoint.attach_mesh(&mesh);
-                checkpoint.save_system(fields.as_slice());
+                save_image(&mut checkpoint, fields.as_ref());
                 checkpoint.save_field("Horizon", &horizon_field);
                 checkpoint.export_vtu(
                     horizon_dir.join(format!("{}.vtu", config.name)),
@@ -720,13 +721,14 @@ pub fn evolve_data(
                 FieldConditions,
                 FieldDerivs {
                     gauge: config.evolve.gauge,
+                    masses: &scalar_fields,
                 },
                 h,
-                fields.as_mut_slice(),
+                fields.as_mut(),
             )
             .unwrap();
 
-        let lapse = mesh.bottom_left_value(fields.field(Field::Gauge(Gauge::Lapse)));
+        let lapse = mesh.bottom_left_value(fields.channel(LAPSE_CH));
 
         step += 1;
         coord_time += h;

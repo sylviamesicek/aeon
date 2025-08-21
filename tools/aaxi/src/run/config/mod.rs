@@ -75,6 +75,17 @@ impl Config {
     pub fn output_dir(&self) -> eyre::Result<PathBuf> {
         Ok(aeon_app::file::abs_or_relative(Path::new(&self.directory))?)
     }
+
+    pub fn scalar_field_masses(&self) -> Vec<f64> {
+        let mut scalar_fields = Vec::new();
+        for source in &self.sources {
+            if let Source::ScalarField { mass, .. } = source {
+                scalar_fields.push(mass.unwrap());
+            }
+        }
+
+        scalar_fields
+    }
 }
 
 /// Settings deciding domain of the mesh.

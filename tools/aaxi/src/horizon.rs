@@ -1,5 +1,5 @@
 use crate::eqs::{HorizonData, horizon};
-use crate::systems::{Field, Fields, Metric};
+use crate::systems::{GRR_CH, GRZ_CH, GZZ_CH, KRR_CH, KRZ_CH, KZZ_CH, S_CH, Y_CH};
 use aeon::kernel::Derivative;
 use aeon::solver::{HyperRelaxError, SolverCallback};
 use aeon::{
@@ -102,7 +102,7 @@ impl ApparentHorizonFinder {
     pub fn _search(
         &mut self,
         mesh: &Mesh<2>,
-        fields: SystemSlice<Fields>,
+        fields: ImageRef,
         order: usize,
         surface: &mut Mesh<1>,
         radius: &mut [f64],
@@ -113,10 +113,10 @@ impl ApparentHorizonFinder {
     /// Performs a horizon search on the given mesh, using the 1d surface mesh and radius
     /// vector for the search. This passes the callback into the underlying solver to
     /// allow for visualization of iterations, etc.
-    pub fn search_with_callback<Call: SolverCallback<1, Scalar>>(
+    pub fn search_with_callback<Call: SolverCallback<1>>(
         &mut self,
         mesh: &Mesh<2>,
-        fields: SystemSlice<Fields>,
+        fields: ImageRef,
         order: usize,
         surface: &mut Mesh<1>,
         mut callback: Call,
@@ -125,7 +125,7 @@ impl ApparentHorizonFinder {
     where
         Call::Error: Send,
     {
-        assert_eq!(fields.len(), mesh.num_nodes());
+        assert_eq!(fields.num_nodes(), mesh.num_nodes());
         assert_eq!(radius.len(), surface.num_nodes());
         assert_eq!(surface.tree().domain(), HORIZON_DOMAIN);
         assert_eq!(
@@ -169,7 +169,7 @@ impl ApparentHorizonFinder {
                         fields,
                         cache: &mut self.cache,
                     },
-                    SystemSliceMut::from_scalar(radius),
+                    ImageMut::from(radius),
                 )
             };
         }
@@ -213,9 +213,7 @@ impl Clone for ApparentHorizonFinder {
 struct HorizonRadialBoundary;
 
 impl SystemBoundaryConds<1> for HorizonRadialBoundary {
-    type System = Scalar;
-
-    fn kind(&self, _label: <Self::System as System>::Label, _face: Face<1>) -> BoundaryKind {
+    fn kind(&self, _channel: usize, _face: Face<1>) -> BoundaryKind {
         BoundaryKind::Symmetric
     }
 }
@@ -225,21 +223,15 @@ struct HorizonNullExpansion<'a, const ORDER: usize> {
     surface_to_cell: &'a mut [CellId],
     surface_position: &'a mut [[f64; 2]],
     mesh: &'a Mesh<2>,
-    fields: SystemSlice<'a, Fields>,
+    fields: ImageRef<'a>,
     cache: &'a mut UnsafeThreadCache<UniformInterpolate<2>>,
 }
 
 impl<'a, const ORDER: usize> Function<1> for HorizonNullExpansion<'a, ORDER> {
-    type Input = Scalar;
-    type Output = Scalar;
     type Error = HorizonError<Infallible>;
 
-    fn preprocess(
-        &mut self,
-        surface: &mut Mesh<1>,
-        mut input: SystemSliceMut<Self::Input>,
-    ) -> Result<(), Self::Error> {
-        let radius = input.field_mut(());
+    fn preprocess(&mut self, surface: &mut Mesh<1>, input: ImageMut) -> Result<(), Self::Error> {
+        let radius = input.channel(0);
 
         for block in 0..surface.num_blocks() {
             let nodes = surface.block_nodes(BlockId(block));
@@ -276,14 +268,14 @@ impl<'a, const ORDER: usize> Function<1> for HorizonNullExpansion<'a, ORDER> {
     fn evaluate(
         &self,
         engine: impl Engine<1>,
-        input: SystemSlice<Self::Input>,
-        mut output: SystemSliceMut<Self::Output>,
+        input: ImageRef,
+        mut output: ImageMut,
     ) -> Result<(), Self::Error> {
         let mesh = self.mesh;
         let fields = self.fields.rb();
 
-        let surface_radius = input.field(());
-        let surface_deriv = output.field_mut(());
+        let surface_radius = input.channel(0);
+        let surface_deriv = output.channel_mut(0);
 
         let nodes = engine.node_range();
 
@@ -330,15 +322,15 @@ impl<'a, const ORDER: usize> Function<1> for HorizonNullExpansion<'a, ORDER> {
 
             let block_fields = fields.slice(block_nodes.clone());
 
-            let grr_f = block_fields.field(Field::Metric(Metric::Grr));
-            let grz_f = block_fields.field(Field::Metric(Metric::Grz));
-            let gzz_f = block_fields.field(Field::Metric(Metric::Gzz));
-            let seed_f = block_fields.field(Field::Metric(Metric::S));
+            let grr_f = block_fields.channel(GRR_CH);
+            let grz_f = block_fields.channel(GRZ_CH);
+            let gzz_f = block_fields.channel(GZZ_CH);
+            let seed_f = block_fields.channel(S_CH);
 
-            let krr_f = block_fields.field(Field::Metric(Metric::Krr));
-            let krz_f = block_fields.field(Field::Metric(Metric::Krz));
-            let kzz_f = block_fields.field(Field::Metric(Metric::Kzz));
-            let y_f = block_fields.field(Field::Metric(Metric::Y));
+            let krr_f = block_fields.channel(KRR_CH);
+            let krz_f = block_fields.channel(KRZ_CH);
+            let kzz_f = block_fields.channel(KZZ_CH);
+            let y_f = block_fields.channel(Y_CH);
 
             // Handle metric values
             macro_rules! interpolate_value {
@@ -421,17 +413,17 @@ struct HorizonCallback<'a, I> {
     min_radius: f64,
 }
 
-impl<'a, I: SolverCallback<1, Scalar>> SolverCallback<1, Scalar> for HorizonCallback<'a, I> {
+impl<'a, I: SolverCallback<1>> SolverCallback<1> for HorizonCallback<'a, I> {
     type Error = HorizonCallbackError<I::Error>;
 
     fn callback(
         &mut self,
         surface: &Mesh<1>,
-        input: SystemSlice<Scalar>,
-        output: SystemSlice<Scalar>,
+        input: ImageRef,
+        output: ImageRef,
         iteration: usize,
     ) -> Result<(), Self::Error> {
-        let radius = input.field(());
+        let radius = input.channel(0);
 
         let collapsed = radius.iter().all(|r| r.abs() <= self.min_radius);
 
@@ -455,25 +447,23 @@ fn polar_to_cartesian(radius: f64, theta: f64) -> [f64; 2] {
 pub struct HorizonProjection;
 
 impl Function<2> for HorizonProjection {
-    type Input = Fields;
-    type Output = Scalar;
     type Error = Infallible;
 
     fn evaluate(
         &self,
         engine: impl Engine<2>,
-        input: SystemSlice<Self::Input>,
-        mut output: SystemSliceMut<Self::Output>,
+        input: ImageRef,
+        mut output: ImageMut,
     ) -> Result<(), Self::Error> {
-        let grr_f = input.field(Field::Metric(Metric::Grr));
-        let grz_f = input.field(Field::Metric(Metric::Grz));
-        let gzz_f = input.field(Field::Metric(Metric::Gzz));
-        let s_f = input.field(Field::Metric(Metric::S));
+        let grr_f = input.channel(GRR_CH);
+        let grz_f = input.channel(GRZ_CH);
+        let gzz_f = input.channel(GZZ_CH);
+        let s_f = input.channel(S_CH);
 
-        let krr_f = input.field(Field::Metric(Metric::Krr));
-        let krz_f = input.field(Field::Metric(Metric::Krz));
-        let kzz_f = input.field(Field::Metric(Metric::Kzz));
-        let y_f = input.field(Field::Metric(Metric::Y));
+        let krr_f = input.channel(KRR_CH);
+        let krz_f = input.channel(KRZ_CH);
+        let kzz_f = input.channel(KZZ_CH);
+        let y_f = input.channel(Y_CH);
 
         for vertex in IndexSpace::new(engine.vertex_size()).iter() {
             let pos = engine.position(vertex);
@@ -529,7 +519,7 @@ impl Function<2> for HorizonProjection {
                 radius_second_deriv: 0.0,
             };
 
-            output.field_mut(())[index] = horizon(horizon_system, pos);
+            output.channel_mut(0)[index] = horizon(horizon_system, pos);
         }
 
         Ok(())

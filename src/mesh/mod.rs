@@ -10,11 +10,8 @@ use crate::geometry::{
     TreeInterfaces, TreeNeighbors, TreeSer,
 };
 use crate::kernel::{BoundaryClass, DirichletParams, Element, node_from_vertex};
+use crate::kernel::{BoundaryKind, NodeSpace, NodeWindow, SystemBoundaryConds};
 use crate::prelude::IndexSpace;
-use crate::{
-    kernel::{BoundaryKind, NodeSpace, NodeWindow},
-    system::SystemBoundaryConds,
-};
 use datasize::DataSize;
 
 #[cfg(feature = "parallel")]
@@ -34,7 +31,7 @@ pub use checkpoint::{Checkpoint, ExportStride, ExportVtuConfig};
 pub use function::{Engine, Function, FunctionBorrowMut, Gaussian, Projection, TanH};
 pub use store::{MeshStore, UnsafeThreadCache};
 
-use crate::system::{System, SystemSlice};
+use crate::image::ImageRef;
 
 /// A discretization of a rectangular axis aligned grid into a collection of uniform grids of nodes
 /// with different spacings. A `Mesh` is built on top of a Quadtree, allowing one to selectively
@@ -593,21 +590,19 @@ impl<const N: usize> Mesh<N> {
     }
 
     /// Computes the maximum l2 norm of all fields in the system.
-    pub fn l2_norm_system<S: System>(&mut self, source: SystemSlice<S>) -> f64 {
+    pub fn l2_norm_system(&mut self, source: ImageRef) -> f64 {
         source
-            .system()
-            .enumerate()
-            .map(|label| self.l2_norm(source.field(label)))
+            .channels()
+            .map(|label| self.l2_norm(source.channel(label)))
             .max_by(f64::total_cmp)
             .unwrap()
     }
 
     /// Computes the maximum l-infinity norm of all fields in the system.
-    pub fn max_norm_system<S: System>(&mut self, source: SystemSlice<S>) -> f64 {
+    pub fn max_norm_system(&mut self, source: ImageRef) -> f64 {
         source
-            .system()
-            .enumerate()
-            .map(|label| self.max_norm(source.field(label)))
+            .channels()
+            .map(|label| self.max_norm(source.channel(label)))
             .max_by(f64::total_cmp)
             .unwrap()
     }
@@ -689,11 +684,10 @@ impl<const N: usize> Mesh<N> {
         result
     }
 
-    pub fn oscillation_heuristic_system<S: System>(&mut self, source: SystemSlice<S>) -> f64 {
+    pub fn oscillation_heuristic_system(&mut self, source: ImageRef) -> f64 {
         source
-            .system()
-            .enumerate()
-            .map(|label| self.oscillation_heuristic(source.field(label)))
+            .channels()
+            .map(|cidx| self.oscillation_heuristic(source.channel(cidx)))
             .max_by(f64::total_cmp)
             .unwrap()
     }
@@ -979,30 +973,20 @@ pub struct BlockBoundaryConds<const N: usize, I> {
 impl<const N: usize, I: SystemBoundaryConds<N>> SystemBoundaryConds<N>
     for BlockBoundaryConds<N, I>
 {
-    type System = I::System;
-
-    fn kind(&self, label: <Self::System as System>::Label, face: Face<N>) -> BoundaryKind {
+    fn kind(&self, channel: usize, face: Face<N>) -> BoundaryKind {
         if self.physical_boundary_flags.is_set(face) {
-            self.inner.kind(label, face)
+            self.inner.kind(channel, face)
         } else {
             BoundaryKind::Custom
         }
     }
 
-    fn dirichlet(
-        &self,
-        label: <Self::System as System>::Label,
-        position: [f64; N],
-    ) -> DirichletParams {
-        self.inner.dirichlet(label, position)
+    fn dirichlet(&self, channel: usize, position: [f64; N]) -> DirichletParams {
+        self.inner.dirichlet(channel, position)
     }
 
-    fn radiative(
-        &self,
-        label: <Self::System as System>::Label,
-        position: [f64; N],
-    ) -> crate::prelude::RadiativeParams {
-        self.inner.radiative(label, position)
+    fn radiative(&self, channel: usize, position: [f64; N]) -> crate::prelude::RadiativeParams {
+        self.inner.radiative(channel, position)
     }
 }
 

@@ -1,6 +1,7 @@
 use crate::{
+    image::{ImageMut, ImageRef, ImageShared},
+    kernel::SystemBoundaryConds,
     mesh::{Function, FunctionBorrowMut, Mesh},
-    system::{System, SystemBoundaryConds, SystemSlice, SystemSliceMut},
 };
 use datasize::DataSize;
 use rayon::iter::{ParallelBridge, ParallelIterator};
@@ -34,29 +35,23 @@ impl Integrator {
     }
 
     /// Step the integrator forwards in time.
-    pub fn step<
-        const N: usize,
-        C: SystemBoundaryConds<N> + Sync,
-        F: Function<N, Input = C::System, Output = C::System> + Sync,
-    >(
+    pub fn step<const N: usize, C: SystemBoundaryConds<N> + Sync, F: Function<N> + Sync>(
         &mut self,
         mesh: &mut Mesh<N>,
         order: usize,
         conditions: C,
         mut deriv: F,
         h: f64,
-        mut result: SystemSliceMut<C::System>,
+        mut result: ImageMut,
     ) -> Result<(), F::Error>
     where
-        C::System: Clone + Sync,
         F::Error: Send,
     {
-        assert!(mesh.num_nodes() == result.len());
-
-        let system = result.system().clone();
+        assert!(mesh.num_nodes() == result.num_nodes());
+        let num_channels = result.num_channels();
 
         // Number of degrees of freedom required to store one system.
-        let dimension = system.count() * mesh.num_nodes();
+        let dimension = num_channels * result.num_nodes();
         self.tmp.clear();
 
         match self.method {
@@ -64,7 +59,7 @@ impl Integrator {
                 // Resize temporary vector to appropriate size
                 self.tmp.resize(dimension, 0.0);
                 // Retrieve reference to tmp `SystemVec`.
-                let mut tmp = SystemSliceMut::from_contiguous(&mut self.tmp, &system);
+                let mut tmp = ImageMut::from_storage(&mut self.tmp, num_channels);
 
                 // First step
                 Self::copy_from(tmp.rb_mut(), result.rb());
@@ -77,8 +72,8 @@ impl Integrator {
                 self.tmp.resize(2 * dimension, 0.0);
 
                 let (tmp1, tmp2) = self.tmp.split_at_mut(dimension);
-                let mut tmp = SystemSliceMut::from_contiguous(tmp1, &system);
-                let mut update = SystemSliceMut::from_contiguous(tmp2, &system);
+                let mut tmp = ImageMut::from_storage(tmp1, num_channels);
+                let mut update = ImageMut::from_storage(tmp2, num_channels);
 
                 mesh.fill_boundary(order, conditions.clone(), result.rb_mut());
 
@@ -135,7 +130,7 @@ impl Integrator {
                 if let Method::RK4KO6(diss) = self.method {
                     mesh.fill_boundary_to_extent(order, 3, conditions.clone(), result.rb_mut());
                     deriv.preprocess(mesh, result.rb_mut())?;
-                    mesh.dissipation::<6, _>(diss, result.rb_mut());
+                    mesh.dissipation::<6>(diss, result.rb_mut());
                 }
 
                 Ok(())
@@ -143,23 +138,19 @@ impl Integrator {
         }
     }
 
-    fn copy_from<S: System + Clone + Sync>(dest: SystemSliceMut<S>, source: SystemSlice<S>) {
-        let shared = dest.into_shared();
-        source.system().enumerate().par_bridge().for_each(|field| {
-            unsafe { shared.field_mut(field) }.copy_from_slice(source.field(field))
+    fn copy_from(dest: ImageMut, source: ImageRef) {
+        let shared: ImageShared = dest.into();
+        source.channels().par_bridge().for_each(|field| {
+            unsafe { shared.channel_mut(field) }.copy_from_slice(source.channel(field))
         });
     }
 
     /// Performs operation `dest = dest + h * b`
-    fn fused_multiply_add_assign<S: System + Clone + Sync>(
-        dest: SystemSliceMut<S>,
-        h: f64,
-        b: SystemSlice<S>,
-    ) {
-        let shared = dest.into_shared();
-        b.system().enumerate().par_bridge().for_each(|field| {
-            let dest = unsafe { shared.field_mut(field) };
-            let src = b.field(field);
+    fn fused_multiply_add_assign(dest: ImageMut, h: f64, b: ImageRef) {
+        let shared: ImageShared = dest.into();
+        b.channels().par_bridge().for_each(|field| {
+            let dest = unsafe { shared.channel_mut(field) };
+            let src = b.channel(field);
 
             dest.iter_mut().zip(src).for_each(|(a, b)| *a += h * b);
         });
@@ -186,15 +177,11 @@ impl Integrator {
     // }
 
     /// Performs operation `dest = a + h * dest`
-    fn fused_multiply_add_dest<S: System + Clone + Sync>(
-        dest: SystemSliceMut<S>,
-        a: SystemSlice<S>,
-        h: f64,
-    ) {
-        let shared = dest.into_shared();
-        a.system().enumerate().par_bridge().for_each(|field| {
-            let dest = unsafe { shared.field_mut(field) };
-            let a = a.field(field);
+    fn fused_multiply_add_dest(dest: ImageMut, a: ImageRef, h: f64) {
+        let shared: ImageShared = dest.into();
+        a.channels().par_bridge().for_each(|field| {
+            let dest = unsafe { shared.channel_mut(field) };
+            let a = a.channel(field);
             dest.iter_mut().zip(a.iter()).for_each(|(d, a)| {
                 *d = a + h * *d;
             });

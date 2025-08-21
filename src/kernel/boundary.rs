@@ -158,3 +158,113 @@ pub fn is_boundary_compatible<const N: usize, B: BoundaryConds<N>>(
         .map(|face| conditions.kind(face).class() == boundary[face])
         .all(|x| x)
 }
+
+/// A generalization of `Condition<N>` for a coupled systems of scalar fields.
+pub trait SystemBoundaryConds<const N: usize>: Clone {
+    fn kind(&self, channel: usize, _face: Face<N>) -> BoundaryKind;
+
+    fn radiative(&self, _channel: usize, _position: [f64; N]) -> RadiativeParams {
+        RadiativeParams {
+            target: 0.0,
+            speed: 1.0,
+        }
+    }
+
+    fn dirichlet(&self, _channel: usize, _position: [f64; N]) -> DirichletParams {
+        DirichletParams {
+            target: 0.0,
+            strength: 1.0,
+        }
+    }
+
+    fn field(&self, channel: usize) -> FieldBoundaryConds<N, Self> {
+        FieldBoundaryConds::new(self.clone(), channel)
+    }
+}
+
+/// Transfers a set of `Conditions<N>` into a single `Condition<N>` by only applying the set of conditions
+/// to a single field.
+pub struct FieldBoundaryConds<const N: usize, C> {
+    conditions: C,
+    channel: usize,
+}
+
+impl<const N: usize, C: SystemBoundaryConds<N>> FieldBoundaryConds<N, C> {
+    pub const fn new(conditions: C, channel: usize) -> Self {
+        Self {
+            channel,
+            conditions,
+        }
+    }
+}
+
+impl<const N: usize, C: SystemBoundaryConds<N>> Clone for FieldBoundaryConds<N, C> {
+    fn clone(&self) -> Self {
+        Self {
+            conditions: self.conditions.clone(),
+            channel: self.channel,
+        }
+    }
+}
+
+impl<const N: usize, C: SystemBoundaryConds<N>> BoundaryConds<N> for FieldBoundaryConds<N, C> {
+    fn kind(&self, face: Face<N>) -> BoundaryKind {
+        self.conditions.kind(self.channel, face)
+    }
+
+    fn radiative(&self, position: [f64; N]) -> RadiativeParams {
+        self.conditions.radiative(self.channel, position)
+    }
+
+    fn dirichlet(&self, position: [f64; N]) -> DirichletParams {
+        self.conditions.dirichlet(self.channel, position)
+    }
+}
+
+// ****************************
+// Specializations ************
+// ****************************
+
+/// Transforms a single condition into a set of `Conditions<N>` where `Self::System = Scalar`.
+#[derive(Clone)]
+pub struct ScalarConditions<I>(pub I);
+
+impl<I> ScalarConditions<I> {
+    pub const fn new(inner: I) -> Self {
+        Self(inner)
+    }
+}
+
+impl<const N: usize, I: BoundaryConds<N>> SystemBoundaryConds<N> for ScalarConditions<I> {
+    fn kind(&self, channel: usize, face: Face<N>) -> BoundaryKind {
+        debug_assert!(channel == 0);
+        self.0.kind(face)
+    }
+
+    fn radiative(&self, channel: usize, position: [f64; N]) -> RadiativeParams {
+        debug_assert!(channel == 0);
+        self.0.radiative(position)
+    }
+
+    fn dirichlet(&self, channel: usize, position: [f64; N]) -> DirichletParams {
+        debug_assert!(channel == 0);
+        self.0.dirichlet(position)
+    }
+}
+
+#[derive(Clone)]
+pub struct EmptyConditions;
+
+impl<const N: usize> SystemBoundaryConds<N> for EmptyConditions {
+    fn kind(&self, _channel: usize, _face: Face<N>) -> BoundaryKind {
+        unreachable!()
+    }
+
+    fn radiative(&self, _channel: usize, _position: [f64; N]) -> RadiativeParams {
+        unreachable!()
+    }
+
+    fn dirichlet(&self, _channel: usize, _position: [f64; N]) -> DirichletParams {
+        unreachable!()
+    }
+}

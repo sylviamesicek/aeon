@@ -1,39 +1,36 @@
 use crate::geometry::{ActiveCellId, IndexSpace, NeighborId, Split};
+use crate::image::ImageShared;
 use crate::kernel::Interpolation;
 use reborrow::ReborrowMut;
 use std::array;
 
 use crate::{
+    image::{ImageMut, ImageRef},
+    kernel::SystemBoundaryConds,
     mesh::Mesh,
     shared::SharedSlice,
-    system::{System, SystemBoundaryConds, SystemSlice, SystemSliceMut},
 };
 
 impl<const N: usize> Mesh<N> {
-    pub fn transfer_system<S: System + Sync>(
-        &mut self,
-        order: usize,
-        source: SystemSlice<S>,
-        dest: SystemSliceMut<S>,
-    ) {
+    pub fn transfer_system(&mut self, order: usize, source: ImageRef, dest: ImageMut) {
+        assert_eq!(source.num_channels(), dest.num_channels());
+        assert_eq!(dest.num_nodes(), self.num_nodes());
+        assert_eq!(source.num_nodes(), self.num_old_nodes());
+
         match order {
-            2 => self.transfer_system_impl::<2, _>(source, dest),
-            4 => self.transfer_system_impl::<4, _>(source, dest),
-            6 => self.transfer_system_impl::<6, _>(source, dest),
+            2 => self.transfer_system_impl::<2>(source, dest),
+            4 => self.transfer_system_impl::<4>(source, dest),
+            6 => self.transfer_system_impl::<6>(source, dest),
             _ => unimplemented!("Order unimplemented"),
         }
     }
 
     /// Transfers data from an old version of the mesh to the new refined version.
-    fn transfer_system_impl<const ORDER: usize, S: System + Sync>(
-        &mut self,
-        source: SystemSlice<S>,
-        dest: SystemSliceMut<S>,
-    ) {
-        assert!(self.num_nodes() == dest.len());
-        assert!(self.num_old_nodes() == source.len());
+    fn transfer_system_impl<const ORDER: usize>(&mut self, source: ImageRef, dest: ImageMut) {
+        assert!(self.num_nodes() == dest.num_nodes());
+        assert!(self.num_old_nodes() == source.num_nodes());
 
-        let dest = dest.into_shared();
+        let dest: ImageShared = dest.into();
 
         self.old_block_compute(|mesh, _store, block| {
             let size = mesh.old_blocks.size(block);
@@ -82,14 +79,14 @@ impl<const N: usize> Mesh<N> {
                                 (node_origin[axis] + node_offset[axis]) as isize
                             });
 
-                            for field in dest.system().enumerate() {
+                            for field in dest.channels() {
                                 let v = space.prolong(
                                     Interpolation::<ORDER>,
                                     source_node,
-                                    block_source.field(field),
+                                    block_source.channel(field),
                                 );
-                                block_dest.field_mut(field)[new_space.index_from_node(dest_node)] =
-                                    v;
+                                block_dest.channel_mut(field)
+                                    [new_space.index_from_node(dest_node)] = v;
                             }
                         }
                     }
@@ -110,9 +107,9 @@ impl<const N: usize> Mesh<N> {
                         let dest_node =
                             array::from_fn(|axis| (node_origin[axis] + node_offset[axis]) as isize);
 
-                        for field in dest.system().enumerate() {
-                            let v = block_source.field(field)[space.index_from_node(source_node)];
-                            block_dest.field_mut(field)[new_space.index_from_node(dest_node)] = v;
+                        for field in dest.channels() {
+                            let v = block_source.channel(field)[space.index_from_node(source_node)];
+                            block_dest.channel_mut(field)[new_space.index_from_node(dest_node)] = v;
                         }
                     }
                 } else {
@@ -153,9 +150,9 @@ impl<const N: usize> Mesh<N> {
                         let dest_node =
                             array::from_fn(|axis| (node_origin[axis] + node_offset[axis]) as isize);
 
-                        for field in dest.system().enumerate() {
-                            let v = block_source.field(field)[space.index_from_node(source_node)];
-                            block_dest.field_mut(field)[new_space.index_from_node(dest_node)] = v;
+                        for field in dest.channels() {
+                            let v = block_source.channel(field)[space.index_from_node(source_node)];
+                            block_dest.channel_mut(field)[new_space.index_from_node(dest_node)] = v;
                         }
                     }
                 }
@@ -169,8 +166,10 @@ impl<const N: usize> Mesh<N> {
         &mut self,
         order: usize,
         bcs: BCs,
-        system: SystemSliceMut<'_, BCs::System>,
+        system: ImageMut,
     ) {
+        assert_eq!(system.num_nodes(), self.num_nodes());
+
         self.fill_boundary_to_extent(order, self.ghost, bcs, system);
     }
 
@@ -182,8 +181,9 @@ impl<const N: usize> Mesh<N> {
         order: usize,
         extent: usize,
         bcs: C,
-        mut system: SystemSliceMut<'_, C::System>,
+        mut system: ImageMut,
     ) {
+        assert_eq!(system.num_nodes(), self.num_nodes());
         assert!(extent <= self.ghost);
 
         self.fill_fine(extent, system.rb_mut());
@@ -191,9 +191,9 @@ impl<const N: usize> Mesh<N> {
 
         self.fill_physical(extent, &bcs, system.rb_mut());
         match order {
-            2 => self.fill_prolong::<2, _>(extent, system.rb_mut()),
-            4 => self.fill_prolong::<4, _>(extent, system.rb_mut()),
-            6 => self.fill_prolong::<6, _>(extent, system.rb_mut()),
+            2 => self.fill_prolong::<2>(extent, system.rb_mut()),
+            4 => self.fill_prolong::<4>(extent, system.rb_mut()),
+            6 => self.fill_prolong::<6>(extent, system.rb_mut()),
             _ => unimplemented!("Fill order not implemented"),
         }
         self.fill_physical(extent, &bcs, system.rb_mut());
@@ -203,11 +203,11 @@ impl<const N: usize> Mesh<N> {
         &mut self,
         extent: usize,
         bcs: &C,
-        dest: SystemSliceMut<'_, C::System>,
+        dest: ImageMut,
     ) {
-        debug_assert!(dest.len() == self.num_nodes());
+        debug_assert!(dest.num_nodes() == self.num_nodes());
 
-        let shared = dest.into_shared();
+        let shared: ImageShared = dest.into();
 
         self.blocks.indices().for_each(|block| {
             // Fill Physical Boundary conditions
@@ -217,14 +217,14 @@ impl<const N: usize> Mesh<N> {
 
             let mut block_system = unsafe { shared.slice_mut(nodes) };
 
-            for field in shared.system().enumerate() {
-                space.fill_boundary(extent, bcs.field(field), block_system.field_mut(field));
+            for field in shared.channels() {
+                space.fill_boundary(extent, bcs.field(field), block_system.channel_mut(field));
             }
         });
     }
 
-    fn fill_direct<S: System>(&mut self, extent: usize, result: SystemSliceMut<S>) {
-        let shared = result.into_shared();
+    fn fill_direct(&mut self, extent: usize, result: ImageMut) {
+        let shared: ImageShared = result.into();
 
         // Fill direct neighbors
         self.neighbors.direct_indices().for_each(|interface| {
@@ -248,16 +248,16 @@ impl<const N: usize> Mesh<N> {
                 let block_index = block_space.index_from_node(block_node);
                 let neighbor_index = neighbor_space.index_from_node(neighbor_node);
 
-                for field in shared.system().enumerate() {
-                    let value = neighbor_system.field(field)[neighbor_index];
-                    block_system.field_mut(field)[block_index] = value;
+                for field in shared.channels() {
+                    let value = neighbor_system.channel(field)[neighbor_index];
+                    block_system.channel_mut(field)[block_index] = value;
                 }
             }
         });
     }
 
-    fn fill_fine<S: System>(&mut self, extent: usize, result: SystemSliceMut<S>) {
-        let shared = result.into_shared();
+    fn fill_fine(&mut self, extent: usize, result: ImageMut) {
+        let shared: ImageShared = result.into();
 
         self.neighbors.fine_indices().for_each(|interface| {
             let info = self.interfaces.interface(interface);
@@ -278,20 +278,16 @@ impl<const N: usize> Mesh<N> {
                 let block_index = block_space.index_from_node(block_node);
                 let neighbor_index = neighbor_space.index_from_node(neighbor_node);
 
-                for field in shared.system().enumerate() {
-                    let value = neighbor_system.field(field)[neighbor_index];
-                    block_system.field_mut(field)[block_index] = value;
+                for field in shared.channels() {
+                    let value = neighbor_system.channel(field)[neighbor_index];
+                    block_system.channel_mut(field)[block_index] = value;
                 }
             }
         });
     }
 
-    fn fill_prolong<const ORDER: usize, S: System>(
-        &mut self,
-        extent: usize,
-        result: SystemSliceMut<S>,
-    ) {
-        let shared = result.into_shared();
+    fn fill_prolong<const ORDER: usize>(&mut self, extent: usize, result: ImageMut) {
+        let shared: ImageShared = result.into();
 
         self.neighbors.coarse_indices().for_each(|interface| {
             let info = self.interfaces.interface(interface);
@@ -310,13 +306,13 @@ impl<const N: usize> Mesh<N> {
                 let neighbor_node = array::from_fn(|axis| node[axis] as isize + info.source[axis]);
                 let block_index = block_space.index_from_node(block_node);
 
-                for field in shared.system().enumerate() {
+                for field in shared.channels() {
                     let value = neighbor_space.prolong(
                         Interpolation::<ORDER>,
                         neighbor_node,
-                        neighbor_system.field(field),
+                        neighbor_system.channel(field),
                     );
-                    block_system.field_mut(field)[block_index] = value;
+                    block_system.channel_mut(field)[block_index] = value;
                 }
             }
         });
