@@ -219,8 +219,8 @@ pub fn solve_constraints(mesh: &mut Mesh<1>, system: SystemSliceMut<Fields>) {
     let phi = unsafe { shared.field_mut(Field::Phi) };
     let pi = unsafe { shared.field_mut(Field::Pi) };
 
-    mesh.fill_boundary(Order::<4>, ScalarConditions(AntiSymCondition), phi.into());
-    mesh.fill_boundary(Order::<4>, ScalarConditions(SymCondition), pi.into());
+    mesh.fill_boundary(4, ScalarConditions(AntiSymCondition), phi.into());
+    mesh.fill_boundary(4, ScalarConditions(SymCondition), pi.into());
 
     let conformal = unsafe { shared.field_mut(Field::Conformal) };
     let lapse = unsafe { shared.field_mut(Field::Lapse) };
@@ -277,7 +277,7 @@ pub fn solve_constraints(mesh: &mut Mesh<1>, system: SystemSliceMut<Fields>) {
         conformal_prev = conformal[space.index_from_vertex([cell_size])];
     }
     // Fill ghost nodes.
-    mesh.fill_boundary(Order::<4>, ScalarConditions(SymCondition), conformal.into());
+    mesh.fill_boundary(4, ScalarConditions(SymCondition), conformal.into());
 
     // Perform radial quadrature for lapse
     let mut lapse_prev = 1.0 / conformal_prev;
@@ -344,7 +344,7 @@ pub fn solve_constraints(mesh: &mut Mesh<1>, system: SystemSliceMut<Fields>) {
     }
 
     // Fill lapse ghost nodes
-    mesh.fill_boundary(Order::<4>, ScalarConditions(SymCondition), lapse.into());
+    mesh.fill_boundary(4, ScalarConditions(SymCondition), lapse.into());
 }
 
 fn smooth(s: f64, n: f64, r: f64) -> f64 {
@@ -465,7 +465,7 @@ pub fn intial_data(
         }
     }
 
-    mesh.fill_boundary(Order::<4>, FieldConditions, output);
+    mesh.fill_boundary(4, FieldConditions, output);
 }
 
 pub fn find_mass(mesh: &Mesh<1>, system: SystemSlice<Fields>) -> f64 {

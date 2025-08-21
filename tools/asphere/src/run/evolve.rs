@@ -144,7 +144,7 @@ pub fn evolve_data_full(
 
     while proper_time < config.evolve.max_proper_time {
         assert!(system.len() == mesh.num_nodes());
-        mesh.fill_boundary(Order::<4>, FieldConditions, system.as_mut_slice());
+        mesh.fill_boundary(4, FieldConditions, system.as_mut_slice());
 
         // Fill current derive buffer
         deriv_buffers[buffer_index % 5].resize(mesh.num_nodes(), 0.0);
@@ -292,7 +292,7 @@ pub fn evolve_data_full(
                 scratch.copy_from_slice(system.contigious());
                 system.resize(mesh.num_nodes());
                 mesh.transfer_system(
-                    Order::<4>,
+                    4,
                     SystemSlice::from_contiguous(&scratch, &Fields),
                     system.as_mut_slice(),
                 );
@@ -361,7 +361,7 @@ pub fn evolve_data_full(
             scratch.copy_from_slice(system.contigious());
             system.resize(mesh.num_nodes());
             mesh.transfer_system(
-                Order::<4>,
+                4,
                 SystemSlice::from_contiguous(&scratch, &Fields),
                 system.as_mut_slice(),
             );
@@ -434,7 +434,7 @@ pub fn evolve_data_full(
         integrator
             .step(
                 &mut mesh,
-                Order::<4>,
+                4,
                 FieldConditions,
                 TimeDerivs,
                 h,

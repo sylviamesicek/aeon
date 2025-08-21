@@ -1,9 +1,9 @@
 use crate::eqs::{HorizonData, horizon};
 use crate::systems::{Field, Fields, Metric};
+use aeon::kernel::Derivative;
 use aeon::solver::{HyperRelaxError, SolverCallback};
 use aeon::{
-    element::UniformInterpolate, kernel::Kernels, mesh::UnsafeThreadCache, prelude::*,
-    solver::HyperRelaxSolver,
+    element::UniformInterpolate, mesh::UnsafeThreadCache, prelude::*, solver::HyperRelaxSolver,
 };
 
 use core::f64;
@@ -99,34 +99,30 @@ impl ApparentHorizonFinder {
         }
     }
 
-    pub fn _search<K: Kernels>(
+    pub fn _search(
         &mut self,
         mesh: &Mesh<2>,
         fields: SystemSlice<Fields>,
-        order: K,
+        order: usize,
         surface: &mut Mesh<1>,
         radius: &mut [f64],
-    ) -> Result<HorizonStatus, HorizonError<Infallible>>
-    where
-        K: Sync,
-    {
+    ) -> Result<HorizonStatus, HorizonError<Infallible>> {
         self.search_with_callback(mesh, fields, order, surface, (), radius)
     }
 
     /// Performs a horizon search on the given mesh, using the 1d surface mesh and radius
     /// vector for the search. This passes the callback into the underlying solver to
     /// allow for visualization of iterations, etc.
-    pub fn search_with_callback<K: Kernels, Call: SolverCallback<1, Scalar>>(
+    pub fn search_with_callback<Call: SolverCallback<1, Scalar>>(
         &mut self,
         mesh: &Mesh<2>,
         fields: SystemSlice<Fields>,
-        order: K,
+        order: usize,
         surface: &mut Mesh<1>,
         mut callback: Call,
         radius: &mut [f64],
     ) -> Result<HorizonStatus, HorizonError<Call::Error>>
     where
-        K: Sync,
         Call::Error: Send,
     {
         assert_eq!(fields.len(), mesh.num_nodes());
@@ -156,25 +152,35 @@ impl ApparentHorizonFinder {
             }
         }
 
+        macro_rules! solve_with_callback_order {
+            ($order:literal) => {
+                self.solver.solve_with_callback(
+                    surface,
+                    order,
+                    HorizonRadialBoundary,
+                    HorizonCallback {
+                        inner: &mut callback,
+                        min_radius,
+                    },
+                    HorizonNullExpansion::<$order> {
+                        surface_to_cell: &mut self.surface_to_cell,
+                        surface_position: &mut self.surface_position,
+                        mesh,
+                        fields,
+                        cache: &mut self.cache,
+                    },
+                    SystemSliceMut::from_scalar(radius),
+                )
+            };
+        }
+
         // Run solver
-        let result = self.solver.solve_with_callback(
-            surface,
-            order,
-            HorizonRadialBoundary,
-            HorizonCallback {
-                inner: &mut callback,
-                min_radius,
-            },
-            HorizonNullExpansion::<K> {
-                surface_to_cell: &mut self.surface_to_cell,
-                surface_position: &mut self.surface_position,
-                mesh,
-                fields,
-                cache: &mut self.cache,
-                _phantom: std::marker::PhantomData,
-            },
-            SystemSliceMut::from_scalar(radius),
-        );
+        let result = match order {
+            2 => solve_with_callback_order!(2),
+            4 => solve_with_callback_order!(4),
+            6 => solve_with_callback_order!(6),
+            _ => unimplemented!("Unimplemented order"),
+        };
 
         match result {
             Ok(()) => Ok(HorizonStatus::Converged),
@@ -215,16 +221,15 @@ impl SystemBoundaryConds<1> for HorizonRadialBoundary {
 }
 
 /// Expansion of null paths
-struct HorizonNullExpansion<'a, K> {
+struct HorizonNullExpansion<'a, const ORDER: usize> {
     surface_to_cell: &'a mut [CellId],
     surface_position: &'a mut [[f64; 2]],
     mesh: &'a Mesh<2>,
     fields: SystemSlice<'a, Fields>,
     cache: &'a mut UnsafeThreadCache<UniformInterpolate<2>>,
-    _phantom: std::marker::PhantomData<K>,
 }
 
-impl<'a, K: Kernels> Function<1> for HorizonNullExpansion<'a, K> {
+impl<'a, const ORDER: usize> Function<1> for HorizonNullExpansion<'a, ORDER> {
     type Input = Scalar;
     type Output = Scalar;
     type Error = HorizonError<Infallible>;
@@ -349,7 +354,7 @@ impl<'a, K: Kernels> Function<1> for HorizonNullExpansion<'a, K> {
                 ($output:ident, $field:ident, $axis:expr) => {
                     for (i, node) in active_window.iter().enumerate() {
                         scratch[i] =
-                            block_space.evaluate_axis(K::derivative(), node, $field, $axis);
+                            block_space.evaluate_axis(Derivative::<ORDER>, node, $field, $axis);
                     }
                     let $output = interpolate.apply(&scratch);
                 };

@@ -3,7 +3,6 @@ use crate::run::config::{Config, Initial, Source};
 use crate::systems::{Constraint, Field, FieldConditions, Fields, Gauge, Metric, ScalarField};
 use aeon::prelude::*;
 use aeon::{
-    kernel::Kernels,
     mesh::{Gaussian, Mesh},
     solver::{HyperRelaxSolver, SolverCallback},
     system::System,
@@ -264,8 +263,8 @@ impl<'a> Function<2> for FieldsFromGarfinkle<'a> {
     }
 }
 
-fn solve_order<const ORDER: usize, S: SolverCallback<2, Scalar> + Send + Sync>(
-    order: Order<ORDER>,
+fn solve_order<S: SolverCallback<2, Scalar> + Send + Sync>(
+    order: usize,
     mesh: &mut Mesh<2>,
     initial: &Initial,
     callback: S,
@@ -273,7 +272,6 @@ fn solve_order<const ORDER: usize, S: SolverCallback<2, Scalar> + Send + Sync>(
     mut system: SystemSliceMut<Fields>,
 ) -> eyre::Result<()>
 where
-    Order<ORDER>: Kernels,
     S::Error: Error + Send + Sync + 'static,
 {
     let num_scalar_field = system.system().num_scalar_fields();
@@ -291,7 +289,7 @@ where
 
     // Compute seed values.
     mesh.project(
-        ORDER,
+        order,
         SeedProjection(sources),
         context.field_mut(Context::Seed),
     );
@@ -304,7 +302,7 @@ where
         } = source
         {
             mesh.project(
-                ORDER,
+                order,
                 Gaussian {
                     amplitude: amplitude.unwrap(),
                     sigma: [sigma.0.unwrap(), sigma.1.unwrap()],
@@ -348,7 +346,7 @@ where
     )?;
 
     mesh.evaluate(
-        ORDER,
+        order,
         FieldsFromGarfinkle {
             psi: &psi,
             context: context.as_slice(),
@@ -559,51 +557,18 @@ pub fn initial_data(config: &Config) -> eyre::Result<(Mesh<2>, SystemVec<Fields>
         pb.set_prefix(format!("[Level {}]", mesh.num_levels()));
         pb.enable_steady_tick(Duration::from_millis(100));
 
-        match config.order {
-            2 => {
-                solve_order(
-                    Order::<2>,
-                    &mut mesh,
-                    &config.initial,
-                    IterCallback {
-                        config,
-                        pb: pb.clone(),
-                        output: &output,
-                    },
-                    &config.sources,
-                    system.as_mut_slice(),
-                )?;
-            }
-            4 => {
-                solve_order(
-                    Order::<4>,
-                    &mut mesh,
-                    &config.initial,
-                    IterCallback {
-                        config,
-                        pb: pb.clone(),
-                        output: &output,
-                    },
-                    &config.sources,
-                    system.as_mut_slice(),
-                )?;
-            }
-            6 => {
-                solve_order(
-                    Order::<6>,
-                    &mut mesh,
-                    &config.initial,
-                    IterCallback {
-                        config,
-                        pb: pb.clone(),
-                        output: &output,
-                    },
-                    &config.sources,
-                    system.as_mut_slice(),
-                )?;
-            }
-            _ => return Err(eyre!("Invalid initial data type and order")),
-        };
+        solve_order(
+            config.order,
+            &mut mesh,
+            &config.initial,
+            IterCallback {
+                config,
+                pb: pb.clone(),
+                output: &output,
+            },
+            &config.sources,
+            system.as_mut_slice(),
+        )?;
 
         pb.finish_with_message(format!(
             "Relaxed in {} steps, {} nodes",
@@ -665,12 +630,7 @@ pub fn initial_data(config: &Config) -> eyre::Result<(Mesh<2>, SystemVec<Fields>
         mesh.regrid();
         system.resize(mesh.num_nodes());
 
-        match config.order {
-            2 => mesh.transfer_system(Order::<2>, transfer.as_slice(), system.as_mut_slice()),
-            4 => mesh.transfer_system(Order::<4>, transfer.as_slice(), system.as_mut_slice()),
-            6 => mesh.transfer_system(Order::<6>, transfer.as_slice(), system.as_mut_slice()),
-            _ => {}
-        };
+        mesh.transfer_system(config.order, transfer.as_slice(), system.as_mut_slice());
     }
 
     if config.visualize.initial {

@@ -369,7 +369,7 @@ impl<const N: usize> NodeSpace<N> {
 
     pub fn evaluate_axis_interior(
         &self,
-        kernel: &impl Kernel,
+        kernel: impl Kernel,
         node: [isize; N],
         field: &[f64],
         axis: usize,
@@ -464,7 +464,7 @@ impl<const N: usize> NodeSpace<N> {
     /// Evaluates the operation of a kernel along an axis at a given vertex.
     pub fn evaluate_axis(
         &self,
-        kernel: &impl Kernel,
+        kernel: impl Kernel,
         node: [isize; N],
         field: &[f64],
         axis: usize,
@@ -480,7 +480,7 @@ impl<const N: usize> NodeSpace<N> {
 
         let spacing = self.spacing_axis(axis);
         let support = self.support_axis(node[axis] as usize, kernel.border_width(), axis);
-        let stencil = self.stencil_axis(support, kernel, axis);
+        let stencil = self.stencil_axis(support, &kernel, axis);
 
         let mut corner = node;
         corner[axis] = match support {

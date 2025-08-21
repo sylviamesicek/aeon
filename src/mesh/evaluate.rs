@@ -1,7 +1,6 @@
 use std::convert::Infallible;
 use std::{array, ops::Range};
 
-use crate::IRef;
 use crate::geometry::{BlockId, Face, FaceMask, IndexSpace};
 use crate::kernel::{Derivative, Dissipation, Kernel, SecondDerivative, is_boundary_compatible};
 use crate::{
@@ -32,7 +31,7 @@ impl<'store, const N: usize, const ORDER: usize> FdEngine<'store, N, ORDER> {
         &self,
         field: &[f64],
         axis: usize,
-        kernel: &impl Kernel,
+        kernel: impl Kernel,
         vertex: [usize; N],
     ) -> f64 {
         self.space
@@ -84,13 +83,7 @@ struct FdIntEngine<'store, const N: usize, const ORDER: usize> {
 }
 
 impl<'store, const N: usize, const ORDER: usize> FdIntEngine<'store, N, ORDER> {
-    fn evaluate(
-        &self,
-        field: &[f64],
-        axis: usize,
-        kernel: &impl Kernel,
-        vertex: [usize; N],
-    ) -> f64 {
+    fn evaluate(&self, field: &[f64], axis: usize, kernel: impl Kernel, vertex: [usize; N]) -> f64 {
         self.space
             .evaluate_axis_interior(kernel, node_from_vertex(vertex), field, axis)
     }
@@ -318,7 +311,7 @@ impl<const N: usize> Mesh<N> {
         }
 
         // Strong boundary condition
-        self.fill_boundary::<ORDER, _>(bcs.clone(), f.rb_mut());
+        self.fill_boundary(order, bcs.clone(), f.rb_mut());
         // Preprocess data
         op.preprocess(self, f.rb_mut())?;
 
@@ -363,14 +356,35 @@ impl<const N: usize> Mesh<N> {
                     _ => unreachable!(),
                 }
             } else {
-                let engine = FdEngine::<N, ORDER> {
-                    space: space.clone(),
+                macro_rules! evaluate {
+                    ($order:literal) => {
+                        op.evaluate(
+                            FdEngine::<N, $order> {
+                                space: space.clone(),
+                                store,
+                                range: nodes.clone(),
+                            },
+                            block_source.rb(),
+                            block_dest.rb_mut(),
+                        )?
+                    };
+                }
 
-                    store,
-                    range: nodes.clone(),
-                };
+                match order {
+                    2 => evaluate!(2),
+                    4 => evaluate!(4),
+                    6 => evaluate!(6),
+                    _ => unreachable!(),
+                }
 
-                op.evaluate(IRef(&engine), block_source.rb(), block_dest.rb_mut())?;
+                // let engine = FdEngine::<N, ORDER> {
+                //     space: space.clone(),
+
+                //     store,
+                //     range: nodes.clone(),
+                // };
+
+                // op.evaluate(IRef(&engine), block_source.rb(), block_dest.rb_mut())?;
 
                 // Weak boundary conditions.
                 for face in Face::<N>::iterate() {
@@ -405,57 +419,74 @@ impl<const N: usize> Mesh<N> {
                             let r = position.iter().map(|&v| v * v).sum::<f64>().sqrt();
                             let index = space.index_from_node(node);
 
-                            // *************************
-                            // Inner
+                            macro_rules! inner {
+                                ($order:literal) => {
+                                    // *************************
+                                    // Inner
 
-                            let mut inner = vertex;
+                                    let engine = FdEngine::<N, $order> {
+                                        space: space.clone(),
+                                        store,
+                                        range: nodes.clone(),
+                                    };
 
-                            // Find innter vertex for approximating higher order r dependence
-                            for axis in 0..N {
-                                if boundary.kind(Face::negative(axis)) == BoundaryKind::Radiative
-                                    && vertex[axis] == 0
-                                {
-                                    inner[axis] += 1;
-                                }
+                                    let mut inner = vertex;
 
-                                if boundary.kind(Face::positive(axis)) == BoundaryKind::Radiative
-                                    && vertex[axis] == engine.vertex_size()[axis] - 1
-                                {
-                                    inner[axis] -= 1;
-                                }
+                                    // Find innter vertex for approximating higher order r dependence
+                                    for axis in 0..N {
+                                        if boundary.kind(Face::negative(axis)) == BoundaryKind::Radiative
+                                            && vertex[axis] == 0
+                                        {
+                                            inner[axis] += 1;
+                                        }
+                                    
+                                        if boundary.kind(Face::positive(axis)) == BoundaryKind::Radiative
+                                            && vertex[axis] == engine.vertex_size()[axis] - 1
+                                        {
+                                            inner[axis] -= 1;
+                                        }
+                                    }
+                                
+                                    let inner_position = engine.position(inner);
+                                    let inner_r = inner_position.iter().map(|&v| v * v).sum::<f64>().sqrt();
+                                    let inner_index = engine.index_from_vertex(inner);
+                                
+                                    // Get condition parameters.
+                                    let params = boundary.radiative(position);
+                                    // Inner R dependence.
+                                    let mut inner_advection = source[inner_index] - params.target;
+                                
+                                    for axis in 0..N {
+                                        let derivative = engine.derivative(source, axis, inner);
+                                        inner_advection += inner_position[axis] * derivative;
+                                    }
+                                
+                                    inner_advection *= params.speed;
+                                
+                                    let k = inner_r
+                                        * inner_r
+                                        * inner_r
+                                        * (dest[inner_index] + inner_advection / inner_r);
+                                
+                                    // Vertex
+                                    let mut advection = source[index] - params.target;
+                                
+                                    for axis in 0..N {
+                                        let derivative = engine.derivative(source, axis, vertex);
+                                        advection += position[axis] * derivative;
+                                    }
+                                
+                                    advection *= params.speed;
+                                    dest[index] = -advection / r + k / (r * r * r);
+                                };
                             }
 
-                            let inner_position = engine.position(inner);
-                            let inner_r = inner_position.iter().map(|&v| v * v).sum::<f64>().sqrt();
-                            let inner_index = engine.index_from_vertex(inner);
-
-                            // Get condition parameters.
-                            let params = boundary.radiative(position);
-                            // Inner R dependence.
-                            let mut inner_advection = source[inner_index] - params.target;
-
-                            for axis in 0..N {
-                                let derivative = engine.derivative(source, axis, inner);
-                                inner_advection += inner_position[axis] * derivative;
+                            match order {
+                                2 => { inner!(2); },
+                                4 => { inner!(4); },
+                                6 => { inner!(6); },
+                                _ => unimplemented!("Order unimplemented")
                             }
-
-                            inner_advection *= params.speed;
-
-                            let k = inner_r
-                                * inner_r
-                                * inner_r
-                                * (dest[inner_index] + inner_advection / inner_r);
-
-                            // Vertex
-                            let mut advection = source[index] - params.target;
-
-                            for axis in 0..N {
-                                let derivative = engine.derivative(source, axis, vertex);
-                                advection += position[axis] * derivative;
-                            }
-
-                            advection *= params.speed;
-                            dest[index] = -advection / r + k / (r * r * r);
                         }
                     }
                 }

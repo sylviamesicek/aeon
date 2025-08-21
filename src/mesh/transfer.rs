@@ -1,4 +1,3 @@
-use crate::IRef;
 use crate::geometry::{ActiveCellId, IndexSpace, NeighborId, Split};
 use crate::kernel::Interpolation;
 use reborrow::ReborrowMut;
@@ -11,8 +10,22 @@ use crate::{
 };
 
 impl<const N: usize> Mesh<N> {
+    pub fn transfer_system<S: System + Sync>(
+        &mut self,
+        order: usize,
+        source: SystemSlice<S>,
+        dest: SystemSliceMut<S>,
+    ) {
+        match order {
+            2 => self.transfer_system_impl::<2, _>(source, dest),
+            4 => self.transfer_system_impl::<4, _>(source, dest),
+            6 => self.transfer_system_impl::<6, _>(source, dest),
+            _ => unimplemented!("Order unimplemented"),
+        }
+    }
+
     /// Transfers data from an old version of the mesh to the new refined version.
-    pub fn transfer_system<const ORDER: usize, S: System + Sync>(
+    fn transfer_system_impl<const ORDER: usize, S: System + Sync>(
         &mut self,
         source: SystemSlice<S>,
         dest: SystemSliceMut<S>,

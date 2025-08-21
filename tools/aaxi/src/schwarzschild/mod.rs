@@ -177,7 +177,7 @@ pub fn schwarzschild(matches: &ArgMatches) -> eyre::Result<()> {
             system.as_mut_slice(),
         )
         .unwrap();
-        mesh.fill_boundary(Order::<4>, FieldConditions, system.as_mut_slice());
+        mesh.fill_boundary(4, FieldConditions, system.as_mut_slice());
 
         // Perform amr
         mesh.flag_wavelets(4, 1e-13, 1e-6, system.as_slice());
@@ -241,7 +241,7 @@ pub fn schwarzschild(matches: &ArgMatches) -> eyre::Result<()> {
     let search = finder.search_with_callback(
         &mesh,
         system.as_slice(),
-        Order::<4>,
+        4,
         &mut surface,
         HorizonCallback {
             output: &output,

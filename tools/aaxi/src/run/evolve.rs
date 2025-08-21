@@ -27,8 +27,6 @@ use std::{
     time::{Duration, Instant},
 };
 
-const ORDER: Order<4> = Order::<4>;
-
 #[derive(Clone)]
 struct FieldDerivs {
     gauge: GaugeCondition,
@@ -522,7 +520,7 @@ pub fn evolve_data(
         // ******************************
 
         // Fill boundaries
-        mesh.fill_boundary(ORDER, FieldConditions, fields.as_mut_slice());
+        mesh.fill_boundary(4, FieldConditions, fields.as_mut_slice());
 
         // *******************************
         // Norm
@@ -564,7 +562,7 @@ pub fn evolve_data(
             scratch.copy_from_slice(fields.contigious());
             fields.resize(mesh.num_nodes());
             mesh.transfer_system(
-                ORDER,
+                4,
                 SystemSlice::from_contiguous(&scratch, &system),
                 fields.as_mut_slice(),
             );
@@ -641,7 +639,7 @@ pub fn evolve_data(
             let result = finder.search_with_callback(
                 &mesh,
                 fields.as_slice(),
-                ORDER,
+                4,
                 surface,
                 HorizonCallback {
                     directory: horizon_dir.as_path(),
@@ -718,7 +716,7 @@ pub fn evolve_data(
         integrator
             .step(
                 &mut mesh,
-                ORDER,
+                4,
                 FieldConditions,
                 FieldDerivs {
                     gauge: config.evolve.gauge,
@@ -764,10 +762,7 @@ pub fn evolve_data(
 
         // Check if lapse is too small, which indicates collapse
         if lapse < 1e-7 {
-            println!(
-                "{}",
-                style(format!("lapse too small: {:.5e}", lapse)).red()
-            );
+            println!("{}", style(format!("lapse too small: {:.5e}", lapse)).red());
 
             break 'evolve config
                 .error_handler
