@@ -1,6 +1,7 @@
 directory = "output/axigauss/search"
 parameter = "amplitude"
-start = 0.0
-end = 0.5
-max_depth = 10
-min_error = 1e-5
+start = 0.25
+end = 0.35
+max_depth = 25
+min_error = 1e-15
+parallel = 10
