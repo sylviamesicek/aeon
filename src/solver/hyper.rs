@@ -339,14 +339,14 @@ mod tests {
     use std::{convert::Infallible, f64::consts};
 
     #[derive(Clone)]
-    struct PoissonConditions;
+    struct _PoissonConditions;
 
-    impl SystemBoundaryConds<2> for PoissonConditions {
-        fn kind(&self, channel: usize, _face: Face<2>) -> BoundaryKind {
+    impl SystemBoundaryConds<2> for _PoissonConditions {
+        fn kind(&self, _channel: usize, _face: Face<2>) -> BoundaryKind {
             BoundaryKind::StrongDirichlet
         }
 
-        fn dirichlet(&self, channel: usize, _position: [f64; 2]) -> DirichletParams {
+        fn dirichlet(&self, _channel: usize, _position: [f64; 2]) -> DirichletParams {
             DirichletParams {
                 target: 0.0,
                 strength: 1.0,

@@ -5,7 +5,6 @@ use aeon::{
     prelude::*,
 };
 use core::f64;
-use serde::{Deserialize, Serialize};
 use std::convert::Infallible;
 
 const KAPPA: f64 = 8.0 * f64::consts::PI;
