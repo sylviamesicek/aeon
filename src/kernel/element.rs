@@ -101,7 +101,7 @@ impl<const N: usize> Element<N> {
         &self.grid
     }
 
-    pub fn prolong_stencil(&self, target: usize) -> ColRef<f64> {
+    pub fn prolong_stencil(&self, target: usize) -> ColRef<'_, f64> {
         self.stencils.col(target)
     }
 

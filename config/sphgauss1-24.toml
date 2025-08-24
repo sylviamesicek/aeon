@@ -28,14 +28,13 @@ fix_grid = false
 [visualize]
 save_initial = false
 save_initial_levels = false
-save_evolve = false
+save_evolve = true
 save_evolve_interval = 0.05
 stride = "per_vertex"
 
 [diagnostic]
 save_evolve = true
 save_evolve_interval = 20
-
 
 [[sources]]
 mass = 0.0

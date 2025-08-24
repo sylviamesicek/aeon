@@ -56,11 +56,11 @@ impl ApproxOperator {
         )
     }
 
-    pub fn weights(&self, i: usize) -> ColRef<f64> {
+    pub fn weights(&self, i: usize) -> ColRef<'_, f64> {
         self.shape.col(i)
     }
 
-    pub fn shape(&self) -> MatRef<f64> {
+    pub fn shape(&self) -> MatRef<'_, f64> {
         self.shape.rb()
     }
 }

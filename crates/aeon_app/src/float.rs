@@ -3,7 +3,7 @@ use std::num::ParseIntError;
 
 /// Encodes a float as a hexidecimal string
 pub fn encode_float(value: f64) -> String {
-    let bits: u64 = unsafe { std::mem::transmute(value) };
+    let bits: u64 = value.to_bits();
     format!("{:016x}", bits)
 }
 
@@ -11,7 +11,7 @@ pub fn encode_float(value: f64) -> String {
 #[allow(dead_code)]
 pub fn decode_float(value: &str) -> Result<f64, ParseIntError> {
     let bits = u64::from_str_radix(value, 16)?;
-    Ok(unsafe { std::mem::transmute(bits) })
+    Ok(f64::from_bits(bits))
 }
 
 pub fn log_range(start: f64, end: f64, n: usize) -> LogRange {

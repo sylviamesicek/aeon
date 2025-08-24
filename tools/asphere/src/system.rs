@@ -31,7 +31,7 @@ impl System for Fields {
     }
 
     fn count(&self) -> usize {
-        4
+        5
     }
 
     fn label_from_index(&self, index: usize) -> Self::Label {
@@ -434,7 +434,7 @@ pub fn intial_data(
                     sigma: [sigma.unwrap()],
                     center: [center.unwrap()],
                 },
-                output.field_mut(Field::Phi),
+                output.field_mut(Field::Psi),
             );
         }
         ScalarFieldProfile::TanH {
@@ -460,7 +460,7 @@ pub fn intial_data(
                     sigma: sigma.unwrap(),
                     center: [center.unwrap()],
                 },
-                output.field_mut(Field::Phi),
+                output.field_mut(Field::Psi),
             );
         }
     }

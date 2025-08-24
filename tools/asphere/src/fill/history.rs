@@ -19,7 +19,7 @@ impl FillHistory {
         let mut reader = csv::Reader::from_path(path)?;
         for record in reader.deserialize::<FillRecord>() {
             if let Ok(record) = record {
-                let param = unsafe { std::mem::transmute(record.param) };
+                let param = record.param.to_bits();
                 map.insert(param, record);
             }
         }
@@ -40,12 +40,12 @@ impl FillHistory {
     }
 
     pub fn insert(&mut self, key: f64, mass: f64) {
-        let bits: u64 = unsafe { std::mem::transmute(key) };
+        let bits: u64 = key.to_bits();
         self.map.insert(bits, FillRecord { param: key, mass });
     }
 
     pub fn mass(&self, key: f64) -> Option<f64> {
-        let bits: u64 = unsafe { std::mem::transmute(key) };
+        let bits: u64 = key.to_bits();
         self.map.get(&bits).map(|v| v.mass)
     }
 }
