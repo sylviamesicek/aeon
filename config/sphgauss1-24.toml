@@ -33,7 +33,7 @@ save_evolve_interval = 0.05
 stride = "per_vertex"
 
 [diagnostic]
-save_evolve = true
+save_evolve = false
 save_evolve_interval = 20
 
 [[sources]]

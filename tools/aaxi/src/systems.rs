@@ -1,204 +1,54 @@
 use aeon::prelude::*;
-use serde::{Deserialize, Serialize};
 
-/// System for storing all fields necessary for axisymmetric evolution.
-#[derive(Clone, Serialize, Deserialize)]
-pub struct Fields {
-    /// Scalar field masses.
-    pub scalar_fields: Vec<f64>,
+pub const GRR_CH: usize = 0;
+pub const GRZ_CH: usize = 1;
+pub const GZZ_CH: usize = 2;
+pub const S_CH: usize = 3;
+pub const KRR_CH: usize = 4;
+pub const KRZ_CH: usize = 5;
+pub const KZZ_CH: usize = 6;
+pub const Y_CH: usize = 7;
+pub const THETA_CH: usize = 8;
+pub const ZR_CH: usize = 9;
+pub const ZZ_CH: usize = 10;
+pub const LAPSE_CH: usize = 11;
+pub const SHIFTR_CH: usize = 12;
+pub const SHIFTZ_CH: usize = 13;
+
+pub const fn phi_ch(i: usize) -> usize {
+    14 + 2 * i
 }
 
-impl Fields {
-    pub fn num_scalar_fields(&self) -> usize {
-        self.scalar_fields.len()
-    }
-
-    pub fn scalar_fields(&self) -> impl Iterator<Item = f64> + '_ {
-        self.scalar_fields.iter().cloned()
-    }
+pub const fn pi_ch(i: usize) -> usize {
+    14 + 2 * i + 1
 }
 
-impl System for Fields {
-    const NAME: &'static str = "Fields";
-
-    type Label = Field;
-
-    fn enumerate(&self) -> impl Iterator<Item = Self::Label> {
-        MetricSystem
-            .enumerate()
-            .map(Field::Metric)
-            .chain(GaugeSystem.enumerate().map(Field::Gauge))
-            .chain(ConstraintSystem.enumerate().map(Field::Constraint))
-            .chain((0..self.scalar_fields.len()).flat_map(|i| {
-                [ScalarField::Phi, ScalarField::Pi]
-                    .into_iter()
-                    .map(move |scalar_field| Field::ScalarField(scalar_field, i))
-            }))
-    }
-
-    fn count(&self) -> usize {
-        MetricSystem.count()
-            + GaugeSystem.count()
-            + ConstraintSystem.count()
-            + ScalarFields(self.scalar_fields.len()).count()
-    }
-
-    fn label_from_index(&self, mut index: usize) -> Self::Label {
-        // ************************
-        // Metric *****************
-
-        if index < MetricSystem.count() {
-            return Field::Metric(MetricSystem.label_from_index(index));
-        }
-        index -= MetricSystem.count();
-
-        if index < GaugeSystem.count() {
-            return Field::Gauge(GaugeSystem.label_from_index(index));
-        }
-        index -= GaugeSystem.count();
-
-        if index < ConstraintSystem.count() {
-            return Field::Constraint(ConstraintSystem.label_from_index(index));
-        }
-        index -= ConstraintSystem.count();
-
-        // **************************
-        // Sources ******************
-
-        let (scalar_field, id) = ScalarFields(self.scalar_fields.len()).label_from_index(index);
-        Field::ScalarField(scalar_field, id)
-    }
-
-    fn label_index(&self, label: Self::Label) -> usize {
-        let mut offset = 0;
-
-        if let Field::Metric(metric) = label {
-            return MetricSystem.label_index(metric) + offset;
-        }
-        offset += MetricSystem.count();
-
-        if let Field::Gauge(gauge) = label {
-            return GaugeSystem.label_index(gauge) + offset;
-        }
-        offset += GaugeSystem.count();
-
-        if let Field::Constraint(constraint) = label {
-            return ConstraintSystem.label_index(constraint) + offset;
-        }
-        offset += ConstraintSystem.count();
-
-        let Field::ScalarField(scalar_field, id) = label else {
-            unreachable!()
-        };
-
-        ScalarFields(self.scalar_fields.len()).label_index((scalar_field, id)) + offset
-    }
-
-    fn label_name(&self, label: Self::Label) -> String {
-        match label {
-            Field::Metric(metric) => MetricSystem.label_name(metric),
-            Field::Gauge(gauge) => GaugeSystem.label_name(gauge),
-            Field::Constraint(constraints) => ConstraintSystem.label_name(constraints),
-            Field::ScalarField(scalar_field, id) => {
-                ScalarFields(self.scalar_fields.len()).label_name((scalar_field, id))
-            }
-        }
-    }
+pub const fn num_channels(scalar_fields: usize) -> usize {
+    14 + 2 * scalar_fields
 }
 
-/// Label for indexing fields in `Fields`.
-#[derive(Clone, Copy)]
-pub enum Field {
-    /// Metric and extrinsic curvature.
-    Metric(Metric),
-    /// Lapse and shift.
-    Gauge(Gauge),
-    /// Constraint violation.
-    Constraint(Constraint),
-    /// Scalar field sources.
-    ScalarField(ScalarField, usize),
-}
+pub fn save_image(checkpoint: &mut Checkpoint<2>, image: ImageRef) {
+    checkpoint.save_field("Grr", image.channel(GRR_CH));
+    checkpoint.save_field("Grz", image.channel(GRZ_CH));
+    checkpoint.save_field("Gzz", image.channel(GZZ_CH));
+    checkpoint.save_field("S", image.channel(S_CH));
+    checkpoint.save_field("Krr", image.channel(KRR_CH));
+    checkpoint.save_field("Krz", image.channel(KRZ_CH));
+    checkpoint.save_field("Kzz", image.channel(KZZ_CH));
+    checkpoint.save_field("Y", image.channel(Y_CH));
+    checkpoint.save_field("Theta", image.channel(THETA_CH));
+    checkpoint.save_field("Zr", image.channel(ZR_CH));
+    checkpoint.save_field("Zz", image.channel(ZZ_CH));
+    checkpoint.save_field("Lapse", image.channel(LAPSE_CH));
+    checkpoint.save_field("Shiftr", image.channel(SHIFTR_CH));
+    checkpoint.save_field("Shiftz", image.channel(SHIFTZ_CH));
 
-/// Metric variables.
-#[derive(Clone, Copy, SystemLabel)]
-pub enum Metric {
-    Grr,
-    Grz,
-    Gzz,
-    S,
-    Krr,
-    Krz,
-    Kzz,
-    Y,
-}
+    let num_scalar_fields = (image.num_channels() - 14) / 2;
 
-/// Gauge variables.
-#[derive(Clone, Copy, SystemLabel)]
-pub enum Gauge {
-    Lapse,
-    Shiftr,
-    Shiftz,
-}
-
-/// Constraint violation variables.
-#[derive(Clone, Copy, SystemLabel)]
-pub enum Constraint {
-    Theta,
-    Zr,
-    Zz,
-}
-
-/// Scalar field variables.
-#[derive(Clone, Copy)]
-pub struct ScalarFields(pub usize);
-
-impl System for ScalarFields {
-    const NAME: &'static str = "ScalarFields";
-
-    type Label = (ScalarField, usize);
-
-    fn count(&self) -> usize {
-        self.0 * 2
+    for i in 0..num_scalar_fields {
+        checkpoint.save_field(&format!("Phi{i}"), image.channel(phi_ch(i)));
+        checkpoint.save_field(&format!("Pi{i}"), image.channel(phi_ch(i)));
     }
-
-    fn enumerate(&self) -> impl Iterator<Item = Self::Label> {
-        (0..self.0).flat_map(|i| {
-            [ScalarField::Phi, ScalarField::Pi]
-                .into_iter()
-                .map(move |scalar_field| (scalar_field, i))
-        })
-    }
-
-    fn label_index(&self, label: Self::Label) -> usize {
-        match label {
-            (ScalarField::Phi, i) => 2 * i,
-            (ScalarField::Pi, i) => 2 * i + 1,
-        }
-    }
-
-    fn label_from_index(&self, index: usize) -> Self::Label {
-        if index % 2 == 0 {
-            (ScalarField::Phi, index / 2)
-        } else {
-            (ScalarField::Pi, index / 2)
-        }
-    }
-
-    fn label_name(&self, label: Self::Label) -> String {
-        match label {
-            (ScalarField::Phi, i) => format!("Phi{i}"),
-            (ScalarField::Pi, i) => format!("Pi{i}"),
-        }
-    }
-}
-
-/// Variables for a single scalar field.
-#[derive(Clone, Copy)]
-pub enum ScalarField {
-    /// Scalar field component
-    Phi,
-    /// Time derivative of `Phi`.
-    Pi,
 }
 
 /// Boundary conditions for various fields.
@@ -206,9 +56,7 @@ pub enum ScalarField {
 pub struct FieldConditions;
 
 impl SystemBoundaryConds<2> for FieldConditions {
-    type System = Fields;
-
-    fn kind(&self, label: <Self::System as System>::Label, face: Face<2>) -> BoundaryKind {
+    fn kind(&self, channel: usize, face: Face<2>) -> BoundaryKind {
         if face.side {
             return BoundaryKind::Radiative;
         }
@@ -218,26 +66,24 @@ impl SystemBoundaryConds<2> for FieldConditions {
         let s01 = [BoundaryKind::AntiSymmetric, BoundaryKind::Symmetric];
         let s11 = [BoundaryKind::Symmetric, BoundaryKind::Symmetric];
 
-        let axes = match label {
-            Field::Metric(Metric::Grr) | Field::Metric(Metric::Krr) => s11,
-            Field::Metric(Metric::Grz) | Field::Metric(Metric::Krz) => s00,
-            Field::Metric(Metric::Gzz) | Field::Metric(Metric::Kzz) => s11,
-            Field::Metric(Metric::S) | Field::Metric(Metric::Y) => s01,
+        let axes = match channel {
+            GRR_CH | KRR_CH => s11,
+            GRZ_CH | KRZ_CH => s00,
+            GZZ_CH | KZZ_CH => s11,
+            S_CH | Y_CH => s01,
 
-            Field::Constraint(Constraint::Theta) | Field::Gauge(Gauge::Lapse) => s11,
-            Field::Constraint(Constraint::Zr) | Field::Gauge(Gauge::Shiftr) => s01,
-            Field::Constraint(Constraint::Zz) | Field::Gauge(Gauge::Shiftz) => s10,
+            THETA_CH | LAPSE_CH => s11,
+            ZR_CH | SHIFTR_CH => s01,
+            ZZ_CH | SHIFTZ_CH => s10,
 
-            Field::ScalarField(_, _) => s11,
+            _ => s11,
         };
         axes[face.axis]
     }
 
-    fn radiative(&self, field: Field, _position: [f64; 2]) -> RadiativeParams {
-        match field {
-            Field::Metric(Metric::Grr)
-            | Field::Metric(Metric::Gzz)
-            | Field::Gauge(Gauge::Lapse) => RadiativeParams::lightlike(1.0),
+    fn radiative(&self, channel: usize, _position: [f64; 2]) -> RadiativeParams {
+        match channel {
+            GRR_CH | GZZ_CH | LAPSE_CH => RadiativeParams::lightlike(1.0),
             _ => RadiativeParams::lightlike(0.0),
         }
     }

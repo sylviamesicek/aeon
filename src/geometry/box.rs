@@ -2,11 +2,11 @@ use std::array::{self, from_fn};
 
 use datasize::DataSize;
 
-use crate::geometry::AxisMask;
+use crate::geometry::Split;
 
 /// Represents a rectangular physical domain.
 #[derive(Debug, Copy, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
-pub struct Rectangle<const N: usize> {
+pub struct HyperBox<const N: usize> {
     /// Size of the rectangle along each axis.
     #[serde(with = "crate::array")]
     pub size: [f64; N],
@@ -15,7 +15,7 @@ pub struct Rectangle<const N: usize> {
     pub origin: [f64; N],
 }
 
-impl<const N: usize> DataSize for Rectangle<N> {
+impl<const N: usize> DataSize for HyperBox<N> {
     const IS_DYNAMIC: bool = false;
     const STATIC_HEAP_SIZE: usize = 0;
 
@@ -24,9 +24,9 @@ impl<const N: usize> DataSize for Rectangle<N> {
     }
 }
 
-impl<const N: usize> Rectangle<N> {
+impl<const N: usize> HyperBox<N> {
     /// Unit rectangle.
-    pub const UNIT: Self = Rectangle {
+    pub const UNIT: Self = HyperBox {
         size: [1.0; N],
         origin: [0.0; N],
     };
@@ -55,10 +55,10 @@ impl<const N: usize> Rectangle<N> {
     }
 
     /// Subdivides the rectangle.
-    pub fn split(&self, mask: AxisMask<N>) -> Self {
+    pub fn subdivide(&self, split: Split<N>) -> Self {
         let size = array::from_fn(|i| self.size[i] / 2.0);
         let origin = array::from_fn(|i| {
-            if mask.is_set(i) {
+            if split.is_set(i) {
                 self.origin[i] + self.size[i] / 2.0
             } else {
                 self.origin[i]

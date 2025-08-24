@@ -1,6 +1,7 @@
+use crate::image::{Image, ImageRef};
+use crate::mesh::{Mesh, MeshSer};
 use crate::prelude::IndexSpace;
 use ron::ser::PrettyConfig;
-use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs::File;
@@ -8,9 +9,6 @@ use std::io::{Read as _, Write as _};
 use std::path::Path;
 use std::str::FromStr;
 use thiserror::Error;
-
-use crate::mesh::{Mesh, MeshSer};
-use crate::system::{System, SystemSlice, SystemVec};
 
 #[derive(Debug, Error)]
 pub enum CheckpointParseError {
@@ -29,7 +27,7 @@ pub struct Checkpoint<const N: usize> {
     /// Is this mesh embedded in a higher dimensional mesh?
     embedding: Option<Embedding>,
     /// Systems which are stored in the checkpoint.
-    systems: HashMap<String, SystemMeta>,
+    systems: HashMap<String, ImageMeta>,
     /// Fields which are stored in the checkpoint
     fields: HashMap<String, Vec<f64>>,
     /// Int fields (useful for debugging) which are stored in the checkpoint.
@@ -60,71 +58,68 @@ impl<const N: usize> Checkpoint<N> {
         self.mesh.clone().unwrap().into()
     }
 
-    pub fn save_system<S: System + Serialize>(&mut self, data: SystemSlice<S>) {
-        assert!(!self.systems.contains_key(S::NAME));
+    pub fn save_image(&mut self, name: &str, data: ImageRef) {
+        assert!(!self.systems.contains_key(name));
 
-        let count = data.len();
+        let num_channels = data.num_channels();
         let buffer = data
-            .system()
-            .enumerate()
-            .flat_map(|label| data.field(label).iter().cloned())
+            .channels()
+            .flat_map(|label| data.channel(label).iter().cloned())
             .collect();
 
-        let fields = data
-            .system()
-            .enumerate()
-            .map(|label| data.system().label_name(label))
-            .collect();
+        // let fields = data
+        //     .system()
+        //     .enumerate()
+        //     .map(|label| data.system().label_name(label))
+        //     .collect();
 
         self.systems.insert(
-            S::NAME.to_string(),
-            SystemMeta {
-                meta: ron::ser::to_string(data.system()).unwrap(),
-                count,
+            name.to_string(),
+            ImageMeta {
+                channels: num_channels,
                 buffer,
-                fields,
             },
         );
     }
 
-    pub fn read_system<S: System + DeserializeOwned>(&self) -> SystemVec<S> {
-        let data = self.systems.get(S::NAME).unwrap();
-        let system = ron::de::from_str::<S>(&data.meta).unwrap();
+    pub fn read_image(&self, name: &str) -> Image {
+        let data = self.systems.get(name).unwrap();
+        // let system = ron::de::from_str::<S>(&data.meta).unwrap();
 
-        SystemVec::from_contiguous(data.buffer.clone(), system)
+        Image::from_storage(data.buffer.clone(), data.channels)
     }
 
-    pub fn save_system_default<S: System + Default>(&mut self, data: SystemSlice<S>) {
-        assert!(!self.systems.contains_key(S::NAME));
+    // pub fn save_system_default<S: System + Default>(&mut self, data: SystemSlice<S>) {
+    //     assert!(!self.systems.contains_key(S::NAME));
 
-        let count = data.len();
-        let buffer = data
-            .system()
-            .enumerate()
-            .flat_map(|label| data.field(label).iter().cloned())
-            .collect();
+    //     let count = data.len();
+    //     let buffer = data
+    //         .system()
+    //         .enumerate()
+    //         .flat_map(|label| data.field(label).iter().cloned())
+    //         .collect();
 
-        let fields = data
-            .system()
-            .enumerate()
-            .map(|label| data.system().label_name(label))
-            .collect();
+    //     let fields = data
+    //         .system()
+    //         .enumerate()
+    //         .map(|label| data.system().label_name(label))
+    //         .collect();
 
-        self.systems.insert(
-            S::NAME.to_string(),
-            SystemMeta {
-                meta: String::new(),
-                count,
-                buffer,
-                fields,
-            },
-        );
-    }
+    //     self.systems.insert(
+    //         S::NAME.to_string(),
+    //         SystemMeta {
+    //             meta: String::new(),
+    //             count,
+    //             buffer,
+    //             fields,
+    //         },
+    //     );
+    // }
 
-    pub fn read_system_default<S: System + Default>(&mut self) -> SystemVec<S> {
-        let data = self.systems.get(S::NAME).unwrap();
-        SystemVec::from_contiguous(data.buffer.clone(), S::default())
-    }
+    // pub fn read_system_default<S: System + Default>(&mut self) -> SystemVec<S> {
+    //     let data = self.systems.get(S::NAME).unwrap();
+    //     SystemVec::from_contiguous(data.buffer.clone(), S::default())
+    // }
 
     /// Attaches a field for serialization in the model.
     pub fn save_field(&mut self, name: &str, data: &[f64]) {
@@ -198,11 +193,9 @@ impl<const N: usize> Checkpoint<N> {
 
 /// Metadata required for storing a system.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct SystemMeta {
-    pub meta: String,
-    pub count: usize,
+pub struct ImageMeta {
+    pub channels: usize,
     pub buffer: Vec<f64>,
-    pub fields: Vec<String>,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -301,20 +294,20 @@ impl<const N: usize> Checkpoint<N> {
             cell: Vec::new(),
         };
 
-        for (name, system) in self.systems.iter() {
-            for (idx, field) in system.fields.iter().enumerate() {
-                let start = idx * system.count;
-                let end = idx * system.count + system.count;
+        // for (name, system) in self.systems.iter() {
+        //     for (idx, field) in system.fields.iter().enumerate() {
+        //         let start = idx * system.count;
+        //         let end = idx * system.count + system.count;
 
-                attributes.point.push(Self::field_attribute(
-                    &mesh,
-                    format!("{}::{}", name, field),
-                    &system.buffer[start..end],
-                    config.ghost,
-                    stride,
-                ));
-            }
-        }
+        //         attributes.point.push(Self::field_attribute(
+        //             &mesh,
+        //             format!("{}::{}", name, field),
+        //             &system.buffer[start..end],
+        //             config.ghost,
+        //             stride,
+        //         ));
+        //     }
+        // }
 
         for (name, system) in self.fields.iter() {
             attributes.point.push(Self::field_attribute(

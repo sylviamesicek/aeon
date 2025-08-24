@@ -1,8 +1,8 @@
 #![allow(clippy::needless_range_loop)]
 
 use crate::{
-    geometry::{AxisMask, Region, Side, regions},
-    prelude::{Face, IndexSpace, Rectangle},
+    geometry::{Region, Side, Split, regions},
+    prelude::{Face, HyperBox, IndexSpace},
 };
 use bitvec::{order::Lsb0, slice::BitSlice, vec::BitVec};
 use datasize::DataSize;
@@ -63,7 +63,7 @@ impl CellId {
     /// The root cell in a tree is also stored at index 0.
     pub const ROOT: CellId = CellId(0);
 
-    pub fn child<const N: usize>(offset: Self, split: AxisMask<N>) -> Self {
+    pub fn child<const N: usize>(offset: Self, split: Split<N>) -> Self {
         Self(offset.0 + split.to_linear())
     }
 }
@@ -71,7 +71,7 @@ impl CellId {
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 struct Cell<const N: usize> {
     /// Physical bounds of this node
-    bounds: Rectangle<N>,
+    bounds: HyperBox<N>,
     /// Parent Node
     parent: usize,
     /// Child nodes
@@ -101,7 +101,7 @@ impl<const N: usize> DataSize for Cell<N> {
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(from = "TreeSer<N>", into = "TreeSer<N>")]
 pub struct Tree<const N: usize> {
-    domain: Rectangle<N>,
+    domain: HyperBox<N>,
     periodic: [bool; N],
     // *********************
     // Active Cells
@@ -124,7 +124,7 @@ pub struct Tree<const N: usize> {
 impl<const N: usize> Tree<N> {
     /// Constructs a new tree consisting of a single root cell, covering the given
     /// domain.
-    pub fn new(domain: Rectangle<N>) -> Self {
+    pub fn new(domain: HyperBox<N>) -> Self {
         let mut result = Self {
             domain,
             periodic: [false; N],
@@ -142,7 +142,7 @@ impl<const N: usize> Tree<N> {
         self.periodic[axis] = periodic;
     }
 
-    pub fn domain(&self) -> Rectangle<N> {
+    pub fn domain(&self) -> HyperBox<N> {
         self.domain
     }
 
@@ -174,11 +174,11 @@ impl<const N: usize> Tree<N> {
     }
 
     /// Returns the numerical bounds of a given cell.
-    pub fn bounds(&self, cell: CellId) -> Rectangle<N> {
+    pub fn bounds(&self, cell: CellId) -> HyperBox<N> {
         self.cells[cell.0].bounds
     }
 
-    pub fn active_bounds(&self, active: ActiveCellId) -> Rectangle<N> {
+    pub fn active_bounds(&self, active: ActiveCellId) -> HyperBox<N> {
         self.bounds(self.cell_from_active_index(active))
     }
 
@@ -200,7 +200,7 @@ impl<const N: usize> Tree<N> {
     }
 
     /// Returns a child of a give node.
-    pub fn child(&self, cell: CellId, child: AxisMask<N>) -> Option<CellId> {
+    pub fn child(&self, cell: CellId, child: Split<N>) -> Option<CellId> {
         if self.cells[cell.0].children == NULL {
             return None;
         }
@@ -222,13 +222,13 @@ impl<const N: usize> Tree<N> {
             [N * self.active_offsets[active.0]..N * self.active_offsets[active.0 + 1]]
     }
 
-    pub fn active_split(&self, active: ActiveCellId, level: usize) -> AxisMask<N> {
-        AxisMask::pack(array::from_fn(|axis| {
+    pub fn active_split(&self, active: ActiveCellId, level: usize) -> Split<N> {
+        Split::pack(array::from_fn(|axis| {
             self.active_zvalue(active)[N * level + axis]
         }))
     }
 
-    pub fn most_recent_active_split(&self, active: ActiveCellId) -> Option<AxisMask<N>> {
+    pub fn most_recent_active_split(&self, active: ActiveCellId) -> Option<Split<N>> {
         if self.num_cells() == 1 {
             return None;
         }
@@ -295,7 +295,7 @@ impl<const N: usize> Tree<N> {
             map[cell] = ActiveCellId(cursor);
 
             if flags[cell] {
-                cursor += AxisMask::<N>::COUNT;
+                cursor += Split::<N>::COUNT;
             } else {
                 cursor += 1;
             }
@@ -306,7 +306,7 @@ impl<const N: usize> Tree<N> {
         assert!(self.num_active_cells() == flags.len());
 
         let num_flags = flags.iter().copied().filter(|&p| p).count();
-        let total_active_cells = self.num_active_cells() + (AxisMask::<N>::COUNT - 1) * num_flags;
+        let total_active_cells = self.num_active_cells() + (Split::<N>::COUNT - 1) * num_flags;
 
         let mut active_values = BitVec::with_capacity(total_active_cells * N);
         let mut active_offsets = Vec::with_capacity(total_active_cells);
@@ -314,7 +314,7 @@ impl<const N: usize> Tree<N> {
 
         for active in 0..self.num_active_cells() {
             if flags[active] {
-                for split in AxisMask::<N>::enumerate() {
+                for split in Split::<N>::enumerate() {
                     active_values.extend_from_bitslice(self.active_zvalue(ActiveCellId(active)));
                     for axis in 0..N {
                         active_values.push(split.is_set(axis));
@@ -342,7 +342,7 @@ impl<const N: usize> Tree<N> {
         }
 
         // Short circuit if this mesh only has two levels.
-        if flags.len() == AxisMask::<N>::COUNT {
+        if flags.len() == Split::<N>::COUNT {
             return flags.iter().all(|&b| !b);
         }
 
@@ -372,21 +372,21 @@ impl<const N: usize> Tree<N> {
             let level = self.active_level(ActiveCellId(cell));
             let split = self.most_recent_active_split(ActiveCellId(cell)).unwrap();
 
-            if split != AxisMask::<N>::empty() {
+            if split != Split::<N>::empty() {
                 return false;
             }
 
-            for offset in 0..AxisMask::<N>::COUNT {
+            for offset in 0..Split::<N>::COUNT {
                 if self.active_level(ActiveCellId(cell + offset)) != level {
                     return false;
                 }
             }
 
-            if !flags[cell..cell + AxisMask::<N>::COUNT].iter().all(|&b| b) {
+            if !flags[cell..cell + Split::<N>::COUNT].iter().all(|&b| b) {
                 return false;
             }
             // Skip forwards. We have considered all cases.
-            cell += AxisMask::<N>::COUNT;
+            cell += Split::<N>::COUNT;
         }
 
         true
@@ -401,7 +401,7 @@ impl<const N: usize> Tree<N> {
         }
 
         // Short circuit if this mesh only has two levels.
-        if flags.len() == AxisMask::<N>::COUNT {
+        if flags.len() == Split::<N>::COUNT {
             flags.fill(false);
         }
 
@@ -435,14 +435,14 @@ impl<const N: usize> Tree<N> {
                 let level = self.active_level(ActiveCellId(cell));
                 let split = self.most_recent_active_split(ActiveCellId(cell)).unwrap();
 
-                if split != AxisMask::<N>::empty() {
+                if split != Split::<N>::empty() {
                     flags[cell] = false;
                     is_balanced = false;
                     cell += 1;
                     continue;
                 }
 
-                for offset in 0..AxisMask::<N>::COUNT {
+                for offset in 0..Split::<N>::COUNT {
                     if self.active_level(ActiveCellId(cell + offset)) != level {
                         flags[cell] = false;
                         is_balanced = false;
@@ -451,12 +451,12 @@ impl<const N: usize> Tree<N> {
                     }
                 }
 
-                if !flags[cell..cell + AxisMask::<N>::COUNT].iter().all(|&b| b) {
-                    flags[cell..cell + AxisMask::<N>::COUNT].fill(false);
+                if !flags[cell..cell + Split::<N>::COUNT].iter().all(|&b| b) {
+                    flags[cell..cell + Split::<N>::COUNT].fill(false);
                     is_balanced = false;
                 }
                 // Skip forwards. We have considered all cases.
-                cell += AxisMask::<N>::COUNT;
+                cell += Split::<N>::COUNT;
             }
 
             if is_balanced {
@@ -475,8 +475,8 @@ impl<const N: usize> Tree<N> {
 
         while cell < self.num_active_cells() {
             if flags[cell] {
-                map[cell..cell + AxisMask::<N>::COUNT].fill(ActiveCellId(cursor));
-                cell += AxisMask::<N>::COUNT;
+                map[cell..cell + Split::<N>::COUNT].fill(ActiveCellId(cursor));
+                cell += Split::<N>::COUNT;
             } else {
                 map[cell] = ActiveCellId(cursor);
                 cell += 1;
@@ -491,8 +491,8 @@ impl<const N: usize> Tree<N> {
 
         // Compute number of cells after coarsening
         let num_flags = flags.iter().copied().filter(|&p| p).count();
-        debug_assert!(num_flags % AxisMask::<N>::COUNT == 0);
-        let total_active = self.num_active_cells() - num_flags / AxisMask::<N>::COUNT;
+        debug_assert!(num_flags % Split::<N>::COUNT == 0);
+        let total_active = self.num_active_cells() - num_flags / Split::<N>::COUNT;
 
         let mut active_values = BitVec::with_capacity(total_active * N);
         let mut active_offsets = Vec::new();
@@ -507,13 +507,13 @@ impl<const N: usize> Tree<N> {
 
             if flags[cursor] {
                 #[cfg(debug_assertions)]
-                for split in AxisMask::<N>::enumerate() {
+                for split in Split::<N>::enumerate() {
                     assert!(flags[cursor + split.to_linear()])
                 }
 
                 active_values.extend_from_bitslice(&zvalue[0..zvalue.len().saturating_sub(N)]);
                 // Skip next `Count` cells
-                cursor += AxisMask::<N>::COUNT;
+                cursor += Split::<N>::COUNT;
             } else {
                 active_values.extend_from_bitslice(zvalue);
                 cursor += 1;
@@ -575,7 +575,7 @@ impl<const N: usize> Tree<N> {
 
                 let bounds = self.cells[parent].bounds;
 
-                for mask in AxisMask::<N>::enumerate() {
+                for mask in Split::<N>::enumerate() {
                     let child_cell_start = cursor;
 
                     while cursor < active_end
@@ -587,7 +587,7 @@ impl<const N: usize> Tree<N> {
                     let child_cell_end = cursor;
 
                     self.cells.push(Cell {
-                        bounds: bounds.split(mask),
+                        bounds: bounds.subdivide(mask),
                         parent,
                         children: NULL,
                         active_offset: child_cell_start,
@@ -671,7 +671,7 @@ impl<const N: usize> Tree<N> {
             let center = bounds.center();
             node = CellId::child(
                 children,
-                AxisMask::<N>::pack(array::from_fn(|axis| point[axis] > center[axis])),
+                Split::<N>::pack(array::from_fn(|axis| point[axis] > center[axis])),
             );
         }
 
@@ -695,7 +695,7 @@ impl<const N: usize> Tree<N> {
             let center = bounds.center();
             node = CellId::child(
                 children,
-                AxisMask::<N>::pack(array::from_fn(|axis| point[axis] > center[axis])),
+                Split::<N>::pack(array::from_fn(|axis| point[axis] > center[axis])),
             )
         }
 
@@ -940,7 +940,7 @@ impl<const N: usize> DataSize for Tree<N> {
 /// Helper struct for serializing a tree while avoiding saving redundent data.
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct TreeSer<const N: usize> {
-    domain: Rectangle<N>,
+    domain: HyperBox<N>,
     #[serde(with = "crate::array")]
     periodic: [bool; N],
     active_values: BitVec<usize, Lsb0>,
@@ -977,7 +977,7 @@ impl<const N: usize> From<Tree<N>> for TreeSer<N> {
 impl<const N: usize> Default for TreeSer<N> {
     fn default() -> Self {
         Self {
-            domain: Rectangle::UNIT,
+            domain: HyperBox::UNIT,
             periodic: [false; N],
             active_values: BitVec::default(),
             active_offsets: Vec::default(),
@@ -991,9 +991,9 @@ mod tests {
 
     #[test]
     fn neighbors() {
-        let mut tree = Tree::<2>::new(Rectangle::UNIT);
+        let mut tree = Tree::<2>::new(HyperBox::UNIT);
 
-        assert_eq!(tree.bounds(CellId::ROOT), Rectangle::UNIT);
+        assert_eq!(tree.bounds(CellId::ROOT), HyperBox::UNIT);
         assert_eq!(tree.num_cells(), 1);
         assert_eq!(tree.num_active_cells(), 1);
         assert_eq!(tree.num_levels(), 1);
@@ -1006,7 +1006,7 @@ mod tests {
         assert_eq!(tree.num_cells(), 5);
         assert_eq!(tree.num_active_cells(), 4);
         assert_eq!(tree.num_levels(), 2);
-        for split in AxisMask::enumerate() {
+        for split in Split::enumerate() {
             assert_eq!(tree.active_split(ActiveCellId(split.to_linear()), 0), split);
         }
         for i in 0..4 {
@@ -1038,7 +1038,7 @@ mod tests {
 
     #[test]
     fn periodic_neighbors() {
-        let mut tree = Tree::<2>::new(Rectangle::UNIT);
+        let mut tree = Tree::<2>::new(HyperBox::UNIT);
         tree.set_periodic(0, true);
         tree.set_periodic(1, true);
         assert_eq!(
@@ -1060,7 +1060,7 @@ mod tests {
 
     #[test]
     fn active_neighbors_in_region() {
-        let mut tree = Tree::<2>::new(Rectangle::UNIT);
+        let mut tree = Tree::<2>::new(HyperBox::UNIT);
         // Refine tree
         tree.refine(&[true]);
         tree.refine(&[true, false, false, false]);
@@ -1089,7 +1089,7 @@ mod tests {
 
     #[test]
     fn refinement_and_coarsening() {
-        let mut tree = Tree::<2>::new(Rectangle::UNIT);
+        let mut tree = Tree::<2>::new(HyperBox::UNIT);
         tree.refine(&[true]);
         // Make initially asymmetric.
         tree.refine(&[true, false, false, false]);
@@ -1108,7 +1108,7 @@ mod tests {
             tree.coarsen(&flags);
         }
 
-        let mut other_tree = Tree::<2>::new(Rectangle::UNIT);
+        let mut other_tree = Tree::<2>::new(HyperBox::UNIT);
         other_tree.refine(&[true]);
 
         assert_eq!(tree, other_tree);
@@ -1118,7 +1118,7 @@ mod tests {
 
     #[test]
     fn fuzz_serialize() -> eyre::Result<()> {
-        let mut tree = Tree::<2>::new(Rectangle::UNIT);
+        let mut tree = Tree::<2>::new(HyperBox::UNIT);
 
         // Randomly refine tree
         let mut rng = rand::rng();
@@ -1141,7 +1141,7 @@ mod tests {
 
     #[test]
     fn cell_from_point() -> eyre::Result<()> {
-        let mut tree = Tree::<2>::new(Rectangle::UNIT);
+        let mut tree = Tree::<2>::new(HyperBox::UNIT);
         tree.refine(&[true]);
         tree.refine(&[true, false, false, false]);
 

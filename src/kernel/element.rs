@@ -1,6 +1,6 @@
 use crate::{
     element::{ApproxOperator, Monomials, Uniform, Values},
-    geometry::{AxisMask, IndexSpace},
+    geometry::{Split, IndexSpace},
 };
 use faer::{ColRef, Mat};
 use std::array;
@@ -155,7 +155,7 @@ impl<const N: usize> Element<N> {
         let cells = IndexSpace::new([self.width; N]).iter();
 
         cells.flat_map(|index| {
-            AxisMask::<N>::enumerate().skip(1).map(move |mask| {
+            Split::<N>::enumerate().skip(1).map(move |mask| {
                 let mut point = index;
 
                 for axis in 0..N {

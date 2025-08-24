@@ -4,7 +4,7 @@ use std::{
     fmt::{Display, Write},
 };
 
-use super::{index::IndexWindow, AxisMask, CartesianIter, Face, IndexSpace};
+use super::{index::IndexWindow, Split, CartesianIter, Face, IndexSpace};
 
 /// Denotes where the region falls on a certain axis.
 #[repr(u8)]
@@ -91,7 +91,7 @@ impl<const N: usize> Region<N> {
     }
 
     /// Iterates over all splits that can touch this region.
-    pub fn adjacent_splits(self) -> impl Iterator<Item = AxisMask<N>> {
+    pub fn adjacent_splits(self) -> impl Iterator<Item = Split<N>> {
         let origin: [_; N] = from_fn(|axis| match self.side(axis) {
             Side::Left | Side::Middle => 0,
             Side::Right => 1,
@@ -104,12 +104,12 @@ impl<const N: usize> Region<N> {
 
         IndexWindow::new(origin, size)
             .iter()
-            .map(|index| AxisMask::pack(from_fn(|axis| index[axis] != 0)))
+            .map(|index| Split::pack(from_fn(|axis| index[axis] != 0)))
     }
 
     /// Computes a split which touches the given region.
-    pub fn adjacent_split(&self) -> AxisMask<N> {
-        let mut result = AxisMask::empty();
+    pub fn adjacent_split(&self) -> Split<N> {
+        let mut result = Split::empty();
         for axis in 0..N {
             result.set_to(axis, self.side(axis) == Side::Right)
         }
@@ -117,7 +117,7 @@ impl<const N: usize> Region<N> {
     }
 
     /// Checks whether a given split is adjacent to the region.
-    pub fn is_split_adjacent(&self, split: AxisMask<N>) -> bool {
+    pub fn is_split_adjacent(&self, split: Split<N>) -> bool {
         for axis in 0..N {
             match (self.side(axis), split.is_set(axis)) {
                 (Side::Left, true) => return false,
@@ -385,7 +385,7 @@ pub fn regions<const N: usize>() -> RegionIter<N> {
 
 #[cfg(test)]
 mod tests {
-    use crate::geometry::{AxisMask, Face};
+    use crate::geometry::{Split, Face};
 
     use super::{regions, Region, Side};
 
@@ -419,9 +419,9 @@ mod tests {
         assert_eq!(faces.next(), None);
 
         let mut splits = region.adjacent_splits();
-        assert_eq!(splits.next(), Some(AxisMask::pack([false, true])));
+        assert_eq!(splits.next(), Some(Split::pack([false, true])));
         assert_eq!(splits.next(), None);
 
-        assert_eq!(region.adjacent_split(), AxisMask::pack([false, true]));
+        assert_eq!(region.adjacent_split(), Split::pack([false, true]));
     }
 }

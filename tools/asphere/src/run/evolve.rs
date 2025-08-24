@@ -1,8 +1,12 @@
 use crate::{
     run::{SimulationInfo, Status, Subrun, config::Config},
-    system::{ConstraintRhs, Field, FieldConditions, Fields, TimeDerivs, find_mass},
+    system::{
+        CONFORMAL_CH, ConstraintRhs, FieldConditions, LAPSE_CH, NUM_CHANNELS, PSI_CH, TimeDerivs,
+        find_mass, save_image,
+    },
 };
 use aeon::{
+    image::ImageMut,
     prelude::*,
     solver::{Integrator, Method},
 };
@@ -38,11 +42,7 @@ pub fn save_csv_table<T: serde::Serialize>(records: &[T], path: &Path) -> eyre::
     Ok(())
 }
 
-pub fn evolve_data(
-    config: &Config,
-    mesh: Mesh<1>,
-    system: SystemVec<Fields>,
-) -> eyre::Result<SimulationInfo> {
+pub fn evolve_data(config: &Config, mesh: Mesh<1>, system: Image) -> eyre::Result<SimulationInfo> {
     // // Load diagnostics
     // let mut diagnostics = Diagnostics::default();
     // // Evolve
@@ -58,7 +58,7 @@ pub fn evolve_data(
 pub fn evolve_data_full(
     config: &Config,
     mut mesh: Mesh<1>,
-    mut system: SystemVec<Fields>,
+    mut system: Image,
     subrun: Option<&Subrun>,
 ) -> eyre::Result<SimulationInfo> {
     // Get start time of evolution
@@ -132,31 +132,36 @@ pub fn evolve_data_full(
     let mut buffer_index = 0;
 
     let mut constraint: f64 = 0.0;
+    let mut constraint_linf: f64 = 0.0;
     let mut max_constraint: f64 = 0.0;
+    let mut max_constraint_linf: f64 = 0.0;
+
+    let mut max_nodes = 0;
+    let mut max_dofs = 0;
 
     let mut diagnostic = Vec::new();
     let mut collapse_msg = "".to_string();
 
     while proper_time < config.evolve.max_proper_time {
-        assert!(system.len() == mesh.num_nodes());
-        mesh.fill_boundary(Order::<4>, FieldConditions, system.as_mut_slice());
+        assert!(system.num_nodes() == mesh.num_nodes());
+        mesh.fill_boundary(4, FieldConditions, system.as_mut());
 
         // Fill current derive buffer
         deriv_buffers[buffer_index % 5].resize(mesh.num_nodes(), 0.0);
         constraint_buffers[buffer_index % 5].resize(mesh.num_nodes(), 0.0);
-        deriv_buffers[buffer_index % 5].copy_from_slice(system.field(Field::Conformal));
+        deriv_buffers[buffer_index % 5].copy_from_slice(system.channel(CONFORMAL_CH));
         mesh.evaluate(
             4,
             ConstraintRhs,
-            system.as_slice(),
-            SystemSliceMut::from_scalar(&mut constraint_buffers[buffer_index % 5]),
+            system.as_ref(),
+            ImageMut::from(constraint_buffers[buffer_index % 5].as_mut_slice()),
         )
         .unwrap();
 
         buffers_filled[buffer_index % 5] = true;
 
         // Check Norm
-        let norm = mesh.l2_norm_system(system.as_slice());
+        let norm = mesh.l2_norm_system(system.as_ref());
 
         if norm.is_nan() || norm >= 1e60 {
             // println!("Evolution collapses, norm: {}", norm);
@@ -166,6 +171,9 @@ pub fn evolve_data_full(
         }
 
         max_constraint = max_constraint.max(constraint);
+        max_constraint_linf = max_constraint_linf.max(constraint_linf);
+        max_nodes = max_nodes.max(mesh.num_nodes());
+        max_dofs = max_dofs.max(mesh.num_dofs());
         if constraint >= config.evolve.max_constraint {
             collapse_msg = format!("Max constraint reached: {}", max_constraint);
             disperse = false;
@@ -264,6 +272,7 @@ pub fn evolve_data_full(
                     }
 
                     constraint = mesh.l2_norm(&deriv_buffer);
+                    constraint_linf = mesh.max_norm(&deriv_buffer);
                 }
 
                 // Take one regridding step towards desired level
@@ -279,13 +288,13 @@ pub fn evolve_data_full(
                 }
 
                 // Copy system into tmp scratch space (provided by dissipation).
-                let scratch = integrator.scratch(system.contigious().len());
-                scratch.copy_from_slice(system.contigious());
+                let scratch = integrator.scratch(system.storage().len());
+                scratch.copy_from_slice(system.storage());
                 system.resize(mesh.num_nodes());
                 mesh.transfer_system(
-                    Order::<4>,
-                    SystemSlice::from_contiguous(&scratch, &Fields),
-                    system.as_mut_slice(),
+                    4,
+                    ImageRef::from_storage(&scratch, NUM_CHANNELS),
+                    system.as_mut(),
                 );
 
                 buffers_filled.fill(false);
@@ -327,13 +336,14 @@ pub fn evolve_data_full(
                 }
 
                 constraint = mesh.l2_norm(&deriv_buffer);
+                constraint_linf = mesh.max_norm(&deriv_buffer);
             }
 
             mesh.flag_wavelets(
                 4,
                 config.regrid.coarsen_error,
                 config.regrid.refine_error,
-                system.as_slice(),
+                system.as_ref(),
             );
             mesh.limit_level_range_flags(1, config.limits.max_levels - 1);
             mesh.balance_flags();
@@ -347,13 +357,13 @@ pub fn evolve_data_full(
             );
 
             // Copy system into tmp scratch space (provided by dissipation).
-            let scratch = integrator.scratch(system.contigious().len());
-            scratch.copy_from_slice(system.contigious());
+            let scratch = integrator.scratch(system.storage().len());
+            scratch.copy_from_slice(system.storage());
             system.resize(mesh.num_nodes());
             mesh.transfer_system(
-                Order::<4>,
-                SystemSlice::from_contiguous(&scratch, &Fields),
-                system.as_mut_slice(),
+                4,
+                ImageRef::from_storage(&scratch, NUM_CHANNELS),
+                system.as_mut(),
             );
 
             buffers_filled.fill(false);
@@ -373,7 +383,7 @@ pub fn evolve_data_full(
             // Output current system to disk
             let mut checkpoint = Checkpoint::default();
             checkpoint.attach_mesh(&mesh);
-            checkpoint.save_system(system.as_slice());
+            save_image(&mut checkpoint, system.as_ref());
             checkpoint.export_vtu(
                 absolute
                     .join("evolve")
@@ -389,9 +399,9 @@ pub fn evolve_data_full(
         }
 
         // Compute lapse and mass before running diagnostic
-        let alpha = mesh.bottom_left_value(system.field(Field::Lapse));
-        let psi = mesh.bottom_left_value(system.field(Field::Psi));
-        let mass = find_mass(&mesh, system.as_slice());
+        let alpha = mesh.bottom_left_value(system.channel(LAPSE_CH));
+        let psi = mesh.bottom_left_value(system.channel(PSI_CH));
+        let mass = find_mass(&mesh, system.as_ref());
 
         if config.diagnostic.save_evolve && step % config.diagnostic.save_evolve_interval == 0 {
             diagnostic.push(DiagnosticInfo {
@@ -424,11 +434,11 @@ pub fn evolve_data_full(
         integrator
             .step(
                 &mut mesh,
-                Order::<4>,
+                4,
                 FieldConditions,
                 TimeDerivs,
                 h,
-                system.as_mut_slice(),
+                system.as_mut(),
             )
             .unwrap();
 
@@ -463,7 +473,7 @@ pub fn evolve_data_full(
 
         mass_queue.push(mass);
 
-        let norm = mesh.l2_norm_system(system.as_slice());
+        let norm = mesh.l2_norm_system(system.as_ref());
 
         if norm.is_nan() || norm >= 1e60 || alpha.is_nan() || alpha <= 0.0 {
             collapse_msg = format!(
@@ -532,6 +542,11 @@ pub fn evolve_data_full(
         if !disperse {
             println!("Reason for Collapse: {}", collapse_msg);
         }
+
+        println!(
+            "Nodes: {}, Dofs: {}, Max constraint: {}",
+            max_nodes, max_dofs, max_constraint
+        );
 
         println!("Mesh Info...");
         println!("- Num Nodes: {}", mesh.num_nodes());

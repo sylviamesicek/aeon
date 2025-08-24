@@ -1,12 +1,12 @@
 use crate::{
     run::config::Config,
-    system::{self, Fields, solve_constraints},
+    system::{self, NUM_CHANNELS, save_image, solve_constraints},
 };
 use aeon::prelude::*;
 use eyre::eyre;
 
 /// Solve for initial conditions and adaptively refine mesh
-pub fn initial_data(config: &Config) -> eyre::Result<(Mesh<1>, SystemVec<Fields>)> {
+pub fn initial_data(config: &Config) -> eyre::Result<(Mesh<1>, Image)> {
     // Get output directory
     let absolute = config.directory()?;
 
@@ -25,7 +25,7 @@ pub fn initial_data(config: &Config) -> eyre::Result<(Mesh<1>, SystemVec<Fields>
 
     // Build mesh
     let mut mesh = Mesh::new(
-        Rectangle {
+        HyperBox {
             size: [config.domain.radius],
             origin: [0.0],
         },
@@ -39,7 +39,7 @@ pub fn initial_data(config: &Config) -> eyre::Result<(Mesh<1>, SystemVec<Fields>
     }
 
     // Create system of fields
-    let mut system = SystemVec::new(Fields);
+    let mut system = Image::new(NUM_CHANNELS, 0);
 
     // Adaptively solve and refine until we satisfy error requirement
     loop {
@@ -47,15 +47,9 @@ pub fn initial_data(config: &Config) -> eyre::Result<(Mesh<1>, SystemVec<Fields>
         system.resize(mesh.num_nodes());
 
         // Set initial data for scalar field.
-        system::intial_data(
-            &mut mesh,
-            &source.profile,
-            &source.smooth,
-            system.as_mut_slice(),
-        );
-
+        system::intial_data(&mut mesh, &source.profile, &source.smooth, system.as_mut());
         // Solve for conformal and lapse
-        solve_constraints(&mut mesh, system.as_mut_slice());
+        solve_constraints(&mut mesh, system.as_mut());
         // Compute norm
         // let l2_norm: f64 = mesh.l2_norm_system(system.as_slice());
         // log::info!("Scalar Field Norm {}", l2_norm);
@@ -63,7 +57,7 @@ pub fn initial_data(config: &Config) -> eyre::Result<(Mesh<1>, SystemVec<Fields>
         if config.visualize.save_initial_levels {
             let mut checkpoint = Checkpoint::default();
             checkpoint.attach_mesh(&mesh);
-            checkpoint.save_system(system.as_slice());
+            save_image(&mut checkpoint, system.as_ref());
             checkpoint.export_vtu(
                 absolute.join("initial").join(format!(
                     "{}_levels_{}.vtu",
@@ -87,7 +81,7 @@ pub fn initial_data(config: &Config) -> eyre::Result<(Mesh<1>, SystemVec<Fields>
             return Err(eyre!("failed to refine within perscribed limits"));
         }
 
-        mesh.flag_wavelets(4, 0.0, config.regrid.refine_error, system.as_slice());
+        mesh.flag_wavelets(4, 0.0, config.regrid.refine_error, system.as_ref());
         mesh.limit_level_range_flags(1, config.limits.max_levels - 1);
         mesh.balance_flags();
 
@@ -105,7 +99,7 @@ pub fn initial_data(config: &Config) -> eyre::Result<(Mesh<1>, SystemVec<Fields>
     if config.visualize.save_initial {
         let mut checkpoint = Checkpoint::default();
         checkpoint.attach_mesh(&mesh);
-        checkpoint.save_system(system.as_slice());
+        save_image(&mut checkpoint, system.as_ref());
         checkpoint.export_vtu(
             absolute.join("initial.vtu"),
             ExportVtuConfig {
@@ -117,7 +111,7 @@ pub fn initial_data(config: &Config) -> eyre::Result<(Mesh<1>, SystemVec<Fields>
 
         let mut checkpoint = Checkpoint::default();
         checkpoint.attach_mesh(&mesh);
-        checkpoint.save_system(system.as_slice());
+        save_image(&mut checkpoint, system.as_ref());
         checkpoint.export_vtu(
             absolute
                 .join("initial")

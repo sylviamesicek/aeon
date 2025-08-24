@@ -6,15 +6,12 @@
 //! filling interior interfaces, and adaptively regridding a domain based on various error heuristics.
 
 use crate::geometry::{
-    ActiveCellId, AxisMask, BlockId, Face, FaceArray, FaceMask, Rectangle, Tree, TreeBlocks,
-    TreeInterfaces, TreeNeighbors, TreeSer, faces,
+    ActiveCellId, BlockId, Face, FaceArray, FaceMask, HyperBox, Split, Tree, TreeBlocks,
+    TreeInterfaces, TreeNeighbors, TreeSer,
 };
 use crate::kernel::{BoundaryClass, DirichletParams, Element, node_from_vertex};
+use crate::kernel::{BoundaryKind, NodeSpace, NodeWindow, SystemBoundaryConds};
 use crate::prelude::IndexSpace;
-use crate::{
-    kernel::{BoundaryKind, NodeSpace, NodeWindow},
-    system::SystemBoundaryConds,
-};
 use datasize::DataSize;
 
 #[cfg(feature = "parallel")]
@@ -34,7 +31,7 @@ pub use checkpoint::{Checkpoint, ExportStride, ExportVtuConfig};
 pub use function::{Engine, Function, FunctionBorrowMut, Gaussian, Projection, TanH};
 pub use store::{MeshStore, UnsafeThreadCache};
 
-use crate::system::{System, SystemSlice};
+use crate::image::ImageRef;
 
 /// A discretization of a rectangular axis aligned grid into a collection of uniform grids of nodes
 /// with different spacings. A `Mesh` is built on top of a Quadtree, allowing one to selectively
@@ -76,7 +73,7 @@ pub struct Mesh<const N: usize> {
     /// Cell splits from before most recent refinement.
     ///
     /// May be temporary if I can find a more elegant solution.
-    old_cell_splits: Vec<AxisMask<N>>,
+    old_cell_splits: Vec<Split<N>>,
 
     // ********************************
     // Caches *************************
@@ -90,7 +87,7 @@ impl<const N: usize> Mesh<N> {
     /// Constructs a new `Mesh` covering the domain, with a number of nodes
     /// defined by `width` and `ghost`.
     pub fn new(
-        bounds: Rectangle<N>,
+        bounds: HyperBox<N>,
         width: usize,
         ghost: usize,
         boundary: FaceArray<N, BoundaryClass>,
@@ -281,13 +278,13 @@ impl<const N: usize> Mesh<N> {
         NodeSpace {
             size: cell_size,
             ghost: self.ghost,
-            bounds: Rectangle::UNIT,
+            bounds: HyperBox::UNIT,
             boundary: self.old_block_boundary_classes(block),
         }
     }
 
     /// The bounds of a block.
-    pub fn block_bounds(&self, block: BlockId) -> Rectangle<N> {
+    pub fn block_bounds(&self, block: BlockId) -> HyperBox<N> {
         self.blocks.bounds(block)
     }
 
@@ -350,12 +347,12 @@ impl<const N: usize> Mesh<N> {
     // Node windows ******************
 
     /// Finds bounds associated with a node window.
-    pub fn window_bounds(&self, block: BlockId, window: NodeWindow<N>) -> Rectangle<N> {
+    pub fn window_bounds(&self, block: BlockId, window: NodeWindow<N>) -> HyperBox<N> {
         debug_assert!(self.block_space(block).contains_window(window));
         let block_size = self.blocks.node_size(block);
         let bounds = self.blocks.bounds(block);
 
-        Rectangle {
+        HyperBox {
             size: array::from_fn(|axis| {
                 bounds.size[axis] * window.size[axis] as f64 / block_size[axis] as f64
             }),
@@ -469,7 +466,7 @@ impl<const N: usize> Mesh<N> {
         let boundary = self.block_boundary_classes(block);
         let position = self.blocks.active_cell_position(cell);
 
-        for face in faces::<N>() {
+        for face in Face::iterate() {
             let border = if face.side {
                 block_size[face.axis] - 1
             } else {
@@ -593,21 +590,19 @@ impl<const N: usize> Mesh<N> {
     }
 
     /// Computes the maximum l2 norm of all fields in the system.
-    pub fn l2_norm_system<S: System>(&mut self, source: SystemSlice<S>) -> f64 {
+    pub fn l2_norm_system(&mut self, source: ImageRef) -> f64 {
         source
-            .system()
-            .enumerate()
-            .map(|label| self.l2_norm(source.field(label)))
+            .channels()
+            .map(|label| self.l2_norm(source.channel(label)))
             .max_by(f64::total_cmp)
             .unwrap()
     }
 
     /// Computes the maximum l-infinity norm of all fields in the system.
-    pub fn max_norm_system<S: System>(&mut self, source: SystemSlice<S>) -> f64 {
+    pub fn max_norm_system(&mut self, source: ImageRef) -> f64 {
         source
-            .system()
-            .enumerate()
-            .map(|label| self.max_norm(source.field(label)))
+            .channels()
+            .map(|label| self.max_norm(source.channel(label)))
             .max_by(f64::total_cmp)
             .unwrap()
     }
@@ -689,11 +684,10 @@ impl<const N: usize> Mesh<N> {
         result
     }
 
-    pub fn oscillation_heuristic_system<S: System>(&mut self, source: SystemSlice<S>) -> f64 {
+    pub fn oscillation_heuristic_system(&mut self, source: ImageRef) -> f64 {
         source
-            .system()
-            .enumerate()
-            .map(|label| self.oscillation_heuristic(source.field(label)))
+            .channels()
+            .map(|cidx| self.oscillation_heuristic(source.channel(cidx)))
             .max_by(f64::total_cmp)
             .unwrap()
     }
@@ -889,7 +883,7 @@ impl<const N: usize> Clone for Mesh<N> {
 impl<const N: usize> Default for Mesh<N> {
     fn default() -> Self {
         let mut result = Self {
-            tree: Tree::new(Rectangle::UNIT),
+            tree: Tree::new(HyperBox::UNIT),
             width: 4,
             ghost: 1,
             boundary: FaceArray::default(),
@@ -979,30 +973,20 @@ pub struct BlockBoundaryConds<const N: usize, I> {
 impl<const N: usize, I: SystemBoundaryConds<N>> SystemBoundaryConds<N>
     for BlockBoundaryConds<N, I>
 {
-    type System = I::System;
-
-    fn kind(&self, label: <Self::System as System>::Label, face: Face<N>) -> BoundaryKind {
+    fn kind(&self, channel: usize, face: Face<N>) -> BoundaryKind {
         if self.physical_boundary_flags.is_set(face) {
-            self.inner.kind(label, face)
+            self.inner.kind(channel, face)
         } else {
             BoundaryKind::Custom
         }
     }
 
-    fn dirichlet(
-        &self,
-        label: <Self::System as System>::Label,
-        position: [f64; N],
-    ) -> DirichletParams {
-        self.inner.dirichlet(label, position)
+    fn dirichlet(&self, channel: usize, position: [f64; N]) -> DirichletParams {
+        self.inner.dirichlet(channel, position)
     }
 
-    fn radiative(
-        &self,
-        label: <Self::System as System>::Label,
-        position: [f64; N],
-    ) -> crate::prelude::RadiativeParams {
-        self.inner.radiative(label, position)
+    fn radiative(&self, channel: usize, position: [f64; N]) -> crate::prelude::RadiativeParams {
+        self.inner.radiative(channel, position)
     }
 }
 
@@ -1013,7 +997,7 @@ mod tests {
     #[test]
     fn fuzzy_serialize() -> eyre::Result<()> {
         let mut mesh = Mesh::<2>::new(
-            Rectangle::UNIT,
+            HyperBox::UNIT,
             6,
             3,
             [

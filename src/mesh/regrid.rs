@@ -2,11 +2,8 @@ use std::array;
 
 use crate::geometry::{ActiveCellId, IndexSpace};
 
-use crate::{
-    mesh::Mesh,
-    shared::SharedSlice,
-    system::{System, SystemSlice},
-};
+use crate::image::ImageRef;
+use crate::{mesh::Mesh, shared::SharedSlice};
 
 impl<const N: usize> Mesh<N> {
     /// Retrieves a vector representing all regridding flags for the mesh.
@@ -145,15 +142,11 @@ impl<const N: usize> Mesh<N> {
     /// Flags cells for refinement using a wavelet criterion. The system must have filled
     /// boundaries. This function tags any cell that is insufficiently refined to approximate
     /// operators of the given `order` within the range of error.
-    pub fn flag_wavelets<S: System + Sync>(
-        &mut self,
-        order: usize,
-        lower: f64,
-        upper: f64,
-        result: SystemSlice<S>,
-    ) {
+    pub fn flag_wavelets(&mut self, order: usize, lower: f64, upper: f64, data: ImageRef) {
         assert!(order % 2 == 0);
         assert!(order <= self.width);
+
+        assert_eq!(data.num_nodes(), self.num_nodes());
 
         let element = self.request_element(self.width, order);
         let element_coarse = self.request_element(self.width / 2, order / 2);
@@ -174,7 +167,7 @@ impl<const N: usize> Mesh<N> {
             let nodes = mesh.block_nodes(block);
             let space = mesh.block_space(block);
 
-            let block_system = result.slice(nodes.clone());
+            let block_system = data.slice(nodes.clone());
 
             for &cell in mesh.blocks.active_cells(block) {
                 let is_cell_on_boundary = mesh.cell_needs_coarse_element(cell);
@@ -189,10 +182,10 @@ impl<const N: usize> Mesh<N> {
                 let mut should_refine = false;
                 let mut should_coarsen = true;
 
-                for field in result.system().enumerate() {
+                for field in data.channels() {
                     // Unpack data to element
                     for (i, node) in window.iter().enumerate() {
-                        imsrc[i] = block_system.field(field)[space.index_from_node(node)];
+                        imsrc[i] = block_system.channel(field)[space.index_from_node(node)];
                     }
 
                     if is_cell_on_boundary {
@@ -348,14 +341,14 @@ impl<const N: usize> Mesh<N> {
 
 #[cfg(test)]
 mod tests {
-    use crate::geometry::{ActiveCellId, FaceArray, Rectangle};
+    use crate::geometry::{ActiveCellId, FaceArray, HyperBox};
     use crate::kernel::BoundaryClass;
     use crate::mesh::Mesh;
 
     #[test]
     fn element_windows() {
         let mut mesh = Mesh::new(
-            Rectangle::UNIT,
+            HyperBox::UNIT,
             4,
             2,
             FaceArray::from_sides([BoundaryClass::Ghost; 2], [BoundaryClass::OneSided; 2]),

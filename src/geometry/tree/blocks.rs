@@ -1,7 +1,7 @@
 use std::{array, ops::Range};
 
 use super::{ActiveCellId, Tree};
-use crate::geometry::{Face, FaceMask, IndexSpace, Rectangle, faces};
+use crate::geometry::{Face, FaceMask, HyperBox, IndexSpace};
 use bitvec::prelude::*;
 use datasize::DataSize;
 
@@ -27,7 +27,7 @@ pub struct TreeBlocks<const N: usize> {
     /// The offsets for the aforementioned flattened list of lists.
     block_active_offsets: Vec<usize>,
     /// The physical bounds of each block.
-    block_bounds: Vec<Rectangle<N>>,
+    block_bounds: Vec<HyperBox<N>>,
     /// The level of refinement of each block.
     block_levels: Vec<usize>,
     /// Stores whether block face is on physical boundary.
@@ -98,7 +98,7 @@ impl<const N: usize> TreeBlocks<N> {
     }
 
     /// Returns the bounds of the given block.
-    pub fn bounds(&self, block: BlockId) -> Rectangle<N> {
+    pub fn bounds(&self, block: BlockId) -> HyperBox<N> {
         self.block_bounds[block.0]
     }
 
@@ -111,7 +111,7 @@ impl<const N: usize> TreeBlocks<N> {
     pub fn boundary_flags(&self, block: BlockId) -> FaceMask<N> {
         let mut flags = [[false; 2]; N];
 
-        for face in faces::<N>() {
+        for face in Face::<N>::iterate() {
             flags[face.axis][face.side as usize] =
                 self.boundaries[block.0 * 2 * N + face.to_linear()];
         }
@@ -203,7 +203,7 @@ impl<const N: usize> TreeBlocks<N> {
                     let space = IndexSpace::new(size);
 
                     // Make sure every cell on face is suitable for expansion.
-                    for index in space.face(Face::positive(axis)).iter() {
+                    for index in space.face_window(Face::positive(axis)).iter() {
                         // Retrieves the cell on this face
                         let cell = tree.cell_from_active_index(
                             self.block_active_indices
@@ -236,7 +236,7 @@ impl<const N: usize> TreeBlocks<N> {
                     }
 
                     // We may now expand along this axis
-                    for index in space.face(Face::positive(axis)).iter() {
+                    for index in space.face_window(Face::positive(axis)).iter() {
                         let active = self.block_active_indices
                             [block_cell_offset + space.linear_from_cartesian(index)];
 
@@ -270,7 +270,7 @@ impl<const N: usize> TreeBlocks<N> {
 
             let cell_bounds = tree.bounds(tree.cell_from_active_index(a));
 
-            self.block_bounds.push(Rectangle {
+            self.block_bounds.push(HyperBox {
                 origin: cell_bounds.origin,
                 size: array::from_fn(|axis| cell_bounds.size[axis] * size[axis] as f64),
             })
@@ -284,7 +284,7 @@ impl<const N: usize> TreeBlocks<N> {
             let a = 0;
             let b: usize = self.active_cells(block).len() - 1;
 
-            for face in faces::<N>() {
+            for face in Face::<N>::iterate() {
                 let active = if face.side {
                     self.active_cells(block)[b]
                 } else {
@@ -349,11 +349,11 @@ impl<const N: usize> DataSize for TreeBlocks<N> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{geometry::Tree, prelude::Rectangle};
+    use crate::{geometry::Tree, prelude::HyperBox};
 
     #[test]
     fn greedy_meshing() {
-        let mut tree = Tree::new(Rectangle::<2>::UNIT);
+        let mut tree = Tree::new(HyperBox::<2>::UNIT);
         tree.refine(&[true]);
         tree.refine(&[true, false, false, false]);
 
@@ -410,7 +410,7 @@ mod tests {
 
     #[test]
     fn node_ranges() {
-        let mut tree = Tree::new(Rectangle::<2>::UNIT);
+        let mut tree = Tree::new(HyperBox::<2>::UNIT);
         let mut blocks = TreeBlocks::new([8; 2], 3);
         tree.refine(&[true]);
         tree.refine(&[true, false, false, false]);

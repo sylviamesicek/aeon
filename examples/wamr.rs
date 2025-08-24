@@ -8,9 +8,7 @@ use std::f64::consts::PI;
 pub struct SeedConditions;
 
 impl SystemBoundaryConds<2> for SeedConditions {
-    type System = Scalar;
-
-    fn kind(&self, _label: <Self::System as System>::Label, face: Face<2>) -> BoundaryKind {
+    fn kind(&self, _channel: usize, face: Face<2>) -> BoundaryKind {
         if face.side {
             return BoundaryKind::Radiative;
         }
@@ -18,7 +16,7 @@ impl SystemBoundaryConds<2> for SeedConditions {
         [BoundaryKind::AntiSymmetric, BoundaryKind::Symmetric][face.axis]
     }
 
-    fn radiative(&self, _field: (), _position: [f64; 2]) -> RadiativeParams {
+    fn radiative(&self, _channel: usize, _position: [f64; 2]) -> RadiativeParams {
         RadiativeParams::lightlike(0.0)
     }
 }
@@ -39,7 +37,7 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     std::fs::create_dir_all("output/wamr")?;
 
-    let domain = Rectangle {
+    let domain = HyperBox {
         origin: [0., 0.],
         size: [2. * PI, 2. * PI],
     };
@@ -59,8 +57,8 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
     mesh.refine_global();
 
     // Store system from previous iteration.
-    let mut system_prev = SystemVec::with_length(mesh.num_nodes(), Scalar);
-    mesh.project(4, SeedProjection, system_prev.field_mut(()));
+    let mut system_prev = Image::new(1, mesh.num_nodes());
+    mesh.project(4, SeedProjection, system_prev.channel_mut(0));
 
     let mut errors = Vec::new();
 
@@ -71,11 +69,11 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
             mesh.num_nodes()
         );
 
-        let mut system = SystemVec::with_length(mesh.num_nodes(), Scalar);
-        mesh.project(4, SeedProjection, system.field_mut(()));
-        mesh.fill_boundary(Order::<4>, SeedConditions, system.as_mut_slice());
+        let mut system = Image::new(1, mesh.num_nodes());
+        mesh.project(4, SeedProjection, system.channel_mut(0));
+        mesh.fill_boundary(4, SeedConditions, system.as_mut());
 
-        mesh.flag_wavelets(4, 1e-13, 1e-9, system.as_slice());
+        mesh.flag_wavelets(4, 1e-13, 1e-9, system.as_ref());
         mesh.balance_flags();
 
         // Output
@@ -89,13 +87,13 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
         mesh.cell_debug(&mut cell_debug);
 
         let diff = system
-            .field(())
+            .channel(0)
             .iter()
-            .zip(system_prev.field(()).iter())
+            .zip(system_prev.channel(0).iter())
             .map(|(i, j)| i - j)
             .collect::<Vec<_>>();
 
-        let norm = mesh.l2_norm_system(SystemSlice::from_scalar(diff.as_slice()));
+        let norm = mesh.l2_norm_system(ImageRef::from(diff.as_slice()));
 
         if norm.abs() >= 1e-20 {
             errors.push((i, norm));
@@ -103,8 +101,8 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         let mut checkpoint = Checkpoint::default();
         checkpoint.attach_mesh(&mesh);
-        checkpoint.save_field("Seed", system.field(()));
-        checkpoint.save_field("SeedInterpolated", system_prev.field(()));
+        checkpoint.save_field("Seed", system.channel(0));
+        checkpoint.save_field("SeedInterpolated", system_prev.channel(0));
         checkpoint.save_field("SeedDiff", &diff);
         checkpoint.save_int_field("Flags", &flag_debug);
         checkpoint.save_int_field("Blocks", &block_debug);
@@ -122,8 +120,8 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
         mesh.regrid();
 
         // Prolong data from previous system.
-        system_prev = SystemVec::with_length(mesh.num_nodes(), Scalar);
-        mesh.transfer_system(Order::<4>, system.as_slice(), system_prev.as_mut_slice());
+        system_prev = Image::new(1, mesh.num_nodes());
+        mesh.transfer_system(4, system.as_ref(), system_prev.as_mut());
     }
 
     for i in 0..errors.len() - 1 {

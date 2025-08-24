@@ -1,7 +1,9 @@
 use std::convert::Infallible;
 
+use crate::IRef;
 use crate::geometry::{Face, IndexSpace};
-use crate::kernel::{BoundaryKind, DirichletParams, Kernels, RadiativeParams};
+use crate::image::{ImageMut, ImageRef};
+use crate::kernel::{BoundaryKind, DirichletParams, RadiativeParams, SystemBoundaryConds};
 use crate::mesh::FunctionBorrowMut;
 use datasize::DataSize;
 use reborrow::{Reborrow, ReborrowMut};
@@ -10,7 +12,6 @@ use thiserror::Error;
 use crate::{
     mesh::{Engine, Function, Mesh},
     solver::{Integrator, Method},
-    system::{Pair, System, SystemBoundaryConds, SystemSlice, SystemSliceMut},
 };
 
 use super::SolverCallback;
@@ -70,21 +71,15 @@ impl HyperRelaxSolver {
     }
 
     /// Solves a given elliptic system
-    pub fn solve<
-        const N: usize,
-        K: Kernels + Sync,
-        C: SystemBoundaryConds<N> + Sync,
-        F: Function<N, Input = C::System, Output = C::System> + Sync,
-    >(
+    pub fn solve<const N: usize, C: SystemBoundaryConds<N> + Sync, F: Function<N> + Sync>(
         &mut self,
         mesh: &mut Mesh<N>,
-        order: K,
+        order: usize,
         conditions: C,
         deriv: F,
-        result: SystemSliceMut<C::System>,
+        result: ImageMut,
     ) -> Result<(), HyperRelaxError<F::Error, Infallible>>
     where
-        C::System: Default + Clone + Sync,
         F::Error: Send,
     {
         self.solve_with_callback(mesh, order, conditions, (), deriv, result)
@@ -92,30 +87,28 @@ impl HyperRelaxSolver {
 
     pub fn solve_with_callback<
         const N: usize,
-        K: Kernels + Sync,
         C: SystemBoundaryConds<N> + Sync,
-        F: Function<N, Input = C::System, Output = C::System> + Sync,
-        Call: SolverCallback<N, C::System>,
+        F: Function<N> + Sync,
+        Call: SolverCallback<N>,
     >(
         &mut self,
         mesh: &mut Mesh<N>,
-        order: K,
+        order: usize,
         conditions: C,
         mut callback: Call,
         mut deriv: F,
-        mut result: SystemSliceMut<C::System>,
+        mut result: ImageMut,
     ) -> Result<(), HyperRelaxError<F::Error, Call::Error>>
     where
-        C::System: Default + Clone + Sync,
         F::Error: Send,
         Call::Error: Send,
     {
+        assert_eq!(result.num_nodes(), mesh.num_nodes());
         // Total number of degreees of freedom in the whole system
-        let dimension = result.system().count() * mesh.num_nodes();
+        let dimension = result.num_channels() * mesh.num_nodes();
+        let num_channels = result.num_channels();
 
-        assert!(result.len() == dimension);
-
-        let system = (result.system().clone(), result.system().clone());
+        // assert!(result.len() == dimension);
 
         // Allocate storage
         let mut data = vec![0.0; 2 * dimension].into_boxed_slice();
@@ -134,15 +127,9 @@ impl HyperRelaxSolver {
         {
             let (u, v) = data.split_at_mut(dimension);
             // u is initial guess
-            mesh.copy_from_slice(
-                SystemSliceMut::from_contiguous(u, result.system()),
-                result.rb(),
-            );
+            mesh.copy_from_slice(ImageMut::from_storage(u, num_channels), result.rb());
             // Let us assume that du/dt is initially zero
-            mesh.copy_from_slice(
-                SystemSliceMut::from_contiguous(v, result.system()),
-                result.rb(),
-            );
+            mesh.copy_from_slice(ImageMut::from_storage(v, num_channels), result.rb());
             for value in v.iter_mut() {
                 *value *= self.dampening;
             }
@@ -154,12 +141,13 @@ impl HyperRelaxSolver {
                 FicticuousBoundaryConds {
                     dampening: self.dampening,
                     conditions: conditions.clone(),
+                    channels: num_channels,
                 },
-                SystemSliceMut::from_contiguous(&mut data, &system),
+                ImageMut::from_storage(&mut data, 2 * num_channels),
             );
 
             {
-                let u = SystemSlice::from_contiguous(&data[..dimension], &system.0);
+                let u = ImageRef::from_storage(&data[..dimension], num_channels);
                 mesh.copy_from_slice(result.rb_mut(), u.rb());
                 mesh.apply(
                     order,
@@ -189,7 +177,7 @@ impl HyperRelaxSolver {
                 // Copy solution back to system vector
                 mesh.copy_from_slice(
                     result.rb_mut(),
-                    SystemSlice::from_contiguous(&data[..dimension], &system.0),
+                    ImageRef::from_storage(&data[..dimension], num_channels),
                 );
                 mesh.fill_boundary(order, conditions, result.rb_mut());
 
@@ -203,6 +191,7 @@ impl HyperRelaxSolver {
                     FicticuousBoundaryConds {
                         dampening: self.dampening,
                         conditions: conditions.clone(),
+                        channels: num_channels,
                     },
                     FicticuousDerivs {
                         dampening: self.dampening,
@@ -211,7 +200,7 @@ impl HyperRelaxSolver {
                         min_spacing,
                     },
                     time_step,
-                    SystemSliceMut::from_contiguous(&mut data, &system),
+                    ImageMut::from_storage(&mut data, 2 * num_channels),
                 )
                 .map_err(|err| HyperRelaxError::FunctionFailed(err))?;
 
@@ -226,7 +215,7 @@ impl HyperRelaxSolver {
         // Copy solution back to system vector
         mesh.copy_from_slice(
             result.rb_mut(),
-            SystemSlice::from_contiguous(&data[..dimension], &system.0),
+            ImageRef::from_storage(&data[..dimension], num_channels),
         );
         mesh.fill_boundary(order, conditions, result.rb_mut());
 
@@ -238,20 +227,14 @@ impl HyperRelaxSolver {
 struct FicticuousBoundaryConds<C> {
     dampening: f64,
     conditions: C,
+    channels: usize,
 }
 
 impl<const N: usize, C: SystemBoundaryConds<N>> SystemBoundaryConds<N>
     for FicticuousBoundaryConds<C>
 {
-    type System = (C::System, C::System);
-
-    fn kind(&self, label: <Self::System as System>::Label, face: Face<N>) -> BoundaryKind {
-        let label = match label {
-            Pair::First(label) => label,
-            Pair::Second(label) => label,
-        };
-
-        let boundary_kind = self.conditions.kind(label, face);
+    fn kind(&self, channel: usize, face: Face<N>) -> BoundaryKind {
+        let boundary_kind: BoundaryKind = self.conditions.kind(channel % self.channels, face);
 
         match boundary_kind {
             BoundaryKind::Symmetric => BoundaryKind::Symmetric,
@@ -265,34 +248,20 @@ impl<const N: usize, C: SystemBoundaryConds<N>> SystemBoundaryConds<N>
         }
     }
 
-    fn radiative(
-        &self,
-        label: <Self::System as System>::Label,
-        position: [f64; N],
-    ) -> RadiativeParams {
-        match label {
-            Pair::First(label) => self.conditions.radiative(label, position),
-            Pair::Second(label) => {
-                let mut result = self.conditions.radiative(label, position);
-                result.target *= self.dampening;
-                result
-            }
+    fn radiative(&self, channel: usize, position: [f64; N]) -> RadiativeParams {
+        let mut result = self.conditions.radiative(channel % self.channels, position);
+        if channel >= self.channels {
+            result.target *= self.dampening;
         }
+        result
     }
 
-    fn dirichlet(
-        &self,
-        label: <Self::System as System>::Label,
-        position: [f64; N],
-    ) -> DirichletParams {
-        match label {
-            Pair::First(label) => self.conditions.dirichlet(label, position),
-            Pair::Second(label) => {
-                let mut params = self.conditions.dirichlet(label, position);
-                params.target *= self.dampening;
-                params
-            }
+    fn dirichlet(&self, channel: usize, position: [f64; N]) -> DirichletParams {
+        let mut result = self.conditions.dirichlet(channel % self.channels, position);
+        if channel >= self.channels {
+            result.target *= self.dampening;
         }
+        result
     }
 }
 
@@ -304,28 +273,26 @@ struct FicticuousDerivs<'a, const N: usize, F> {
     min_spacing: f64,
 }
 
-impl<const N: usize, S: System, F: Function<N, Input = S, Output = S>> Function<N>
-    for FicticuousDerivs<'_, N, F>
-{
-    type Input = (S, S);
-    type Output = (S, S);
+impl<const N: usize, F: Function<N>> Function<N> for FicticuousDerivs<'_, N, F> {
     type Error = F::Error;
 
     fn evaluate(
         &self,
         engine: impl Engine<N>,
-        input: SystemSlice<Self::Input>,
-        output: SystemSliceMut<Self::Output>,
+        input: ImageRef,
+        mut output: ImageMut,
     ) -> Result<(), F::Error> {
-        let (uin, vin) = input.split_pair();
-        let (mut uout, mut vout) = output.split_pair();
+        assert_eq!(input.num_channels(), output.num_channels());
+        let num_channels = output.num_channels();
+        let (uin, vin) = input.split_channels(num_channels / 2);
+        let (mut uout, mut vout) = output.rb_mut().split_channels(num_channels / 2);
 
         // Find du/dt from the definition v = du/dt + η u
-        for field in uin.system().enumerate() {
-            let u = uin.field(field);
-            let v = vin.field(field);
+        for field in uin.channels() {
+            let u = uin.channel(field);
+            let v = vin.channel(field);
 
-            let udest = uout.field_mut(field);
+            let udest = uout.channel_mut(field);
 
             for vertex in IndexSpace::new(engine.vertex_size()).iter() {
                 let index = engine.index_from_vertex(vertex);
@@ -335,21 +302,21 @@ impl<const N: usize, S: System, F: Function<N, Input = S, Output = S>> Function<
 
         // dv/dt = c^2 Lu
         // TODO speed
-        self.function.evaluate(&engine, uin, vout.rb_mut())?;
+        self.function.evaluate(IRef(&engine), uin, vout.rb_mut())?;
 
         // Use adaptive timestep
         let block_spacing = &self.spacing_per_vertex[engine.node_range()];
 
-        for field in uout.system().enumerate() {
-            let uout = uout.field_mut(field);
+        for field in uout.channels() {
+            let uout = uout.channel_mut(field);
             for vertex in IndexSpace::new(engine.vertex_size()).iter() {
                 let index = engine.index_from_vertex(vertex);
                 uout[index] *= block_spacing[index] / self.min_spacing;
             }
         }
 
-        for field in vout.system().enumerate() {
-            let vout = vout.field_mut(field);
+        for field in vout.channels() {
+            let vout = vout.channel_mut(field);
             for vertex in IndexSpace::new(engine.vertex_size()).iter() {
                 let index = engine.index_from_vertex(vertex);
                 vout[index] *= block_spacing[index] / self.min_spacing;
@@ -363,33 +330,23 @@ impl<const N: usize, S: System, F: Function<N, Input = S, Output = S>> Function<
 #[cfg(test)]
 mod tests {
     use crate::{
-        geometry::{FaceArray, Rectangle},
+        geometry::{FaceArray, HyperBox},
         kernel::{BoundaryClass, DirichletParams},
     };
 
     use super::*;
-    use crate::{
-        kernel::BoundaryKind,
-        mesh::Projection,
-        system::{Scalar, SystemBoundaryConds},
-    };
+    use crate::{kernel::BoundaryKind, mesh::Projection};
     use std::{convert::Infallible, f64::consts};
 
     #[derive(Clone)]
-    struct PoissonConditions;
+    struct _PoissonConditions;
 
-    impl SystemBoundaryConds<2> for PoissonConditions {
-        type System = Scalar;
-
-        fn kind(&self, _label: <Self::System as System>::Label, _face: Face<2>) -> BoundaryKind {
+    impl SystemBoundaryConds<2> for _PoissonConditions {
+        fn kind(&self, _channel: usize, _face: Face<2>) -> BoundaryKind {
             BoundaryKind::StrongDirichlet
         }
 
-        fn dirichlet(
-            &self,
-            _label: <Self::System as System>::Label,
-            _position: [f64; 2],
-        ) -> DirichletParams {
+        fn dirichlet(&self, _channel: usize, _position: [f64; 2]) -> DirichletParams {
             DirichletParams {
                 target: 0.0,
                 strength: 1.0,
@@ -410,18 +367,16 @@ mod tests {
     pub struct PoissonEquation;
 
     impl Function<2> for PoissonEquation {
-        type Input = Scalar;
-        type Output = Scalar;
         type Error = Infallible;
 
         fn evaluate(
             &self,
             engine: impl Engine<2>,
-            input: SystemSlice<Self::Input>,
-            output: SystemSliceMut<Self::Output>,
+            input: ImageRef,
+            mut output: ImageMut,
         ) -> Result<(), Infallible> {
-            let input = input.into_scalar();
-            let output = output.into_scalar();
+            let input = input.channel(0);
+            let output = output.channel_mut(0);
 
             for vertex in IndexSpace::new(engine.vertex_size()).iter() {
                 let index = engine.index_from_vertex(vertex);
@@ -445,7 +400,7 @@ mod tests {
     #[test]
     fn poisson() {
         let mut mesh = Mesh::new(
-            Rectangle::from_aabb([0.0, 0.0], [1.0, 1.0]),
+            HyperBox::from_aabb([0.0, 0.0], [1.0, 1.0]),
             4,
             2,
             FaceArray::splat(BoundaryClass::Ghost),
