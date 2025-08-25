@@ -753,7 +753,7 @@ pub fn evolve_data(
         // There is a chance that lapse is now NaN, which should trigger collapse,
         // but might be interpreted as disspersion because `NaN > max_proper_time`
         // Check again
-        if lapse.is_nan() || lapse.is_infinite() || lapse.abs() == 0.0 {
+        if lapse.is_nan() || lapse.is_infinite() || lapse <= 0.0 {
             println!("{}", style(format!("lapse collapses: {:.5e}", norm)).red());
 
             break 'evolve config

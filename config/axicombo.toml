@@ -1,5 +1,5 @@
-name = "axigauss"
-directory = "output/axigauss/${amplitude}"
+name = "axicombo"
+directory = "output/axicombo/${brill}/${amplitude}"
 
 order = 4
 diss_order = 6
@@ -30,7 +30,7 @@ cfl = 0.2
 dissipation = 0.5
 gauge = "harmonic_zero_shift"
 max_coord_time = 1000.0
-max_proper_time = 7.0
+max_proper_time = 10.0
 max_steps = 1_000_000
 refine_error = 1e-6
 coarsen_error = 1e-10
@@ -76,3 +76,8 @@ type = "scalar_field"
 amplitude = "${amplitude}"
 sigma = [5.35, 5.35]
 mass = 0.0
+
+[[sources]]
+type = "brill"
+amplitude = "${brill}"
+sigma = [1.0, 1.0]

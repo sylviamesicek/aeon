@@ -4,10 +4,10 @@
 #SBATCH --partition=belz-shared-np
 #SBATCH --nodes=1
 #SBATCH --ntasks=10
-#SBATCH --job-name=gausssearch
-#SBATCH -o ./output/gausssearch.out
-#SBATCH -e ./output/gausssearch.err
+#SBATCH --job-name=axicombo
+#SBATCH -o ./output/axicombo.out
+#SBATCH -e ./output/axicombo.err
 
 module load rust/1.87.0
 cargo build --release
-cargo run --release --package asphere -- search config/sphgauss1
+cargo run --release --package aaxi -- search config/axicombo -Dbrill=0.01
