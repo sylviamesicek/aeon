@@ -4,6 +4,7 @@ use crate::prelude::IndexSpace;
 use ron::ser::PrettyConfig;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::fmt::Write as _;
 use std::fs::File;
 use std::io::{Read as _, Write as _};
 use std::path::Path;
@@ -249,6 +250,64 @@ pub enum ExportStride {
 }
 
 impl<const N: usize> Checkpoint<N> {
+    pub fn export_csv(&self, path: impl AsRef<Path>, stride: ExportStride) -> std::io::Result<()> {
+        let mesh: Mesh<N> = self.mesh.clone().unwrap().into();
+        let stride = match stride {
+            ExportStride::PerVertex => 1,
+            ExportStride::PerCell => mesh.width,
+        };
+
+        let mut wtr = csv::Writer::from_path(path)?;
+        let mut header = (0..N)
+            .into_iter()
+            .map(|i| format!("Coord{i}"))
+            .collect::<Vec<String>>();
+
+        for field in self.fields.keys() {
+            header.push(field.clone());
+        }
+
+        wtr.write_record(header.iter())?;
+
+        let mut buffer = String::new();
+
+        for block in mesh.blocks.indices() {
+            let space = mesh.block_space(block);
+            let nodes = mesh.block_nodes(block);
+            let window = space.inner_window();
+
+            'window: for node in window {
+                for axis in 0..N {
+                    if node[axis] % (stride as isize) != 0 {
+                        continue 'window;
+                    }
+                }
+
+                let index = space.index_from_node(node);
+                let position = space.position(node);
+
+                for i in 0..N {
+                    buffer.clear();
+                    write!(&mut buffer, "{}", position[i]).unwrap();
+                    wtr.write_field(&buffer)?;
+                }
+
+                for (i, (name, data)) in self.fields.iter().enumerate() {
+                    debug_assert_eq!(&header[i + N], name);
+
+                    let value = data[nodes.clone()][index];
+                    buffer.clear();
+                    write!(&mut buffer, "{}", value).unwrap();
+                    wtr.write_field(&buffer)?;
+                }
+
+                wtr.write_record::<&[String], &String>(&[])?;
+            }
+        }
+
+        Ok(())
+    }
+
     /// Checkpoint and additional field data to a .vtu file, for visualisation in applications like
     /// Paraview. This requires a mesh be attached to the checkpoint.
     pub fn export_vtu(

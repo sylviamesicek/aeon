@@ -63,6 +63,7 @@ aeon_macros.workspace = true
 
 bitvec.workspace = true
 bumpalo.workspace = true
+csv.workspace = true
 datasize.workspace = true
 faer.workspace = true
 log.workspace = true

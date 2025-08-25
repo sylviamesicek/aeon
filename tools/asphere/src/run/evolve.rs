@@ -135,6 +135,7 @@ pub fn evolve_data_full(
     let mut constraint_linf: f64 = 0.0;
     let mut max_constraint: f64 = 0.0;
     let mut max_constraint_linf: f64 = 0.0;
+    // let mut constraint_output_index: usize = 0;
 
     let mut max_nodes = 0;
     let mut max_dofs = 0;
@@ -335,8 +336,31 @@ pub fn evolve_data_full(
                     deriv_buffer[i] -= constraint_buffer[i];
                 }
 
+                // let mut checkpoint = Checkpoint::default();
+                // checkpoint.attach_mesh(&mesh);
+                // save_image(&mut checkpoint, system.as_ref());
+                // checkpoint.save_field("Constraint", &deriv_buffer);
+                // checkpoint.export_vtu(
+                //     absolute
+                //         .join("evolve")
+                //         .join(format!("constraint_{constraint_output_index}.vtu")),
+                //     ExportVtuConfig {
+                //         title: "Masslesss Scalar Field Evolution".to_string(),
+                //         ghost: false,
+                //         stride: config.visualize.stride,
+                //     },
+                // )?;
+                // checkpoint.export_csv(
+                //     absolute
+                //         .join("evolve")
+                //         .join(format!("constraint_{constraint_output_index}.csv")),
+                //     ExportStride::PerVertex,
+                // )?;
+
                 constraint = mesh.l2_norm(&deriv_buffer);
                 constraint_linf = mesh.max_norm(&deriv_buffer);
+
+                // constraint_output_index += 1;
             }
 
             mesh.flag_wavelets(
