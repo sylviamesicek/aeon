@@ -7,7 +7,7 @@ use crate::{
     run::{
         config::Config,
         history::{RunHistory, RunRecord},
-        interval::IntervalTracker,
+        interval::{Interval, IntervalTracker},
         status::{Status, Strategy},
     },
     systems::*,
@@ -242,7 +242,7 @@ pub struct HorizonCallback<'a> {
     directory: &'a Path,
     positions: &'a mut Vec<[f64; 2]>,
     config: &'a Config,
-    pb: &'a mut ProgressBar,
+    pb: Option<&'a mut ProgressBar>,
 }
 
 impl<'a> SolverCallback<1> for HorizonCallback<'a> {
@@ -255,7 +255,9 @@ impl<'a> SolverCallback<1> for HorizonCallback<'a> {
         _output: ImageRef,
         iteration: usize,
     ) -> Result<(), Self::Error> {
-        self.pb.set_position(iteration as u64);
+        if let Some(pb) = &self.pb {
+            pb.set_position(iteration as u64);
+        }
 
         if !self.config.visualize.horizon_relax {
             return Ok(());
@@ -287,6 +289,143 @@ impl<'a> SolverCallback<1> for HorizonCallback<'a> {
                 stride: ExportStride::PerVertex,
             },
         )?;
+
+        Ok(())
+    }
+}
+
+struct Progress {
+    m: MultiProgress,
+    node_pb: ProgressBar,
+    level_pb: ProgressBar,
+    memory_pb: ProgressBar,
+    step_pb: ProgressBar,
+}
+
+struct Incremental {
+    tracker: IntervalTracker,
+    interval: Interval,
+    max_nodes: usize,
+    max_levels: usize,
+    max_memory: usize,
+}
+
+enum Spinners {
+    Progress(Progress),
+    Incremental(Incremental),
+}
+
+impl Spinners {
+    fn progress(max_nodes: usize, max_levels: usize, max_memory: usize) -> Self {
+        // Setup progress bars
+        let m = MultiProgress::new();
+        // Max nodes
+        let node_pb = m.add(ProgressBar::new(max_nodes as u64));
+        node_pb.set_style(progress::node_style());
+        node_pb.enable_steady_tick(Duration::from_millis(100));
+        node_pb.set_prefix("[Node]  ");
+        // Max levels
+        let level_pb = m.add(ProgressBar::new(max_levels as u64));
+        level_pb.set_style(progress::level_style());
+        level_pb.enable_steady_tick(Duration::from_millis(100));
+        level_pb.set_prefix("[Level] ");
+        // Memory usage
+        let memory_pb = m.add(ProgressBar::new(max_memory as u64));
+        memory_pb.set_style(progress::byte_style());
+        memory_pb.enable_steady_tick(Duration::from_millis(100));
+        memory_pb.set_prefix("[Memory]");
+        // Step spinner
+        let step_pb = m.add(ProgressBar::no_length());
+        step_pb.set_style(progress::spinner_style());
+        step_pb.enable_steady_tick(Duration::from_millis(100));
+        step_pb.set_prefix("[Step] ");
+
+        Self::Progress(Progress {
+            m,
+            node_pb,
+            level_pb,
+            memory_pb,
+            step_pb,
+        })
+    }
+
+    fn incremental(
+        max_nodes: usize,
+        max_levels: usize,
+        max_memory: usize,
+        interval: Interval,
+    ) -> Self {
+        Self::Incremental(Incremental {
+            interval,
+            tracker: IntervalTracker::new(),
+            max_nodes,
+            max_levels,
+            max_memory,
+        })
+    }
+
+    fn multiprogress(&self) -> Option<&MultiProgress> {
+        if let Self::Progress(progress) = self {
+            Some(&progress.m)
+        } else {
+            None
+        }
+    }
+
+    fn update(
+        &mut self,
+        step: usize,
+        proper_time: f64,
+        coord_time: f64,
+        proper_time_delta: f64,
+        coord_time_delta: f64,
+        num_nodes: usize,
+        num_levels: usize,
+        memory_usage: usize,
+        lapse: f64,
+    ) {
+        match self {
+            Spinners::Progress(progress) => {
+                progress.node_pb.set_position(num_nodes as u64);
+                progress.level_pb.set_position(num_levels as u64);
+                progress.memory_pb.set_position(memory_usage as u64);
+
+                progress.step_pb.inc(1);
+                progress.step_pb.set_message(format!(
+                    "Step: {}, Proper Time {:.8}, Lapse {:.5e}",
+                    step, proper_time, lapse
+                ));
+            }
+            Spinners::Incremental(inc) => {
+                inc.tracker.every(inc.interval, || {
+                    let node_percentage = num_nodes as f64 / inc.max_nodes as f64;
+                    let level_percentage = num_levels as f64 / inc.max_levels as f64;
+                    let memory_percentage = memory_usage as f64 / inc.max_memory as f64;
+
+                    println!(
+                        "Step: {}, Proper Time: {:.8}, Coord Time: {:.8}",
+                        step, proper_time, coord_time
+                    );
+                    println!(
+                        "- Nodes: {} ({:.2}%), Levels: {} ({:.2}%), Ram Usage: {} ({:.2}%)",
+                        num_nodes,
+                        node_percentage,
+                        num_levels,
+                        level_percentage,
+                        memory_usage,
+                        memory_percentage
+                    );
+                    println!("- Lapse: {:.6e}", lapse)
+                });
+                inc.tracker.update(proper_time_delta, coord_time_delta, 1);
+            }
+        }
+    }
+
+    fn clear(&self) -> eyre::Result<()> {
+        if let Self::Progress(progress) = self {
+            progress.m.clear()?;
+        }
 
         Ok(())
     }
@@ -381,28 +520,20 @@ pub fn evolve_data(
 
     println!("Evolving data");
 
-    // Setup progress bars
-    let m = MultiProgress::new();
-    // Max nodes
-    let node_pb = m.add(ProgressBar::new(config.limits.max_nodes as u64));
-    node_pb.set_style(progress::node_style());
-    node_pb.enable_steady_tick(Duration::from_millis(100));
-    node_pb.set_prefix("[Node]  ");
-    // Max levels
-    let level_pb = m.add(ProgressBar::new(config.limits.max_levels as u64));
-    level_pb.set_style(progress::level_style());
-    level_pb.enable_steady_tick(Duration::from_millis(100));
-    level_pb.set_prefix("[Level] ");
-    // Memory usage
-    let memory_pb = m.add(ProgressBar::new(config.limits.max_memory as u64));
-    memory_pb.set_style(progress::byte_style());
-    memory_pb.enable_steady_tick(Duration::from_millis(100));
-    memory_pb.set_prefix("[Memory]");
-    // Step spinner
-    let step_pb = m.add(ProgressBar::no_length());
-    step_pb.set_style(progress::spinner_style());
-    step_pb.enable_steady_tick(Duration::from_millis(100));
-    step_pb.set_prefix("[Step] ");
+    // Create spinner outputs
+    let mut spinners = match config.logging {
+        crate::run::config::Logging::Progress => Spinners::progress(
+            config.limits.max_nodes,
+            config.limits.max_levels,
+            config.limits.max_memory,
+        ),
+        crate::run::config::Logging::Incremental { interval } => Spinners::incremental(
+            config.limits.max_nodes,
+            config.limits.max_levels,
+            config.limits.max_memory,
+            interval,
+        ),
+    };
 
     let status: Status = 'evolve: loop {
         assert!(fields.num_nodes() == mesh.num_nodes());
@@ -632,10 +763,13 @@ pub fn evolve_data(
                 std::fs::create_dir_all(&horizon_dir).map_err(eyre::Report::new)?;
             }
 
-            let mut horizon_pb = m.add(ProgressBar::new(config.horizon.relax.max_steps as u64));
-            horizon_pb.set_style(progress::node_style());
-            horizon_pb.enable_steady_tick(Duration::from_millis(100));
-            horizon_pb.set_prefix("- [Horizon Search]");
+            let mut pb = spinners.multiprogress().map(|m| {
+                let pb = m.add(ProgressBar::new(config.horizon.relax.max_steps as u64));
+                pb.set_style(progress::node_style());
+                pb.enable_steady_tick(Duration::from_millis(100));
+                pb.set_prefix("- [Horizon Search]");
+                pb
+            });
 
             let result = finder.search_with_callback(
                 &mesh,
@@ -646,12 +780,12 @@ pub fn evolve_data(
                     directory: horizon_dir.as_path(),
                     positions: &mut search_positions,
                     config: &config,
-                    pb: &mut horizon_pb,
+                    pb: pb.as_mut(),
                 },
                 surface_radius,
             );
 
-            horizon_pb.finish_and_clear();
+            pb.as_ref().map(ProgressBar::finish_and_clear);
 
             if config.visualize.horizon_relax {
                 horizon_field.resize(mesh.num_nodes(), 0.0);
@@ -740,15 +874,17 @@ pub fn evolve_data(
         visualize_tracker.update(proper_time_delta, coord_time_delta, 1);
         search_tracker.update(proper_time_delta, coord_time_delta, 1);
 
-        node_pb.set_position(mesh.num_nodes() as u64);
-        level_pb.set_position(mesh.num_levels() as u64);
-        memory_pb.set_position(memory_usage as u64);
-
-        step_pb.inc(1);
-        step_pb.set_message(format!(
-            "Step: {}, Proper Time {:.8}, Lapse {:.5e}",
-            step, proper_time, lapse
-        ));
+        spinners.update(
+            step,
+            proper_time,
+            coord_time,
+            proper_time_delta,
+            coord_time_delta,
+            mesh.num_nodes(),
+            mesh.num_levels(),
+            memory_usage,
+            lapse,
+        );
 
         // There is a chance that lapse is now NaN, which should trigger collapse,
         // but might be interpreted as disspersion because `NaN > max_proper_time`
@@ -781,7 +917,7 @@ pub fn evolve_data(
         })?;
     };
 
-    m.clear()?;
+    spinners.clear()?;
 
     // Flush record at end of execution.
     history.flush()?;

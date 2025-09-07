@@ -35,6 +35,8 @@ pub struct Config {
     /// Details for saving visualization files.
     #[serde(default)]
     pub visualize: Visualize,
+    #[serde(default)]
+    pub logging: Logging,
     /// Details for saving cache files.
     #[serde(default)]
     pub cache: Cache,
@@ -63,6 +65,7 @@ impl Config {
             evolve: self.evolve.clone(),
             limits: self.limits.clone(),
             visualize: self.visualize.clone(),
+            logging: self.logging.clone(),
             cache: self.cache.clone(),
             error_handler: self.error_handler,
             horizon: self.horizon.clone(),
@@ -188,6 +191,16 @@ impl Default for Visualize {
             stride: ExportStride::PerVertex,
         }
     }
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, Default)]
+#[serde(tag = "style")]
+pub enum Logging {
+    #[serde(rename = "progress")]
+    #[default]
+    Progress,
+    #[serde(rename = "incremental")]
+    Incremental { interval: Interval },
 }
 
 /// Config struct describing how we cache data.

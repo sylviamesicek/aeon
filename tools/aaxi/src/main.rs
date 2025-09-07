@@ -19,8 +19,8 @@ fn main() -> eyre::Result<()> {
     // Specify cli argument parsing.
     let command = Command::new("aaxi")
         .about("A program for running axisymmetric simulations using numerical relativity")
-        .author("Lukas Mesicek, lukas.m.mesicek@gmail.com")
-        .version("0.2.2")
+        .author("Sylvia Mesicek, sylvia.mesicek@gmail.com")
+        .version("0.3.0")
         .subcommand_negates_reqs(true)
         .schwarzschild_cmd()
         .run_cmd()
