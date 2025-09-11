@@ -1,7 +1,8 @@
+use bincode::{Decode, Encode};
 use serde::{Deserialize, Serialize};
 
 /// What strategy should we employ on a possible error?
-#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Encode, Decode)]
 pub enum Strategy {
     #[serde(rename = "crash")]
     Crash,
@@ -61,7 +62,18 @@ impl Strategy {
 
 /// Status of an indivdual run.
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(i32)]
 pub enum Status {
-    Disperse,
-    Collapse,
+    Collapse = 0,
+    Disperse = 1,
+}
+
+impl From<i32> for Status {
+    fn from(value: i32) -> Self {
+        match value {
+            0 => Status::Collapse,
+            1 => Status::Disperse,
+            _ => panic!("Invalid status value"),
+        }
+    }
 }

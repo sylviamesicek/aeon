@@ -1,10 +1,11 @@
+use bincode::{Decode, Encode};
 use serde::{Deserialize, Serialize};
 use std::convert::Infallible;
 
 // ***********************************
 // Intervals
 
-#[derive(Serialize, Deserialize, Debug, Clone, Copy)]
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, Encode, Decode)]
 #[serde(untagged)]
 pub enum Interval {
     ProperTime { proper_time: f64 },

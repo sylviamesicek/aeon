@@ -16,6 +16,7 @@ global_refine = 1
 max_levels = 16
 max_nodes = 16_000_000
 max_memory = 5_000_000_000
+max_wall_time = 1_000_000_000
 
 [initial]
 coarsen_error = 0.0
@@ -28,7 +29,7 @@ relax.tolerance = 1e-6
 [evolve]
 cfl = 0.2
 dissipation = 0.5
-gauge = "harmonic_zero_shift"
+gauge = "log_plus_one_zero_shift"
 max_coord_time = 1000.0
 max_proper_time = 7.0
 max_steps = 1_000_000
@@ -42,13 +43,17 @@ initial_levels = false
 initial_relax = false
 initial_relax_interval.steps = 500
 
-evolve = true
+evolve = false
 evolve_interval.steps = 20
 
 horizon_relax = false
 horizon_relax_interval.steps = 10
 
 stride = "per_cell"
+
+[logging]
+style = "incremental"
+evolve.steps = 1000
 
 [cache]
 initial = true

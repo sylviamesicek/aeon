@@ -135,7 +135,7 @@ impl<T: Transform> Transform for Vec<T> {
 
 /// A floating point argument that can either be provided via a configuration file
 /// or as a config variable.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, bincode::Encode, bincode::Decode)]
 #[serde(untagged)]
 pub enum FloatVar {
     /// Fixed floating point input.
@@ -178,7 +178,7 @@ impl Transform for FloatVar {
 
 /// A unsigned integer argument that can either be provided via a configuration file
 /// or as a config variable.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, bincode::Encode, bincode::Decode)]
 #[serde(untagged)]
 pub enum UnsignedVar {
     /// Fixed floating point input.

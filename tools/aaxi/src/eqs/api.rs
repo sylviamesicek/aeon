@@ -10,7 +10,16 @@ use aeon_tensor::metric::d2::{
 // Public interface.
 
 /// Gauge condition to use for evolution.
-#[derive(Clone, Copy, Debug, Default, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    Default,
+    serde::Serialize,
+    serde::Deserialize,
+    bincode::Encode,
+    bincode::Decode,
+)]
 pub enum GaugeCondition {
     /// Pure generalized harmonic gauge conditions.
     #[default]

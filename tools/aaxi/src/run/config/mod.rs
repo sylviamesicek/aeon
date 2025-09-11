@@ -3,6 +3,7 @@ use crate::run::interval::Interval;
 use crate::run::status::Strategy;
 use aeon::mesh::ExportStride;
 use aeon_app::config::{FloatVar, Transform, VarDefs};
+use bincode::{Decode, Encode};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
@@ -12,7 +13,7 @@ mod validate;
 pub use inline::*;
 
 /// Global configuration struct for simulation run.
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone, Encode, Decode)]
 pub struct Config {
     #[serde(default = "default_name")]
     pub name: String,
@@ -92,7 +93,7 @@ impl Config {
 }
 
 /// Settings deciding domain of the mesh.
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone, Encode, Decode)]
 pub struct Domain {
     /// Size of domain along the ρ axis.
     pub radius: f64,
@@ -107,7 +108,7 @@ pub struct Domain {
 }
 
 /// Global limits before simulation fails
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone, Encode, Decode)]
 pub struct Limits {
     /// Maximum number of levels allowed during refinement.
     pub max_levels: usize,
@@ -115,10 +116,12 @@ pub struct Limits {
     pub max_nodes: usize,
     /// Maximum amount of RAM avalable before the program crashes
     pub max_memory: usize,
+    /// Maximum amount of wall time (in seconds) available before program crashes.
+    pub max_wall_time: usize,
 }
 
 /// Settings for initial data solving.
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone, Encode, Decode)]
 pub struct Initial {
     /// Relaxation settings for solving initial data.
     pub relax: Relax,
@@ -129,7 +132,7 @@ pub struct Initial {
 }
 
 /// Evolution settings for running evolution.
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone, Encode, Decode)]
 pub struct Evolve {
     /// CFL factor for evolution
     pub cfl: f64,
@@ -152,7 +155,7 @@ pub struct Evolve {
 }
 
 /// Visualization settings for initial data and evolution output.
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone, Encode, Decode)]
 pub struct Visualize {
     /// Should we save the final result for initial data?
     pub initial: bool,
@@ -193,18 +196,18 @@ impl Default for Visualize {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, Default)]
+#[derive(Serialize, Deserialize, Debug, Clone, Default, Encode, Decode)]
 #[serde(tag = "style")]
 pub enum Logging {
     #[serde(rename = "progress")]
     #[default]
     Progress,
     #[serde(rename = "incremental")]
-    Incremental { interval: Interval },
+    Incremental { evolve: Interval },
 }
 
 /// Config struct describing how we cache data.
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone, Encode, Decode)]
 pub struct Cache {
     pub initial: bool,
     /// Should we cache evolution
@@ -224,11 +227,12 @@ impl Default for Cache {
 }
 
 /// How should we handle possible errors in the code?
-#[derive(Serialize, Deserialize, Debug, Clone, Copy)]
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, Encode, Decode)]
 pub struct ErrorHandler {
     pub on_max_levels: Strategy,
     pub on_max_nodes: Strategy,
     pub on_max_memory: Strategy,
+    pub on_max_wall_time: Strategy,
     pub on_max_initial_steps: Strategy,
     pub on_max_evolve_steps: Strategy,
     pub on_max_evolve_coord_time: Strategy,
@@ -243,6 +247,7 @@ impl Default for ErrorHandler {
             on_max_levels: Strategy::Ignore,
             on_max_nodes: Strategy::Collapse,
             on_max_memory: Strategy::Collapse,
+            on_max_wall_time: Strategy::Collapse,
             on_max_initial_steps: Strategy::Crash,
             on_max_evolve_steps: Strategy::Collapse,
             on_max_evolve_coord_time: Strategy::Disperse,
@@ -253,7 +258,7 @@ impl Default for ErrorHandler {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone, Encode, Decode)]
 pub struct Horizon {
     /// Should we search for apparent horizons?
     pub search: bool,
@@ -292,7 +297,7 @@ impl Default for Horizon {
 }
 
 /// Source term for the simulated system.
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone, Encode, Decode)]
 #[serde(tag = "type")]
 pub enum Source {
     /// Instance generates Brill-type initial data with gunlach seed function.

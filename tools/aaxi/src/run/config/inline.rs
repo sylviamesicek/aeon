@@ -1,9 +1,10 @@
 //! Inline tables and types for use in config
 
+use bincode::{Decode, Encode};
 use serde::{Deserialize, Serialize};
 
 /// Settings for hyperbolic relaxation.
-#[derive(Serialize, Deserialize, Debug, Clone, Copy)]
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, Encode, Decode)]
 pub struct Relax {
     /// Ficticious cfl to use while relaxing initial data.
     pub cfl: f64,

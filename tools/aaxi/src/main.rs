@@ -1,6 +1,12 @@
 use aeon_app::config::{VarDef, VarDefs};
 use clap::{Arg, ArgAction, ArgMatches, Command};
 use eyre::eyre;
+#[cfg(feature = "mpi")]
+use mpi::{
+    topology::{Process, SimpleCommunicator},
+    traits::*,
+};
+use std::marker::PhantomData;
 
 mod eqs;
 mod horizon;
@@ -13,22 +19,42 @@ use run::CommandExt as _;
 use schwarzschild::CommandExt as _;
 use search::CommandExt as _;
 
-pub struct MpiContext {
+#[derive(Clone)]
+/// Struct for managing High Performance Computing datastructures (mainly responsible for coordinating several different MPI processes)
+struct Hpc<'a> {
     #[cfg(feature = "mpi")]
-    world: mpi::topology::SimpleCommunicator,
+    world: &'a mpi::topology::SimpleCommunicator,
+    #[cfg(feature = "mpi")]
+    root: Process<'a>,
+
+    _marker: PhantomData<&'a ()>,
 }
 
-impl MpiContext {
-    pub fn is_root(&self) -> bool {
-        #[cfg(feature = "mpi")]
-        return self.world.rank() == 0;
-        #[cfg(not(feature = "mpi"))]
-        return true;
+impl<'a> Hpc<'a> {
+    #[cfg(feature = "mpi")]
+    fn new(world: &'a SimpleCommunicator) -> Self {
+        Self {
+            world: world,
+            root: world.process_at_rank(ROOT_RANK),
+            _marker: PhantomData,
+        }
     }
 }
 
-#[cfg(feature = "mpi")]
-use mpi::traits::*;
+impl Hpc<'static> {
+    #[cfg(not(feature = "mpi"))]
+    fn empty() -> Self {
+        Self {
+            _marker: PhantomData,
+        }
+    }
+}
+
+const WORKER_OP_NONE: i32 = 0;
+const WORKER_OP_SEARCH: i32 = 1;
+const WORKER_STATUS_RUN: i32 = 0;
+const WORKER_STATUS_HALT: i32 = 1;
+const ROOT_RANK: i32 = 0;
 
 fn main() -> eyre::Result<()> {
     // Set up MPI context and such.
@@ -44,15 +70,38 @@ fn main() -> eyre::Result<()> {
     );
 
     #[cfg(feature = "mpi")]
-    let mpi_context = MpiContext {
-        world: universe.world(),
-    };
-
+    let world = universe.world();
+    #[cfg(feature = "mpi")]
+    let hpc = Hpc::new(&world);
     #[cfg(not(feature = "mpi"))]
-    let mpi_context = MpiContext {};
+    let hpc = Hpc::empty();
 
     // Set up nice error handing.
     color_eyre::install()?;
+
+    // Run as a worker if requested.
+    #[cfg(feature = "mpi")]
+    if hpc.world.rank() != ROOT_RANK {
+        let mut opcode = 0;
+        hpc.root.broadcast_into(&mut opcode);
+
+        match opcode {
+            WORKER_OP_NONE => {
+                println!("Worker (rank {}): performing noop", hpc.world.rank());
+                return Ok(());
+            }
+            WORKER_OP_SEARCH => {
+                return search::search_worker(hpc);
+            }
+            _ => {
+                return Err(eyre!(
+                    "invalid worker op id received on rank: {}",
+                    hpc.world.rank()
+                ));
+            }
+        }
+    }
+
     // Specify cli argument parsing.
     let command = Command::new("aaxi")
         .about("A program for running axisymmetric simulations using numerical relativity")
@@ -74,7 +123,14 @@ fn main() -> eyre::Result<()> {
     // Run search subcommand
     if let Some(matches) = search::parse_search_cmd(&matches) {
         println!("Running Search subcommand");
-        return search::search(matches, mpi_context);
+        #[cfg(feature = "mpi")]
+        {
+            println!("Root   (Rank 0): Broadcasting search subcommand.");
+            let mut worker = WORKER_OP_SEARCH;
+            hpc.root.broadcast_into(&mut worker);
+        }
+
+        return search::search(matches, hpc);
     }
 
     // Run default subcommand

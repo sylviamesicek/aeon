@@ -7,6 +7,7 @@ edition = "2024"
 aeon.workspace = true
 aeon_app.workspace = true
 aeon_tensor.workspace = true
+bincode.workspace = true
 clap.workspace = true
 chumsky.workspace = true
 color-eyre.workspace = true
@@ -30,4 +31,4 @@ mpi = { version = "0.8.0", optional = true }
 rand.workspace = true
 
 [features]
-default = []
+default = ["mpi"]

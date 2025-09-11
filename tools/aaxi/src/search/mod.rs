@@ -1,5 +1,6 @@
 use crate::{
-    CommandExt as _, MpiContext, parse_define_args, parse_invoke_arg,
+    CommandExt as _, Hpc, WORKER_STATUS_HALT, WORKER_STATUS_RUN, parse_define_args,
+    parse_invoke_arg,
     run::{self, RunHistory, Status},
 };
 use aeon_app::{
@@ -8,14 +9,20 @@ use aeon_app::{
 };
 use clap::{ArgMatches, Command};
 use eyre::eyre;
+#[cfg(feature = "mpi")]
+use mpi::traits::*;
 
 mod config;
 mod history;
 
-use config::Config;
+use config::Config as SearchConfig;
 use history::SearchHistory;
+use run::Config as RunConfig;
 
-pub fn search(matches: &ArgMatches, mctx: MpiContext) -> eyre::Result<()> {
+pub fn search(matches: &ArgMatches, hpc: Hpc) -> eyre::Result<()> {
+    #[cfg(feature = "mpi")]
+    println!("Root   (Rank 0): launching root in search mode");
+
     let vars = parse_define_args(matches)?;
     let invoke = parse_invoke_arg(matches)?;
 
@@ -23,10 +30,12 @@ pub fn search(matches: &ArgMatches, mctx: MpiContext) -> eyre::Result<()> {
     let config_search_file = std::env::current_dir()?.join(format!("{}.search.toml", invoke));
 
     // Load search configuration
-    let search_config = file::import_toml::<Config>(&config_search_file)?;
+    let search_config = file::import_toml::<SearchConfig>(&config_search_file)?;
     let search_config = search_config.transform(&vars)?;
     // Load run configuration
-    let run_config = file::import_toml::<run::Config>(&config_run_file)?;
+    let run_config = file::import_toml::<RunConfig>(&config_run_file)?;
+
+    // let run_config = run_config.transform(&vars)?;
 
     // Find search directory
     let search_dir = search_config.search_dir()?;
@@ -42,10 +51,40 @@ pub fn search(matches: &ArgMatches, mctx: MpiContext) -> eyre::Result<()> {
     // Name of parameter
     let parameter = search_config.parameter.clone();
 
-    let info = [start, end]
-        .iter()
-        .map(|value| search_iteration(&vars, &run_config, &parameter, *value, &history))
-        .collect::<Result<Vec<_>, _>>()?;
+    // Coordinate run configuration across mpi processes
+    #[cfg(feature = "mpi")]
+    {
+        let mut config_buffer = bincode::encode_to_vec::<RunConfig, _>(
+            run_config.clone(),
+            bincode::config::standard(),
+        )?;
+        let mut config_buffer_len: usize = config_buffer.len();
+        hpc.root.broadcast_into(&mut config_buffer_len);
+        assert_eq!(config_buffer_len, config_buffer.len());
+        hpc.root.broadcast_into(&mut config_buffer);
+        println!(
+            "Root   (Rank 0): broadcasted config buffer with length {}",
+            config_buffer_len
+        );
+
+        // println!("Root (Rank 0): broadcasting config File");
+        let mut parameter_buffer = parameter.clone().into_bytes();
+        let mut parameter_len: usize = parameter_buffer.len();
+        hpc.root.broadcast_into(&mut parameter_len);
+        hpc.root.broadcast_into(&mut parameter_buffer);
+        println!(
+            "Root   (Rank 0): broadcasted parameter buffer with length {}",
+            parameter_len
+        );
+    }
+
+    let info = launch_fleet(
+        &run_config,
+        &parameter,
+        &[start, end],
+        &history,
+        hpc.clone(),
+    )?;
 
     let start_status = info[0];
     let end_status = info[1];
@@ -64,9 +103,7 @@ pub fn search(matches: &ArgMatches, mctx: MpiContext) -> eyre::Result<()> {
     }
 
     // Cache history file (only if we are root to avoid conflicts).
-    if mctx.is_root() {
-        history.save_csv(&history_file)?;
-    }
+    history.save_csv(&history_file)?;
 
     let mut depth = 0;
     loop {
@@ -88,17 +125,14 @@ pub fn search(matches: &ArgMatches, mctx: MpiContext) -> eyre::Result<()> {
             .collect::<Vec<_>>();
 
         // Execute iterations independently
-        let status = amplitudes
-            .iter()
-            .map(|&w| search_iteration(&vars, &run_config, &parameter, w, &history))
-            .collect::<Result<Vec<Status>, _>>()?;
+        let status = launch_fleet(&run_config, &parameter, &amplitudes, &history, hpc.clone())?;
 
-        // Insert results into cache
+        // Insert results into history cache
         for (w, s) in amplitudes.iter().zip(status.iter()) {
             history.insert(*w, *s);
         }
 
-        println!("Status Results: {:?}", status);
+        println!("Iteration Status Results: {:?}", status);
 
         // Imagine vector of all statuses, including start and end
         let (sindex, eindex) = double_headed_search(start_status, &status, end_status);
@@ -130,6 +164,12 @@ pub fn search(matches: &ArgMatches, mctx: MpiContext) -> eyre::Result<()> {
         }
     }
 
+    #[cfg(feature = "mpi")]
+    {
+        let mut status: i32 = WORKER_STATUS_HALT;
+        hpc.root.broadcast_into(&mut status);
+    }
+
     println!(
         "Final search range: {} to {}, diff: {:.4e}",
         start,
@@ -140,30 +180,227 @@ pub fn search(matches: &ArgMatches, mctx: MpiContext) -> eyre::Result<()> {
     Ok(())
 }
 
-/// Run a single iteration of a critical search
-fn search_iteration(
-    vars: &VarDefs,
-    config: &run::Config,
+#[cfg(feature = "mpi")]
+fn launch_fleet(
+    config: &RunConfig,
     parameter: &str,
-    amplitude: f64,
+    amplitudes: &[f64],
     history: &SearchHistory,
-) -> eyre::Result<Status> {
-    if let Some(s) = history.status(amplitude) {
-        return Ok(s);
+    hpc: Hpc,
+) -> eyre::Result<Vec<Status>> {
+    let mut execute = Vec::new();
+    let mut imap = Vec::new();
+    let mut stat = vec![Status::Collapse; amplitudes.len()];
+
+    for (i, a) in amplitudes.iter().enumerate() {
+        if let Some(s) = history.status(*a) {
+            stat[i] = s;
+        } else {
+            execute.push(*a);
+            imap.push(i);
+        }
     }
 
-    let mut vars = vars.clone();
-    // Set the parameter variable to the given amplitude
-    vars.defs
-        .insert(parameter.to_string(), amplitude.to_string());
-    // Transform config appropriately
-    let config = config.transform(&vars)?;
+    // Some stuff
+    let mut cursor = 0;
+    while cursor < execute.len() {
+        let mut exec = vec![0.0; hpc.world.size() as usize];
+        let mut result = vec![0i32; hpc.world.size() as usize];
 
-    let mut history = RunHistory::empty();
-    let sim = run::run_simulation(&config, &mut history)?;
+        let mut num_workers: i32 = (execute.len() - cursor).min(hpc.world.size() as usize) as i32;
+        assert!(num_workers >= 1);
 
-    return Ok(sim);
+        for i in 0..hpc.world.size() as usize {
+            if cursor + i < execute.len() {
+                exec[i] = execute[cursor + i];
+            } else {
+                exec[i] = 0.0;
+            }
+        }
+
+        let mut status: i32 = WORKER_STATUS_RUN;
+        hpc.root.broadcast_into(&mut status);
+        println!("Root   (Rank 0): broadcasted run op code");
+        hpc.root.broadcast_into(&mut num_workers);
+        println!("Root   (Rank 0): broadcasted num workers {}", num_workers);
+
+        let mut root_exec: f64 = 0.0;
+        hpc.root.scatter_into_root(&exec, &mut root_exec);
+        println!("Root   (Rank 0): scattered amplitudes {:?}", exec);
+
+        // Perform iteration
+
+        println!(
+            "Root   (Rank 0): running simulation for param = {:.8}",
+            root_exec
+        );
+        let mut vars = VarDefs::new();
+        vars.defs
+            .insert(parameter.to_string(), root_exec.to_string());
+
+        let config = config.transform(&vars)?;
+
+        let mut history = RunHistory::empty();
+        let status = run::run_simulation(&config, &mut history)?;
+        let mut code = status as i32;
+        // Gather results
+        hpc.root.gather_into_root(&mut code, &mut result);
+
+        for (&s, &i) in result.iter().zip(imap.iter()) {
+            stat[cursor + i] = Status::from(s);
+        }
+
+        cursor += hpc.world.size() as usize;
+    }
+
+    Ok(stat)
 }
+
+#[cfg(feature = "mpi")]
+pub fn search_worker(hpc: Hpc) -> eyre::Result<()> {
+    let rank = hpc.world.rank();
+
+    println!("Worker (Rank {}): launching worker in search mode", rank);
+
+    // Recieve config over network
+    let mut config_buffer_len: usize = 0;
+    hpc.root.broadcast_into(&mut config_buffer_len);
+    let mut config_buffer = vec![0u8; config_buffer_len];
+    hpc.root.broadcast_into(&mut config_buffer);
+    println!(
+        "Worker (Rank {}): received config buffer with length {}",
+        rank, config_buffer_len
+    );
+    // Convert back to config
+    let (run_config, _) =
+        bincode::decode_from_slice::<RunConfig, _>(&config_buffer, bincode::config::standard())?;
+
+    // Recieve parameter name over network
+    let mut parameter_buffer_len: usize = 0;
+    hpc.root.broadcast_into(&mut parameter_buffer_len);
+    let mut parameter_buffer = vec![0u8; parameter_buffer_len];
+    hpc.root.broadcast_into(&mut parameter_buffer);
+    println!(
+        "Worker (Rank {}): received parameter buffer with length {}",
+        rank, parameter_buffer_len
+    );
+    let parameter = String::from_utf8(parameter_buffer)?;
+
+    loop {
+        let mut code: i32 = WORKER_STATUS_RUN;
+        hpc.root.broadcast_into(&mut code);
+        println!(
+            "Worker (Rank {}): work loop received status update {}",
+            rank, code
+        );
+
+        if code == WORKER_STATUS_RUN {
+        } else if code == WORKER_STATUS_HALT {
+            println!("Worker (Rank {rank}): halting");
+            break;
+        } else {
+            return Err(eyre!(
+                "worker on rank {} received unknown status code {}",
+                rank,
+                code
+            ));
+        }
+
+        let mut num_workers: i32 = 0;
+        hpc.root.broadcast_into(&mut num_workers);
+        println!(
+            "Worker (Rank {}): received num workers {}",
+            rank, num_workers
+        );
+
+        let mut amplitude: f64 = 0.0;
+        hpc.root.scatter_into(&mut amplitude);
+        println!(
+            "Worker (Rank {}): received scattered amplitude {}",
+            rank, amplitude
+        );
+
+        let mut code = Status::Collapse as i32;
+
+        if hpc.world.rank() < num_workers {
+            // Perform iteration
+            println!(
+                "Worker (Rank {}): running simulation for param = {}",
+                rank, amplitude
+            );
+
+            let mut vars = VarDefs::new();
+            vars.defs
+                .insert(parameter.to_string(), amplitude.to_string());
+
+            let config = run_config.transform(&vars)?;
+
+            let mut history = RunHistory::empty();
+            let simulation = run::run_simulation(&config, &mut history)?;
+            code = simulation as i32;
+        } else {
+            // Perform iteration
+            println!("Worker (Rank {}): skipping execution", rank);
+        }
+
+        hpc.root.gather_into(&code);
+    }
+
+    Ok(())
+}
+
+#[cfg(not(feature = "mpi"))]
+fn launch_fleet(
+    config: &RunConfig,
+    parameter: &str,
+    amplitudes: &[f64],
+    history: &SearchHistory,
+    hpc: Hpc,
+) -> eyre::Result<Vec<Status>> {
+    let mut status = vec![Status::Collapse; amplitudes.len()];
+
+    for (i, &amp) in amplitudes.iter().enumerate() {
+        if let Some(s) = history.status(amp) {
+            status[i] = s;
+            continue;
+        }
+
+        let mut vars = VarDefs::new();
+        vars.defs.insert(parameter.to_string(), amp.to_string());
+
+        let config = config.transform(&vars)?;
+
+        let mut history = RunHistory::empty();
+        status[i] = run::run_simulation(&config, &mut history)?;
+    }
+
+    Ok(status)
+}
+
+// /// Run a single iteration of a critical search
+// fn search_iteration(
+//     vars: &VarDefs,
+//     config: &run::Config,
+//     parameter: &str,
+//     amplitude: f64,
+//     history: &SearchHistory,
+// ) -> eyre::Result<Status> {
+//     if let Some(s) = history.status(amplitude) {
+//         return Ok(s);
+//     }
+
+//     let mut vars = vars.clone();
+//     // Set the parameter variable to the given amplitude
+//     vars.defs
+//         .insert(parameter.to_string(), amplitude.to_string());
+//     // Transform config appropriately
+//     let config = config.transform(&vars)?;
+
+//     let mut history = RunHistory::empty();
+//     let sim = run::run_simulation(&config, &mut history)?;
+
+//     Ok(sim)
+// }
 
 pub trait CommandExt {
     fn search_cmd(self) -> Self;

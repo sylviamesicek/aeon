@@ -463,6 +463,7 @@ pub fn evolve_data(
     let max_levels = config.limits.max_levels;
     let max_nodes = config.limits.max_nodes;
     let max_memory = config.limits.max_memory;
+    let max_wall_time = config.limits.max_wall_time;
 
     let max_steps = config.evolve.max_steps;
     let max_coord_time = config.evolve.max_coord_time;
@@ -527,7 +528,7 @@ pub fn evolve_data(
             config.limits.max_levels,
             config.limits.max_memory,
         ),
-        crate::run::config::Logging::Incremental { interval } => Spinners::incremental(
+        crate::run::config::Logging::Incremental { evolve: interval } => Spinners::incremental(
             config.limits.max_nodes,
             config.limits.max_levels,
             config.limits.max_memory,
@@ -592,11 +593,26 @@ pub fn evolve_data(
         }
 
         // *********************************
-        // Max nodes, levels, and memory
+        // Max nodes, levels, memory, wall time
 
         let memory_usage = fields.estimate_heap_size()
             + integrator.estimate_heap_size()
             + mesh.estimate_heap_size();
+
+        if start.elapsed().as_secs() as usize > max_wall_time {
+            println!(
+                "{}",
+                style(format!(
+                    "Wall time exceded maximum alotted wall time: {:?}",
+                    start.elapsed()
+                ))
+                .red()
+            );
+            break 'evolve config
+                .error_handler
+                .on_max_wall_time
+                .status_or_crash(|| eyre!("wall time exceded maximum alotted wall time"))?;
+        }
 
         if mesh.num_nodes() > max_nodes {
             println!(

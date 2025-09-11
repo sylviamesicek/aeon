@@ -18,6 +18,7 @@ aeon_app = { path = "crates/aeon_app" }
 aeon_macros = { path = "crates/aeon_macros" }
 aeon_tensor = { path = "crates/aeon_tensor" }
 
+bincode = { version = "2.0.1" }
 bitvec = { version = "1.0.1", features = ["serde"] }
 bumpalo = "3.16.0"
 cc = "1.0"
@@ -62,6 +63,7 @@ parallel = []
 aeon_macros.workspace = true
 
 bitvec.workspace = true
+bincode.workspace = true
 bumpalo.workspace = true
 csv.workspace = true
 datasize.workspace = true

@@ -31,6 +31,7 @@ max_steps = 1_000_000
 max_levels = 15
 max_nodes = 16_000_000
 max_memory = 5_000_000_000
+max_wall_time = 1_000_000_000
 
 [regrid]
 refine_error = 1e-6

@@ -1,6 +1,7 @@
 use crate::image::{Image, ImageRef};
 use crate::mesh::{Mesh, MeshSer};
 use crate::prelude::IndexSpace;
+use bincode::{Decode, Encode};
 use ron::ser::PrettyConfig;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -238,7 +239,7 @@ impl Default for ExportVtuConfig {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, Copy)]
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, Encode, Decode)]
 pub enum ExportStride {
     /// Output data for every vertex in the simulation
     #[serde(rename = "per_vertex")]
