@@ -8,6 +8,8 @@ use std::path::{Path, PathBuf};
 pub struct Config {
     pub directory: String,
     pub parameter: String,
+    /// How many simulations do we run/process in parallel?
+    pub parallel: usize,
     /// Start of range to search
     pub start: FloatVar,
     /// End of range to search
@@ -50,6 +52,7 @@ impl Transform for Config {
         Ok(Self {
             directory: self.directory.transform(vars)?,
             parameter: self.parameter.transform(vars)?,
+            parallel: self.parallel,
             start: self.start.transform(&vars)?,
             end: self.end.transform(&vars)?,
             max_depth: self.max_depth,

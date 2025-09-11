@@ -1,5 +1,5 @@
 use crate::{
-    CommandExt as _, parse_define_args, parse_invoke_arg,
+    CommandExt as _, MpiContext, parse_define_args, parse_invoke_arg,
     run::{self, RunHistory, Status},
 };
 use aeon_app::{
@@ -7,7 +7,7 @@ use aeon_app::{
     file,
 };
 use clap::{ArgMatches, Command};
-use eyre::{Context as _, eyre};
+use eyre::eyre;
 
 mod config;
 mod history;
@@ -15,7 +15,7 @@ mod history;
 use config::Config;
 use history::SearchHistory;
 
-pub fn search(matches: &ArgMatches) -> eyre::Result<()> {
+pub fn search(matches: &ArgMatches, mctx: MpiContext) -> eyre::Result<()> {
     let vars = parse_define_args(matches)?;
     let invoke = parse_invoke_arg(matches)?;
 
@@ -23,16 +23,10 @@ pub fn search(matches: &ArgMatches) -> eyre::Result<()> {
     let config_search_file = std::env::current_dir()?.join(format!("{}.search.toml", invoke));
 
     // Load search configuration
-    let search_config = file::import_toml::<Config>(&config_search_file).with_context(|| {
-        format!(
-            "failed to find search config file: {:?}",
-            config_search_file
-        )
-    })?;
+    let search_config = file::import_toml::<Config>(&config_search_file)?;
     let search_config = search_config.transform(&vars)?;
     // Load run configuration
-    let run_config = file::import_toml::<run::Config>(&config_run_file)
-        .with_context(|| format!("failed to find run config file: {:?}", config_run_file))?;
+    let run_config = file::import_toml::<run::Config>(&config_run_file)?;
 
     // Find search directory
     let search_dir = search_config.search_dir()?;
@@ -48,11 +42,16 @@ pub fn search(matches: &ArgMatches) -> eyre::Result<()> {
     // Name of parameter
     let parameter = search_config.parameter.clone();
 
-    let mut start_status = search_iteration(&vars, &run_config, &parameter, start, &mut history)?;
-    let mut end_status = search_iteration(&vars, &run_config, &parameter, end, &mut history)?;
+    let info = [start, end]
+        .iter()
+        .map(|value| search_iteration(&vars, &run_config, &parameter, *value, &history))
+        .collect::<Result<Vec<_>, _>>()?;
 
-    // Cache history file.
-    history.save_csv(&history_file)?;
+    let start_status = info[0];
+    let end_status = info[1];
+
+    history.insert(start, start_status);
+    history.insert(end, end_status);
 
     match (start_status, end_status) {
         (Status::Disperse, Status::Disperse) => {
@@ -62,6 +61,11 @@ pub fn search(matches: &ArgMatches) -> eyre::Result<()> {
             return Err(eyre!("both sides of the parameter range collapse"));
         }
         _ => {}
+    }
+
+    // Cache history file (only if we are root to avoid conflicts).
+    if mctx.is_root() {
+        history.save_csv(&history_file)?;
     }
 
     let mut depth = 0;
@@ -78,28 +82,41 @@ pub fn search(matches: &ArgMatches) -> eyre::Result<()> {
             start, end, tolerance
         );
 
-        let midpoint = (start + end) / 2.0;
-        let midpoint_status =
-            search_iteration(&vars, &run_config, &parameter, midpoint, &mut history)?;
+        let amplitudes = (0..search_config.parallel)
+            .map(|i| (i + 1) as f64 / (search_config.parallel + 1) as f64)
+            .map(|w| (1.0 - w) * start + w * end)
+            .collect::<Vec<_>>();
 
-        match (start_status, midpoint_status, end_status) {
-            (Status::Disperse, Status::Disperse, Status::Collapse) => {
-                start = midpoint;
-                start_status = midpoint_status;
-            }
-            (Status::Disperse, Status::Collapse, Status::Collapse) => {
-                end = midpoint;
-                end_status = midpoint_status;
-            }
-            (Status::Collapse, Status::Disperse, Status::Disperse) => {
-                end = midpoint;
-                end_status = midpoint_status;
-            }
-            (Status::Collapse, Status::Collapse, Status::Disperse) => {
-                start = midpoint;
-                start_status = midpoint_status;
-            }
-            _ => unreachable!(),
+        // Execute iterations independently
+        let status = amplitudes
+            .iter()
+            .map(|&w| search_iteration(&vars, &run_config, &parameter, w, &history))
+            .collect::<Result<Vec<Status>, _>>()?;
+
+        // Insert results into cache
+        for (w, s) in amplitudes.iter().zip(status.iter()) {
+            history.insert(*w, *s);
+        }
+
+        println!("Status Results: {:?}", status);
+
+        // Imagine vector of all statuses, including start and end
+        let (sindex, eindex) = double_headed_search(start_status, &status, end_status);
+        match (sindex, eindex) {
+            (Some(idx), None) if idx == status.len() - 1 => {}
+            (None, Some(0)) => {}
+            (Some(start), Some(end)) if start + 1 == end => {}
+            _ => return Err(eyre!("range contains multiple critical points")),
+        }
+
+        if let Some(sidx) = sindex {
+            assert!(status[sidx] == start_status);
+            start = amplitudes[sidx];
+        }
+
+        if let Some(eidx) = eindex {
+            assert!(status[eidx] == end_status);
+            end = amplitudes[eidx]
         }
 
         // Cache history file.
@@ -129,14 +146,10 @@ fn search_iteration(
     config: &run::Config,
     parameter: &str,
     amplitude: f64,
-    history: &mut SearchHistory,
+    history: &SearchHistory,
 ) -> eyre::Result<Status> {
-    if let Some(status) = history.status(amplitude) {
-        println!(
-            "Using cached status: {:?} for amplitude: {}",
-            status, amplitude
-        );
-        return Ok(status);
+    if let Some(s) = history.status(amplitude) {
+        return Ok(s);
     }
 
     let mut vars = vars.clone();
@@ -146,11 +159,9 @@ fn search_iteration(
     // Transform config appropriately
     let config = config.transform(&vars)?;
 
-    println!("Performing search for amplitude: {}", amplitude);
-    // Setup history file
-    let sim = run::run_simulation(&config, &mut RunHistory::empty())?;
-    // Insert it into cache
-    history.insert(amplitude, sim);
+    let mut history = RunHistory::empty();
+    let sim = run::run_simulation(&config, &mut history)?;
+
     return Ok(sim);
 }
 
@@ -162,7 +173,7 @@ impl CommandExt for Command {
     fn search_cmd(self) -> Self {
         self.subcommand(
             Command::new("search")
-                .about("Performs critical search")
+                .about("Performs critical search across many MPI nodes")
                 .define_args()
                 .invoke_arg(),
         )
@@ -171,4 +182,70 @@ impl CommandExt for Command {
 
 pub fn parse_search_cmd(matches: &ArgMatches) -> Option<&ArgMatches> {
     matches.subcommand_matches("search")
+}
+
+/// Returns the last index in values that matches start and the first index in values that matches end.
+fn double_headed_search<T: PartialEq>(
+    start: T,
+    values: &[T],
+    end: T,
+) -> (Option<usize>, Option<usize>) {
+    assert!(start != end);
+
+    if values.len() == 0 {
+        return (None, None);
+    }
+
+    if values.len() == 1 {
+        if start == values[0] {
+            return (Some(0), None);
+        }
+
+        if end == values[0] {
+            return (None, Some(0));
+        }
+
+        panic!("Invalid search");
+    }
+
+    let sindex = if values[0] != start {
+        None
+    } else {
+        let mut sindex = 0;
+        while sindex < values.len() - 1 && values[sindex + 1] == start {
+            sindex += 1;
+        }
+        Some(sindex)
+    };
+
+    let eindex = if values[values.len() - 1] != end {
+        None
+    } else {
+        let mut eindex = values.len() - 1;
+        while eindex > 0 && values[eindex - 1] == end {
+            eindex -= 1;
+        }
+        Some(eindex)
+    };
+
+    (sindex, eindex)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn double_headed() {
+        assert_eq!(double_headed_search(false, &[true], true), (None, Some(0)));
+        assert_eq!(double_headed_search(false, &[false], true), (Some(0), None));
+        assert_eq!(
+            double_headed_search(false, &[false, false, true, true], true),
+            (Some(1), Some(2))
+        );
+        assert_eq!(
+            double_headed_search(false, &[false, false, true, false, true, true], true),
+            (Some(1), Some(4))
+        );
+    }
 }

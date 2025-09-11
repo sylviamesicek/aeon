@@ -43,17 +43,10 @@ impl SearchHistory {
 
     pub fn insert(&mut self, key: f64, status: Status) {
         let bits: u64 = key.to_bits();
-        self.map.insert(
-            bits,
-            SearchRecord {
-                param: key,
-                // encode: float::encode_float(key),
-                status,
-            },
-        );
+        self.map.insert(bits, SearchRecord { param: key, status });
     }
 
-    pub fn status(&mut self, key: f64) -> Option<Status> {
+    pub fn status(&self, key: f64) -> Option<Status> {
         let bits: u64 = key.to_bits();
         self.map.get(&bits).map(|v| v.status)
     }
@@ -62,6 +55,5 @@ impl SearchHistory {
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct SearchRecord {
     param: f64,
-    // encode: String,
     status: Status,
 }

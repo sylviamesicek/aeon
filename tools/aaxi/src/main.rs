@@ -13,7 +13,44 @@ use run::CommandExt as _;
 use schwarzschild::CommandExt as _;
 use search::CommandExt as _;
 
+pub struct MpiContext {
+    #[cfg(feature = "mpi")]
+    world: mpi::topology::SimpleCommunicator,
+}
+
+impl MpiContext {
+    pub fn is_root(&self) -> bool {
+        #[cfg(feature = "mpi")]
+        return self.world.rank() == 0;
+        #[cfg(not(feature = "mpi"))]
+        return true;
+    }
+}
+
+#[cfg(feature = "mpi")]
+use mpi::traits::*;
+
 fn main() -> eyre::Result<()> {
+    // Set up MPI context and such.
+    #[cfg(feature = "mpi")]
+    let (universe, threading) = mpi::initialize_with_threading(mpi::Threading::Serialized).unwrap();
+    #[cfg(feature = "mpi")]
+    eyre::ensure!(
+        matches!(
+            threading,
+            mpi::Threading::Serialized | mpi::Threading::Multiple
+        ),
+        "MPI implementation doesn't support multithreaded processes"
+    );
+
+    #[cfg(feature = "mpi")]
+    let mpi_context = MpiContext {
+        world: universe.world(),
+    };
+
+    #[cfg(not(feature = "mpi"))]
+    let mpi_context = MpiContext {};
+
     // Set up nice error handing.
     color_eyre::install()?;
     // Specify cli argument parsing.
@@ -37,7 +74,7 @@ fn main() -> eyre::Result<()> {
     // Run search subcommand
     if let Some(matches) = search::parse_search_cmd(&matches) {
         println!("Running Search subcommand");
-        return search::search(matches);
+        return search::search(matches, mpi_context);
     }
 
     // Run default subcommand

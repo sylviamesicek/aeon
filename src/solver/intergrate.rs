@@ -156,26 +156,6 @@ impl Integrator {
         });
     }
 
-    // fn fused_multiply_add<S: System + Clone + Sync>(
-    //     dest: SystemSliceMut<S>,
-    //     a: SystemSlice<S>,
-    //     h: f64,
-    //     b: SystemSlice<S>,
-    // ) {
-    //     let shared = dest.into_shared();
-    //     a.system().enumerate().par_bridge().for_each(|field| {
-    //         let dest = unsafe { shared.field_mut(field) };
-    //         let a = a.field(field);
-    //         let b = b.field(field);
-
-    //         dest.iter_mut()
-    //             .zip(a.iter().zip(b))
-    //             .for_each(|(d, (a, b))| {
-    //                 *d = a + h * b;
-    //             });
-    //     });
-    // }
-
     /// Performs operation `dest = a + h * dest`
     fn fused_multiply_add_dest(dest: ImageMut, a: ImageRef, h: f64) {
         let shared: ImageShared = dest.into();
