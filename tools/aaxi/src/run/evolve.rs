@@ -528,7 +528,9 @@ pub fn evolve_data(
             config.limits.max_levels,
             config.limits.max_memory,
         ),
-        crate::run::config::Logging::Incremental { evolve: interval } => Spinners::incremental(
+        crate::run::config::Logging::Incremental {
+            evolve: interval, ..
+        } => Spinners::incremental(
             config.limits.max_nodes,
             config.limits.max_levels,
             config.limits.max_memory,

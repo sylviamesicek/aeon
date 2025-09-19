@@ -54,6 +54,7 @@ stride = "per_cell"
 [logging]
 style = "incremental"
 evolve.steps = 1000
+initial.steps = 1000
 
 [cache]
 initial = true

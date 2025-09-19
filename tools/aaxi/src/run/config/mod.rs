@@ -203,7 +203,7 @@ pub enum Logging {
     #[default]
     Progress,
     #[serde(rename = "incremental")]
-    Incremental { evolve: Interval },
+    Incremental { evolve: Interval, initial: Interval },
 }
 
 /// Config struct describing how we cache data.

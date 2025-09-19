@@ -1,8 +1,9 @@
 use crate::{
-    CommandExt as _, Hpc, WORKER_STATUS_HALT, WORKER_STATUS_RUN, parse_define_args,
-    parse_invoke_arg,
+    CommandExt as _, Hpc, parse_define_args, parse_invoke_arg,
     run::{self, RunHistory, Status},
 };
+#[cfg(feature = "mpi")]
+use crate::{WORKER_STATUS_HALT, WORKER_STATUS_RUN};
 use aeon_app::{
     config::{Transform, VarDefs},
     file,
@@ -34,8 +35,6 @@ pub fn search(matches: &ArgMatches, hpc: Hpc) -> eyre::Result<()> {
     let search_config = search_config.transform(&vars)?;
     // Load run configuration
     let run_config = file::import_toml::<RunConfig>(&config_run_file)?;
-
-    // let run_config = run_config.transform(&vars)?;
 
     // Find search directory
     let search_dir = search_config.search_dir()?;
@@ -76,12 +75,23 @@ pub fn search(matches: &ArgMatches, hpc: Hpc) -> eyre::Result<()> {
             "Root   (Rank 0): broadcasted parameter buffer with length {}",
             parameter_len
         );
+
+        let mut vars_buffer =
+            bincode::encode_to_vec::<VarDefs, _>(vars.clone(), bincode::config::standard())?;
+        let mut vars_buffer_len = vars_buffer.len();
+        hpc.root.broadcast_into(&mut vars_buffer_len);
+        hpc.root.broadcast_into(&mut vars_buffer);
+        println!(
+            "Root   (Rank 0): broadcasted var defs buffer with length {}",
+            vars_buffer_len
+        );
     }
 
     let info = launch_fleet(
         &run_config,
         &parameter,
         &[start, end],
+        &vars,
         &history,
         hpc.clone(),
     )?;
@@ -125,7 +135,14 @@ pub fn search(matches: &ArgMatches, hpc: Hpc) -> eyre::Result<()> {
             .collect::<Vec<_>>();
 
         // Execute iterations independently
-        let status = launch_fleet(&run_config, &parameter, &amplitudes, &history, hpc.clone())?;
+        let status = launch_fleet(
+            &run_config,
+            &parameter,
+            &amplitudes,
+            &vars,
+            &history,
+            hpc.clone(),
+        )?;
 
         // Insert results into history cache
         for (w, s) in amplitudes.iter().zip(status.iter()) {
@@ -185,6 +202,7 @@ fn launch_fleet(
     config: &RunConfig,
     parameter: &str,
     amplitudes: &[f64],
+    vars: &VarDefs,
     history: &SearchHistory,
     hpc: Hpc,
 ) -> eyre::Result<Vec<Status>> {
@@ -234,12 +252,14 @@ fn launch_fleet(
             "Root   (Rank 0): running simulation for param = {:.8}",
             root_exec
         );
-        let mut vars = VarDefs::new();
+
+        // Transform config
+        let mut vars = vars.clone();
         vars.defs
             .insert(parameter.to_string(), root_exec.to_string());
-
         let config = config.transform(&vars)?;
 
+        // Run simulation
         let mut history = RunHistory::empty();
         let status = run::run_simulation(&config, &mut history)?;
         let mut code = status as i32;
@@ -286,6 +306,19 @@ pub fn search_worker(hpc: Hpc) -> eyre::Result<()> {
     );
     let parameter = String::from_utf8(parameter_buffer)?;
 
+    // Recieve var definitions over networks
+    let mut vars_buffer_len: usize = 0;
+    hpc.root.broadcast_into(&mut vars_buffer_len);
+    let mut vars_buffer = vec![0u8; vars_buffer_len];
+    hpc.root.broadcast_into(&mut vars_buffer);
+    println!(
+        "Worker (Rank {}): received var defs buffer with length {}",
+        rank, vars_buffer_len
+    );
+    // Convert back to config
+    let (vars, _) =
+        bincode::decode_from_slice::<VarDefs, _>(&vars_buffer, bincode::config::standard())?;
+
     loop {
         let mut code: i32 = WORKER_STATUS_RUN;
         hpc.root.broadcast_into(&mut code);
@@ -329,7 +362,7 @@ pub fn search_worker(hpc: Hpc) -> eyre::Result<()> {
                 rank, amplitude
             );
 
-            let mut vars = VarDefs::new();
+            let mut vars = vars.clone();
             vars.defs
                 .insert(parameter.to_string(), amplitude.to_string());
 
@@ -354,8 +387,9 @@ fn launch_fleet(
     config: &RunConfig,
     parameter: &str,
     amplitudes: &[f64],
+    vars: &VarDefs,
     history: &SearchHistory,
-    hpc: Hpc,
+    _hpc: Hpc,
 ) -> eyre::Result<Vec<Status>> {
     let mut status = vec![Status::Collapse; amplitudes.len()];
 
@@ -365,7 +399,7 @@ fn launch_fleet(
             continue;
         }
 
-        let mut vars = VarDefs::new();
+        let mut vars = vars.clone();
         vars.defs.insert(parameter.to_string(), amp.to_string());
 
         let config = config.transform(&vars)?;

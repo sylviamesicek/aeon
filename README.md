@@ -57,10 +57,30 @@ cargo run --release --package asphere -- run -Damplitude=0.3 config/sphgauss1
 Example `aaxi` invokations:
 ```bash
 # Runs a single simulation for a 0.3 amplitude scalar field.
-cargo run --release --package aaxi -- run -Damplitude=0.3 config/axiscalar
+cargo run --release --package aaxi -- run -Damplitude=0.3 config/axigauss
 # Performs a critical search for a single massless scalar field between
 # amplitudes 0.0 and 0.5.
-cargo run --release --package aaxi -- search config/axiscalar
+cargo run --release --package aaxi -- search config/axigauss
+```
+
+#### MPI
+
+I recently implemented MPI support for running axisymmetric searches on multiple cluster nodes. This requires the code be compiled with the mpi feature enabled, i.e.
+```bash
+cargo build --release --package aaxi --features="mpi"
+```
+and requires some compatible mpi compiler available (on Windows this includes clang binaries and MSMPI). Running output piped through `mpirun` or `mpiexec` breaks progress bar logging, so I recommend switching to incremental logging by adding this line to your config file.
+```toml
+# ....
+[logging]
+style = "incremental"
+evolve.steps = 1000  # Number of steps between each log during evolution
+initial.steps = 1000 # Number of steps between each log during relaxation
+# ....
+```
+An example of running multiple processes on a single computer for testing purposes
+```bash
+mpiexec -n 3 ./target/release/aaxi search config/axigauss 
 ```
 
 

@@ -1,5 +1,6 @@
 use crate::eqs;
-use crate::run::config::{Config, Initial, Source};
+use crate::run::config::{Config, Initial, Logging, Source};
+use crate::run::interval::Interval;
 use crate::systems::{self, FieldConditions, save_image};
 use aeon::kernel::ScalarConditions;
 use aeon::prelude::*;
@@ -332,10 +333,17 @@ where
 // Initial Data ******************
 // *******************************
 
+#[derive(Clone)]
+enum Spinners {
+    Progress(ProgressBar),
+    Incremental(Interval),
+}
+
 struct IterCallback<'a> {
     config: &'a Config,
-    pb: ProgressBar,
+    spinners: Spinners,
     output: &'a Path,
+    step_count: &'a mut usize,
 }
 
 impl<'a> SolverCallback<2> for IterCallback<'a> {
@@ -348,8 +356,26 @@ impl<'a> SolverCallback<2> for IterCallback<'a> {
         output: ImageRef,
         iteration: usize,
     ) -> Result<(), Self::Error> {
-        self.pb.set_message(format!("Step: {}", iteration));
-        self.pb.inc(1);
+        *self.step_count += 1;
+
+        match &self.spinners {
+            Spinners::Progress(pb) => {
+                pb.set_message(format!("Step: {}", iteration));
+                pb.inc(1);
+            }
+            Spinners::Incremental(interval) => match interval {
+                Interval::Steps { steps } => {
+                    if iteration % steps == 0 {
+                        println!(
+                            "Initial Relax; levels: {}, iteration: {}",
+                            mesh.num_levels(),
+                            iteration
+                        );
+                    }
+                }
+                _ => unimplemented!("Incremental logging interval for initial data must be steps"),
+            },
+        }
 
         if !self.config.visualize.initial_relax {
             return Ok(());
@@ -481,10 +507,17 @@ pub fn initial_data(config: &Config) -> eyre::Result<(Mesh<2>, Image)> {
     let mut step_count = 0;
 
     loop {
-        let pb = m.add(ProgressBar::no_length());
-        pb.set_style(progress::spinner_style());
-        pb.set_prefix(format!("[Level {}]", mesh.num_levels()));
-        pb.enable_steady_tick(Duration::from_millis(100));
+        let spinners = match config.logging {
+            Logging::Progress => Spinners::Progress({
+                let pb = m.add(ProgressBar::no_length());
+                pb.set_style(progress::spinner_style());
+                pb.set_prefix(format!("[Level {}]", mesh.num_levels()));
+                pb.enable_steady_tick(Duration::from_millis(100));
+
+                pb
+            }),
+            Logging::Incremental { initial, .. } => Spinners::Incremental(initial),
+        };
 
         solve_order(
             config.order,
@@ -492,19 +525,24 @@ pub fn initial_data(config: &Config) -> eyre::Result<(Mesh<2>, Image)> {
             &config.initial,
             IterCallback {
                 config,
-                pb: pb.clone(),
+                spinners: spinners.clone(),
                 output: &output,
+                step_count: &mut step_count,
             },
             &config.sources,
             system.as_mut(),
         )?;
 
-        pb.finish_with_message(format!(
-            "Relaxed in {} steps, {} nodes",
-            pb.position(),
-            mesh.num_nodes()
-        ));
-        step_count += pb.position();
+        match spinners {
+            Spinners::Progress(pb) => {
+                pb.finish_with_message(format!(
+                    "Relaxed in {} steps, {} nodes",
+                    pb.position(),
+                    mesh.num_nodes()
+                ));
+            }
+            Spinners::Incremental(..) => {}
+        }
 
         if config.visualize.initial_levels {
             let mut checkpoint = Checkpoint::default();
@@ -579,7 +617,7 @@ pub fn initial_data(config: &Config) -> eyre::Result<(Mesh<2>, Image)> {
     println!(
         "Finished relaxing in {}, {} Steps",
         HumanDuration(start.elapsed()),
-        HumanCount(step_count),
+        HumanCount(step_count as u64),
     );
     println!("Mesh Info...");
     println!("- Num Nodes: {}", mesh.num_nodes());

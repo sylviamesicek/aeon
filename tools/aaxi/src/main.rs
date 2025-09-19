@@ -50,10 +50,15 @@ impl Hpc<'static> {
     }
 }
 
+#[cfg(feature = "mpi")]
 const WORKER_OP_NONE: i32 = 0;
+#[cfg(feature = "mpi")]
 const WORKER_OP_SEARCH: i32 = 1;
+#[cfg(feature = "mpi")]
 const WORKER_STATUS_RUN: i32 = 0;
+#[cfg(feature = "mpi")]
 const WORKER_STATUS_HALT: i32 = 1;
+#[cfg(feature = "mpi")]
 const ROOT_RANK: i32 = 0;
 
 fn main() -> eyre::Result<()> {

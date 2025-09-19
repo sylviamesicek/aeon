@@ -42,7 +42,7 @@ fn def_var_parser<'a>() -> impl Parser<'a, &'a str, VarDef<'a>, SimpleError<'a>>
 }
 
 /// Collection of variables defined intrinsicly or via `-Dvar=value`.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, bincode::Encode, bincode::Decode, serde::Serialize, serde::Deserialize)]
 pub struct VarDefs {
     /// Named arguments.
     pub defs: HashMap<String, String>,
