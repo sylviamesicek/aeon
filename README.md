@@ -82,7 +82,3 @@ An example of running multiple processes on a single computer for testing purpos
 ```bash
 mpiexec -n 3 ./target/release/aaxi search config/axigauss 
 ```
-
-
-<!-- [![Build Status](https://github.com/lukazmm/Aeon.jl/actions/workflows/CI.yml/badge.svg?branch=main)](https://github.com/lukazmm/Aeon.jl/actions/workflows/CI.yml?query=branch%3Amain)
-[![Coverage](https://codecov.io/gh/lukazmm/Aeon.jl/branch/main/graph/badge.svg)](https://codecov.io/gh/lukazmm/Aeon.jl) -->
