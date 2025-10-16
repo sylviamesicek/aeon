@@ -44,13 +44,14 @@ pub fn run_simulation(config: &Config, history: &mut RunHistory) -> eyre::Result
     let term = Term::stdout();
     term.set_title("Axisymmetric Simulation");
     // Basic info dumping
-    println!("Simulation: {}", style(&config.name).green());
-    println!("Output Directory: {}", style(output_path.display()).green());
-    println!(
+    log::info!("Simulation: {}", style(&config.name).green());
+    log::info!("Output Directory: {}", style(output_path.display()).green());
+    log::info!(
         "Domain: {:.5} x {:.5}",
-        config.domain.radius, config.domain.height
+        config.domain.radius,
+        config.domain.height
     );
-    println!("Sources...");
+    log::info!("Sources...");
     for source in &config.sources {
         source.println();
     }

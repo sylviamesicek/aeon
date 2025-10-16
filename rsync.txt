@@ -1,0 +1,10 @@
++ output/
++ output/axicombo/
++ output/axicombo/**
+- output/**
+- Analyze/
+- Analyze/**
+- target/
+- target/**
+- .git/
+- .git/**

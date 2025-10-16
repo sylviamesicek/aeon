@@ -22,7 +22,7 @@ use run::Config as RunConfig;
 
 pub fn search(matches: &ArgMatches, hpc: Hpc) -> eyre::Result<()> {
     #[cfg(feature = "mpi")]
-    println!("Root   (Rank 0): launching root in search mode");
+    log::info!("Launching root in search mode");
 
     let vars = parse_define_args(matches)?;
     let invoke = parse_invoke_arg(matches)?;
@@ -61,8 +61,8 @@ pub fn search(matches: &ArgMatches, hpc: Hpc) -> eyre::Result<()> {
         hpc.root.broadcast_into(&mut config_buffer_len);
         assert_eq!(config_buffer_len, config_buffer.len());
         hpc.root.broadcast_into(&mut config_buffer);
-        println!(
-            "Root   (Rank 0): broadcasted config buffer with length {}",
+        log::info!(
+            "Broadcasted config buffer with length {}",
             config_buffer_len
         );
 
@@ -71,18 +71,15 @@ pub fn search(matches: &ArgMatches, hpc: Hpc) -> eyre::Result<()> {
         let mut parameter_len: usize = parameter_buffer.len();
         hpc.root.broadcast_into(&mut parameter_len);
         hpc.root.broadcast_into(&mut parameter_buffer);
-        println!(
-            "Root   (Rank 0): broadcasted parameter buffer with length {}",
-            parameter_len
-        );
+        log::info!("Broadcasted parameter buffer with length {}", parameter_len);
 
         let mut vars_buffer =
             bincode::encode_to_vec::<VarDefs, _>(vars.clone(), bincode::config::standard())?;
         let mut vars_buffer_len = vars_buffer.len();
         hpc.root.broadcast_into(&mut vars_buffer_len);
         hpc.root.broadcast_into(&mut vars_buffer);
-        println!(
-            "Root   (Rank 0): broadcasted var defs buffer with length {}",
+        log::info!(
+            "Broadcasted var defs buffer with length {}",
             vars_buffer_len
         );
     }
@@ -120,13 +117,15 @@ pub fn search(matches: &ArgMatches, hpc: Hpc) -> eyre::Result<()> {
         // Have we reached minimum tolerance
         let tolerance = (end - start).abs();
         if tolerance <= search_config.min_error {
-            println!("Reached minimum critical parameter error {:.4e}", tolerance);
+            log::info!("Reached minimum critical parameter error {:.4e}", tolerance);
             break;
         }
 
-        println!(
+        log::info!(
             "Searching range: {} to {}, diff: {:.4e}",
-            start, end, tolerance
+            start,
+            end,
+            tolerance
         );
 
         let amplitudes = (0..search_config.parallel)
@@ -149,7 +148,7 @@ pub fn search(matches: &ArgMatches, hpc: Hpc) -> eyre::Result<()> {
             history.insert(*w, *s);
         }
 
-        println!("Iteration Status Results: {:?}", status);
+        log::info!("Iteration Status Results: {:?}", status);
 
         // Imagine vector of all statuses, including start and end
         let (sindex, eindex) = double_headed_search(start_status, &status, end_status);
@@ -176,7 +175,7 @@ pub fn search(matches: &ArgMatches, hpc: Hpc) -> eyre::Result<()> {
         depth += 1;
         // Check maximum depth
         if depth >= search_config.max_depth {
-            println!("Reached maximum critical search depth");
+            log::info!("Reached maximum critical search depth");
             break;
         }
     }
@@ -187,7 +186,7 @@ pub fn search(matches: &ArgMatches, hpc: Hpc) -> eyre::Result<()> {
         hpc.root.broadcast_into(&mut status);
     }
 
-    println!(
+    log::info!(
         "Final search range: {} to {}, diff: {:.4e}",
         start,
         end,
@@ -238,20 +237,17 @@ fn launch_fleet(
 
         let mut status: i32 = WORKER_STATUS_RUN;
         hpc.root.broadcast_into(&mut status);
-        println!("Root   (Rank 0): broadcasted run op code");
+        log::info!("Broadcasted run op code");
         hpc.root.broadcast_into(&mut num_workers);
-        println!("Root   (Rank 0): broadcasted num workers {}", num_workers);
+        log::info!("Broadcasted num workers {}", num_workers);
 
         let mut root_exec: f64 = 0.0;
         hpc.root.scatter_into_root(&exec, &mut root_exec);
-        println!("Root   (Rank 0): scattered amplitudes {:?}", exec);
+        log::info!("Scattered amplitudes {:?}", exec);
 
         // Perform iteration
 
-        println!(
-            "Root   (Rank 0): running simulation for param = {:.8}",
-            root_exec
-        );
+        log::info!("Running simulation for param = {:.8}", root_exec);
 
         // Transform config
         let mut vars = vars.clone();
@@ -280,17 +276,14 @@ fn launch_fleet(
 pub fn search_worker(hpc: Hpc) -> eyre::Result<()> {
     let rank = hpc.world.rank();
 
-    println!("Worker (Rank {}): launching worker in search mode", rank);
+    log::info!("Launching worker in search mode");
 
     // Recieve config over network
     let mut config_buffer_len: usize = 0;
     hpc.root.broadcast_into(&mut config_buffer_len);
     let mut config_buffer = vec![0u8; config_buffer_len];
     hpc.root.broadcast_into(&mut config_buffer);
-    println!(
-        "Worker (Rank {}): received config buffer with length {}",
-        rank, config_buffer_len
-    );
+    log::info!("Received config buffer with length {}", config_buffer_len);
     // Convert back to config
     let (run_config, _) =
         bincode::decode_from_slice::<RunConfig, _>(&config_buffer, bincode::config::standard())?;
@@ -300,9 +293,9 @@ pub fn search_worker(hpc: Hpc) -> eyre::Result<()> {
     hpc.root.broadcast_into(&mut parameter_buffer_len);
     let mut parameter_buffer = vec![0u8; parameter_buffer_len];
     hpc.root.broadcast_into(&mut parameter_buffer);
-    println!(
-        "Worker (Rank {}): received parameter buffer with length {}",
-        rank, parameter_buffer_len
+    log::info!(
+        "Received parameter buffer with length {}",
+        parameter_buffer_len
     );
     let parameter = String::from_utf8(parameter_buffer)?;
 
@@ -311,10 +304,7 @@ pub fn search_worker(hpc: Hpc) -> eyre::Result<()> {
     hpc.root.broadcast_into(&mut vars_buffer_len);
     let mut vars_buffer = vec![0u8; vars_buffer_len];
     hpc.root.broadcast_into(&mut vars_buffer);
-    println!(
-        "Worker (Rank {}): received var defs buffer with length {}",
-        rank, vars_buffer_len
-    );
+    log::info!("Received var defs buffer with length {}", vars_buffer_len);
     // Convert back to config
     let (vars, _) =
         bincode::decode_from_slice::<VarDefs, _>(&vars_buffer, bincode::config::standard())?;
@@ -322,14 +312,11 @@ pub fn search_worker(hpc: Hpc) -> eyre::Result<()> {
     loop {
         let mut code: i32 = WORKER_STATUS_RUN;
         hpc.root.broadcast_into(&mut code);
-        println!(
-            "Worker (Rank {}): work loop received status update {}",
-            rank, code
-        );
+        log::info!("Work loop received status update {}", code);
 
         if code == WORKER_STATUS_RUN {
         } else if code == WORKER_STATUS_HALT {
-            println!("Worker (Rank {rank}): halting");
+            log::info!("Halting");
             break;
         } else {
             return Err(eyre!(
@@ -341,26 +328,17 @@ pub fn search_worker(hpc: Hpc) -> eyre::Result<()> {
 
         let mut num_workers: i32 = 0;
         hpc.root.broadcast_into(&mut num_workers);
-        println!(
-            "Worker (Rank {}): received num workers {}",
-            rank, num_workers
-        );
+        log::info!("Received num workers {}", num_workers);
 
         let mut amplitude: f64 = 0.0;
         hpc.root.scatter_into(&mut amplitude);
-        println!(
-            "Worker (Rank {}): received scattered amplitude {}",
-            rank, amplitude
-        );
+        log::info!("Received scattered amplitude {}", amplitude);
 
         let mut code = Status::Collapse as i32;
 
         if hpc.world.rank() < num_workers {
             // Perform iteration
-            println!(
-                "Worker (Rank {}): running simulation for param = {}",
-                rank, amplitude
-            );
+            log::info!("Running simulation for param = {}", amplitude);
 
             let mut vars = vars.clone();
             vars.defs
@@ -373,7 +351,7 @@ pub fn search_worker(hpc: Hpc) -> eyre::Result<()> {
             code = simulation as i32;
         } else {
             // Perform iteration
-            println!("Worker (Rank {}): skipping execution", rank);
+            log::info!("Skipping execution");
         }
 
         hpc.root.gather_into(&code);

@@ -402,11 +402,13 @@ impl Spinners {
                     let level_percentage = num_levels as f64 / inc.max_levels as f64;
                     let memory_percentage = memory_usage as f64 / inc.max_memory as f64;
 
-                    println!(
+                    log::info!(
                         "Step: {}, Proper Time: {:.8}, Coord Time: {:.8}",
-                        step, proper_time, coord_time
+                        step,
+                        proper_time,
+                        coord_time
                     );
-                    println!(
+                    log::info!(
                         "- Nodes: {} ({:.2}%), Levels: {} ({:.2}%), Ram Usage: {} ({:.2}%)",
                         num_nodes,
                         node_percentage,
@@ -415,7 +417,7 @@ impl Spinners {
                         memory_usage,
                         memory_percentage
                     );
-                    println!("- Lapse: {:.6e}", lapse)
+                    log::info!("- Lapse: {:.6e}", lapse)
                 });
                 inc.tracker.update(proper_time_delta, coord_time_delta, 1);
             }
@@ -519,7 +521,7 @@ pub fn evolve_data(
     // **************************
     // Evolve
 
-    println!("Evolving data");
+    log::info!("Evolving data");
 
     // Create spinner outputs
     let mut spinners = match config.logging {
@@ -545,7 +547,7 @@ pub fn evolve_data(
         // Coordinate time
 
         if coord_time > max_coord_time {
-            println!(
+            log::warn!(
                 "{}",
                 style(format!(
                     "Evolution reached max coordinate time: {}",
@@ -564,7 +566,7 @@ pub fn evolve_data(
         // Proper time
 
         if proper_time > max_proper_time {
-            println!(
+            log::warn!(
                 "{}",
                 style(format!(
                     "Evolution reached max proper time: {}",
@@ -583,7 +585,7 @@ pub fn evolve_data(
         // Steps
 
         if step > max_steps {
-            println!(
+            log::warn!(
                 "{}",
                 style(format!("Evolution reached max steps: {}", step)).green()
             );
@@ -942,24 +944,24 @@ pub fn evolve_data(
 
     // Print status of run
     match status {
-        Status::Disperse => println!("{}", style(format!("System disperses")).cyan()),
-        Status::Collapse => println!("{}", style(format!("System collapses")).cyan()),
+        Status::Disperse => log::info!("{}", style(format!("System disperses")).cyan()),
+        Status::Collapse => log::info!("{}", style(format!("System collapses")).cyan()),
     }
 
-    println!(
+    log::info!(
         "Final evolution takes {}, {} steps",
         HumanDuration(start.elapsed()),
         HumanCount(step as u64),
     );
-    println!("Mesh Info...");
-    println!("- Num Nodes: {}", mesh.num_nodes());
-    println!("- Active Cells: {}", mesh.num_active_cells());
-    println!(
+    log::info!("Mesh Info...");
+    log::info!("- Num Nodes: {}", mesh.num_nodes());
+    log::info!("- Active Cells: {}", mesh.num_active_cells());
+    log::info!(
         "- RAM usage: ~{}",
         HumanBytes(mesh.estimate_heap_size() as u64)
     );
-    println!("Field Info...");
-    println!(
+    log::info!("Field Info...");
+    log::info!(
         "- RAM usage: ~{}",
         HumanBytes((fields.estimate_heap_size() + integrator.estimate_heap_size()) as u64)
     );

@@ -1,9 +1,9 @@
 #! /bin/bash
 #SBATCH --time=30:00:0
-#SBATCH --account=owner-guest
-#SBATCH --partition=notchpeak-guest
+#SBATCH --account=belz
+#SBATCH --partition=notchpeak
 #SBATCH --nodes=9
-#SBATCH --ntasks=9
+#SBATCH --ntasks-per-node=1
 #SBATCH --mem=8G
 #SBATCH --job-name=axicombo
 #SBATCH -o ./output/axicombo.out

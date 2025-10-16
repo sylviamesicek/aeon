@@ -366,7 +366,7 @@ impl<'a> SolverCallback<2> for IterCallback<'a> {
             Spinners::Incremental(interval) => match interval {
                 Interval::Steps { steps } => {
                     if iteration % steps == 0 {
-                        println!(
+                        log::info!(
                             "Initial Relax; levels: {}, iteration: {}",
                             mesh.num_levels(),
                             iteration
@@ -435,7 +435,7 @@ pub fn initial_data(config: &Config) -> eyre::Result<(Mesh<2>, Image)> {
         let mesh = checkpoint.read_mesh();
         let system = checkpoint.read_image("Data");
 
-        println!(
+        log::info!(
             "Successfully read cached initial data: {}",
             style(init_cache.display()).cyan()
         );
@@ -444,7 +444,7 @@ pub fn initial_data(config: &Config) -> eyre::Result<(Mesh<2>, Image)> {
     };
 
     if config.cache.initial {
-        println!(
+        log::warn!(
             "Failed to read cached initial data: {}",
             style(init_cache.display()).yellow()
         );
@@ -499,7 +499,7 @@ pub fn initial_data(config: &Config) -> eyre::Result<(Mesh<2>, Image)> {
     let mut system = Image::new(num_channels, 0);
     system.resize(mesh.num_nodes());
 
-    println!("Relaxing Initial Data");
+    log::info!("Relaxing Initial Data");
 
     // Progress bars for relaxation
     let m = MultiProgress::new();
@@ -614,20 +614,20 @@ pub fn initial_data(config: &Config) -> eyre::Result<(Mesh<2>, Image)> {
 
     m.clear()?;
 
-    println!(
+    log::info!(
         "Finished relaxing in {}, {} Steps",
         HumanDuration(start.elapsed()),
         HumanCount(step_count as u64),
     );
-    println!("Mesh Info...");
-    println!("- Num Nodes: {}", mesh.num_nodes());
-    println!("- Active Cells: {}", mesh.num_active_cells());
-    println!(
+    log::info!("Mesh Info...");
+    log::info!("- Num Nodes: {}", mesh.num_nodes());
+    log::info!("- Active Cells: {}", mesh.num_active_cells());
+    log::info!(
         "- RAM usage: ~{}",
         HumanBytes(mesh.estimate_heap_size() as u64)
     );
-    println!("Field Info...");
-    println!(
+    log::info!("Field Info...");
+    log::info!(
         "- RAM usage: ~{}",
         HumanBytes((system.estimate_heap_size() + transfer.estimate_heap_size()) as u64)
     );
@@ -641,7 +641,7 @@ pub fn initial_data(config: &Config) -> eyre::Result<(Mesh<2>, Image)> {
         checkpoint.save_image("Data", system.as_ref());
         checkpoint.export_dat(&init_cache)?;
 
-        println!(
+        log::info!(
             "Successfully wrote initial data cache: {}",
             style(init_cache.display()).cyan()
         );

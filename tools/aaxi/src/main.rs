@@ -6,6 +6,7 @@ use mpi::{
     topology::{Process, SimpleCommunicator},
     traits::*,
 };
+use std::io::Write as _;
 use std::marker::PhantomData;
 
 mod eqs;
@@ -84,6 +85,46 @@ fn main() -> eyre::Result<()> {
     // Set up nice error handing.
     color_eyre::install()?;
 
+    #[cfg(not(feature = "mpi"))]
+    {
+        env_logger::builder()
+            .filter_level(log::LevelFilter::Info)
+            .format(move |buf, record| writeln!(buf, "[{}]: {}", record.level(), record.args()))
+            .init();
+    }
+
+    #[cfg(feature = "mpi")]
+    {
+        let rank = hpc.world.rank();
+        if rank != ROOT_RANK {
+            env_logger::builder()
+                .filter_level(log::LevelFilter::Info)
+                .format(move |buf, record| {
+                    writeln!(
+                        buf,
+                        "[{}; Worker {}]: {}",
+                        record.level(),
+                        rank,
+                        record.args()
+                    )
+                })
+                .init();
+        } else {
+            env_logger::builder()
+                .filter_level(log::LevelFilter::Info)
+                .format(move |buf, record| {
+                    writeln!(
+                        buf,
+                        "[{}; Root   {}]: {}",
+                        record.level(),
+                        rank,
+                        record.args()
+                    )
+                })
+                .init();
+        }
+    }
+
     // Run as a worker if requested.
     #[cfg(feature = "mpi")]
     if hpc.world.rank() != ROOT_RANK {
@@ -92,7 +133,7 @@ fn main() -> eyre::Result<()> {
 
         match opcode {
             WORKER_OP_NONE => {
-                println!("Worker (rank {}): performing noop", hpc.world.rank());
+                log::info!("Performing noop");
                 return Ok(());
             }
             WORKER_OP_SEARCH => {
@@ -121,16 +162,16 @@ fn main() -> eyre::Result<()> {
 
     // Run schwarzschild subcommand
     if let Some(matches) = schwarzschild::parse_schwarzschild_cmd(&matches) {
-        println!("Running Schwarzschild subcommand");
+        log::info!("Running Schwarzschil subcommand");
         return schwarzschild::schwarzschild(matches);
     }
 
     // Run search subcommand
     if let Some(matches) = search::parse_search_cmd(&matches) {
-        println!("Running Search subcommand");
+        log::info!("Running Search subcommand");
         #[cfg(feature = "mpi")]
         {
-            println!("Root   (Rank 0): Broadcasting search subcommand.");
+            log::info!("Broadcasting search subcommand.");
             let mut worker = WORKER_OP_SEARCH;
             hpc.root.broadcast_into(&mut worker);
         }
@@ -140,12 +181,12 @@ fn main() -> eyre::Result<()> {
 
     // Run default subcommand
     if let Some(matches) = run::parse_run_cmd(&matches) {
-        println!("Running run subcommand");
+        log::info!("Running run subcommand");
         return run::run(matches);
     }
 
     // Run default subcommand
-    println!("No subcommand provided");
+    log::info!("No subcommand provided");
     Ok(())
 }
 

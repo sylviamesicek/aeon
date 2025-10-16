@@ -15,6 +15,7 @@ console.workspace = true
 csv.workspace = true
 datasize.workspace = true
 eyre.workspace = true
+env_logger.workspace = true
 faer.workspace = true
 indicatif.workspace = true
 log.workspace = true
