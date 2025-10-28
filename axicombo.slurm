@@ -1,10 +1,10 @@
 #! /bin/bash
-#SBATCH --time=30:00:0
-#SBATCH --account=belz
-#SBATCH --partition=notchpeak
-#SBATCH --nodes=9
-#SBATCH --ntasks-per-node=1
-#SBATCH --mem=8G
+#SBATCH --time=40:00:0
+#SBATCH --account=belz-np
+#SBATCH --partition=belz-shared-np
+#SBATCH --ntasks=9
+#SBATCH --cpus-per-task=1
+#SBATCH --mem-per-cpu=8G
 #SBATCH --job-name=axicombo
 #SBATCH -o ./output/axicombo.out
 #SBATCH -e ./output/axicombo.err

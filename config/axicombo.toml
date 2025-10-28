@@ -15,8 +15,8 @@ global_refine = 1
 [limits]
 max_levels = 16
 max_nodes = 16_000_000
-max_memory = 5_000_000_000
-max_wall_time = 72000
+max_memory = 3_000_000_000
+max_wall_time = 36000
 
 [initial]
 coarsen_error = 0.0

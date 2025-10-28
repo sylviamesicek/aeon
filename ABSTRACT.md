@@ -1,0 +1,5 @@
+# APS 2026
+
+Title: *Competing Effects of Brill Waves and Scalar Fields in Axisymmetric Critical Collapse*
+
+In the parameter space near the threshold of black hole formation (given arbitrary initial data) numerical analysis reveals an intriguing degree of structure to resulting spacetimes, namely power-law mass scaling, universality, and self-similarity. These solutions have proven to be a powerful test of cosmic censorship, but are less understood in higher dimensional systems which pose computational challenges, and incorporate additional physical effects such as gravitational waves. We present our hyperbolic, adaptive finite difference code for simulating black hole collapse in axisymmetry. To understand the impact of gravity waves on universality and self-similarity, we apply this code to the study of competing effects of Brill waves and scalar fields in axisymmetry, and present preliminary results from these simulations. 

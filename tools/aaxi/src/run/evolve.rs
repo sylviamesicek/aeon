@@ -398,9 +398,9 @@ impl Spinners {
             }
             Spinners::Incremental(inc) => {
                 inc.tracker.every(inc.interval, || {
-                    let node_percentage = num_nodes as f64 / inc.max_nodes as f64;
-                    let level_percentage = num_levels as f64 / inc.max_levels as f64;
-                    let memory_percentage = memory_usage as f64 / inc.max_memory as f64;
+                    let node_percentage = num_nodes as f64 / inc.max_nodes as f64 * 100.0;
+                    let level_percentage = num_levels as f64 / inc.max_levels as f64 * 100.0;
+                    let memory_percentage = memory_usage as f64 / inc.max_memory as f64 * 100.0;
 
                     log::info!(
                         "Step: {}, Proper Time: {:.8}, Coord Time: {:.8}",
