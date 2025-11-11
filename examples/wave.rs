@@ -96,7 +96,7 @@ pub fn main() -> eyre::Result<()> {
     );
     mesh.refine_global();
     // Allocate space for system
-    let mut system = Image::default();
+    let mut system = Image::new(1, 0);
 
     log::info!("Performing Initial Adaptive Mesh Refinement.");
 
