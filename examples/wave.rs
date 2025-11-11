@@ -155,21 +155,21 @@ pub fn main() -> eyre::Result<()> {
             log::info!("Refining {refine} cells, coarsening {coarsen} cells.");
             mesh.regrid();
 
-            let mut string = String::new();
-            mesh.write_debug(&mut string);
-            std::fs::write(PathBuf::from(format!("output/waves/debug{i}.txt")), string)?;
+            // let mut string = String::new();
+            // mesh.write_debug(&mut string);
+            // std::fs::write(PathBuf::from(format!("output/waves/debug{i}.txt")), string)?;
 
-            let mut checkpoint = Checkpoint::default();
-            checkpoint.attach_mesh(&mesh);
-            checkpoint.save_int_field("Flags", &vec![0; mesh.num_nodes()]);
-            checkpoint.export_vtu(
-                format!("output/waves/debug{i}.vtu"),
-                ExportVtuConfig {
-                    title: "Initial Wave Mesh".to_string(),
-                    ghost: false,
-                    stride: ExportStride::PerCell,
-                },
-            )?;
+            // let mut checkpoint = Checkpoint::default();
+            // checkpoint.attach_mesh(&mesh);
+            // checkpoint.save_int_field("Flags", &vec![0; mesh.num_nodes()]);
+            // checkpoint.export_vtu(
+            //     format!("output/waves/debug{i}.vtu"),
+            //     ExportVtuConfig {
+            //         title: "Initial Wave Mesh".to_string(),
+            //         ghost: false,
+            //         stride: ExportStride::PerCell,
+            //     },
+            // )?;
 
             continue;
         } else {
