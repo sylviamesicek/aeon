@@ -143,12 +143,17 @@ impl<const N: usize> Mesh<N> {
     /// boundaries. This function tags any cell that is insufficiently refined to approximate
     /// operators of the given `order` within the range of error.
     pub fn flag_wavelets(&mut self, order: usize, lower: f64, upper: f64, data: ImageRef) {
+        let buffer = 2 * (self.ghost / 2);
+        let support = (self.width + 2 * buffer) / 2;
+
         assert!(order % 2 == 0);
-        assert!(order <= self.width);
+        assert!(order <= support);
+        // Example w = 6, g = 3, o = 6
+        // -> o > (6 + 4) / 2 because the ghost offset is odd
 
         assert_eq!(data.num_nodes(), self.num_nodes());
 
-        let element = self.request_element(self.width, order);
+        let element = self.request_element(support, order);
         let element_coarse = self.request_element(self.width / 2, order / 2);
 
         let support = element.support_refined();
@@ -201,7 +206,7 @@ impl<const N: usize> Mesh<N> {
                     } else {
                         element.wavelet(imsrc, imdest);
 
-                        for point in element.diagonal_int_points() {
+                        for point in element.diagonal_int_points(buffer) {
                             should_refine = should_refine || imdest[point].abs() >= upper;
                             should_coarsen = should_coarsen && imdest[point].abs() <= lower;
                         }

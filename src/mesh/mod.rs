@@ -93,7 +93,7 @@ impl<const N: usize> Mesh<N> {
         boundary: FaceArray<N, BoundaryClass>,
     ) -> Self {
         assert!(width % 2 == 0);
-        assert!(ghost == width / 2);
+        assert!(ghost >= width / 2);
 
         let mut tree = Tree::new(bounds);
 
@@ -394,9 +394,13 @@ impl<const N: usize> Mesh<N> {
     /// Element associated with a given cell.
     pub fn element_window(&self, cell: ActiveCellId) -> NodeWindow<N> {
         let position = self.blocks.active_cell_position(cell);
+        // Round ghost to nearest even number to make sure diagonal coefficients of element
+        // actually correspond with newly refined points.
+        let buffer = 2 * (self.ghost / 2);
+        debug_assert!(buffer <= self.ghost);
 
-        let size = [2 * self.width + 1; N];
-        let mut origin = [(self.width as isize) / 2 - self.width as isize; N];
+        let size = [self.width + 2 * buffer + 1; N];
+        let mut origin = [-(buffer as isize); N];
 
         for axis in 0..N {
             origin[axis] += (self.width * position[axis]) as isize

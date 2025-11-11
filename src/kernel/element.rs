@@ -1,6 +1,6 @@
 use crate::{
     element::{ApproxOperator, Monomials, Uniform, Values},
-    geometry::{Split, IndexSpace},
+    geometry::{IndexSpace, Split},
 };
 use faer::{ColRef, Mat};
 use std::array;
@@ -28,6 +28,7 @@ impl<const N: usize> Element<N> {
     /// Constructs a reference element with uniformly placed
     /// support points with `width + 1` points along each axis.
     pub fn uniform(width: usize, order: usize) -> Self {
+        assert!(width >= order);
         let (grid, grid_refined) = Self::uniform_grid(width);
         debug_assert!(grid.len() == width + 1);
         debug_assert!(grid_refined.len() == 2 * width + 1);
@@ -140,14 +141,14 @@ impl<const N: usize> Element<N> {
             .map(|v| array::from_fn(|axis| v[axis] * 2 + 1))
     }
 
-    /// Iterates over diagonal detail coefficients in a wavelet representation on the interior of this element.
-    pub fn diagonal_int_indices(&self) -> impl Iterator<Item = [usize; N]> {
-        // Relies on truncation.
-        let padding = self.width / 4;
+    /// Iterates over diagonal detail coefficients in a wavelet representation of this element,
+    /// ignoring elements within a `buffer` around the edge of the refined support.
+    pub fn diagonal_int_indices(&self, buffer: usize) -> impl Iterator<Item = [usize; N]> {
+        debug_assert!(buffer % 2 == 0);
 
-        IndexSpace::new([self.width - 2 * padding; N])
+        IndexSpace::new([self.width - buffer; N])
             .iter()
-            .map(move |v| array::from_fn(|axis| 2 * (v[axis] + padding) + 1))
+            .map(move |v| array::from_fn(|axis| 2 * v[axis] + 1 + buffer))
     }
 
     /// Iterates over all detail coefficients in a wavelet representation on this element.
@@ -183,9 +184,9 @@ impl<const N: usize> Element<N> {
             .map(move |index| space.linear_from_cartesian(index))
     }
 
-    pub fn diagonal_int_points(&self) -> impl Iterator<Item = usize> {
+    pub fn diagonal_int_points(&self, buffer: usize) -> impl Iterator<Item = usize> {
         let space = IndexSpace::new([2 * self.width + 1; N]);
-        self.diagonal_int_indices()
+        self.diagonal_int_indices(buffer)
             .map(move |index| space.linear_from_cartesian(index))
     }
 
@@ -351,7 +352,7 @@ mod tests {
         assert_eq!(diagonal.next(), Some([3, 3]));
         assert_eq!(diagonal.next(), None);
 
-        let mut diagonal_int = element.diagonal_int_indices();
+        let mut diagonal_int = element.diagonal_int_indices(0);
         assert_eq!(diagonal_int.next(), Some([1, 1]));
         assert_eq!(diagonal_int.next(), Some([3, 1]));
         assert_eq!(diagonal_int.next(), Some([1, 3]));
@@ -381,8 +382,23 @@ mod tests {
     fn interior_indices() {
         let element = Element::<1>::uniform(6, 4);
 
-        let mut indices = element.diagonal_int_points();
+        let mut indices = element.diagonal_int_points(2);
         assert_eq!(indices.next(), Some(3));
+        assert_eq!(indices.next(), Some(5));
+        assert_eq!(indices.next(), Some(7));
+        assert_eq!(indices.next(), Some(9));
+        assert_eq!(indices.next(), None);
+
+        // Width 4, ghost 3
+        let width = 6;
+        let ghost = 5;
+
+        let buffer = 2 * (ghost / 2); // 4
+        let support = (width + 2 * buffer) / 2; // 7
+
+        let element = Element::<1>::uniform(support, 4);
+
+        let mut indices = element.diagonal_int_points(buffer);
         assert_eq!(indices.next(), Some(5));
         assert_eq!(indices.next(), Some(7));
         assert_eq!(indices.next(), Some(9));

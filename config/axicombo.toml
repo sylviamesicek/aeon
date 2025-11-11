@@ -56,10 +56,10 @@ initial = true
 evolve = false
 evolve_interval.steps = 100
 
-[logging]
-style = "incremental"
-evolve.steps = 1000
-initial.steps = 1000
+# [logging]
+# style = "incremental"
+# evolve.steps = 1000
+# initial.steps = 1000
 
 [horizon]
 search = false

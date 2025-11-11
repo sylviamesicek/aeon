@@ -1,61 +1,83 @@
 name = "axibrill"
-output = "output/axibrill/$0"
+directory = "output/axibrill/${brill}"
 
 order = 4
 diss_order = 6
 
-[execution]
-mode = "run"
 
 [domain]
 radius = 48.0
 height = 48.0
 cell_size = 6
 cell_ghost = 3
+global_refine = 3
 
-[relax]
-max_steps = 10_000_000
-error_tolerance = 1e-6
-cfl = 0.5
-dampening = 0.4
+[limits]
+max_levels = 16
+max_nodes = 16_000_000
+max_memory = 3_000_000_000
+max_wall_time = 36000
+
+[initial]
+coarsen_error = 0.0
+refine_error = 1e-6
+relax.cfl = 0.5
+relax.dampening = 0.4
+relax.max_steps = 10_000_000
+relax.tolerance = 1e-6
 
 [evolve]
 cfl = 0.2
 dissipation = 0.5
-gauge = "log_plus_one"
-max_time = 1000.0
-max_proper_time = 7.0
+gauge = "harmonic_zero_shift"
+max_coord_time = 1000.0
+max_proper_time = 10.0
 max_steps = 1_000_000
-
-[limits]
-max_levels = 15
-max_nodes = 16_000_000
-max_memory = 5_000_000_000
-max_wall_time = 1_000_000_000
-
-[regrid]
 refine_error = 1e-6
 coarsen_error = 1e-10
-global = 3
-flag_interval = 20
+regrid_interval.steps = 20
 
 [visualize]
-save_evolve = true
-save_evolve_interval = 0.07
+initial = true
+initial_levels = true
+initial_relax = true
+initial_relax_interval.steps = 1000
 
-save_relax = true
-save_relax_interval = 1000
-save_relax_levels = true
-save_relax_result = true
+evolve = true
+evolve_interval.steps = 10
+
+horizon_relax = false
+horizon_relax_interval.steps = 10
 
 stride = "per_cell"
 
 [cache]
 initial = true
 evolve = false
-evolve_interval = 100
+evolve_interval.steps = 100
+
+# [logging]
+# style = "incremental"
+# evolve.steps = 1000
+# initial.steps = 1000
+
+[horizon]
+search = false
+search_interval.steps = 500
+search_initial_radius = 5.0
+global_refine = 6
+relax.cfl = 0.5
+relax.dampening = 0.4
+relax.max_steps = 10_000
+relax.tolerance = 1e-4
+
+on_max_search_steps = "ignore"
+on_search_not_contained = "ignore"
+on_search_diverged = "ignore"
+on_search_converged = "collapse"
+on_search_converged_to_zero = "ignore"
 
 [[sources]]
 type = "brill"
-amplitude = "$0"
+amplitude = "${brill}"
 sigma = [1.0, 1.0]

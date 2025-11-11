@@ -56,7 +56,7 @@ exclude = ["crates/", "tools/"]
 readme = "README.md"
 
 [features]
-default = ["parallel"]
+default = []
 parallel = []
 
 [dependencies]
