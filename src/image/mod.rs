@@ -4,6 +4,7 @@ use std::marker::PhantomData;
 use std::ops::{Bound, Range, RangeBounds};
 use std::slice::SliceIndex;
 
+/// Several fields of data spread among
 #[derive(Clone, Debug, Default, Serialize, Deserialize, datasize::DataSize)]
 pub struct Image {
     data: Vec<f64>,
@@ -11,6 +12,7 @@ pub struct Image {
 }
 
 impl Image {
+    /// Allocates a new image with the specified number of channels and nodes
     pub fn new(channels: usize, nodes: usize) -> Self {
         Self {
             data: vec![0.0; channels * nodes],

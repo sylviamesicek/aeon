@@ -1,0 +1,6 @@
++ output/
++ output/axicombo/
++ output/axicombo/**
+- output/**
+- */**
+- **

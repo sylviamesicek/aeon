@@ -1,4 +1,4 @@
-use std::{array, convert::Infallible, path::PathBuf};
+use std::{array, convert::Infallible};
 
 use aeon::{
     mesh::Gaussian,

@@ -391,17 +391,17 @@ mod tests {
 
         // Width 4, ghost 3
         let width = 6;
-        let ghost = 5;
+        let ghost = 3;
 
-        let buffer = 2 * (ghost / 2); // 4
-        let support = (width + 2 * buffer) / 2; // 7
+        let buffer = 2 * (ghost / 2); // 2
+        let support = (width + 2 * buffer) / 2; // 5
 
         let element = Element::<1>::uniform(support, 4);
 
         let mut indices = element.diagonal_int_points(buffer);
+        assert_eq!(indices.next(), Some(3));
         assert_eq!(indices.next(), Some(5));
         assert_eq!(indices.next(), Some(7));
-        assert_eq!(indices.next(), Some(9));
         assert_eq!(indices.next(), None);
     }
 
