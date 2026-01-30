@@ -6,7 +6,7 @@ use crate::{
     horizon::{self, ApparentHorizonFinder, HorizonError, HorizonProjection, HorizonStatus},
     run::{
         config::Config,
-        history::{RunHistory, RunRecord},
+        history::{History, HistoryInfo},
         interval::{Interval, IntervalTracker},
         status::{Status, Strategy},
     },
@@ -433,12 +433,7 @@ impl Spinners {
     }
 }
 
-pub fn evolve_data(
-    config: &Config,
-    history: &mut RunHistory,
-    mut mesh: Mesh<2>,
-    mut fields: Image,
-) -> eyre::Result<Status> {
+pub fn evolve_data(config: &Config, mut mesh: Mesh<2>, mut fields: Image) -> eyre::Result<Status> {
     // Save initial time
     let start = Instant::now();
 
@@ -488,6 +483,17 @@ pub fn evolve_data(
     let visualize_interval = config.visualize.evolve_interval;
     let visualize_stride = config.visualize.stride;
     let mut visualize_index = 0;
+
+    // ***************************
+    // Origin Output
+
+    let mut history_tracker = IntervalTracker::new();
+    let history_interval = config.history.evolve_interval;
+    let mut history = if config.history.evolve {
+        History::output(&output.join("evolve_history.csv"))?
+    } else {
+        History::empty()
+    };
 
     // ***************************
     // Apparent horizons
@@ -765,6 +771,23 @@ pub fn evolve_data(
             Ok(())
         })?;
 
+        history_tracker.try_every(history_interval, || -> std::io::Result<()> {
+            history.write_record(HistoryInfo {
+                proper_time,
+                coord_time,
+                nodes: mesh.num_nodes(),
+                dofs: mesh.num_dofs(),
+                levels: mesh.num_levels(),
+                alpha: mesh.bottom_left_value(fields.channel(LAPSE_CH)),
+                grr: mesh.bottom_left_value(fields.channel(GRR_CH)),
+                grz: mesh.bottom_left_value(fields.channel(GRZ_CH)),
+                gzz: mesh.bottom_left_value(fields.channel(GZZ_CH)),
+                theta: mesh.bottom_left_value(fields.channel(THETA_CH)),
+            })?;
+
+            Ok(())
+        })?;
+
         // ***********************************
         // Periodically run horizon search
 
@@ -892,6 +915,7 @@ pub fn evolve_data(
         let coord_time_delta = h;
         regrid_tracker.update(proper_time_delta, coord_time_delta, 1);
         visualize_tracker.update(proper_time_delta, coord_time_delta, 1);
+        history_tracker.update(proper_time_delta, coord_time_delta, 1);
         search_tracker.update(proper_time_delta, coord_time_delta, 1);
 
         spinners.update(
@@ -927,19 +951,11 @@ pub fn evolve_data(
                 .on_min_lapse
                 .status_or_crash(|| eyre!("lapse is too small during evolution"))?;
         }
-
-        // Serialize those values
-        history.write_record(RunRecord {
-            step,
-            time: coord_time,
-            proper_time,
-            lapse,
-        })?;
     };
 
     spinners.clear()?;
 
-    // Flush record at end of execution.
+    // Flush history file
     history.flush()?;
 
     // Print status of run

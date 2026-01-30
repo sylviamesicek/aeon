@@ -364,9 +364,9 @@ mod tests {
     }
 
     #[derive(Clone)]
-    pub struct PoissonEquation;
+    pub struct _PoissonEquation;
 
-    impl Function<2> for PoissonEquation {
+    impl Function<2> for _PoissonEquation {
         type Error = Infallible;
 
         fn evaluate(

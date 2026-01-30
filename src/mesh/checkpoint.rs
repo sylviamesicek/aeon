@@ -200,12 +200,12 @@ pub struct ImageMeta {
     pub buffer: Vec<f64>,
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct HyperSurface<const N: usize, const S: usize> {
-    pub surface: MeshSer<S>,
-    #[serde(with = "crate::array::vec")]
-    pub position: Vec<[f64; N]>,
-}
+// #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+// pub struct HyperSurface<const N: usize, const S: usize> {
+//     pub surface: MeshSer<S>,
+//     #[serde(with = "crate::array::vec")]
+//     pub position: Vec<[f64; N]>,
+// }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Embedding {

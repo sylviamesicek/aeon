@@ -16,7 +16,7 @@ global_refine = 1
 max_levels = 16
 max_nodes = 16_000_000
 max_memory = 3_000_000_000
-max_wall_time = 36000
+max_wall_time = 108000     # Run evolution for 30 hrs
 
 [initial]
 coarsen_error = 0.0
@@ -50,6 +50,10 @@ horizon_relax = false
 horizon_relax_interval.steps = 10
 
 stride = "per_cell"
+
+[history]
+evolve = true
+evolve_interval.steps = 1
 
 [cache]
 initial = true

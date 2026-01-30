@@ -78,11 +78,11 @@ impl Image {
         &mut self.data[stride * channel..stride * (channel + 1)]
     }
 
-    pub fn as_ref(&self) -> ImageRef {
+    pub fn as_ref(&self) -> ImageRef<'_> {
         ImageRef::from_storage(&self.data, self.channels)
     }
 
-    pub fn as_mut(&mut self) -> ImageMut {
+    pub fn as_mut(&mut self) -> ImageMut<'_>  {
         ImageMut::from_storage(&mut self.data, self.channels)
     }
 

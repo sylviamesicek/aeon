@@ -1,6 +1,6 @@
 use crate::{
     CommandExt as _, Hpc, parse_define_args, parse_invoke_arg,
-    run::{self, RunHistory, Status},
+    run::{self, Status},
 };
 #[cfg(feature = "mpi")]
 use crate::{WORKER_STATUS_HALT, WORKER_STATUS_RUN};
@@ -256,8 +256,7 @@ fn launch_fleet(
         let config = config.transform(&vars)?;
 
         // Run simulation
-        let mut history = RunHistory::empty();
-        let status = run::run_simulation(&config, &mut history)?;
+        let status = run::run_simulation(&config)?;
         let mut code = status as i32;
         // Gather results
         hpc.root.gather_into_root(&mut code, &mut result);
@@ -346,8 +345,7 @@ pub fn search_worker(hpc: Hpc) -> eyre::Result<()> {
 
             let config = run_config.transform(&vars)?;
 
-            let mut history = RunHistory::empty();
-            let simulation = run::run_simulation(&config, &mut history)?;
+            let simulation = run::run_simulation(&config)?;
             code = simulation as i32;
         } else {
             // Perform iteration
@@ -382,8 +380,7 @@ fn launch_fleet(
 
         let config = config.transform(&vars)?;
 
-        let mut history = RunHistory::empty();
-        status[i] = run::run_simulation(&config, &mut history)?;
+        status[i] = run::run_simulation(&config)?;
     }
 
     Ok(status)

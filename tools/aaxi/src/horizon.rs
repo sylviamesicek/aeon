@@ -16,6 +16,7 @@ pub fn surface() -> Mesh<1> {
     Mesh::new(HORIZON_DOMAIN, 4, 2, FaceArray::splat(BoundaryClass::Ghost))
 }
 
+/// Transforms a radius on the 1d surface into a 2d embedded position.
 pub fn compute_position_from_radius(surface: &Mesh<1>, radius: &[f64], output: &mut [[f64; 2]]) {
     assert_eq!(surface.tree().domain(), HORIZON_DOMAIN);
     assert_eq!(surface.num_nodes(), output.len());
@@ -37,11 +38,13 @@ pub fn compute_position_from_radius(surface: &Mesh<1>, radius: &[f64], output: &
     }
 }
 
+/// Horizon covers a single quadrant.
 const HORIZON_DOMAIN: HyperBox<1> = HyperBox {
     size: [f64::consts::PI / 2.0],
     origin: [0.0],
 };
 
+/// Status of the horizon search
 #[derive(Debug, Clone)]
 pub enum HorizonStatus {
     ConvergedToZero,

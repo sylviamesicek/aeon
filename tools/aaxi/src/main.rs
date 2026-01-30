@@ -32,6 +32,7 @@ struct Hpc<'a> {
 }
 
 impl<'a> Hpc<'a> {
+    /// Constructs a new copy of the hpc context assuming MPI has been enabled during compilation.
     #[cfg(feature = "mpi")]
     fn new(world: &'a SimpleCommunicator) -> Self {
         Self {
@@ -43,6 +44,7 @@ impl<'a> Hpc<'a> {
 }
 
 impl Hpc<'static> {
+    /// Constructs an void type assuming MPI has been disable during compilation
     #[cfg(not(feature = "mpi"))]
     fn empty() -> Self {
         Self {
@@ -51,17 +53,23 @@ impl Hpc<'static> {
     }
 }
 
+/// Worker process should perform no work.
 #[cfg(feature = "mpi")]
 const WORKER_OP_NONE: i32 = 0;
+/// Worker process should perform a search command.
 #[cfg(feature = "mpi")]
 const WORKER_OP_SEARCH: i32 = 1;
+/// Worker process is currently running.
 #[cfg(feature = "mpi")]
 const WORKER_STATUS_RUN: i32 = 0;
+/// Worker perocess has halted.
 #[cfg(feature = "mpi")]
 const WORKER_STATUS_HALT: i32 = 1;
+/// MPI Rank of root process (defaults to 0)
 #[cfg(feature = "mpi")]
 const ROOT_RANK: i32 = 0;
 
+/// Main application function.
 fn main() -> eyre::Result<()> {
     // Set up MPI context and such.
     #[cfg(feature = "mpi")]

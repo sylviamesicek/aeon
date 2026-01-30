@@ -15,7 +15,6 @@ mod status;
 
 pub use config::Config;
 use eyre::Context;
-pub use history::RunHistory;
 pub use status::Status;
 
 pub fn run(matches: &ArgMatches) -> eyre::Result<()> {
@@ -28,12 +27,12 @@ pub fn run(matches: &ArgMatches) -> eyre::Result<()> {
         .with_context(|| format!("failed to find run config file: {:?}", config_run_file))?;
     let config = config.transform(&vars)?;
     // Run simulation
-    let _ = run_simulation(&config, &mut RunHistory::empty());
+    let _ = run_simulation(&config);
 
     Ok(())
 }
 
-pub fn run_simulation(config: &Config, history: &mut RunHistory) -> eyre::Result<Status> {
+pub fn run_simulation(config: &Config) -> eyre::Result<Status> {
     let output_path = config.output_dir()?;
     // Ensure path exists.
     std::fs::create_dir_all(&output_path)?;
@@ -69,7 +68,7 @@ pub fn run_simulation(config: &Config, history: &mut RunHistory) -> eyre::Result
     // ************************************
     // Evolve data forwards
 
-    let status = evolve::evolve_data(&config, history, mesh, system)?;
+    let status = evolve::evolve_data(&config, mesh, system)?;
 
     Ok(status)
 }

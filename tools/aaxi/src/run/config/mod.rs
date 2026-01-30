@@ -37,6 +37,8 @@ pub struct Config {
     #[serde(default)]
     pub visualize: Visualize,
     #[serde(default)]
+    pub history: History,
+    #[serde(default)]
     pub logging: Logging,
     /// Details for saving cache files.
     #[serde(default)]
@@ -66,6 +68,7 @@ impl Config {
             evolve: self.evolve.clone(),
             limits: self.limits.clone(),
             visualize: self.visualize.clone(),
+            history: self.history.clone(),
             logging: self.logging.clone(),
             cache: self.cache.clone(),
             error_handler: self.error_handler,
@@ -192,6 +195,24 @@ impl Default for Visualize {
             horizon_relax: false,
             horizon_relax_interval: Interval::default(),
             stride: ExportStride::PerVertex,
+        }
+    }
+}
+
+/// Configuration options for storing run history.
+#[derive(Serialize, Deserialize, Clone, Debug, Encode, Decode)]
+pub struct History {
+    /// Should we save origin data info for evolution runs
+    pub evolve: bool,
+    /// How often do we save diagnostic info for evolution runs
+    pub evolve_interval: Interval,
+}
+
+impl Default for History {
+    fn default() -> Self {
+        Self {
+            evolve: false,
+            evolve_interval: Interval::Steps { steps: 1 },
         }
     }
 }
