@@ -610,7 +610,7 @@ pub fn evolve_data(config: &Config, mut mesh: Mesh<2>, mut fields: Image) -> eyr
             + mesh.estimate_heap_size();
 
         if start.elapsed().as_secs() as usize > max_wall_time {
-            println!(
+            log::warn!(
                 "{}",
                 style(format!(
                     "Wall time exceded maximum alotted wall time: {:?}",
@@ -625,7 +625,7 @@ pub fn evolve_data(config: &Config, mut mesh: Mesh<2>, mut fields: Image) -> eyr
         }
 
         if mesh.num_nodes() > max_nodes {
-            println!(
+            log::warn!(
                 "{}",
                 style(format!(
                     "Nodes exceded maximum allocated nodes: {}",
@@ -641,7 +641,7 @@ pub fn evolve_data(config: &Config, mut mesh: Mesh<2>, mut fields: Image) -> eyr
         }
 
         if memory_usage > max_memory {
-            println!(
+            log::warn!(
                 "{}",
                 style(format!(
                     "RAM usage exceded maximum allocated bytes: {}",
@@ -662,7 +662,7 @@ pub fn evolve_data(config: &Config, mut mesh: Mesh<2>, mut fields: Image) -> eyr
                 .on_max_levels
                 .execute(|| eyre!("evolution exceded maximum allowed levels"))?
             {
-                println!(
+                log::warn!(
                     "{}",
                     style(format!(
                         "Evolution exceded maxmimum allowed levels: {}",
@@ -934,7 +934,7 @@ pub fn evolve_data(config: &Config, mut mesh: Mesh<2>, mut fields: Image) -> eyr
         // but might be interpreted as disspersion because `NaN > max_proper_time`
         // Check again
         if lapse.is_nan() || lapse.is_infinite() || lapse <= 0.0 {
-            println!("{}", style(format!("lapse collapses: {:.5e}", norm)).red());
+            log::warn!("{}", style(format!("lapse collapses: {:.5e}", norm)).red());
 
             break 'evolve config
                 .error_handler
@@ -944,7 +944,7 @@ pub fn evolve_data(config: &Config, mut mesh: Mesh<2>, mut fields: Image) -> eyr
 
         // Check if lapse is too small, which indicates collapse
         if lapse < 1e-7 {
-            println!("{}", style(format!("lapse too small: {:.5e}", lapse)).red());
+            log::warn!("{}", style(format!("lapse too small: {:.5e}", lapse)).red());
 
             break 'evolve config
                 .error_handler
@@ -960,8 +960,8 @@ pub fn evolve_data(config: &Config, mut mesh: Mesh<2>, mut fields: Image) -> eyr
 
     // Print status of run
     match status {
-        Status::Disperse => log::info!("{}", style(format!("System disperses")).cyan()),
-        Status::Collapse => log::info!("{}", style(format!("System collapses")).cyan()),
+        Status::Disperse => log::info!("{}", style(format!("Status: system disperses")).cyan()),
+        Status::Collapse => log::info!("{}", style(format!("Status: system collapses")).cyan()),
     }
 
     log::info!(
@@ -969,16 +969,14 @@ pub fn evolve_data(config: &Config, mut mesh: Mesh<2>, mut fields: Image) -> eyr
         HumanDuration(start.elapsed()),
         HumanCount(step as u64),
     );
-    log::info!("Mesh Info...");
-    log::info!("- Num Nodes: {}", mesh.num_nodes());
-    log::info!("- Active Cells: {}", mesh.num_active_cells());
     log::info!(
-        "- RAM usage: ~{}",
+        "Mesh Data: (Nodes: {}; Cells: {}; RAM usage: ~{}",
+        mesh.num_nodes(),
+        mesh.num_active_cells(),
         HumanBytes(mesh.estimate_heap_size() as u64)
     );
-    log::info!("Field Info...");
     log::info!(
-        "- RAM usage: ~{}",
+        "Field Data: (RAM usage: ~{})",
         HumanBytes((fields.estimate_heap_size() + integrator.estimate_heap_size()) as u64)
     );
 

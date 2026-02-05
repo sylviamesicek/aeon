@@ -1,5 +1,5 @@
 #! /bin/bash
-#SBATCH --time=120:00:0
+#SBATCH --time=46:00:0
 #SBATCH --account=belz
 #SBATCH --partition=notchpeak
 #SBATCH --ntasks=9

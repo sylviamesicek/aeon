@@ -50,9 +50,9 @@ pub fn run_simulation(config: &Config) -> eyre::Result<Status> {
         config.domain.radius,
         config.domain.height
     );
-    log::info!("Sources...");
+    log::info!("Sources:");
     for source in &config.sources {
-        source.println();
+        log::info!("- {}", source.description());
     }
 
     // ***********************************

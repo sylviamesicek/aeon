@@ -20,7 +20,7 @@ push_src_flags=(
 )
 
 rsync_pull_output() {
-    rsync -avz --relative $pull_output_flags $* $remote_path ./
+    rsync -avz --relative $pull_output_flags $* $remote_path/./ ./
 }
 
 rsync_push_src() {

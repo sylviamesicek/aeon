@@ -61,27 +61,27 @@ pub fn search(matches: &ArgMatches, hpc: Hpc) -> eyre::Result<()> {
         hpc.root.broadcast_into(&mut config_buffer_len);
         assert_eq!(config_buffer_len, config_buffer.len());
         hpc.root.broadcast_into(&mut config_buffer);
-        log::info!(
-            "Broadcasted config buffer with length {}",
-            config_buffer_len
-        );
+        // log::info!(
+        //     "Broadcasted config buffer with length {}",
+        //     config_buffer_len
+        // );
 
         // println!("Root (Rank 0): broadcasting config File");
         let mut parameter_buffer = parameter.clone().into_bytes();
         let mut parameter_len: usize = parameter_buffer.len();
         hpc.root.broadcast_into(&mut parameter_len);
         hpc.root.broadcast_into(&mut parameter_buffer);
-        log::info!("Broadcasted parameter buffer with length {}", parameter_len);
+        // log::info!("Broadcasted parameter buffer with length {}", parameter_len);
 
         let mut vars_buffer =
             bincode::encode_to_vec::<VarDefs, _>(vars.clone(), bincode::config::standard())?;
         let mut vars_buffer_len = vars_buffer.len();
         hpc.root.broadcast_into(&mut vars_buffer_len);
         hpc.root.broadcast_into(&mut vars_buffer);
-        log::info!(
-            "Broadcasted var defs buffer with length {}",
-            vars_buffer_len
-        );
+        // log::info!(
+        //     "Broadcasted var defs buffer with length {}",
+        //     vars_buffer_len
+        // );
     }
 
     let info = launch_fleet(
@@ -237,9 +237,9 @@ fn launch_fleet(
 
         let mut status: i32 = WORKER_STATUS_RUN;
         hpc.root.broadcast_into(&mut status);
-        log::info!("Broadcasted run op code");
+        // log::info!("Broadcasted run op code");
         hpc.root.broadcast_into(&mut num_workers);
-        log::info!("Broadcasted num workers {}", num_workers);
+        // log::info!("Broadcasted num workers {}", num_workers);
 
         let mut root_exec: f64 = 0.0;
         hpc.root.scatter_into_root(&exec, &mut root_exec);
@@ -282,7 +282,7 @@ pub fn search_worker(hpc: Hpc) -> eyre::Result<()> {
     hpc.root.broadcast_into(&mut config_buffer_len);
     let mut config_buffer = vec![0u8; config_buffer_len];
     hpc.root.broadcast_into(&mut config_buffer);
-    log::info!("Received config buffer with length {}", config_buffer_len);
+    // log::info!("Received config buffer with length {}", config_buffer_len);
     // Convert back to config
     let (run_config, _) =
         bincode::decode_from_slice::<RunConfig, _>(&config_buffer, bincode::config::standard())?;
@@ -292,10 +292,10 @@ pub fn search_worker(hpc: Hpc) -> eyre::Result<()> {
     hpc.root.broadcast_into(&mut parameter_buffer_len);
     let mut parameter_buffer = vec![0u8; parameter_buffer_len];
     hpc.root.broadcast_into(&mut parameter_buffer);
-    log::info!(
-        "Received parameter buffer with length {}",
-        parameter_buffer_len
-    );
+    // log::info!(
+    //     "Received parameter buffer with length {}",
+    //     parameter_buffer_len
+    // );
     let parameter = String::from_utf8(parameter_buffer)?;
 
     // Recieve var definitions over networks
@@ -303,7 +303,7 @@ pub fn search_worker(hpc: Hpc) -> eyre::Result<()> {
     hpc.root.broadcast_into(&mut vars_buffer_len);
     let mut vars_buffer = vec![0u8; vars_buffer_len];
     hpc.root.broadcast_into(&mut vars_buffer);
-    log::info!("Received var defs buffer with length {}", vars_buffer_len);
+    // log::info!("Received var defs buffer with length {}", vars_buffer_len);
     // Convert back to config
     let (vars, _) =
         bincode::decode_from_slice::<VarDefs, _>(&vars_buffer, bincode::config::standard())?;
@@ -311,11 +311,11 @@ pub fn search_worker(hpc: Hpc) -> eyre::Result<()> {
     loop {
         let mut code: i32 = WORKER_STATUS_RUN;
         hpc.root.broadcast_into(&mut code);
-        log::info!("Work loop received status update {}", code);
+        // log::info!("Work loop received status update {}", code);
 
         if code == WORKER_STATUS_RUN {
         } else if code == WORKER_STATUS_HALT {
-            log::info!("Halting");
+            log::info!("Worker Halting");
             break;
         } else {
             return Err(eyre!(
@@ -327,17 +327,17 @@ pub fn search_worker(hpc: Hpc) -> eyre::Result<()> {
 
         let mut num_workers: i32 = 0;
         hpc.root.broadcast_into(&mut num_workers);
-        log::info!("Received num workers {}", num_workers);
+        // log::info!("Received num workers {}", num_workers);
 
         let mut amplitude: f64 = 0.0;
         hpc.root.scatter_into(&mut amplitude);
-        log::info!("Received scattered amplitude {}", amplitude);
+        // log::info!("Received scattered amplitude {}", amplitude);
 
         let mut code = Status::Collapse as i32;
 
         if hpc.world.rank() < num_workers {
             // Perform iteration
-            log::info!("Running simulation for param = {}", amplitude);
+            log::info!("Running simulation for param={}", amplitude);
 
             let mut vars = vars.clone();
             vars.defs

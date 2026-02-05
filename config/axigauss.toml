@@ -79,6 +79,7 @@ on_search_converged_to_zero = "ignore"
 
 [[sources]]
 type = "scalar_field"
-amplitude = "${amplitude}"
-sigma = [5.35, 5.35]
+profile.type = "gaussian"
+profile.amplitude = "${amplitude}"
+profile.sigma = [5.35, 5.35]
 mass = 0.0

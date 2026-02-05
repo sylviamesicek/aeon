@@ -1,5 +1,5 @@
 use crate::eqs;
-use crate::run::config::{Config, Initial, Logging, Source};
+use crate::run::config::{Config, Initial, Logging, ScalarFieldProfile, Source};
 use crate::run::interval::Interval;
 use crate::systems::{self, FieldConditions, save_image};
 use aeon::kernel::ScalarConditions;
@@ -104,6 +104,18 @@ impl<'a> Projection<2> for SeedProjection<'a> {
         }
 
         result
+    }
+}
+
+#[derive(Clone, Copy)]
+struct SphericalHarmonic20 {
+    amplitude: f64,
+    scale: f64,
+}
+
+impl Projection<2> for SphericalHarmonic20 {
+    fn project(&self, [_rho, _z]: [f64; 2]) -> f64 {
+        0.0 * self.amplitude + 0.0 * self.scale
     }
 }
 
@@ -261,21 +273,30 @@ where
     let mut scalar_fields = Vec::new();
     let mut scalar_field_index = 0;
     for source in sources {
-        if let Source::ScalarField {
-            amplitude,
-            sigma,
-            mass,
-        } = source
-        {
-            mesh.project(
-                order,
-                Gaussian {
-                    amplitude: amplitude.unwrap(),
-                    sigma: [sigma.0.unwrap(), sigma.1.unwrap()],
-                    center: [0.0; 2],
-                },
-                context.channel_mut(garfinkle::phi_ch(scalar_field_index)),
-            );
+        if let Source::ScalarField { profile, mass } = source {
+            match profile {
+                ScalarFieldProfile::Gaussian { amplitude, sigma } => {
+                    mesh.project(
+                        order,
+                        Gaussian {
+                            amplitude: amplitude.unwrap(),
+                            sigma: [sigma.0.unwrap(), sigma.1.unwrap()],
+                            center: [0.0; 2],
+                        },
+                        context.channel_mut(garfinkle::phi_ch(scalar_field_index)),
+                    );
+                }
+                ScalarFieldProfile::SphericalHarmonic20 { amplitude, scale } => {
+                    mesh.project(
+                        order,
+                        SphericalHarmonic20 {
+                            amplitude: amplitude.unwrap(),
+                            scale: scale.unwrap(),
+                        },
+                        context.channel_mut(garfinkle::phi_ch(scalar_field_index)),
+                    );
+                }
+            }
 
             scalar_fields.push(mass.unwrap());
             scalar_field_index += 1;
@@ -443,12 +464,12 @@ pub fn initial_data(config: &Config) -> eyre::Result<(Mesh<2>, Image)> {
         return Ok((mesh, system));
     };
 
-    if config.cache.initial {
-        log::warn!(
-            "Failed to read cached initial data: {}",
-            style(init_cache.display()).yellow()
-        );
-    }
+    // if config.cache.initial {
+    //     log::warn!(
+    //         "Failed to read cached initial data: {}",
+    //         style(init_cache.display()).yellow()
+    //     );
+    // }
 
     // Build mesh
     let mut mesh = Mesh::new(
@@ -615,20 +636,19 @@ pub fn initial_data(config: &Config) -> eyre::Result<(Mesh<2>, Image)> {
     m.clear()?;
 
     log::info!(
-        "Finished relaxing in {}, {} Steps",
+        "Relaxation takes {}, {} steps",
         HumanDuration(start.elapsed()),
         HumanCount(step_count as u64),
     );
-    log::info!("Mesh Info...");
-    log::info!("- Num Nodes: {}", mesh.num_nodes());
-    log::info!("- Active Cells: {}", mesh.num_active_cells());
+
     log::info!(
-        "- RAM usage: ~{}",
+        "Mesh Data: (Nodes: {}; Cells: {}; RAM usage: ~{}",
+        mesh.num_nodes(),
+        mesh.num_active_cells(),
         HumanBytes(mesh.estimate_heap_size() as u64)
     );
-    log::info!("Field Info...");
     log::info!(
-        "- RAM usage: ~{}",
+        "Field Data: (RAM usage: ~{})",
         HumanBytes((system.estimate_heap_size() + transfer.estimate_heap_size()) as u64)
     );
 
@@ -641,10 +661,10 @@ pub fn initial_data(config: &Config) -> eyre::Result<(Mesh<2>, Image)> {
         checkpoint.save_image("Data", system.as_ref());
         checkpoint.export_dat(&init_cache)?;
 
-        log::info!(
-            "Successfully wrote initial data cache: {}",
-            style(init_cache.display()).cyan()
-        );
+        // log::info!(
+        //     "Successfully wrote initial data cache: {}",
+        //     style(init_cache.display()).cyan()
+        // );
     }
 
     Ok((mesh, system))

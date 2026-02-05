@@ -16,7 +16,7 @@ global_refine = 1
 max_levels = 16
 max_nodes = 16_000_000
 max_memory = 3_000_000_000
-max_wall_time = 108000     # Run evolution for 30 hrs
+max_wall_time = 144000     # Run evolution for 40 hrs
 
 [initial]
 coarsen_error = 0.0
@@ -31,7 +31,7 @@ cfl = 0.2
 dissipation = 0.5
 gauge = "log_plus_one_zero_shift"
 max_coord_time = 1000.0
-max_proper_time = 10.0
+max_proper_time = 9.0
 max_steps = 1_000_000
 refine_error = 1e-6
 coarsen_error = 1e-10
@@ -43,7 +43,7 @@ initial_levels = false
 initial_relax = false
 initial_relax_interval.steps = 500
 
-evolve = true
+evolve = false
 evolve_interval.steps = 100
 
 horizon_relax = false
@@ -83,8 +83,9 @@ on_search_converged_to_zero = "ignore"
 
 [[sources]]
 type = "scalar_field"
-amplitude = "${amplitude}"
-sigma = [5.35, 5.35]
+profile.type = "gaussian"
+profile.amplitude = "${amplitude}"
+profile.sigma = [5.35, 5.35]
 mass = 0.0
 
 [[sources]]

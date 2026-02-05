@@ -50,7 +50,7 @@ toml = "0.8.19"
 # Main package (`aeon`) configuration.
 [package]
 name = "aeon"
-version = "0.3.2"
+version = "0.3.3"
 edition = "2024"
 exclude = ["crates/", "tools/"]
 readme = "README.md"

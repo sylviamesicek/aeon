@@ -330,43 +330,31 @@ pub enum Source {
     /// An axisymmetric scalar field with the given sigma.
     #[serde(rename = "scalar_field")]
     ScalarField {
-        amplitude: FloatVar,
-        sigma: (FloatVar, FloatVar),
+        profile: ScalarFieldProfile,
         mass: FloatVar,
     },
 }
 
 impl Source {
-    pub fn println(&self) {
+    pub fn description(&self) -> String {
         match self {
             Source::Brill { amplitude, sigma } => {
-                println!(
-                    "- Gunlach seed function: A = {}, σ = ({}, {})",
+                format!(
+                    "Brill Wave: Gundlach(A={}, σr={}, σz={})",
                     amplitude.unwrap(),
                     sigma.0.unwrap(),
                     sigma.1.unwrap()
-                );
+                )
             }
-            Source::ScalarField {
-                amplitude,
-                sigma,
-                mass,
-            } => {
+            Source::ScalarField { profile, mass } => {
                 if mass.unwrap().abs() == 0.0 {
-                    println!(
-                        "- Massless Scalar Field: A = {}, σ = ({}, {})",
-                        amplitude.unwrap(),
-                        sigma.0.unwrap(),
-                        sigma.1.unwrap()
-                    );
+                    format!("Massless Scalar Field: {}", profile.description())
                 } else {
-                    println!(
-                        "- Massive Scalar Field: A = {}, σ = ({}, {}), m = {}",
-                        amplitude.unwrap(),
-                        sigma.0.unwrap(),
-                        sigma.1.unwrap(),
+                    format!(
+                        "Scalar Field: {}, m={}",
+                        profile.description(),
                         mass.unwrap()
-                    );
+                    )
                 }
             }
         }
@@ -382,14 +370,61 @@ impl Transform for Source {
                 amplitude: amplitude.transform(vars)?,
                 sigma: (sigma.0.transform(vars)?, sigma.1.transform(vars)?),
             },
-            Self::ScalarField {
-                amplitude,
-                sigma,
-                mass,
-            } => Self::ScalarField {
+            Self::ScalarField { profile, mass } => Self::ScalarField {
+                profile: profile.transform(vars)?,
+                mass: mass.transform(vars)?,
+            },
+        })
+    }
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, Encode, Decode)]
+#[serde(tag = "type")]
+pub enum ScalarFieldProfile {
+    #[serde(rename = "gaussian")]
+    Gaussian {
+        amplitude: FloatVar,
+        sigma: (FloatVar, FloatVar),
+    },
+    #[serde(rename = "harmonic20")]
+    SphericalHarmonic20 {
+        amplitude: FloatVar,
+        scale: FloatVar,
+    },
+}
+
+impl ScalarFieldProfile {
+    pub fn description(&self) -> String {
+        match self {
+            ScalarFieldProfile::Gaussian { amplitude, sigma } => format!(
+                "Gaussian(A={}, σr={}, σz={})",
+                amplitude.unwrap(),
+                sigma.0.unwrap(),
+                sigma.1.unwrap()
+            ),
+            ScalarFieldProfile::SphericalHarmonic20 { amplitude, scale } => {
+                format!(
+                    "SphericalHarmonic20(A={}, σ={})",
+                    amplitude.unwrap(),
+                    scale.unwrap()
+                )
+            }
+        }
+    }
+}
+
+impl Transform for ScalarFieldProfile {
+    type Output = Self;
+
+    fn transform(&self, vars: &VarDefs) -> Result<Self::Output, aeon_app::config::TransformError> {
+        Ok(match self {
+            Self::Gaussian { amplitude, sigma } => Self::Gaussian {
                 amplitude: amplitude.transform(vars)?,
                 sigma: (sigma.0.transform(vars)?, sigma.1.transform(vars)?),
-                mass: mass.transform(vars)?,
+            },
+            Self::SphericalHarmonic20 { amplitude, scale } => Self::SphericalHarmonic20 {
+                amplitude: amplitude.transform(vars)?,
+                scale: scale.transform(vars)?,
             },
         })
     }
