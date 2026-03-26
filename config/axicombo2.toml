@@ -16,7 +16,7 @@ global_refine = 1
 max_levels = 16
 max_nodes = 16_000_000
 max_memory = 3_000_000_000
-max_wall_time = 164000     # Run evolution for 45 hrs
+max_wall_time = 180000     # Run evolution for 50 hrs
 
 [initial]
 coarsen_error = 0.0
@@ -38,7 +38,7 @@ coarsen_error = 1e-10
 regrid_interval.steps = 20
 
 [visualize]
-initial = true
+initial = false
 initial_levels = false
 initial_relax = false
 initial_relax_interval.steps = 500

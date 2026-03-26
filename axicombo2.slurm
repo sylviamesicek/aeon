@@ -15,4 +15,4 @@ module load rust/1.87.0
 module load gcc mpich
 cargo build --release --package aaxi --features "mpi"
 
-mpirun -n $SLURM_NTASKS ./target/release/aaxi search config/axicombo -Dbrill=1.0
+mpirun -n $SLURM_NTASKS ./target/release/aaxi search config/axicombo2 -Dbrill=1.0

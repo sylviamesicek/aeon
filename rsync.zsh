@@ -26,4 +26,3 @@ rsync_pull_output() {
 rsync_push_src() {
     rsync -avz --relative $push_src_flags $* ./ $remote_path
 }
-

@@ -10,6 +10,7 @@ use aeon::{
 };
 use aeon_app::progress;
 use console::style;
+use core::f64;
 use datasize::DataSize as _;
 use eyre::eyre;
 use indicatif::{HumanBytes, HumanCount, HumanDuration, MultiProgress, ProgressBar};
@@ -623,6 +624,12 @@ pub fn initial_data(config: &Config) -> eyre::Result<(Mesh<2>, Image)> {
         let mut checkpoint = Checkpoint::default();
         checkpoint.attach_mesh(&mesh);
         save_image(&mut checkpoint, system.as_ref());
+
+        // Save Block Ids
+        let mut block_ids = vec![0; mesh.num_nodes()];
+        mesh.block_debug(&mut block_ids);
+        checkpoint.save_int_field("BlockId", &block_ids);
+
         checkpoint.export_vtu(
             output.join("initial").join(format!("{}.vtu", config.name)),
             ExportVtuConfig {
