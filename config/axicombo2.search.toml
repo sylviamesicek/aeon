@@ -1,7 +1,7 @@
 directory = "output/axicombo/${brill}/search"
 parameter = "amplitude"
-start = 0.3
-end = 0.4
+start = 0.23
+end = 0.30100000000000005
 max_depth = 15
 min_error = 1e-8
 parallel = 9

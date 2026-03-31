@@ -16,7 +16,7 @@ global_refine = 1
 max_levels = 16
 max_nodes = 16_000_000
 max_memory = 3_000_000_000
-max_wall_time = 180000     # Run evolution for 50 hrs
+max_wall_time = 144000     # Run evolution for 42 hrs
 
 [initial]
 coarsen_error = 0.0
