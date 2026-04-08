@@ -7,6 +7,7 @@ authors = ["Sylvia Mesicek <sylvia.mesicek@gmail.com>"]
 homepage = "https://github.com/sylviamesicek/aeon"
 repository = "https://github.com/sylviamesicek/aeon"
 license = "MIT OR Apache-2.0"
+include = ["../../LICENSE-APACHE", "../../LICENSE-MIT", "**/*.rs", "Cargo.toml"]
 
 [dependencies]
 bincode.workspace = true

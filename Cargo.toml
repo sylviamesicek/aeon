@@ -13,10 +13,10 @@ default-members = [
 resolver = "2"
 
 [workspace.dependencies]
-aeon = { package = "aeon-tk", path = "." }
-aeon-app = { path = "crates/aeon_app" }
-aeon-macros = { path = "crates/aeon_macros" }
-aeon-tensor = { path = "crates/aeon_tensor" }
+aeon = { package = "aeon-tk", version = "0.3.3", path = "." }
+aeon-app = { version = "0.3.3", path = "crates/aeon_app" }
+aeon-macros = { version = "0.3.3", path = "crates/aeon_macros" }
+aeon-tensor = { version = "0.3.3", path = "crates/aeon_tensor" }
 
 bincode = { version = "2.0.1" }
 bitvec = { version = "1.0.1", features = ["serde"] }
@@ -94,7 +94,7 @@ ron.workspace = true
 serde.workspace = true
 thiserror.workspace = true
 thread_local.workspace = true
-vtkio = "0.7.0-rc1"
+vtkio = { version = "0.7.0-rc2", default-features = false, features = ["xml"] }
 
 [dev-dependencies]
 env_logger.workspace = true

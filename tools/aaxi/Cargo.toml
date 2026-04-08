@@ -8,6 +8,7 @@ homepage = "https://github.com/sylviamesicek/aeon"
 repository = "https://github.com/sylviamesicek/aeon"
 license = "MIT OR Apache-2.0"
 readme = "README.md"
+include = ["../../LICENSE-APACHE", "../../LICENSE-MIT", "**/*.rs", "Cargo.toml"]
 
 [dependencies]
 aeon.workspace = true
