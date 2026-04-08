@@ -236,6 +236,7 @@ impl<const N: usize> Mesh<N> {
         self.old_blocks.num_nodes()
     }
 
+    /// Returns the boundary classes associated with each boundary of the physical domain.
     pub fn boundary_classes(&self) -> FaceArray<N, BoundaryClass> {
         self.boundary.clone()
     }
@@ -243,6 +244,7 @@ impl<const N: usize> Mesh<N> {
     // *******************************
     // Data for each block ***********
 
+    /// Returns underlying `TreeBlocks<N>` object.
     pub fn blocks(&self) -> &TreeBlocks<N> {
         &self.blocks
     }
@@ -283,7 +285,7 @@ impl<const N: usize> Mesh<N> {
         }
     }
 
-    /// The bounds of a block.
+    /// Computes the bounds of a block.
     pub fn block_bounds(&self, block: BlockId) -> HyperBox<N> {
         self.blocks.bounds(block)
     }

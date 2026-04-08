@@ -1,7 +1,12 @@
 [package]
-name = "aeon_macros"
+name = "aeon-macros"
 version = "0.3.3"
 edition = "2021"
+description = "Macros exported by aeon-tk"
+authors = ["Sylvia Mesicek <sylvia.mesicek@gmail.com>"]
+homepage = "https://github.com/sylviamesicek/aeon"
+repository = "https://github.com/sylviamesicek/aeon"
+license = "MIT OR Apache-2.0"
 
 [lib]
 proc-macro = true

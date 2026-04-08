@@ -1,7 +1,7 @@
-//! This modules contains several "hacky" utilities to work around the current lack of generic_const_exprs in
+//! This module contains several "hacky" utilities to work around the current lack of generic_const_exprs in
 //! Rust.
 //!
-//! In several parts of the codebase (`System`s, `Kernel`s, etc.) we have to creates arrays whose
+//! In several parts of the codebase  we have to creates arrays whose
 //! length is determined by an associated constant of a trait. Seeing as this is impossible in stable Rust, we instead
 //! use the following pattern:
 //!
@@ -172,7 +172,7 @@ where
 /// Contains methods for working with vecs of arrays.
 pub mod vec {
     use super::ArrayWrap;
-    use serde::{de, ser::SerializeSeq, Deserialize, Deserializer, Serialize, Serializer};
+    use serde::{Deserialize, Deserializer, Serialize, Serializer, de, ser::SerializeSeq};
     use std::{fmt, marker::PhantomData};
 
     /// Serialize vectors of const generic arrays.

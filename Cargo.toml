@@ -13,10 +13,10 @@ default-members = [
 resolver = "2"
 
 [workspace.dependencies]
-aeon = { path = "." }
-aeon_app = { path = "crates/aeon_app" }
-aeon_macros = { path = "crates/aeon_macros" }
-aeon_tensor = { path = "crates/aeon_tensor" }
+aeon = { package = "aeon-tk", path = "." }
+aeon-app = { path = "crates/aeon_app" }
+aeon-macros = { path = "crates/aeon_macros" }
+aeon-tensor = { path = "crates/aeon_tensor" }
 
 bincode = { version = "2.0.1" }
 bitvec = { version = "1.0.1", features = ["serde"] }
@@ -47,20 +47,37 @@ thiserror = "2.0.9"
 thread_local = "1.1.8"
 toml = "0.8.19"
 
-# Main package (`aeon`) configuration.
+# Main package configuration.
 [package]
-name = "aeon"
+name = "aeon-tk"
 version = "0.3.3"
 edition = "2024"
-exclude = ["crates/", "tools/"]
+description = "Toolkit for running finite difference simulations with adaptive mesh refinement"
+authors = ["Sylvia Mesicek <sylvia.mesicek@gmail.com>"]
+exclude = [
+    "Analyze/",
+    "config/",
+    "crates/",
+    "figures/",
+    "scripts/",
+    "tools/",
+    "ABSTRACT.md",
+    "*.slurm",
+    "*.zsh",
+]
+homepage = "https://github.com/sylviamesicek/aeon"
+repository = "https://github.com/sylviamesicek/aeon"
 readme = "README.md"
+license = "MIT OR Apache-2.0"
+keywords = ["finite-difference"]
+categories = ["science", "simulation"]
 
 [features]
 default = []
 parallel = []
 
 [dependencies]
-aeon_macros.workspace = true
+aeon-macros.workspace = true
 
 bitvec.workspace = true
 bincode.workspace = true

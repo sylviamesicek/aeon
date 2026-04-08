@@ -20,6 +20,10 @@ pub enum CheckpointParseError {
     ParseFailed(String),
 }
 
+/// Represents a snapshot of a `Mesh` along with relavent field data.
+///
+/// The `Checkpoint<N>` can then be serialized and deserialized from disk,
+/// allowing data to be loaded/reused across runs.
 #[derive(Default, Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Checkpoint<const N: usize> {
     /// Meta data to be stored in checkpoint (useful for storing time, number of steps, ect.)
@@ -60,6 +64,7 @@ impl<const N: usize> Checkpoint<N> {
         self.mesh.clone().unwrap().into()
     }
 
+    /// Saves image data with the given name key.
     pub fn save_image(&mut self, name: &str, data: ImageRef) {
         assert!(!self.systems.contains_key(name));
 
@@ -68,12 +73,6 @@ impl<const N: usize> Checkpoint<N> {
             .channels()
             .flat_map(|label| data.channel(label).iter().cloned())
             .collect();
-
-        // let fields = data
-        //     .system()
-        //     .enumerate()
-        //     .map(|label| data.system().label_name(label))
-        //     .collect();
 
         self.systems.insert(
             name.to_string(),
@@ -84,6 +83,7 @@ impl<const N: usize> Checkpoint<N> {
         );
     }
 
+    /// Reads image data associated to the given name.
     pub fn read_image(&self, name: &str) -> Image {
         let data = self.systems.get(name).unwrap();
         // let system = ron::de::from_str::<S>(&data.meta).unwrap();
@@ -154,18 +154,22 @@ impl<const N: usize> Checkpoint<N> {
         data.extend_from_slice(self.int_fields.get(name).unwrap());
     }
 
+    /// Saves meta data associated with a given string.
     pub fn save_meta(&mut self, name: &str, data: &str) {
         let _ = self.meta.insert(name.to_string(), data.to_string());
     }
 
+    /// Loads meta data associated with a given string into `data`
     pub fn load_meta(&self, name: &str, data: &mut String) {
         data.clone_from(self.meta.get(name).unwrap())
     }
 
+    /// Writes meta data associated with a given type to the checkpoint.
     pub fn write_meta<T: ToString>(&mut self, name: &str, data: T) {
         self.save_meta(name, &data.to_string());
     }
 
+    /// Reads meta data associated with a given type from the checkpoint.
     pub fn read_meta<T: FromStr>(&self, name: &str) -> Result<T, CheckpointParseError> {
         let data = self
             .meta
@@ -185,6 +189,7 @@ impl<const N: usize> Checkpoint<N> {
         ron::from_str(&contents).map_err(std::io::Error::other)
     }
 
+    /// Saves the checkpoint as a dat file at the given path.
     pub fn export_dat(&self, path: impl AsRef<Path>) -> std::io::Result<()> {
         let data = ron::ser::to_string_pretty::<Checkpoint<N>>(self, PrettyConfig::default())
             .map_err(std::io::Error::other)?;
@@ -199,13 +204,6 @@ pub struct ImageMeta {
     pub channels: usize,
     pub buffer: Vec<f64>,
 }
-
-// #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-// pub struct HyperSurface<const N: usize, const S: usize> {
-//     pub surface: MeshSer<S>,
-//     #[serde(with = "crate::array::vec")]
-//     pub position: Vec<[f64; N]>,
-// }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Embedding {

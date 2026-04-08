@@ -13,6 +13,8 @@ use crate::{
 };
 
 impl<const N: usize> Mesh<N> {
+    /// Transfers data from an older version of the mesh to the new refined version, using
+    /// the given order of interpolation.
     pub fn transfer_system(&mut self, order: usize, source: ImageRef, dest: ImageMut) {
         assert_eq!(source.num_channels(), dest.num_channels());
         assert_eq!(dest.num_nodes(), self.num_nodes());
@@ -26,7 +28,7 @@ impl<const N: usize> Mesh<N> {
         }
     }
 
-    /// Transfers data from an old version of the mesh to the new refined version.
+    /// Const optimized backend to `Mesh::<N>::transfer_system`.
     fn transfer_system_impl<const ORDER: usize>(&mut self, source: ImageRef, dest: ImageMut) {
         assert!(self.num_nodes() == dest.num_nodes());
         assert!(self.num_old_nodes() == source.num_nodes());
@@ -200,6 +202,7 @@ impl<const N: usize> Mesh<N> {
         self.fill_physical(extent, &bcs, system.rb_mut());
     }
 
+    /// Enforces physical boundary conditions near edge of the numerical domain, out to the given extent.
     fn fill_physical<C: SystemBoundaryConds<N> + Sync>(
         &mut self,
         extent: usize,
@@ -224,6 +227,7 @@ impl<const N: usize> Mesh<N> {
         });
     }
 
+    /// Fills ghost nodes via direct injection from neighbors on the same level of refinement.
     fn fill_direct(&mut self, extent: usize, result: ImageMut) {
         let shared: ImageShared = result.into();
 
@@ -260,6 +264,7 @@ impl<const N: usize> Mesh<N> {
             });
     }
 
+    /// Fills ghost nodes via injection from neighbors at a higher level of refinement.
     fn fill_fine(&mut self, extent: usize, result: ImageMut) {
         let shared: ImageShared = result.into();
 
@@ -293,6 +298,7 @@ impl<const N: usize> Mesh<N> {
             });
     }
 
+    /// Fills ghost nodes by interpolating from neighbors at a lower level of refinement.
     fn fill_prolong<const ORDER: usize>(&mut self, extent: usize, result: ImageMut) {
         let shared: ImageShared = result.into();
 

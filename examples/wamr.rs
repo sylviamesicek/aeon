@@ -1,7 +1,7 @@
 //! An example of using wavelet adaptive mesh refinement to
 //! compress a function and generate appropriate grids.
 
-use aeon::prelude::*;
+use aeon_tk::prelude::*;
 use std::f64::consts::PI;
 
 #[derive(Clone)]

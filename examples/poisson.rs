@@ -1,8 +1,8 @@
 use std::convert::Infallible;
 use std::path::PathBuf;
 
-use aeon::solver::SolverCallback;
-use aeon::{mesh::Gaussian, prelude::*, solver::HyperRelaxSolver};
+use aeon_tk::solver::SolverCallback;
+use aeon_tk::{mesh::Gaussian, prelude::*, solver::HyperRelaxSolver};
 
 const ORDER: usize = 4;
 

@@ -1,7 +1,12 @@
 [package]
-name = "aeon_app"
+name = "aeon-app"
 version = "0.3.3"
 edition = "2021"
+description = "Helper package for building binaries with aeon-tk"
+authors = ["Sylvia Mesicek <sylvia.mesicek@gmail.com>"]
+homepage = "https://github.com/sylviamesicek/aeon"
+repository = "https://github.com/sylviamesicek/aeon"
+license = "MIT OR Apache-2.0"
 
 [dependencies]
 bincode.workspace = true

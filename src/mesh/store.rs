@@ -23,18 +23,23 @@ impl MeshStore {
     }
 }
 
+/// A data type which stores a pool of thread local variables.
+/// Thus allowing each thread to access one copy of `T` mutably.
 #[derive(Debug)]
 pub struct UnsafeThreadCache<T: Send> {
     pool: ThreadLocal<UnsafeCell<T>>,
 }
 
 impl<T: Send> UnsafeThreadCache<T> {
+    /// Constructs an empty thread cache.
     pub fn new() -> Self {
         Self::default()
     }
 }
 
 impl<T: Send + Default> UnsafeThreadCache<T> {
+    /// Retrieves the object `T` associated with this thread, initializing the
+    /// default value in place if this has not already been done.
     pub unsafe fn get_or_default(&self) -> &mut T {
         unsafe { &mut *self.pool.get_or_default().get() }
     }

@@ -222,6 +222,8 @@ impl<const N: usize> Mesh<N> {
         })
     }
 
+    /// Checks if the all neighbors of the block have strongly enforced boundary conditions 
+    /// (and thus can use centered stencils).
     pub fn is_block_in_interior(&self, block: BlockId) -> bool {
         let boundary = self.block_boundary_classes(block);
 
@@ -492,6 +494,7 @@ impl<const N: usize> Mesh<N> {
         }
     }
 
+    /// Applies a projection and stores the result in the destination vector.
     pub fn project<P: Projection<N> + Sync>(
         &mut self,
         order: usize,

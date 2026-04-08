@@ -2,14 +2,20 @@
 name = "asphere"
 version = "0.3.3"
 edition = "2024"
+description = "Binary for simulating spherically symmetric critical phenomena"
+authors = ["Sylvia Mesicek <sylvia.mesicek@gmail.com>"]
+homepage = "https://github.com/sylviamesicek/aeon"
+repository = "https://github.com/sylviamesicek/aeon"
+license = "MIT OR Apache-2.0"
+readme = "README.md"
 
 [features]
 default = ["progress"]
 progress = []
 
 [dependencies]
-aeon = { path = "../../", default-features = false }
-aeon_app.workspace = true
+aeon.workspace = true
+aeon-app.workspace = true
 clap.workspace = true
 color-eyre.workspace = true
 console.workspace = true

@@ -1,0 +1,3 @@
+# `aaxi`: Axisymmetric Numerical Relavitity
+
+`aaxi` implements an formulation derived from the axisymmetric evolution scheme of Rinne 2006 to second-order in space, first-order in time using `aeon-tk`. This scheme is purely hyperbolic during evolution, and solves for initial data using a hyperbolic relaxation solver (modelled after NRPyElliptic's solver). This is significantly more complex and numerically expensive than spherical symmetry.

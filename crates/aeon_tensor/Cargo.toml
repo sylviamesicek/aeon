@@ -1,8 +1,13 @@
 [package]
-name = "aeon_tensor"
+name = "aeon-tensor"
 version = "0.3.3"
 edition = "2021"
+description = "Helper package for working with tensor-based PDEs in aeon-tk binaries"
+authors = ["Sylvia Mesicek <sylvia.mesicek@gmail.com>"]
+homepage = "https://github.com/sylviamesicek/aeon"
+repository = "https://github.com/sylviamesicek/aeon"
+license = "MIT OR Apache-2.0"
 
 [dependencies]
-aeon_macros.workspace = true
+aeon-macros.workspace = true
 paste.workspace = true

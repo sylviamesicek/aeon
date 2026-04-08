@@ -22,7 +22,6 @@
 - Adaptive error heuristics
     - Wavelet-based interpolating basis functions
 - Coupled systems, operators, and functions
-    - System API with custom `#[derive]` macros
 - Method of Lines solver for hyperbolic equations
     - Forward Euler
     - Runge-Kutta 4
@@ -52,7 +51,7 @@ cargo run --release --package asphere -- run -Damplitude=0.3 config/sphgauss1
 
 ### `aaxi`
 
-`aaxi` adapts the axisymmetric evolution scheme of Rinne 2006 to second-order in space, first-order in time. This scheme is purely hyperbolic during evolution, and solves for initial data using a hyperbolic relaxation solver (modelled after NRPyElliptic's solver). This is significantly more complex and numerically expensive than spherical symmetry.
+`aaxi` implements an formulation derived from the axisymmetric evolution scheme of Rinne 2006 to second-order in space, first-order in time. This scheme is purely hyperbolic during evolution, and solves for initial data using a hyperbolic relaxation solver (modelled after NRPyElliptic's solver). This is significantly more complex and numerically expensive than spherical symmetry.
 
 Example `aaxi` invokations:
 ```bash

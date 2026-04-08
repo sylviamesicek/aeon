@@ -1,3 +1,5 @@
+//! High-level solvers and integrators for common numerical problems.
+
 mod hyper;
 mod intergrate;
 

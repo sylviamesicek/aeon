@@ -1,3 +1,5 @@
+//! Helpers for working with slices of unsafe cells.
+
 use std::{cell::UnsafeCell, ops::Range, slice};
 
 /// Represents a reference to a slice which may be shared among threads. This uses `UnsafeCell` to
