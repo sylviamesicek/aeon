@@ -1,6 +1,11 @@
-# Aeon
+# Aeon Toolkit `aeon-tk`
 
-`Aeon` is a rust package for solving N-dimensional elliptic and hyperbolic PDEs using the finite difference method and Adaptive Mesh Refinement (AMR).
+[![Latest version](https://img.shields.io/crates/v/aeon-tk.svg)](https://crates.io/crates/aeon-tk)
+[![Documentation](https://docs.rs/aeon-tk/badge.svg)](https://docs.rs/aeon-tk)
+[![MIT](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/emilk/egui/blob/main/LICENSE-MIT)
+[![Apache](https://img.shields.io/badge/license-Apache-blue.svg)](https://github.com/emilk/egui/blob/main/LICENSE-APACHE)
+
+Aeon toolkit is a collection of crates for solving N-dimensional elliptic and hyperbolic PDEs using the finite difference method and Adaptive Mesh Refinement (AMR). 
 
 ## Capabilities
 
