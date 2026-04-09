@@ -12,11 +12,18 @@ default-members = [
 ]
 resolver = "2"
 
+[workspace.package]
+version = "0.3.4"
+authors = ["Sylvia Mesicek <sylvia.mesicek@gmail.com>"]
+homepage = "https://github.com/sylviamesicek/aeon"
+repository = "https://github.com/sylviamesicek/aeon"
+license = "MIT OR Apache-2.0"
+
 [workspace.dependencies]
-aeon = { package = "aeon-tk", version = "0.3.3", path = "." }
-aeon-app = { version = "0.3.3", path = "crates/aeon_app" }
-aeon-macros = { version = "0.3.3", path = "crates/aeon_macros" }
-aeon-tensor = { version = "0.3.3", path = "crates/aeon_tensor" }
+aeon = { package = "aeon-tk", version = "0.3.4", path = "." }
+aeon-app = { version = "0.3.4", path = "crates/aeon_app" }
+aeon-macros = { version = "0.3.4", path = "crates/aeon_macros" }
+aeon-tensor = { version = "0.3.4", path = "crates/aeon_tensor" }
 
 bincode = { version = "2.0.1" }
 bitvec = { version = "1.0.1", features = ["serde"] }
@@ -50,10 +57,10 @@ toml = "0.8.19"
 # Main package configuration.
 [package]
 name = "aeon-tk"
-version = "0.3.3"
+version.workspace = true
 edition = "2024"
 description = "Toolkit for running finite difference simulations with adaptive mesh refinement"
-authors = ["Sylvia Mesicek <sylvia.mesicek@gmail.com>"]
+authors.workspace = true
 exclude = [
     "Analyze/",
     "config/",
@@ -65,10 +72,10 @@ exclude = [
     "*.slurm",
     "*.zsh",
 ]
-homepage = "https://github.com/sylviamesicek/aeon"
-repository = "https://github.com/sylviamesicek/aeon"
+homepage.workspace = true
+repository.workspace = true
 readme = "README.md"
-license = "MIT OR Apache-2.0"
+license.workspace = true
 keywords = ["finite-difference"]
 categories = ["science", "simulation"]
 

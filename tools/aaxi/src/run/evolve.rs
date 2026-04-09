@@ -6,7 +6,7 @@ use crate::{
     horizon::{self, ApparentHorizonFinder, HorizonError, HorizonProjection, HorizonStatus},
     run::{
         config::Config,
-        history::{History, HistoryInfo},
+        history::{History, HistoryInfo, ScalarFieldInfo},
         interval::{Interval, IntervalTracker},
         status::{Status, Strategy},
     },
@@ -259,11 +259,11 @@ impl<'a> SolverCallback<1> for HorizonCallback<'a> {
             pb.set_position(iteration as u64);
         }
 
-        if !self.config.visualize.horizon_relax {
+        if !self.config.output.horizon_relax_vtu {
             return Ok(());
         }
 
-        let interval = self.config.visualize.horizon_relax_interval.unwrap_steps();
+        let interval = self.config.output.horizon_relax_interval.unwrap_steps();
 
         if iteration % interval != 0 {
             return Ok(());
@@ -438,10 +438,11 @@ pub fn evolve_data(config: &Config, mut mesh: Mesh<2>, mut fields: Image) -> eyr
     let start = Instant::now();
 
     let output = config.output_dir()?;
+
     // Create output folder.
     std::fs::create_dir_all(output.join("evolve"))?;
     // If we are outputing horizon data, create a folder for that too
-    if config.horizon.search && config.visualize.horizon_relax {
+    if config.horizon.search && config.output.horizon_relax_vtu {
         std::fs::create_dir_all(output.join("horizon"))?;
     }
 
@@ -476,24 +477,36 @@ pub fn evolve_data(config: &Config, mut mesh: Mesh<2>, mut fields: Image) -> eyr
     let upper = config.evolve.refine_error;
 
     // *************************
-    // Visualization
+    // Output
 
-    let visualize = config.visualize.evolve;
-    let mut visualize_tracker = IntervalTracker::new();
-    let visualize_interval = config.visualize.evolve_interval;
-    let visualize_stride = config.visualize.stride;
-    let mut visualize_index = 0;
+    let output_vtu = config.output.evolve_vtu;
+    let mut output_tracker = IntervalTracker::new();
+    let output_interval = config.output.evolve_interval;
+    let vtu_stride = config.output.vtu_stride;
+    let mut output_index = 0;
 
-    // ***************************
-    // Origin Output
-
-    let mut history_tracker = IntervalTracker::new();
-    let history_interval = config.history.evolve_interval;
-    let mut history = if config.history.evolve {
-        History::output(&output.join("evolve_history.csv"))?
+    let mut history = if config.output.evolve_history_csv {
+        History::output(&output.join("evolve_history.csv"), num_scalar_fields)?
     } else {
         History::empty()
     };
+
+    // let visualize = config.visualize.evolve;
+    // let mut visualize_tracker = IntervalTracker::new();
+    // let visualize_interval = config.visualize.evolve_interval;
+    // let visualize_stride = config.visualize.stride;
+    // let mut visualize_index = 0;
+
+    // // ***************************
+    // // Origin Output
+
+    // let mut history_tracker = IntervalTracker::new();
+    // let history_interval = config.history.evolve_interval;
+    // let mut history = if config.history.evolve {
+    //     History::output(&output.join("evolve_history.csv"), num_scalar_fields)?
+    // } else {
+    //     History::empty()
+    // };
 
     // ***************************
     // Apparent horizons
@@ -735,55 +748,58 @@ pub fn evolve_data(config: &Config, mut mesh: Mesh<2>, mut fields: Image) -> eyr
         // ******************************************
         // Periodically save output data
 
-        visualize_tracker.try_every(visualize_interval, || -> std::io::Result<()> {
-            if !visualize {
-                return Ok(());
+        output_tracker.try_every(output_interval, || -> eyre::Result<()> {
+            if output_vtu {
+                horizon_field.resize(mesh.num_nodes(), 0.0);
+
+                mesh.evaluate(
+                    4,
+                    HorizonProjection,
+                    fields.as_ref(),
+                    ImageMut::from(horizon_field.as_mut_slice()),
+                )
+                .unwrap();
+
+                // Output current system to disk
+                let mut checkpoint = Checkpoint::default();
+                checkpoint.attach_mesh(&mesh);
+                checkpoint.save_field("Horizon", &horizon_field);
+                save_image(&mut checkpoint, fields.as_ref());
+                checkpoint.export_vtu(
+                    output
+                        .join("evolve")
+                        .join(format!("{}_{output_index}.vtu", config.name)),
+                    ExportVtuConfig {
+                        title: config.name.clone(),
+                        ghost: false,
+                        stride: vtu_stride,
+                    },
+                )?;
             }
 
-            horizon_field.resize(mesh.num_nodes(), 0.0);
-
-            mesh.evaluate(
-                4,
-                HorizonProjection,
-                fields.as_ref(),
-                ImageMut::from(horizon_field.as_mut_slice()),
-            )
-            .unwrap();
-
-            // Output current system to disk
-            let mut checkpoint = Checkpoint::default();
-            checkpoint.attach_mesh(&mesh);
-            checkpoint.save_field("Horizon", &horizon_field);
-            save_image(&mut checkpoint, fields.as_ref());
-            checkpoint.export_vtu(
-                output
-                    .join("evolve")
-                    .join(format!("{}_{visualize_index}.vtu", config.name)),
-                ExportVtuConfig {
-                    title: config.name.clone(),
-                    ghost: false,
-                    stride: visualize_stride,
+            history.write_record(
+                HistoryInfo {
+                    proper_time,
+                    coord_time,
+                    output_index,
+                    nodes: mesh.num_nodes(),
+                    dofs: mesh.num_dofs(),
+                    levels: mesh.num_levels(),
+                    alpha: mesh.bottom_left_value(fields.channel(LAPSE_CH)),
+                    grr: mesh.bottom_left_value(fields.channel(GRR_CH)),
+                    grz: mesh.bottom_left_value(fields.channel(GRZ_CH)),
+                    gzz: mesh.bottom_left_value(fields.channel(GZZ_CH)),
+                    theta: mesh.bottom_left_value(fields.channel(THETA_CH)),
                 },
+                (0..num_scalar_fields).map(|i| ScalarFieldInfo {
+                    phi: mesh.bottom_left_value(fields.channel(phi_ch(i))),
+                    pi: mesh.bottom_left_value(fields.channel(pi_ch(i))),
+                }),
             )?;
+            // Flush history file
+            history.flush()?;
 
-            visualize_index += 1;
-
-            Ok(())
-        })?;
-
-        history_tracker.try_every(history_interval, || -> std::io::Result<()> {
-            history.write_record(HistoryInfo {
-                proper_time,
-                coord_time,
-                nodes: mesh.num_nodes(),
-                dofs: mesh.num_dofs(),
-                levels: mesh.num_levels(),
-                alpha: mesh.bottom_left_value(fields.channel(LAPSE_CH)),
-                grr: mesh.bottom_left_value(fields.channel(GRR_CH)),
-                grz: mesh.bottom_left_value(fields.channel(GRZ_CH)),
-                gzz: mesh.bottom_left_value(fields.channel(GZZ_CH)),
-                theta: mesh.bottom_left_value(fields.channel(THETA_CH)),
-            })?;
+            output_index += 1;
 
             Ok(())
         })?;
@@ -802,7 +818,7 @@ pub fn evolve_data(config: &Config, mut mesh: Mesh<2>, mut fields: Image) -> eyr
 
             let horizon_dir = output.join("horizon").join(format!("{}", search_index));
 
-            if config.visualize.horizon_relax {
+            if config.output.horizon_relax_vtu {
                 std::fs::create_dir_all(&horizon_dir).map_err(eyre::Report::new)?;
             }
 
@@ -830,7 +846,7 @@ pub fn evolve_data(config: &Config, mut mesh: Mesh<2>, mut fields: Image) -> eyr
 
             pb.as_ref().map(ProgressBar::finish_and_clear);
 
-            if config.visualize.horizon_relax {
+            if config.output.horizon_relax_vtu {
                 horizon_field.resize(mesh.num_nodes(), 0.0);
 
                 mesh.evaluate(
@@ -914,8 +930,8 @@ pub fn evolve_data(config: &Config, mut mesh: Mesh<2>, mut fields: Image) -> eyr
         let proper_time_delta = h * lapse;
         let coord_time_delta = h;
         regrid_tracker.update(proper_time_delta, coord_time_delta, 1);
-        visualize_tracker.update(proper_time_delta, coord_time_delta, 1);
-        history_tracker.update(proper_time_delta, coord_time_delta, 1);
+        output_tracker.update(proper_time_delta, coord_time_delta, 1);
+        // history_tracker.update(proper_time_delta, coord_time_delta, 1);
         search_tracker.update(proper_time_delta, coord_time_delta, 1);
 
         spinners.update(

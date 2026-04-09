@@ -1,4 +1,4 @@
-//! This module contains several "hacky" utilities to work around the current lack of generic_const_exprs in
+//! Several "hacky" utilities to work around the current lack of generic_const_exprs in
 //! Rust.
 //!
 //! In several parts of the codebase  we have to creates arrays whose

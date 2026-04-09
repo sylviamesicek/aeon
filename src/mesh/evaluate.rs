@@ -19,7 +19,7 @@ use crate::{
 
 use super::{Mesh, MeshStore};
 
-/// A finite difference engine of a given order, but potentially bordering a free boundary.
+/// A finite difference engine of a given order, potentially bordering a free boundary.
 struct FdEngine<'store, const N: usize, const ORDER: usize> {
     space: NodeSpace<N>,
     store: &'store MeshStore,

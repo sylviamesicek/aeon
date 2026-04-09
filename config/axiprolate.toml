@@ -36,19 +36,21 @@ refine_error = 1e-6
 coarsen_error = 1e-10
 regrid_interval.steps = 20
 
-[visualize]
-initial = true
-initial_levels = false
-initial_relax = false
-initial_relax_interval.steps = 500
-
-evolve = true
+[output]
 evolve_interval.steps = 20
+initial_relax_interval.steps = 1000
+horizon_relax_interval.steps = 1000
 
-horizon_relax = false
-horizon_relax_interval.steps = 10
+vtu_stride = "per_cell"
 
-stride = "per_cell"
+initial_vtu = true
+initial_levels_vtu = false
+initial_relax_vtu = false
+
+evolve_vtu = true
+evolve_history_csv = true
+
+horizon_relax_vtu = false
 
 [cache]
 initial = true

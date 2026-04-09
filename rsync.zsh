@@ -7,6 +7,8 @@ pull_output_flags=(
 )
 
 push_src_flags=(
+    "--include=output/axicombo/0.0/search/history.csv"
+    "--include=output/axicombo/1.0/search/history.csv"
     "--exclude=output/"
     "--exclude=output/**"
     "--exclude=Analyze/"

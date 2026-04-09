@@ -34,10 +34,14 @@ pub struct Config {
     // Default fields
     // *******************
     /// Details for saving visualization files.
+    // #[serde(default)]
+    // pub visualize: Visualize,
+    // #[serde(default)]
+    // pub history: History,
+    /// Details for saving output.
     #[serde(default)]
-    pub visualize: Visualize,
-    #[serde(default)]
-    pub history: History,
+    pub output: Output,
+    /// Logging settings.
     #[serde(default)]
     pub logging: Logging,
     /// Details for saving cache files.
@@ -67,8 +71,9 @@ impl Config {
             initial: self.initial.clone(),
             evolve: self.evolve.clone(),
             limits: self.limits.clone(),
-            visualize: self.visualize.clone(),
-            history: self.history.clone(),
+            // visualize: self.visualize.clone(),
+            // history: self.history.clone(),
+            output: self.output.clone(),
             logging: self.logging.clone(),
             cache: self.cache.clone(),
             error_handler: self.error_handler,
@@ -157,65 +162,107 @@ pub struct Evolve {
     pub regrid_interval: Interval,
 }
 
-/// Visualization settings for initial data and evolution output.
+/// Settings for data output.
 #[derive(Serialize, Deserialize, Debug, Clone, Encode, Decode)]
-pub struct Visualize {
-    /// Should we save the final result for initial data?
-    pub initial: bool,
-    /// Should we save the final result for relaxing each leve?
-    pub initial_levels: bool,
-    /// Should we save relaxation iterations.
-    pub initial_relax: bool,
-    /// How many iterations between each save?
+pub struct Output {
+    /// How often do we output evolution data?
+    pub evolve_interval: Interval,
+    /// How often do we output initial relaxation data
     pub initial_relax_interval: Interval,
-
-    /// Should we save evolution data?
-    pub evolve: bool,
-    /// How often do we save a visualization?
-    pub evolve_interval: Interval,
-
-    /// Should we save horizon search data
-    pub horizon_relax: bool,
-    /// How often do we save a horizon visualization
+    /// How often do we output horizon relaxation data?
     pub horizon_relax_interval: Interval,
-
-    /// How much data to poutput?
-    pub stride: ExportStride,
+    /// Stride for vtu visualizations
+    pub vtu_stride: ExportStride,
+    /// Output vtu files for initial data?
+    pub initial_vtu: bool,
+    /// Output vtu files for each level when relaxing initial data?
+    pub initial_levels_vtu: bool,
+    /// Output vtu files during initial relaxation?
+    pub initial_relax_vtu: bool,
+    /// Output vtu files during evolution?
+    pub evolve_vtu: bool,
+    /// Output evolve history data?
+    pub evolve_history_csv: bool,
+    /// Output horizon relaxation data?
+    pub horizon_relax_vtu: bool,
 }
 
-impl Default for Visualize {
+impl Default for Output {
     fn default() -> Self {
-        Visualize {
-            evolve: false,
+        Output {
             evolve_interval: Interval::default(),
-            initial: false,
-            initial_levels: false,
-            initial_relax: false,
             initial_relax_interval: Interval::default(),
-            horizon_relax: false,
             horizon_relax_interval: Interval::default(),
-            stride: ExportStride::PerVertex,
+            vtu_stride: ExportStride::PerCell,
+            initial_vtu: false,
+            initial_levels_vtu: false,
+            initial_relax_vtu: false,
+            evolve_vtu: false,
+            evolve_history_csv: false,
+            horizon_relax_vtu: false,
         }
     }
 }
 
-/// Configuration options for storing run history.
-#[derive(Serialize, Deserialize, Clone, Debug, Encode, Decode)]
-pub struct History {
-    /// Should we save origin data info for evolution runs
-    pub evolve: bool,
-    /// How often do we save diagnostic info for evolution runs
-    pub evolve_interval: Interval,
-}
+// /// Visualization settings for initial data and evolution output.
+// #[derive(Serialize, Deserialize, Debug, Clone, Encode, Decode)]
+// pub struct Visualize {
+//     /// Should we save the final result for initial data?
+//     pub initial: bool,
+//     /// Should we save the final result for relaxing each leve?
+//     pub initial_levels: bool,
+//     /// Should we save relaxation iterations.
+//     pub initial_relax: bool,
+//     /// How many iterations between each save?
+//     pub initial_relax_interval: Interval,
 
-impl Default for History {
-    fn default() -> Self {
-        Self {
-            evolve: false,
-            evolve_interval: Interval::Steps { steps: 1 },
-        }
-    }
-}
+//     /// Should we save evolution data?
+//     pub evolve: bool,
+//     /// How often do we save a visualization?
+//     pub evolve_interval: Interval,
+
+//     /// Should we save horizon search data
+//     pub horizon_relax: bool,
+//     /// How often do we save a horizon visualization
+//     pub horizon_relax_interval: Interval,
+
+//     /// How much data to poutput?
+//     pub stride: ExportStride,
+// }
+
+// impl Default for Visualize {
+//     fn default() -> Self {
+//         Visualize {
+//             evolve: false,
+//             evolve_interval: Interval::default(),
+//             initial: false,
+//             initial_levels: false,
+//             initial_relax: false,
+//             initial_relax_interval: Interval::default(),
+//             horizon_relax: false,
+//             horizon_relax_interval: Interval::default(),
+//             stride: ExportStride::PerVertex,
+//         }
+//     }
+// }
+
+// /// Configuration options for storing run history.
+// #[derive(Serialize, Deserialize, Clone, Debug, Encode, Decode)]
+// pub struct History {
+//     /// Should we save origin data info for evolution runs
+//     pub evolve: bool,
+//     /// How often do we save diagnostic info for evolution runs
+//     pub evolve_interval: Interval,
+// }
+
+// impl Default for History {
+//     fn default() -> Self {
+//         Self {
+//             evolve: false,
+//             evolve_interval: Interval::Steps { steps: 1 },
+//         }
+//     }
+// }
 
 #[derive(Serialize, Deserialize, Debug, Clone, Default, Encode, Decode)]
 #[serde(tag = "style")]

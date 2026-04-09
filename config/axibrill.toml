@@ -29,7 +29,7 @@ relax.tolerance = 1e-6
 [evolve]
 cfl = 0.2
 dissipation = 0.5
-gauge = "harmonic_zero_shift"
+gauge = "log_plus_one_zero_shift"
 max_coord_time = 1000.0
 max_proper_time = 10.0
 max_steps = 1_000_000
@@ -37,24 +37,30 @@ refine_error = 1e-6
 coarsen_error = 1e-10
 regrid_interval.steps = 20
 
-[visualize]
-initial = true
-initial_levels = true
-initial_relax = true
+[output]
+evolve_interval.steps = 20
 initial_relax_interval.steps = 1000
+horizon_relax_interval.steps = 1000
 
-evolve = true
-evolve_interval.steps = 10
+vtu_stride = "per_cell"
 
-horizon_relax = false
-horizon_relax_interval.steps = 10
+initial_vtu = true
+initial_levels_vtu = false
+initial_relax_vtu = false
 
-stride = "per_cell"
+evolve_vtu = true
+evolve_history_csv = true
+
+horizon_relax_vtu = false
 
 [cache]
 initial = true
 evolve = false
 evolve_interval.steps = 100
+
+[history]
+evolve = true
+evolve_interval.steps = 1
 
 # [logging]
 # style = "incremental"

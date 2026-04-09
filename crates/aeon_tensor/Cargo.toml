@@ -1,12 +1,12 @@
 [package]
 name = "aeon-tensor"
-version = "0.3.3"
+version.workspace = true
 edition = "2021"
 description = "Helper package for working with tensor-based PDEs in aeon-tk binaries"
-authors = ["Sylvia Mesicek <sylvia.mesicek@gmail.com>"]
-homepage = "https://github.com/sylviamesicek/aeon"
-repository = "https://github.com/sylviamesicek/aeon"
-license = "MIT OR Apache-2.0"
+authors.workspace = true
+homepage.workspace = true
+repository.workspace = true
+license.workspace = true
 include = ["../../LICENSE-APACHE", "../../LICENSE-MIT", "**/*.rs", "Cargo.toml"]
 
 [dependencies]

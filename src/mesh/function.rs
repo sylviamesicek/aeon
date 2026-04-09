@@ -108,10 +108,28 @@ pub trait Projection<const N: usize> {
 /// A Gaussian projection centered on a given point, with an amplitude and a sigma.
 #[derive(Clone, Copy)]
 pub struct Gaussian<const N: usize> {
+    /// Amplitude of gaussian.
     pub amplitude: f64,
+    /// Width of 1sigma along each axis.
     pub sigma: [f64; N],
+    /// Point at which the gaussian is centered.
     pub center: [f64; N],
 }
+
+// impl Gaussian<2> {
+//     pub fn from_eccentricity(
+//         amplitude: f64,
+//         sigma: f64,
+//         eccentricity: f64,
+//         center: [f64; N],
+//     ) -> Self {
+//         Self {
+//             amplitude,
+//             sigma: [sigma, ],
+//             center,
+//         }
+//     }
+// }
 
 impl<const N: usize> Projection<N> for Gaussian<N> {
     fn project(&self, position: [f64; N]) -> f64 {

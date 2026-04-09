@@ -10,13 +10,16 @@ use reborrow::{Reborrow, ReborrowMut};
 /// Method to be used for numerical intergration of ODE.
 #[derive(Clone, Copy, Debug, Default, DataSize)]
 pub enum Method {
-    // First order accurate Euler integration
+    /// First order accurate Euler integration.
     #[default]
     ForwardEuler,
+    /// Fourth order Runge-Kutta method.
     RK4,
+    /// Fourth order Runge-Kutta with sixth order dissipation of a given weight.
     RK4KO6(f64),
 }
 
+/// An explicit numerical integrator
 #[derive(Clone, Debug, DataSize)]
 pub struct Integrator {
     /// Numerical Method

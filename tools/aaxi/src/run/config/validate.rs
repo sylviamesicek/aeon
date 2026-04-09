@@ -40,21 +40,15 @@ impl Config {
         eyre::ensure!(self.evolve.cfl > 0.0, "evolve cfl must be positive");
 
         // **************************
-        // Visualize
+        // Output
 
         eyre::ensure!(
-            matches!(
-                self.visualize.initial_relax_interval,
-                Interval::Steps { .. }
-            ),
+            matches!(self.output.initial_relax_interval, Interval::Steps { .. }),
             "relaxation intervals must be measured in steps"
         );
 
         eyre::ensure!(
-            matches!(
-                self.visualize.horizon_relax_interval,
-                Interval::Steps { .. }
-            ),
+            matches!(self.output.horizon_relax_interval, Interval::Steps { .. }),
             "relaxation intervals must be measured in steps"
         );
 

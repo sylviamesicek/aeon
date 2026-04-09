@@ -40,6 +40,10 @@ impl<'a, T> SharedSlice<'a, T> {
         unsafe { &mut *self.0[index].get() }
     }
 
+    /// Retrieves an immutable reference to a subslice of this shared slice.
+    ///
+    /// # Safety
+    /// No overlapping mutable references to any element in this subslice may exist when this function is called.
     pub unsafe fn slice(self, range: Range<usize>) -> &'a [T] {
         debug_assert!(range.start <= self.0.len());
         debug_assert!(range.end <= self.0.len());
@@ -51,6 +55,11 @@ impl<'a, T> SharedSlice<'a, T> {
         unsafe { core::slice::from_raw_parts(self.get(range.start), range.end - range.start) }
     }
 
+    /// Retrieves a mutable reference to a subslice of this shared slice.
+    ///
+    /// # Safety
+    /// No overlapping mutable or immutable references to any element in this subslice
+    /// may exist when this function is called.
     pub unsafe fn slice_mut(self, range: Range<usize>) -> &'a mut [T] {
         debug_assert!(range.start <= self.0.len());
         debug_assert!(range.end <= self.0.len());
@@ -74,6 +83,7 @@ unsafe impl<T: ?Sized + Sync> Sync for SyncUnsafeCell<T> {}
 
 // Identical interface as UnsafeCell:
 impl<T: ?Sized> SyncUnsafeCell<T> {
+    /// Pointer to undlying data.
     pub const fn get(&self) -> *mut T {
         self.value.get()
     }

@@ -85,6 +85,7 @@ impl HyperRelaxSolver {
         self.solve_with_callback(mesh, order, conditions, (), deriv, result)
     }
 
+    /// Solves a given elliptic system, calling the provided callback at each iteration.
     pub fn solve_with_callback<
         const N: usize,
         C: SystemBoundaryConds<N> + Sync,

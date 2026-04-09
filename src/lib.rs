@@ -1,3 +1,6 @@
+//! A toolkit for solving N-dimensional elliptic and hyperbolic PDEs using
+//! the finite difference method and Adaptive Mesh Refinement (AMR).
+
 #![allow(clippy::needless_range_loop)]
 #![allow(clippy::too_many_arguments)]
 

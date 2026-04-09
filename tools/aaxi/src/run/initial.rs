@@ -399,11 +399,11 @@ impl<'a> SolverCallback<2> for IterCallback<'a> {
             },
         }
 
-        if !self.config.visualize.initial_relax {
+        if !self.config.output.initial_relax_vtu {
             return Ok(());
         }
 
-        let visualize_interval = self.config.visualize.initial_relax_interval.unwrap_steps();
+        let visualize_interval = self.config.output.initial_relax_interval.unwrap_steps();
 
         if iteration % visualize_interval != 0 {
             return Ok(());
@@ -425,7 +425,7 @@ impl<'a> SolverCallback<2> for IterCallback<'a> {
             ExportVtuConfig {
                 title: self.config.name.to_string(),
                 ghost: false,
-                stride: self.config.visualize.stride,
+                stride: self.config.output.vtu_stride,
             },
         )?;
 
@@ -500,7 +500,9 @@ pub fn initial_data(config: &Config) -> eyre::Result<(Mesh<2>, Image)> {
     // Visualization
 
     // Path for all visualization data.
-    if config.visualize.initial || config.visualize.initial_levels || config.visualize.initial_relax
+    if config.output.initial_vtu
+        || config.output.initial_levels_vtu
+        || config.output.initial_relax_vtu
     {
         std::fs::create_dir_all(&output.join("initial"))?;
     }
@@ -566,7 +568,7 @@ pub fn initial_data(config: &Config) -> eyre::Result<(Mesh<2>, Image)> {
             Spinners::Incremental(..) => {}
         }
 
-        if config.visualize.initial_levels {
+        if config.output.initial_levels_vtu {
             let mut checkpoint = Checkpoint::default();
             checkpoint.attach_mesh(&mesh);
             save_image(&mut checkpoint, system.as_ref());
@@ -579,7 +581,7 @@ pub fn initial_data(config: &Config) -> eyre::Result<(Mesh<2>, Image)> {
                 ExportVtuConfig {
                     title: config.name.clone(),
                     ghost: false,
-                    stride: config.visualize.stride,
+                    stride: config.output.vtu_stride,
                 },
             )?;
         }
@@ -620,7 +622,7 @@ pub fn initial_data(config: &Config) -> eyre::Result<(Mesh<2>, Image)> {
         mesh.transfer_system(config.order, transfer.as_ref(), system.as_mut());
     }
 
-    if config.visualize.initial {
+    if config.output.initial_vtu {
         let mut checkpoint = Checkpoint::default();
         checkpoint.attach_mesh(&mesh);
         save_image(&mut checkpoint, system.as_ref());
@@ -635,7 +637,7 @@ pub fn initial_data(config: &Config) -> eyre::Result<(Mesh<2>, Image)> {
             ExportVtuConfig {
                 title: config.name.clone(),
                 ghost: false,
-                stride: config.visualize.stride,
+                stride: config.output.vtu_stride,
             },
         )?;
     }

@@ -79,6 +79,7 @@ impl BoundaryKind {
         }
     }
 
+    /// Boundary class corresponding to this kind of boundary condition.
     pub fn class(self) -> BoundaryClass {
         match self {
             BoundaryKind::AntiSymmetric | BoundaryKind::Symmetric | BoundaryKind::Custom => {
@@ -94,13 +95,18 @@ impl BoundaryKind {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 pub enum BoundaryClass {
+    /// Boundary condition implemented by invoking one-sided stencils near the boundary.
     #[default]
     OneSided,
+    /// Boundary condition implemented by setting ghost nodes to fixed values.
     Ghost,
+    /// Boundary where data is read from the opposite side of the domain, allowing data
+    /// to tile infinitely along this axis.
     Periodic,
 }
 
 impl BoundaryClass {
+    /// Does this boundary class depend on setting ghost node values.
     pub fn has_ghost(self) -> bool {
         matches!(self, BoundaryClass::Ghost | BoundaryClass::Periodic)
     }
@@ -125,7 +131,9 @@ impl RadiativeParams {
 
 #[derive(Clone, Copy, Debug)]
 pub struct DirichletParams {
+    /// Target value for the field.
     pub target: f64,
+    /// Scale factor for "spring" drawing function to this value.
     pub strength: f64,
 }
 

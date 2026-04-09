@@ -4,7 +4,7 @@ use std::marker::PhantomData;
 use std::ops::{Bound, Range, RangeBounds};
 use std::slice::SliceIndex;
 
-/// Several fields of data spread among
+/// A system consisting of multiple fields, each belonging to a seperate "channel".
 #[derive(Clone, Debug, Default, Serialize, Deserialize, datasize::DataSize)]
 pub struct Image {
     data: Vec<f64>,
@@ -82,7 +82,7 @@ impl Image {
         ImageRef::from_storage(&self.data, self.channels)
     }
 
-    pub fn as_mut(&mut self) -> ImageMut<'_>  {
+    pub fn as_mut(&mut self) -> ImageMut<'_> {
         ImageMut::from_storage(&mut self.data, self.channels)
     }
 

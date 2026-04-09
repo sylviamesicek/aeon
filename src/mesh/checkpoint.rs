@@ -12,6 +12,7 @@ use std::path::Path;
 use std::str::FromStr;
 use thiserror::Error;
 
+/// Possible error codes when parsing checkpoint from a file.
 #[derive(Debug, Error)]
 pub enum CheckpointParseError {
     #[error("Invalid key")]
@@ -249,6 +250,7 @@ pub enum ExportStride {
 }
 
 impl<const N: usize> Checkpoint<N> {
+    /// Exports checkpoint as csv file of ordered nodes with position and field values.
     pub fn export_csv(&self, path: impl AsRef<Path>, stride: ExportStride) -> std::io::Result<()> {
         let mesh: Mesh<N> = self.mesh.clone().unwrap().into();
         let stride = match stride {
