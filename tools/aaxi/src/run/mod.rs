@@ -1,7 +1,7 @@
 //! Submodule representing default `run` command (that is, `aaxi`) invoked without
 //! any additional subcommands.
 
-use crate::{CommandExt as _, parse_define_args, parse_invoke_arg};
+use crate::{CommandExt as _, parse_clobber_flag, parse_define_args, parse_invoke_arg};
 use aeon_app::file;
 use clap::{ArgMatches, Command};
 use console::{Term, style};
@@ -20,22 +20,29 @@ pub use status::Status;
 pub fn run(matches: &ArgMatches) -> eyre::Result<()> {
     let vars = parse_define_args(matches)?;
     let invoke = parse_invoke_arg(matches)?;
+    let clobber = parse_clobber_flag(matches);
     // Find config file
     let config_run_file = std::env::current_dir()?.join(format!("{}.toml", invoke));
     // Load and apply variable transformation
     let config = file::import_toml::<Config>(&config_run_file)
         .with_context(|| format!("failed to find run config file: {:?}", config_run_file))?;
     let config = config.transform(&vars)?;
+
     // Run simulation
-    let _ = run_simulation(&config);
+    let _ = run_simulation(&config, clobber);
 
     Ok(())
 }
 
-pub fn run_simulation(config: &Config) -> eyre::Result<Status> {
+pub fn run_simulation(config: &Config, clobber: bool) -> eyre::Result<Status> {
     let output_path = config.output_dir()?;
     // Ensure path exists.
     std::fs::create_dir_all(&output_path)?;
+
+    // Remove cache if necessary
+    if clobber {
+        std::fs::remove_dir_all(output_path.join("cache"))?;
+    }
 
     // **********************************
 
@@ -88,7 +95,8 @@ impl CommandExt for Command {
             Command::new("run")
                 .about("Runs an evolution of axisymmetric spacetime")
                 .define_args()
-                .invoke_arg(),
+                .invoke_arg()
+                .clobber_flag(),
         )
     }
 }

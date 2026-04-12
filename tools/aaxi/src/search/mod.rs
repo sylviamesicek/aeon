@@ -1,5 +1,5 @@
 use crate::{
-    CommandExt as _, Hpc, parse_define_args, parse_invoke_arg,
+    CommandExt as _, Hpc, parse_clobber_flag, parse_define_args, parse_invoke_arg,
     run::{self, Status},
 };
 #[cfg(feature = "mpi")]
@@ -26,6 +26,7 @@ pub fn search(matches: &ArgMatches, hpc: Hpc) -> eyre::Result<()> {
 
     let vars = parse_define_args(matches)?;
     let invoke = parse_invoke_arg(matches)?;
+    let clobber = parse_clobber_flag(matches);
 
     let config_run_file = std::env::current_dir()?.join(format!("{}.toml", invoke));
     let config_search_file = std::env::current_dir()?.join(format!("{}.search.toml", invoke));
@@ -61,6 +62,9 @@ pub fn search(matches: &ArgMatches, hpc: Hpc) -> eyre::Result<()> {
         hpc.root.broadcast_into(&mut config_buffer_len);
         assert_eq!(config_buffer_len, config_buffer.len());
         hpc.root.broadcast_into(&mut config_buffer);
+        let mut clobber_id: usize = if clobber { 1 } else { 0 };
+        hpc.root.broadcast_into(&mut clobber_id);
+
         // log::info!(
         //     "Broadcasted config buffer with length {}",
         //     config_buffer_len
@@ -90,6 +94,7 @@ pub fn search(matches: &ArgMatches, hpc: Hpc) -> eyre::Result<()> {
         &[start, end],
         &vars,
         &history,
+        clobber,
         hpc.clone(),
     )?;
 
@@ -140,6 +145,7 @@ pub fn search(matches: &ArgMatches, hpc: Hpc) -> eyre::Result<()> {
             &amplitudes,
             &vars,
             &history,
+            clobber,
             hpc.clone(),
         )?;
 
@@ -203,6 +209,7 @@ fn launch_fleet(
     amplitudes: &[f64],
     vars: &VarDefs,
     history: &SearchHistory,
+    clobber: bool,
     hpc: Hpc,
 ) -> eyre::Result<Vec<Status>> {
     let mut execute = Vec::new();
@@ -256,7 +263,7 @@ fn launch_fleet(
         let config = config.transform(&vars)?;
 
         // Run simulation
-        let status = run::run_simulation(&config)?;
+        let status = run::run_simulation(&config, clobber)?;
         let mut code = status as i32;
         // Gather results
         hpc.root.gather_into_root(&mut code, &mut result);
@@ -282,10 +289,14 @@ pub fn search_worker(hpc: Hpc) -> eyre::Result<()> {
     hpc.root.broadcast_into(&mut config_buffer_len);
     let mut config_buffer = vec![0u8; config_buffer_len];
     hpc.root.broadcast_into(&mut config_buffer);
+    let mut clobber_id: usize = 0;
+    hpc.root.broadcast_into(&mut clobber_id);
     // log::info!("Received config buffer with length {}", config_buffer_len);
     // Convert back to config
     let (run_config, _) =
         bincode::decode_from_slice::<RunConfig, _>(&config_buffer, bincode::config::standard())?;
+
+    let clobber = clobber_id == 1;
 
     // Recieve parameter name over network
     let mut parameter_buffer_len: usize = 0;
@@ -345,7 +356,7 @@ pub fn search_worker(hpc: Hpc) -> eyre::Result<()> {
 
             let config = run_config.transform(&vars)?;
 
-            let simulation = run::run_simulation(&config)?;
+            let simulation = run::run_simulation(&config, clobber)?;
             code = simulation as i32;
         } else {
             // Perform iteration
@@ -365,6 +376,7 @@ fn launch_fleet(
     amplitudes: &[f64],
     vars: &VarDefs,
     history: &SearchHistory,
+    clobber: bool,
     _hpc: Hpc,
 ) -> eyre::Result<Vec<Status>> {
     let mut status = vec![Status::Collapse; amplitudes.len()];
@@ -380,7 +392,7 @@ fn launch_fleet(
 
         let config = config.transform(&vars)?;
 
-        status[i] = run::run_simulation(&config)?;
+        status[i] = run::run_simulation(&config, clobber)?;
     }
 
     Ok(status)

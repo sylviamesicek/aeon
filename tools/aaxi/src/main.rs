@@ -203,6 +203,8 @@ trait CommandExt {
     fn define_args(self) -> Self;
     /// Implements 0th positional argument for executing a specific subconfig
     fn invoke_arg(self) -> Self;
+    /// A flag indicating whether cached data should be clobbered
+    fn clobber_flag(self) -> Self;
 }
 
 impl CommandExt for Command {
@@ -219,6 +221,15 @@ impl CommandExt for Command {
 
     fn invoke_arg(self) -> Self {
         self.arg(Arg::new("invoke").required(true))
+    }
+
+    fn clobber_flag(self) -> Self {
+        self.arg(
+            Arg::new("clobber")
+                .long("clobber")
+                .help("Clobber cached datafiles, forcing the code to regenerate them while running")
+                .action(ArgAction::SetTrue),
+        )
     }
 }
 
@@ -243,4 +254,8 @@ fn parse_invoke_arg(matches: &ArgMatches) -> eyre::Result<String> {
     };
 
     Ok(invoke.clone())
+}
+
+fn parse_clobber_flag(matches: &ArgMatches) -> bool {
+    matches.get_flag("clobber")
 }
