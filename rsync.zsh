@@ -7,8 +7,6 @@ pull_output_flags=(
 )
 
 push_src_flags=(
-    "--include=output/axicombo/0.0/search/history.csv"
-    "--include=output/axicombo/1.0/search/history.csv"
     "--exclude=output/"
     "--exclude=output/**"
     "--exclude=Analyze/"
@@ -21,10 +19,23 @@ push_src_flags=(
     "--exclude=.git/**"
 )
 
+push_history_flags=(
+    "--include=output/"
+    "--include=output/axicombo/"
+    "--include=output/axicombo/*/"
+    "--include=output/axicombo/*/search/"
+    "--include=output/axicombo/*/search/history.csv"
+    "--exclude=**"
+)
+
 rsync_pull_output() {
     rsync -avz --relative $pull_output_flags $* $remote_path/./ ./
 }
 
 rsync_push_src() {
     rsync -avz --relative $push_src_flags $* ./ $remote_path
+}
+
+rsync_push_history() {
+    rsync -avz --relative $push_history_flags $* ./ $remote_path
 }

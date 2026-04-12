@@ -4,7 +4,6 @@ directory = "output/axicombo/${brill}/${amplitude}"
 order = 4
 diss_order = 6
 
-
 [domain]
 radius = 48.0
 height = 48.0
@@ -16,7 +15,7 @@ global_refine = 1
 max_levels = 16
 max_nodes = 16_000_000
 max_memory = 3_000_000_000
-max_wall_time = 144000     # Run evolution for 42 hrs
+max_wall_time = 414000     # Run evolution for 115 hrs
 
 [initial]
 coarsen_error = 0.0
@@ -55,8 +54,8 @@ horizon_relax_vtu = false
 
 [cache]
 initial = true
-evolve = false
-evolve_interval.steps = 100
+evolve = true
+evolve_interval.steps = 4000
 
 # [logging]
 # style = "incremental"

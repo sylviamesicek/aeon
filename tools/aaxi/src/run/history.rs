@@ -1,5 +1,12 @@
 use std::{fmt::Write as _, fs::File, path::Path};
 
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+pub struct CacheInfo {
+    pub proper_time: f64,
+    pub coord_time: f64,
+    pub output_index: usize,
+}
+
 #[derive(Clone, Copy, Debug)]
 pub struct ScalarFieldInfo {
     pub phi: f64,

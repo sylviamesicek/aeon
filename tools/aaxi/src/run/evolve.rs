@@ -6,7 +6,7 @@ use crate::{
     horizon::{self, ApparentHorizonFinder, HorizonError, HorizonProjection, HorizonStatus},
     run::{
         config::Config,
-        history::{History, HistoryInfo, ScalarFieldInfo},
+        history::{CacheInfo, History, HistoryInfo, ScalarFieldInfo},
         interval::{Interval, IntervalTracker},
         status::{Status, Strategy},
     },
@@ -23,6 +23,8 @@ use eyre::eyre;
 use indicatif::{HumanBytes, HumanCount, HumanDuration, MultiProgress, ProgressBar};
 use std::{
     convert::Infallible,
+    fs::File,
+    io::Write as _,
     path::Path,
     time::{Duration, Instant},
 };
@@ -491,6 +493,14 @@ pub fn evolve_data(config: &Config, mut mesh: Mesh<2>, mut fields: Image) -> eyr
         History::empty()
     };
 
+    // **************************
+    // Cache
+
+    let cache = config.cache.evolve;
+    let mut cache_tracker = IntervalTracker::new();
+    let cache_interval = config.cache.evolve_interval;
+    let mut cache_index = 0;
+
     // let visualize = config.visualize.evolve;
     // let mut visualize_tracker = IntervalTracker::new();
     // let visualize_interval = config.visualize.evolve_interval;
@@ -800,6 +810,43 @@ pub fn evolve_data(config: &Config, mut mesh: Mesh<2>, mut fields: Image) -> eyr
             history.flush()?;
 
             output_index += 1;
+
+            Ok(())
+        })?;
+
+        // ***********************************
+        // Periodically cache evolve data
+
+        cache_tracker.try_every(cache_interval, || -> eyre::Result<()> {
+            if !cache {
+                return Ok(());
+            }
+
+            // Output current system to disk
+            let mut checkpoint = Checkpoint::default();
+            checkpoint.attach_mesh(&mesh);
+            save_image(&mut checkpoint, fields.as_ref());
+            checkpoint.export_dat(
+                output
+                    .join("cache")
+                    .join(format!("evolve_{cache_index}.vtu")),
+            )?;
+
+            let mut checkpoint_info = File::create(
+                output
+                    .join("cache")
+                    .join(format!("evolve_{cache_index}.toml")),
+            )?;
+            checkpoint_info.write_all(
+                toml::to_string_pretty(&CacheInfo {
+                    proper_time,
+                    coord_time,
+                    output_index,
+                })?
+                .as_bytes(),
+            )?;
+
+            cache_index += 1;
 
             Ok(())
         })?;

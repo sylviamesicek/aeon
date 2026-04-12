@@ -49,6 +49,8 @@ pub fn save_image(checkpoint: &mut Checkpoint<2>, image: ImageRef) {
         checkpoint.save_field(&format!("Phi{i}"), image.channel(phi_ch(i)));
         checkpoint.save_field(&format!("Pi{i}"), image.channel(phi_ch(i)));
     }
+
+    checkpoint.save_meta("NumScalarFields", &num_scalar_fields.to_string());
 }
 
 /// Boundary conditions for various fields.
