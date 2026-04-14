@@ -213,7 +213,13 @@ impl<const N: usize> Mesh<N> {
 
         let shared: ImageShared = dest.into();
 
-        self.blocks.indices().par_bridge().for_each(|block| {
+        #[cfg(feature = "parallel")]
+        let blocks = self.blocks.indices().par_bridge();
+
+        #[cfg(not(feature = "parallel"))]
+        let blocks = self.blocks.indices();
+
+        blocks.for_each(|block| {
             // Fill Physical Boundary conditions
             let nodes = self.block_nodes(block);
             let space = self.block_space(block);
@@ -231,108 +237,116 @@ impl<const N: usize> Mesh<N> {
     fn fill_direct(&mut self, extent: usize, result: ImageMut) {
         let shared: ImageShared = result.into();
 
+        #[cfg(feature = "parallel")]
+        let neighbors = self.neighbors.direct_indices().par_bridge();
+
+        #[cfg(not(feature = "parallel"))]
+        let neighbors = self.neighbors.direct_indices();
+
         // Fill direct neighbors
-        self.neighbors
-            .direct_indices()
-            .par_bridge()
-            .for_each(|interface| {
-                let info = self.interfaces.interface(interface);
+        neighbors.for_each(|interface| {
+            let info = self.interfaces.interface(interface);
 
-                let block_space = self.block_space(info.block);
-                let block_nodes = self.block_nodes(info.block);
-                let neighbor_space = self.block_space(info.neighbor);
-                let neighbor_nodes = self.block_nodes(info.neighbor);
+            let block_space = self.block_space(info.block);
+            let block_nodes = self.block_nodes(info.block);
+            let neighbor_space = self.block_space(info.neighbor);
+            let neighbor_nodes = self.block_nodes(info.neighbor);
 
-                let dest = info.dest;
-                let source = info.source;
+            let dest = info.dest;
+            let source = info.source;
 
-                let mut block_system = unsafe { shared.slice_mut(block_nodes) };
-                let neighbor_system = unsafe { shared.slice(neighbor_nodes) };
+            let mut block_system = unsafe { shared.slice_mut(block_nodes) };
+            let neighbor_system = unsafe { shared.slice(neighbor_nodes) };
 
-                for node in self.interfaces.interface_nodes_active(interface, extent) {
-                    let block_node = array::from_fn(|axis| node[axis] as isize + dest[axis]);
-                    let neighbor_node = array::from_fn(|axis| node[axis] as isize + source[axis]);
+            for node in self.interfaces.interface_nodes_active(interface, extent) {
+                let block_node = array::from_fn(|axis| node[axis] as isize + dest[axis]);
+                let neighbor_node = array::from_fn(|axis| node[axis] as isize + source[axis]);
 
-                    let block_index = block_space.index_from_node(block_node);
-                    let neighbor_index = neighbor_space.index_from_node(neighbor_node);
+                let block_index = block_space.index_from_node(block_node);
+                let neighbor_index = neighbor_space.index_from_node(neighbor_node);
 
-                    for field in shared.channels() {
-                        let value = neighbor_system.channel(field)[neighbor_index];
-                        block_system.channel_mut(field)[block_index] = value;
-                    }
+                for field in shared.channels() {
+                    let value = neighbor_system.channel(field)[neighbor_index];
+                    block_system.channel_mut(field)[block_index] = value;
                 }
-            });
+            }
+        });
     }
 
     /// Fills ghost nodes via injection from neighbors at a higher level of refinement.
     fn fill_fine(&mut self, extent: usize, result: ImageMut) {
         let shared: ImageShared = result.into();
 
-        self.neighbors
-            .fine_indices()
-            .par_bridge()
-            .for_each(|interface| {
-                let info = self.interfaces.interface(interface);
+        #[cfg(feature = "parallel")]
+        let neighbors = self.neighbors.fine_indices().par_bridge();
 
-                let block_space = self.block_space(info.block);
-                let block_nodes = self.block_nodes(info.block);
-                let neighbor_space = self.block_space(info.neighbor);
-                let neighbor_nodes = self.block_nodes(info.neighbor);
+        #[cfg(not(feature = "parallel"))]
+        let neighbors = self.neighbors.fine_indices();
 
-                let mut block_system = unsafe { shared.slice_mut(block_nodes) };
-                let neighbor_system = unsafe { shared.slice(neighbor_nodes) };
+        neighbors.for_each(|interface| {
+            let info = self.interfaces.interface(interface);
 
-                for node in self.interfaces.interface_nodes_active(interface, extent) {
-                    let block_node = array::from_fn(|axis| node[axis] as isize + info.dest[axis]);
-                    let neighbor_node =
-                        array::from_fn(|axis| 2 * (node[axis] as isize + info.source[axis]));
+            let block_space = self.block_space(info.block);
+            let block_nodes = self.block_nodes(info.block);
+            let neighbor_space = self.block_space(info.neighbor);
+            let neighbor_nodes = self.block_nodes(info.neighbor);
 
-                    let block_index = block_space.index_from_node(block_node);
-                    let neighbor_index = neighbor_space.index_from_node(neighbor_node);
+            let mut block_system = unsafe { shared.slice_mut(block_nodes) };
+            let neighbor_system = unsafe { shared.slice(neighbor_nodes) };
 
-                    for field in shared.channels() {
-                        let value = neighbor_system.channel(field)[neighbor_index];
-                        block_system.channel_mut(field)[block_index] = value;
-                    }
+            for node in self.interfaces.interface_nodes_active(interface, extent) {
+                let block_node = array::from_fn(|axis| node[axis] as isize + info.dest[axis]);
+                let neighbor_node =
+                    array::from_fn(|axis| 2 * (node[axis] as isize + info.source[axis]));
+
+                let block_index = block_space.index_from_node(block_node);
+                let neighbor_index = neighbor_space.index_from_node(neighbor_node);
+
+                for field in shared.channels() {
+                    let value = neighbor_system.channel(field)[neighbor_index];
+                    block_system.channel_mut(field)[block_index] = value;
                 }
-            });
+            }
+        });
     }
 
     /// Fills ghost nodes by interpolating from neighbors at a lower level of refinement.
     fn fill_prolong<const ORDER: usize>(&mut self, extent: usize, result: ImageMut) {
         let shared: ImageShared = result.into();
 
-        self.neighbors
-            .coarse_indices()
-            .par_bridge()
-            .for_each(|interface| {
-                let info = self.interfaces.interface(interface);
+        #[cfg(feature = "parallel")]
+        let neighbors = self.neighbors.coarse_indices().par_bridge();
 
-                let block_nodes = self.block_nodes(info.block);
-                let block_space = self.block_space(info.block);
-                let neighbor_nodes = self.block_nodes(info.neighbor);
-                let neighbor_space = self.block_space(info.neighbor);
+        #[cfg(not(feature = "parallel"))]
+        let neighbors = self.neighbors.coarse_indices();
 
-                let mut block_system = unsafe { shared.slice_mut(block_nodes) };
-                let neighbor_system = unsafe { shared.slice(neighbor_nodes) };
+        neighbors.for_each(|interface| {
+            let info = self.interfaces.interface(interface);
 
-                for node in self.interfaces.interface_nodes_active(interface, extent) {
-                    let block_node = array::from_fn(|axis| node[axis] as isize + info.dest[axis]);
+            let block_nodes = self.block_nodes(info.block);
+            let block_space = self.block_space(info.block);
+            let neighbor_nodes = self.block_nodes(info.neighbor);
+            let neighbor_space = self.block_space(info.neighbor);
 
-                    let neighbor_node =
-                        array::from_fn(|axis| node[axis] as isize + info.source[axis]);
-                    let block_index = block_space.index_from_node(block_node);
+            let mut block_system = unsafe { shared.slice_mut(block_nodes) };
+            let neighbor_system = unsafe { shared.slice(neighbor_nodes) };
 
-                    for field in shared.channels() {
-                        let value = neighbor_space.prolong(
-                            Interpolation::<ORDER>,
-                            neighbor_node,
-                            neighbor_system.channel(field),
-                        );
-                        block_system.channel_mut(field)[block_index] = value;
-                    }
+            for node in self.interfaces.interface_nodes_active(interface, extent) {
+                let block_node = array::from_fn(|axis| node[axis] as isize + info.dest[axis]);
+
+                let neighbor_node = array::from_fn(|axis| node[axis] as isize + info.source[axis]);
+                let block_index = block_space.index_from_node(block_node);
+
+                for field in shared.channels() {
+                    let value = neighbor_space.prolong(
+                        Interpolation::<ORDER>,
+                        neighbor_node,
+                        neighbor_system.channel(field),
+                    );
+                    block_system.channel_mut(field)[block_index] = value;
                 }
-            });
+            }
+        });
     }
 
     /// Stores the index of the block which owns each individual node in a debug vector.
