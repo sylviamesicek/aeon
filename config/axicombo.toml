@@ -1,5 +1,5 @@
 name = "axicombo"
-directory = "output/axicombo/${brill}/${amplitude}"
+directory = "output_/axicombo/${brill}/${amplitude}"
 
 order = 4
 diss_order = 6

@@ -20,7 +20,10 @@ Cargo.lock
 
 # Output
 output/
+output
 examples/output
+output_/
+output__/
 
 # Jupyter Notebooks
 **/.ipynb_checkpoints/
