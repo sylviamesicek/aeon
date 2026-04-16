@@ -258,4 +258,5 @@ fn parse_invoke_arg(matches: &ArgMatches) -> eyre::Result<String> {
 
 fn parse_clobber_flag(matches: &ArgMatches) -> bool {
     matches.get_flag("clobber")
+    // false
 }

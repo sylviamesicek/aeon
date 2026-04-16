@@ -433,7 +433,8 @@ impl CommandExt for Command {
             Command::new("search")
                 .about("Performs critical search across many MPI nodes")
                 .define_args()
-                .invoke_arg(),
+                .invoke_arg()
+                .clobber_flag(),
         )
     }
 }

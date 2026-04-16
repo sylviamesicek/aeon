@@ -6,8 +6,8 @@
 #SBATCH --cpus-per-task=1
 #SBATCH --mem-per-cpu=8G
 #SBATCH --job-name=axi
-#SBATCH -o ./output/axicombo.0.0.out
-#SBATCH -e ./output/axicombo.0.0.err
+#SBATCH -o ./output_/axicombo.0.0.out
+#SBATCH -e ./output_/axicombo.0.0.err
 #SBATCH --mail-type=FAIL,BEGIN,END
 #SBATCH --mail-user=sylvia.mesicek@utah.edu
 

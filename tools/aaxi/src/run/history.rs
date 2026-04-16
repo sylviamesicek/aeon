@@ -73,9 +73,7 @@ impl History {
 
         // If previous history exists write rows 0..offset
 
-        if let Some(mut history) = history_
-            && let Some(offset) = offset
-        {
+        if let (Some(mut history), Some(offset)) = (history_, offset) {
             let mut records = history.records();
             // _ = records.next();
 
