@@ -1,5 +1,5 @@
-name = "axibrillalt"
-directory = "output/axibrillalt/${brill}"
+name = "axibrill"
+directory = "output/axibrill-vis/${brill}"
 
 order = 4
 diss_order = 6
@@ -29,7 +29,7 @@ relax.tolerance = 1e-6
 [evolve]
 cfl = 0.2
 dissipation = 0.5
-gauge = "harmonic_zero_shift"
+gauge = "log_plus_one_zero_shift"
 max_coord_time = 1000.0
 max_proper_time = 10.0
 max_steps = 1_000_000
@@ -55,7 +55,7 @@ horizon_relax_vtu = false
 
 [cache]
 initial = true
-evolve = false
+evolve = true
 evolve_interval.steps = 100
 
 # [logging]

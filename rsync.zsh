@@ -1,4 +1,4 @@
-remote_path="u1192515@notchpeak1.chpc.utah.edu:/uufs/chpc.utah.edu/common/home/u1192515/dev/aeon"
+remote_path="u1192515@notchpeak1.chpc.utah.edu:/uufs/chpc.utah.edu/common/home/u1192515/dev/aeon_job"
 
 pull_output_flags=(
     "--include=output/"

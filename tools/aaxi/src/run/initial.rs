@@ -1,4 +1,5 @@
 use crate::eqs;
+use crate::run::CacheInfo;
 use crate::run::config::{Config, Initial, Logging, ScalarFieldProfile, Source};
 use crate::run::interval::Interval;
 use crate::systems::{self, FieldConditions, save_image};
@@ -434,14 +435,50 @@ impl<'a> SolverCallback<2> for IterCallback<'a> {
 }
 
 /// Solve rinne's initial data problem using Garfinkles variables.
-pub fn initial_data(config: &Config) -> eyre::Result<(Mesh<2>, Image)> {
+pub fn initial_data(config: &Config) -> eyre::Result<(Mesh<2>, Image, Option<CacheInfo>)> {
     // Save initial time
     let start = Instant::now();
 
     // Cache directory
     let output = config.output_dir()?;
     let cache = output.join("cache");
-    let init_cache = cache.join(format!("{}_init.dat", config.name));
+    let init_cache = cache.join("initial.dat");
+
+    'cache: {
+        if !config.cache.evolve {
+            // Don't attempt to load evolve cache
+            break 'cache;
+        }
+
+        log::info!("Reading Evolve");
+
+        let Some(info): Option<CacheInfo> = std::fs::read_to_string(cache.join("evolve.toml"))
+            .ok()
+            .and_then(|buffer: String| toml::from_str(&buffer).ok())
+        else {
+            break 'cache;
+        };
+
+        // Attempt to load file
+        let Ok(checkpoint) = Checkpoint::<2>::import_dat(&cache.join("evolve.dat")) else {
+            break 'cache;
+        };
+
+        let mesh = checkpoint.read_mesh();
+        let system = checkpoint.read_image("Data");
+
+        log::info!(
+            "Successfully read cached evolution data: {}",
+            style(cache.join("evolve.dat").display()).cyan(),
+        );
+        log::info!(
+            "Starting Proper Time: {}, Coord Time: {}",
+            info.proper_time,
+            info.coord_time
+        );
+
+        return Ok((mesh, system, Some(info)));
+    };
 
     'cache: {
         if !config.cache.initial {
@@ -462,7 +499,7 @@ pub fn initial_data(config: &Config) -> eyre::Result<(Mesh<2>, Image)> {
             style(init_cache.display()).cyan()
         );
 
-        return Ok((mesh, system));
+        return Ok((mesh, system, None));
     };
 
     // if config.cache.initial {
@@ -676,5 +713,5 @@ pub fn initial_data(config: &Config) -> eyre::Result<(Mesh<2>, Image)> {
         // );
     }
 
-    Ok((mesh, system))
+    Ok((mesh, system, None))
 }

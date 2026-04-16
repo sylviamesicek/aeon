@@ -5,8 +5,9 @@ use crate::{
     },
     horizon::{self, ApparentHorizonFinder, HorizonError, HorizonProjection, HorizonStatus},
     run::{
+        CacheInfo,
         config::Config,
-        history::{CacheInfo, History, HistoryInfo, ScalarFieldInfo},
+        history::{History, HistoryInfo, ScalarFieldInfo},
         interval::{Interval, IntervalTracker},
         status::{Status, Strategy},
     },
@@ -435,7 +436,12 @@ impl Spinners {
     }
 }
 
-pub fn evolve_data(config: &Config, mut mesh: Mesh<2>, mut fields: Image) -> eyre::Result<Status> {
+pub fn evolve_data(
+    config: &Config,
+    mut mesh: Mesh<2>,
+    mut fields: Image,
+    cache: Option<CacheInfo>,
+) -> eyre::Result<Status> {
     // Save initial time
     let start = Instant::now();
 
@@ -460,6 +466,11 @@ pub fn evolve_data(config: &Config, mut mesh: Mesh<2>, mut fields: Image) -> eyr
     let mut coord_time = 0.0;
     let mut proper_time = 0.0;
 
+    if let Some(cache) = cache {
+        coord_time = cache.coord_time;
+        proper_time = cache.proper_time;
+    }
+
     let max_levels = config.limits.max_levels;
     let max_nodes = config.limits.max_nodes;
     let max_memory = config.limits.max_memory;
@@ -482,13 +493,22 @@ pub fn evolve_data(config: &Config, mut mesh: Mesh<2>, mut fields: Image) -> eyr
     // Output
 
     let output_vtu = config.output.evolve_vtu;
-    let mut output_tracker = IntervalTracker::new();
     let output_interval = config.output.evolve_interval;
+    let mut output_tracker = IntervalTracker::new();
+    output_tracker.trigger_on_first_call(output_interval);
     let vtu_stride = config.output.vtu_stride;
     let mut output_index = 0;
 
+    if let Some(cache) = cache {
+        output_index = cache.output_index - 1;
+    }
+
     let mut history = if config.output.evolve_history_csv {
-        History::output(&output.join("evolve_history.csv"), num_scalar_fields)?
+        History::output(
+            &output.join("evolve_history.csv"),
+            num_scalar_fields,
+            cache.map(|c| c.output_index - 1),
+        )?
     } else {
         History::empty()
     };
@@ -497,8 +517,9 @@ pub fn evolve_data(config: &Config, mut mesh: Mesh<2>, mut fields: Image) -> eyr
     // Cache
 
     let cache = config.cache.evolve;
-    let mut cache_tracker = IntervalTracker::new();
     let cache_interval = config.cache.evolve_interval;
+    let mut cache_tracker = IntervalTracker::new();
+    cache_tracker.trigger_on_first_call(cache_interval);
     let mut cache_index = 0;
 
     // let visualize = config.visualize.evolve;
@@ -822,21 +843,23 @@ pub fn evolve_data(config: &Config, mut mesh: Mesh<2>, mut fields: Image) -> eyr
                 return Ok(());
             }
 
+            let _ = std::fs::rename(
+                output.join("cache").join("evolve.toml"),
+                output.join("cache").join("evolve_.toml"),
+            );
+            let _ = std::fs::rename(
+                output.join("cache").join("evolve.dat"),
+                output.join("cache").join("evolve_.dat"),
+            );
+
             // Output current system to disk
             let mut checkpoint = Checkpoint::default();
             checkpoint.attach_mesh(&mesh);
-            save_image(&mut checkpoint, fields.as_ref());
-            checkpoint.export_dat(
-                output
-                    .join("cache")
-                    .join(format!("evolve_{cache_index}.vtu")),
-            )?;
+            checkpoint.save_image("Data", fields.as_ref());
+            checkpoint.export_dat(&output.join("cache").join(format!("evolve.dat")))?;
 
-            let mut checkpoint_info = File::create(
-                output
-                    .join("cache")
-                    .join(format!("evolve_{cache_index}.toml")),
-            )?;
+            let mut checkpoint_info =
+                File::create(output.join("cache").join(format!("evolve.toml")))?;
             checkpoint_info.write_all(
                 toml::to_string_pretty(&CacheInfo {
                     proper_time,
@@ -978,7 +1001,7 @@ pub fn evolve_data(config: &Config, mut mesh: Mesh<2>, mut fields: Image) -> eyr
         let coord_time_delta = h;
         regrid_tracker.update(proper_time_delta, coord_time_delta, 1);
         output_tracker.update(proper_time_delta, coord_time_delta, 1);
-        // history_tracker.update(proper_time_delta, coord_time_delta, 1);
+        cache_tracker.update(proper_time_delta, coord_time_delta, 1);
         search_tracker.update(proper_time_delta, coord_time_delta, 1);
 
         spinners.update(

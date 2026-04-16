@@ -17,6 +17,13 @@ pub use config::Config;
 use eyre::Context;
 pub use status::Status;
 
+#[derive(Clone, Copy, Debug, serde::Serialize, serde::Deserialize)]
+pub struct CacheInfo {
+    pub proper_time: f64,
+    pub coord_time: f64,
+    pub output_index: usize,
+}
+
 pub fn run(matches: &ArgMatches) -> eyre::Result<()> {
     let vars = parse_define_args(matches)?;
     let invoke = parse_invoke_arg(matches)?;
@@ -70,12 +77,12 @@ pub fn run_simulation(config: &Config, clobber: bool) -> eyre::Result<Status> {
     // ***********************************
     // Initial data
 
-    let (mesh, system) = initial::initial_data(&config)?;
+    let (mesh, system, cache) = initial::initial_data(&config)?;
 
     // ************************************
     // Evolve data forwards
 
-    let status = evolve::evolve_data(&config, mesh, system)?;
+    let status = evolve::evolve_data(&config, mesh, system, cache)?;
 
     Ok(status)
 }

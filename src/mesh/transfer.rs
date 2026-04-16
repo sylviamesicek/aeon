@@ -1,6 +1,7 @@
 use crate::geometry::{ActiveCellId, IndexSpace, NeighborId, Split};
 use crate::image::ImageShared;
 use crate::kernel::Interpolation;
+#[cfg(feature = "parallel")]
 use rayon::iter::{ParallelBridge, ParallelIterator as _};
 use reborrow::ReborrowMut;
 use std::array;

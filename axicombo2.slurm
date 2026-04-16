@@ -1,7 +1,7 @@
 #! /bin/bash
-#SBATCH --time=120:00:0
-#SBATCH --account=belz-np
-#SBATCH --partition=belz-np
+#SBATCH --time=72:00:0
+#SBATCH --account=belz
+#SBATCH --partition=notchpeak
 #SBATCH --ntasks=9
 #SBATCH --cpus-per-task=1
 #SBATCH --mem-per-cpu=8G
@@ -16,3 +16,6 @@ module load gcc mpich
 cargo build --release --package aaxi --features "mpi"
 
 mpirun -n $SLURM_NTASKS ./target/release/aaxi search config/axicombo2 -Dbrill=1.0
+
+# # BATCH --account=belz-np
+# # BATCH --partition=belz-np

@@ -57,6 +57,15 @@ impl IntervalTracker {
         }
     }
 
+    /// Sets the interval tracker to execute the first time every or try every is called.
+    pub fn trigger_on_first_call(&mut self, interval: Interval) {
+        match interval {
+            Interval::ProperTime { proper_time } => self.proper_time_elapsed = proper_time,
+            Interval::CoordTime { coord_time } => self.coord_time_elapsed = coord_time,
+            Interval::Steps { steps } => self.steps_elapsed = steps,
+        }
+    }
+
     pub fn every(&mut self, interval: Interval, f: impl FnOnce()) {
         self.try_every::<Infallible>(interval, || {
             f();

@@ -610,7 +610,7 @@ impl Decomposition {
                 let term4 = 2.0 * theta_lie_n_times_lapse
                     + 2.0 * S::sum(|[a]| z_con[[a]] * lapse_grad[[a]]);
 
-                let mut regular = -S::sum(|[m]| twist.regular_con()[[m]] * -lapse_grad[[m]]);
+                let mut regular = -S::sum(|[m]| twist.regular_con()[[m]] * lapse_grad[[m]]);
 
                 if on_axis {
                     regular += -lapse.derivs2[[0, 0]] / metric.value[[0, 0]];

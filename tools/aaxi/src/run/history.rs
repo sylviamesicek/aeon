@@ -1,12 +1,5 @@
 use std::{fmt::Write as _, fs::File, path::Path};
 
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
-pub struct CacheInfo {
-    pub proper_time: f64,
-    pub coord_time: f64,
-    pub output_index: usize,
-}
-
 #[derive(Clone, Copy, Debug)]
 pub struct ScalarFieldInfo {
     pub phi: f64,
@@ -46,11 +39,19 @@ impl History {
     }
 
     /// Constructs a run history object that will periodically store record data in the given file.
-    pub fn output(path: &Path, num_scalar_fields: usize) -> Result<Self, csv::Error> {
+    pub fn output(
+        path: &Path,
+        num_scalar_fields: usize,
+        offset: Option<usize>,
+    ) -> Result<Self, csv::Error> {
+        let buffer = std::fs::read_to_string(path).ok();
+        let history_ =
+            offset.and_then(|_| Some(csv::Reader::from_reader(buffer.as_ref()?.as_bytes())));
+
         let mut header: Vec<_> = [
+            "output_index",
             "proper_time",
             "coord_time",
-            "output_index",
             "nodes",
             "dofs",
             "levels",
@@ -69,6 +70,29 @@ impl History {
 
         let mut writer = csv::Writer::from_path(path)?;
         writer.write_record(&header)?;
+
+        // If previous history exists write rows 0..offset
+
+        if let Some(mut history) = history_
+            && let Some(offset) = offset
+        {
+            let mut records = history.records();
+            // _ = records.next();
+
+            'records: while let Some(Ok(record)) = records.next() {
+                let Some(output_index) =
+                    record.get(0).and_then(|index| index.parse::<usize>().ok())
+                else {
+                    break 'records;
+                };
+
+                if output_index < offset {
+                    writer.write_record(&record)?;
+                }
+            }
+        }
+
+        writer.flush()?;
 
         Ok(Self {
             writer: Some(writer),
@@ -89,9 +113,9 @@ impl History {
             s.clear();
         }
 
-        write!(&mut self.row[0], "{}", history.proper_time)?;
-        write!(&mut self.row[1], "{}", history.coord_time)?;
-        write!(&mut self.row[2], "{}", history.output_index)?;
+        write!(&mut self.row[0], "{}", history.output_index)?;
+        write!(&mut self.row[1], "{}", history.proper_time)?;
+        write!(&mut self.row[2], "{}", history.coord_time)?;
         write!(&mut self.row[3], "{}", history.nodes)?;
         write!(&mut self.row[4], "{}", history.dofs)?;
         write!(&mut self.row[5], "{}", history.levels)?;
