@@ -22,6 +22,7 @@ pub trait Engine<const N: usize> {
 
     fn node_range(&self) -> Range<usize>;
 
+    #[allow(clippy::mut_from_ref)]
     fn alloc<T: Default>(&self, len: usize) -> &mut [T];
 
     fn position(&self, vertex: [usize; N]) -> [f64; N] {

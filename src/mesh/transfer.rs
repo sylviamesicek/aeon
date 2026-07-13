@@ -1,4 +1,4 @@
-use crate::geometry::{ActiveCellId, IndexSpace, NeighborId, Split};
+use crate::geometry::{IndexSpace, LeafId, NeighborId, Split};
 use crate::image::ImageShared;
 use crate::kernel::Interpolation;
 #[cfg(feature = "parallel")]
@@ -8,7 +8,7 @@ use std::array;
 
 use crate::{
     image::{ImageMut, ImageRef},
-    kernel::SystemBoundaryConds,
+    kernel::ImageBoundaryConds,
     mesh::Mesh,
     shared::SharedSlice,
 };
@@ -45,20 +45,20 @@ impl<const N: usize> Mesh<N> {
             let block_source = source.slice(nodes.clone());
 
             for (i, offset) in IndexSpace::new(size).iter().enumerate() {
-                let cell = mesh.old_blocks.active_cells(block)[i];
+                let cell = mesh.old_blocks.leaves(block)[i];
                 let cell_origin: [_; N] = array::from_fn(|axis| offset[axis] * mesh.width);
 
                 let new_cell = mesh.regrid_map[cell.0];
-                let new_level = mesh.tree.active_level(new_cell);
+                let new_level = mesh.tree.leaf_level(new_cell);
 
                 #[allow(clippy::comparison_chain)]
                 if new_level > level {
                     // Loop over every child of the recently refined cell.
                     for child in Split::<N>::enumerate() {
                         // Retrieves new cell.
-                        let new_cell = ActiveCellId(new_cell.0 + child.to_linear());
+                        let new_cell = LeafId(new_cell.0 + child.to_linear());
 
-                        let new_block = mesh.blocks.active_cell_block(new_cell);
+                        let new_block = mesh.blocks.block_from_leaf(new_cell);
                         let new_nodes = mesh.block_nodes(new_block);
                         let new_space = mesh.block_space(new_block);
 
@@ -96,7 +96,7 @@ impl<const N: usize> Mesh<N> {
                     }
                 } else if new_level == level {
                     // Direct copy
-                    let new_block = mesh.blocks.active_cell_block(new_cell);
+                    let new_block = mesh.blocks.block_from_leaf(new_cell);
                     let new_nodes = mesh.block_nodes(new_block);
                     let new_space = mesh.block_space(new_block);
 
@@ -120,8 +120,8 @@ impl<const N: usize> Mesh<N> {
                     // Coarsening
                     let split = mesh.old_cell_splits[cell.0];
 
-                    let new_block = mesh.blocks.active_cell_block(new_cell);
-                    let new_offset = mesh.blocks.active_cell_position(new_cell);
+                    let new_block = mesh.blocks.block_from_leaf(new_cell);
+                    let new_offset = mesh.blocks.leaf_position(new_cell);
                     let new_size = mesh.blocks.size(new_block);
                     let new_nodes = mesh.block_nodes(new_block);
                     let new_space = mesh.block_space(new_block);
@@ -166,7 +166,7 @@ impl<const N: usize> Mesh<N> {
 
     /// Enforces strong boundary conditions. This includes strong physical boundary conditions, as well
     /// as handling interior boundaries (same level, coarse-fine, or fine-coarse).
-    pub fn fill_boundary<BCs: SystemBoundaryConds<N> + Sync>(
+    pub fn fill_boundary<BCs: ImageBoundaryConds<N> + Sync>(
         &mut self,
         order: usize,
         bcs: BCs,
@@ -180,7 +180,7 @@ impl<const N: usize> Mesh<N> {
     /// Enforces strong boundary conditions, only filling ghost nodes if those nodes are within `extent`
     /// of a physical node. This is useful if one is using Kriss-Olgier dissipation, where dissipation
     /// and derivatives use different order stencils.
-    pub fn fill_boundary_to_extent<C: SystemBoundaryConds<N> + Sync>(
+    pub fn fill_boundary_to_extent<C: ImageBoundaryConds<N> + Sync>(
         &mut self,
         order: usize,
         extent: usize,
@@ -204,7 +204,7 @@ impl<const N: usize> Mesh<N> {
     }
 
     /// Enforces physical boundary conditions near edge of the numerical domain, out to the given extent.
-    fn fill_physical<C: SystemBoundaryConds<N> + Sync>(
+    fn fill_physical<C: ImageBoundaryConds<N> + Sync>(
         &mut self,
         extent: usize,
         bcs: &C,
@@ -229,7 +229,7 @@ impl<const N: usize> Mesh<N> {
             let mut block_system = unsafe { shared.slice_mut(nodes) };
 
             for field in shared.channels() {
-                space.fill_boundary(extent, bcs.field(field), block_system.channel_mut(field));
+                space.fill_boundary(extent, bcs.channel(field), block_system.channel_mut(field));
             }
         });
     }
@@ -377,7 +377,7 @@ impl<const N: usize> Mesh<N> {
             let block_nodes = mesh.block_nodes(block);
             let block_space = mesh.block_space(block);
             let block_size = mesh.blocks.size(block);
-            let cells = mesh.blocks.active_cells(block);
+            let cells = mesh.blocks.leaves(block);
 
             for (i, position) in IndexSpace::new(block_size).iter().enumerate() {
                 let cell = cells[i];

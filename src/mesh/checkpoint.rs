@@ -431,8 +431,8 @@ impl<const N: usize> Checkpoint<N> {
 
             if ghost {
                 for axis in 0..N {
-                    cell_size[axis] += 2 * space.ghost();
-                    vertex_size[axis] += 2 * space.ghost();
+                    cell_size[axis] += 2 * space.ghost;
+                    vertex_size[axis] += 2 * space.ghost;
                 }
             }
 

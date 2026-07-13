@@ -220,8 +220,8 @@ impl<const N: usize> TreeInterfaces<N> {
         let a = neighbor.a.clone();
         let b = neighbor.b.clone();
 
-        let block_level = tree.active_level(a.cell);
-        let neighbor_level = tree.active_level(a.neighbor);
+        let block_level = tree.leaf_level(a.cell);
+        let neighbor_level = tree.leaf_level(a.neighbor);
 
         // ********************************
         // Dest
@@ -273,11 +273,11 @@ impl<const N: usize> TreeInterfaces<N> {
         let b = interface.b.clone();
 
         // Find ghost region that must be filled
-        let aindex = blocks.active_cell_position(a.cell);
-        let bindex = blocks.active_cell_position(b.cell);
+        let aindex = blocks.leaf_position(a.cell);
+        let bindex = blocks.leaf_position(b.cell);
 
-        let block_level = tree.active_level(a.cell);
-        let neighbor_level = tree.active_level(a.neighbor);
+        let block_level = tree.leaf_level(a.cell);
+        let neighbor_level = tree.leaf_level(a.neighbor);
 
         // ********************************
         // A node
@@ -287,7 +287,7 @@ impl<const N: usize> TreeInterfaces<N> {
             array::from_fn(|axis| (aindex[axis] * blocks.width()[axis]) as isize);
 
         if block_level < neighbor_level {
-            let split = tree.most_recent_active_split(a.neighbor).unwrap();
+            let split = tree.most_recent_leaf_split(a.neighbor).unwrap();
             (0..N)
                 .filter(|&axis| a.region.side(axis) == Side::Middle && split.is_set(axis))
                 .for_each(|axis| anode[axis] += (blocks.width()[axis] / 2) as isize);
@@ -314,7 +314,7 @@ impl<const N: usize> TreeInterfaces<N> {
             array::from_fn(|axis| ((bindex[axis] + 1) * blocks.width()[axis]) as isize);
 
         if block_level < neighbor_level {
-            let split = tree.most_recent_active_split(b.neighbor).unwrap();
+            let split = tree.most_recent_leaf_split(b.neighbor).unwrap();
             (0..N)
                 .filter(|&axis| b.region.side(axis) == Side::Middle && !split.is_set(axis))
                 .for_each(|axis| bnode[axis] -= (blocks.width()[axis] / 2) as isize);
@@ -344,11 +344,11 @@ impl<const N: usize> TreeInterfaces<N> {
         blocks: &TreeBlocks<N>,
         a: &TreeCellNeighbor<N>,
     ) -> [isize; N] {
-        let block_level = tree.active_level(a.cell);
-        let neighbor_level = tree.active_level(a.neighbor);
+        let block_level = tree.leaf_level(a.cell);
+        let neighbor_level = tree.leaf_level(a.neighbor);
 
         // Find source node
-        let nindex = blocks.active_cell_position(a.neighbor);
+        let nindex = blocks.leaf_position(a.neighbor);
         let mut source: [isize; N] =
             array::from_fn(|axis| (nindex[axis] * blocks.width()[axis]) as isize);
 
@@ -366,7 +366,7 @@ impl<const N: usize> TreeInterfaces<N> {
                     source[axis] *= 2;
                 }
 
-                let split = tree.most_recent_active_split(a.cell).unwrap();
+                let split = tree.most_recent_leaf_split(a.cell).unwrap();
 
                 for axis in 0..N {
                     if split.is_set(axis) {

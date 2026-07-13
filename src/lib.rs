@@ -24,12 +24,12 @@ pub struct IRef<'a, B>(pub &'a B);
 /// Provides common types used for most `aeon` applications.
 pub mod prelude {
     pub use crate::geometry::{
-        ActiveCellId, BlockId, CellId, Face, FaceArray, FaceMask, HyperBox, IndexSpace, NeighborId,
+        BlockId, CellId, Face, FaceArray, FaceMask, HyperBox, IndexSpace, LeafId, NeighborId,
     };
     pub use crate::image::{Image, ImageMut, ImageRef, ImageShared};
     pub use crate::kernel::{
-        BoundaryClass, BoundaryConds, BoundaryKind, DirichletParams, RadiativeParams,
-        SystemBoundaryConds,
+        BoundaryClass, BoundaryConds, BoundaryKind, DirichletParams, ImageBoundaryConds,
+        RadiativeParams,
     };
     pub use crate::mesh::{
         Checkpoint, Engine, ExportStride, ExportVtuConfig, Function, Mesh, Projection,

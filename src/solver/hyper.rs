@@ -3,7 +3,7 @@ use std::convert::Infallible;
 use crate::IRef;
 use crate::geometry::{Face, IndexSpace};
 use crate::image::{ImageMut, ImageRef};
-use crate::kernel::{BoundaryKind, DirichletParams, RadiativeParams, SystemBoundaryConds};
+use crate::kernel::{BoundaryKind, DirichletParams, RadiativeParams, ImageBoundaryConds};
 use crate::mesh::FunctionBorrowMut;
 use datasize::DataSize;
 use reborrow::{Reborrow, ReborrowMut};
@@ -71,7 +71,7 @@ impl HyperRelaxSolver {
     }
 
     /// Solves a given elliptic system
-    pub fn solve<const N: usize, C: SystemBoundaryConds<N> + Sync, F: Function<N> + Sync>(
+    pub fn solve<const N: usize, C: ImageBoundaryConds<N> + Sync, F: Function<N> + Sync>(
         &mut self,
         mesh: &mut Mesh<N>,
         order: usize,
@@ -88,7 +88,7 @@ impl HyperRelaxSolver {
     /// Solves a given elliptic system, calling the provided callback at each iteration.
     pub fn solve_with_callback<
         const N: usize,
-        C: SystemBoundaryConds<N> + Sync,
+        C: ImageBoundaryConds<N> + Sync,
         F: Function<N> + Sync,
         Call: SolverCallback<N>,
     >(
@@ -231,7 +231,7 @@ struct FicticuousBoundaryConds<C> {
     channels: usize,
 }
 
-impl<const N: usize, C: SystemBoundaryConds<N>> SystemBoundaryConds<N>
+impl<const N: usize, C: ImageBoundaryConds<N>> ImageBoundaryConds<N>
     for FicticuousBoundaryConds<C>
 {
     fn kind(&self, channel: usize, face: Face<N>) -> BoundaryKind {
@@ -342,7 +342,7 @@ mod tests {
     #[derive(Clone)]
     struct _PoissonConditions;
 
-    impl SystemBoundaryConds<2> for _PoissonConditions {
+    impl ImageBoundaryConds<2> for _PoissonConditions {
         fn kind(&self, _channel: usize, _face: Face<2>) -> BoundaryKind {
             BoundaryKind::StrongDirichlet
         }

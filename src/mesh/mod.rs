@@ -6,11 +6,11 @@
 //! filling interior interfaces, and adaptively regridding a domain based on various error heuristics.
 
 use crate::geometry::{
-    ActiveCellId, BlockId, Face, FaceArray, FaceMask, HyperBox, Split, Tree, TreeBlocks,
-    TreeInterfaces, TreeNeighbors, TreeSer,
+    BlockId, Face, FaceArray, FaceMask, HyperBox, LeafId, Split, Tree, TreeBlocks, TreeInterfaces,
+    TreeNeighbors, TreeSer,
 };
 use crate::kernel::{BoundaryClass, DirichletParams, Element, node_from_vertex};
-use crate::kernel::{BoundaryKind, NodeSpace, NodeWindow, SystemBoundaryConds};
+use crate::kernel::{BoundaryKind, NodeSpace, NodeWindow, ImageBoundaryConds};
 use crate::prelude::IndexSpace;
 use datasize::DataSize;
 
@@ -66,7 +66,7 @@ pub struct Mesh<const N: usize> {
     coarsen_flags: Vec<bool>,
 
     /// Map from cells before refinement to current cells.
-    regrid_map: Vec<ActiveCellId>,
+    regrid_map: Vec<LeafId>,
 
     /// Blocks before most recent refinement.
     old_blocks: TreeBlocks<N>,
@@ -173,10 +173,8 @@ impl<const N: usize> Mesh<N> {
         self.refine_flags.clear();
         self.coarsen_flags.clear();
 
-        self.refine_flags
-            .resize(self.tree.num_active_cells(), false);
-        self.coarsen_flags
-            .resize(self.tree.num_active_cells(), false);
+        self.refine_flags.resize(self.tree.num_leaves(), false);
+        self.coarsen_flags.resize(self.tree.num_leaves(), false);
     }
 
     // *******************************
@@ -199,7 +197,7 @@ impl<const N: usize> Mesh<N> {
 
     /// Returns the total number of cells on the mesh.
     pub fn num_active_cells(&self) -> usize {
-        self.tree.num_active_cells()
+        self.tree.num_leaves()
     }
 
     /// Returns the total number of nodes on the mesh.
@@ -311,7 +309,7 @@ impl<const N: usize> Mesh<N> {
 
     /// Produces a block boundary which correctly accounts for
     /// interior interfaces.
-    pub fn block_bcs<B: SystemBoundaryConds<N>>(
+    pub fn block_bcs<B: ImageBoundaryConds<N>>(
         &self,
         block: BlockId,
         bcs: B,
@@ -365,7 +363,7 @@ impl<const N: usize> Mesh<N> {
     }
 
     /// Retrieves the node window associated with a certain active cell on its block.
-    pub fn active_window(&self, cell: ActiveCellId) -> NodeWindow<N> {
+    pub fn active_window(&self, cell: LeafId) -> NodeWindow<N> {
         NodeWindow {
             origin: node_from_vertex(self.active_node_origin(cell)),
             size: [self.width + 1; N],
@@ -374,9 +372,9 @@ impl<const N: usize> Mesh<N> {
 
     /// Retrieves the node window that is optimal for interpolating values to the given position,
     /// lying within the given active cell.
-    pub fn interpolate_window(&self, cell: ActiveCellId, position: [f64; N]) -> NodeWindow<N> {
-        let cell_offset = self.blocks.active_cell_position(cell);
-        let cell_bounds = self.tree().active_bounds(cell);
+    pub fn interpolate_window(&self, cell: LeafId, position: [f64; N]) -> NodeWindow<N> {
+        let cell_offset = self.blocks.leaf_position(cell);
+        let cell_bounds = self.tree().leaf_bounds(cell);
         let cell_origin: [_; N] = array::from_fn(|axis| (self.width * cell_offset[axis]) as isize);
 
         debug_assert!(cell_bounds.contains(position));
@@ -394,8 +392,8 @@ impl<const N: usize> Mesh<N> {
     }
 
     /// Element associated with a given cell.
-    pub fn element_window(&self, cell: ActiveCellId) -> NodeWindow<N> {
-        let position = self.blocks.active_cell_position(cell);
+    pub fn element_window(&self, cell: LeafId) -> NodeWindow<N> {
+        let position = self.blocks.leaf_position(cell);
         // Round ghost to nearest even number to make sure diagonal coefficients of element
         // actually correspond with newly refined points.
         let buffer = 2 * (self.ghost / 2);
@@ -413,8 +411,8 @@ impl<const N: usize> Mesh<N> {
 
     /// Returns the window of nodes in a block corresponding to a given cell, including
     /// no padding.
-    pub fn element_coarse_window(&self, cell: ActiveCellId) -> NodeWindow<N> {
-        let position = self.blocks.active_cell_position(cell);
+    pub fn element_coarse_window(&self, cell: LeafId) -> NodeWindow<N> {
+        let position = self.blocks.leaf_position(cell);
 
         let size = [self.width + 1; N];
         let mut origin = [0; N];
@@ -443,10 +441,10 @@ impl<const N: usize> Mesh<N> {
     /// Retrieves the number of nodes along each axis of a cell.
     /// This defaults to `[self.width; N]` but is increased by one
     /// if the cell lies along a block boundary for a given axis.
-    pub fn cell_node_size(&self, cell: ActiveCellId) -> [usize; N] {
-        let block = self.blocks.active_cell_block(cell);
+    pub fn cell_node_size(&self, cell: LeafId) -> [usize; N] {
+        let block = self.blocks.block_from_leaf(cell);
         let size = self.blocks.size(block);
-        let position = self.blocks.active_cell_position(cell);
+        let position = self.blocks.leaf_position(cell);
 
         array::from_fn(|axis| {
             if position[axis] == size[axis] - 1 {
@@ -458,19 +456,19 @@ impl<const N: usize> Mesh<N> {
     }
 
     /// Returns the origin of an active cell in its block's `NodeSpace<N>`.
-    pub fn active_node_origin(&self, cell: ActiveCellId) -> [usize; N] {
-        let position = self.blocks.active_cell_position(cell);
+    pub fn active_node_origin(&self, cell: LeafId) -> [usize; N] {
+        let position = self.blocks.leaf_position(cell);
         array::from_fn(|axis| position[axis] * self.width)
     }
 
     /// Returns true if the given cell is on a boundary that does not contain
     /// ghost nodes. If this is the case we must fall back to a lower order element
     /// error approximation.
-    pub fn cell_needs_coarse_element(&self, cell: ActiveCellId) -> bool {
-        let block = self.blocks.active_cell_block(cell);
+    pub fn cell_needs_coarse_element(&self, cell: LeafId) -> bool {
+        let block = self.blocks.block_from_leaf(cell);
         let block_size = self.blocks.size(block);
         let boundary = self.block_boundary_classes(block);
-        let position = self.blocks.active_cell_position(cell);
+        let position = self.blocks.leaf_position(cell);
 
         for face in Face::iterate() {
             let border = if face.side {
@@ -728,19 +726,14 @@ impl<const N: usize> Mesh<N> {
         writeln!(result, "// **********************").unwrap();
         writeln!(result).unwrap();
 
-        for cell in self.tree.active_cell_indices() {
+        for cell in self.tree.leaves() {
             writeln!(result, "Cell {}", cell.0).unwrap();
-            writeln!(result, "    Bounds {:?}", self.tree.active_bounds(cell)).unwrap();
-            writeln!(
-                result,
-                "    Block {:?}",
-                self.blocks.active_cell_block(cell)
-            )
-            .unwrap();
+            writeln!(result, "    Bounds {:?}", self.tree.leaf_bounds(cell)).unwrap();
+            writeln!(result, "    Block {:?}", self.blocks.block_from_leaf(cell)).unwrap();
             writeln!(
                 result,
                 "    Block Position {:?}",
-                self.blocks.active_cell_position(cell)
+                self.blocks.leaf_position(cell)
             )
             .unwrap();
         }
@@ -755,7 +748,7 @@ impl<const N: usize> Mesh<N> {
             writeln!(result, "Block {block:?}").unwrap();
             writeln!(result, "    Bounds {:?}", self.blocks.bounds(block)).unwrap();
             writeln!(result, "    Size {:?}", self.blocks.size(block)).unwrap();
-            writeln!(result, "    Cells {:?}", self.blocks.active_cells(block)).unwrap();
+            writeln!(result, "    Cells {:?}", self.blocks.leaves(block)).unwrap();
             writeln!(
                 result,
                 "    Vertices {:?}",
@@ -976,7 +969,7 @@ pub struct BlockBoundaryConds<const N: usize, I> {
     physical_boundary_flags: FaceMask<N>,
 }
 
-impl<const N: usize, I: SystemBoundaryConds<N>> SystemBoundaryConds<N>
+impl<const N: usize, I: ImageBoundaryConds<N>> ImageBoundaryConds<N>
     for BlockBoundaryConds<N, I>
 {
     fn kind(&self, channel: usize, face: Face<N>) -> BoundaryKind {

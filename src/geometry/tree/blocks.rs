@@ -1,6 +1,6 @@
 use std::{array, ops::Range};
 
-use super::{ActiveCellId, Tree};
+use super::{LeafId, Tree};
 use crate::geometry::{Face, FaceMask, HyperBox, IndexSpace};
 use bitvec::prelude::*;
 use datasize::DataSize;
@@ -15,17 +15,17 @@ pub struct BlockId(pub usize);
 pub struct TreeBlocks<const N: usize> {
     /// Stores each cell's position within its parent's block.
     #[serde(with = "crate::array::vec")]
-    active_cell_positions: Vec<[usize; N]>,
+    leaf_positions: Vec<[usize; N]>,
     /// Maps cell to the block that contains it.
-    active_cell_to_block: Vec<usize>,
+    leaf_to_block: Vec<usize>,
     /// Stores the size of each block.
     #[serde(with = "crate::array::vec")]
     block_sizes: Vec<[usize; N]>,
     /// A flattened list of lists (for each block) that stores
     /// a local cell index to global cell index map.
-    block_active_indices: Vec<ActiveCellId>,
+    block_leaves: Vec<LeafId>,
     /// The offsets for the aforementioned flattened list of lists.
-    block_active_offsets: Vec<usize>,
+    block_leaf_offsets: Vec<usize>,
     /// The physical bounds of each block.
     block_bounds: Vec<HyperBox<N>>,
     /// The level of refinement of each block.
@@ -44,11 +44,11 @@ pub struct TreeBlocks<const N: usize> {
 impl<const N: usize> TreeBlocks<N> {
     pub fn new(width: [usize; N], ghost: usize) -> Self {
         Self {
-            active_cell_positions: Default::default(),
-            active_cell_to_block: Default::default(),
+            leaf_positions: Default::default(),
+            leaf_to_block: Default::default(),
             block_sizes: Default::default(),
-            block_active_indices: Default::default(),
-            block_active_offsets: Default::default(),
+            block_leaves: Default::default(),
+            block_leaf_offsets: Default::default(),
             block_bounds: Default::default(),
             block_levels: Default::default(),
             boundaries: Default::default(),
@@ -82,9 +82,8 @@ impl<const N: usize> TreeBlocks<N> {
     }
 
     /// Returns the cells associated with the given block.
-    pub fn active_cells(&self, block: BlockId) -> &[ActiveCellId] {
-        &self.block_active_indices
-            [self.block_active_offsets[block.0]..self.block_active_offsets[block.0 + 1]]
+    pub fn leaves(&self, block: BlockId) -> &[LeafId] {
+        &self.block_leaves[self.block_leaf_offsets[block.0]..self.block_leaf_offsets[block.0 + 1]]
     }
 
     /// Size of a given block, measured in cells.
@@ -120,13 +119,13 @@ impl<const N: usize> TreeBlocks<N> {
     }
 
     /// Returns the position of the cell within the block.
-    pub fn active_cell_position(&self, cell: ActiveCellId) -> [usize; N] {
-        self.active_cell_positions[cell.0]
+    pub fn leaf_position(&self, cell: LeafId) -> [usize; N] {
+        self.leaf_positions[cell.0]
     }
 
-    /// Retrieves the block associated with a given active cell.
-    pub fn active_cell_block(&self, cell: ActiveCellId) -> BlockId {
-        BlockId(self.active_cell_to_block[cell.0])
+    /// Retrieves the block associated with a given leaf.
+    pub fn block_from_leaf(&self, cell: LeafId) -> BlockId {
+        BlockId(self.leaf_to_block[cell.0])
     }
 
     /// The width of each cell along each axis.
@@ -160,23 +159,22 @@ impl<const N: usize> TreeBlocks<N> {
     }
 
     fn build_blocks(&mut self, tree: &Tree<N>) {
-        let num_active_cells = tree.num_active_cells();
+        let num_active_cells = tree.num_leaves();
 
         // Resize/reset various maps
-        self.active_cell_positions.resize(num_active_cells, [0; N]);
-        self.active_cell_positions.fill([0; N]);
+        self.leaf_positions.resize(num_active_cells, [0; N]);
+        self.leaf_positions.fill([0; N]);
 
-        self.active_cell_to_block
-            .resize(num_active_cells, usize::MAX);
-        self.active_cell_to_block.fill(usize::MAX);
+        self.leaf_to_block.resize(num_active_cells, usize::MAX);
+        self.leaf_to_block.fill(usize::MAX);
 
         self.block_sizes.clear();
-        self.block_active_indices.clear();
-        self.block_active_offsets.clear();
+        self.block_leaves.clear();
+        self.block_leaf_offsets.clear();
 
         // Loop over each cell in the tree
-        for active in tree.active_cell_indices() {
-            if self.active_cell_to_block[active.0] != usize::MAX {
+        for active in tree.leaves() {
+            if self.leaf_to_block[active.0] != usize::MAX {
                 // This cell already belongs to a block, continue.
                 continue;
             }
@@ -184,14 +182,14 @@ impl<const N: usize> TreeBlocks<N> {
             // Get index of next block
             let block = self.block_sizes.len();
 
-            self.active_cell_positions[active.0] = [0; N];
-            self.active_cell_to_block[active.0] = block;
+            self.leaf_positions[active.0] = [0; N];
+            self.leaf_to_block[active.0] = block;
 
             self.block_sizes.push([1; N]);
-            let block_cell_offset = self.block_active_indices.len();
+            let block_cell_offset = self.block_leaves.len();
 
-            self.block_active_offsets.push(block_cell_offset);
-            self.block_active_indices.push(active);
+            self.block_leaf_offsets.push(block_cell_offset);
+            self.block_leaves.push(active);
 
             // Try expanding the block along each axis.
             for axis in 0..N {
@@ -205,8 +203,8 @@ impl<const N: usize> TreeBlocks<N> {
                     // Make sure every cell on face is suitable for expansion.
                     for index in space.face_window(Face::positive(axis)).iter() {
                         // Retrieves the cell on this face
-                        let cell = tree.cell_from_active_index(
-                            self.block_active_indices
+                        let cell = tree.cell_from_leaf(
+                            self.block_leaves
                                 [block_cell_offset + space.linear_from_cartesian(index)],
                         );
                         let level = tree.level(cell);
@@ -215,7 +213,7 @@ impl<const N: usize> TreeBlocks<N> {
                         // 2. We did not pass over a periodic boundary.
                         // 3. The neighbor is the same level of refinement.
                         // 4. The neighbor does not already belong to another block.
-                        let Some(neighbor) = tree.neighbor(cell, face) else {
+                        let Some(neighbor) = tree.neighbor_face(cell, face) else {
                             break 'expand;
                         };
 
@@ -223,12 +221,11 @@ impl<const N: usize> TreeBlocks<N> {
                             break 'expand;
                         }
 
-                        if level != tree.level(neighbor) || !tree.is_active(neighbor) {
+                        if level != tree.level(neighbor) || !tree.is_leaf(neighbor) {
                             break 'expand;
                         }
 
-                        if self.active_cell_to_block
-                            [tree.active_index_from_cell(neighbor).unwrap().0]
+                        if self.leaf_to_block[tree.leaf_from_cell(neighbor).unwrap().0]
                             != usize::MAX
                         {
                             break 'expand;
@@ -237,19 +234,19 @@ impl<const N: usize> TreeBlocks<N> {
 
                     // We may now expand along this axis
                     for index in space.face_window(Face::positive(axis)).iter() {
-                        let active = self.block_active_indices
+                        let active = self.block_leaves
                             [block_cell_offset + space.linear_from_cartesian(index)];
 
-                        let cell = tree.cell_from_active_index(active);
-                        let cell_neighbor = tree.neighbor(cell, face).unwrap();
-                        debug_assert!(tree.is_active(cell_neighbor));
-                        let active_neighbor = tree.active_index_from_cell(cell_neighbor).unwrap();
+                        let cell = tree.cell_from_leaf(active);
+                        let cell_neighbor = tree.neighbor_face(cell, face).unwrap();
+                        debug_assert!(tree.is_leaf(cell_neighbor));
+                        let active_neighbor = tree.leaf_from_cell(cell_neighbor).unwrap();
 
-                        self.active_cell_positions[active_neighbor.0] = index;
-                        self.active_cell_positions[active_neighbor.0][axis] += 1;
-                        self.active_cell_to_block[active_neighbor.0] = block;
+                        self.leaf_positions[active_neighbor.0] = index;
+                        self.leaf_positions[active_neighbor.0][axis] += 1;
+                        self.leaf_to_block[active_neighbor.0] = block;
 
-                        self.block_active_indices.push(active_neighbor);
+                        self.block_leaves.push(active_neighbor);
                     }
 
                     self.block_sizes[block][axis] += 1;
@@ -257,8 +254,7 @@ impl<const N: usize> TreeBlocks<N> {
             }
         }
 
-        self.block_active_offsets
-            .push(self.block_active_indices.len());
+        self.block_leaf_offsets.push(self.block_leaves.len());
     }
 
     fn build_bounds(&mut self, tree: &Tree<N>) {
@@ -266,9 +262,9 @@ impl<const N: usize> TreeBlocks<N> {
 
         for block in self.indices() {
             let size = self.size(block);
-            let a = *self.active_cells(block).first().unwrap();
+            let a = *self.leaves(block).first().unwrap();
 
-            let cell_bounds = tree.bounds(tree.cell_from_active_index(a));
+            let cell_bounds = tree.bounds(tree.cell_from_leaf(a));
 
             self.block_bounds.push(HyperBox {
                 origin: cell_bounds.origin,
@@ -282,15 +278,15 @@ impl<const N: usize> TreeBlocks<N> {
 
         for block in self.indices() {
             let a = 0;
-            let b: usize = self.active_cells(block).len() - 1;
+            let b: usize = self.leaves(block).len() - 1;
 
             for face in Face::<N>::iterate() {
                 let active = if face.side {
-                    self.active_cells(block)[b]
+                    self.leaves(block)[b]
                 } else {
-                    self.active_cells(block)[a]
+                    self.leaves(block)[a]
                 };
-                let cell = tree.cell_from_active_index(active);
+                let cell = tree.cell_from_leaf(active);
                 self.boundaries.push(tree.is_boundary_face(cell, face))
             }
         }
@@ -299,8 +295,8 @@ impl<const N: usize> TreeBlocks<N> {
     fn build_levels(&mut self, tree: &Tree<N>) {
         self.block_levels.resize(self.len(), 0);
         for block in self.indices() {
-            let active = self.active_cells(block)[0];
-            self.block_levels[block.0] = tree.active_level(active);
+            let active = self.leaves(block)[0];
+            self.block_levels[block.0] = tree.leaf_level(active);
         }
     }
 
@@ -334,11 +330,11 @@ impl<const N: usize> DataSize for TreeBlocks<N> {
     const STATIC_HEAP_SIZE: usize = 0;
 
     fn estimate_heap_size(&self) -> usize {
-        self.active_cell_positions.estimate_heap_size()
-            + self.active_cell_to_block.estimate_heap_size()
+        self.leaf_positions.estimate_heap_size()
+            + self.leaf_to_block.estimate_heap_size()
             + self.block_sizes.estimate_heap_size()
-            + self.block_active_offsets.estimate_heap_size()
-            + self.block_active_indices.estimate_heap_size()
+            + self.block_leaf_offsets.estimate_heap_size()
+            + self.block_leaves.estimate_heap_size()
             + self.block_bounds.estimate_heap_size()
             + self.block_levels.estimate_heap_size()
             + self.boundaries.capacity() / size_of::<usize>()
@@ -364,23 +360,15 @@ mod tests {
         assert_eq!(blocks.level(BlockId(0)), 2);
         assert_eq!(blocks.size(BlockId(0)), [2, 2]);
         assert_eq!(
-            blocks.active_cells(BlockId(0)),
-            [
-                ActiveCellId(0),
-                ActiveCellId(1),
-                ActiveCellId(2),
-                ActiveCellId(3)
-            ]
+            blocks.leaves(BlockId(0)),
+            [LeafId(0), LeafId(1), LeafId(2), LeafId(3)]
         );
         assert_eq!(blocks.level(BlockId(1)), 1);
         assert_eq!(blocks.size(BlockId(1)), [1, 2]);
-        assert_eq!(
-            blocks.active_cells(BlockId(1)),
-            [ActiveCellId(4), ActiveCellId(6),]
-        );
+        assert_eq!(blocks.leaves(BlockId(1)), [LeafId(4), LeafId(6),]);
         assert_eq!(blocks.level(BlockId(2)), 1);
         assert_eq!(blocks.size(BlockId(2)), [1, 1]);
-        assert_eq!(blocks.active_cells(BlockId(2)), [ActiveCellId(5)]);
+        assert_eq!(blocks.leaves(BlockId(2)), [LeafId(5)]);
 
         tree.refine(&[false, false, false, false, true, false, false]);
         blocks.build(&tree);
@@ -388,24 +376,21 @@ mod tests {
         assert_eq!(blocks.level(BlockId(0)), 2);
         assert_eq!(blocks.size(BlockId(0)), [4, 2]);
         assert_eq!(
-            blocks.active_cells(BlockId(0)),
+            blocks.leaves(BlockId(0)),
             [
-                ActiveCellId(0),
-                ActiveCellId(1),
-                ActiveCellId(4),
-                ActiveCellId(5),
-                ActiveCellId(2),
-                ActiveCellId(3),
-                ActiveCellId(6),
-                ActiveCellId(7),
+                LeafId(0),
+                LeafId(1),
+                LeafId(4),
+                LeafId(5),
+                LeafId(2),
+                LeafId(3),
+                LeafId(6),
+                LeafId(7),
             ]
         );
         assert_eq!(blocks.level(BlockId(1)), 1);
         assert_eq!(blocks.size(BlockId(1)), [2, 1]);
-        assert_eq!(
-            blocks.active_cells(BlockId(1)),
-            [ActiveCellId(8), ActiveCellId(9),]
-        );
+        assert_eq!(blocks.leaves(BlockId(1)), [LeafId(8), LeafId(9),]);
     }
 
     #[test]

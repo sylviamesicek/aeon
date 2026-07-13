@@ -7,7 +7,7 @@ const UPPER: f64 = 1e-6;
 #[derive(Clone)]
 pub struct WaveConditions;
 
-impl SystemBoundaryConds<2> for WaveConditions {
+impl ImageBoundaryConds<2> for WaveConditions {
     fn kind(&self, _channel: usize, _face: Face<2>) -> BoundaryKind {
         BoundaryKind::Radiative
     }

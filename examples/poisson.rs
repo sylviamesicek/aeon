@@ -12,7 +12,7 @@ const UPPER: f64 = 1e-6;
 #[derive(Clone)]
 struct Conditions;
 
-impl SystemBoundaryConds<2> for Conditions {
+impl ImageBoundaryConds<2> for Conditions {
     fn kind(&self, _: usize, _face: Face<2>) -> BoundaryKind {
         BoundaryKind::StrongDirichlet
     }

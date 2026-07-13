@@ -4,7 +4,7 @@ use datasize::DataSize;
 
 use crate::geometry::Split;
 
-/// Represents a rectangular physical domain.
+/// Represents a rectangular, axis aligned, physical box.
 #[derive(Debug, Copy, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct HyperBox<const N: usize> {
     /// Size of the rectangle along each axis.
@@ -68,10 +68,12 @@ impl<const N: usize> HyperBox<N> {
         Self { size, origin }
     }
 
+    /// The bottom-left corner of the box.
     pub fn aa(&self) -> [f64; N] {
         self.origin
     }
 
+    /// The top-right corner of the box.
     pub fn bb(&self) -> [f64; N] {
         from_fn(|i| self.origin[i] + self.size[i])
     }

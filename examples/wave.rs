@@ -23,7 +23,7 @@ const SPEED: [f64; 2] = [1.0, 0.0];
 #[derive(Clone)]
 struct WaveConditions;
 
-impl SystemBoundaryConds<2> for WaveConditions {
+impl ImageBoundaryConds<2> for WaveConditions {
     fn kind(&self, _channel: usize, _face: Face<2>) -> BoundaryKind {
         BoundaryKind::Radiative
     }

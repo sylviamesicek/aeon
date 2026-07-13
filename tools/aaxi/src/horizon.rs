@@ -215,7 +215,7 @@ impl Clone for ApparentHorizonFinder {
 #[derive(Clone)]
 struct HorizonRadialBoundary;
 
-impl SystemBoundaryConds<1> for HorizonRadialBoundary {
+impl ImageBoundaryConds<1> for HorizonRadialBoundary {
     fn kind(&self, _channel: usize, _face: Face<1>) -> BoundaryKind {
         BoundaryKind::Symmetric
     }
@@ -310,14 +310,14 @@ impl<'a, const ORDER: usize> Function<1> for HorizonNullExpansion<'a, ORDER> {
             // Interpolate values from Mesh ****
 
             let mesh_cell = surface_to_cell[index];
-            let mesh_active = mesh.tree().active_index_from_cell(mesh_cell).unwrap();
-            let mesh_block = mesh.blocks().active_cell_block(mesh_active);
+            let mesh_active = mesh.tree().leaf_from_cell(mesh_cell).unwrap();
+            let mesh_block = mesh.blocks().block_from_leaf(mesh_active);
 
             let block_space = mesh.block_space(mesh_block);
             let block_nodes = mesh.block_nodes(mesh_block);
 
             let active_window = mesh.active_window(mesh_active);
-            let active_bounds = mesh.tree().active_bounds(mesh_active);
+            let active_bounds = mesh.tree().leaf_bounds(mesh_active);
 
             interpolate
                 .build(cell_support, cell_support, active_bounds, [r, z])

@@ -28,7 +28,7 @@ pub fn save_image(checkpoint: &mut Checkpoint<1>, image: ImageRef) {
 #[derive(Clone)]
 pub struct FieldConditions;
 
-impl SystemBoundaryConds<1> for FieldConditions {
+impl ImageBoundaryConds<1> for FieldConditions {
     fn kind(&self, channel: usize, face: Face<1>) -> BoundaryKind {
         if face.side {
             BoundaryKind::Radiative

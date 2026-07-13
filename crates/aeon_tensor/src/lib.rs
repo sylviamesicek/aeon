@@ -1,4 +1,5 @@
-//! Crate for manipulating tensors and tensorial quantaties in Rust.
+//! Crate for manipulating tensors and tensorial quantaties in Rust. This is used to express
+//! various tensorial differential equations by applications in the aeon toolkit space.
 
 extern crate self as aeon_tensor;
 

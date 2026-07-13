@@ -10,7 +10,7 @@ mod weights;
 
 pub use boundary::{
     BoundaryClass, BoundaryConds, BoundaryKind, DirichletParams, EmptyConditions, RadiativeParams,
-    ScalarConditions, SystemBoundaryConds, is_boundary_compatible,
+    ScalarConditions, ImageBoundaryConds, is_boundary_compatible,
 };
 pub use convolution::{Convolution, Gradient, Hessian};
 pub use element::Element;

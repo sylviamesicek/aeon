@@ -19,11 +19,11 @@ pub use neighbors::{NeighborId, TreeBlockNeighbor, TreeCellNeighbor, TreeNeighbo
 /// Null index, used internally to make storage of `Option<usize>`` more efficent
 const NULL: usize = usize::MAX;
 
-/// Index into active cells in tree.
+/// Index into leaves in tree.
 ///
 /// This is the primary representation of cells in a `Tree`, as degrees
-/// of freedom are only assigned to active cells. Can be converted to generic `CellIndex` via
-/// `tree.cell_from_active_index(`
+/// of freedom are only assigned to leaves. Can be converted to generic `CellId` via
+/// `tree.cell_from_leaf_index(`
 #[derive(
     Clone,
     Copy,
@@ -37,11 +37,11 @@ const NULL: usize = usize::MAX;
     serde::Deserialize,
     DataSize,
 )]
-pub struct ActiveCellId(pub usize);
+pub struct LeafId(pub usize);
 
 /// Index into cells in a tree.
 ///
-/// A tree stores non-active cells to facilitate O(log n) point -> cell and cell -> neighbor
+/// A tree stores non-leaf cells to facilitate O(log n) point -> cell and cell -> neighbor
 /// searches. These cells are generated after refinement/coarsening and are therefore not
 /// the "source of truth" for the dataset.
 #[derive(
@@ -63,8 +63,39 @@ impl CellId {
     /// The root cell in a tree is also stored at index 0.
     pub const ROOT: CellId = CellId(0);
 
+    /// Index to child located at `offset`.
     pub fn child<const N: usize>(offset: Self, split: Split<N>) -> Self {
         Self(offset.0 + split.to_linear())
+    }
+}
+
+/// Index into a tree as a sequence of increasingly refined uniform grids.
+#[derive(
+    Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, serde::Serialize, serde::Deserialize,
+)]
+pub struct GridId<const N: usize> {
+    pub level: usize,
+    /// Position on `level`-th uniform grid.
+    #[serde(with = "crate::array")]
+    pub position: [usize; N],
+}
+
+impl<const N: usize> GridId<N> {
+    /// Does self.position fit into the uniform grid at level self.level
+    pub fn is_valid(self) -> bool {
+        debug_assert!(self.level < 64);
+
+        let max_grid_position = 1usize << self.level;
+        self.position.iter().all(|&i| i < max_grid_position)
+    }
+}
+
+impl<const N: usize> DataSize for GridId<N> {
+    const IS_DYNAMIC: bool = false;
+    const STATIC_HEAP_SIZE: usize = 0;
+
+    fn estimate_heap_size(&self) -> usize {
+        0
     }
 }
 
@@ -76,10 +107,10 @@ struct Cell<const N: usize> {
     parent: usize,
     /// Child nodes
     children: usize,
-    /// Which active cells are children of this cell?
-    active_offset: usize,
-    /// Number of active cells which are children of this cell.
-    active_count: usize,
+    /// Which leaves are children of this cell?
+    leaf_offset: usize,
+    /// Number of leaves which are children of this cell.
+    leaf_count: usize,
     /// Level of cell
     level: usize,
 }
@@ -102,23 +133,24 @@ impl<const N: usize> DataSize for Cell<N> {
 #[serde(from = "TreeSer<N>", into = "TreeSer<N>")]
 pub struct Tree<const N: usize> {
     domain: HyperBox<N>,
+    /// Is this tree periodic along any axes?
     periodic: [bool; N],
     // *********************
     // Active Cells
     //
     /// Stores structure of the quadtree using `zindex` ordering.
-    active_values: BitVec<usize, Lsb0>,
+    leaf_values: BitVec<usize, Lsb0>,
     /// Offsets into `active_indices` (stride of `N`).
-    active_offsets: Vec<usize>,
-    /// Map from active cell index to general cells.
-    active_to_cell: Vec<usize>,
+    leaf_offsets: Vec<usize>,
+    /// Map from leave indices to general cells.
+    leaf_to_cell: Vec<usize>,
     // *********************
     // All cells
     //
-    /// Map from level to cells.
-    level_offsets: Vec<usize>,
     /// Bounds of each individual cell.
     cells: Vec<Cell<N>>,
+    /// Map from level to cells.
+    level_offsets: Vec<usize>,
 }
 
 impl<const N: usize> Tree<N> {
@@ -128,9 +160,9 @@ impl<const N: usize> Tree<N> {
         let mut result = Self {
             domain,
             periodic: [false; N],
-            active_values: BitVec::new(),
-            active_offsets: vec![0, 0],
-            active_to_cell: Vec::new(),
+            leaf_values: BitVec::new(),
+            leaf_offsets: vec![0, 0],
+            leaf_to_cell: Vec::new(),
             level_offsets: Vec::new(),
             cells: Vec::new(),
         };
@@ -147,8 +179,8 @@ impl<const N: usize> Tree<N> {
     }
 
     /// The number of active (leaf) cells in this tree.
-    pub fn num_active_cells(&self) -> usize {
-        self.active_offsets.len() - 1
+    pub fn num_leaves(&self) -> usize {
+        self.leaf_offsets.len() - 1
     }
 
     /// The total number of cells in this tree (including )
@@ -165,12 +197,14 @@ impl<const N: usize> Tree<N> {
         (self.level_offsets[level]..self.level_offsets[level + 1]).map(CellId)
     }
 
-    pub fn cell_indices(&self) -> impl Iterator<Item = CellId> {
+    /// Iterator over all cells in the tree.
+    pub fn cells(&self) -> impl Iterator<Item = CellId> {
         (0..self.num_cells()).map(CellId)
     }
 
-    pub fn active_cell_indices(&self) -> impl Iterator<Item = ActiveCellId> {
-        (0..self.num_active_cells()).map(ActiveCellId)
+    /// Iterator over all leaves in the tree.
+    pub fn leaves(&self) -> impl Iterator<Item = LeafId> {
+        (0..self.num_leaves()).map(LeafId)
     }
 
     /// Returns the numerical bounds of a given cell.
@@ -178,8 +212,8 @@ impl<const N: usize> Tree<N> {
         self.cells[cell.0].bounds
     }
 
-    pub fn active_bounds(&self, active: ActiveCellId) -> HyperBox<N> {
-        self.bounds(self.cell_from_active_index(active))
+    pub fn leaf_bounds(&self, active: LeafId) -> HyperBox<N> {
+        self.bounds(self.cell_from_leaf(active))
     }
 
     /// Returns the level of a given cell.
@@ -187,19 +221,19 @@ impl<const N: usize> Tree<N> {
         self.cells[cell.0].level
     }
 
-    pub fn active_level(&self, cell: ActiveCellId) -> usize {
-        self.active_offsets[cell.0 + 1] - self.active_offsets[cell.0]
+    pub fn leaf_level(&self, cell: LeafId) -> usize {
+        self.leaf_offsets[cell.0 + 1] - self.leaf_offsets[cell.0]
     }
 
-    /// Returns the children of a given node. Node must not be leaf.
-    pub fn children(&self, cell: CellId) -> Option<CellId> {
+    /// Returns the children offset of a given node. Node must not be leaf.
+    pub fn child_offset(&self, cell: CellId) -> Option<CellId> {
         if self.cells[cell.0].children == NULL {
             return None;
         }
         Some(CellId(self.cells[cell.0].children))
     }
 
-    /// Returns a child of a give node.
+    /// Returns a specific child of a give cell.
     pub fn child(&self, cell: CellId, child: Split<N>) -> Option<CellId> {
         if self.cells[cell.0].children == NULL {
             return None;
@@ -217,35 +251,34 @@ impl<const N: usize> Tree<N> {
     }
 
     /// Returns the zvalue of the given active cell.
-    pub fn active_zvalue(&self, active: ActiveCellId) -> &BitSlice<usize, Lsb0> {
-        &self.active_values
-            [N * self.active_offsets[active.0]..N * self.active_offsets[active.0 + 1]]
+    pub fn leaf_zvalue(&self, active: LeafId) -> &BitSlice<usize, Lsb0> {
+        &self.leaf_values[N * self.leaf_offsets[active.0]..N * self.leaf_offsets[active.0 + 1]]
     }
 
-    pub fn active_split(&self, active: ActiveCellId, level: usize) -> Split<N> {
+    pub fn leaf_split(&self, active: LeafId, level: usize) -> Split<N> {
         Split::pack(array::from_fn(|axis| {
-            self.active_zvalue(active)[N * level + axis]
+            self.leaf_zvalue(active)[N * level + axis]
         }))
     }
 
-    pub fn most_recent_active_split(&self, active: ActiveCellId) -> Option<Split<N>> {
+    pub fn most_recent_leaf_split(&self, active: LeafId) -> Option<Split<N>> {
         if self.num_cells() == 1 {
             return None;
         }
 
-        Some(self.active_split(active, self.active_level(active) - 1))
+        Some(self.leaf_split(active, self.leaf_level(active) - 1))
     }
 
     /// Checks whether the given refinement flags are balanced.
     pub fn check_refine_flags(&self, flags: &[bool]) -> bool {
-        assert!(flags.len() == self.num_active_cells());
+        assert!(flags.len() == self.num_leaves());
 
-        for cell in self.active_cell_indices() {
+        for cell in self.leaves() {
             if !flags[cell.0] {
                 continue;
             }
 
-            for coarse in self.active_coarse_neighborhood(cell) {
+            for coarse in self.leaf_coarse_neighborhood(cell) {
                 if !flags[coarse.0] {
                     return false;
                 }
@@ -259,17 +292,17 @@ impl<const N: usize> Tree<N> {
     /// for refinement to preserve the 2:1 fine coarse ratio between every
     /// two neighbors.
     pub fn balance_refine_flags(&self, flags: &mut [bool]) {
-        assert!(flags.len() == self.num_active_cells());
+        assert!(flags.len() == self.num_leaves());
 
         loop {
             let mut is_balanced = true;
 
-            for cell in self.active_cell_indices() {
+            for cell in self.leaves() {
                 if !flags[cell.0] {
                     continue;
                 }
 
-                for coarse in self.active_coarse_neighborhood(cell) {
+                for coarse in self.leaf_coarse_neighborhood(cell) {
                     if !flags[coarse.0] {
                         is_balanced = false;
                         flags[coarse.0] = true;
@@ -285,14 +318,14 @@ impl<const N: usize> Tree<N> {
 
     /// Fills the map with updated indices after refinement is performed.
     /// If a cell is refined, this will point to the base cell in that new subdivision.
-    pub fn refine_active_index_map(&self, flags: &[bool], map: &mut [ActiveCellId]) {
-        assert!(flags.len() == self.num_active_cells());
-        assert!(map.len() == self.num_active_cells());
+    pub fn refine_leaf_index_map(&self, flags: &[bool], map: &mut [LeafId]) {
+        assert!(flags.len() == self.num_leaves());
+        assert!(map.len() == self.num_leaves());
 
         let mut cursor = 0;
 
-        for cell in 0..self.num_active_cells() {
-            map[cell] = ActiveCellId(cursor);
+        for cell in 0..self.num_leaves() {
+            map[cell] = LeafId(cursor);
 
             if flags[cell] {
                 cursor += Split::<N>::COUNT;
@@ -303,39 +336,39 @@ impl<const N: usize> Tree<N> {
     }
 
     pub fn refine(&mut self, flags: &[bool]) {
-        assert!(self.num_active_cells() == flags.len());
+        assert!(self.num_leaves() == flags.len());
 
         let num_flags = flags.iter().copied().filter(|&p| p).count();
-        let total_active_cells = self.num_active_cells() + (Split::<N>::COUNT - 1) * num_flags;
+        let total_leaves = self.num_leaves() + (Split::<N>::COUNT - 1) * num_flags;
 
-        let mut active_values = BitVec::with_capacity(total_active_cells * N);
-        let mut active_offsets = Vec::with_capacity(total_active_cells);
-        active_offsets.push(0);
+        let mut leaf_values = BitVec::with_capacity(total_leaves * N);
+        let mut leaf_offsets = Vec::with_capacity(total_leaves);
+        leaf_offsets.push(0);
 
-        for active in 0..self.num_active_cells() {
-            if flags[active] {
+        for leaf in 0..self.num_leaves() {
+            if flags[leaf] {
                 for split in Split::<N>::enumerate() {
-                    active_values.extend_from_bitslice(self.active_zvalue(ActiveCellId(active)));
+                    leaf_values.extend_from_bitslice(self.leaf_zvalue(LeafId(leaf)));
                     for axis in 0..N {
-                        active_values.push(split.is_set(axis));
+                        leaf_values.push(split.is_set(axis));
                     }
-                    active_offsets.push(active_values.len() / N);
+                    leaf_offsets.push(leaf_values.len() / N);
                 }
             } else {
-                active_values.extend_from_bitslice(self.active_zvalue(ActiveCellId(active)));
-                active_offsets.push(active_values.len() / N);
+                leaf_values.extend_from_bitslice(self.leaf_zvalue(LeafId(leaf)));
+                leaf_offsets.push(leaf_values.len() / N);
             }
         }
 
-        self.active_values.clone_from(&active_values);
-        self.active_offsets.clone_from(&active_offsets);
+        self.leaf_values.clone_from(&leaf_values);
+        self.leaf_offsets.clone_from(&leaf_offsets);
 
         self.build();
     }
 
     /// Checks that the given coarsening flags are balanced and valid.
     pub fn check_coarsen_flags(&self, flags: &[bool]) -> bool {
-        assert!(flags.len() == self.num_active_cells());
+        assert!(flags.len() == self.num_leaves());
 
         if flags.len() == 1 {
             return true;
@@ -347,9 +380,9 @@ impl<const N: usize> Tree<N> {
         }
 
         // First if any flagging would break 2:1 border, unmark it
-        for cell in self.active_cell_indices() {
-            if !flags[cell.0] {
-                for neighbor in self.active_coarse_neighborhood(cell) {
+        for leaf in self.leaves() {
+            if !flags[leaf.0] {
+                for neighbor in self.leaf_coarse_neighborhood(leaf) {
                     // Set any coarser cells to not be coarsened further.
                     if flags[neighbor.0] {
                         return false;
@@ -360,33 +393,33 @@ impl<const N: usize> Tree<N> {
 
         // Make sure only cells that can be coarsened are coarsened. And that every single child of such a cell
         // is flagged.
-        let mut cell = 0;
+        let mut leaf = 0;
 
-        while cell < self.num_active_cells() {
-            if !flags[cell] {
-                cell += 1;
+        while leaf < self.num_leaves() {
+            if !flags[leaf] {
+                leaf += 1;
                 continue;
             }
 
             // if flags[cell] {
-            let level = self.active_level(ActiveCellId(cell));
-            let split = self.most_recent_active_split(ActiveCellId(cell)).unwrap();
+            let level = self.leaf_level(LeafId(leaf));
+            let split = self.most_recent_leaf_split(LeafId(leaf)).unwrap();
 
             if split != Split::<N>::empty() {
                 return false;
             }
 
             for offset in 0..Split::<N>::COUNT {
-                if self.active_level(ActiveCellId(cell + offset)) != level {
+                if self.leaf_level(LeafId(leaf + offset)) != level {
                     return false;
                 }
             }
 
-            if !flags[cell..cell + Split::<N>::COUNT].iter().all(|&b| b) {
+            if !flags[leaf..leaf + Split::<N>::COUNT].iter().all(|&b| b) {
                 return false;
             }
             // Skip forwards. We have considered all cases.
-            cell += Split::<N>::COUNT;
+            leaf += Split::<N>::COUNT;
         }
 
         true
@@ -394,7 +427,7 @@ impl<const N: usize> Tree<N> {
 
     /// Balances the given coarsening flags
     pub fn balance_coarsen_flags(&self, flags: &mut [bool]) {
-        assert!(flags.len() == self.num_active_cells());
+        assert!(flags.len() == self.num_leaves());
 
         if flags.len() == 1 {
             return;
@@ -409,9 +442,9 @@ impl<const N: usize> Tree<N> {
             let mut is_balanced = true;
 
             // First if any flagging would break 2:1 border, unmark it
-            for cell in self.active_cell_indices() {
-                if !flags[cell.0] {
-                    for neighbor in self.active_coarse_neighborhood(cell) {
+            for leaf in self.leaves() {
+                if !flags[leaf.0] {
+                    for neighbor in self.leaf_coarse_neighborhood(leaf) {
                         // Set any coarser cells to not be coarsened further.
                         if flags[neighbor.0] {
                             is_balanced = false;
@@ -423,40 +456,39 @@ impl<const N: usize> Tree<N> {
 
             // Make sure only cells that can be coarsened are coarsened. And that every single child of such a cell
             // is flagged.
-            let mut cell = 0;
+            let mut leaf = 0;
 
-            while cell < self.num_active_cells() {
-                if !flags[cell] {
-                    cell += 1;
+            while leaf < self.num_leaves() {
+                if !flags[leaf] {
+                    leaf += 1;
                     continue;
                 }
 
-                // if flags[cell] {
-                let level = self.active_level(ActiveCellId(cell));
-                let split = self.most_recent_active_split(ActiveCellId(cell)).unwrap();
+                let level = self.leaf_level(LeafId(leaf));
+                let split = self.most_recent_leaf_split(LeafId(leaf)).unwrap();
 
                 if split != Split::<N>::empty() {
-                    flags[cell] = false;
+                    flags[leaf] = false;
                     is_balanced = false;
-                    cell += 1;
+                    leaf += 1;
                     continue;
                 }
 
                 for offset in 0..Split::<N>::COUNT {
-                    if self.active_level(ActiveCellId(cell + offset)) != level {
-                        flags[cell] = false;
+                    if self.leaf_level(LeafId(leaf + offset)) != level {
+                        flags[leaf] = false;
                         is_balanced = false;
-                        cell += 1;
+                        leaf += 1;
                         continue;
                     }
                 }
 
-                if !flags[cell..cell + Split::<N>::COUNT].iter().all(|&b| b) {
-                    flags[cell..cell + Split::<N>::COUNT].fill(false);
+                if !flags[leaf..leaf + Split::<N>::COUNT].iter().all(|&b| b) {
+                    flags[leaf..leaf + Split::<N>::COUNT].fill(false);
                     is_balanced = false;
                 }
                 // Skip forwards. We have considered all cases.
-                cell += Split::<N>::COUNT;
+                leaf += Split::<N>::COUNT;
             }
 
             if is_balanced {
@@ -466,19 +498,19 @@ impl<const N: usize> Tree<N> {
     }
 
     /// Maps current cells to indices after coarsening is performed.
-    pub fn coarsen_active_index_map(&self, flags: &[bool], map: &mut [ActiveCellId]) {
-        assert!(flags.len() == self.num_active_cells());
-        assert!(map.len() == self.num_active_cells());
+    pub fn coarsen_leaf_index_map(&self, flags: &[bool], map: &mut [LeafId]) {
+        assert!(flags.len() == self.num_leaves());
+        assert!(map.len() == self.num_leaves());
 
         let mut cursor = 0;
         let mut cell = 0;
 
-        while cell < self.num_active_cells() {
+        while cell < self.num_leaves() {
             if flags[cell] {
-                map[cell..cell + Split::<N>::COUNT].fill(ActiveCellId(cursor));
+                map[cell..cell + Split::<N>::COUNT].fill(LeafId(cursor));
                 cell += Split::<N>::COUNT;
             } else {
-                map[cell] = ActiveCellId(cursor);
+                map[cell] = LeafId(cursor);
                 cell += 1;
             }
 
@@ -487,23 +519,23 @@ impl<const N: usize> Tree<N> {
     }
 
     pub fn coarsen(&mut self, flags: &[bool]) {
-        assert!(flags.len() == self.num_active_cells());
+        assert!(flags.len() == self.num_leaves());
 
         // Compute number of cells after coarsening
         let num_flags = flags.iter().copied().filter(|&p| p).count();
         debug_assert!(num_flags % Split::<N>::COUNT == 0);
-        let total_active = self.num_active_cells() - num_flags / Split::<N>::COUNT;
+        let total_leaves = self.num_leaves() - num_flags / Split::<N>::COUNT;
 
-        let mut active_values = BitVec::with_capacity(total_active * N);
-        let mut active_offsets = Vec::new();
-        active_offsets.push(0);
+        let mut leaf_values = BitVec::with_capacity(total_leaves * N);
+        let mut leaf_offsets = Vec::new();
+        leaf_offsets.push(0);
 
         // Loop over cells
         let mut cursor = 0;
 
-        while cursor < self.num_active_cells() {
+        while cursor < self.num_leaves() {
             // Retrieve zvalue of cursor
-            let zvalue = self.active_zvalue(ActiveCellId(cursor));
+            let zvalue = self.leaf_zvalue(LeafId(cursor));
 
             if flags[cursor] {
                 #[cfg(debug_assertions)]
@@ -511,26 +543,26 @@ impl<const N: usize> Tree<N> {
                     assert!(flags[cursor + split.to_linear()])
                 }
 
-                active_values.extend_from_bitslice(&zvalue[0..zvalue.len().saturating_sub(N)]);
+                leaf_values.extend_from_bitslice(&zvalue[0..zvalue.len().saturating_sub(N)]);
                 // Skip next `Count` cells
                 cursor += Split::<N>::COUNT;
             } else {
-                active_values.extend_from_bitslice(zvalue);
+                leaf_values.extend_from_bitslice(zvalue);
                 cursor += 1;
             }
 
-            active_offsets.push(active_values.len() / N);
+            leaf_offsets.push(leaf_values.len() / N);
         }
 
-        self.active_values.clone_from(&active_values);
-        self.active_offsets.clone_from(&active_offsets);
+        self.leaf_values.clone_from(&leaf_values);
+        self.leaf_offsets.clone_from(&leaf_offsets);
 
         self.build();
     }
 
     pub fn build(&mut self) {
         // Reset tree
-        self.active_to_cell.resize(self.num_active_cells(), 0);
+        self.leaf_to_cell.resize(self.num_leaves(), 0);
         self.level_offsets.clear();
         self.cells.clear();
 
@@ -539,8 +571,8 @@ impl<const N: usize> Tree<N> {
             bounds: self.domain,
             parent: NULL,
             children: NULL,
-            active_offset: 0,
-            active_count: self.num_active_cells(),
+            leaf_offset: 0,
+            leaf_count: self.num_leaves(),
             level: 0,
         });
         self.level_offsets.push(0);
@@ -555,32 +587,28 @@ impl<const N: usize> Tree<N> {
             let next_level_start = self.cells.len();
             // Loop over nodes on the current level
             for parent in level_cells {
-                if self.cells[parent].active_count == 1 {
-                    debug_assert!(
-                        self.active_level(ActiveCellId(self.cells[parent].active_offset)) == level
-                    );
-                    self.active_to_cell[self.cells[parent].active_offset] = parent;
+                if self.cells[parent].leaf_count == 1 {
+                    debug_assert!(self.leaf_level(LeafId(self.cells[parent].leaf_offset)) == level);
+                    self.leaf_to_cell[self.cells[parent].leaf_offset] = parent;
                     continue;
                 }
 
                 // Update parent's children
                 self.cells[parent].children = self.cells.len();
                 // Iterate over constituent active cells
-                let active_start = self.cells[parent].active_offset;
-                let active_end = active_start + self.cells[parent].active_count;
+                let active_start = self.cells[parent].leaf_offset;
+                let active_end = active_start + self.cells[parent].leaf_count;
 
                 let mut cursor = active_start;
 
-                debug_assert!(self.active_level(ActiveCellId(cursor)) > level);
+                debug_assert!(self.leaf_level(LeafId(cursor)) > level);
 
                 let bounds = self.cells[parent].bounds;
 
                 for mask in Split::<N>::enumerate() {
                     let child_cell_start = cursor;
 
-                    while cursor < active_end
-                        && mask == self.active_split(ActiveCellId(cursor), level)
-                    {
+                    while cursor < active_end && mask == self.leaf_split(LeafId(cursor), level) {
                         cursor += 1;
                     }
 
@@ -590,8 +618,8 @@ impl<const N: usize> Tree<N> {
                         bounds: bounds.subdivide(mask),
                         parent,
                         children: NULL,
-                        active_offset: child_cell_start,
-                        active_count: child_cell_end - child_cell_start,
+                        leaf_offset: child_cell_start,
+                        leaf_count: child_cell_end - child_cell_start,
                         level: level + 1,
                     });
                 }
@@ -607,55 +635,55 @@ impl<const N: usize> Tree<N> {
         }
 
         #[cfg(debug_assertions)]
-        for cell in self.cell_indices() {
-            let active = ActiveCellId(self.cells[cell.0].active_offset);
-            assert!(self.active_level(active) >= self.level(cell));
+        for cell in self.cells() {
+            let active = LeafId(self.cells[cell.0].leaf_offset);
+            assert!(self.leaf_level(active) >= self.level(cell));
         }
     }
 
     /// Computes the cell index corresponding to an active cell.
-    pub fn cell_from_active_index(&self, active: ActiveCellId) -> CellId {
+    pub fn cell_from_leaf(&self, active: LeafId) -> CellId {
         debug_assert!(
-            active.0 < self.num_active_cells(),
+            active.0 < self.num_leaves(),
             "Active cell index is expected to be less that the number of active cells."
         );
-        CellId(self.active_to_cell[active.0])
+        CellId(self.leaf_to_cell[active.0])
     }
 
-    /// Computes active cell index from a cell, returning None if `cell` is
-    /// not active.
-    pub fn active_index_from_cell(&self, cell: CellId) -> Option<ActiveCellId> {
+    /// Transforms a cell id into a leaf id, returning None if `cell` is
+    /// not a leaf.
+    pub fn leaf_from_cell(&self, cell: CellId) -> Option<LeafId> {
         debug_assert!(
             cell.0 < self.num_cells(),
             "Cell index is expected to be less that the number of cells."
         );
 
-        if self.cells[cell.0].active_count != 1 {
+        if self.cells[cell.0].leaf_count != 1 {
             return None;
         }
 
-        Some(ActiveCellId(self.cells[cell.0].active_offset))
+        Some(LeafId(self.cells[cell.0].leaf_offset))
     }
 
-    /// Returns an iterator over active cells that are children of the given cell.
-    /// If `is_active(cell) = true` then this iterator will be a singleton
+    /// Returns an iterator over leaves that are children of the given cell.
+    /// If `is_leaf(cell) = true` then this iterator will be a singleton
     /// returning the same value as `tree.active_index_from_cell(cell)`.
-    pub fn active_children(
+    pub fn contained_leaves(
         &self,
         cell: CellId,
-    ) -> impl Iterator<Item = ActiveCellId> + ExactSizeIterator {
+    ) -> impl Iterator<Item = LeafId> + ExactSizeIterator {
         let (offset, count) = (
-            self.cells[cell.0].active_offset,
-            self.cells[cell.0].active_count,
+            self.cells[cell.0].leaf_offset,
+            self.cells[cell.0].leaf_count,
         );
 
-        (offset..offset + count).map(ActiveCellId)
+        (offset..offset + count).map(LeafId)
     }
 
-    /// True if a node has no children.
-    pub fn is_active(&self, node: CellId) -> bool {
-        let result = self.cells[node.0].children == NULL;
-        debug_assert!(!result || self.cells[node.0].active_count == 1);
+    /// True if a cell has no children.
+    pub fn is_leaf(&self, cell: CellId) -> bool {
+        let result = self.cells[cell.0].children == NULL;
+        debug_assert!(!result || self.cells[cell.0].leaf_count == 1);
         result
     }
 
@@ -664,21 +692,21 @@ impl<const N: usize> Tree<N> {
     pub fn cell_from_point(&self, point: [f64; N]) -> CellId {
         debug_assert!(self.domain.contains(point));
 
-        let mut node = CellId(0);
+        let mut cell = CellId(0);
 
-        while let Some(children) = self.children(node) {
-            let bounds = self.bounds(node);
+        while let Some(children) = self.child_offset(cell) {
+            let bounds = self.bounds(cell);
             let center = bounds.center();
-            node = CellId::child(
+            cell = CellId::child(
                 children,
-                Split::<N>::pack(array::from_fn(|axis| point[axis] > center[axis])),
+                Split::<N>::pack(array::from_fn(|axis| point[axis] >= center[axis])),
             );
         }
 
-        node
+        cell
     }
 
-    /// Returns the node which owns the given point, shortening this search
+    /// Returns the cells which owns the given point, shortening this search
     /// with an initial guess. Rather than operating in O(log N) time, this approaches
     /// O(1) if the guess is sufficiently close.
     pub fn cell_from_point_cached(&self, point: [f64; N], mut cache: CellId) -> CellId {
@@ -688,24 +716,61 @@ impl<const N: usize> Tree<N> {
             cache = self.parent(cache).unwrap();
         }
 
-        let mut node = cache;
+        let mut cell = cache;
 
-        while let Some(children) = self.children(node) {
-            let bounds = self.bounds(node);
+        while let Some(children) = self.child_offset(cell) {
+            let bounds = self.bounds(cell);
             let center = bounds.center();
-            node = CellId::child(
+            cell = CellId::child(
                 children,
-                Split::<N>::pack(array::from_fn(|axis| point[axis] > center[axis])),
+                Split::<N>::pack(array::from_fn(|axis| point[axis] >= center[axis])),
             )
         }
 
-        node
+        cell
+    }
+
+    /// Returns the cell which owns the given grid point.
+    pub fn cell_from_grid_index(&self, grid: GridId<N>) -> CellId {
+        debug_assert!(grid.is_valid());
+
+        // Start with root.
+        let mut cell = CellId(0);
+        let mut position = [0usize; N];
+
+        while let Some(children) = self.child_offset(cell) {
+            // Level of bottom-left child.
+            let level = self.level(children);
+            // Position of bottom-left child.
+            position = array::from_fn(|i| 2 * position[i]);
+            // If we have progressed so far that this child is actually more refined than the grid,
+            // just return the most recent cell.
+            if grid.level < level {
+                break;
+            }
+            debug_assert!(grid.level >= level);
+
+            // Width of child on the uniform grid.
+            let child_width = 1 << (grid.level - level);
+
+            let split = Split::<N>::pack(array::from_fn(|i| {
+                grid.position[i] >= (position[i] + 1) * child_width
+            }));
+
+            for i in 0..N {
+                position[i] += split.is_set(i) as usize;
+            }
+
+            cell = CellId::child(children, split);
+        }
+
+        cell
     }
 
     /// Returns the neighboring cell along the given face. If the neighboring cell is more refined, this
     /// returns the cell index of the adjacent cell with `tree.level(neighbor) == tree.level(cell)`.
     /// If this passes over a nonperiodic boundary then it returns `None`.
-    pub fn neighbor(&self, cell: CellId, face: Face<N>) -> Option<CellId> {
+    pub fn neighbor_face(&self, cell: CellId, face: Face<N>) -> Option<CellId> {
         let mut region = Region::CENTRAL;
         region.set_side(face.axis, if face.side { Side::Right } else { Side::Left });
         self.neighbor_region(cell, region)
@@ -715,8 +780,8 @@ impl<const N: usize> Tree<N> {
     /// returns the cell index of the adjacent cell with `tree.level(neighbor) == tree.level(cell)`.
     /// If this passes over a nonperiodic boundary then it returns `None`.
     pub fn neighbor_region(&self, cell: CellId, region: Region<N>) -> Option<CellId> {
-        let active_indices = ActiveCellId(self.cells[cell.0].active_offset);
-        debug_assert!(self.active_level(active_indices) >= self.level(cell));
+        let leaf_offset = LeafId(self.cells[cell.0].leaf_offset);
+        debug_assert!(self.leaf_level(leaf_offset) >= self.level(cell));
 
         let is_periodic = (0..N)
             .map(|axis| region.side(axis) == Side::Middle || self.periodic[axis])
@@ -728,9 +793,9 @@ impl<const N: usize> Tree<N> {
 
         let parent = self.parent(cell)?;
         debug_assert!(self.level(cell) > 0 && self.level(cell) == self.level(parent) + 1);
-        let split = self.active_split(active_indices, self.level(parent));
+        let split = self.leaf_split(leaf_offset, self.level(parent));
         if split.is_inner_region(region) {
-            let children = self.children(parent).unwrap();
+            let children = self.child_offset(parent).unwrap();
             return Some(CellId::child(children, split.as_outer_region(region)));
         }
 
@@ -748,7 +813,7 @@ impl<const N: usize> Tree<N> {
 
         let parent_neighbor = self.neighbor_region(parent, parent_region)?;
 
-        let Some(parent_neighbor_children) = self.children(parent_neighbor) else {
+        let Some(parent_neighbor_children) = self.child_offset(parent_neighbor) else {
             return Some(parent_neighbor);
         };
 
@@ -782,7 +847,7 @@ impl<const N: usize> Tree<N> {
         }
 
         // Retrieve first active cell owned by `cell`.
-        let active_index = ActiveCellId(self.cells[cell.0].active_offset);
+        let active_index = LeafId(self.cells[cell.0].leaf_offset);
         // Start at this cell
         let mut cursor = cell;
         // While this cell has a parent, recurse downwards and check whether the region is compatible.
@@ -790,19 +855,19 @@ impl<const N: usize> Tree<N> {
         while let Some(parent) = self.parent(cursor) {
             cursor = parent;
             if self
-                .active_split(active_index, self.level(cursor))
+                .leaf_split(active_index, self.level(cursor))
                 .is_inner_region(region)
             {
                 break;
             }
         }
 
-        if self.children(cursor).is_some() {
-            let split = self.active_split(active_index, self.level(cursor));
+        if self.child_offset(cursor).is_some() {
+            let split = self.leaf_split(active_index, self.level(cursor));
 
             if split.is_inner_region(region) {
                 cursor = CellId::child(
-                    self.children(cursor).unwrap(),
+                    self.child_offset(cursor).unwrap(),
                     split.as_outer_region(region),
                 )
             }
@@ -816,21 +881,21 @@ impl<const N: usize> Tree<N> {
 
             debug_assert!(self.level(cell) > 0);
 
-            let split = self.active_split(active_index, self.level(cursor));
+            let split = self.leaf_split(active_index, self.level(cursor));
             cursor = CellId::child(
-                self.children(cursor).unwrap(),
+                self.child_offset(cursor).unwrap(),
                 split.as_inner_region(region),
             );
         }
 
         // Recurse back upwards
         while self.level(cursor) < self.level(cell) {
-            let Some(children) = self.children(cursor) else {
+            let Some(children) = self.child_offset(cursor) else {
                 break;
             };
 
             let split = self
-                .active_split(active_index, self.level(cursor))
+                .leaf_split(active_index, self.level(cursor))
                 .as_inner_region(region);
             cursor = CellId::child(children, split);
         }
@@ -840,21 +905,21 @@ impl<const N: usize> Tree<N> {
     }
 
     /// Iterates over
-    pub fn active_neighbors_in_region(
+    pub fn leaf_neighbors_in_region(
         &self,
         cell: CellId,
         region: Region<N>,
-    ) -> impl Iterator<Item = ActiveCellId> + '_ {
+    ) -> impl Iterator<Item = LeafId> + '_ {
         let level = self.level(cell);
 
         self.neighbor_region(cell, region)
             .into_iter()
             .flat_map(move |neighbor| {
-                self.active_children(neighbor).filter(move |&active| {
-                    for l in level..self.active_level(active) {
+                self.contained_leaves(neighbor).filter(move |&active| {
+                    for l in level..self.leaf_level(active) {
                         if !region
                             .reverse()
-                            .is_split_adjacent(self.active_split(active, l))
+                            .is_split_adjacent(self.leaf_split(active, l))
                         {
                             return false;
                         }
@@ -865,23 +930,17 @@ impl<const N: usize> Tree<N> {
             })
     }
 
-    pub fn active_neighborhood(
-        &self,
-        cell: ActiveCellId,
-    ) -> impl Iterator<Item = ActiveCellId> + '_ {
+    pub fn leaf_neighborhood(&self, cell: LeafId) -> impl Iterator<Item = LeafId> + '_ {
         regions().flat_map(move |region| {
-            self.active_neighbors_in_region(self.cell_from_active_index(cell), region)
+            self.leaf_neighbors_in_region(self.cell_from_leaf(cell), region)
         })
     }
 
-    pub fn active_coarse_neighborhood(
-        &self,
-        cell: ActiveCellId,
-    ) -> impl Iterator<Item = ActiveCellId> + '_ {
+    pub fn leaf_coarse_neighborhood(&self, cell: LeafId) -> impl Iterator<Item = LeafId> + '_ {
         regions().flat_map(move |region| {
-            let neighbor = self.neighbor_region(self.cell_from_active_index(cell), region)?;
-            if self.level(neighbor) < self.active_level(cell) {
-                return self.active_index_from_cell(neighbor);
+            let neighbor = self.neighbor_region(self.cell_from_leaf(cell), region)?;
+            if self.level(neighbor) < self.leaf_level(cell) {
+                return self.leaf_from_cell(neighbor);
             }
             None
         })
@@ -898,7 +957,7 @@ impl<const N: usize> Tree<N> {
     /// belongs to (usually)
     pub fn boundary_region(&self, cell: CellId, region: Region<N>) -> Region<N> {
         // Get the active cell owned by this cell.
-        let Some(active) = self.active_index_from_cell(cell) else {
+        let Some(active) = self.leaf_from_cell(cell) else {
             return region;
         };
 
@@ -906,7 +965,7 @@ impl<const N: usize> Tree<N> {
         let mut level = self.level(cell);
 
         while level > 0 && result != Region::CENTRAL {
-            let split = self.active_split(active, level - 1);
+            let split = self.leaf_split(active, level - 1);
 
             // Mask region by
             for axis in 0..N {
@@ -929,9 +988,9 @@ impl<const N: usize> DataSize for Tree<N> {
     const STATIC_HEAP_SIZE: usize = 0;
 
     fn estimate_heap_size(&self) -> usize {
-        self.active_offsets.estimate_heap_size()
-            + self.active_values.capacity() / size_of::<usize>()
-            + self.active_to_cell.estimate_heap_size()
+        self.leaf_offsets.estimate_heap_size()
+            + self.leaf_values.capacity() / size_of::<usize>()
+            + self.leaf_to_cell.estimate_heap_size()
             + self.level_offsets.estimate_heap_size()
             + self.cells.estimate_heap_size()
     }
@@ -943,8 +1002,8 @@ pub struct TreeSer<const N: usize> {
     domain: HyperBox<N>,
     #[serde(with = "crate::array")]
     periodic: [bool; N],
-    active_values: BitVec<usize, Lsb0>,
-    active_offsets: Vec<usize>,
+    leaf_values: BitVec<usize, Lsb0>,
+    leaf_offsets: Vec<usize>,
 }
 
 impl<const N: usize> From<TreeSer<N>> for Tree<N> {
@@ -952,9 +1011,9 @@ impl<const N: usize> From<TreeSer<N>> for Tree<N> {
         let mut result = Tree {
             domain: value.domain,
             periodic: value.periodic,
-            active_values: value.active_values,
-            active_offsets: value.active_offsets,
-            active_to_cell: Vec::default(),
+            leaf_values: value.leaf_values,
+            leaf_offsets: value.leaf_offsets,
+            leaf_to_cell: Vec::default(),
             level_offsets: Vec::default(),
             cells: Vec::default(),
         };
@@ -968,8 +1027,8 @@ impl<const N: usize> From<Tree<N>> for TreeSer<N> {
         Self {
             domain: value.domain,
             periodic: value.periodic,
-            active_values: value.active_values,
-            active_offsets: value.active_offsets,
+            leaf_values: value.leaf_values,
+            leaf_offsets: value.leaf_offsets,
         }
     }
 }
@@ -979,8 +1038,8 @@ impl<const N: usize> Default for TreeSer<N> {
         Self {
             domain: HyperBox::UNIT,
             periodic: [false; N],
-            active_values: BitVec::default(),
-            active_offsets: Vec::default(),
+            leaf_values: BitVec::default(),
+            leaf_offsets: Vec::default(),
         }
     }
 }
@@ -995,28 +1054,28 @@ mod tests {
 
         assert_eq!(tree.bounds(CellId::ROOT), HyperBox::UNIT);
         assert_eq!(tree.num_cells(), 1);
-        assert_eq!(tree.num_active_cells(), 1);
+        assert_eq!(tree.num_leaves(), 1);
         assert_eq!(tree.num_levels(), 1);
 
-        assert_eq!(tree.neighbor(CellId::ROOT, Face::negative(0)), None);
+        assert_eq!(tree.neighbor_face(CellId::ROOT, Face::negative(0)), None);
 
         tree.refine(&[true]);
         tree.build();
 
         assert_eq!(tree.num_cells(), 5);
-        assert_eq!(tree.num_active_cells(), 4);
+        assert_eq!(tree.num_leaves(), 4);
         assert_eq!(tree.num_levels(), 2);
         for split in Split::enumerate() {
-            assert_eq!(tree.active_split(ActiveCellId(split.to_linear()), 0), split);
+            assert_eq!(tree.leaf_split(LeafId(split.to_linear()), 0), split);
         }
         for i in 0..4 {
-            assert_eq!(tree.cell_from_active_index(ActiveCellId(i)), CellId(i + 1));
+            assert_eq!(tree.cell_from_leaf(LeafId(i)), CellId(i + 1));
         }
 
         tree.refine(&[true, false, false, false]);
         tree.build();
 
-        assert_eq!(tree.cell_from_active_index(ActiveCellId(0)), CellId(5));
+        assert_eq!(tree.cell_from_leaf(LeafId(0)), CellId(5));
 
         assert!(tree.is_boundary_face(CellId(5), Face::negative(0)));
         assert!(tree.is_boundary_face(CellId(5), Face::negative(1)));
@@ -1042,7 +1101,7 @@ mod tests {
         tree.set_periodic(0, true);
         tree.set_periodic(1, true);
         assert_eq!(
-            tree.neighbor(CellId::ROOT, Face::negative(0)),
+            tree.neighbor_face(CellId::ROOT, Face::negative(0)),
             Some(CellId::ROOT)
         );
 
@@ -1051,7 +1110,10 @@ mod tests {
         tree.refine(&[true, false, false, false]);
         tree.build();
 
-        assert_eq!(tree.neighbor(CellId(5), Face::negative(0)), Some(CellId(2)));
+        assert_eq!(
+            tree.neighbor_face(CellId(5), Face::negative(0)),
+            Some(CellId(2))
+        );
         assert_eq!(
             tree.neighbor_region(CellId(5), Region::new([Side::Left, Side::Left])),
             Some(CellId(4))
@@ -1067,23 +1129,23 @@ mod tests {
         tree.build();
 
         assert!(
-            tree.active_neighbors_in_region(CellId(2), Region::new([Side::Left, Side::Middle]))
-                .eq([ActiveCellId(1), ActiveCellId(3)].into_iter())
+            tree.leaf_neighbors_in_region(CellId(2), Region::new([Side::Left, Side::Middle]))
+                .eq([LeafId(1), LeafId(3)].into_iter())
         );
 
         assert!(
-            tree.active_neighbors_in_region(CellId(3), Region::new([Side::Middle, Side::Left]))
-                .eq([ActiveCellId(2), ActiveCellId(3)].into_iter())
+            tree.leaf_neighbors_in_region(CellId(3), Region::new([Side::Middle, Side::Left]))
+                .eq([LeafId(2), LeafId(3)].into_iter())
         );
 
         assert!(
-            tree.active_neighbors_in_region(CellId(4), Region::new([Side::Left, Side::Left]))
-                .eq([ActiveCellId(3)].into_iter())
+            tree.leaf_neighbors_in_region(CellId(4), Region::new([Side::Left, Side::Left]))
+                .eq([LeafId(3)].into_iter())
         );
 
         assert!(
-            tree.active_neighbors_in_region(CellId(6), Region::new([Side::Right, Side::Right]))
-                .eq([ActiveCellId(4)].into_iter())
+            tree.leaf_neighbors_in_region(CellId(6), Region::new([Side::Right, Side::Right]))
+                .eq([LeafId(4)].into_iter())
         );
     }
 
@@ -1095,16 +1157,16 @@ mod tests {
         tree.refine(&[true, false, false, false]);
 
         for _ in 0..1 {
-            let mut flags: Vec<bool> = vec![true; tree.num_active_cells()];
+            let mut flags: Vec<bool> = vec![true; tree.num_leaves()];
             tree.balance_refine_flags(&mut flags);
             tree.refine(&flags);
         }
 
         for _ in 0..2 {
-            let mut flags = vec![true; tree.num_active_cells()];
+            let mut flags = vec![true; tree.num_leaves()];
             tree.balance_coarsen_flags(&mut flags);
-            let mut coarsen_map = vec![ActiveCellId(0); tree.num_active_cells()];
-            tree.coarsen_active_index_map(&flags, &mut coarsen_map);
+            let mut coarsen_map = vec![LeafId(0); tree.num_leaves()];
+            tree.coarsen_leaf_index_map(&flags, &mut coarsen_map);
             tree.coarsen(&flags);
         }
 
@@ -1123,7 +1185,7 @@ mod tests {
         // Randomly refine tree
         let mut rng = rand::rng();
         for _ in 0..4 {
-            let mut flags = vec![false; tree.num_active_cells()];
+            let mut flags = vec![false; tree.num_leaves()];
             rng.fill(flags.as_mut_slice());
 
             tree.balance_coarsen_flags(&mut flags);
@@ -1146,16 +1208,10 @@ mod tests {
         tree.refine(&[true, false, false, false]);
 
         assert_eq!(tree.cell_from_point([0.0, 0.0]), CellId(5));
-        assert_eq!(
-            tree.active_index_from_cell(CellId(5)),
-            Some(ActiveCellId(0))
-        );
+        assert_eq!(tree.leaf_from_cell(CellId(5)), Some(LeafId(0)));
 
         assert_eq!(tree.cell_from_point([0.51, 0.67]), CellId(4));
-        assert_eq!(
-            tree.active_index_from_cell(CellId(4)),
-            Some(ActiveCellId(6))
-        );
+        assert_eq!(tree.leaf_from_cell(CellId(4)), Some(LeafId(6)));
 
         let mut rng = rand::rng();
         for _ in 0..50 {

@@ -2,7 +2,7 @@ use crate::run::Status;
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, path::Path};
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct SearchHistory {
     map: HashMap<u64, SearchRecord>,
 }

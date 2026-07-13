@@ -5,7 +5,9 @@
 [![MIT](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/emilk/egui/blob/main/LICENSE-MIT)
 [![Apache](https://img.shields.io/badge/license-Apache-blue.svg)](https://github.com/emilk/egui/blob/main/LICENSE-APACHE)
 
-Aeon toolkit is a collection of crates for solving N-dimensional elliptic and hyperbolic PDEs using the finite difference method and Adaptive Mesh Refinement (AMR). 
+Aeon Toolkit is a collection of crates for solving N-dimensional elliptic and hyperbolic PDEs using the Finite Difference Method (FDM) and Wavelet Adaptive Mesh Refinement (WAMR). Though designed for a wide range of problems, `aeon-tk` is specifically tailored for problems in Numerical Relativity, and includes reference cli tools for simulating collapsing black holes in spherical and axisymmetry.  
+
+See the [`examples/`](https://github.com/sylviamesicek/aeon/tree/master/examples) directory for self-contained programs applying the toolkit to common PDEs and demonstrating various functions of the codebase. For examples of complex applications built using `aeon-tk`, go to the [`tools/`](https://github.com/sylviamesicek/aeon/tree/master/tools) directory.
 
 ## Capabilities
 
@@ -67,7 +69,22 @@ cargo run --release --package aaxi -- run -Damplitude=0.3 config/axigauss
 cargo run --release --package aaxi -- search config/axigauss
 ```
 
-#### MPI
+`aaxi` also supports running several axisymmetric simulations simultaneously on multiple processer nodes via MPI. This requires the `mpi` feature to be enabled and a compatible mpi compiler depending on operating system
+- MS-MPI (Windows) 
+- OpenMpi (MacOs)
+- MPICH (Linux)
+Check the [rsmpi repository](https://github.com/rsmpi/rsmpi) for more details. 
+
+Once built via
+```bash
+cargo build --release --package aaxi --features="mpi"
+```
+one can run a parallel search via
+```bash
+mpiexec -n 3 ./target/release/aaxi search config/axigauss
+```
+
+<!-- #### MPI
 
 I recently implemented MPI support for running axisymmetric searches on multiple cluster nodes. This requires the code be compiled with the mpi feature enabled, i.e.
 ```bash
@@ -85,4 +102,4 @@ initial.steps = 1000 # Number of steps between each log during relaxation
 An example of running multiple processes on a single computer for testing purposes
 ```bash
 mpiexec -n 3 ./target/release/aaxi search config/axigauss 
-```
+``` -->

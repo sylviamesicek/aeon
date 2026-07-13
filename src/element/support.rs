@@ -1,7 +1,10 @@
 use crate::geometry::IndexSpace;
 
+/// Support points for an element.
 pub trait Support<const N: usize> {
+    /// Total number of points in the support.
     fn num_points(&self) -> usize;
+    /// Position of the `i`th support point.
     fn point(&self, i: usize) -> [f64; N];
 }
 

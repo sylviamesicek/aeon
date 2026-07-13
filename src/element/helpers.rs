@@ -8,7 +8,7 @@ use faer::linalg::svd::{
 use faer::{Accum, Mat, MatMut, MatRef, Par};
 use reborrow::{Reborrow, ReborrowMut};
 
-/// A faer workspace
+/// A workspace for repeated `faer` linear algebra operations.
 pub struct Workspace {
     req: StackReq,
     buffer: MemBuffer,

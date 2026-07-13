@@ -6,7 +6,7 @@
 //! use the following pattern:
 //!
 //! ```rust
-//! # use aeon::array::ArrayLike;
+//! # use aeon_tk::array::ArrayLike;
 //! trait MyTrait {
 //!     type Weights: ArrayLike<usize, Elem = f64>;
 //! }
@@ -144,6 +144,10 @@ where
     }
 }
 
+/// Serialize const generic or arbitrary large arrays
+///
+/// For any array up to length `usize::MAX`, this function will allow Serde to properly serialize
+/// it, provided the type `T` is serializable.
 pub fn serialize<S, T, const N: usize>(data: &[T; N], ser: S) -> Result<S::Ok, S::Error>
 where
     S: Serializer,

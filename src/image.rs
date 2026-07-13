@@ -4,10 +4,17 @@ use std::marker::PhantomData;
 use std::ops::{Bound, Range, RangeBounds};
 use std::slice::SliceIndex;
 
-/// A system consisting of multiple fields, each belonging to a seperate "channel".
+/// A collection of multiple scalar fields bundled together.
+///
+/// Many PDEs involve several fields evolving contemporaneously. To abstract over this `aeon-tk` introduces
+/// the concept of an `Image`, with each field corresponding to a numerically indexed `channel` within the
+/// image. This analogy is inspired by the standard use of interpolating wavelets on quadtree meshes as a
+/// compression scheme.
 #[derive(Clone, Debug, Default, Serialize, Deserialize, datasize::DataSize)]
 pub struct Image {
+    /// Value of the image at each point, with different channels being stored Structure-of-Arrays style.
     data: Vec<f64>,
+    /// Number of channels in this `Image`.
     channels: usize,
 }
 
@@ -20,15 +27,18 @@ impl Image {
         }
     }
 
+    /// Reallocates the image, reusing existing memory if possible.
     pub fn reinit(&mut self, channels: usize, nodes: usize) {
         self.data.resize(channels * nodes, 0.0);
         self.channels = channels;
     }
 
+    /// Resizes the image to a new number of nodes.
     pub fn resize(&mut self, nodes: usize) {
         self.reinit(self.channels, nodes);
     }
 
+    /// Returns the total number of nodes stored by the image.
     pub fn num_nodes(&self) -> usize {
         if self.channels == 0 {
             return 0;
@@ -37,6 +47,7 @@ impl Image {
         self.data.len() / self.channels
     }
 
+    /// Returns true if the image has either no channels or no nodes.
     pub fn is_empty(&self) -> bool {
         self.num_nodes() == 0 || self.num_channels() == 0
     }
@@ -52,40 +63,49 @@ impl Image {
         self.data
     }
 
+    /// Retrieves the linear vector of image data.
     pub fn storage(&self) -> &[f64] {
         &self.data
     }
 
+    /// Retrieves a mutable reference to the linear vector of image data.
     pub fn storage_mut(&mut self) -> &mut [f64] {
         &mut self.data
     }
 
+    /// The number of channels in this image.
     pub fn num_channels(&self) -> usize {
         self.channels
     }
 
+    /// Creates an iterator over the channel indices in this image.
     pub fn channels(&self) -> Range<usize> {
         0..self.channels
     }
 
+    /// Retrieves a reference to data corresponding to a single channel of this image.
     pub fn channel(&self, channel: usize) -> &[f64] {
         let stride = self.data.len() / self.channels;
         &self.data[stride * channel..stride * (channel + 1)]
     }
 
+    /// Retrieves a mutable reference to data corresponding to a single channel of this image.
     pub fn channel_mut(&mut self, channel: usize) -> &mut [f64] {
         let stride = self.data.len() / self.channels;
         &mut self.data[stride * channel..stride * (channel + 1)]
     }
 
+    /// Reborrows this image as a reference.
     pub fn as_ref(&self) -> ImageRef<'_> {
         ImageRef::from_storage(&self.data, self.channels)
     }
 
+    /// Reborrows this image as a mutable reference.
     pub fn as_mut(&mut self) -> ImageMut<'_> {
         ImageMut::from_storage(&mut self.data, self.channels)
     }
 
+    /// Produces an immutable slice of this image (each )
     pub fn slice<R>(&self, range: R) -> ImageRef<'_>
     where
         R: RangeBounds<usize> + SliceIndex<[f64], Output = [f64]> + Clone,
@@ -141,7 +161,7 @@ where
     start_inc..end_exc
 }
 
-/// Represents a subslice of an owned system vector.
+/// Represents a subslice of/immutable reference to an owned `Image`.
 #[derive(Clone, Copy)]
 pub struct ImageRef<'a> {
     ptr: *const f64,
@@ -153,6 +173,7 @@ pub struct ImageRef<'a> {
 }
 
 impl<'a> ImageRef<'a> {
+    /// Returns an empty reference to a blank image, often used if no context is required for a given solve.
     pub fn empty() -> Self {
         Self::from_storage(&[], 0)
     }
@@ -180,10 +201,6 @@ impl<'a> ImageRef<'a> {
     pub fn num_nodes(&self) -> usize {
         self.length
     }
-
-    // pub fn len(&self) -> usize {
-    //     self.num_nodes() * self.num_channels()
-    // }
 
     pub fn is_empty(&self) -> bool {
         self.length == 0 || self.channels == 0
@@ -592,6 +609,7 @@ impl ImageShared<'_> {
     }
 
     /// Retrieves a mutable slice of the given field.
+    #[allow(clippy::mut_from_ref)]
     pub unsafe fn channel_mut(&self, channel: usize) -> &mut [f64] {
         debug_assert!(channel < self.num_channels());
 

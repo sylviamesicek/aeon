@@ -1,4 +1,8 @@
 //! High-level solvers and integrators for common numerical problems.
+//!
+//! This includes Method-of-Lines integrators for solving spatially discretized PDEs
+//! as well as a hyperbolic relaxation solver that transforms elliptic PDEs into hyperbolic
+//! problems using a ficticuous time variable.
 
 mod hyper;
 mod intergrate;

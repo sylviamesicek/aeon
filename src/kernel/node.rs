@@ -38,22 +38,22 @@ pub struct NodeSpace<const N: usize> {
     pub ghost: usize,
     /// Position of the node space.
     pub bounds: HyperBox<N>,
+    /// What type of boundary condition is applied on each face.
     pub boundary: FaceArray<N, BoundaryClass>,
 }
 
 impl<const N: usize> NodeSpace<N> {
-    pub fn ghost(&self) -> usize {
-        self.ghost
-    }
-
+    /// Number of cells along each axis.
     pub fn cell_size(&self) -> [usize; N] {
         self.size
     }
 
+    /// Number of vertices along each axis.
     pub fn vertex_size(&self) -> [usize; N] {
         array::from_fn(|axis| self.size[axis] + 1)
     }
 
+    /// Number of nodes along each axis.
     pub fn node_size(&self) -> [usize; N] {
         array::from_fn(|axis| self.size[axis] + 1 + 2 * self.ghost)
     }
@@ -68,6 +68,7 @@ impl<const N: usize> NodeSpace<N> {
         from_fn(|axis| self.bounds.size[axis] / self.size[axis] as f64)
     }
 
+    /// Returns the spacing between nodes on an individual axis.
     pub fn spacing_axis(&self, axis: usize) -> f64 {
         self.bounds.size[axis] / self.size[axis] as f64
     }
@@ -79,7 +80,7 @@ impl<const N: usize> NodeSpace<N> {
             .all(|b| b)
     }
 
-    /// Computes the position of the given node.
+    /// Computes the physical position of the given node.
     pub fn position(&self, node: [isize; N]) -> [f64; N] {
         let spacing: [_; N] = from_fn(|axis| self.bounds.size[axis] / self.size[axis] as f64);
 

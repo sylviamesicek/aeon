@@ -3,7 +3,7 @@ use std::{array, ops::Range};
 
 use crate::geometry::{BlockId, Face, FaceMask, IndexSpace};
 use crate::image::ImageShared;
-use crate::kernel::{is_boundary_compatible, Derivative, Dissipation, Kernel, SecondDerivative, SystemBoundaryConds};
+use crate::kernel::{is_boundary_compatible, Derivative, Dissipation, Kernel, SecondDerivative, ImageBoundaryConds};
 use crate::{
     kernel::{
         BoundaryConds as _, BoundaryKind, Hessian, NodeSpace, node_from_vertex, vertex_from_node,
@@ -288,7 +288,7 @@ impl<const N: usize> Mesh<N> {
     /// Applies an operator to a system in place, enforcing both strong and weak boundary conditions
     /// and running necessary preprocessing.
     pub fn apply<
-        C: SystemBoundaryConds<N> + Sync,
+        C: ImageBoundaryConds<N> + Sync,
         P: Function<N> + Sync,
     >(
         &mut self,
@@ -304,7 +304,7 @@ impl<const N: usize> Mesh<N> {
 
         for field in f.channels() {
             assert!(
-                is_boundary_compatible(&self.boundary, &bcs.field(field)),
+                is_boundary_compatible(&self.boundary, &bcs.channel(field)),
                 "Boundary Conditions incompatible with set boundary classes"
             )
         }
@@ -378,7 +378,7 @@ impl<const N: usize> Mesh<N> {
                 // Weak boundary conditions.
                 for face in Face::<N>::iterate() {
                     for field in f.channels() {
-                        let boundary = bcs.field(field);
+                        let boundary = bcs.channel(field);
                         let source = block_source.channel(field);
                         let dest = block_dest.channel_mut(field);
 
@@ -577,7 +577,7 @@ impl<const N: usize> Mesh<N> {
 
             let block_dest = unsafe { dest.slice_mut(nodes) };
 
-            for &cell in mesh.blocks.active_cells(block) {
+            for &cell in mesh.blocks.leaves(block) {
                 let node_size = mesh.cell_node_size(cell);
                 let node_origin = mesh.active_node_origin(cell);
 
@@ -586,12 +586,12 @@ impl<const N: usize> Mesh<N> {
                 for face in Face::iterate() {
                     let Some(neighbor) = mesh
                         .tree
-                        .neighbor(mesh.tree.cell_from_active_index(cell), face)
+                        .neighbor_face(mesh.tree.cell_from_leaf(cell), face)
                     else {
                         continue;
                     };
                     // If neighbors have larger refinement than us
-                    if !mesh.tree.is_active(neighbor) {
+                    if !mesh.tree.is_leaf(neighbor) {
                         flags.set(face);
                     }
                 }

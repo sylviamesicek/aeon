@@ -63,7 +63,7 @@ impl BoundaryConds<2> for PsiCondition {
 #[derive(Clone)]
 struct ContextConditions;
 
-impl SystemBoundaryConds<2> for ContextConditions {
+impl ImageBoundaryConds<2> for ContextConditions {
     fn kind(&self, channel: usize, face: Face<2>) -> BoundaryKind {
         if face.side {
             return BoundaryKind::Radiative;

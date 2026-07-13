@@ -5,40 +5,6 @@
 
 use crate::geometry::{Face, FaceArray};
 
-// #[derive(Clone, Copy, Debug, PartialEq, Default, serde::Serialize, serde::Deserialize)]
-// pub enum Boundary {
-//     Symmetric,
-//     AntiSymmetric,
-//     Dirichlet(f64),
-//     #[default]
-//     Free,
-//     Custom,
-// }
-
-// impl Boundary {
-//     pub fn is_one_sided(self) -> bool {
-//         matches!(self, Self::Free)
-//     }
-// }
-
-// pub trait BoundaryConds<const N: usize> {
-//     fn boundary(&self, channel: usize, position: [f64; N]) -> Boundary;
-// }
-
-// #[derive(Clone, Copy, Debug, PartialEq, Default, serde::Serialize, serde::Deserialize)]
-// pub enum Penalty {
-//     #[default]
-//     Free,
-//     Radiative {
-//         target: f64,
-//         strength: f64,
-//     },
-// }
-
-// pub trait PenaltyTerms<const N: usize> {
-//     fn penalty(&self, channel: usize, position: [f64; N]) -> Penalty;
-// }
-
 /// Indicates what type of boundary condition is used along a particualr
 /// face of the domain. More specific boundary conditions are provided
 /// by the `Condition` API, but for many funtions, `Boundary` provides
@@ -56,7 +22,7 @@ pub enum BoundaryKind {
     /// process. This can be used to implement custom boundary conditions, and is primarily used to
     /// fill inter-grid boundaries in the adaptive mesh refinement driver.
     Custom,
-    /// The boundary condition is implemented via
+    /// The boundary condition is implemented via sommerfeld radiative boundary conditions.
     Radiative,
     #[default]
     Free,
@@ -168,7 +134,7 @@ pub fn is_boundary_compatible<const N: usize, B: BoundaryConds<N>>(
 }
 
 /// A generalization of `Condition<N>` for a coupled systems of scalar fields.
-pub trait SystemBoundaryConds<const N: usize>: Clone {
+pub trait ImageBoundaryConds<const N: usize>: Clone {
     fn kind(&self, channel: usize, _face: Face<N>) -> BoundaryKind;
 
     fn radiative(&self, _channel: usize, _position: [f64; N]) -> RadiativeParams {
@@ -185,19 +151,19 @@ pub trait SystemBoundaryConds<const N: usize>: Clone {
         }
     }
 
-    fn field(&self, channel: usize) -> FieldBoundaryConds<N, Self> {
-        FieldBoundaryConds::new(self.clone(), channel)
+    fn channel(&self, channel: usize) -> ChannelBoundaryConds<N, Self> {
+        ChannelBoundaryConds::new(self.clone(), channel)
     }
 }
 
 /// Transfers a set of `Conditions<N>` into a single `Condition<N>` by only applying the set of conditions
 /// to a single field.
-pub struct FieldBoundaryConds<const N: usize, C> {
+pub struct ChannelBoundaryConds<const N: usize, C> {
     conditions: C,
     channel: usize,
 }
 
-impl<const N: usize, C: SystemBoundaryConds<N>> FieldBoundaryConds<N, C> {
+impl<const N: usize, C: ImageBoundaryConds<N>> ChannelBoundaryConds<N, C> {
     pub const fn new(conditions: C, channel: usize) -> Self {
         Self {
             channel,
@@ -206,7 +172,7 @@ impl<const N: usize, C: SystemBoundaryConds<N>> FieldBoundaryConds<N, C> {
     }
 }
 
-impl<const N: usize, C: SystemBoundaryConds<N>> Clone for FieldBoundaryConds<N, C> {
+impl<const N: usize, C: ImageBoundaryConds<N>> Clone for ChannelBoundaryConds<N, C> {
     fn clone(&self) -> Self {
         Self {
             conditions: self.conditions.clone(),
@@ -215,7 +181,7 @@ impl<const N: usize, C: SystemBoundaryConds<N>> Clone for FieldBoundaryConds<N, 
     }
 }
 
-impl<const N: usize, C: SystemBoundaryConds<N>> BoundaryConds<N> for FieldBoundaryConds<N, C> {
+impl<const N: usize, C: ImageBoundaryConds<N>> BoundaryConds<N> for ChannelBoundaryConds<N, C> {
     fn kind(&self, face: Face<N>) -> BoundaryKind {
         self.conditions.kind(self.channel, face)
     }
@@ -243,7 +209,7 @@ impl<I> ScalarConditions<I> {
     }
 }
 
-impl<const N: usize, I: BoundaryConds<N>> SystemBoundaryConds<N> for ScalarConditions<I> {
+impl<const N: usize, I: BoundaryConds<N>> ImageBoundaryConds<N> for ScalarConditions<I> {
     fn kind(&self, channel: usize, face: Face<N>) -> BoundaryKind {
         debug_assert!(channel == 0);
         self.0.kind(face)
@@ -263,7 +229,7 @@ impl<const N: usize, I: BoundaryConds<N>> SystemBoundaryConds<N> for ScalarCondi
 #[derive(Clone)]
 pub struct EmptyConditions;
 
-impl<const N: usize> SystemBoundaryConds<N> for EmptyConditions {
+impl<const N: usize> ImageBoundaryConds<N> for EmptyConditions {
     fn kind(&self, _channel: usize, _face: Face<N>) -> BoundaryKind {
         unreachable!()
     }

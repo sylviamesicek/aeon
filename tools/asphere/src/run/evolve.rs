@@ -211,9 +211,9 @@ pub fn evolve_data_full(
                 // Check if we are at the desired level
                 let mut min_level = usize::MAX;
                 let mut max_level = usize::MIN;
-                for cell in mesh.tree().active_cell_indices() {
-                    let ll = mesh.tree().active_level(cell);
-                    let cc = mesh.tree().active_bounds(cell).center()[0]; // get 1st element because we only have 1 dimension
+                for cell in mesh.tree().leaves() {
+                    let ll = mesh.tree().leaf_level(cell);
+                    let cc = mesh.tree().leaf_bounds(cell).center()[0]; // get 1st element because we only have 1 dimension
                     if cc < config.regrid.fix_grid_radius {
                         if ll < min_level {
                             min_level = ll;

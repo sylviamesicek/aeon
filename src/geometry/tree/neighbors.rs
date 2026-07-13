@@ -9,9 +9,9 @@ pub struct NeighborId(pub usize);
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct TreeCellNeighbor<const N: usize> {
     /// Primary cell.
-    pub cell: ActiveCellId,
+    pub cell: LeafId,
     /// Neighbor cell.
-    pub neighbor: ActiveCellId,
+    pub neighbor: LeafId,
     /// Which region is the neighbor cell in?
     pub region: Region<N>,
     /// Which periodic region is the neighbor cell in?
@@ -159,8 +159,8 @@ impl<const N: usize> TreeNeighbors<N> {
 
             // Sort neighbors (to group cells from the same block together).
             neighbors.sort_unstable_by(|left, right| {
-                let lblock = blocks.active_cell_block(left.neighbor);
-                let rblock = blocks.active_cell_block(right.neighbor);
+                let lblock = blocks.block_from_leaf(left.neighbor);
+                let rblock = blocks.block_from_leaf(right.neighbor);
 
                 left.boundary_region
                     .cmp(&right.boundary_region)
@@ -171,8 +171,8 @@ impl<const N: usize> TreeNeighbors<N> {
             });
 
             Self::taverse_cell_neighbors(blocks, &mut neighbors, |neighbor, a, b| {
-                let acell = tree.cell_from_active_index(a.cell);
-                let aneighbor = tree.cell_from_active_index(a.neighbor);
+                let acell = tree.cell_from_leaf(a.cell);
+                let aneighbor = tree.cell_from_leaf(a.neighbor);
 
                 // Compute this boundary interface.
                 let kind = InterfaceKind::from_levels(tree.level(acell), tree.level(aneighbor));
@@ -205,7 +205,7 @@ impl<const N: usize> TreeNeighbors<N> {
         neighbors: &mut Vec<TreeCellNeighbor<N>>,
     ) {
         let block_size = blocks.size(block);
-        let block_active_cells = blocks.active_cells(block);
+        let block_active_cells = blocks.leaves(block);
         let block_space = IndexSpace::new(block_size);
 
         debug_assert!(block_size.iter().product::<usize>() == block_active_cells.len());
@@ -218,10 +218,10 @@ impl<const N: usize> TreeNeighbors<N> {
             // Find all cells adjacent to the given region.
             for index in block_space.region_adjacent_window(region) {
                 let active = block_active_cells[block_space.linear_from_cartesian(index)];
-                let cell = tree.cell_from_active_index(active);
+                let cell = tree.cell_from_leaf(active);
                 let periodic = tree.boundary_region(cell, region);
 
-                for neighbor in tree.active_neighbors_in_region(cell, region) {
+                for neighbor in tree.leaf_neighbors_in_region(cell, region) {
                     neighbors.push(TreeCellNeighbor {
                         cell: active,
                         neighbor,
@@ -242,7 +242,7 @@ impl<const N: usize> TreeNeighbors<N> {
         let mut neighbors = neighbors.iter().cloned().peekable();
 
         while let Some(a) = neighbors.next() {
-            let neighbor = blocks.active_cell_block(a.neighbor);
+            let neighbor = blocks.block_from_leaf(a.neighbor);
 
             // Next we walk through the iterator until we find the last neighbor that is still in this block.
             let mut b = a.clone();
@@ -250,7 +250,7 @@ impl<const N: usize> TreeNeighbors<N> {
             loop {
                 if let Some(next) = neighbors.peek() {
                     if a.boundary_region == next.boundary_region
-                        && neighbor == blocks.active_cell_block(next.neighbor)
+                        && neighbor == blocks.block_from_leaf(next.neighbor)
                     {
                         b = neighbors.next().unwrap();
                         continue;
@@ -352,14 +352,14 @@ mod tests {
                 block: BlockId(0),
                 neighbor: BlockId(1),
                 a: TreeCellNeighbor {
-                    cell: ActiveCellId(1),
-                    neighbor: ActiveCellId(4),
+                    cell: LeafId(1),
+                    neighbor: LeafId(4),
                     region: Region::new([Side::Right, Side::Middle]),
                     boundary_region: Region::CENTRAL,
                 },
                 b: TreeCellNeighbor {
-                    cell: ActiveCellId(3),
-                    neighbor: ActiveCellId(6),
+                    cell: LeafId(3),
+                    neighbor: LeafId(6),
                     region: Region::new([Side::Right, Side::Right]),
                     boundary_region: Region::CENTRAL,
                 }
@@ -372,14 +372,14 @@ mod tests {
                 block: BlockId(0),
                 neighbor: BlockId(2),
                 a: TreeCellNeighbor {
-                    cell: ActiveCellId(2),
-                    neighbor: ActiveCellId(5),
+                    cell: LeafId(2),
+                    neighbor: LeafId(5),
                     region: Region::new([Side::Middle, Side::Right]),
                     boundary_region: Region::CENTRAL,
                 },
                 b: TreeCellNeighbor {
-                    cell: ActiveCellId(3),
-                    neighbor: ActiveCellId(5),
+                    cell: LeafId(3),
+                    neighbor: LeafId(5),
                     region: Region::new([Side::Middle, Side::Right]),
                     boundary_region: Region::CENTRAL,
                 }

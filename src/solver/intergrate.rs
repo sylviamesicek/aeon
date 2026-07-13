@@ -1,6 +1,6 @@
 use crate::{
     image::{ImageMut, ImageRef, ImageShared},
-    kernel::SystemBoundaryConds,
+    kernel::ImageBoundaryConds,
     mesh::{Function, FunctionBorrowMut, Mesh},
 };
 use datasize::DataSize;
@@ -38,7 +38,7 @@ impl Integrator {
     }
 
     /// Step the integrator forwards in time.
-    pub fn step<const N: usize, C: SystemBoundaryConds<N> + Sync, F: Function<N> + Sync>(
+    pub fn step<const N: usize, C: ImageBoundaryConds<N> + Sync, F: Function<N> + Sync>(
         &mut self,
         mesh: &mut Mesh<N>,
         order: usize,

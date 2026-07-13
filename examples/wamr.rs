@@ -7,7 +7,7 @@ use std::f64::consts::PI;
 #[derive(Clone)]
 pub struct SeedConditions;
 
-impl SystemBoundaryConds<2> for SeedConditions {
+impl ImageBoundaryConds<2> for SeedConditions {
     fn kind(&self, _channel: usize, face: Face<2>) -> BoundaryKind {
         if face.side {
             return BoundaryKind::Radiative;

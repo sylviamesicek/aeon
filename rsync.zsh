@@ -1,5 +1,5 @@
-remote_path="u1192515@notchpeak1.chpc.utah.edu:/uufs/chpc.utah.edu/common/home/u1192515/dev/aeon"
-remote_path_="u1192515@notchpeak1.chpc.utah.edu:/uufs/chpc.utah.edu/common/home/u1192515/dev/aeon_"
+remote_path="u1192515@notchpeak.chpc.utah.edu:/uufs/chpc.utah.edu/common/home/u1192515/dev/aeon"
+remote_path_="u1192515@notchpeak.chpc.utah.edu:/uufs/chpc.utah.edu/common/home/u1192515/dev/aeon_"
 
 
 pull_output_flags=(
@@ -11,6 +11,8 @@ pull_output_flags=(
 pull_output_flags_=(
     "--include=output_/"
     "--include=output_/**"
+    # "--exclude=output_/*/cache/evolve.dat"
+    # "--exclude=output_/*/cache/evolve_.dat"
     "--exclude=**"
 )
 

@@ -40,6 +40,7 @@ impl<T: Send> UnsafeThreadCache<T> {
 impl<T: Send + Default> UnsafeThreadCache<T> {
     /// Retrieves the object `T` associated with this thread, initializing the
     /// default value in place if this has not already been done.
+    #[allow(clippy::mut_from_ref)]
     pub unsafe fn get_or_default(&self) -> &mut T {
         unsafe { &mut *self.pool.get_or_default().get() }
     }
