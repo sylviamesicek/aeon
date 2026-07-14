@@ -18,12 +18,9 @@ impl SearchHistory {
         let mut map = HashMap::new();
 
         let mut reader = csv::Reader::from_path(path)?;
-        for record in reader.deserialize::<SearchRecord>() {
-            if let Ok(record) = record {
-                let param = record.param.to_bits();
-
-                map.insert(param, record);
-            }
+        for record in reader.deserialize::<SearchRecord>().flatten() {
+            let param = record.param.to_bits();
+            map.insert(param, record);
         }
 
         Ok(SearchHistory { map })

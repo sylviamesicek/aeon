@@ -18,11 +18,11 @@ pub fn abs_or_relative_to(dir: &Path, path: &Path) -> std::io::Result<PathBuf> {
 /// Deserialize data from toml file.
 pub fn import_toml<T: DeserializeOwned>(path: &Path) -> std::io::Result<T> {
     let string = std::fs::read_to_string(path)?;
-    Ok(toml::from_str(&string).map_err(|err| std::io::Error::other(err))?)
+    Ok(toml::from_str(&string).map_err(std::io::Error::other)?)
 }
 
 /// Serialize data to toml file.
 pub fn export_toml<T: Serialize>(path: &Path, value: &T) -> std::io::Result<()> {
-    let string = toml::to_string_pretty(value).map_err(|err| std::io::Error::other(err))?;
+    let string = toml::to_string_pretty(value).map_err(std::io::Error::other)?;
     std::fs::write(path, string)
 }

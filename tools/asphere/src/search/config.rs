@@ -53,8 +53,8 @@ impl Transform for Config {
             directory: self.directory.transform(vars)?,
             parameter: self.parameter.transform(vars)?,
             parallel: self.parallel,
-            start: self.start.transform(&vars)?,
-            end: self.end.transform(&vars)?,
+            start: self.start.transform(vars)?,
+            end: self.end.transform(vars)?,
             max_depth: self.max_depth,
             min_error: self.min_error,
         })

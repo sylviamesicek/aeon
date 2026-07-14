@@ -20,7 +20,7 @@ pub fn initial_data(config: &Config) -> eyre::Result<(Mesh<1>, Image)> {
 
     // Path for initial visualization data.
     if config.visualize.save_initial || config.visualize.save_initial_levels {
-        std::fs::create_dir_all(&absolute.join("initial"))?;
+        std::fs::create_dir_all(absolute.join("initial"))?;
     }
 
     // Build mesh

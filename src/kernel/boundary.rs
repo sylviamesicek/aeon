@@ -128,9 +128,7 @@ pub fn is_boundary_compatible<const N: usize, B: BoundaryConds<N>>(
     boundary: &FaceArray<N, BoundaryClass>,
     conditions: &B,
 ) -> bool {
-    Face::iterate()
-        .map(|face| conditions.kind(face).class() == boundary[face])
-        .all(|x| x)
+    Face::iterate().all(|face| conditions.kind(face).class() == boundary[face])
 }
 
 /// A generalization of `Condition<N>` for a coupled systems of scalar fields.

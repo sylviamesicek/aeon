@@ -83,7 +83,7 @@ impl<'a> SolverCallback<1> for HorizonCallback<'a> {
         _output: ImageRef,
         iteration: usize,
     ) -> Result<(), Self::Error> {
-        if iteration % 100 != 0 {
+        if !iteration.is_multiple_of(100) {
             return Ok(());
         }
 
@@ -91,11 +91,11 @@ impl<'a> SolverCallback<1> for HorizonCallback<'a> {
         let radius = input.channel(0);
 
         self.positions.resize(surface.num_nodes(), [0.0; 2]);
-        horizon::compute_position_from_radius(surface, radius, &mut self.positions);
+        horizon::compute_position_from_radius(surface, radius, self.positions);
 
         let mut checkpoint = Checkpoint::default();
-        checkpoint.attach_mesh(&surface);
-        checkpoint.set_embedding(&self.positions);
+        checkpoint.attach_mesh(surface);
+        checkpoint.set_embedding(self.positions);
         checkpoint.save_field("radius", radius);
         checkpoint.export_vtu(
             self.output.join("horizons").join(format!("horizon{i}.vtu")),
@@ -125,8 +125,8 @@ pub fn schwarzschild(matches: &ArgMatches) -> eyre::Result<()> {
 
     // Create output directory
     std::fs::create_dir_all(&output)?;
-    std::fs::create_dir_all(&output.join("initial"))?;
-    std::fs::create_dir_all(&output.join("horizons"))?;
+    std::fs::create_dir_all(output.join("initial"))?;
+    std::fs::create_dir_all(output.join("horizons"))?;
 
     let domain = HyperBox {
         origin: [0., 0.],
@@ -237,7 +237,7 @@ pub fn schwarzschild(matches: &ArgMatches) -> eyre::Result<()> {
     checkpoint.attach_mesh(&mesh);
     save_image(&mut checkpoint, system.as_ref());
     checkpoint.export_vtu(
-        output.join(format!("schwarzschild.vtu")),
+        output.join("schwarzschild.vtu"),
         ExportVtuConfig {
             title: "schwarzschild".into(),
             ghost: false,

@@ -17,8 +17,7 @@ pub struct Element<const N: usize> {
     width: usize,
     /// Grid of points within element.
     grid: Vec<f64>,
-    /// Positions of points within element
-    /// after refinement
+    /// Positions of points within element after refinement
     grid_refined: Vec<f64>,
     /// Interpolation stencils.
     stencils: Mat<f64>,
@@ -144,7 +143,7 @@ impl<const N: usize> Element<N> {
     /// Iterates over diagonal detail coefficients in a wavelet representation of this element,
     /// ignoring elements within a `buffer` around the edge of the refined support.
     pub fn diagonal_int_indices(&self, buffer: usize) -> impl Iterator<Item = [usize; N]> {
-        debug_assert!(buffer % 2 == 0);
+        debug_assert!(buffer.is_multiple_of(2));
 
         IndexSpace::new([self.width - buffer; N])
             .iter()

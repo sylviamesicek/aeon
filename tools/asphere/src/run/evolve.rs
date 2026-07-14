@@ -1,3 +1,4 @@
+#[allow(clippy::needless_range_loop)]
 use crate::{
     run::{SimulationInfo, Status, Subrun, config::Config},
     system::{
@@ -68,7 +69,7 @@ pub fn evolve_data_full(
 
     // Path for initial visualization data.
     if config.visualize.save_evolve || config.diagnostic.save_evolve {
-        std::fs::create_dir_all(&absolute.join("evolve"))?;
+        std::fs::create_dir_all(absolute.join("evolve"))?;
     }
 
     let mut integrator = Integrator::new(Method::RK4KO6(config.evolve.dissipation));
@@ -386,7 +387,7 @@ pub fn evolve_data_full(
             system.resize(mesh.num_nodes());
             mesh.transfer_system(
                 4,
-                ImageRef::from_storage(&scratch, NUM_CHANNELS),
+                ImageRef::from_storage(scratch, NUM_CHANNELS),
                 system.as_mut(),
             );
 

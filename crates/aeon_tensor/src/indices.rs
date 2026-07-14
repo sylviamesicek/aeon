@@ -155,9 +155,7 @@ impl<const N: usize> TensorIndex<N, 2> for Sym {
         // Make sure numbers are
         if col > row {
             // Swap col and row
-            let tmp = col;
-            col = row;
-            row = tmp;
+            std::mem::swap(&mut col, &mut row)
         }
 
         let row_offset = (row * (row + 1)) / 2; // Use gaussian addition to find row offset

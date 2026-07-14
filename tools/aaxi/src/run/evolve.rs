@@ -230,6 +230,7 @@ impl<'a> Function<2> for FieldDerivs<'a> {
             output.channel_mut(SHIFTR_CH)[index] = derivs.shiftr_t;
             output.channel_mut(SHIFTZ_CH)[index] = derivs.shiftz_t;
 
+            #[allow(clippy::needless_range_loop)]
             for i in 0..num_scalar_fields {
                 let derivs = &scalar_field_derivs[i];
                 output.channel_mut(phi_ch(i))[index] = derivs.phi;
@@ -856,10 +857,9 @@ pub fn evolve_data(
             let mut checkpoint = Checkpoint::default();
             checkpoint.attach_mesh(&mesh);
             checkpoint.save_image("Data", fields.as_ref());
-            checkpoint.export_dat(&output.join("cache").join(format!("evolve.dat")))?;
+            checkpoint.export_dat(&output.join("cache").join("evolve.dat"))?;
 
-            let mut checkpoint_info =
-                File::create(output.join("cache").join(format!("evolve.toml")))?;
+            let mut checkpoint_info = File::create(output.join("cache").join("evolve.toml"))?;
             checkpoint_info.write_all(
                 toml::to_string_pretty(&CacheInfo {
                     proper_time,
@@ -908,7 +908,7 @@ pub fn evolve_data(
                 HorizonCallback {
                     directory: horizon_dir.as_path(),
                     positions: &mut search_positions,
-                    config: &config,
+                    config,
                     pb: pb.as_mut(),
                 },
                 surface_radius,
@@ -1046,8 +1046,8 @@ pub fn evolve_data(
 
     // Print status of run
     match status {
-        Status::Disperse => log::info!("{}", style(format!("Status: system disperses")).cyan()),
-        Status::Collapse => log::info!("{}", style(format!("Status: system collapses")).cyan()),
+        Status::Disperse => log::info!("{}", style("Status: system disperses").cyan()),
+        Status::Collapse => log::info!("{}", style("Status: system collapses").cyan()),
     }
 
     log::info!(

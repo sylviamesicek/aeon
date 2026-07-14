@@ -360,7 +360,7 @@ impl<'a> ImageMut<'a> {
         let mut length = 0;
 
         if channels != 0 {
-            assert!(data.len() % channels == 0);
+            assert!(data.len().is_multiple_of(channels));
             length = data.len() / channels;
         }
 
@@ -379,10 +379,7 @@ impl<'a> ImageMut<'a> {
         self.length
     }
 
-    // pub fn len(&self) -> usize {
-    //     self.length * self.channels
-    // }
-
+    /// Returns true if the image has either no channels or no nodes.
     pub fn is_empty(&self) -> bool {
         self.length == 0 || self.channels == 0
     }
@@ -558,7 +555,7 @@ impl<'short> ReborrowMut<'short> for ImageMut<'_> {
 unsafe impl Send for ImageMut<'_> {}
 unsafe impl Sync for ImageMut<'_> {}
 
-/// An unsafe pointer to a range of a system.
+/// An unsafe pointer to a slice of an image.
 #[derive(Debug, Clone)]
 pub struct ImageShared<'a> {
     ptr: *mut f64,
@@ -575,10 +572,7 @@ impl ImageShared<'_> {
         self.length
     }
 
-    // pub fn len(&self) -> usize {
-    //     self.length * self.channels
-    // }
-
+    /// Returns true if the image has either no channels or no nodes.
     pub fn is_empty(&self) -> bool {
         self.length == 0 || self.num_channels() == 0
     }

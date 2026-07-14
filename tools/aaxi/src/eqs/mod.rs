@@ -1,3 +1,5 @@
+#![allow(clippy::field_reassign_with_default)]
+
 use aeon_tensor::Tensor;
 use aeon_tensor::metric::Space;
 use aeon_tensor::metric::d2::{

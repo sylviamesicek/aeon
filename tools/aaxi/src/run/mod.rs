@@ -77,12 +77,12 @@ pub fn run_simulation(config: &Config, clobber: bool) -> eyre::Result<Status> {
     // ***********************************
     // Initial data
 
-    let (mesh, system, cache) = initial::initial_data(&config)?;
+    let (mesh, system, cache) = initial::initial_data(config)?;
 
     // ************************************
     // Evolve data forwards
 
-    let status = evolve::evolve_data(&config, mesh, system, cache)?;
+    let status = evolve::evolve_data(config, mesh, system, cache)?;
 
     Ok(status)
 }

@@ -74,14 +74,14 @@ impl SolverCallback<2> for Callback {
         output: ImageRef,
         iteration: usize,
     ) -> Result<(), Self::Error> {
-        if iteration % 50 != 0 {
+        if iteration % 1000 != 0 {
             return Ok(());
         }
 
-        let i = iteration / 50;
+        let i = iteration / 1000;
 
         let mut checkpoint = Checkpoint::default();
-        checkpoint.attach_mesh(&mesh);
+        checkpoint.attach_mesh(mesh);
         checkpoint.save_field("Solution", input.channel(0));
         checkpoint.save_field("Derivative", output.channel(0));
         checkpoint.export_vtu(
@@ -94,7 +94,7 @@ impl SolverCallback<2> for Callback {
             ExportVtuConfig {
                 title: "poisson".to_string(),
                 ghost: false,
-                stride: ExportStride::PerVertex,
+                stride: ExportStride::PerCell,
             },
         )
     }
@@ -116,6 +116,7 @@ pub fn main() -> eyre::Result<()> {
         2,
         FaceArray::splat(BoundaryClass::OneSided),
     );
+    mesh.refine_global();
     mesh.refine_global();
     mesh.refine_global();
     // Allocate space for system

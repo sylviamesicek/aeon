@@ -196,7 +196,7 @@ fn search_iteration(
             parameter: amplitude,
         },
     )?;
-    return Ok(sim);
+    Ok(sim)
 }
 
 pub trait CommandExt {
@@ -226,7 +226,7 @@ fn double_headed_search<T: PartialEq>(
 ) -> (Option<usize>, Option<usize>) {
     assert!(start != end);
 
-    if values.len() == 0 {
+    if values.is_empty() {
         return (None, None);
     }
 

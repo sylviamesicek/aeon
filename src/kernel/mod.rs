@@ -9,8 +9,8 @@ mod node;
 mod weights;
 
 pub use boundary::{
-    BoundaryClass, BoundaryConds, BoundaryKind, DirichletParams, EmptyConditions, RadiativeParams,
-    ScalarConditions, ImageBoundaryConds, is_boundary_compatible,
+    BoundaryClass, BoundaryConds, BoundaryKind, DirichletParams, EmptyConditions,
+    ImageBoundaryConds, RadiativeParams, ScalarConditions, is_boundary_compatible,
 };
 pub use convolution::{Convolution, Gradient, Hessian};
 pub use element::Element;
@@ -32,6 +32,7 @@ pub enum Border {
 }
 
 impl Border {
+    /// Returns true if the border is near the positive edge and false otherwise.
     pub fn side(self) -> bool {
         match self {
             Border::Negative(_) => false,
@@ -44,10 +45,16 @@ impl Border {
 // Kernel **********************
 // *****************************
 
+/// A weighted kernel that can be applied to a field, often to compute derivatives
+/// or perform interpolation
 pub trait Kernel {
+    /// How far does the kernel's edge extend?
     fn border_width(&self) -> usize;
+    /// Weights for the kernel on the interior of the domain, with equal supports on either side.
     fn interior(&self) -> &[f64];
+    /// Weights for kernel near the boundary of domain.
     fn free(&self, border: Border) -> &[f64];
+    /// A scale factor depending on the physical spacing of the support nodes of the field.
     fn scale(&self, spacing: f64) -> f64;
 }
 

@@ -73,14 +73,14 @@ impl CellId {
 #[derive(
     Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, serde::Serialize, serde::Deserialize,
 )]
-pub struct GridId<const N: usize> {
+pub struct UniformId<const N: usize> {
     pub level: usize,
     /// Position on `level`-th uniform grid.
     #[serde(with = "crate::array")]
     pub position: [usize; N],
 }
 
-impl<const N: usize> GridId<N> {
+impl<const N: usize> UniformId<N> {
     /// Does self.position fit into the uniform grid at level self.level
     pub fn is_valid(self) -> bool {
         debug_assert!(self.level < 64);
@@ -88,9 +88,29 @@ impl<const N: usize> GridId<N> {
         let max_grid_position = 1usize << self.level;
         self.position.iter().all(|&i| i < max_grid_position)
     }
+
+    /// Returns true if this uniform index contains a more refined index.
+    pub fn contains(self, other: Self) -> bool {
+        if other.level < self.level {
+            return false;
+        }
+
+        let diff = other.level - self.level;
+
+        (0..N)
+            .into_iter()
+            .all(|axis| (other.position[axis] >> diff) == self.position[axis])
+    }
+
+    pub fn coarsened(self) -> Self {
+        Self {
+            level: self.level - 1,
+            position: std::array::from_fn(|axis| self.position[axis] >> 1),
+        }
+    }
 }
 
-impl<const N: usize> DataSize for GridId<N> {
+impl<const N: usize> DataSize for UniformId<N> {
     const IS_DYNAMIC: bool = false;
     const STATIC_HEAP_SIZE: usize = 0;
 
@@ -251,13 +271,13 @@ impl<const N: usize> Tree<N> {
     }
 
     /// Returns the zvalue of the given active cell.
-    pub fn leaf_zvalue(&self, active: LeafId) -> &BitSlice<usize, Lsb0> {
-        &self.leaf_values[N * self.leaf_offsets[active.0]..N * self.leaf_offsets[active.0 + 1]]
+    pub fn leaf_zvalue(&self, leaf: LeafId) -> &BitSlice<usize, Lsb0> {
+        &self.leaf_values[N * self.leaf_offsets[leaf.0]..N * self.leaf_offsets[leaf.0 + 1]]
     }
 
-    pub fn leaf_split(&self, active: LeafId, level: usize) -> Split<N> {
+    pub fn leaf_split(&self, leaf: LeafId, level: usize) -> Split<N> {
         Split::pack(array::from_fn(|axis| {
-            self.leaf_zvalue(active)[N * level + axis]
+            self.leaf_zvalue(leaf)[N * level + axis]
         }))
     }
 
@@ -642,12 +662,12 @@ impl<const N: usize> Tree<N> {
     }
 
     /// Computes the cell index corresponding to an active cell.
-    pub fn cell_from_leaf(&self, active: LeafId) -> CellId {
+    pub fn cell_from_leaf(&self, leaf: LeafId) -> CellId {
         debug_assert!(
-            active.0 < self.num_leaves(),
-            "Active cell index is expected to be less that the number of active cells."
+            leaf.0 < self.num_leaves(),
+            "Leaf index is expected to be less that the number of leaves."
         );
-        CellId(self.leaf_to_cell[active.0])
+        CellId(self.leaf_to_cell[leaf.0])
     }
 
     /// Transforms a cell id into a leaf id, returning None if `cell` is
@@ -730,9 +750,27 @@ impl<const N: usize> Tree<N> {
         cell
     }
 
-    /// Returns the cell which owns the given grid point.
-    pub fn cell_from_grid_index(&self, grid: GridId<N>) -> CellId {
-        debug_assert!(grid.is_valid());
+    /// Returns the uniform index corresponding to a cell
+    pub fn uniform_index_from_cell(&self, cell: CellId) -> UniformId<N> {
+        debug_assert!(cell.0 <= self.num_cells());
+
+        let level = self.level(cell);
+        // ZValue of cell stored as [[bool; N]; level]
+        let zvalue = &self.leaf_zvalue(LeafId(self.cells[cell.0].leaf_offset))[0..N * level];
+
+        let mut position = [0usize; N];
+
+        for i in 0..level {
+            for axis in 0..N {
+                position[axis] |= (zvalue[N * i + axis] as usize) << (level - 1 - i);
+            }
+        }
+        UniformId { level, position }
+    }
+
+    /// Returns the cell which owns the given uniform grid point.
+    pub fn cell_from_uniform_index(&self, uniform: UniformId<N>) -> CellId {
+        debug_assert!(uniform.is_valid());
 
         // Start with root.
         let mut cell = CellId(0);
@@ -745,16 +783,66 @@ impl<const N: usize> Tree<N> {
             position = array::from_fn(|i| 2 * position[i]);
             // If we have progressed so far that this child is actually more refined than the grid,
             // just return the most recent cell.
-            if grid.level < level {
+            if uniform.level < level {
                 break;
             }
-            debug_assert!(grid.level >= level);
+            debug_assert!(uniform.level >= level);
 
             // Width of child on the uniform grid.
-            let child_width = 1 << (grid.level - level);
+            let child_width = 1 << (uniform.level - level);
 
             let split = Split::<N>::pack(array::from_fn(|i| {
-                grid.position[i] >= (position[i] + 1) * child_width
+                uniform.position[i] >= (position[i] + 1) * child_width
+            }));
+
+            for i in 0..N {
+                position[i] += split.is_set(i) as usize;
+            }
+
+            cell = CellId::child(children, split);
+        }
+
+        cell
+    }
+
+    /// Returns the cell which owns the given uniform grid point. shortening this search
+    /// with an initial guess. Rather than operating in O(log N) time, this approaches
+    /// O(1) if the guess is sufficiently close.
+    pub fn cell_from_uniform_index_cached(
+        &self,
+        uniform: UniformId<N>,
+        mut cache: CellId,
+    ) -> CellId {
+        debug_assert!(uniform.is_valid());
+
+        let mut grid = self.uniform_index_from_cell(cache);
+
+        while !grid.contains(uniform) {
+            cache = self.parent(cache).unwrap();
+            grid = grid.coarsened();
+        }
+
+        // Start with root.
+        let mut cell = cache;
+        let mut position = grid.position;
+
+        while let Some(children) = self.child_offset(cell) {
+            // Level of bottom-left child.
+            let level = self.level(children);
+            // Position of bottom-left child.
+            position = array::from_fn(|i| 2 * position[i]);
+            // If we have progressed so far that this child is actually more refined than the grid,
+            // just return the most recent cell.
+            if uniform.level < level {
+                break;
+            }
+            debug_assert!(uniform.level >= level);
+
+            // Width of child on the uniform grid.
+            let child_width = 1 << (uniform.level - level);
+
+            let split = Split::<N>::pack(array::from_fn(|i| {
+                uniform.position[i] >= (position[i] + 1) * child_width
             }));
 
             for i in 0..N {
@@ -783,9 +871,8 @@ impl<const N: usize> Tree<N> {
         let leaf_offset = LeafId(self.cells[cell.0].leaf_offset);
         debug_assert!(self.leaf_level(leaf_offset) >= self.level(cell));
 
-        let is_periodic = (0..N)
-            .map(|axis| region.side(axis) == Side::Middle || self.periodic[axis])
-            .all(|b| b);
+        let is_periodic =
+            (0..N).all(|axis| region.side(axis) == Side::Middle || self.periodic[axis]);
 
         if cell == CellId::ROOT && is_periodic {
             return Some(CellId::ROOT);
@@ -834,74 +921,33 @@ impl<const N: usize> Tree<N> {
         Some(CellId::child(parent_neighbor_children, neighbor_split))
     }
 
-    /// Returns the neighboring cell in the given region. If the neighboring cell is more refined, this
-    /// returns the cell index of the adjacent cell with `tree.level(neighbor) == tree.level(cell)`.
-    /// If this passes over a nonperiodic boundary then it returns `None`.
-    pub fn _neighbor_region2(&self, cell: CellId, region: Region<N>) -> Option<CellId> {
-        let is_periodic = (0..N)
-            .map(|axis| region.side(axis) == Side::Middle || self.periodic[axis])
-            .all(|b| b);
+    pub fn neighbor_region_alt(&self, cell: CellId, region: Region<N>) -> Option<CellId> {
+        let UniformId { level, position } = self.uniform_index_from_cell(cell);
+        let mut position: [isize; N] = std::array::from_fn(|axis| position[axis] as isize);
 
-        if cell == CellId::ROOT && is_periodic {
-            return Some(CellId::ROOT);
-        }
-
-        // Retrieve first active cell owned by `cell`.
-        let active_index = LeafId(self.cells[cell.0].leaf_offset);
-        // Start at this cell
-        let mut cursor = cell;
-        // While this cell has a parent, recurse downwards and check whether the region is compatible.
-        // If so, break.
-        while let Some(parent) = self.parent(cursor) {
-            cursor = parent;
-            if self
-                .leaf_split(active_index, self.level(cursor))
-                .is_inner_region(region)
-            {
-                break;
+        for axis in 0..N {
+            match region.side(axis) {
+                Side::Left => position[axis] -= 1,
+                Side::Middle => {}
+                Side::Right => position[axis] += 1,
             }
         }
 
-        if self.child_offset(cursor).is_some() {
-            let split = self.leaf_split(active_index, self.level(cursor));
-
-            if split.is_inner_region(region) {
-                cursor = CellId::child(
-                    self.child_offset(cursor).unwrap(),
-                    split.as_outer_region(region),
-                )
-            }
-        }
-
-        // If we are at root, we can proceed to do silliness (i.e. recurse back upwards)
-        if cursor == CellId::ROOT {
-            if !is_periodic {
+        for axis in 0..N {
+            if self.periodic[axis] {
+                position[axis] = position[axis].rem_euclid(1 << level);
+            } else if position[axis] < 0 || position[axis] >= (1 << level) {
                 return None;
             }
-
-            debug_assert!(self.level(cell) > 0);
-
-            let split = self.leaf_split(active_index, self.level(cursor));
-            cursor = CellId::child(
-                self.child_offset(cursor).unwrap(),
-                split.as_inner_region(region),
-            );
         }
 
-        // Recurse back upwards
-        while self.level(cursor) < self.level(cell) {
-            let Some(children) = self.child_offset(cursor) else {
-                break;
-            };
-
-            let split = self
-                .leaf_split(active_index, self.level(cursor))
-                .as_inner_region(region);
-            cursor = CellId::child(children, split);
-        }
-
-        // Algorithm complete
-        Some(cursor)
+        Some(self.cell_from_uniform_index_cached(
+            UniformId {
+                level,
+                position: std::array::from_fn(|axis| position[axis] as usize),
+            },
+            cell,
+        ))
     }
 
     /// Iterates over
@@ -1223,6 +1269,249 @@ mod tests {
             assert_eq!(
                 tree.cell_from_point_cached([x, y], CellId(cache)),
                 tree.cell_from_point([x, y])
+            );
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn cell_from_uniform_index() -> eyre::Result<()> {
+        let mut tree = Tree::<2>::new(HyperBox::UNIT);
+        tree.refine(&[true]);
+        tree.refine(&[true, true, false, true]);
+        tree.refine(&[
+            false, true, false, false, // Bottom left
+            true, false, false, false, // Bottom right
+            false, // Top left
+            false, false, false, false, // Top right
+        ]);
+
+        // Level 0
+        assert_eq!(
+            tree.cell_from_uniform_index(UniformId {
+                level: 0,
+                position: [0, 0]
+            }),
+            CellId(0)
+        );
+
+        // Level 1
+        let level1 = [1, 2, 3, 4];
+        for column in 0..2 {
+            for row in 0..2 {
+                let position = [row, column];
+                let index = column * 2 + row;
+
+                assert_eq!(
+                    tree.cell_from_uniform_index(UniformId { level: 1, position }),
+                    CellId(level1[index])
+                )
+            }
+        }
+
+        // Level 2
+        let level2 = [
+            5, 6, 9, 10, //
+            7, 8, 11, 12, //
+            3, 3, 13, 14, //
+            3, 3, 15, 16, //
+        ];
+
+        for row in 0..4 {
+            for column in 0..4 {
+                let position = [column, row];
+                let index = row * 4 + column;
+
+                assert_eq!(
+                    tree.cell_from_uniform_index(UniformId { level: 2, position }),
+                    CellId(level2[index])
+                )
+            }
+        }
+
+        // #[rustfmt::skip]
+        let level3 = [
+            5, 5, 17, 18, 21, 22, 10, 10, //
+            5, 5, 19, 20, 23, 24, 10, 10, //
+            7, 7, 8, 8, 11, 11, 12, 12, //
+            7, 7, 8, 8, 11, 11, 12, 12, //
+            3, 3, 3, 3, 13, 13, 14, 14, //
+            3, 3, 3, 3, 13, 13, 14, 14, //
+            3, 3, 3, 3, 15, 15, 16, 16, //
+            3, 3, 3, 3, 15, 15, 16, 16, //
+        ];
+
+        for row in 0..8 {
+            for column in 0..8 {
+                let position = [column, row];
+                let index = row * 8 + column;
+
+                assert_eq!(
+                    tree.cell_from_uniform_index(UniformId { level: 3, position }),
+                    CellId(level3[index])
+                )
+            }
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn cell_from_uniform_index_cached() -> eyre::Result<()> {
+        let mut tree = Tree::<2>::new(HyperBox::UNIT);
+        tree.refine(&[true]);
+        tree.refine(&[true, true, true, true]);
+
+        let mut rng = rand::rng();
+
+        for _ in 0..3 {
+            let mut flags: Vec<bool> = std::iter::repeat_with(|| rng.random())
+                .take(tree.num_leaves())
+                .collect();
+            tree.balance_refine_flags(&mut flags);
+            tree.refine(&flags);
+        }
+
+        for _ in 0..50 {
+            let level = rng.random_range(0..tree.num_levels());
+            let max = 1usize << level;
+            let x = rng.random_range(0..max);
+            let y = rng.random_range(0..max);
+
+            let uniform = UniformId {
+                level,
+                position: [x, y],
+            };
+
+            let cache: usize = rng.random_range(0..tree.num_cells());
+
+            assert_eq!(
+                tree.cell_from_uniform_index_cached(uniform, CellId(cache)),
+                tree.cell_from_uniform_index(uniform)
+            );
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn uniform_index_from_cell() -> eyre::Result<()> {
+        let mut tree = Tree::<2>::new(HyperBox::UNIT);
+        tree.refine(&[true]);
+        tree.refine(&[true, true, false, true]);
+        tree.refine(&[
+            false, true, false, false, // Bottom left
+            true, false, false, false, // Bottom right
+            false, // Top left
+            false, false, false, false, // Top right
+        ]);
+
+        let compare = [
+            (0, [0, 0]), // Root
+            // Level 1
+            (1, [0, 0]),
+            (1, [1, 0]),
+            (1, [0, 1]),
+            (1, [1, 1]),
+            // *******************
+            // Level 2
+            (2, [0, 0]),
+            (2, [1, 0]),
+            (2, [0, 1]),
+            (2, [1, 1]),
+            (2, [2, 0]),
+            (2, [3, 0]),
+            (2, [2, 1]),
+            (2, [3, 1]),
+            (2, [2, 2]),
+            (2, [3, 2]),
+            (2, [2, 3]),
+            (2, [3, 3]),
+            // *******************
+            // Level 3
+            (3, [2, 0]),
+            (3, [3, 0]),
+            (3, [2, 1]),
+            (3, [3, 1]),
+            (3, [4, 0]),
+            (3, [5, 0]),
+            (3, [4, 1]),
+            (3, [5, 1]),
+        ];
+
+        for (index, &(level, position)) in compare.iter().enumerate() {
+            assert_eq!(
+                tree.uniform_index_from_cell(CellId(index)),
+                UniformId { level, position }
+            );
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn uniform_index_contains() -> eyre::Result<()> {
+        let base = UniformId {
+            level: 2,
+            position: [2, 3],
+        };
+
+        assert!(base.coarsened().contains(base));
+        assert!(base.contains(UniformId {
+            level: 3,
+            position: [4, 6]
+        }));
+        assert!(base.contains(UniformId {
+            level: 3,
+            position: [5, 6]
+        }));
+        assert!(base.contains(UniformId {
+            level: 3,
+            position: [4, 7]
+        }));
+        assert!(base.contains(UniformId {
+            level: 3,
+            position: [5, 7]
+        }));
+        assert!(!base.contains(UniformId {
+            level: 3,
+            position: [6, 7]
+        }));
+
+        assert!(base.contains(UniformId {
+            level: 4,
+            position: [10, 14]
+        }));
+
+        Ok(())
+    }
+
+    #[test]
+    fn neighbor_region_compare() -> eyre::Result<()> {
+        let mut tree = Tree::<2>::new(HyperBox::UNIT);
+        let mut rng = rand::rng();
+        for axis in 0..2 {
+            tree.set_periodic(axis, rng.random());
+        }
+        tree.refine(&[true]);
+        tree.refine(&[true, true, true, true]);
+
+        for _ in 0..4 {
+            let mut flags: Vec<bool> = std::iter::repeat_with(|| rng.random())
+                .take(tree.num_leaves())
+                .collect();
+            tree.balance_refine_flags(&mut flags);
+            tree.refine(&flags);
+        }
+
+        for _ in 0..100 {
+            let region = Region::from_linear(rng.random_range(0..Region::<2>::COUNT));
+            let cell = CellId(rng.random_range(0..tree.num_cells()));
+
+            assert_eq!(
+                tree.neighbor_region(cell, region),
+                tree.neighbor_region_alt(cell, region)
             );
         }
 

@@ -388,7 +388,7 @@ impl<'a> SolverCallback<2> for IterCallback<'a> {
             }
             Spinners::Incremental(interval) => match interval {
                 Interval::Steps { steps } => {
-                    if iteration % steps == 0 {
+                    if iteration.is_multiple_of(*steps) {
                         log::info!(
                             "Initial Relax; levels: {}, iteration: {}",
                             mesh.num_levels(),
@@ -406,14 +406,14 @@ impl<'a> SolverCallback<2> for IterCallback<'a> {
 
         let visualize_interval = self.config.output.initial_relax_interval.unwrap_steps();
 
-        if iteration % visualize_interval != 0 {
+        if !iteration.is_multiple_of(visualize_interval) {
             return Ok(());
         }
 
         let i = iteration / visualize_interval;
 
         let mut checkpoint = Checkpoint::default();
-        checkpoint.attach_mesh(&mesh);
+        checkpoint.attach_mesh(mesh);
         checkpoint.save_field("Solution", input.channel(0));
         checkpoint.save_field("Derivative", output.channel(0));
         checkpoint.export_vtu(
@@ -460,7 +460,7 @@ pub fn initial_data(config: &Config) -> eyre::Result<(Mesh<2>, Image, Option<Cac
         };
 
         // Attempt to load file
-        let Ok(checkpoint) = Checkpoint::<2>::import_dat(&cache.join("evolve.dat")) else {
+        let Ok(checkpoint) = Checkpoint::<2>::import_dat(cache.join("evolve.dat")) else {
             break 'cache;
         };
 
@@ -541,7 +541,7 @@ pub fn initial_data(config: &Config) -> eyre::Result<(Mesh<2>, Image, Option<Cac
         || config.output.initial_levels_vtu
         || config.output.initial_relax_vtu
     {
-        std::fs::create_dir_all(&output.join("initial"))?;
+        std::fs::create_dir_all(output.join("initial"))?;
     }
 
     // ************************************

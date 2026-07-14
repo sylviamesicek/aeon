@@ -3,7 +3,7 @@ use std::convert::Infallible;
 use crate::IRef;
 use crate::geometry::{Face, IndexSpace};
 use crate::image::{ImageMut, ImageRef};
-use crate::kernel::{BoundaryKind, DirichletParams, RadiativeParams, ImageBoundaryConds};
+use crate::kernel::{BoundaryKind, DirichletParams, ImageBoundaryConds, RadiativeParams};
 use crate::mesh::FunctionBorrowMut;
 use datasize::DataSize;
 use reborrow::{Reborrow, ReborrowMut};
@@ -168,8 +168,8 @@ impl HyperRelaxSolver {
                 return Err(HyperRelaxError::NormDiverged);
             }
 
-            if index % 100 == 0 {
-                log::trace!("Relaxed {}k steps, norm: {:.5e}", index / 100, norm);
+            if index % 1000 == 0 {
+                log::trace!("Relaxed {}k steps, norm: {:.5e}", index / 1000, norm);
             }
 
             if norm <= self.tolerance {
@@ -203,7 +203,7 @@ impl HyperRelaxSolver {
                     time_step,
                     ImageMut::from_storage(&mut data, 2 * num_channels),
                 )
-                .map_err(|err| HyperRelaxError::FunctionFailed(err))?;
+                .map_err(HyperRelaxError::FunctionFailed)?;
 
             if index == self.max_steps - 1 {
                 log::error!(
