@@ -7,7 +7,7 @@ use std::f64::consts::PI;
 #[derive(Clone)]
 pub struct SeedConditions;
 
-impl ImageBoundaryConds<2> for SeedConditions {
+impl Boundary<2> for SeedConditions {
     fn kind(&self, _channel: usize, face: Face<2>) -> BoundaryKind {
         if face.side {
             return BoundaryKind::Radiative;
@@ -25,7 +25,7 @@ impl ImageBoundaryConds<2> for SeedConditions {
 struct SeedProjection;
 
 impl Projection<2> for SeedProjection {
-    fn project(&self, [rho, z]: [f64; 2]) -> f64 {
+    fn project(&self, _: usize, [rho, z]: [f64; 2]) -> f64 {
         rho * (-(rho * rho + z * z)).exp()
     }
 }
@@ -58,7 +58,7 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Store system from previous iteration.
     let mut system_prev = Image::new(1, mesh.num_nodes());
-    mesh.project(4, SeedProjection, system_prev.channel_mut(0));
+    mesh.project(SeedProjection, system_prev.channel_mut(0).into());
 
     let mut errors = Vec::new();
 
@@ -70,7 +70,7 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
         );
 
         let mut system = Image::new(1, mesh.num_nodes());
-        mesh.project(4, SeedProjection, system.channel_mut(0));
+        mesh.project(SeedProjection, system.channel_mut(0).into());
         mesh.fill_boundary(4, SeedConditions, system.as_mut());
 
         mesh.flag_wavelets(4, 1e-13, 1e-9, system.as_ref());

@@ -337,7 +337,7 @@ impl<const N: usize> Tree<N> {
     }
 
     /// Fills the map with updated indices after refinement is performed.
-    /// If a cell is refined, this will point to the base cell in that new subdivision.
+    /// If a leaf is refined, this will point to the first leaf in that new subdivision.
     pub fn refine_leaf_index_map(&self, flags: &[bool], map: &mut [LeafId]) {
         assert!(flags.len() == self.num_leaves());
         assert!(map.len() == self.num_leaves());
@@ -355,6 +355,7 @@ impl<const N: usize> Tree<N> {
         }
     }
 
+    /// Performs tree refinement.
     pub fn refine(&mut self, flags: &[bool]) {
         assert!(self.num_leaves() == flags.len());
 

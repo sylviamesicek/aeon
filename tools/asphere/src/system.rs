@@ -1,6 +1,6 @@
 use crate::run::config::{ScalarFieldProfile, Smooth};
 use aeon::{
-    kernel::{Interpolation, ScalarConditions},
+    kernel::Interpolation,
     mesh::{Gaussian, TanH},
     prelude::*,
 };
@@ -28,7 +28,7 @@ pub fn save_image(checkpoint: &mut Checkpoint<1>, image: ImageRef) {
 #[derive(Clone)]
 pub struct FieldConditions;
 
-impl ImageBoundaryConds<1> for FieldConditions {
+impl Boundary<1> for FieldConditions {
     fn kind(&self, channel: usize, face: Face<1>) -> BoundaryKind {
         if face.side {
             BoundaryKind::Radiative
@@ -53,8 +53,8 @@ impl ImageBoundaryConds<1> for FieldConditions {
 #[derive(Clone)]
 pub struct SymCondition;
 
-impl BoundaryConds<1> for SymCondition {
-    fn kind(&self, face: Face<1>) -> BoundaryKind {
+impl Boundary<1> for SymCondition {
+    fn kind(&self, _channel: usize, face: Face<1>) -> BoundaryKind {
         if face.side {
             BoundaryKind::Radiative
         } else {
@@ -62,7 +62,7 @@ impl BoundaryConds<1> for SymCondition {
         }
     }
 
-    fn radiative(&self, _position: [f64; 1]) -> RadiativeParams {
+    fn radiative(&self, _channel: usize, _position: [f64; 1]) -> RadiativeParams {
         RadiativeParams {
             target: 0.0,
             speed: 1.0,
@@ -74,8 +74,8 @@ impl BoundaryConds<1> for SymCondition {
 #[derive(Clone)]
 pub struct AntiSymCondition;
 
-impl BoundaryConds<1> for AntiSymCondition {
-    fn kind(&self, face: Face<1>) -> BoundaryKind {
+impl Boundary<1> for AntiSymCondition {
+    fn kind(&self, _channel: usize, face: Face<1>) -> BoundaryKind {
         if face.side {
             BoundaryKind::Radiative
         } else {
@@ -83,7 +83,7 @@ impl BoundaryConds<1> for AntiSymCondition {
         }
     }
 
-    fn radiative(&self, _position: [f64; 1]) -> RadiativeParams {
+    fn radiative(&self, _channel: usize, _position: [f64; 1]) -> RadiativeParams {
         RadiativeParams {
             target: 0.0,
             speed: 1.0,
@@ -156,8 +156,8 @@ pub fn solve_constraints(mesh: &mut Mesh<1>, system: ImageMut) {
     let phi = unsafe { shared.channel_mut(PHI_CH) };
     let pi = unsafe { shared.channel_mut(PI_CH) };
 
-    mesh.fill_boundary(4, ScalarConditions(AntiSymCondition), phi.into());
-    mesh.fill_boundary(4, ScalarConditions(SymCondition), pi.into());
+    mesh.fill_boundary(4, AntiSymCondition, phi.into());
+    mesh.fill_boundary(4, SymCondition, pi.into());
 
     let conformal = unsafe { shared.channel_mut(CONFORMAL_CH) };
     let lapse = unsafe { shared.channel_mut(LAPSE_CH) };
@@ -214,7 +214,7 @@ pub fn solve_constraints(mesh: &mut Mesh<1>, system: ImageMut) {
         conformal_prev = conformal[space.index_from_vertex([cell_size])];
     }
     // Fill ghost nodes.
-    mesh.fill_boundary(4, ScalarConditions(SymCondition), conformal.into());
+    mesh.fill_boundary(4, SymCondition, conformal.into());
 
     // Perform radial quadrature for lapse
     let mut lapse_prev = 1.0 / conformal_prev;
@@ -281,7 +281,7 @@ pub fn solve_constraints(mesh: &mut Mesh<1>, system: ImageMut) {
     }
 
     // Fill lapse ghost nodes
-    mesh.fill_boundary(4, ScalarConditions(SymCondition), lapse.into());
+    mesh.fill_boundary(4, SymCondition, lapse.into());
 }
 
 fn smooth(s: f64, n: f64, r: f64) -> f64 {
@@ -308,7 +308,7 @@ struct GaussGrad {
 }
 
 impl Projection<1> for GaussGrad {
-    fn project(&self, [r]: [f64; 1]) -> f64 {
+    fn project(&self, _: usize, [r]: [f64; 1]) -> f64 {
         let offset = (r - self.center) / self.sigma;
 
         let f = -2.0 * self.amplitude * offset / self.sigma * (-offset * offset).exp();
@@ -328,7 +328,7 @@ struct TanHGrad {
 }
 
 impl Projection<1> for TanHGrad {
-    fn project(&self, [r]: [f64; 1]) -> f64 {
+    fn project(&self, _: usize, [r]: [f64; 1]) -> f64 {
         let offset = (r - self.center) / self.sigma;
         let f = self.amplitude * offset.cosh().powi(-2) / self.sigma;
 
@@ -354,7 +354,6 @@ pub fn intial_data(
             center,
         } => {
             mesh.project(
-                4,
                 GaussGrad {
                     amplitude: amplitude.unwrap(),
                     sigma: sigma.unwrap(),
@@ -362,16 +361,15 @@ pub fn intial_data(
                     spower: smooth.power,
                     sstrength: smooth.strength,
                 },
-                output.channel_mut(PHI_CH),
+                output.channel_mut(PHI_CH).into(),
             );
             mesh.project(
-                4,
                 Gaussian {
                     amplitude: amplitude.unwrap(),
                     sigma: [sigma.unwrap()],
                     center: [center.unwrap()],
                 },
-                output.channel_mut(PSI_CH),
+                output.channel_mut(PSI_CH).into(),
             );
         }
         ScalarFieldProfile::TanH {
@@ -380,7 +378,6 @@ pub fn intial_data(
             center,
         } => {
             mesh.project(
-                4,
                 TanHGrad {
                     amplitude: amplitude.unwrap(),
                     sigma: sigma.unwrap(),
@@ -388,16 +385,15 @@ pub fn intial_data(
                     spower: smooth.power,
                     sstrength: smooth.strength,
                 },
-                output.channel_mut(PHI_CH),
+                output.channel_mut(PHI_CH).into(),
             );
             mesh.project(
-                4,
                 TanH {
                     amplitude: amplitude.unwrap(),
                     sigma: sigma.unwrap(),
                     center: [center.unwrap()],
                 },
-                output.channel_mut(PI_CH),
+                output.channel_mut(PI_CH).into(),
             );
         }
     }

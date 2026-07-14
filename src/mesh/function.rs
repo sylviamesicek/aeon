@@ -103,7 +103,7 @@ pub trait Function<const N: usize> {
 
 /// A projection takes in a position and returns a system of values.
 pub trait Projection<const N: usize> {
-    fn project(&self, position: [f64; N]) -> f64;
+    fn project(&self, channel: usize, position: [f64; N]) -> f64;
 }
 
 /// A Gaussian projection centered on a given point, with an amplitude and a sigma.
@@ -133,7 +133,7 @@ pub struct Gaussian<const N: usize> {
 // }
 
 impl<const N: usize> Projection<N> for Gaussian<N> {
-    fn project(&self, position: [f64; N]) -> f64 {
+    fn project(&self, _: usize, position: [f64; N]) -> f64 {
         let offset: [_; N] =
             core::array::from_fn(|axis| (position[axis] - self.center[axis]) / self.sigma[axis]);
         let r2: f64 = offset.map(|v| v * v).iter().sum();
@@ -149,7 +149,7 @@ pub struct TanH<const N: usize> {
 }
 
 impl<const N: usize> Projection<N> for TanH<N> {
-    fn project(&self, position: [f64; N]) -> f64 {
+    fn project(&self, _: usize, position: [f64; N]) -> f64 {
         let offset =
             core::array::from_fn::<_, N, _>(|axis| (position[axis] - self.center[axis]).powi(2))
                 .iter()

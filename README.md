@@ -7,7 +7,11 @@
 
 Aeon Toolkit is a collection of crates for solving N-dimensional elliptic and hyperbolic PDEs using the Finite Difference Method (FDM) and Wavelet Adaptive Mesh Refinement (WAMR). Though designed for a wide range of problems, `aeon-tk` is specifically tailored for problems in Numerical Relativity, and includes reference cli tools for simulating collapsing black holes in spherical and axisymmetry.  
 
-See the [`examples/`](https://github.com/sylviamesicek/aeon/tree/master/examples) directory for self-contained programs applying the toolkit to common PDEs and demonstrating various functions of the codebase. For examples of complex applications built using `aeon-tk`, go to the [`tools/`](https://github.com/sylviamesicek/aeon/tree/master/tools) directory.
+See the [`examples/`](https://github.com/sylviamesicek/aeon/tree/master/examples) directory for self-contained programs applying the toolkit to common PDEs and demonstrating various functions of the codebase. 
+
+For examples of complex applications built using `aeon-tk`, go to the [`tools/`](https://github.com/sylviamesicek/aeon/tree/master/tools) directory. 
+- `tools/asphere`: implements relativistic spherical scalar field collapse 
+- `tools/aaxi`: implements a generic 2d formulation for numerical relativity that can simulate both scalar fields and Brill waves.
 
 ## Capabilities
 
@@ -39,6 +43,17 @@ See the [`examples/`](https://github.com/sylviamesicek/aeon/tree/master/examples
 - Saving and loading checkpoints of meshes and systems
 - Output to `.vtu` files (for viewing in ParaView or VisIt)
 
+## Usage
+To install `aeon-tk` as a dependency to an existing rust project, simply run
+```bash
+cargo add aeon-tk
+```
+In your project you can then import the most import types/functions using the prelude
+```rust
+use aeon_tk::prelude::*;
+```
+
+<!-- 
 ## Tools
 
 The bulk of "interesting GR code" lies in the two binary crates `tools/aaxi` and `tools/asphere`. These implement necessary the initial data and evolution code for axisymmetric spacetimes and spherically symmetric spacetimes respectively. Both codebases pull settings from template config files, which support bash-style variable references to enable run-time injection of arguments. Example config scripts can be found in the `config/` subdirectory.
@@ -82,7 +97,7 @@ cargo build --release --package aaxi --features="mpi"
 one can run a parallel search via
 ```bash
 mpiexec -n 3 ./target/release/aaxi search config/axigauss
-```
+``` -->
 
 <!-- #### MPI
 

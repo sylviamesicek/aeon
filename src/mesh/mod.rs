@@ -9,8 +9,8 @@ use crate::geometry::{
     BlockId, Face, FaceArray, FaceMask, HyperBox, LeafId, Split, Tree, TreeBlocks, TreeInterfaces,
     TreeNeighbors, TreeSer,
 };
+use crate::kernel::{Boundary, BoundaryKind, NodeSpace, NodeWindow};
 use crate::kernel::{BoundaryClass, DirichletParams, Element, node_from_vertex};
-use crate::kernel::{BoundaryKind, NodeSpace, NodeWindow, ImageBoundaryConds};
 use crate::prelude::IndexSpace;
 use datasize::DataSize;
 
@@ -309,12 +309,8 @@ impl<const N: usize> Mesh<N> {
 
     /// Produces a block boundary which correctly accounts for
     /// interior interfaces.
-    pub fn block_bcs<B: ImageBoundaryConds<N>>(
-        &self,
-        block: BlockId,
-        bcs: B,
-    ) -> BlockBoundaryConds<N, B> {
-        BlockBoundaryConds {
+    pub fn block_bcs<B: Boundary<N>>(&self, block: BlockId, bcs: B) -> BlockBoundary<N, B> {
+        BlockBoundary {
             inner: bcs,
             physical_boundary_flags: self.block_physical_boundary_flags(block),
         }
@@ -963,15 +959,13 @@ impl<const N: usize> From<MeshSer<N>> for Mesh<N> {
 }
 
 #[derive(Clone, Debug)]
-pub struct BlockBoundaryConds<const N: usize, I> {
+pub struct BlockBoundary<const N: usize, I> {
     inner: I,
     /// Physical boundary mask for various faces.
     physical_boundary_flags: FaceMask<N>,
 }
 
-impl<const N: usize, I: ImageBoundaryConds<N>> ImageBoundaryConds<N>
-    for BlockBoundaryConds<N, I>
-{
+impl<const N: usize, I: Boundary<N>> Boundary<N> for BlockBoundary<N, I> {
     fn kind(&self, channel: usize, face: Face<N>) -> BoundaryKind {
         if self.physical_boundary_flags.is_set(face) {
             self.inner.kind(channel, face)

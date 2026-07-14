@@ -3,10 +3,10 @@ use std::{array, ops::Range};
 
 use crate::geometry::{BlockId, Face, FaceMask, IndexSpace};
 use crate::image::ImageShared;
-use crate::kernel::{is_boundary_compatible, Derivative, Dissipation, Kernel, SecondDerivative, ImageBoundaryConds};
+use crate::kernel::{is_boundary_compatible, Derivative, Dissipation, Kernel, SecondDerivative, Boundary};
 use crate::{
     kernel::{
-        BoundaryConds as _, BoundaryKind, Hessian, NodeSpace, node_from_vertex, vertex_from_node,
+        BoundaryKind, Hessian, NodeSpace, node_from_vertex, vertex_from_node,
     },
 };
 use reborrow::{Reborrow, ReborrowMut as _};
@@ -125,32 +125,8 @@ impl<'store, const N: usize, const ORDER: usize> Engine<N> for FdIntEngine<'stor
     }
 }
 
-/// Transforms a projection into a function.
-#[derive(Clone)]
-struct ProjectionAsFunction<P>(P);
-
-impl<const N: usize, P: Projection<N>> Function<N> for ProjectionAsFunction<P> {
-    type Error = Infallible;
-
-    fn evaluate(
-        &self,
-        engine: impl Engine<N>,
-        _input: ImageRef,
-        mut output: ImageMut,
-    ) -> Result<(), Infallible> {
-        let dest = output.channel_mut(0);
-
-        for vertex in IndexSpace::new(engine.vertex_size()).iter() {
-            let index = engine.index_from_vertex(vertex);
-            dest[index] = self.0.project(engine.position(vertex))
-        }
-
-        Ok(())
-    }
-}
-
 impl<const N: usize> Mesh<N> {
-    /// Applies the projection to `source`, and stores the result in `dest`.
+    /// Applies the function to `source`, and stores the result in `dest`.
     pub fn evaluate<P: Function<N> + Sync>(
         &mut self,
         order: usize,
@@ -288,7 +264,7 @@ impl<const N: usize> Mesh<N> {
     /// Applies an operator to a system in place, enforcing both strong and weak boundary conditions
     /// and running necessary preprocessing.
     pub fn apply<
-        C: ImageBoundaryConds<N> + Sync,
+        C: Boundary<N> + Sync,
         P: Function<N> + Sync,
     >(
         &mut self,
@@ -301,13 +277,7 @@ impl<const N: usize> Mesh<N> {
         P::Error: Send,
     {
         assert_eq!(f.num_nodes(), self.num_nodes());
-
-        for field in f.channels() {
-            assert!(
-                is_boundary_compatible(&self.boundary, &bcs.channel(field)),
-                "Boundary Conditions incompatible with set boundary classes"
-            )
-        }
+        assert!(is_boundary_compatible(&self.boundary, &bcs, f.num_channels()), "Boundary Conditions incompatible with set boundary classes");
 
         // Strong boundary condition
         self.fill_boundary(order, bcs.clone(), f.rb_mut());
@@ -378,23 +348,22 @@ impl<const N: usize> Mesh<N> {
                 // Weak boundary conditions.
                 for face in Face::<N>::iterate() {
                     for field in f.channels() {
-                        let boundary = bcs.channel(field);
                         let source = block_source.channel(field);
                         let dest = block_dest.channel_mut(field);
 
                         // Apply weak dirichlet boundary conditions
-                        if boundary.kind(face) == BoundaryKind::WeakDirichlet {
+                        if bcs.kind(field, face) == BoundaryKind::WeakDirichlet {
                             for node in space.face_window_disjoint(face) {
                                 let index = space.index_from_node(node);
                                 let position = space.position(node);
-                                let dirichlet = boundary.dirichlet(position);
+                                let dirichlet = bcs.dirichlet(field, position);
                                 dest[index] =
                                     dirichlet.strength * (dirichlet.target - source[index])
                             }
                         }
 
                         // Apply radiative condition
-                        if boundary.kind(face) != BoundaryKind::Radiative {
+                        if bcs.kind(field, face) != BoundaryKind::Radiative {
                             continue;
                         }
 
@@ -423,13 +392,13 @@ impl<const N: usize> Mesh<N> {
 
                                     // Find innter vertex for approximating higher order r dependence
                                     for axis in 0..N {
-                                        if boundary.kind(Face::negative(axis)) == BoundaryKind::Radiative
+                                        if bcs.kind(field, Face::negative(axis)) == BoundaryKind::Radiative
                                             && vertex[axis] == 0
                                         {
                                             inner[axis] += 1;
                                         }
                                     
-                                        if boundary.kind(Face::positive(axis)) == BoundaryKind::Radiative
+                                        if bcs.kind(field, Face::positive(axis)) == BoundaryKind::Radiative
                                             && vertex[axis] == engine.vertex_size()[axis] - 1
                                         {
                                             inner[axis] -= 1;
@@ -441,7 +410,7 @@ impl<const N: usize> Mesh<N> {
                                     let inner_index = engine.index_from_vertex(inner);
                                 
                                     // Get condition parameters.
-                                    let params = boundary.radiative(position);
+                                    let params = bcs.radiative(field, position);
                                     // Inner R dependence.
                                     let mut inner_advection = source[inner_index] - params.target;
                                 
@@ -497,18 +466,40 @@ impl<const N: usize> Mesh<N> {
     /// Applies a projection and stores the result in the destination vector.
     pub fn project<P: Projection<N> + Sync>(
         &mut self,
-        order: usize,
         projection: P,
-        dest: &mut [f64],
+        dest: ImageMut,
     ) {
-        assert_eq!(dest.len(), self.num_nodes());
-        self.evaluate(
-            order,
-            ProjectionAsFunction(projection),
-            ImageRef::empty(),
-            ImageMut::from(dest),
-        )
-        .unwrap();
+        // assert_eq!(dest.len(), self.num_nodes());
+        // self.evaluate(
+        //     order,
+        //     ProjectionAsFunction(projection),
+        //     ImageRef::empty(),
+        //     ImageMut::from(dest),
+        // )
+        // .unwrap();
+
+        assert!(dest.num_nodes() == self.num_nodes() || dest.num_channels() == 0);
+        assert_eq!(dest.num_nodes(), self.num_nodes());
+        
+        let dest = ImageShared::from(dest);
+
+        self.block_compute(|mesh, _, block| {
+            let space = mesh.block_space(block);
+            let nodes = mesh.block_nodes(block);
+
+            let mut block_dest = unsafe { dest.slice_mut(nodes.clone()) };
+
+            for channel in block_dest.channels() {
+                let channel_dest = block_dest.channel_mut(channel);
+
+                for node in space.full_window() {
+                    let index = space.index_from_node(node);
+                    let position = space.position(node);
+
+                    channel_dest[index] = projection.project(channel, position);
+                }
+            }
+        });
     }
 
     /// Applies the projection to `source`, and stores the result in `dest`.

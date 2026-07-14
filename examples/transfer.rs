@@ -7,7 +7,7 @@ const UPPER: f64 = 1e-6;
 #[derive(Clone)]
 pub struct WaveConditions;
 
-impl ImageBoundaryConds<2> for WaveConditions {
+impl Boundary<2> for WaveConditions {
     fn kind(&self, _channel: usize, _face: Face<2>) -> BoundaryKind {
         BoundaryKind::Radiative
     }
@@ -56,7 +56,7 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         system.resize(mesh.num_nodes());
 
-        mesh.project(4, profile, system.channel_mut(0));
+        mesh.project(profile, system.channel_mut(0).into());
         mesh.fill_boundary(ORDER, WaveConditions, system.as_mut());
 
         mesh.flag_wavelets(4, LOWER, UPPER, system.as_ref());

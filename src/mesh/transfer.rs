@@ -8,7 +8,7 @@ use std::array;
 
 use crate::{
     image::{ImageMut, ImageRef},
-    kernel::ImageBoundaryConds,
+    kernel::Boundary,
     mesh::Mesh,
     shared::SharedSlice,
 };
@@ -166,7 +166,7 @@ impl<const N: usize> Mesh<N> {
 
     /// Enforces strong boundary conditions. This includes strong physical boundary conditions, as well
     /// as handling interior boundaries (same level, coarse-fine, or fine-coarse).
-    pub fn fill_boundary<BCs: ImageBoundaryConds<N> + Sync>(
+    pub fn fill_boundary<BCs: Boundary<N> + Sync>(
         &mut self,
         order: usize,
         bcs: BCs,
@@ -180,7 +180,7 @@ impl<const N: usize> Mesh<N> {
     /// Enforces strong boundary conditions, only filling ghost nodes if those nodes are within `extent`
     /// of a physical node. This is useful if one is using Kriss-Olgier dissipation, where dissipation
     /// and derivatives use different order stencils.
-    pub fn fill_boundary_to_extent<C: ImageBoundaryConds<N> + Sync>(
+    pub fn fill_boundary_to_extent<C: Boundary<N> + Sync>(
         &mut self,
         order: usize,
         extent: usize,
@@ -204,12 +204,7 @@ impl<const N: usize> Mesh<N> {
     }
 
     /// Enforces physical boundary conditions near edge of the numerical domain, out to the given extent.
-    fn fill_physical<C: ImageBoundaryConds<N> + Sync>(
-        &mut self,
-        extent: usize,
-        bcs: &C,
-        dest: ImageMut,
-    ) {
+    fn fill_physical<C: Boundary<N> + Sync>(&mut self, extent: usize, bcs: &C, dest: ImageMut) {
         debug_assert!(dest.num_nodes() == self.num_nodes());
 
         let shared: ImageShared = dest.into();
@@ -226,11 +221,8 @@ impl<const N: usize> Mesh<N> {
             let space = self.block_space(block);
             let bcs = self.block_bcs(block, bcs.clone());
 
-            let mut block_system = unsafe { shared.slice_mut(nodes) };
-
-            for field in shared.channels() {
-                space.fill_boundary(extent, bcs.channel(field), block_system.channel_mut(field));
-            }
+            let block_system = unsafe { shared.slice_mut(nodes) };
+            space.fill_boundary(extent, bcs, block_system);
         });
     }
 

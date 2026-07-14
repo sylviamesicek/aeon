@@ -103,37 +103,59 @@ pub struct DirichletParams {
     pub strength: f64,
 }
 
-/// Provides specifics for enforcing boundary conditions for
-/// a particular field.
-pub trait BoundaryConds<const N: usize>: Clone {
-    fn kind(&self, _face: Face<N>) -> BoundaryKind;
+// /// Provides specifics for enforcing boundary conditions for
+// /// a particular field.
+// pub trait BoundaryConds<const N: usize>: Clone {
+//     fn kind(&self, _face: Face<N>) -> BoundaryKind;
 
-    fn radiative(&self, _position: [f64; N]) -> RadiativeParams {
-        RadiativeParams {
-            target: 0.0,
-            speed: 1.0,
-        }
-    }
+//     fn radiative(&self, _position: [f64; N]) -> RadiativeParams {
+//         RadiativeParams {
+//             target: 0.0,
+//             speed: 1.0,
+//         }
+//     }
 
-    fn dirichlet(&self, _position: [f64; N]) -> DirichletParams {
-        DirichletParams {
-            target: 0.0,
-            strength: 1.0,
-        }
-    }
-}
+//     fn dirichlet(&self, _position: [f64; N]) -> DirichletParams {
+//         DirichletParams {
+//             target: 0.0,
+//             strength: 1.0,
+//         }
+//     }
+// }
 
-/// Checks whether a set of boundary conditions are compatible with the given ghost flags.
-pub fn is_boundary_compatible<const N: usize, B: BoundaryConds<N>>(
-    boundary: &FaceArray<N, BoundaryClass>,
-    conditions: &B,
-) -> bool {
-    Face::iterate().all(|face| conditions.kind(face).class() == boundary[face])
-}
+// /// Checks whether a set of boundary conditions are compatible with the given ghost flags.
+// pub fn is_boundary_compatible<const N: usize, B: BoundaryConds<N>>(
+//     boundary: &FaceArray<N, BoundaryClass>,
+//     conditions: &B,
+// ) -> bool {
+//     Face::iterate().all(|face| conditions.kind(face).class() == boundary[face])
+// }
 
-/// A generalization of `Condition<N>` for a coupled systems of scalar fields.
-pub trait ImageBoundaryConds<const N: usize>: Clone {
-    fn kind(&self, channel: usize, _face: Face<N>) -> BoundaryKind;
+// /// A generalization of `Condition<N>` for a coupled systems of scalar fields.
+// pub trait ImageBoundaryConds<const N: usize>: Clone {
+//     fn kind(&self, channel: usize, _face: Face<N>) -> BoundaryKind;
+
+//     fn radiative(&self, _channel: usize, _position: [f64; N]) -> RadiativeParams {
+//         RadiativeParams {
+//             target: 0.0,
+//             speed: 1.0,
+//         }
+//     }
+
+//     fn dirichlet(&self, _channel: usize, _position: [f64; N]) -> DirichletParams {
+//         DirichletParams {
+//             target: 0.0,
+//             strength: 1.0,
+//         }
+//     }
+
+//     // fn channel(&self, channel: usize) -> ChannelBoundaryConds<N, Self> {
+//     //     ChannelBoundaryConds::new(self.clone(), channel)
+//     // }
+// }
+
+pub trait Boundary<const N: usize>: Clone {
+    fn kind(&self, channel: usize, face: Face<N>) -> BoundaryKind;
 
     fn radiative(&self, _channel: usize, _position: [f64; N]) -> RadiativeParams {
         RadiativeParams {
@@ -148,86 +170,92 @@ pub trait ImageBoundaryConds<const N: usize>: Clone {
             strength: 1.0,
         }
     }
-
-    fn channel(&self, channel: usize) -> ChannelBoundaryConds<N, Self> {
-        ChannelBoundaryConds::new(self.clone(), channel)
-    }
 }
 
-/// Transfers a set of `Conditions<N>` into a single `Condition<N>` by only applying the set of conditions
-/// to a single field.
-pub struct ChannelBoundaryConds<const N: usize, C> {
-    conditions: C,
-    channel: usize,
+pub fn is_boundary_compatible<const N: usize, B: Boundary<N>>(
+    boundary: &FaceArray<N, BoundaryClass>,
+    conditions: &B,
+    num_channels: usize,
+) -> bool {
+    (0..num_channels).all(|channel| {
+        Face::iterate().all(|face| conditions.kind(channel, face).class() == boundary[face])
+    })
 }
 
-impl<const N: usize, C: ImageBoundaryConds<N>> ChannelBoundaryConds<N, C> {
-    pub const fn new(conditions: C, channel: usize) -> Self {
-        Self {
-            channel,
-            conditions,
-        }
-    }
-}
+// /// Transfers a set of `Conditions<N>` into a single `Condition<N>` by only applying the set of conditions
+// /// to a single field.
+// pub struct ChannelBoundaryConds<const N: usize, C> {
+//     conditions: C,
+//     channel: usize,
+// }
 
-impl<const N: usize, C: ImageBoundaryConds<N>> Clone for ChannelBoundaryConds<N, C> {
-    fn clone(&self) -> Self {
-        Self {
-            conditions: self.conditions.clone(),
-            channel: self.channel,
-        }
-    }
-}
+// impl<const N: usize, C: ImageBoundaryConds<N>> ChannelBoundaryConds<N, C> {
+//     pub const fn new(conditions: C, channel: usize) -> Self {
+//         Self {
+//             channel,
+//             conditions,
+//         }
+//     }
+// }
 
-impl<const N: usize, C: ImageBoundaryConds<N>> BoundaryConds<N> for ChannelBoundaryConds<N, C> {
-    fn kind(&self, face: Face<N>) -> BoundaryKind {
-        self.conditions.kind(self.channel, face)
-    }
+// impl<const N: usize, C: ImageBoundaryConds<N>> Clone for ChannelBoundaryConds<N, C> {
+//     fn clone(&self) -> Self {
+//         Self {
+//             conditions: self.conditions.clone(),
+//             channel: self.channel,
+//         }
+//     }
+// }
 
-    fn radiative(&self, position: [f64; N]) -> RadiativeParams {
-        self.conditions.radiative(self.channel, position)
-    }
+// impl<const N: usize, C: ImageBoundaryConds<N>> BoundaryConds<N> for ChannelBoundaryConds<N, C> {
+//     fn kind(&self, face: Face<N>) -> BoundaryKind {
+//         self.conditions.kind(self.channel, face)
+//     }
 
-    fn dirichlet(&self, position: [f64; N]) -> DirichletParams {
-        self.conditions.dirichlet(self.channel, position)
-    }
-}
+//     fn radiative(&self, position: [f64; N]) -> RadiativeParams {
+//         self.conditions.radiative(self.channel, position)
+//     }
+
+//     fn dirichlet(&self, position: [f64; N]) -> DirichletParams {
+//         self.conditions.dirichlet(self.channel, position)
+//     }
+// }
 
 // ****************************
 // Specializations ************
 // ****************************
 
-/// Transforms a single condition into a set of `Conditions<N>` where `Self::System = Scalar`.
+// /// Transforms a single condition into a set of `Conditions<N>` where `Self::System = Scalar`.
+// #[derive(Clone)]
+// pub struct ScalarConditions<I>(pub I);
+
+// impl<I> ScalarConditions<I> {
+//     pub const fn new(inner: I) -> Self {
+//         Self(inner)
+//     }
+// }
+
+// impl<const N: usize, I: BoundaryConds<N>> ImageBoundaryConds<N> for ScalarConditions<I> {
+//     fn kind(&self, channel: usize, face: Face<N>) -> BoundaryKind {
+//         debug_assert!(channel == 0);
+//         self.0.kind(face)
+//     }
+
+//     fn radiative(&self, channel: usize, position: [f64; N]) -> RadiativeParams {
+//         debug_assert!(channel == 0);
+//         self.0.radiative(position)
+//     }
+
+//     fn dirichlet(&self, channel: usize, position: [f64; N]) -> DirichletParams {
+//         debug_assert!(channel == 0);
+//         self.0.dirichlet(position)
+//     }
+// }
+
 #[derive(Clone)]
-pub struct ScalarConditions<I>(pub I);
+pub struct EmptyBoundary;
 
-impl<I> ScalarConditions<I> {
-    pub const fn new(inner: I) -> Self {
-        Self(inner)
-    }
-}
-
-impl<const N: usize, I: BoundaryConds<N>> ImageBoundaryConds<N> for ScalarConditions<I> {
-    fn kind(&self, channel: usize, face: Face<N>) -> BoundaryKind {
-        debug_assert!(channel == 0);
-        self.0.kind(face)
-    }
-
-    fn radiative(&self, channel: usize, position: [f64; N]) -> RadiativeParams {
-        debug_assert!(channel == 0);
-        self.0.radiative(position)
-    }
-
-    fn dirichlet(&self, channel: usize, position: [f64; N]) -> DirichletParams {
-        debug_assert!(channel == 0);
-        self.0.dirichlet(position)
-    }
-}
-
-#[derive(Clone)]
-pub struct EmptyConditions;
-
-impl<const N: usize> ImageBoundaryConds<N> for EmptyConditions {
+impl<const N: usize> Boundary<N> for EmptyBoundary {
     fn kind(&self, _channel: usize, _face: Face<N>) -> BoundaryKind {
         unreachable!()
     }

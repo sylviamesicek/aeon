@@ -3,7 +3,7 @@ use std::convert::Infallible;
 use crate::IRef;
 use crate::geometry::{Face, IndexSpace};
 use crate::image::{ImageMut, ImageRef};
-use crate::kernel::{BoundaryKind, DirichletParams, ImageBoundaryConds, RadiativeParams};
+use crate::kernel::{Boundary, BoundaryKind, DirichletParams, RadiativeParams};
 use crate::mesh::FunctionBorrowMut;
 use datasize::DataSize;
 use reborrow::{Reborrow, ReborrowMut};
@@ -71,31 +71,31 @@ impl HyperRelaxSolver {
     }
 
     /// Solves a given elliptic system
-    pub fn solve<const N: usize, C: ImageBoundaryConds<N> + Sync, F: Function<N> + Sync>(
+    pub fn solve<const N: usize, C: Boundary<N> + Sync, F: Function<N> + Sync>(
         &mut self,
         mesh: &mut Mesh<N>,
         order: usize,
-        conditions: C,
+        boundary: C,
         deriv: F,
         result: ImageMut,
     ) -> Result<(), HyperRelaxError<F::Error, Infallible>>
     where
         F::Error: Send,
     {
-        self.solve_with_callback(mesh, order, conditions, (), deriv, result)
+        self.solve_with_callback(mesh, order, boundary, (), deriv, result)
     }
 
     /// Solves a given elliptic system, calling the provided callback at each iteration.
     pub fn solve_with_callback<
         const N: usize,
-        C: ImageBoundaryConds<N> + Sync,
+        C: Boundary<N> + Sync,
         F: Function<N> + Sync,
         Call: SolverCallback<N>,
     >(
         &mut self,
         mesh: &mut Mesh<N>,
         order: usize,
-        conditions: C,
+        boundary: C,
         mut callback: Call,
         mut deriv: F,
         mut result: ImageMut,
@@ -139,9 +139,9 @@ impl HyperRelaxSolver {
         for index in 0..self.max_steps {
             mesh.fill_boundary(
                 order,
-                FicticuousBoundaryConds {
+                FicticuousBoundary {
                     dampening: self.dampening,
-                    conditions: conditions.clone(),
+                    conditions: boundary.clone(),
                     channels: num_channels,
                 },
                 ImageMut::from_storage(&mut data, 2 * num_channels),
@@ -152,7 +152,7 @@ impl HyperRelaxSolver {
                 mesh.copy_from_slice(result.rb_mut(), u.rb());
                 mesh.apply(
                     order,
-                    conditions.clone(),
+                    boundary.clone(),
                     FunctionBorrowMut(&mut deriv),
                     result.rb_mut(),
                 )
@@ -180,7 +180,7 @@ impl HyperRelaxSolver {
                     result.rb_mut(),
                     ImageRef::from_storage(&data[..dimension], num_channels),
                 );
-                mesh.fill_boundary(order, conditions, result.rb_mut());
+                mesh.fill_boundary(order, boundary, result.rb_mut());
 
                 return Ok(());
             }
@@ -189,9 +189,9 @@ impl HyperRelaxSolver {
                 .step(
                     mesh,
                     order,
-                    FicticuousBoundaryConds {
+                    FicticuousBoundary {
                         dampening: self.dampening,
-                        conditions: conditions.clone(),
+                        conditions: boundary.clone(),
                         channels: num_channels,
                     },
                     FicticuousDerivs {
@@ -218,22 +218,20 @@ impl HyperRelaxSolver {
             result.rb_mut(),
             ImageRef::from_storage(&data[..dimension], num_channels),
         );
-        mesh.fill_boundary(order, conditions, result.rb_mut());
+        mesh.fill_boundary(order, boundary, result.rb_mut());
 
         Err(HyperRelaxError::ReachedMaxSteps)
     }
 }
 
 #[derive(Clone)]
-struct FicticuousBoundaryConds<C> {
+struct FicticuousBoundary<C> {
     dampening: f64,
     conditions: C,
     channels: usize,
 }
 
-impl<const N: usize, C: ImageBoundaryConds<N>> ImageBoundaryConds<N>
-    for FicticuousBoundaryConds<C>
-{
+impl<const N: usize, C: Boundary<N>> Boundary<N> for FicticuousBoundary<C> {
     fn kind(&self, channel: usize, face: Face<N>) -> BoundaryKind {
         let boundary_kind: BoundaryKind = self.conditions.kind(channel % self.channels, face);
 
@@ -342,7 +340,7 @@ mod tests {
     #[derive(Clone)]
     struct _PoissonConditions;
 
-    impl ImageBoundaryConds<2> for _PoissonConditions {
+    impl Boundary<2> for _PoissonConditions {
         fn kind(&self, _channel: usize, _face: Face<2>) -> BoundaryKind {
             BoundaryKind::StrongDirichlet
         }
@@ -359,7 +357,7 @@ mod tests {
     pub struct PoissonSolution;
 
     impl Projection<2> for PoissonSolution {
-        fn project(&self, [x, y]: [f64; 2]) -> f64 {
+        fn project(&self, _: usize, [x, y]: [f64; 2]) -> f64 {
             (2.0 * consts::PI * x).sin() * (2.0 * consts::PI * y).sin()
         }
     }
@@ -412,7 +410,7 @@ mod tests {
 
         // Write solution vector
         let mut solution = vec![0.0; mesh.num_nodes()];
-        mesh.project(4, PoissonSolution, &mut solution);
+        mesh.project(PoissonSolution, solution.as_mut_slice().into());
 
         let mut solver = HyperRelaxSolver::new();
         solver.adaptive = true;

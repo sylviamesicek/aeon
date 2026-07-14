@@ -125,6 +125,10 @@ path = "examples/transfer.rs"
 name = "poisson"
 path = "examples/poisson.rs"
 
+[[example]]
+name = "projection"
+path = "examples/projection.rs"
+
 [[bench]]
 name = "neighbors"
 harness = false

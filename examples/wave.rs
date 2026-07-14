@@ -23,7 +23,7 @@ const SPEED: [f64; 2] = [1.0, 0.0];
 #[derive(Clone)]
 struct WaveConditions;
 
-impl ImageBoundaryConds<2> for WaveConditions {
+impl Boundary<2> for WaveConditions {
     fn kind(&self, _channel: usize, _face: Face<2>) -> BoundaryKind {
         BoundaryKind::Radiative
     }
@@ -70,7 +70,7 @@ struct AnalyticSolution {
 }
 
 impl Projection<2> for AnalyticSolution {
-    fn project(&self, position: [f64; 2]) -> f64 {
+    fn project(&self, _: usize, position: [f64; 2]) -> f64 {
         let origin: [_; 2] = array::from_fn(|axis| self.speed[axis] * self.time);
         let offset: [_; 2] = array::from_fn(|axis| position[axis] - origin[axis]);
         let r2: f64 = offset.map(|v| v * v).iter().sum();
@@ -114,7 +114,7 @@ pub fn main() -> eyre::Result<()> {
 
         log::trace!("Projecting System");
 
-        mesh.project(4, profile, system.channel_mut(0));
+        mesh.project(profile, system.channel_mut(0).into());
         mesh.fill_boundary(ORDER, WaveConditions, system.as_mut());
 
         log::trace!("Flagging Wavelets");
@@ -207,9 +207,8 @@ pub fn main() -> eyre::Result<()> {
         error.resize(mesh.num_nodes());
 
         mesh.project(
-            4,
             AnalyticSolution { speed: SPEED, time },
-            exact.channel_mut(0),
+            exact.channel_mut(0).into(),
         );
 
         // Fill boundaries

@@ -1,6 +1,6 @@
 use crate::{
     image::{ImageMut, ImageRef, ImageShared},
-    kernel::ImageBoundaryConds,
+    kernel::Boundary,
     mesh::{Function, FunctionBorrowMut, Mesh},
 };
 use datasize::DataSize;
@@ -38,11 +38,11 @@ impl Integrator {
     }
 
     /// Step the integrator forwards in time.
-    pub fn step<const N: usize, C: ImageBoundaryConds<N> + Sync, F: Function<N> + Sync>(
+    pub fn step<const N: usize, B: Boundary<N> + Sync, F: Function<N> + Sync>(
         &mut self,
         mesh: &mut Mesh<N>,
         order: usize,
-        conditions: C,
+        boundary: B,
         mut deriv: F,
         h: f64,
         mut result: ImageMut,
@@ -66,7 +66,7 @@ impl Integrator {
 
                 // First step
                 Self::copy_from(tmp.rb_mut(), result.rb());
-                mesh.apply(order, conditions.clone(), deriv, tmp.rb_mut())?;
+                mesh.apply(order, boundary.clone(), deriv, tmp.rb_mut())?;
                 Self::fused_multiply_add_assign(result, h, tmp.rb());
 
                 Ok(())
@@ -78,14 +78,14 @@ impl Integrator {
                 let mut tmp = ImageMut::from_storage(tmp1, num_channels);
                 let mut update = ImageMut::from_storage(tmp2, num_channels);
 
-                mesh.fill_boundary(order, conditions.clone(), result.rb_mut());
+                mesh.fill_boundary(order, boundary.clone(), result.rb_mut());
 
                 // K1
                 Self::copy_from(tmp.rb_mut(), result.rb());
                 deriv.preprocess(mesh, tmp.rb_mut())?;
                 mesh.apply(
                     order,
-                    conditions.clone(),
+                    boundary.clone(),
                     FunctionBorrowMut(&mut deriv),
                     tmp.rb_mut(),
                 )?;
@@ -93,11 +93,11 @@ impl Integrator {
 
                 // K2
                 Self::fused_multiply_add_dest(tmp.rb_mut(), result.rb(), h / 2.0);
-                mesh.fill_boundary(order, conditions.clone(), tmp.rb_mut());
+                mesh.fill_boundary(order, boundary.clone(), tmp.rb_mut());
                 deriv.preprocess(mesh, tmp.rb_mut())?;
                 mesh.apply(
                     order,
-                    conditions.clone(),
+                    boundary.clone(),
                     FunctionBorrowMut(&mut deriv),
                     tmp.rb_mut(),
                 )?;
@@ -105,11 +105,11 @@ impl Integrator {
 
                 // K3
                 Self::fused_multiply_add_dest(tmp.rb_mut(), result.rb(), h / 2.0);
-                mesh.fill_boundary(order, conditions.clone(), tmp.rb_mut());
+                mesh.fill_boundary(order, boundary.clone(), tmp.rb_mut());
                 deriv.preprocess(mesh, tmp.rb_mut())?;
                 mesh.apply(
                     order,
-                    conditions.clone(),
+                    boundary.clone(),
                     FunctionBorrowMut(&mut deriv),
                     tmp.rb_mut(),
                 )?;
@@ -117,11 +117,11 @@ impl Integrator {
 
                 // K4
                 Self::fused_multiply_add_dest(tmp.rb_mut(), result.rb(), h);
-                mesh.fill_boundary(order, conditions.clone(), tmp.rb_mut());
+                mesh.fill_boundary(order, boundary.clone(), tmp.rb_mut());
                 deriv.preprocess(mesh, tmp.rb_mut())?;
                 mesh.apply(
                     order,
-                    conditions.clone(),
+                    boundary.clone(),
                     FunctionBorrowMut(&mut deriv),
                     tmp.rb_mut(),
                 )?;
@@ -131,7 +131,7 @@ impl Integrator {
                 Self::fused_multiply_add_assign(result.rb_mut(), h, update.rb());
 
                 if let Method::RK4KO6(diss) = self.method {
-                    mesh.fill_boundary_to_extent(order, 3, conditions.clone(), result.rb_mut());
+                    mesh.fill_boundary_to_extent(order, 3, boundary.clone(), result.rb_mut());
                     deriv.preprocess(mesh, result.rb_mut())?;
                     mesh.dissipation::<6>(diss, result.rb_mut());
                 }

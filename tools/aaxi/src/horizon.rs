@@ -215,7 +215,7 @@ impl Clone for ApparentHorizonFinder {
 #[derive(Clone)]
 struct HorizonRadialBoundary;
 
-impl ImageBoundaryConds<1> for HorizonRadialBoundary {
+impl Boundary<1> for HorizonRadialBoundary {
     fn kind(&self, _channel: usize, _face: Face<1>) -> BoundaryKind {
         BoundaryKind::Symmetric
     }

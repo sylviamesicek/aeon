@@ -12,7 +12,7 @@ const UPPER: f64 = 1e-6;
 #[derive(Clone)]
 struct Conditions;
 
-impl ImageBoundaryConds<2> for Conditions {
+impl Boundary<2> for Conditions {
     fn kind(&self, _: usize, _face: Face<2>) -> BoundaryKind {
         BoundaryKind::StrongDirichlet
     }
@@ -133,13 +133,12 @@ pub fn main() -> eyre::Result<()> {
         solution.resize(mesh.num_nodes(), 0.0);
 
         mesh.project(
-            4,
             Gaussian {
                 amplitude: 1.0,
                 sigma: [1.0, 1.0],
                 center: [0., 0.],
             },
-            &mut source,
+            source.as_mut_slice().into(),
         );
         mesh.fill_boundary(ORDER, Conditions, source.as_mut_slice().into());
 

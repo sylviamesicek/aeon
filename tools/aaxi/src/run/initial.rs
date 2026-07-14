@@ -3,7 +3,6 @@ use crate::run::CacheInfo;
 use crate::run::config::{Config, Initial, Logging, ScalarFieldProfile, Source};
 use crate::run::interval::Interval;
 use crate::systems::{self, FieldConditions, save_image};
-use aeon::kernel::ScalarConditions;
 use aeon::prelude::*;
 use aeon::{
     mesh::{Gaussian, Mesh},
@@ -45,8 +44,8 @@ mod garfinkle {
 #[derive(Clone)]
 struct PsiCondition;
 
-impl BoundaryConds<2> for PsiCondition {
-    fn kind(&self, face: Face<2>) -> BoundaryKind {
+impl Boundary<2> for PsiCondition {
+    fn kind(&self, _channel: usize, face: Face<2>) -> BoundaryKind {
         if face.side {
             return BoundaryKind::Radiative;
         }
@@ -54,7 +53,7 @@ impl BoundaryConds<2> for PsiCondition {
         BoundaryKind::Symmetric
     }
 
-    fn radiative(&self, _position: [f64; 2]) -> RadiativeParams {
+    fn radiative(&self, _channel: usize, _position: [f64; 2]) -> RadiativeParams {
         RadiativeParams::lightlike(1.0)
     }
 }
@@ -63,7 +62,7 @@ impl BoundaryConds<2> for PsiCondition {
 #[derive(Clone)]
 struct ContextConditions;
 
-impl ImageBoundaryConds<2> for ContextConditions {
+impl Boundary<2> for ContextConditions {
     fn kind(&self, channel: usize, face: Face<2>) -> BoundaryKind {
         if face.side {
             return BoundaryKind::Radiative;
@@ -87,7 +86,7 @@ impl ImageBoundaryConds<2> for ContextConditions {
 struct SeedProjection<'a>(&'a [Source]);
 
 impl<'a> Projection<2> for SeedProjection<'a> {
-    fn project(&self, [rho, z]: [f64; 2]) -> f64 {
+    fn project(&self, _channel: usize, [rho, z]: [f64; 2]) -> f64 {
         let rho2 = rho * rho;
         let z2 = z * z;
 
@@ -116,7 +115,7 @@ struct SphericalHarmonic20 {
 }
 
 impl Projection<2> for SphericalHarmonic20 {
-    fn project(&self, [_rho, _z]: [f64; 2]) -> f64 {
+    fn project(&self, _channel: usize, [_rho, _z]: [f64; 2]) -> f64 {
         0.0 * self.amplitude + 0.0 * self.scale
     }
 }
@@ -266,9 +265,8 @@ where
 
     // Compute seed values.
     mesh.project(
-        order,
         SeedProjection(sources),
-        context.channel_mut(garfinkle::S_CH),
+        context.channel_mut(garfinkle::S_CH).into(),
     );
 
     // Compute scalar field values.
@@ -279,23 +277,25 @@ where
             match profile {
                 ScalarFieldProfile::Gaussian { amplitude, sigma } => {
                     mesh.project(
-                        order,
                         Gaussian {
                             amplitude: amplitude.unwrap(),
                             sigma: [sigma.0.unwrap(), sigma.1.unwrap()],
                             center: [0.0; 2],
                         },
-                        context.channel_mut(garfinkle::phi_ch(scalar_field_index)),
+                        context
+                            .channel_mut(garfinkle::phi_ch(scalar_field_index))
+                            .into(),
                     );
                 }
                 ScalarFieldProfile::SphericalHarmonic20 { amplitude, scale } => {
                     mesh.project(
-                        order,
                         SphericalHarmonic20 {
                             amplitude: amplitude.unwrap(),
                             scale: scale.unwrap(),
                         },
-                        context.channel_mut(garfinkle::phi_ch(scalar_field_index)),
+                        context
+                            .channel_mut(garfinkle::phi_ch(scalar_field_index))
+                            .into(),
                     );
                 }
             }
@@ -327,7 +327,7 @@ where
     solver.solve_with_callback(
         mesh,
         order,
-        ScalarConditions(PsiCondition),
+        PsiCondition,
         callback,
         Hamiltonian {
             context: context.as_ref(),

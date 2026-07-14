@@ -28,8 +28,7 @@ pub mod prelude {
     };
     pub use crate::image::{Image, ImageMut, ImageRef, ImageShared};
     pub use crate::kernel::{
-        BoundaryClass, BoundaryConds, BoundaryKind, DirichletParams, ImageBoundaryConds,
-        RadiativeParams,
+        Boundary, BoundaryClass, BoundaryKind, DirichletParams, RadiativeParams,
     };
     pub use crate::mesh::{
         Checkpoint, Engine, ExportStride, ExportVtuConfig, Function, Mesh, Projection,

@@ -6,8 +6,9 @@
 use crate::geometry::{
     CartesianIter, Face, FaceArray, HyperBox, IndexSpace, Region, Side, regions,
 };
+use crate::image::ImageMut;
 use crate::kernel::{
-    Border, BoundaryClass, BoundaryConds, BoundaryKind, Convolution, Interpolant, Kernel, Value,
+    Border, Boundary, BoundaryClass, BoundaryKind, Convolution, Interpolant, Kernel, Value,
     boundary::is_boundary_compatible,
 };
 use std::array::{self, from_fn};
@@ -238,70 +239,78 @@ impl<const N: usize> NodeSpace<N> {
 
     /// Set strongly enforced boundary conditions. This enforces parity and dirichlet boundary
     /// conditions on this particular `NodeSpace`.
-    pub fn fill_boundary(&self, extent: usize, cond: impl BoundaryConds<N>, dest: &mut [f64]) {
-        debug_assert!(is_boundary_compatible(&self.boundary, &cond));
+    pub fn fill_boundary(&self, extent: usize, boundary: impl Boundary<N>, mut dest: ImageMut) {
+        debug_assert!(is_boundary_compatible(
+            &self.boundary,
+            &boundary,
+            dest.num_channels()
+        ));
 
-        // Loop over faces
-        for face in Face::<N>::iterate() {
-            // Enforce zeros if boundary condition is odd
-            if cond.kind(face) == BoundaryKind::AntiSymmetric {
-                // Iterate over face
-                for node in self.face_window_disjoint(face) {
-                    // For antisymmetric boundaries we set all values on axis to be 0.
-                    let index = self.index_from_node(node);
-                    dest[index] = 0.0;
+        for channel in dest.channels() {
+            let dest = dest.channel_mut(channel);
+
+            // Loop over faces
+            for face in Face::<N>::iterate() {
+                // Enforce zeros if boundary condition is odd
+                if boundary.kind(channel, face) == BoundaryKind::AntiSymmetric {
+                    // Iterate over face
+                    for node in self.face_window_disjoint(face) {
+                        // For antisymmetric boundaries we set all values on axis to be 0.
+                        let index = self.index_from_node(node);
+                        dest[index] = 0.0;
+                    }
+                }
+
+                if boundary.kind(channel, face) == BoundaryKind::StrongDirichlet {
+                    // Iterate over face
+                    for node in self.face_window_disjoint(face) {
+                        let position = self.position(node);
+                        let index = self.index_from_node(node);
+                        dest[index] = boundary.dirichlet(channel, position).target;
+                    }
                 }
             }
 
-            if cond.kind(face) == BoundaryKind::StrongDirichlet {
-                // Iterate over face
-                for node in self.face_window_disjoint(face) {
-                    let position = self.position(node);
-                    let index = self.index_from_node(node);
-                    dest[index] = cond.dirichlet(position).target;
+            // Loop over regions
+            for region in regions::<N>() {
+                if region == Region::CENTRAL {
+                    continue;
                 }
-            }
-        }
 
-        // Loop over regions
-        for region in regions::<N>() {
-            if region == Region::CENTRAL {
-                continue;
-            }
+                // Nodes to iterate over
+                let window = self.region_window(extent, region);
 
-            // Nodes to iterate over
-            let window = self.region_window(extent, region);
-
-            // Parity boundary conditions
-            let mut parity = true;
-
-            for face in region.adjacent_faces() {
-                // Flip parity if boundary is antisymmetric
-                parity ^= cond.kind(face) == BoundaryKind::AntiSymmetric;
-            }
-
-            let sign = if parity { 1.0 } else { -1.0 };
-
-            for node in window {
-                let mut source = node;
+                // Parity boundary conditions
+                let mut parity = true;
 
                 for face in region.adjacent_faces() {
-                    if !matches!(
-                        cond.kind(face),
-                        BoundaryKind::AntiSymmetric | BoundaryKind::Symmetric
-                    ) {
-                        continue;
-                    }
-
-                    if face.side {
-                        let dist = node[face.axis] - self.size[face.axis] as isize;
-                        source[face.axis] = self.size[face.axis] as isize - dist;
-                    } else {
-                        source[face.axis] = -node[face.axis];
-                    }
+                    // Flip parity if boundary is antisymmetric
+                    parity ^= boundary.kind(channel, face) == BoundaryKind::AntiSymmetric;
                 }
 
-                dest[self.index_from_node(node)] = sign * dest[self.index_from_node(source)];
+                let sign = if parity { 1.0 } else { -1.0 };
+
+                for node in window {
+                    let mut source = node;
+
+                    for face in region.adjacent_faces() {
+                        if !matches!(
+                            boundary.kind(channel, face),
+                            BoundaryKind::AntiSymmetric | BoundaryKind::Symmetric
+                        ) {
+                            continue;
+                        }
+
+                        if face.side {
+                            let dist = node[face.axis] - self.size[face.axis] as isize;
+                            source[face.axis] = self.size[face.axis] as isize - dist;
+                        } else {
+                            source[face.axis] = -node[face.axis];
+                        }
+                    }
+
+                    dest[self.index_from_node(node)] = sign * dest[self.index_from_node(source)];
+                }
             }
         }
     }
