@@ -59,7 +59,7 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
         mesh.project(profile, system.channel_mut(0).into());
         mesh.fill_boundary(WaveConditions, system.as_mut());
 
-        mesh.flag_wavelets(LOWER, UPPER, system.as_ref());
+        mesh.flag_elements(LOWER, UPPER, system.as_ref());
 
         mesh.limit_level_range_flags(1, 10);
         mesh.balance_flags();

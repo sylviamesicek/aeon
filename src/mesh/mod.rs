@@ -263,25 +263,34 @@ impl<const N: usize> Mesh<N> {
     }
 
     /// The range of nodes assigned to a given block.
-    pub fn block_nodes(&self, block: BlockId) -> Range<usize> {
+    pub fn block_global_node_indices(&self, block: BlockId) -> Range<usize> {
         self.blocks.global_node_indices(block)
     }
 
     /// The range of nodes assigned to a given block on the mesh before the most recent refinement.
-    pub(crate) fn old_block_nodes(&self, block: BlockId) -> Range<usize> {
+    pub(crate) fn old_block_global_node_indices(&self, block: BlockId) -> Range<usize> {
         self.old_blocks.global_node_indices(block)
     }
 
     /// Computes the nodespace corresponding to a block.
     pub fn block_space(&self, block: BlockId) -> NodeSpace<N> {
-        let size = self.blocks.size(block);
-        let cell_size = array::from_fn(|axis| size[axis] * self.width);
+        let block_size_in_leaves = self.blocks.size(block);
 
         NodeSpace {
-            size: cell_size,
+            size: array::from_fn(|axis| block_size_in_leaves[axis] * self.width),
             ghost: self.ghost,
             boundary: self.block_boundary_classes(block),
             bounds: self.block_bounds(block),
+        }
+    }
+
+    pub fn block_coarse_space(&self, block: BlockId) -> NodeSpace<N> {
+        let block_size_in_leaves = self.blocks().size(block);
+        NodeSpace {
+            size: block_size_in_leaves.map(|size| size * self.width() / 2),
+            ghost: self.width() / 2,
+            bounds: self.block_bounds(block),
+            boundary: self.block_boundary_classes(block),
         }
     }
 
@@ -469,11 +478,11 @@ impl<const N: usize> Mesh<N> {
     /// Returns true if the given cell is on a boundary that does not contain
     /// ghost nodes. If this is the case we must fall back to a lower order element
     /// error approximation.
-    pub fn cell_needs_coarse_element(&self, cell: LeafId) -> bool {
-        let block = self.blocks.block_from_leaf(cell);
+    pub fn leaf_need_coarse_element(&self, leaf: LeafId) -> bool {
+        let block = self.blocks.block_from_leaf(leaf);
         let block_size = self.blocks.size(block);
         let boundary = self.block_boundary_classes(block);
-        let position = self.blocks.leaf_position(cell);
+        let position = self.blocks.leaf_position(leaf);
 
         for face in Face::iterate() {
             let border = if face.side {
@@ -620,7 +629,7 @@ impl<const N: usize> Mesh<N> {
     /// the mesh.
     pub fn bottom_left_value(&self, src: &[f64]) -> f64 {
         let space = self.block_space(BlockId(0));
-        let nodes = self.block_nodes(BlockId(0));
+        let nodes = self.block_global_node_indices(BlockId(0));
 
         src[nodes][space.index_from_vertex([0; N])]
     }
@@ -633,7 +642,7 @@ impl<const N: usize> Mesh<N> {
             let space = self.block_space(block);
             let size = space.cell_size();
 
-            let data = &src[self.block_nodes(block)];
+            let data = &src[self.block_global_node_indices(block)];
 
             let mut block_result = 0.0;
 
@@ -667,7 +676,7 @@ impl<const N: usize> Mesh<N> {
             let space = self.block_space(block);
             let cell_size = self.blocks.size(block);
 
-            let data = &src[self.block_nodes(block)];
+            let data = &src[self.block_global_node_indices(block)];
 
             for cell in IndexSpace::new(cell_size).iter() {
                 let node_offset: [usize; N] = array::from_fn(|i| self.width * cell[i]);
@@ -707,7 +716,7 @@ impl<const N: usize> Mesh<N> {
 
         for block in self.blocks.iter() {
             let space = self.block_space(block);
-            let data = &src[self.block_nodes(block)];
+            let data = &src[self.block_global_node_indices(block)];
 
             let mut block_result = 0.0f64;
 
@@ -886,7 +895,7 @@ impl<const N: usize> Mesh<N> {
         let block = self.blocks.block_from_leaf(leaf);
         let block_space = self.block_space(block);
         let block_node_origin = self.leaf_node_origin(leaf);
-        let block_node_index_offset = self.block_nodes(block).start;
+        let block_node_index_offset = self.block_global_node_indices(block).start;
 
         for dest_node in
             IndexSpace::<N>::new(array::from_fn(|axis| self.width + edge[axis] as usize))
@@ -966,7 +975,7 @@ impl<const N: usize> Mesh<N> {
         let block = self.blocks.block_from_leaf(leaf);
         let block_space = self.block_space(block);
         let block_node_origin = self.leaf_node_origin(leaf);
-        let block_node_index_offset = self.block_nodes(block).start;
+        let block_node_index_offset = self.block_global_node_indices(block).start;
 
         for dest_offset in IndexSpace::<N>::new(array::from_fn(|axis| {
             current_cell_width + edge[axis] as usize
@@ -1044,14 +1053,10 @@ impl<const N: usize> Mesh<N> {
         let block_boundary_flags = self.blocks().boundary_flags(block);
         let block_level = self.blocks().level(block);
         let block_space = self.block_space(block);
-        let block_source = source.slice(self.block_nodes(block));
+        let block_coarse_space = self.block_coarse_space(block);
+        let block_source = source.slice(self.block_global_node_indices(block));
+        let block_boundary = self.block_bcs(block, boundary);
 
-        let block_coarse_space = NodeSpace {
-            size: block_size_in_leaves.map(|size| size * self.width() / 2),
-            ghost: self.width() / 2,
-            bounds: self.block_bounds(block),
-            boundary: self.block_boundary_classes(block),
-        };
         let block_num_coarse_nodes = block_coarse_space.num_nodes();
 
         debug_assert_eq!(dest.num_nodes(), block_num_coarse_nodes);
@@ -1139,7 +1144,7 @@ impl<const N: usize> Mesh<N> {
                     let neighbor_leaf = self.tree().leaf_from_cell(neighbor_cell).unwrap();
                     let neighbor_block = self.blocks().block_from_leaf(neighbor_leaf);
                     let neighbor_space = self.block_space(neighbor_block);
-                    let neighbor_block_node_offset = self.block_nodes(neighbor_block).start;
+                    let neighbor_block_global_node_offset = self.blocks().global_node_offset(block);
 
                     let mut neighbor_split =
                         self.tree().most_recent_leaf_split(adjacent_leaf).unwrap();
@@ -1157,7 +1162,7 @@ impl<const N: usize> Mesh<N> {
 
                     // We now have the split of the neighbor that we want
                     for offset in coarse_window {
-                        let neighbor_node = neighbor_block_node_offset
+                        let neighbor_node = neighbor_block_global_node_offset
                             + neighbor_space.index_from_vertex(array::from_fn(|axis| {
                                 neighbor_node_origin[axis] + offset[axis]
                             }));
@@ -1174,6 +1179,8 @@ impl<const N: usize> Mesh<N> {
                 }
             }
         }
+
+        block_coarse_space.fill_boundary(self.width() / 2, block_boundary, dest);
     }
 }
 
@@ -1614,7 +1621,7 @@ mod tests {
             let base_leaf = mesh.tree().leaf_from_cell(base_cell).unwrap();
             let base_block = mesh.blocks().block_from_leaf(base_leaf);
             let base_block_space = mesh.block_space(base_block);
-            let base_block_source = source.slice(mesh.block_nodes(base_block));
+            let base_block_source = source.slice(mesh.block_global_node_indices(base_block));
             let base_block_node_origin = mesh.leaf_node_origin(base_leaf);
 
             let mut window = base_space.window();

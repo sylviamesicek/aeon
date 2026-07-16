@@ -363,7 +363,7 @@ pub fn evolve_data_full(
                 // constraint_output_index += 1;
             }
 
-            mesh.flag_wavelets(
+            mesh.flag_elements(
                 config.regrid.coarsen_error,
                 config.regrid.refine_error,
                 system.as_ref(),

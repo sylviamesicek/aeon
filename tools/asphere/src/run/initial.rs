@@ -82,7 +82,7 @@ pub fn initial_data(config: &Config) -> eyre::Result<(Mesh<1>, Image)> {
             return Err(eyre!("failed to refine within perscribed limits"));
         }
 
-        mesh.flag_wavelets(0.0, config.regrid.refine_error, system.as_ref());
+        mesh.flag_elements(0.0, config.regrid.refine_error, system.as_ref());
         mesh.limit_level_range_flags(1, config.limits.max_levels - 1);
         mesh.balance_flags();
 

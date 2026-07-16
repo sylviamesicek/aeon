@@ -147,7 +147,7 @@ impl<const N: usize> Mesh<N> {
 
         self.try_block_compute(|mesh, store, block| {
             let space = mesh.block_space(block);
-            let nodes = mesh.block_nodes(block);
+            let nodes = mesh.block_global_node_indices(block);
 
             let block_source = source.slice(nodes.clone());
             let block_dest = unsafe { dest.slice_mut(nodes.clone()) };
@@ -229,7 +229,7 @@ impl<const N: usize> Mesh<N> {
 
         self.try_block_compute(|mesh, store, block| {
             let space = mesh.block_space(block);
-            let nodes = mesh.block_nodes(block);
+            let nodes = mesh.block_global_node_indices(block);
 
             let block_dest = unsafe { dest.slice_mut(nodes.clone()) };
             let mut block_source =
@@ -288,7 +288,7 @@ impl<const N: usize> Mesh<N> {
 
         self.try_block_compute(|mesh, store, block| {
             let space = mesh.block_space(block);
-            let nodes = mesh.block_nodes(block);
+            let nodes = mesh.block_global_node_indices(block);
             let bcs = mesh.block_bcs(block, bcs.clone());
 
             let mut block_dest = unsafe { f.slice_mut(nodes.clone()) };
@@ -476,7 +476,7 @@ impl<const N: usize> Mesh<N> {
 
         self.block_compute(|mesh, _, block| {
             let space = mesh.block_space(block);
-            let nodes = mesh.block_nodes(block);
+            let nodes = mesh.block_global_node_indices(block);
 
             let mut block_dest = unsafe { dest.slice_mut(nodes.clone()) };
 
@@ -545,7 +545,7 @@ impl<const N: usize> Mesh<N> {
         let dest = SharedSlice::new(dest);
 
         self.block_compute(|mesh, _, block| {
-            let nodes = mesh.block_nodes(block);
+            let nodes = mesh.block_global_node_indices(block);
             let space = mesh.block_space(block);
 
             let spacing = space.spacing();
@@ -610,7 +610,7 @@ impl<const N: usize> Mesh<N> {
 
         self.block_compute(|mesh, _, block| {
             let block_space = mesh.block_space(block);
-            let block_nodes = mesh.block_nodes(block);
+            let block_nodes = mesh.block_global_node_indices(block);
 
             let block_spacings = &spacing_per_vertex[block_nodes.clone()];
             let mut block_dest = unsafe { dest.slice_mut(block_nodes.clone()) };

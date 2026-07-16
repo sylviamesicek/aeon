@@ -161,7 +161,7 @@ pub fn schwarzschild(matches: &ArgMatches) -> eyre::Result<()> {
         .unwrap();
         mesh.fill_boundary(FieldConditions, system.as_mut());
         // Perform wamr
-        mesh.flag_wavelets(1e-13, 1e-6, system.as_ref());
+        mesh.flag_elements(1e-13, 1e-6, system.as_ref());
         mesh.balance_flags();
 
         let mut flag_debug = vec![0; mesh.num_nodes()];

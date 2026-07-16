@@ -74,7 +74,7 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
         mesh.project(SeedProjection, system.channel_mut(0).into());
         mesh.fill_boundary(SeedConditions, system.as_mut());
 
-        mesh.flag_wavelets(1e-13, 1e-9, system.as_ref());
+        mesh.flag_elements(1e-13, 1e-9, system.as_ref());
         mesh.balance_flags();
 
         // Output

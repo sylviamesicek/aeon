@@ -167,7 +167,7 @@ pub fn solve_constraints(mesh: &mut Mesh<1>, system: ImageMut) {
 
     for block in 0..mesh.num_blocks() {
         let space = mesh.block_space(BlockId(block));
-        let nodes = mesh.block_nodes(BlockId(block));
+        let nodes = mesh.block_global_node_indices(BlockId(block));
         // let bounds = mesh.block_bounds(block);
         let spacing = mesh.block_spacing(BlockId(block));
         let cell_size = space.cell_size()[0];
@@ -221,7 +221,7 @@ pub fn solve_constraints(mesh: &mut Mesh<1>, system: ImageMut) {
 
     for block in (0..mesh.num_blocks()).rev() {
         let space = mesh.block_space(BlockId(block));
-        let nodes = mesh.block_nodes(BlockId(block));
+        let nodes = mesh.block_global_node_indices(BlockId(block));
         let spacing = mesh.block_spacing(BlockId(block));
         let cell_size = space.cell_size()[0];
 
@@ -407,7 +407,7 @@ pub fn find_mass(mesh: &Mesh<1>, system: ImageRef) -> f64 {
 
     for block in 0..mesh.num_blocks() {
         let space = mesh.block_space(BlockId(block));
-        let nodes = mesh.block_nodes(BlockId(block));
+        let nodes = mesh.block_global_node_indices(BlockId(block));
 
         let vertex_size = space.vertex_size()[0];
         let a = &system.channel(CONFORMAL_CH)[nodes.clone()];

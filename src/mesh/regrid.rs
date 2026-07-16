@@ -1,11 +1,11 @@
 use std::array;
 
 use rand::Rng;
-use reborrow::ReborrowMut;
+use reborrow::{Reborrow, ReborrowMut};
 
 use crate::geometry::{Face, HyperBox, IndexSpace, LeafId, Region, Side};
 use crate::image::{ImageMut, ImageRef};
-use crate::kernel::NodeSpace;
+use crate::kernel::{Boundary, Interpolation, NodeSpace};
 use crate::{mesh::Mesh, shared::SharedSlice};
 
 impl<const N: usize> Mesh<N> {
@@ -156,7 +156,7 @@ impl<const N: usize> Mesh<N> {
     /// Flags cells for refinement using a wavelet criterion. The system must have filled
     /// boundaries. This function tags any cell that is insufficiently refined to approximate
     /// operators of the given `order` within the range of error.
-    pub fn flag_wavelets(&mut self, lower: f64, upper: f64, data: ImageRef) {
+    pub fn flag_elements(&mut self, lower: f64, upper: f64, data: ImageRef) {
         let buffer = 2 * (self.ghost / 2);
         let support = (self.width + 2 * buffer) / 2;
 
@@ -182,13 +182,13 @@ impl<const N: usize> Mesh<N> {
             let imsrc = store.scratch(support);
             let imdest = store.scratch(support);
 
-            let nodes = mesh.block_nodes(block);
+            let nodes = mesh.block_global_node_indices(block);
             let space = mesh.block_space(block);
 
             let block_system = data.slice(nodes.clone());
 
             for &cell in mesh.blocks.leaves(block) {
-                let is_cell_on_boundary = mesh.cell_needs_coarse_element(cell);
+                let is_cell_on_boundary = mesh.leaf_need_coarse_element(cell);
 
                 // Window of nodes on element.
                 let window = if is_cell_on_boundary {
@@ -245,10 +245,28 @@ impl<const N: usize> Mesh<N> {
         self.replace_element(element_coarse);
     }
 
-    pub fn flag_wavelets2_impl<const ORDER: usize>(
+    pub fn flag_wavelets<B: Boundary<N> + Sync>(
         &mut self,
         lower: f64,
         upper: f64,
+        boundary: B,
+        data: ImageRef,
+    ) {
+        match self.order {
+            2 => self.flag_wavelets_impl::<2, 0, B>(lower, upper, boundary, data),
+            4 => self.flag_wavelets_impl::<4, 2, B>(lower, upper, boundary, data),
+            _ => unimplemented!(
+                "flag_wavelets is unimplemented for wavelet order: {}",
+                self.order
+            ),
+        }
+    }
+
+    pub fn flag_wavelets_impl<const ORDER: usize, const COARSE: usize, B: Boundary<N> + Sync>(
+        &mut self,
+        lower: f64,
+        upper: f64,
+        boundary: B,
         data: ImageRef,
     ) {
         let mut rflags_buf = std::mem::take(&mut self.refine_flags);
@@ -259,139 +277,87 @@ impl<const N: usize> Mesh<N> {
         let cflags = SharedSlice::new(&mut cflags_buf);
 
         self.block_compute(|mesh, store, block| {
-            let block_leaves = mesh.blocks().leaves(block);
-            let block_size_in_leaves = mesh.blocks().size(block);
-            let block_space_in_leaves = IndexSpace::new(block_size_in_leaves);
-            let block_boundary_flags = mesh.blocks().boundary_flags(block);
-            let block_level = mesh.blocks().level(block);
+            let block_coarse_space = mesh.block_coarse_space(block);
             let block_space = mesh.block_space(block);
-            let block_data = data.slice(mesh.block_nodes(block));
+            let block_data = data.slice(mesh.block_global_node_indices(block));
 
-            let block_coarse_space = NodeSpace {
-                size: block_size_in_leaves.map(|size| (size + 2) * mesh.width() / 2),
-                ghost: mesh.width() / 2,
-                bounds: HyperBox::UNIT,
-                boundary: mesh.block_boundary_classes(block),
-            };
-            let block_num_coarse_nodes = block_coarse_space.num_nodes();
-
-            let block_coarse_buffer = store.scratch(block_num_coarse_nodes * data.num_channels());
+            let block_coarse_buffer =
+                store.scratch(block_coarse_space.num_nodes() * data.num_channels());
             let mut block_coarse = ImageMut::from_storage(block_coarse_buffer, data.num_channels());
 
-            let cell_data_buffer = store.scratch((mesh.width() + 1).pow(N as u32));
-            let mut cell_data = ImageMut::from_storage(cell_data_buffer, data.num_channels());
+            let scratch_data_buffer =
+                store.scratch(mesh.num_nodes_per_cell() * data.num_channels());
+            let mut scratch_data = ImageMut::from_storage(scratch_data_buffer, data.num_channels());
 
-            let cell_space = IndexSpace::new([mesh.width() + 1; N]);
+            mesh.load_coarse_nodes_for_block(
+                block,
+                boundary.clone(),
+                data.rb(),
+                block_coarse.rb_mut(),
+                scratch_data.rb_mut(),
+            );
 
-            let mut coarse_window = block_coarse_space.inner_window();
+            for leaf in mesh.blocks.leaves(block).iter().copied() {
+                let leaf_node_origin = mesh.leaf_node_origin(leaf);
+                let need_coarse = mesh.leaf_need_coarse_element(leaf);
 
-            for axis in 0..N {
-                coarse_window.size[axis] -=
-                    (!block_boundary_flags.is_set(Face::positive(axis))) as usize;
-            }
+                let mut should_refine = false;
+                let mut should_coarsen = true;
 
-            for coarse in coarse_window {
-                let block_node_index = block_space.index_from_node(coarse.map(|i| 2 * i));
-                let coarse_index = block_coarse_space.index_from_node(coarse);
+                if need_coarse {
+                    for offset in IndexSpace::new([mesh.width / 2; N]) {
+                        let supernode = std::array::from_fn(|axis| {
+                            leaf_node_origin[axis] as isize + 1 + 2 * offset[axis] as isize
+                        });
 
-                for channel in data.channels() {
-                    block_coarse.channel_mut(channel)[coarse_index] =
-                        block_data.channel(channel)[block_node_index];
-                }
-            }
+                        let source_index = block_space.index_from_node(supernode);
 
-            for region in Region::<N>::enumerate() {
-                if region == Region::CENTRAL {
-                    continue;
-                }
+                        for channel in block_coarse.channels() {
+                            let interpolated = block_coarse_space.prolong(
+                                Interpolation::<COARSE>,
+                                supernode,
+                                block_coarse.channel(channel),
+                            );
 
-                // Skip if on physical boundary
-                for face in region.adjacent_faces() {
-                    if block_boundary_flags.is_set(face) {
-                        continue;
+                            let value = block_data.channel(channel)[source_index];
+
+                            let wavelet = value - interpolated;
+                            should_refine = should_refine || wavelet.abs() >= upper;
+                            should_coarsen = should_coarsen && wavelet.abs() <= lower;
+                        }
+                    }
+                } else {
+                    for offset in IndexSpace::new([mesh.width / 2; N]) {
+                        let supernode = std::array::from_fn(|axis| {
+                            leaf_node_origin[axis] as isize + 1 + 2 * offset[axis] as isize
+                        });
+
+                        let source_index = block_space.index_from_node(supernode);
+
+                        for channel in block_coarse.channels() {
+                            let interpolated = block_coarse_space.prolong(
+                                Interpolation::<ORDER>,
+                                supernode,
+                                block_coarse.channel(channel),
+                            );
+
+                            let value = block_data.channel(channel)[source_index];
+
+                            let wavelet = value - interpolated;
+                            should_refine = should_refine || wavelet.abs() >= upper;
+                            should_coarsen = should_coarsen && wavelet.abs() <= lower;
+                        }
                     }
                 }
 
-                for adjacent_position in block_space_in_leaves.region_adjacent_window(region) {
-                    let adjacent_leaf = block_leaves
-                        [block_space_in_leaves.linear_from_cartesian(adjacent_position)];
-                    let adjacent_cell = mesh.tree().cell_from_leaf(adjacent_leaf);
-                    let neighbor_cell = mesh.tree().neighbor_region(adjacent_cell, region).unwrap();
-                    let neighbor_level = mesh.tree().level(neighbor_cell);
-
-                    let mut coarse_node_origin =
-                        adjacent_position.map(|position| position * mesh.width() / 2);
-
-                    for axis in 0..N {
-                        match region.side(axis) {
-                            Side::Left => coarse_node_origin[axis] -= mesh.width() / 2,
-                            Side::Right => coarse_node_origin[axis] += mesh.width() / 2,
-                            Side::Middle => {}
-                        }
+                unsafe {
+                    if should_refine {
+                        *rflags.get_mut(leaf.0) = true;
                     }
+                }
 
-                    debug_assert!(neighbor_level <= block_level);
-
-                    let edge = std::array::from_fn(|axis| region.side(axis) == Side::Right);
-
-                    let coarse_space = IndexSpace::new([mesh.width() / 2 + 1; N]);
-                    let mut coarse_window = coarse_space.window();
-                    for axis in 0..N {
-                        coarse_window.size[axis] -= (!edge[axis]) as usize;
-                    }
-
-                    if neighbor_level == block_level {
-                        mesh.load_nodes_for_cell(neighbor_cell, data, cell_data.rb_mut(), edge);
-
-                        for offset in coarse_window {
-                            let cell_node = cell_space.linear_from_cartesian(offset.map(|o| 2 * o));
-                            let coarse_node =
-                                block_coarse_space.index_from_vertex(array::from_fn(|axis| {
-                                    coarse_node_origin[axis] + offset[axis]
-                                }));
-
-                            for channel in data.channels() {
-                                block_coarse.channel_mut(channel)[coarse_node] =
-                                    cell_data.channel(channel)[cell_node];
-                            }
-                        }
-                    } else {
-                        let neighbor_leaf = mesh.tree().leaf_from_cell(neighbor_cell).unwrap();
-                        let neighbor_block = mesh.blocks().block_from_leaf(neighbor_leaf);
-                        let neighbor_space = mesh.block_space(neighbor_block);
-                        let neighbor_block_node_offset = mesh.block_nodes(neighbor_block).start;
-
-                        let mut neighbor_split =
-                            mesh.tree().most_recent_leaf_split(adjacent_leaf).unwrap();
-                        for axis in 0..N {
-                            if region.side(axis) != Side::Middle {
-                                neighbor_split.toggle(axis);
-                            }
-                        }
-
-                        let mut neighbor_node_origin = mesh.leaf_node_origin(neighbor_leaf);
-                        for axis in 0..N {
-                            neighbor_node_origin[axis] +=
-                                neighbor_split.is_set(axis) as usize * mesh.width / 2;
-                        }
-                        // We now have the split of the neighbor that we want
-
-                        for offset in coarse_window {
-                            let neighbor_node = neighbor_block_node_offset
-                                + neighbor_space.index_from_vertex(array::from_fn(|axis| {
-                                    neighbor_node_origin[axis] + offset[axis]
-                                }));
-                            let coarse_node =
-                                block_coarse_space.index_from_vertex(array::from_fn(|axis| {
-                                    coarse_node_origin[axis] + offset[axis]
-                                }));
-
-                            for channel in data.channels() {
-                                block_coarse.channel_mut(channel)[coarse_node] =
-                                    data.channel(channel)[neighbor_node];
-                            }
-                        }
-                    }
+                unsafe {
+                    *cflags.get_mut(leaf.0) = should_coarsen;
                 }
             }
         });
@@ -407,7 +373,7 @@ impl<const N: usize> Mesh<N> {
         let debug = SharedSlice::new(debug);
 
         self.block_compute(|mesh, _, block| {
-            let block_nodes = mesh.block_nodes(block);
+            let block_nodes = mesh.block_global_node_indices(block);
             let block_space = mesh.block_space(block);
             let block_size = mesh.blocks.size(block);
             let cells = mesh.blocks.leaves(block);
@@ -537,13 +503,13 @@ mod tests {
         mesh.set_refine_flag(0);
         mesh.regrid();
 
-        assert!(!mesh.cell_needs_coarse_element(LeafId(0)));
-        assert!(!mesh.cell_needs_coarse_element(LeafId(1)));
-        assert!(!mesh.cell_needs_coarse_element(LeafId(2)));
-        assert!(!mesh.cell_needs_coarse_element(LeafId(3)));
-        assert!(mesh.cell_needs_coarse_element(LeafId(4)));
-        assert!(mesh.cell_needs_coarse_element(LeafId(5)));
-        assert!(mesh.cell_needs_coarse_element(LeafId(6)));
+        assert!(!mesh.leaf_need_coarse_element(LeafId(0)));
+        assert!(!mesh.leaf_need_coarse_element(LeafId(1)));
+        assert!(!mesh.leaf_need_coarse_element(LeafId(2)));
+        assert!(!mesh.leaf_need_coarse_element(LeafId(3)));
+        assert!(mesh.leaf_need_coarse_element(LeafId(4)));
+        assert!(mesh.leaf_need_coarse_element(LeafId(5)));
+        assert!(mesh.leaf_need_coarse_element(LeafId(6)));
     }
 
     #[test]

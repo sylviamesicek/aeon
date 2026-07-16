@@ -274,7 +274,7 @@ impl<const N: usize> Checkpoint<N> {
 
         for block in mesh.blocks.iter() {
             let space = mesh.block_space(block);
-            let nodes = mesh.block_nodes(block);
+            let nodes = mesh.block_global_node_indices(block);
             let window = space.inner_window();
 
             'window: for node in window {
@@ -544,7 +544,7 @@ impl<const N: usize> Checkpoint<N> {
 
         for block in mesh.blocks.iter() {
             let space = mesh.block_space(block);
-            let nodes = mesh.block_nodes(block);
+            let nodes = mesh.block_global_node_indices(block);
             let window = if ghost {
                 space.full_window()
             } else {
@@ -583,7 +583,7 @@ impl<const N: usize> Checkpoint<N> {
 
         for block in mesh.blocks.iter() {
             let space = mesh.block_space(block);
-            let nodes = mesh.block_nodes(block);
+            let nodes = mesh.block_global_node_indices(block);
             let window = if ghost {
                 space.full_window()
             } else {

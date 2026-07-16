@@ -128,13 +128,13 @@ impl<const N: usize> TreeBlocks<N> {
     }
 
     /// Returns the position of the cell within the block.
-    pub fn leaf_position(&self, cell: LeafId) -> [usize; N] {
-        self.leaf_positions[cell.0]
+    pub fn leaf_position(&self, leaf: LeafId) -> [usize; N] {
+        self.leaf_positions[leaf.0]
     }
 
     /// Retrieves the block associated with a given leaf.
-    pub fn block_from_leaf(&self, cell: LeafId) -> BlockId {
-        BlockId(self.leaf_to_block[cell.0])
+    pub fn block_from_leaf(&self, leaf: LeafId) -> BlockId {
+        BlockId(self.leaf_to_block[leaf.0])
     }
 
     /// The width of each cell along each axis.

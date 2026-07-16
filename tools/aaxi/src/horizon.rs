@@ -23,7 +23,7 @@ pub fn compute_position_from_radius(surface: &Mesh<1>, radius: &[f64], output: &
 
     for block in surface.blocks().iter() {
         let space = surface.block_space(block);
-        let nodes = surface.block_nodes(block);
+        let nodes = surface.block_global_node_indices(block);
 
         let block_radius = &radius[nodes.clone()];
         let block_result = &mut output[nodes.clone()];
@@ -234,7 +234,7 @@ impl<'a, const ORDER: usize> Function<1> for HorizonNullExpansion<'a, ORDER> {
         let radius = input.channel(0);
 
         for block in 0..surface.num_blocks() {
-            let nodes = surface.block_nodes(BlockId(block));
+            let nodes = surface.block_global_node_indices(BlockId(block));
             let space = surface.block_space(BlockId(block));
 
             let surface_radius = &radius[nodes.clone()];
@@ -311,7 +311,7 @@ impl<'a, const ORDER: usize> Function<1> for HorizonNullExpansion<'a, ORDER> {
             let mesh_block = mesh.blocks().block_from_leaf(mesh_active);
 
             let block_space = mesh.block_space(mesh_block);
-            let block_nodes = mesh.block_nodes(mesh_block);
+            let block_nodes = mesh.block_global_node_indices(mesh_block);
 
             let active_window = mesh.leaf_window(mesh_active);
             let active_bounds = mesh.tree().leaf_bounds(mesh_active);

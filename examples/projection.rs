@@ -40,7 +40,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         mesh.project(MyFunction, image.as_mut());
         mesh.fill_boundary(MyBoundary, image.as_mut());
 
-        mesh.flag_wavelets(1e-13, 1e-9, image.as_ref());
+        mesh.flag_elements(1e-13, 1e-9, image.as_ref());
         mesh.balance_flags();
 
         let mut checkpoint = Checkpoint::default();

@@ -162,7 +162,7 @@ pub fn main() -> eyre::Result<()> {
             solution.as_mut_slice().into(),
         )?;
 
-        mesh.flag_wavelets(LOWER, UPPER, solution.as_slice().into());
+        mesh.flag_elements(LOWER, UPPER, solution.as_slice().into());
 
         mesh.limit_level_range_flags(1, 10);
         mesh.balance_flags();

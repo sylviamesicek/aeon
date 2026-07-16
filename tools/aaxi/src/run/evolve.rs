@@ -750,7 +750,7 @@ pub fn evolve_data(
         let mut regrid_flag = false;
 
         regrid_tracker.every(regrid_interval, || {
-            mesh.flag_wavelets(lower, upper, fields.as_ref());
+            mesh.flag_elements(lower, upper, fields.as_ref());
             mesh.balance_flags();
 
             if config.error_handler.on_max_levels == Strategy::Ignore {

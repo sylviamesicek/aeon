@@ -624,7 +624,7 @@ pub fn initial_data(config: &Config) -> eyre::Result<(Mesh<2>, Image, Option<Cac
             )?;
         }
 
-        mesh.flag_wavelets(
+        mesh.flag_elements(
             config.initial.coarsen_error,
             config.initial.refine_error,
             system.as_ref(),

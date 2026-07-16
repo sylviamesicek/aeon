@@ -56,6 +56,11 @@ impl<const N: usize> NodeSpace<N> {
         array::from_fn(|axis| self.size[axis] + 1 + 2 * self.ghost)
     }
 
+    /// Number of supernodes along each axis.
+    pub fn supernode_size(&self) -> [usize; N] {
+        array::from_fn(|axis| 2 * self.size[axis] + 1 + 4 * self.ghost)
+    }
+
     /// The total number of nodes in the `Node` Space.
     pub fn num_nodes(&self) -> usize {
         self.node_size().iter().product()
@@ -105,6 +110,21 @@ impl<const N: usize> NodeSpace<N> {
         });
 
         IndexSpace::new(self.node_size()).linear_from_cartesian(cartesian)
+    }
+
+    pub fn index_from_supernode(&self, supernode: [isize; N]) -> usize {
+        for axis in 0..N {
+            debug_assert!(supernode[axis] >= -2 * (self.ghost as isize));
+            debug_assert!(supernode[axis] <= 2 * (self.size[axis] + self.ghost) as isize);
+        }
+
+        let cartesian = array::from_fn(|axis| {
+            let mut vertex = supernode[axis];
+            vertex += 2 * self.ghost as isize;
+            vertex as usize
+        });
+
+        IndexSpace::new(self.supernode_size()).linear_from_cartesian(cartesian)
     }
 
     /// Computes a linear index from a vertex index.
@@ -494,6 +514,81 @@ impl<const N: usize> NodeSpace<N> {
 
         self.apply_axis(corner, stencil, field, axis) * kernel.scale(spacing)
     }
+
+    // pub fn prolong_efficient(
+    //     &self,
+    //     kernel: impl Interpolant,
+    //     fallback: impl Interpolant,
+    //     source: &[f64],
+    //     dest: &mut [f64],
+    // ) {
+    //     debug_assert_eq!(source.len(), self.num_nodes());
+    //     debug_assert_eq!(
+    //         dest.len(),
+    //         std::array::from_fn::<_, N, _>(|axis| 2 * self.size[axis] + 1 + 4 * self.ghost)
+    //             .iter()
+    //             .product()
+    //     );
+
+    //     let dest_space = IndexSpace::new(std::array::from_fn::<_, N, _>(|axis| {
+    //         2 * self.size[axis] + 1 + 4 * self.ghost
+    //     }));
+
+    //     let node_size = self.node_size();
+
+    //     for axis in (0..N).rev() {
+    //         let mut psize = [0; N];
+    //         let mut porigin = [0isize; N];
+
+    //         for i in 0..axis {
+    //             psize[i] = self.size[i] + 1;
+
+    //             if self.boundary[Face::negative(i)].has_ghost() {
+    //                 psize[i] += self.ghost;
+    //                 porigin[i] -= self.ghost as isize;
+    //             }
+
+    //             if self.boundary[Face::positive(i)].has_ghost() {
+    //                 psize[i] += self.ghost;
+    //             }
+    //         }
+    //         psize[axis] = self.size[axis];
+    //         for i in (axis + 1)..N {
+    //             psize[i] = 2 * self.size[i] + 1;
+
+    //             if self.boundary[Face::negative(i)].has_ghost() {
+    //                 psize[i] += 2 * self.ghost;
+    //                 porigin[i] -= 2 * self.ghost as isize;
+    //             }
+
+    //             if self.boundary[Face::positive(i)].has_ghost() {
+    //                 psize[i] += 2 * self.ghost;
+    //             }
+    //         }
+
+    //         for mut point in IndexSpace::new(psize)
+    //             .iter()
+    //             .map(|v| array::from_fn(|i| v[i] as isize + porigin[i]))
+    //         {
+    //             for i in 0..axis {
+    //                 point[i] *= 2;
+    //             }
+
+    //             point[axis] *= 2;
+    //             point[axis] += 1;
+
+    //             let dest_index = self.index_from_supernode(point);
+
+    //             let center = space.linear_from_cartesian(point);
+    //             dest[center] = 0.0;
+
+    //             for i in 0..=self.width {
+    //                 point[axis] = 2 * i;
+    //                 dest[center] += stencil[i] * dest[space.linear_from_cartesian(point)];
+    //             }
+    //         }
+    //     }
+    // }
 
     /// Applies an interpolation kernel to the field at a given supernode.
     pub fn prolong(&self, kernel: impl Interpolant, supernode: [isize; N], field: &[f64]) -> f64 {

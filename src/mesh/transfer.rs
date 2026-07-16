@@ -39,7 +39,7 @@ impl<const N: usize> Mesh<N> {
         self.old_block_compute(|mesh, _store, block| {
             let size = mesh.old_blocks.size(block);
             let level = mesh.old_block_level(block);
-            let nodes = mesh.old_block_nodes(block);
+            let nodes = mesh.old_block_global_node_indices(block);
             let space = mesh.old_block_space(block);
 
             let block_source = source.slice(nodes.clone());
@@ -59,7 +59,7 @@ impl<const N: usize> Mesh<N> {
                         let new_cell = LeafId(new_cell.0 + child.to_linear());
 
                         let new_block = mesh.blocks.block_from_leaf(new_cell);
-                        let new_nodes = mesh.block_nodes(new_block);
+                        let new_nodes = mesh.block_global_node_indices(new_block);
                         let new_space = mesh.block_space(new_block);
 
                         let mut block_dest = unsafe { dest.slice_mut(new_nodes.clone()) };
@@ -97,7 +97,7 @@ impl<const N: usize> Mesh<N> {
                 } else if new_level == level {
                     // Direct copy
                     let new_block = mesh.blocks.block_from_leaf(new_cell);
-                    let new_nodes = mesh.block_nodes(new_block);
+                    let new_nodes = mesh.block_global_node_indices(new_block);
                     let new_space = mesh.block_space(new_block);
 
                     let mut block_dest = unsafe { dest.slice_mut(new_nodes.clone()) };
@@ -123,7 +123,7 @@ impl<const N: usize> Mesh<N> {
                     let new_block = mesh.blocks.block_from_leaf(new_cell);
                     let new_offset = mesh.blocks.leaf_position(new_cell);
                     let new_size = mesh.blocks.size(new_block);
-                    let new_nodes = mesh.block_nodes(new_block);
+                    let new_nodes = mesh.block_global_node_indices(new_block);
                     let new_space = mesh.block_space(new_block);
 
                     let mut block_dest = unsafe { dest.slice_mut(new_nodes.clone()) };
@@ -211,7 +211,7 @@ impl<const N: usize> Mesh<N> {
 
         blocks.for_each(|block| {
             // Fill Physical Boundary conditions
-            let nodes = self.block_nodes(block);
+            let nodes = self.block_global_node_indices(block);
             let space = self.block_space(block);
             let bcs = self.block_bcs(block, bcs.clone());
 
@@ -235,9 +235,9 @@ impl<const N: usize> Mesh<N> {
             let info = self.interfaces.interface(interface);
 
             let block_space = self.block_space(info.block);
-            let block_nodes = self.block_nodes(info.block);
+            let block_nodes = self.block_global_node_indices(info.block);
             let neighbor_space = self.block_space(info.neighbor);
-            let neighbor_nodes = self.block_nodes(info.neighbor);
+            let neighbor_nodes = self.block_global_node_indices(info.neighbor);
 
             let dest = info.dest;
             let source = info.source;
@@ -274,9 +274,9 @@ impl<const N: usize> Mesh<N> {
             let info = self.interfaces.interface(interface);
 
             let block_space = self.block_space(info.block);
-            let block_nodes = self.block_nodes(info.block);
+            let block_nodes = self.block_global_node_indices(info.block);
             let neighbor_space = self.block_space(info.neighbor);
-            let neighbor_nodes = self.block_nodes(info.neighbor);
+            let neighbor_nodes = self.block_global_node_indices(info.neighbor);
 
             let mut block_system = unsafe { shared.slice_mut(block_nodes) };
             let neighbor_system = unsafe { shared.slice(neighbor_nodes) };
@@ -310,9 +310,9 @@ impl<const N: usize> Mesh<N> {
         neighbors.for_each(|interface| {
             let info = self.interfaces.interface(interface);
 
-            let block_nodes = self.block_nodes(info.block);
+            let block_nodes = self.block_global_node_indices(info.block);
             let block_space = self.block_space(info.block);
-            let neighbor_nodes = self.block_nodes(info.neighbor);
+            let neighbor_nodes = self.block_global_node_indices(info.neighbor);
             let neighbor_space = self.block_space(info.neighbor);
 
             let mut block_system = unsafe { shared.slice_mut(block_nodes) };
@@ -343,7 +343,7 @@ impl<const N: usize> Mesh<N> {
         let debug = SharedSlice::new(debug);
 
         self.block_compute(|mesh, _, block| {
-            let block_nodes = mesh.block_nodes(block);
+            let block_nodes = mesh.block_global_node_indices(block);
 
             for node in block_nodes {
                 unsafe {
@@ -360,7 +360,7 @@ impl<const N: usize> Mesh<N> {
         let debug = SharedSlice::new(debug);
 
         self.block_compute(|mesh, _, block| {
-            let block_nodes = mesh.block_nodes(block);
+            let block_nodes = mesh.block_global_node_indices(block);
             let block_space = mesh.block_space(block);
             let block_size = mesh.blocks.size(block);
             let cells = mesh.blocks.leaves(block);
@@ -392,7 +392,7 @@ impl<const N: usize> Mesh<N> {
             .iter()
             .enumerate()
             .for_each(|(iidx, interface)| {
-                let block_nodes = self.block_nodes(interface.block);
+                let block_nodes = self.block_global_node_indices(interface.block);
                 let block_space = self.block_space(interface.block);
 
                 for offset in self
@@ -419,7 +419,7 @@ impl<const N: usize> Mesh<N> {
             .iter()
             .enumerate()
             .for_each(|(iidx, interface)| {
-                let block_nodes = self.block_nodes(interface.block);
+                let block_nodes = self.block_global_node_indices(interface.block);
                 let block_space = self.block_space(interface.block);
 
                 for offset in self
