@@ -13,7 +13,7 @@ use thiserror::Error;
 
 // Build new horizon surface
 pub fn surface() -> Mesh<1> {
-    Mesh::new(HORIZON_DOMAIN, 4, 2, BoundaryClasses::GHOST)
+    Mesh::new(HORIZON_DOMAIN, 4, 4, 2, BoundaryClasses::GHOST)
 }
 
 /// Transforms a radius on the 1d surface into a 2d embedded position.
@@ -21,7 +21,7 @@ pub fn compute_position_from_radius(surface: &Mesh<1>, radius: &[f64], output: &
     assert_eq!(surface.tree().domain(), HORIZON_DOMAIN);
     assert_eq!(surface.num_nodes(), output.len());
 
-    for block in surface.blocks().indices() {
+    for block in surface.blocks().iter() {
         let space = surface.block_space(block);
         let nodes = surface.block_nodes(block);
 

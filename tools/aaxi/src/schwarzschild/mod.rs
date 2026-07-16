@@ -136,6 +136,7 @@ pub fn schwarzschild(matches: &ArgMatches) -> eyre::Result<()> {
     let mut mesh = Mesh::new(
         domain,
         6,
+        4,
         3,
         BoundaryClasses::from_fn(|face| match face.side {
             false => BoundaryClass::Ghost,
@@ -158,10 +159,9 @@ pub fn schwarzschild(matches: &ArgMatches) -> eyre::Result<()> {
             system.as_mut(),
         )
         .unwrap();
-        mesh.fill_boundary(4, FieldConditions, system.as_mut());
-
-        // Perform amr
-        mesh.flag_wavelets(4, 1e-13, 1e-6, system.as_ref());
+        mesh.fill_boundary(FieldConditions, system.as_mut());
+        // Perform wamr
+        mesh.flag_wavelets(1e-13, 1e-6, system.as_ref());
         mesh.balance_flags();
 
         let mut flag_debug = vec![0; mesh.num_nodes()];

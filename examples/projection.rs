@@ -27,8 +27,9 @@ impl Boundary<2> for MyBoundary {
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut mesh = Mesh::new(
-        HyperBox::<2>::UNIT,                                // domain
-        4,                                                  // Width of each cell in nodes
+        HyperBox::<2>::UNIT, // domain
+        4,                   // Width of each cell in nodes
+        4,
         2,                                                  // Number of ghost nodes along each axis
         BoundaryClasses::from_fn(|_| BoundaryClass::Ghost), // Boundaries use centered stencils
     );
@@ -37,9 +38,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     for i in 0..10 {
         let mut image = Image::new(1, mesh.num_nodes());
         mesh.project(MyFunction, image.as_mut());
-        mesh.fill_boundary(4, MyBoundary, image.as_mut());
+        mesh.fill_boundary(MyBoundary, image.as_mut());
 
-        mesh.flag_wavelets(4, 1e-13, 1e-9, image.as_ref());
+        mesh.flag_wavelets(1e-13, 1e-9, image.as_ref());
         mesh.balance_flags();
 
         let mut checkpoint = Checkpoint::default();

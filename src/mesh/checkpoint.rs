@@ -272,7 +272,7 @@ impl<const N: usize> Checkpoint<N> {
 
         let mut buffer = String::new();
 
-        for block in mesh.blocks.indices() {
+        for block in mesh.blocks.iter() {
             let space = mesh.block_space(block);
             let nodes = mesh.block_nodes(block);
             let window = space.inner_window();
@@ -423,7 +423,7 @@ impl<const N: usize> Checkpoint<N> {
         let mut vertex_total = 0;
         let mut cell_total = 0;
 
-        for block in mesh.blocks.indices() {
+        for block in mesh.blocks.iter() {
             let space = mesh.block_space(block);
 
             let mut cell_size = space.cell_size();
@@ -505,7 +505,7 @@ impl<const N: usize> Checkpoint<N> {
         // Generate point data
         let mut vertices = Vec::new();
 
-        for block in mesh.blocks.indices() {
+        for block in mesh.blocks.iter() {
             let space = mesh.block_space(block);
             let window = if ghost {
                 space.full_window()
@@ -542,7 +542,7 @@ impl<const N: usize> Checkpoint<N> {
         // Generate point data
         let mut vertices = Vec::new();
 
-        for block in mesh.blocks.indices() {
+        for block in mesh.blocks.iter() {
             let space = mesh.block_space(block);
             let nodes = mesh.block_nodes(block);
             let window = if ghost {
@@ -581,7 +581,7 @@ impl<const N: usize> Checkpoint<N> {
     ) -> Attribute {
         let mut buffer = Vec::new();
 
-        for block in mesh.blocks.indices() {
+        for block in mesh.blocks.iter() {
             let space = mesh.block_space(block);
             let nodes = mesh.block_nodes(block);
             let window = if ghost {

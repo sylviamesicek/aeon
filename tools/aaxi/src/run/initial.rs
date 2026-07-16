@@ -306,7 +306,7 @@ where
     }
 
     // Fill boundary conditions for context fields.
-    mesh.fill_boundary(order, ContextConditions, context.as_mut());
+    mesh.fill_boundary(ContextConditions, context.as_mut());
 
     // Initial Guess for Psi
     psi.fill(1.0);
@@ -347,7 +347,7 @@ where
     )
     .unwrap();
 
-    mesh.fill_boundary(order, FieldConditions, system.rb_mut());
+    mesh.fill_boundary(FieldConditions, system.rb_mut());
 
     Ok(())
 }
@@ -515,8 +515,9 @@ pub fn initial_data(config: &Config) -> eyre::Result<(Mesh<2>, Image, Option<Cac
             size: [config.domain.radius, config.domain.height],
             origin: [0.0, 0.0],
         },
-        config.domain.cell_size,
-        config.domain.cell_ghost,
+        6,
+        4,
+        3,
         BoundaryClasses::from_fn(|face| match face.side {
             false => BoundaryClass::Ghost,
             true => BoundaryClass::OneSided,
@@ -624,7 +625,6 @@ pub fn initial_data(config: &Config) -> eyre::Result<(Mesh<2>, Image, Option<Cac
         }
 
         mesh.flag_wavelets(
-            config.order,
             config.initial.coarsen_error,
             config.initial.refine_error,
             system.as_ref(),
@@ -656,7 +656,7 @@ pub fn initial_data(config: &Config) -> eyre::Result<(Mesh<2>, Image, Option<Cac
         mesh.regrid();
         system.resize(mesh.num_nodes());
 
-        mesh.transfer(config.order, transfer.as_ref(), system.as_mut());
+        mesh.transfer(transfer.as_ref(), system.as_mut());
     }
 
     if config.output.initial_vtu {

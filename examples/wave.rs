@@ -91,6 +91,7 @@ pub fn main() -> eyre::Result<()> {
     let mut mesh = Mesh::new(
         HyperBox::from_aabb([-10., -10.], [10., 10.]),
         6,
+        4,
         3,
         BoundaryClasses::splat(BoundaryClass::OneSided),
     );
@@ -115,11 +116,11 @@ pub fn main() -> eyre::Result<()> {
         log::trace!("Projecting System");
 
         mesh.project(profile, system.channel_mut(0).into());
-        mesh.fill_boundary(ORDER, WaveConditions, system.as_mut());
+        mesh.fill_boundary(WaveConditions, system.as_mut());
 
         log::trace!("Flagging Wavelets");
 
-        mesh.flag_wavelets(4, LOWER, UPPER, system.as_ref());
+        mesh.flag_wavelets(LOWER, UPPER, system.as_ref());
         mesh.limit_level_range_flags(1, 10);
 
         log::trace!("Balancing Flags");
@@ -212,8 +213,8 @@ pub fn main() -> eyre::Result<()> {
         );
 
         // Fill boundaries
-        mesh.fill_boundary(ORDER, WaveConditions, system.as_mut());
-        mesh.fill_boundary(ORDER, WaveConditions, exact.as_mut());
+        mesh.fill_boundary(WaveConditions, system.as_mut());
+        mesh.fill_boundary(WaveConditions, exact.as_mut());
 
         for i in 0..mesh.num_nodes() {
             error.storage_mut()[i] = exact.storage()[i] - system.storage()[i];
@@ -222,8 +223,8 @@ pub fn main() -> eyre::Result<()> {
         if steps_since_regrid > REGRID_SKIP {
             steps_since_regrid = 0;
 
-            mesh.fill_boundary(ORDER, WaveConditions, system.as_mut());
-            mesh.flag_wavelets(4, LOWER, UPPER, system.as_ref());
+            mesh.fill_boundary(WaveConditions, system.as_mut());
+            mesh.flag_wavelets(LOWER, UPPER, system.as_ref());
             mesh.limit_level_range_flags(1, 10);
 
             mesh.balance_flags();
@@ -244,12 +245,12 @@ pub fn main() -> eyre::Result<()> {
             tmp.storage_mut().copy_from_slice(system.storage());
 
             system.resize(mesh.num_nodes());
-            mesh.transfer(ORDER, tmp.as_ref(), system.as_mut());
+            mesh.transfer(tmp.as_ref(), system.as_mut());
 
             continue;
         }
 
-        mesh.fill_boundary(ORDER, WaveConditions, system.as_mut());
+        mesh.fill_boundary(WaveConditions, system.as_mut());
 
         if time_since_save >= SAVE_CHECKPOINT || FORCE_SAVE {
             time_since_save = 0.0;

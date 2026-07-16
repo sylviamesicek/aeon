@@ -18,6 +18,7 @@ fn criterion_benchmark(c: &mut Criterion) {
     let mut mesh: Mesh<2> = Mesh::new(
         HyperBox::UNIT,
         4,
+        4,
         2,
         BoundaryClasses::splat(BoundaryClass::Ghost),
     );
@@ -34,7 +35,7 @@ fn criterion_benchmark(c: &mut Criterion) {
 
     let mut source = Image::new(1, mesh.num_nodes());
     rng.fill(&mut source);
-    mesh.fill_boundary(4, Custom, source.as_mut());
+    mesh.fill_boundary(Custom, source.as_mut());
 
     let mut base_image = Image::new(1, num_node_per_cell);
 

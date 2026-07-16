@@ -150,7 +150,7 @@ impl<const N: usize> TreeNeighbors<N> {
         // Reused memory for neighbors.
         let mut neighbors = Vec::new();
 
-        for block in blocks.indices() {
+        for block in blocks.iter() {
             self.block_offsets.push(self.neighbors.len());
 
             // Build cell neighbors.

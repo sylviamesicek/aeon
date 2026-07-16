@@ -156,8 +156,8 @@ pub fn solve_constraints(mesh: &mut Mesh<1>, system: ImageMut) {
     let phi = unsafe { shared.channel_mut(PHI_CH) };
     let pi = unsafe { shared.channel_mut(PI_CH) };
 
-    mesh.fill_boundary(4, AntiSymCondition, phi.into());
-    mesh.fill_boundary(4, SymCondition, pi.into());
+    mesh.fill_boundary(AntiSymCondition, phi.into());
+    mesh.fill_boundary(SymCondition, pi.into());
 
     let conformal = unsafe { shared.channel_mut(CONFORMAL_CH) };
     let lapse = unsafe { shared.channel_mut(LAPSE_CH) };
@@ -214,7 +214,7 @@ pub fn solve_constraints(mesh: &mut Mesh<1>, system: ImageMut) {
         conformal_prev = conformal[space.index_from_vertex([cell_size])];
     }
     // Fill ghost nodes.
-    mesh.fill_boundary(4, SymCondition, conformal.into());
+    mesh.fill_boundary(SymCondition, conformal.into());
 
     // Perform radial quadrature for lapse
     let mut lapse_prev = 1.0 / conformal_prev;
@@ -281,7 +281,7 @@ pub fn solve_constraints(mesh: &mut Mesh<1>, system: ImageMut) {
     }
 
     // Fill lapse ghost nodes
-    mesh.fill_boundary(4, SymCondition, lapse.into());
+    mesh.fill_boundary(SymCondition, lapse.into());
 }
 
 fn smooth(s: f64, n: f64, r: f64) -> f64 {
@@ -398,7 +398,7 @@ pub fn intial_data(
         }
     }
 
-    mesh.fill_boundary(4, FieldConditions, output);
+    mesh.fill_boundary(FieldConditions, output);
 }
 
 pub fn find_mass(mesh: &Mesh<1>, system: ImageRef) -> f64 {

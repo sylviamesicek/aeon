@@ -156,19 +156,18 @@ impl<const N: usize> Mesh<N> {
     /// Flags cells for refinement using a wavelet criterion. The system must have filled
     /// boundaries. This function tags any cell that is insufficiently refined to approximate
     /// operators of the given `order` within the range of error.
-    pub fn flag_wavelets(&mut self, order: usize, lower: f64, upper: f64, data: ImageRef) {
+    pub fn flag_wavelets(&mut self, lower: f64, upper: f64, data: ImageRef) {
         let buffer = 2 * (self.ghost / 2);
         let support = (self.width + 2 * buffer) / 2;
 
-        assert!(order % 2 == 0);
-        assert!(order <= support);
+        assert!(self.order <= support);
         // Example w = 6, g = 3, o = 6
         // -> o > (6 + 4) / 2 because the ghost offset is odd
 
         assert_eq!(data.num_nodes(), self.num_nodes());
 
-        let element = self.request_element(support, order);
-        let element_coarse = self.request_element(self.width / 2, order / 2);
+        let element = self.request_element(support, self.order);
+        let element_coarse = self.request_element(self.width / 2, self.order / 2);
 
         let support = element.support_refined();
 
@@ -263,7 +262,7 @@ impl<const N: usize> Mesh<N> {
             let block_leaves = mesh.blocks().leaves(block);
             let block_size_in_leaves = mesh.blocks().size(block);
             let block_space_in_leaves = IndexSpace::new(block_size_in_leaves);
-            let block_boundary_flags = mesh.block_physical_boundary_flags(block);
+            let block_boundary_flags = mesh.blocks().boundary_flags(block);
             let block_level = mesh.blocks().level(block);
             let block_space = mesh.block_space(block);
             let block_data = data.slice(mesh.block_nodes(block));
@@ -529,6 +528,7 @@ mod tests {
         let mut mesh = Mesh::new(
             HyperBox::UNIT,
             4,
+            4,
             2,
             BoundaryClasses::from_sides([BoundaryClass::Ghost; 2], [BoundaryClass::OneSided; 2]),
         );
@@ -548,7 +548,7 @@ mod tests {
 
     #[test]
     fn global_coarsening_and_refinement() {
-        let mut mesh = Mesh::<2>::new(HyperBox::UNIT, 4, 2, BoundaryClasses::GHOST);
+        let mut mesh = Mesh::<2>::new(HyperBox::UNIT, 4, 4, 2, BoundaryClasses::GHOST);
         mesh.coarsen_global();
         mesh.refine_global();
         mesh.coarsen_global();

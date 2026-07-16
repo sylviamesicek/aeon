@@ -1042,7 +1042,6 @@ impl<const N: usize> Tree<N> {
         ))
     }
 
-    /// Iterates over
     pub fn leaf_neighbors_in_region(
         &self,
         cell: CellId,

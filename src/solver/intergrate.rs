@@ -78,7 +78,7 @@ impl Integrator {
                 let mut tmp = ImageMut::from_storage(tmp1, num_channels);
                 let mut update = ImageMut::from_storage(tmp2, num_channels);
 
-                mesh.fill_boundary(order, boundary.clone(), result.rb_mut());
+                mesh.fill_boundary(boundary.clone(), result.rb_mut());
 
                 // K1
                 Self::copy_from(tmp.rb_mut(), result.rb());
@@ -93,7 +93,7 @@ impl Integrator {
 
                 // K2
                 Self::fused_multiply_add_dest(tmp.rb_mut(), result.rb(), h / 2.0);
-                mesh.fill_boundary(order, boundary.clone(), tmp.rb_mut());
+                mesh.fill_boundary(boundary.clone(), tmp.rb_mut());
                 deriv.preprocess(mesh, tmp.rb_mut())?;
                 mesh.apply(
                     order,
@@ -105,7 +105,7 @@ impl Integrator {
 
                 // K3
                 Self::fused_multiply_add_dest(tmp.rb_mut(), result.rb(), h / 2.0);
-                mesh.fill_boundary(order, boundary.clone(), tmp.rb_mut());
+                mesh.fill_boundary(boundary.clone(), tmp.rb_mut());
                 deriv.preprocess(mesh, tmp.rb_mut())?;
                 mesh.apply(
                     order,
@@ -117,7 +117,7 @@ impl Integrator {
 
                 // K4
                 Self::fused_multiply_add_dest(tmp.rb_mut(), result.rb(), h);
-                mesh.fill_boundary(order, boundary.clone(), tmp.rb_mut());
+                mesh.fill_boundary(boundary.clone(), tmp.rb_mut());
                 deriv.preprocess(mesh, tmp.rb_mut())?;
                 mesh.apply(
                     order,
@@ -131,7 +131,7 @@ impl Integrator {
                 Self::fused_multiply_add_assign(result.rb_mut(), h, update.rb());
 
                 if let Method::RK4KO6(diss) = self.method {
-                    mesh.fill_boundary_to_extent(order, 3, boundary.clone(), result.rb_mut());
+                    mesh.fill_boundary_to_extent(3, boundary.clone(), result.rb_mut());
                     deriv.preprocess(mesh, result.rb_mut())?;
                     mesh.dissipation::<6>(diss, result.rb_mut());
                 }

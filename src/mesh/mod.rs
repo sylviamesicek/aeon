@@ -54,6 +54,8 @@ pub struct Mesh<const N: usize> {
     width: usize,
     /// The number of ghost cells used to facilitate inter-block communication.
     ghost: usize,
+    /// Order of wavelets in mesh (basically the order of interpolation)
+    order: usize,
     /// `BoundaryClass` for each face. Restricts what kinds of boundary condition
     /// (encoded in `BoundaryKind`) may be enforced on that face.
     boundary: BoundaryClasses<N>,
@@ -94,12 +96,14 @@ impl<const N: usize> Mesh<N> {
     pub fn new(
         bounds: HyperBox<N>,
         width: usize,
+        order: usize,
         ghost: usize,
         boundary: BoundaryClasses<N>,
     ) -> Self {
+        assert!(matches!(order, 2 | 4));
         assert!(width >= 2);
-        assert!(width % 2 == 0);
-        assert!(ghost >= width / 2);
+        assert!(width.is_multiple_of(2));
+        assert!(ghost >= order / 2 && ghost <= width);
 
         let mut tree = Tree::new(bounds);
 
@@ -120,6 +124,7 @@ impl<const N: usize> Mesh<N> {
         let mut result = Self {
             tree,
             width,
+            order,
             ghost,
             boundary,
 
@@ -259,12 +264,12 @@ impl<const N: usize> Mesh<N> {
 
     /// The range of nodes assigned to a given block.
     pub fn block_nodes(&self, block: BlockId) -> Range<usize> {
-        self.blocks.nodes(block)
+        self.blocks.global_node_indices(block)
     }
 
     /// The range of nodes assigned to a given block on the mesh before the most recent refinement.
     pub(crate) fn old_block_nodes(&self, block: BlockId) -> Range<usize> {
-        self.old_blocks.nodes(block)
+        self.old_blocks.global_node_indices(block)
     }
 
     /// Computes the nodespace corresponding to a block.
@@ -298,18 +303,12 @@ impl<const N: usize> Mesh<N> {
         self.blocks.bounds(block)
     }
 
-    /// Computes flags indicating whether a particular face of a block borders a physical
-    /// boundary.
-    pub fn block_physical_boundary_flags(&self, block: BlockId) -> FaceMask<N> {
-        self.blocks.boundary_flags(block)
-    }
-
     /// Indicates what class of boundary condition is enforced along each face of the block.
     pub fn block_boundary_classes(&self, block: BlockId) -> BoundaryClasses<N> {
-        let flag = self.block_physical_boundary_flags(block);
+        let flags = self.blocks.boundary_flags(block);
 
         BoundaryClasses::from_fn(|face| {
-            if flag.is_set(face) {
+            if flags.is_set(face) {
                 self.boundary[face]
             } else {
                 BoundaryClass::Ghost
@@ -322,7 +321,7 @@ impl<const N: usize> Mesh<N> {
     pub fn block_bcs<B: Boundary<N>>(&self, block: BlockId, bcs: B) -> BlockBoundary<N, B> {
         BlockBoundary {
             inner: bcs,
-            physical_boundary_flags: self.block_physical_boundary_flags(block),
+            flags: self.blocks.boundary_flags(block),
         }
     }
 
@@ -355,7 +354,7 @@ impl<const N: usize> Mesh<N> {
     /// Finds bounds associated with a node window.
     pub fn window_bounds(&self, block: BlockId, window: NodeWindow<N>) -> HyperBox<N> {
         debug_assert!(self.block_space(block).contains_window(window));
-        let block_size = self.blocks.node_size(block);
+        let block_size = self.blocks.size_in_vertices(block);
         let bounds = self.blocks.bounds(block);
 
         HyperBox {
@@ -543,7 +542,7 @@ impl<const N: usize> Mesh<N> {
             });
 
         #[cfg(not(feature = "parallel"))]
-        self.blocks.indices().for_each(|block| {
+        self.blocks.iter().for_each(|block| {
             let store = unsafe { self.stores.get_or_default() };
             f(self, store, block);
             store.reset();
@@ -569,7 +568,7 @@ impl<const N: usize> Mesh<N> {
             });
 
         #[cfg(not(feature = "parallel"))]
-        return self.blocks.indices().try_for_each(|block| {
+        return self.blocks.iter().try_for_each(|block| {
             let store = unsafe { self.stores.get_or_default() };
             let result = f(self, store, block);
             store.reset();
@@ -630,7 +629,7 @@ impl<const N: usize> Mesh<N> {
     pub fn l2_norm(&mut self, src: &[f64]) -> f64 {
         let mut result = 0.0;
 
-        for block in self.blocks.indices() {
+        for block in self.blocks.iter() {
             let space = self.block_space(block);
             let size = space.cell_size();
 
@@ -664,7 +663,7 @@ impl<const N: usize> Mesh<N> {
     pub fn oscillation_heuristic(&mut self, src: &[f64]) -> f64 {
         let mut result: f64 = 0.0;
 
-        for block in self.blocks.indices() {
+        for block in self.blocks.iter() {
             let space = self.block_space(block);
             let cell_size = self.blocks.size(block);
 
@@ -706,7 +705,7 @@ impl<const N: usize> Mesh<N> {
     pub fn linf_norm(&mut self, src: &[f64]) -> f64 {
         let mut result = 0.0f64;
 
-        for block in self.blocks.indices() {
+        for block in self.blocks.iter() {
             let space = self.block_space(block);
             let data = &src[self.block_nodes(block)];
 
@@ -750,7 +749,7 @@ impl<const N: usize> Mesh<N> {
         writeln!(result, "// **********************").unwrap();
         writeln!(result).unwrap();
 
-        for block in self.blocks.indices() {
+        for block in self.blocks.iter() {
             writeln!(result, "Block {block:?}").unwrap();
             writeln!(result, "    Bounds {:?}", self.blocks.bounds(block)).unwrap();
             writeln!(result, "    Size {:?}", self.blocks.size(block)).unwrap();
@@ -991,7 +990,7 @@ impl<const N: usize> Mesh<N> {
         let block = self.blocks.block_from_leaf(leaf);
         let node_origin = self.leaf_node_origin(leaf);
         let offset = self.block_space(block).index_from_vertex(node_origin);
-        self.blocks.nodes(block).start + offset
+        self.blocks.global_node_indices(block).start + offset
     }
 
     /// Returns the index of a corner node for the given cell.
@@ -1025,12 +1024,13 @@ impl<const N: usize> Mesh<N> {
             node_origin[axis] += corner[axis] as usize * self.width
         }
         let offset = self.block_space(block).index_from_vertex(node_origin);
-        self.blocks.nodes(block).start + offset
+        self.blocks.global_node_indices(block).start + offset
     }
 
-    pub fn load_coarse_nodes_for_block(
+    pub fn load_coarse_nodes_for_block<B: Boundary<N>>(
         &self,
         block: BlockId,
+        boundary: B,
         source: ImageRef,
         mut dest: ImageMut,
         mut scratch: ImageMut,
@@ -1041,7 +1041,7 @@ impl<const N: usize> Mesh<N> {
         let block_leaves = self.blocks().leaves(block);
         let block_size_in_leaves = self.blocks().size(block);
         let block_space_in_leaves = IndexSpace::new(block_size_in_leaves);
-        let block_boundary_flags = self.block_physical_boundary_flags(block);
+        let block_boundary_flags = self.blocks().boundary_flags(block);
         let block_level = self.blocks().level(block);
         let block_space = self.block_space(block);
         let block_source = source.slice(self.block_nodes(block));
@@ -1182,6 +1182,7 @@ impl<const N: usize> Clone for Mesh<N> {
         Self {
             tree: self.tree.clone(),
             width: self.width,
+            order: self.order,
             ghost: self.ghost,
             boundary: self.boundary,
 
@@ -1207,6 +1208,7 @@ impl<const N: usize> Default for Mesh<N> {
         let mut result = Self {
             tree: Tree::new(HyperBox::UNIT),
             width: 4,
+            order: 2,
             ghost: 1,
             boundary: BoundaryClasses::default(),
 
@@ -1256,6 +1258,7 @@ impl<const N: usize> Distribution<Mesh<N>> for StandardUniform {
         Mesh::new(
             rng.random(),
             1 << width,
+            1 << width,
             1 << (width - 1),
             BoundaryClasses::from_fn(|face| axes[face.axis]),
         )
@@ -1303,12 +1306,12 @@ impl<const N: usize> From<MeshSer<N>> for Mesh<N> {
 pub struct BlockBoundary<const N: usize, I> {
     inner: I,
     /// Physical boundary mask for various faces.
-    physical_boundary_flags: FaceMask<N>,
+    flags: FaceMask<N>,
 }
 
 impl<const N: usize, I: Boundary<N>> Boundary<N> for BlockBoundary<N, I> {
     fn kind(&self, channel: usize, face: Face<N>) -> BoundaryKind {
-        if self.physical_boundary_flags.is_set(face) {
+        if self.flags.is_set(face) {
             self.inner.kind(channel, face)
         } else {
             BoundaryKind::Custom
@@ -1335,6 +1338,7 @@ mod tests {
         let mut mesh = Mesh::<2>::new(
             HyperBox::UNIT,
             6,
+            4,
             3,
             [
                 [BoundaryClass::Ghost, BoundaryClass::OneSided],
@@ -1412,6 +1416,7 @@ mod tests {
         let mut mesh: Mesh<2> = Mesh::new(
             HyperBox::UNIT,
             4,
+            4,
             2,
             BoundaryClasses::splat(BoundaryClass::Ghost),
         );
@@ -1464,7 +1469,7 @@ mod tests {
     #[test]
     fn analytic_load_coarse_nodes_for_blocks() -> eyre::Result<()> {
         let mut rng = rand::rngs::StdRng::seed_from_u64(2024);
-        let mut mesh: Mesh<2> = Mesh::new(HyperBox::UNIT, 4, 2, BoundaryClasses::GHOST);
+        let mut mesh: Mesh<2> = Mesh::new(HyperBox::UNIT, 4, 4, 2, BoundaryClasses::GHOST);
 
         mesh.refine_global();
         mesh.refine_global();
@@ -1487,9 +1492,9 @@ mod tests {
 
         let mut scratch = Image::new(1, mesh.num_nodes_per_cell());
 
-        for block in mesh.blocks().indices() {
+        for block in mesh.blocks().iter() {
             let block_size_in_leaves = mesh.blocks().size(block);
-            let block_boundary_flags = mesh.block_physical_boundary_flags(block);
+            let block_boundary_flags = mesh.blocks().boundary_flags(block);
             let block_coarse_space = NodeSpace {
                 size: block_size_in_leaves.map(|size| size * mesh.width() / 2),
                 ghost: mesh.width() / 2,
@@ -1501,6 +1506,7 @@ mod tests {
             dest.channel_mut(0).fill(f64::NAN);
             mesh.load_coarse_nodes_for_block(
                 block,
+                Custom,
                 source.as_ref(),
                 dest.as_mut(),
                 scratch.as_mut(),
@@ -1553,7 +1559,7 @@ mod tests {
     fn fuzz_transfer_vs_load_nodes_for_cell() -> eyre::Result<()> {
         let mut rng = rand::rngs::StdRng::seed_from_u64(1984);
         for _ in 0..10 {
-            let mut mesh: Mesh<2> = Mesh::new(HyperBox::UNIT, 4, 2, BoundaryClasses::GHOST);
+            let mut mesh: Mesh<2> = Mesh::new(HyperBox::UNIT, 4, 4, 2, BoundaryClasses::GHOST);
             let num_node_per_cell = (mesh.width() + 1).pow(2);
 
             mesh.refine_global();
@@ -1568,7 +1574,7 @@ mod tests {
             let mut source = Image::new(1, mesh.num_nodes());
             rng.fill(&mut source);
 
-            mesh.fill_boundary(4, Custom, source.as_mut());
+            mesh.fill_boundary(Custom, source.as_mut());
 
             println!("{}", mesh.num_levels());
 
@@ -1598,9 +1604,9 @@ mod tests {
                 mesh.regrid();
 
                 let mut tmp = Image::new(1, mesh.num_nodes());
-                mesh.transfer(4, source.as_ref(), tmp.as_mut());
+                mesh.transfer(source.as_ref(), tmp.as_mut());
                 source.clone_from(&tmp);
-                mesh.fill_boundary(4, Custom, source.as_mut());
+                mesh.fill_boundary(Custom, source.as_mut());
             }
 
             assert_eq!(mesh.num_levels(), base_level + 1);

@@ -1,6 +1,5 @@
 use aeon_tk::{mesh::Gaussian, prelude::*};
 
-const ORDER: usize = 4;
 const LOWER: f64 = 1e-10;
 const UPPER: f64 = 1e-6;
 
@@ -30,6 +29,7 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut mesh = Mesh::new(
         HyperBox::from_aabb([-10., -10.], [10., 10.]),
         4,
+        4,
         2,
         BoundaryClasses::splat(BoundaryClass::OneSided),
     );
@@ -57,9 +57,9 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
         system.resize(mesh.num_nodes());
 
         mesh.project(profile, system.channel_mut(0).into());
-        mesh.fill_boundary(ORDER, WaveConditions, system.as_mut());
+        mesh.fill_boundary(WaveConditions, system.as_mut());
 
-        mesh.flag_wavelets(4, LOWER, UPPER, system.as_ref());
+        mesh.flag_wavelets(LOWER, UPPER, system.as_ref());
 
         mesh.limit_level_range_flags(1, 10);
         mesh.balance_flags();
@@ -108,7 +108,7 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
             transfered.resize(mesh.num_nodes());
             error.resize(mesh.num_nodes());
 
-            mesh.transfer(ORDER, system.as_ref(), transfered.as_mut());
+            mesh.transfer(system.as_ref(), transfered.as_mut());
 
             continue;
         } else {

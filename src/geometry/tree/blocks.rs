@@ -73,10 +73,12 @@ impl<const N: usize> TreeBlocks<N> {
         self.block_sizes.len()
     }
 
-    pub fn indices(&self) -> impl Iterator<Item = BlockId> + use<N> {
+    /// Returns an iterator over all blocks in the tree.
+    pub fn iter(&self) -> impl Iterator<Item = BlockId> + use<N> {
         (0..self.len()).map(BlockId)
     }
 
+    /// Is the number of blocks equal to 0?
     pub fn is_empty(&self) -> bool {
         self.len() == 0
     }
@@ -91,9 +93,16 @@ impl<const N: usize> TreeBlocks<N> {
         self.block_sizes[block.0]
     }
 
-    /// Number of nodes along each axis of a given block, not including ghost nodes.
-    pub fn node_size(&self, block: BlockId) -> [usize; N] {
+    /// Number of vertices along each axis of a given block, not including ghost nodes.
+    pub fn size_in_vertices(&self, block: BlockId) -> [usize; N] {
         array::from_fn(|axis| self.block_sizes[block.0][axis] * self.width[axis] + 1)
+    }
+
+    /// Number of nodes along each axis of a given block, including ghost nodes
+    pub fn size_in_nodes(&self, block: BlockId) -> [usize; N] {
+        array::from_fn(|axis| {
+            self.block_sizes[block.0][axis] * self.width[axis] + 1 + 2 * self.ghost
+        })
     }
 
     /// Returns the bounds of the given block.
@@ -138,24 +147,24 @@ impl<const N: usize> TreeBlocks<N> {
         self.ghost
     }
 
-    // /// Sets the width of cells in the block.
-    // pub fn set_width(&mut self, width: [usize; N]) {
-    //     self.width = width;
-    // }
+    /// Base global offset for nodes belonging to `block`.
+    pub fn global_node_offset(&self, block: BlockId) -> usize {
+        self.offsets[block.0]
+    }
 
-    // /// Sets the number of ghost nodes in cells in the block.
-    // pub fn set_ghost(&mut self, ghost: usize) {
-    //     self.ghost = ghost;
-    // }
+    /// The global indices of nodes associated with a given block.
+    pub fn global_node_indices(&self, block: BlockId) -> Range<usize> {
+        self.offsets[block.0]..self.offsets[block.0 + 1]
+    }
+
+    /// Total number of nodes owned by a block.
+    pub fn node_count(&self, block: BlockId) -> usize {
+        self.offsets[block.0 + 1] - self.offsets[block.0]
+    }
 
     /// Returns the total number of nodes in the tree.
     pub fn num_nodes(&self) -> usize {
         *self.offsets.last().unwrap()
-    }
-
-    /// The range of dofs associated with the given block.
-    pub fn nodes(&self, block: BlockId) -> Range<usize> {
-        self.offsets[block.0]..self.offsets[block.0 + 1]
     }
 
     fn build_blocks(&mut self, tree: &Tree<N>) {
@@ -260,7 +269,7 @@ impl<const N: usize> TreeBlocks<N> {
     fn build_bounds(&mut self, tree: &Tree<N>) {
         self.block_bounds.clear();
 
-        for block in self.indices() {
+        for block in self.iter() {
             let size = self.size(block);
             let a = *self.leaves(block).first().unwrap();
 
@@ -276,7 +285,7 @@ impl<const N: usize> TreeBlocks<N> {
     fn build_boundaries(&mut self, tree: &Tree<N>) {
         self.boundaries.clear();
 
-        for block in self.indices() {
+        for block in self.iter() {
             let a = 0;
             let b: usize = self.leaves(block).len() - 1;
 
@@ -294,7 +303,7 @@ impl<const N: usize> TreeBlocks<N> {
 
     fn build_levels(&mut self, tree: &Tree<N>) {
         self.block_levels.resize(self.len(), 0);
-        for block in self.indices() {
+        for block in self.iter() {
             let active = self.leaves(block)[0];
             self.block_levels[block.0] = tree.leaf_level(active);
         }
@@ -313,7 +322,7 @@ impl<const N: usize> TreeBlocks<N> {
         let mut cursor = 0;
         self.offsets.push(cursor);
 
-        for block in self.indices() {
+        for block in self.iter() {
             let size = self.size(block);
             // Width of block in nodes.
             let block_width: [usize; N] =
@@ -405,8 +414,8 @@ mod tests {
 
         assert_eq!(blocks.len(), 3);
 
-        assert_eq!(blocks.nodes(BlockId(0)), 0..529);
-        assert_eq!(blocks.nodes(BlockId(1)), 529..874);
-        assert_eq!(blocks.nodes(BlockId(2)), 874..1099);
+        assert_eq!(blocks.global_node_indices(BlockId(0)), 0..529);
+        assert_eq!(blocks.global_node_indices(BlockId(1)), 529..874);
+        assert_eq!(blocks.global_node_indices(BlockId(2)), 874..1099);
     }
 }

@@ -131,7 +131,7 @@ impl<const N: usize> TreeInterfaces<N> {
 
         let mut buffer = Vec::default();
 
-        for block in blocks.indices() {
+        for block in blocks.iter() {
             let block_size = blocks.size(block);
             let block_level = blocks.level(block);
             let block_space = NodeSpace {

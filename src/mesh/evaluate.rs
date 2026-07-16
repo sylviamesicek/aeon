@@ -280,7 +280,7 @@ impl<const N: usize> Mesh<N> {
         assert!(self.boundary.is_compatible(&bcs, f.num_channels()), "Boundary Conditions incompatible with set boundary classes");
 
         // Strong boundary condition
-        self.fill_boundary(order, bcs.clone(), f.rb_mut());
+        self.fill_boundary(bcs.clone(), f.rb_mut());
         // Preprocess data
         op.preprocess(self, f.rb_mut())?;
 

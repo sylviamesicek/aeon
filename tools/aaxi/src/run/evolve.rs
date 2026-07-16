@@ -723,7 +723,7 @@ pub fn evolve_data(
         // ******************************
 
         // Fill boundaries
-        mesh.fill_boundary(4, FieldConditions, fields.as_mut());
+        mesh.fill_boundary(FieldConditions, fields.as_mut());
 
         // *******************************
         // Norm
@@ -750,7 +750,7 @@ pub fn evolve_data(
         let mut regrid_flag = false;
 
         regrid_tracker.every(regrid_interval, || {
-            mesh.flag_wavelets(4, lower, upper, fields.as_ref());
+            mesh.flag_wavelets(lower, upper, fields.as_ref());
             mesh.balance_flags();
 
             if config.error_handler.on_max_levels == Strategy::Ignore {
@@ -765,7 +765,6 @@ pub fn evolve_data(
             scratch.copy_from_slice(fields.storage());
             fields.resize(mesh.num_nodes());
             mesh.transfer(
-                4,
                 ImageRef::from_storage(&scratch, num_channels),
                 fields.as_mut(),
             );

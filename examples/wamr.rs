@@ -48,6 +48,7 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut mesh = Mesh::new(
         domain,
         4,
+        4,
         2,
         BoundaryClasses::from_fn(|face| match face.side {
             false => BoundaryClass::Ghost,
@@ -71,9 +72,9 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         let mut system = Image::new(1, mesh.num_nodes());
         mesh.project(SeedProjection, system.channel_mut(0).into());
-        mesh.fill_boundary(4, SeedConditions, system.as_mut());
+        mesh.fill_boundary(SeedConditions, system.as_mut());
 
-        mesh.flag_wavelets(4, 1e-13, 1e-9, system.as_ref());
+        mesh.flag_wavelets(1e-13, 1e-9, system.as_ref());
         mesh.balance_flags();
 
         // Output
@@ -121,7 +122,7 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         // Prolong data from previous system.
         system_prev = Image::new(1, mesh.num_nodes());
-        mesh.transfer(4, system.as_ref(), system_prev.as_mut());
+        mesh.transfer(system.as_ref(), system_prev.as_mut());
     }
 
     for i in 0..errors.len() - 1 {

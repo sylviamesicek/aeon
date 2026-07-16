@@ -138,7 +138,6 @@ impl HyperRelaxSolver {
 
         for index in 0..self.max_steps {
             mesh.fill_boundary(
-                order,
                 FicticuousBoundary {
                     dampening: self.dampening,
                     conditions: boundary.clone(),
@@ -180,7 +179,7 @@ impl HyperRelaxSolver {
                     result.rb_mut(),
                     ImageRef::from_storage(&data[..dimension], num_channels),
                 );
-                mesh.fill_boundary(order, boundary, result.rb_mut());
+                mesh.fill_boundary(boundary, result.rb_mut());
 
                 return Ok(());
             }
@@ -218,7 +217,7 @@ impl HyperRelaxSolver {
             result.rb_mut(),
             ImageRef::from_storage(&data[..dimension], num_channels),
         );
-        mesh.fill_boundary(order, boundary, result.rb_mut());
+        mesh.fill_boundary(boundary, result.rb_mut());
 
         Err(HyperRelaxError::ReachedMaxSteps)
     }
@@ -400,6 +399,7 @@ mod tests {
     fn poisson() {
         let mut mesh = Mesh::new(
             HyperBox::from_aabb([0.0, 0.0], [1.0, 1.0]),
+            4,
             4,
             2,
             BoundaryClasses::GHOST,

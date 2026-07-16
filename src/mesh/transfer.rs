@@ -16,12 +16,12 @@ use crate::{
 impl<const N: usize> Mesh<N> {
     /// Transfers data from an older version of the mesh to the new refined version, using
     /// the given order of interpolation.
-    pub fn transfer(&mut self, order: usize, source: ImageRef, dest: ImageMut) {
+    pub fn transfer(&mut self, source: ImageRef, dest: ImageMut) {
         assert_eq!(source.num_channels(), dest.num_channels());
         assert_eq!(dest.num_nodes(), self.num_nodes());
         assert_eq!(source.num_nodes(), self.num_old_nodes());
 
-        match order {
+        match self.order {
             2 => self.transfer_impl::<2>(source, dest),
             4 => self.transfer_impl::<4>(source, dest),
             6 => self.transfer_impl::<6>(source, dest),
@@ -166,10 +166,10 @@ impl<const N: usize> Mesh<N> {
 
     /// Enforces strong boundary conditions. This includes strong physical boundary conditions, as well
     /// as handling interior boundaries (same level, coarse-fine, or fine-coarse).
-    pub fn fill_boundary<B: Boundary<N> + Sync>(&mut self, order: usize, bcs: B, image: ImageMut) {
+    pub fn fill_boundary<B: Boundary<N> + Sync>(&mut self, bcs: B, image: ImageMut) {
         assert_eq!(image.num_nodes(), self.num_nodes());
 
-        self.fill_boundary_to_extent(order, self.ghost, bcs, image);
+        self.fill_boundary_to_extent(self.ghost, bcs, image);
     }
 
     /// Enforces strong boundary conditions, only filling ghost nodes if those nodes are within `extent`
@@ -177,7 +177,6 @@ impl<const N: usize> Mesh<N> {
     /// and derivatives use different order stencils.
     pub fn fill_boundary_to_extent<B: Boundary<N> + Sync>(
         &mut self,
-        order: usize,
         extent: usize,
         bcs: B,
         mut image: ImageMut,
@@ -189,7 +188,7 @@ impl<const N: usize> Mesh<N> {
         self.fill_direct(extent, image.rb_mut());
 
         self.fill_physical(extent, &bcs, image.rb_mut());
-        match order {
+        match self.order {
             2 => self.fill_prolong::<2>(extent, image.rb_mut()),
             4 => self.fill_prolong::<4>(extent, image.rb_mut()),
             6 => self.fill_prolong::<6>(extent, image.rb_mut()),
@@ -208,7 +207,7 @@ impl<const N: usize> Mesh<N> {
         let blocks = self.blocks.indices().par_bridge();
 
         #[cfg(not(feature = "parallel"))]
-        let blocks = self.blocks.indices();
+        let blocks = self.blocks.iter();
 
         blocks.for_each(|block| {
             // Fill Physical Boundary conditions

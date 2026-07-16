@@ -146,7 +146,7 @@ pub fn evolve_data_full(
 
     while proper_time < config.evolve.max_proper_time {
         assert!(system.num_nodes() == mesh.num_nodes());
-        mesh.fill_boundary(4, FieldConditions, system.as_mut());
+        mesh.fill_boundary(FieldConditions, system.as_mut());
 
         // Fill current derive buffer
         deriv_buffers[buffer_index % 5].resize(mesh.num_nodes(), 0.0);
@@ -294,7 +294,6 @@ pub fn evolve_data_full(
                 scratch.copy_from_slice(system.storage());
                 system.resize(mesh.num_nodes());
                 mesh.transfer(
-                    4,
                     ImageRef::from_storage(&scratch, NUM_CHANNELS),
                     system.as_mut(),
                 );
@@ -365,7 +364,6 @@ pub fn evolve_data_full(
             }
 
             mesh.flag_wavelets(
-                4,
                 config.regrid.coarsen_error,
                 config.regrid.refine_error,
                 system.as_ref(),
@@ -386,7 +384,6 @@ pub fn evolve_data_full(
             scratch.copy_from_slice(system.storage());
             system.resize(mesh.num_nodes());
             mesh.transfer(
-                4,
                 ImageRef::from_storage(scratch, NUM_CHANNELS),
                 system.as_mut(),
             );

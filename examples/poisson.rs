@@ -113,6 +113,7 @@ pub fn main() -> eyre::Result<()> {
     let mut mesh = Mesh::new(
         HyperBox::from_aabb([-20., -20.], [20., 20.]),
         4,
+        4,
         2,
         BoundaryClasses::splat(BoundaryClass::OneSided),
     );
@@ -140,7 +141,7 @@ pub fn main() -> eyre::Result<()> {
             },
             source.as_mut_slice().into(),
         );
-        mesh.fill_boundary(ORDER, Conditions, source.as_mut_slice().into());
+        mesh.fill_boundary(Conditions, source.as_mut_slice().into());
 
         // Set initial guess
         solution.fill(0.0);
@@ -161,7 +162,7 @@ pub fn main() -> eyre::Result<()> {
             solution.as_mut_slice().into(),
         )?;
 
-        mesh.flag_wavelets(4, LOWER, UPPER, solution.as_slice().into());
+        mesh.flag_wavelets(LOWER, UPPER, solution.as_slice().into());
 
         mesh.limit_level_range_flags(1, 10);
         mesh.balance_flags();
