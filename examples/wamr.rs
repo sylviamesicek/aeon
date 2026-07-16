@@ -121,7 +121,7 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         // Prolong data from previous system.
         system_prev = Image::new(1, mesh.num_nodes());
-        mesh.transfer_system(4, system.as_ref(), system_prev.as_mut());
+        mesh.transfer(4, system.as_ref(), system_prev.as_mut());
     }
 
     for i in 0..errors.len() - 1 {

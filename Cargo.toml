@@ -130,5 +130,9 @@ name = "projection"
 path = "examples/projection.rs"
 
 [[bench]]
-name = "neighbors"
+name = "basic_tree_ops"
+harness = false
+
+[[bench]]
+name = "basic_mesh_ops"
 harness = false

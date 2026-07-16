@@ -656,7 +656,7 @@ pub fn initial_data(config: &Config) -> eyre::Result<(Mesh<2>, Image, Option<Cac
         mesh.regrid();
         system.resize(mesh.num_nodes());
 
-        mesh.transfer_system(config.order, transfer.as_ref(), system.as_mut());
+        mesh.transfer(config.order, transfer.as_ref(), system.as_mut());
     }
 
     if config.output.initial_vtu {
@@ -690,7 +690,7 @@ pub fn initial_data(config: &Config) -> eyre::Result<(Mesh<2>, Image, Option<Cac
     log::info!(
         "Mesh Data: (Nodes: {}; Cells: {}; RAM usage: ~{}",
         mesh.num_nodes(),
-        mesh.num_active_cells(),
+        mesh.num_leaves(),
         HumanBytes(mesh.estimate_heap_size() as u64)
     );
     log::info!(

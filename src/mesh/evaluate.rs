@@ -469,15 +469,6 @@ impl<const N: usize> Mesh<N> {
         projection: P,
         dest: ImageMut,
     ) {
-        // assert_eq!(dest.len(), self.num_nodes());
-        // self.evaluate(
-        //     order,
-        //     ProjectionAsFunction(projection),
-        //     ImageRef::empty(),
-        //     ImageMut::from(dest),
-        // )
-        // .unwrap();
-
         assert!(dest.num_nodes() == self.num_nodes() || dest.num_channels() == 0);
         assert_eq!(dest.num_nodes(), self.num_nodes());
         
@@ -570,7 +561,7 @@ impl<const N: usize> Mesh<N> {
 
             for &cell in mesh.blocks.leaves(block) {
                 let node_size = mesh.cell_node_size(cell);
-                let node_origin = mesh.active_node_origin(cell);
+                let node_origin = mesh.leaf_node_origin(cell);
 
                 let mut flags = FaceMask::empty();
 

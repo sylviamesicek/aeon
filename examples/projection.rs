@@ -30,7 +30,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         HyperBox::<2>::UNIT,                          // domain
         4,                                            // Width of each cell in nodes
         2,                                            // Number of ghost nodes along each axis
-        FaceArray::from_fn(|_| BoundaryClass::Ghost), // Boundaries use onesided stencils
+        FaceArray::from_fn(|_| BoundaryClass::Ghost), // Boundaries use centered stencils
     );
     mesh.refine_global();
 

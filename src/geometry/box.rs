@@ -1,8 +1,8 @@
-use std::array::{self, from_fn};
-
-use datasize::DataSize;
-
 use crate::geometry::Split;
+use datasize::DataSize;
+use rand::Rng;
+use rand::distr::{Distribution, StandardUniform};
+use std::array::{self, from_fn};
 
 /// Represents a rectangular, axis aligned, physical box.
 #[derive(Debug, Copy, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -21,6 +21,21 @@ impl<const N: usize> DataSize for HyperBox<N> {
 
     fn estimate_heap_size(&self) -> usize {
         0
+    }
+}
+
+impl<const N: usize> Distribution<HyperBox<N>> for StandardUniform {
+    fn sample<R: Rng + ?Sized>(&self, rng: &mut R) -> HyperBox<N> {
+        HyperBox {
+            size: from_fn(|_| {
+                let v = rng.random::<f64>().abs();
+                if v < f64::EPSILON {
+                    return f64::EPSILON;
+                }
+                f64::EPSILON
+            }),
+            origin: from_fn(|_| rng.random()),
+        }
     }
 }
 

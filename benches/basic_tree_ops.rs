@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use aeon_tk::geometry::{CellId, HyperBox, Tree, regions};
+use aeon_tk::geometry::{CellId, HyperBox, Region, Tree};
 use criterion::{Criterion, criterion_group, criterion_main};
 use rand::{Rng as _, SeedableRng};
 
@@ -25,7 +25,7 @@ fn generate_tree() -> Tree<2> {
 }
 
 fn criterion_benchmark(c: &mut Criterion) {
-    let mut group = c.benchmark_group("tree");
+    let mut group = c.benchmark_group("basic_tree_ops");
 
     // Increase warm-up to 10 seconds and measurement to 20 seconds
     group.warm_up_time(Duration::from_secs(4));
@@ -37,7 +37,7 @@ fn criterion_benchmark(c: &mut Criterion) {
             |tree| {
                 let mut accum = 0;
                 for cell in 0..tree.num_cells() {
-                    for region in regions::<2>() {
+                    for region in Region::<2>::enumerate() {
                         accum += tree
                             .neighbor_region(CellId(cell), region)
                             .unwrap_or(CellId(0))
@@ -55,7 +55,7 @@ fn criterion_benchmark(c: &mut Criterion) {
             |tree| {
                 let mut accum = 0;
                 for cell in 0..tree.num_cells() {
-                    for region in regions::<2>() {
+                    for region in Region::<2>::enumerate() {
                         accum += tree
                             .neighbor_region_alt(CellId(cell), region)
                             .unwrap_or(CellId(0))

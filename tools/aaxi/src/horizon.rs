@@ -316,7 +316,7 @@ impl<'a, const ORDER: usize> Function<1> for HorizonNullExpansion<'a, ORDER> {
             let block_space = mesh.block_space(mesh_block);
             let block_nodes = mesh.block_nodes(mesh_block);
 
-            let active_window = mesh.active_window(mesh_active);
+            let active_window = mesh.leaf_window(mesh_active);
             let active_bounds = mesh.tree().leaf_bounds(mesh_active);
 
             interpolate

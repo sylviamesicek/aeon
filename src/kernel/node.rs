@@ -3,9 +3,7 @@
 //! This module introduces the primary abstraction of `aeon_kernel`, namely
 //! the `NodeSpace`.
 
-use crate::geometry::{
-    CartesianIter, Face, FaceArray, HyperBox, IndexSpace, Region, Side, regions,
-};
+use crate::geometry::{CartesianIter, Face, FaceArray, HyperBox, IndexSpace, Region, Side};
 use crate::image::ImageMut;
 use crate::kernel::{
     Border, Boundary, BoundaryClass, BoundaryKind, Convolution, Interpolant, Kernel, Value,
@@ -272,7 +270,7 @@ impl<const N: usize> NodeSpace<N> {
             }
 
             // Loop over regions
-            for region in regions::<N>() {
+            for region in Region::<N>::enumerate() {
                 if region == Region::CENTRAL {
                     continue;
                 }

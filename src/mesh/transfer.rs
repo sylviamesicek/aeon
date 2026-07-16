@@ -16,21 +16,21 @@ use crate::{
 impl<const N: usize> Mesh<N> {
     /// Transfers data from an older version of the mesh to the new refined version, using
     /// the given order of interpolation.
-    pub fn transfer_system(&mut self, order: usize, source: ImageRef, dest: ImageMut) {
+    pub fn transfer(&mut self, order: usize, source: ImageRef, dest: ImageMut) {
         assert_eq!(source.num_channels(), dest.num_channels());
         assert_eq!(dest.num_nodes(), self.num_nodes());
         assert_eq!(source.num_nodes(), self.num_old_nodes());
 
         match order {
-            2 => self.transfer_system_impl::<2>(source, dest),
-            4 => self.transfer_system_impl::<4>(source, dest),
-            6 => self.transfer_system_impl::<6>(source, dest),
+            2 => self.transfer_impl::<2>(source, dest),
+            4 => self.transfer_impl::<4>(source, dest),
+            6 => self.transfer_impl::<6>(source, dest),
             _ => unimplemented!("Order unimplemented"),
         }
     }
 
     /// Const optimized backend to `Mesh::<N>::transfer_system`.
-    fn transfer_system_impl<const ORDER: usize>(&mut self, source: ImageRef, dest: ImageMut) {
+    fn transfer_impl<const ORDER: usize>(&mut self, source: ImageRef, dest: ImageMut) {
         assert!(self.num_nodes() == dest.num_nodes());
         assert!(self.num_old_nodes() == source.num_nodes());
 
@@ -73,7 +73,7 @@ impl<const N: usize> Mesh<N> {
                         }
 
                         let node_size = mesh.cell_node_size(new_cell);
-                        let node_origin = mesh.active_node_origin(new_cell);
+                        let node_origin = mesh.leaf_node_origin(new_cell);
 
                         for node_offset in IndexSpace::new(node_size).iter() {
                             let source_node = array::from_fn(|axis| {
@@ -103,7 +103,7 @@ impl<const N: usize> Mesh<N> {
                     let mut block_dest = unsafe { dest.slice_mut(new_nodes.clone()) };
 
                     let node_size = mesh.cell_node_size(new_cell);
-                    let node_origin = mesh.active_node_origin(new_cell);
+                    let node_origin = mesh.leaf_node_origin(new_cell);
 
                     for node_offset in IndexSpace::new(node_size).iter() {
                         let source_node =
@@ -166,41 +166,36 @@ impl<const N: usize> Mesh<N> {
 
     /// Enforces strong boundary conditions. This includes strong physical boundary conditions, as well
     /// as handling interior boundaries (same level, coarse-fine, or fine-coarse).
-    pub fn fill_boundary<BCs: Boundary<N> + Sync>(
-        &mut self,
-        order: usize,
-        bcs: BCs,
-        system: ImageMut,
-    ) {
-        assert_eq!(system.num_nodes(), self.num_nodes());
+    pub fn fill_boundary<B: Boundary<N> + Sync>(&mut self, order: usize, bcs: B, image: ImageMut) {
+        assert_eq!(image.num_nodes(), self.num_nodes());
 
-        self.fill_boundary_to_extent(order, self.ghost, bcs, system);
+        self.fill_boundary_to_extent(order, self.ghost, bcs, image);
     }
 
     /// Enforces strong boundary conditions, only filling ghost nodes if those nodes are within `extent`
     /// of a physical node. This is useful if one is using Kriss-Olgier dissipation, where dissipation
     /// and derivatives use different order stencils.
-    pub fn fill_boundary_to_extent<C: Boundary<N> + Sync>(
+    pub fn fill_boundary_to_extent<B: Boundary<N> + Sync>(
         &mut self,
         order: usize,
         extent: usize,
-        bcs: C,
-        mut system: ImageMut,
+        bcs: B,
+        mut image: ImageMut,
     ) {
-        assert_eq!(system.num_nodes(), self.num_nodes());
+        assert_eq!(image.num_nodes(), self.num_nodes());
         assert!(extent <= self.ghost);
 
-        self.fill_fine(extent, system.rb_mut());
-        self.fill_direct(extent, system.rb_mut());
+        self.fill_fine(extent, image.rb_mut());
+        self.fill_direct(extent, image.rb_mut());
 
-        self.fill_physical(extent, &bcs, system.rb_mut());
+        self.fill_physical(extent, &bcs, image.rb_mut());
         match order {
-            2 => self.fill_prolong::<2>(extent, system.rb_mut()),
-            4 => self.fill_prolong::<4>(extent, system.rb_mut()),
-            6 => self.fill_prolong::<6>(extent, system.rb_mut()),
+            2 => self.fill_prolong::<2>(extent, image.rb_mut()),
+            4 => self.fill_prolong::<4>(extent, image.rb_mut()),
+            6 => self.fill_prolong::<6>(extent, image.rb_mut()),
             _ => unimplemented!("Fill order not implemented"),
         }
-        self.fill_physical(extent, &bcs, system.rb_mut());
+        self.fill_physical(extent, &bcs, image.rb_mut());
     }
 
     /// Enforces physical boundary conditions near edge of the numerical domain, out to the given extent.

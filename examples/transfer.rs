@@ -108,7 +108,7 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
             transfered.resize(mesh.num_nodes());
             error.resize(mesh.num_nodes());
 
-            mesh.transfer_system(ORDER, system.as_ref(), transfered.as_mut());
+            mesh.transfer(ORDER, system.as_ref(), transfered.as_mut());
 
             continue;
         } else {

@@ -1,7 +1,7 @@
 #![allow(clippy::needless_range_loop)]
 
 use crate::{
-    geometry::{Region, Side, Split, regions},
+    geometry::{Region, Side, Split},
     prelude::{Face, HyperBox, IndexSpace},
 };
 use bitvec::{order::Lsb0, slice::BitSlice, vec::BitVec};
@@ -208,11 +208,17 @@ impl<const N: usize> Tree<N> {
         self.cells.len()
     }
 
+    /// Total number of cells on a single level of the tree.
+    pub fn num_cells_on_level(&self, level: usize) -> usize {
+        self.level_offsets[level + 1] - self.level_offsets[level]
+    }
+
     /// The maximum depth of this tree.
     pub fn num_levels(&self) -> usize {
         self.level_offsets.len() - 1
     }
 
+    /// Iterator over cells on a given level of the tree.
     pub fn level_cells(&self, level: usize) -> impl Iterator<Item = CellId> + ExactSizeIterator {
         (self.level_offsets[level]..self.level_offsets[level + 1]).map(CellId)
     }
@@ -275,18 +281,21 @@ impl<const N: usize> Tree<N> {
         &self.leaf_values[N * self.leaf_offsets[leaf.0]..N * self.leaf_offsets[leaf.0 + 1]]
     }
 
+    /// Returns the position of a leave
     pub fn leaf_split(&self, leaf: LeafId, level: usize) -> Split<N> {
+        debug_assert!(level < self.leaf_level(leaf));
+
         Split::pack(array::from_fn(|axis| {
             self.leaf_zvalue(leaf)[N * level + axis]
         }))
     }
 
-    pub fn most_recent_leaf_split(&self, active: LeafId) -> Option<Split<N>> {
-        if self.num_cells() == 1 {
+    pub fn most_recent_leaf_split(&self, leaf: LeafId) -> Option<Split<N>> {
+        if self.num_leaves() == 1 {
             return None;
         }
 
-        Some(self.leaf_split(active, self.leaf_level(active) - 1))
+        Some(self.leaf_split(leaf, self.leaf_level(leaf) - 1))
     }
 
     /// Checks whether the given refinement flags are balanced.
@@ -358,6 +367,7 @@ impl<const N: usize> Tree<N> {
     /// Performs tree refinement.
     pub fn refine(&mut self, flags: &[bool]) {
         assert!(self.num_leaves() == flags.len());
+        debug_assert!(self.check_refine_flags(flags));
 
         let num_flags = flags.iter().copied().filter(|&p| p).count();
         let total_leaves = self.num_leaves() + (Split::<N>::COUNT - 1) * num_flags;
@@ -397,8 +407,10 @@ impl<const N: usize> Tree<N> {
 
         // Short circuit if this mesh only has two levels.
         if flags.len() == Split::<N>::COUNT {
-            return flags.iter().all(|&b| !b);
+            return flags.iter().skip(1).all(|&b| b == flags[0]);
         }
+
+        debug_assert!(self.num_levels() > 2);
 
         // First if any flagging would break 2:1 border, unmark it
         for leaf in self.leaves() {
@@ -412,6 +424,42 @@ impl<const N: usize> Tree<N> {
             }
         }
 
+        let mut cursor = 0;
+
+        while cursor < self.num_leaves() {
+            if !flags[cursor] {
+                cursor += 1;
+                continue;
+            }
+
+            // Current cell is flagged for refinement, check all nearby children
+
+            let parent = self.parent(self.cell_from_leaf(LeafId(cursor))).unwrap();
+
+            let num_contained_leaves = self.num_contained_leaves(parent);
+            debug_assert!(num_contained_leaves >= Split::<N>::COUNT);
+
+            if num_contained_leaves != Split::<N>::COUNT {
+                return false;
+            }
+
+            // All siblings are same level
+            let num_flagged_leaves = flags[self.contained_leaf_range(parent)]
+                .iter()
+                .filter(|&&b| b)
+                .count();
+
+            debug_assert!(num_flagged_leaves > 0);
+
+            if num_flagged_leaves < num_contained_leaves {
+                return false;
+            }
+
+            debug_assert_eq!(cursor, self.first_contained_leaf(parent).0);
+
+            cursor += num_contained_leaves;
+        }
+
         // Make sure only cells that can be coarsened are coarsened. And that every single child of such a cell
         // is flagged.
         let mut leaf = 0;
@@ -422,7 +470,6 @@ impl<const N: usize> Tree<N> {
                 continue;
             }
 
-            // if flags[cell] {
             let level = self.leaf_level(LeafId(leaf));
             let split = self.most_recent_leaf_split(LeafId(leaf)).unwrap();
 
@@ -454,10 +501,11 @@ impl<const N: usize> Tree<N> {
             return;
         }
 
-        // Short circuit if this mesh only has two levels.
-        if flags.len() == Split::<N>::COUNT {
-            flags.fill(false);
-        }
+        // // Short circuit if this mesh only has two levels.
+        // if flags.len() == Split::<N>::COUNT {
+        //     flags.fill(false);
+        //     return;
+        // }
 
         loop {
             let mut is_balanced = true;
@@ -477,39 +525,49 @@ impl<const N: usize> Tree<N> {
 
             // Make sure only cells that can be coarsened are coarsened. And that every single child of such a cell
             // is flagged.
-            let mut leaf = 0;
+            let mut cursor = 0;
 
-            while leaf < self.num_leaves() {
-                if !flags[leaf] {
-                    leaf += 1;
+            while cursor < self.num_leaves() {
+                if !flags[cursor] {
+                    cursor += 1;
                     continue;
                 }
 
-                let level = self.leaf_level(LeafId(leaf));
-                let split = self.most_recent_leaf_split(LeafId(leaf)).unwrap();
+                // Current cell is flagged for refinement, check all nearby children
+                let parent = self.parent(self.cell_from_leaf(LeafId(cursor))).unwrap();
 
-                if split != Split::<N>::empty() {
-                    flags[leaf] = false;
-                    is_balanced = false;
-                    leaf += 1;
-                    continue;
-                }
+                let num_contained_leaves = self.num_contained_leaves(parent);
+                debug_assert!(num_contained_leaves >= Split::<N>::COUNT);
+                if num_contained_leaves == Split::<N>::COUNT {
+                    let first_contained_leaf = self.first_contained_leaf(parent);
 
-                for offset in 0..Split::<N>::COUNT {
-                    if self.leaf_level(LeafId(leaf + offset)) != level {
-                        flags[leaf] = false;
+                    // All siblings are same level
+                    let num_flagged_leaves = flags[self.contained_leaf_range(parent)]
+                        .iter()
+                        .filter(|&&b| b)
+                        .count();
+
+                    debug_assert!(num_flagged_leaves > 0);
+
+                    if num_flagged_leaves < num_contained_leaves {
                         is_balanced = false;
-                        leaf += 1;
-                        continue;
+                        flags[self.contained_leaf_range(parent)].fill(false);
+                    }
+
+                    // Just to end of leaves owned by parent
+                    cursor = first_contained_leaf.0 + num_contained_leaves;
+                    continue;
+                }
+
+                for split in Split::enumerate() {
+                    if let Some(child) = self.leaf_from_cell(self.child(parent, split).unwrap()) {
+                        // debug_assert!(child.0 == cursor || split != Split::empty());
+                        is_balanced = false;
+                        flags[child.0] = false;
                     }
                 }
 
-                if !flags[leaf..leaf + Split::<N>::COUNT].iter().all(|&b| b) {
-                    flags[leaf..leaf + Split::<N>::COUNT].fill(false);
-                    is_balanced = false;
-                }
-                // Skip forwards. We have considered all cases.
-                leaf += Split::<N>::COUNT;
+                cursor += 1;
             }
 
             if is_balanced {
@@ -523,16 +581,21 @@ impl<const N: usize> Tree<N> {
         assert!(flags.len() == self.num_leaves());
         assert!(map.len() == self.num_leaves());
 
-        let mut cursor = 0;
-        let mut cell = 0;
+        if self.num_leaves() == 1 {
+            map[0] = LeafId(0);
+            return;
+        }
 
-        while cell < self.num_leaves() {
-            if flags[cell] {
-                map[cell..cell + Split::<N>::COUNT].fill(LeafId(cursor));
-                cell += Split::<N>::COUNT;
+        let mut cursor = 0;
+        let mut leaf = 0;
+
+        while leaf < self.num_leaves() {
+            if flags[leaf] {
+                map[leaf..leaf + Split::<N>::COUNT].fill(LeafId(cursor));
+                leaf += Split::<N>::COUNT;
             } else {
-                map[cell] = LeafId(cursor);
-                cell += 1;
+                map[leaf] = LeafId(cursor);
+                leaf += 1;
             }
 
             cursor += 1;
@@ -541,6 +604,11 @@ impl<const N: usize> Tree<N> {
 
     pub fn coarsen(&mut self, flags: &[bool]) {
         assert!(flags.len() == self.num_leaves());
+        debug_assert!(self.check_coarsen_flags(flags));
+
+        if self.num_leaves() == 1 {
+            return;
+        }
 
         // Compute number of cells after coarsening
         let num_flags = flags.iter().copied().filter(|&p| p).count();
@@ -686,6 +754,10 @@ impl<const N: usize> Tree<N> {
         Some(LeafId(self.cells[cell.0].leaf_offset))
     }
 
+    pub fn num_contained_leaves(&self, cell: CellId) -> usize {
+        self.cells[cell.0].leaf_count
+    }
+
     /// Returns an iterator over leaves that are children of the given cell.
     /// If `is_leaf(cell) = true` then this iterator will be a singleton
     /// returning the same value as `tree.active_index_from_cell(cell)`.
@@ -699,6 +771,21 @@ impl<const N: usize> Tree<N> {
         );
 
         (offset..offset + count).map(LeafId)
+    }
+
+    pub fn contained_leaf_range(&self, cell: CellId) -> Range<usize> {
+        let (offset, count) = (
+            self.cells[cell.0].leaf_offset,
+            self.cells[cell.0].leaf_count,
+        );
+
+        offset..offset + count
+    }
+
+    /// Returns the first contained leaf in the given cell. This will be the leaf which shares
+    /// a bottom left corner with the cell.
+    pub fn first_contained_leaf(&self, cell: CellId) -> LeafId {
+        LeafId(self.cells[cell.0].leaf_offset)
     }
 
     /// True if a cell has no children.
@@ -869,6 +956,10 @@ impl<const N: usize> Tree<N> {
     /// returns the cell index of the adjacent cell with `tree.level(neighbor) == tree.level(cell)`.
     /// If this passes over a nonperiodic boundary then it returns `None`.
     pub fn neighbor_region(&self, cell: CellId, region: Region<N>) -> Option<CellId> {
+        if region == Region::CENTRAL {
+            return Some(cell);
+        }
+
         let leaf_offset = LeafId(self.cells[cell.0].leaf_offset);
         debug_assert!(self.leaf_level(leaf_offset) >= self.level(cell));
 
@@ -978,13 +1069,13 @@ impl<const N: usize> Tree<N> {
     }
 
     pub fn leaf_neighborhood(&self, cell: LeafId) -> impl Iterator<Item = LeafId> + '_ {
-        regions().flat_map(move |region| {
+        Region::enumerate().flat_map(move |region| {
             self.leaf_neighbors_in_region(self.cell_from_leaf(cell), region)
         })
     }
 
     pub fn leaf_coarse_neighborhood(&self, cell: LeafId) -> impl Iterator<Item = LeafId> + '_ {
-        regions().flat_map(move |region| {
+        Region::enumerate().flat_map(move |region| {
             let neighbor = self.neighbor_region(self.cell_from_leaf(cell), region)?;
             if self.level(neighbor) < self.leaf_level(cell) {
                 return self.leaf_from_cell(neighbor);

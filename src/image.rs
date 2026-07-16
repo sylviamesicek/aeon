@@ -1,3 +1,4 @@
+use rand::Rng;
 use reborrow::{Reborrow, ReborrowMut};
 use serde::{Deserialize, Serialize};
 use std::marker::PhantomData;
@@ -138,6 +139,12 @@ impl Image {
             channels: self.channels,
             _marker: PhantomData,
         }
+    }
+}
+
+impl rand::Fill for Image {
+    fn fill<R: Rng + ?Sized>(&mut self, rng: &mut R) {
+        rng.fill(self.data.as_mut_slice())
     }
 }
 

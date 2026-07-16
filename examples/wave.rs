@@ -12,7 +12,7 @@ const MAX_STEPS: usize = 10000;
 const CFL: f64 = 0.1;
 const ORDER: usize = 4;
 
-const SAVE_CHECKPOINT: f64 = 0.01;
+const SAVE_CHECKPOINT: f64 = 0.05;
 const FORCE_SAVE: bool = false;
 const REGRID_SKIP: usize = 10;
 
@@ -244,7 +244,7 @@ pub fn main() -> eyre::Result<()> {
             tmp.storage_mut().copy_from_slice(system.storage());
 
             system.resize(mesh.num_nodes());
-            mesh.transfer_system(ORDER, tmp.as_ref(), system.as_mut());
+            mesh.transfer(ORDER, tmp.as_ref(), system.as_mut());
 
             continue;
         }

@@ -15,8 +15,8 @@ pub use axis::Split;
 pub use r#box::HyperBox;
 pub use face::{Face, FaceArray, FaceIter, FaceMask};
 pub use index::{CartesianIter, CartesianWindowIter, IndexSpace, IndexWindow};
-pub use region::{Region, RegionIter, Side, regions};
+pub use region::{Region, RegionIter, Side};
 pub use tree::{
-    LeafId, BlockId, CellId, NeighborId, Tree, TreeBlockNeighbor, TreeBlocks,
-    TreeCellNeighbor, TreeInterface, TreeInterfaces, TreeNeighbors, TreeSer,
+    BlockId, CellId, LeafId, NeighborId, Tree, TreeBlockNeighbor, TreeBlocks, TreeCellNeighbor,
+    TreeInterface, TreeInterfaces, TreeNeighbors, TreeSer,
 };

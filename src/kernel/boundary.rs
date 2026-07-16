@@ -3,6 +3,11 @@
 //! This module uses a combination of trait trickery and type transformers to
 //! create an ergonomic API for working with boundaries.
 
+use rand::{
+    Rng,
+    distr::{Distribution, StandardUniform},
+};
+
 use crate::geometry::{Face, FaceArray};
 
 /// Indicates what type of boundary condition is used along a particualr
@@ -63,18 +68,29 @@ impl BoundaryKind {
 pub enum BoundaryClass {
     /// Boundary condition implemented by invoking one-sided stencils near the boundary.
     #[default]
-    OneSided,
+    OneSided = 0,
     /// Boundary condition implemented by setting ghost nodes to fixed values.
-    Ghost,
+    Ghost = 1,
     /// Boundary where data is read from the opposite side of the domain, allowing data
     /// to tile infinitely along this axis.
-    Periodic,
+    Periodic = 2,
 }
 
 impl BoundaryClass {
     /// Does this boundary class depend on setting ghost node values.
     pub fn has_ghost(self) -> bool {
         matches!(self, BoundaryClass::Ghost | BoundaryClass::Periodic)
+    }
+}
+
+impl Distribution<BoundaryClass> for StandardUniform {
+    fn sample<R: Rng + ?Sized>(&self, rng: &mut R) -> BoundaryClass {
+        match rng.random_range(0..3) {
+            0 => BoundaryClass::OneSided,
+            1 => BoundaryClass::Ghost,
+            2 => BoundaryClass::Periodic,
+            _ => unreachable!(),
+        }
     }
 }
 

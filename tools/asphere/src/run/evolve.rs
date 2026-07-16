@@ -274,7 +274,7 @@ pub fn evolve_data_full(
                     }
 
                     constraint = mesh.l2_norm(&deriv_buffer);
-                    constraint_linf = mesh.max_norm(&deriv_buffer);
+                    constraint_linf = mesh.linf_norm(&deriv_buffer);
                 }
 
                 // Take one regridding step towards desired level
@@ -293,7 +293,7 @@ pub fn evolve_data_full(
                 let scratch = integrator.scratch(system.storage().len());
                 scratch.copy_from_slice(system.storage());
                 system.resize(mesh.num_nodes());
-                mesh.transfer_system(
+                mesh.transfer(
                     4,
                     ImageRef::from_storage(&scratch, NUM_CHANNELS),
                     system.as_mut(),
@@ -359,7 +359,7 @@ pub fn evolve_data_full(
                 // )?;
 
                 constraint = mesh.l2_norm(&deriv_buffer);
-                constraint_linf = mesh.max_norm(&deriv_buffer);
+                constraint_linf = mesh.linf_norm(&deriv_buffer);
 
                 // constraint_output_index += 1;
             }
@@ -385,7 +385,7 @@ pub fn evolve_data_full(
             let scratch = integrator.scratch(system.storage().len());
             scratch.copy_from_slice(system.storage());
             system.resize(mesh.num_nodes());
-            mesh.transfer_system(
+            mesh.transfer(
                 4,
                 ImageRef::from_storage(scratch, NUM_CHANNELS),
                 system.as_mut(),
@@ -575,7 +575,7 @@ pub fn evolve_data_full(
 
         println!("Mesh Info...");
         println!("- Num Nodes: {}", mesh.num_nodes());
-        println!("- Active Cells: {}", mesh.num_active_cells());
+        println!("- Active Cells: {}", mesh.num_leaves());
         println!(
             "- RAM usage: ~{}",
             HumanBytes(mesh.estimate_heap_size() as u64)

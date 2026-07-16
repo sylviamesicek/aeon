@@ -764,7 +764,7 @@ pub fn evolve_data(
             let scratch = integrator.scratch(fields.storage().len());
             scratch.copy_from_slice(fields.storage());
             fields.resize(mesh.num_nodes());
-            mesh.transfer_system(
+            mesh.transfer(
                 4,
                 ImageRef::from_storage(&scratch, num_channels),
                 fields.as_mut(),
@@ -1058,7 +1058,7 @@ pub fn evolve_data(
     log::info!(
         "Mesh Data: (Nodes: {}; Cells: {}; RAM usage: ~{}",
         mesh.num_nodes(),
-        mesh.num_active_cells(),
+        mesh.num_leaves(),
         HumanBytes(mesh.estimate_heap_size() as u64)
     );
     log::info!(

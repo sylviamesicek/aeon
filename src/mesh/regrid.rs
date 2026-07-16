@@ -1,8 +1,12 @@
 use std::array;
 
-use crate::geometry::{IndexSpace, LeafId};
+use rand::Rng;
+use reborrow::{Reborrow, ReborrowMut};
 
-use crate::image::ImageRef;
+use crate::geometry::{Face, HyperBox, IndexSpace, LeafId, Region, Side};
+
+use crate::image::{ImageMut, ImageRef};
+use crate::kernel::NodeSpace;
 use crate::{mesh::Mesh, shared::SharedSlice};
 
 impl<const N: usize> Mesh<N> {
@@ -26,17 +30,23 @@ impl<const N: usize> Mesh<N> {
         self.old_cell_splits.extend(
             self.tree
                 .leaves()
-                .flat_map(|cell| self.tree.most_recent_leaf_split(cell)),
+                .flat_map(|leaf| self.tree.most_recent_leaf_split(leaf)),
         );
 
         // Perform regriding
         self.regrid_map.resize(self.tree.num_leaves(), LeafId(0));
 
         let mut coarsen_map = vec![LeafId(0); self.tree.num_leaves()];
-        self.tree
-            .coarsen_leaf_index_map(&self.coarsen_flags, &mut coarsen_map);
+
+        let check = self.tree.check_coarsen_flags(&self.coarsen_flags);
+        if !check {
+            println!("{:?}", self.coarsen_flags);
+            assert!(false);
+        }
 
         debug_assert!(self.tree.check_coarsen_flags(&self.coarsen_flags));
+        self.tree
+            .coarsen_leaf_index_map(&self.coarsen_flags, &mut coarsen_map);
         self.tree.coarsen(&self.coarsen_flags);
 
         let mut refine_map = vec![LeafId(0); self.tree.num_leaves()];
@@ -46,9 +56,8 @@ impl<const N: usize> Mesh<N> {
             flags[new.0] = self.refine_flags[old];
         }
 
-        self.tree.refine_leaf_index_map(&flags, &mut refine_map);
-
         debug_assert!(self.tree.check_refine_flags(&flags));
+        self.tree.refine_leaf_index_map(&flags, &mut refine_map);
         self.tree.refine(&flags);
 
         for i in 0..self.regrid_map.len() {
@@ -59,15 +68,24 @@ impl<const N: usize> Mesh<N> {
         self.build();
     }
 
-    /// Flags every cell for refinement, then performs the operation.
+    /// Flags every cell for refinement, then regrids.
     pub fn refine_global(&mut self) {
         self.refine_flags.fill(true);
+        self.coarsen_flags.fill(false);
+        self.regrid();
+    }
+
+    /// Flags every cell for coarsening, then regrids.
+    pub fn coarsen_global(&mut self) {
+        self.coarsen_flags.fill(true);
+        self.refine_flags.fill(false);
+        self.balance_flags();
         self.regrid();
     }
 
     /// Refines innermost cell
     pub fn refine_innermost(&mut self) {
-        let mut temp_rflags = vec![false; self.tree().num_leaves()];
+        self.refine_flags.fill(false);
         // Find the innermost cell and flag it for refinement
         let mut cell_inner_index = 0;
         let mut cell_inner_center = f64::MAX;
@@ -80,15 +98,14 @@ impl<const N: usize> Mesh<N> {
             }
         }
         // Set flag and refine
-        temp_rflags[cell_inner_index] = true;
-        self.refine_flags = temp_rflags;
+        self.refine_flags[cell_inner_index] = true;
         self.balance_flags();
         self.regrid();
     }
 
     /// Coarsens innermost cell
     pub fn coarsen_innermost(&mut self) {
-        let mut temp_cflags = vec![false; self.tree().num_leaves()];
+        self.coarsen_flags.fill(false);
         // Find the innermost cell and flag it for coarsening
         let mut cell_inner_index = 0;
         let mut cell_inner_center = f64::MAX;
@@ -101,8 +118,7 @@ impl<const N: usize> Mesh<N> {
             }
         }
         // Set flag and refine
-        temp_cflags[cell_inner_index] = true;
-        self.coarsen_flags = temp_cflags;
+        self.coarsen_flags[cell_inner_index] = true;
         self.balance_flags();
         self.regrid();
     }
@@ -231,6 +247,161 @@ impl<const N: usize> Mesh<N> {
         self.replace_element(element_coarse);
     }
 
+    pub fn flag_wavelets2_impl<const ORDER: usize>(
+        &mut self,
+        lower: f64,
+        upper: f64,
+        data: ImageRef,
+    ) {
+        let mut rflags_buf = std::mem::take(&mut self.refine_flags);
+        let mut cflags_buf = std::mem::take(&mut self.coarsen_flags);
+
+        // Allows interior mutability.
+        let rflags = SharedSlice::new(&mut rflags_buf);
+        let cflags = SharedSlice::new(&mut cflags_buf);
+
+        self.block_compute(|mesh, store, block| {
+            let block_leaves = mesh.blocks().leaves(block);
+            let block_size_in_leaves = mesh.blocks().size(block);
+            let block_space_in_leaves = IndexSpace::new(block_size_in_leaves);
+            let block_boundary_flags = mesh.block_physical_boundary_flags(block);
+            let block_level = mesh.blocks().level(block);
+            let block_space = mesh.block_space(block);
+            let block_data = data.slice(mesh.block_nodes(block));
+
+            let block_coarse_space = NodeSpace {
+                size: block_size_in_leaves.map(|size| (size + 2) * mesh.width() / 2),
+                ghost: mesh.width() / 2,
+                bounds: HyperBox::UNIT,
+                boundary: mesh.block_boundary_classes(block),
+            };
+            let block_num_coarse_nodes = block_coarse_space.num_nodes();
+
+            let block_coarse_buffer = store.scratch(block_num_coarse_nodes * data.num_channels());
+            let mut block_coarse = ImageMut::from_storage(block_coarse_buffer, data.num_channels());
+
+            let cell_data_buffer = store.scratch((mesh.width() + 1).pow(N as u32));
+            let mut cell_data = ImageMut::from_storage(cell_data_buffer, data.num_channels());
+
+            let cell_space = IndexSpace::new([mesh.width() + 1; N]);
+
+            let mut coarse_window = block_coarse_space.inner_window();
+
+            for axis in 0..N {
+                coarse_window.size[axis] -=
+                    (!block_boundary_flags.is_set(Face::positive(axis))) as usize;
+            }
+
+            for coarse in coarse_window {
+                let block_node_index = block_space.index_from_node(coarse.map(|i| 2 * i));
+                let coarse_index = block_coarse_space.index_from_node(coarse);
+
+                for channel in data.channels() {
+                    block_coarse.channel_mut(channel)[coarse_index] =
+                        block_data.channel(channel)[block_node_index];
+                }
+            }
+
+            for region in Region::<N>::enumerate() {
+                if region == Region::CENTRAL {
+                    continue;
+                }
+
+                // Skip if on physical boundary
+                for face in region.adjacent_faces() {
+                    if block_boundary_flags.is_set(face) {
+                        continue;
+                    }
+                }
+
+                for adjacent_position in block_space_in_leaves.region_adjacent_window(region) {
+                    let adjacent_leaf = block_leaves
+                        [block_space_in_leaves.linear_from_cartesian(adjacent_position)];
+                    let adjacent_cell = mesh.tree().cell_from_leaf(adjacent_leaf);
+                    let neighbor_cell = mesh.tree().neighbor_region(adjacent_cell, region).unwrap();
+                    let neighbor_level = mesh.tree().level(neighbor_cell);
+
+                    let mut coarse_node_origin =
+                        adjacent_position.map(|position| position * mesh.width() / 2);
+
+                    for axis in 0..N {
+                        match region.side(axis) {
+                            Side::Left => coarse_node_origin[axis] -= mesh.width() / 2,
+                            Side::Right => coarse_node_origin[axis] += mesh.width() / 2,
+                            Side::Middle => {}
+                        }
+                    }
+
+                    debug_assert!(neighbor_level <= block_level);
+
+                    let edge = std::array::from_fn(|axis| region.side(axis) == Side::Right);
+
+                    let coarse_space = IndexSpace::new([mesh.width() / 2 + 1; N]);
+                    let mut coarse_window = coarse_space.window();
+                    for axis in 0..N {
+                        coarse_window.size[axis] -= (!edge[axis]) as usize;
+                    }
+
+                    if neighbor_level == block_level {
+                        mesh.load_nodes_for_cell(neighbor_cell, data, cell_data.rb_mut(), edge);
+
+                        for offset in coarse_window {
+                            let cell_node = cell_space.linear_from_cartesian(offset.map(|o| 2 * o));
+                            let coarse_node =
+                                block_coarse_space.index_from_vertex(array::from_fn(|axis| {
+                                    coarse_node_origin[axis] + offset[axis]
+                                }));
+
+                            for channel in data.channels() {
+                                block_coarse.channel_mut(channel)[coarse_node] =
+                                    cell_data.channel(channel)[cell_node];
+                            }
+                        }
+                    } else {
+                        let neighbor_leaf = mesh.tree().leaf_from_cell(neighbor_cell).unwrap();
+                        let neighbor_block = mesh.blocks().block_from_leaf(neighbor_leaf);
+                        let neighbor_space = mesh.block_space(neighbor_block);
+                        let neighbor_block_node_offset = mesh.block_nodes(neighbor_block).start;
+
+                        let mut neighbor_split =
+                            mesh.tree().most_recent_leaf_split(adjacent_leaf).unwrap();
+                        for axis in 0..N {
+                            if region.side(axis) != Side::Middle {
+                                neighbor_split.toggle(axis);
+                            }
+                        }
+
+                        let mut neighbor_node_origin = mesh.leaf_node_origin(neighbor_leaf);
+                        for axis in 0..N {
+                            neighbor_node_origin[axis] +=
+                                neighbor_split.is_set(axis) as usize * mesh.width / 2;
+                        }
+                        // We now have the split of the neighbor that we want
+
+                        for offset in coarse_window {
+                            let neighbor_node = neighbor_block_node_offset
+                                + neighbor_space.index_from_vertex(array::from_fn(|axis| {
+                                    neighbor_node_origin[axis] + offset[axis]
+                                }));
+                            let coarse_node =
+                                block_coarse_space.index_from_vertex(array::from_fn(|axis| {
+                                    coarse_node_origin[axis] + offset[axis]
+                                }));
+
+                            for channel in data.channels() {
+                                block_coarse.channel_mut(channel)[coarse_node] =
+                                    data.channel(channel)[neighbor_node];
+                            }
+                        }
+                    }
+                }
+            }
+        });
+
+        let _ = std::mem::replace(&mut self.refine_flags, rflags_buf);
+        let _ = std::mem::replace(&mut self.coarsen_flags, cflags_buf);
+    }
+
     /// Store flags for each cell in a debug buffer.
     pub fn flags_debug(&mut self, debug: &mut [i64]) {
         assert!(debug.len() == self.num_nodes());
@@ -258,6 +429,11 @@ impl<const N: usize> Mesh<N> {
                 }
             }
         });
+    }
+
+    /// Mark cells for refinement at random.
+    pub fn set_refine_flags_random<R: Rng + ?Sized>(&mut self, rng: &mut R) {
+        rng.fill(self.refine_flags.as_mut_slice());
     }
 
     /// Manually marks a cell for refinement.
@@ -288,8 +464,8 @@ impl<const N: usize> Mesh<N> {
     /// Limits coarsening to cells with a `level > min_level`, and refinement to
     /// cells with a `level < max_level`.
     pub fn limit_level_range_flags(&mut self, min_level: usize, max_level: usize) {
-        assert!(self.refine_flags.len() == self.num_active_cells());
-        assert!(self.coarsen_flags.len() == self.num_active_cells());
+        assert!(self.refine_flags.len() == self.num_leaves());
+        assert!(self.coarsen_flags.len() == self.num_leaves());
 
         for cell in self.tree.leaves() {
             let level = self.tree.leaf_level(cell);
@@ -369,5 +545,16 @@ mod tests {
         assert!(mesh.cell_needs_coarse_element(LeafId(4)));
         assert!(mesh.cell_needs_coarse_element(LeafId(5)));
         assert!(mesh.cell_needs_coarse_element(LeafId(6)));
+    }
+
+    #[test]
+    fn global_coarsening_and_refinement() {
+        let mut mesh = Mesh::<2>::new(HyperBox::UNIT, 4, 2, FaceArray::splat(BoundaryClass::Ghost));
+        mesh.coarsen_global();
+        mesh.refine_global();
+        mesh.coarsen_global();
+        mesh.refine_global();
+        mesh.refine_global();
+        mesh.coarsen_global();
     }
 }

@@ -213,6 +213,7 @@ impl<const ORDER: usize> Interpolant for Interpolation<ORDER> {
 
     fn interior(&self) -> &[f64] {
         match ORDER {
+            0 => &[1.0, 1.0],
             2 => &[-1.0, 9.0, 9.0, -1.0],
             4 => &[3.0, -25.0, 150.0, 150.0, -25.0, 3.0],
             _ => unimplemented!("Kernel is unimplemented for order {}", ORDER),
@@ -221,6 +222,14 @@ impl<const ORDER: usize> Interpolant for Interpolation<ORDER> {
 
     fn free(&self, border: Border) -> &[f64] {
         match ORDER {
+            0 => match border {
+                Border::Negative(_) => {
+                    unreachable!("ORDER 0 interpolation requires no lopsided stencils")
+                }
+                Border::Positive(_) => {
+                    unreachable!("ORDER 0 interpolation requires no lopsided stencils")
+                }
+            },
             2 => match border {
                 Border::Positive(_) => &[1.0, -5.0, 15.0, 5.0],
                 Border::Negative(_) => &[5.0, 15.0, -5.0, 1.0],
@@ -237,6 +246,7 @@ impl<const ORDER: usize> Interpolant for Interpolation<ORDER> {
 
     fn scale(&self) -> f64 {
         match ORDER {
+            0 => 1.0 / 2.0,
             2 => 1.0 / 16.0,
             4 => 1.0 / 256.0,
             _ => unimplemented!("Kernel is unimplemented for order {}", ORDER),

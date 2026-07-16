@@ -210,7 +210,7 @@ impl<const N: usize> TreeNeighbors<N> {
 
         debug_assert!(block_size.iter().product::<usize>() == block_active_cells.len());
 
-        for region in regions::<N>() {
+        for region in Region::<N>::enumerate() {
             if region == Region::CENTRAL {
                 continue;
             }

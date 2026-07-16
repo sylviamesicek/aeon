@@ -4,7 +4,7 @@ use std::{
     fmt::{Display, Write},
 };
 
-use super::{index::IndexWindow, Split, CartesianIter, Face, IndexSpace};
+use super::{CartesianIter, Face, IndexSpace, Split, index::IndexWindow};
 
 /// Denotes where the region falls on a certain axis.
 #[repr(u8)]
@@ -43,6 +43,13 @@ impl<const N: usize> Region<N> {
     pub const COUNT: usize = 3usize.pow(N as u32);
     /// The default "central" region.
     pub const CENTRAL: Self = Self::new([Side::Middle; N]);
+
+    /// Iterates over all regions in an N-dimensional space.
+    pub fn enumerate() -> RegionIter<N> {
+        RegionIter {
+            inner: IndexSpace::new([3; N]).iter(),
+        }
+    }
 
     // Builds a new region from the given sides.
     pub const fn new(sides: [Side; N]) -> Self {
@@ -376,18 +383,11 @@ impl<const N: usize> ExactSizeIterator for RegionIter<N> {
     }
 }
 
-/// Iterates over all regions in an N-dimensional space.
-pub fn regions<const N: usize>() -> RegionIter<N> {
-    RegionIter {
-        inner: IndexSpace::new([3; N]).iter(),
-    }
-}
-
 #[cfg(test)]
 mod tests {
-    use crate::geometry::{Split, Face};
+    use crate::geometry::{Face, Split};
 
-    use super::{regions, Region, Side};
+    use super::{Region, Side};
 
     #[test]
     fn region_iteration() {
@@ -403,7 +403,7 @@ mod tests {
             [Side::Right, Side::Right],
         ];
 
-        for (region, compare) in regions().zip(comparison.into_iter()) {
+        for (region, compare) in Region::enumerate().zip(comparison.into_iter()) {
             assert_eq!(region, Region::new(compare));
         }
     }
