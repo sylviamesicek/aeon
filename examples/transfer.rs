@@ -31,7 +31,7 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
         HyperBox::from_aabb([-10., -10.], [10., 10.]),
         4,
         2,
-        FaceArray::splat(BoundaryClass::OneSided),
+        BoundaryClasses::splat(BoundaryClass::OneSided),
     );
     mesh.refine_global();
 

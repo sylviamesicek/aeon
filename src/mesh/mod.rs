@@ -6,12 +6,14 @@
 //! filling interior interfaces, and adaptively regridding a domain based on various error heuristics.
 
 use crate::geometry::{
-    BlockId, CellId, Face, FaceArray, FaceMask, HyperBox, IndexSpace, LeafId, Region, Side, Split,
-    Tree, TreeBlocks, TreeInterfaces, TreeNeighbors, TreeSer,
+    BlockId, CellId, Face, FaceMask, HyperBox, IndexSpace, LeafId, Region, Side, Split, Tree,
+    TreeBlocks, TreeInterfaces, TreeNeighbors, TreeSer,
 };
 use crate::image::{ImageMut, ImageRef};
-use crate::kernel::{Boundary, BoundaryKind, NodeSpace, NodeWindow};
-use crate::kernel::{BoundaryClass, DirichletParams, Element, node_from_vertex};
+use crate::kernel::{
+    Boundary, BoundaryClass, BoundaryClasses, BoundaryKind, DirichletParams, Element, NodeSpace,
+    NodeWindow, node_from_vertex,
+};
 use datasize::DataSize;
 use rand::{
     Rng,
@@ -54,7 +56,7 @@ pub struct Mesh<const N: usize> {
     ghost: usize,
     /// `BoundaryClass` for each face. Restricts what kinds of boundary condition
     /// (encoded in `BoundaryKind`) may be enforced on that face.
-    boundary: FaceArray<N, BoundaryClass>,
+    boundary: BoundaryClasses<N>,
 
     /// Block structure induced by the tree.
     blocks: TreeBlocks<N>,
@@ -93,7 +95,7 @@ impl<const N: usize> Mesh<N> {
         bounds: HyperBox<N>,
         width: usize,
         ghost: usize,
-        boundary: FaceArray<N, BoundaryClass>,
+        boundary: BoundaryClasses<N>,
     ) -> Self {
         assert!(width >= 2);
         assert!(width % 2 == 0);
@@ -243,7 +245,7 @@ impl<const N: usize> Mesh<N> {
     }
 
     /// Returns the boundary classes associated with each boundary of the physical domain.
-    pub fn boundary_classes(&self) -> FaceArray<N, BoundaryClass> {
+    pub fn boundary_classes(&self) -> BoundaryClasses<N> {
         self.boundary.clone()
     }
 
@@ -303,10 +305,10 @@ impl<const N: usize> Mesh<N> {
     }
 
     /// Indicates what class of boundary condition is enforced along each face of the block.
-    pub fn block_boundary_classes(&self, block: BlockId) -> FaceArray<N, BoundaryClass> {
+    pub fn block_boundary_classes(&self, block: BlockId) -> BoundaryClasses<N> {
         let flag = self.block_physical_boundary_flags(block);
 
-        FaceArray::from_fn(|face| {
+        BoundaryClasses::from_fn(|face| {
             if flag.is_set(face) {
                 self.boundary[face]
             } else {
@@ -325,10 +327,10 @@ impl<const N: usize> Mesh<N> {
     }
 
     /// Produces a block ghost flags for the mesh before its most recent refinement.
-    pub(crate) fn old_block_boundary_classes(&self, block: BlockId) -> FaceArray<N, BoundaryClass> {
+    pub(crate) fn old_block_boundary_classes(&self, block: BlockId) -> BoundaryClasses<N> {
         let flag = self.old_blocks.boundary_flags(block);
 
-        FaceArray::from_fn(|face| {
+        BoundaryClasses::from_fn(|face| {
             if flag.is_set(face) {
                 self.boundary[face]
             } else {
@@ -1206,7 +1208,7 @@ impl<const N: usize> Default for Mesh<N> {
             tree: Tree::new(HyperBox::UNIT),
             width: 4,
             ghost: 1,
-            boundary: FaceArray::default(),
+            boundary: BoundaryClasses::default(),
 
             blocks: TreeBlocks::new([4; N], 1),
             neighbors: TreeNeighbors::default(),
@@ -1255,7 +1257,7 @@ impl<const N: usize> Distribution<Mesh<N>> for StandardUniform {
             rng.random(),
             1 << width,
             1 << (width - 1),
-            FaceArray::from_fn(|face| axes[face.axis]),
+            BoundaryClasses::from_fn(|face| axes[face.axis]),
         )
     }
 }
@@ -1266,7 +1268,7 @@ struct MeshSer<const N: usize> {
     tree: TreeSer<N>,
     width: usize,
     ghost: usize,
-    boundary: FaceArray<N, BoundaryClass>,
+    boundary: BoundaryClasses<N>,
 }
 
 impl<const N: usize> From<Mesh<N>> for MeshSer<N> {
@@ -1407,8 +1409,12 @@ mod tests {
     #[test]
     fn analytic_load_node_for_cells() -> eyre::Result<()> {
         let mut rng = rand::rngs::StdRng::seed_from_u64(2024);
-        let mut mesh: Mesh<2> =
-            Mesh::new(HyperBox::UNIT, 4, 2, FaceArray::splat(BoundaryClass::Ghost));
+        let mut mesh: Mesh<2> = Mesh::new(
+            HyperBox::UNIT,
+            4,
+            2,
+            BoundaryClasses::splat(BoundaryClass::Ghost),
+        );
         let num_node_per_cell = (mesh.width() + 1).pow(2);
 
         mesh.refine_global();
@@ -1458,8 +1464,7 @@ mod tests {
     #[test]
     fn analytic_load_coarse_nodes_for_blocks() -> eyre::Result<()> {
         let mut rng = rand::rngs::StdRng::seed_from_u64(2024);
-        let mut mesh: Mesh<2> =
-            Mesh::new(HyperBox::UNIT, 4, 2, FaceArray::splat(BoundaryClass::Ghost));
+        let mut mesh: Mesh<2> = Mesh::new(HyperBox::UNIT, 4, 2, BoundaryClasses::GHOST);
 
         mesh.refine_global();
         mesh.refine_global();
@@ -1548,8 +1553,7 @@ mod tests {
     fn fuzz_transfer_vs_load_nodes_for_cell() -> eyre::Result<()> {
         let mut rng = rand::rngs::StdRng::seed_from_u64(1984);
         for _ in 0..10 {
-            let mut mesh: Mesh<2> =
-                Mesh::new(HyperBox::UNIT, 4, 2, FaceArray::splat(BoundaryClass::Ghost));
+            let mut mesh: Mesh<2> = Mesh::new(HyperBox::UNIT, 4, 2, BoundaryClasses::GHOST);
             let num_node_per_cell = (mesh.width() + 1).pow(2);
 
             mesh.refine_global();

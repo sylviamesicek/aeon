@@ -114,7 +114,7 @@ pub fn main() -> eyre::Result<()> {
         HyperBox::from_aabb([-20., -20.], [20., 20.]),
         4,
         2,
-        FaceArray::splat(BoundaryClass::OneSided),
+        BoundaryClasses::splat(BoundaryClass::OneSided),
     );
     mesh.refine_global();
     mesh.refine_global();

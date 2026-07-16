@@ -15,7 +15,12 @@ fn criterion_benchmark(c: &mut Criterion) {
     let mut rng = rand::rngs::StdRng::seed_from_u64(1027);
 
     // Generate Random Mesh
-    let mut mesh: Mesh<2> = Mesh::new(HyperBox::UNIT, 4, 2, FaceArray::splat(BoundaryClass::Ghost));
+    let mut mesh: Mesh<2> = Mesh::new(
+        HyperBox::UNIT,
+        4,
+        2,
+        BoundaryClasses::splat(BoundaryClass::Ghost),
+    );
     let num_node_per_cell = (mesh.width() + 1).pow(2);
 
     mesh.refine_global();

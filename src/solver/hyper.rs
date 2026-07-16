@@ -329,8 +329,8 @@ impl<const N: usize, F: Function<N>> Function<N> for FicticuousDerivs<'_, N, F> 
 #[cfg(test)]
 mod tests {
     use crate::{
-        geometry::{FaceArray, HyperBox},
-        kernel::{BoundaryClass, DirichletParams},
+        geometry::HyperBox,
+        kernel::{BoundaryClasses, DirichletParams},
     };
 
     use super::*;
@@ -402,7 +402,7 @@ mod tests {
             HyperBox::from_aabb([0.0, 0.0], [1.0, 1.0]),
             4,
             2,
-            FaceArray::splat(BoundaryClass::Ghost),
+            BoundaryClasses::GHOST,
         );
         // Perform refinement
         mesh.refine_global();

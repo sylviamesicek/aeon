@@ -8,7 +8,7 @@ use rand::{
     distr::{Distribution, StandardUniform},
 };
 
-use crate::geometry::{Face, FaceArray};
+use crate::{array::ArrayWrap, geometry::Face};
 
 /// Indicates what type of boundary condition is used along a particualr
 /// face of the domain. More specific boundary conditions are provided
@@ -91,6 +91,96 @@ impl Distribution<BoundaryClass> for StandardUniform {
             2 => BoundaryClass::Periodic,
             _ => unreachable!(),
         }
+    }
+}
+
+/// An array storing a value for each `Face<N>` in a N-dimensional space.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct BoundaryClasses<const N: usize>([[BoundaryClass; 2]; N]);
+
+impl<const N: usize> BoundaryClasses<N> {
+    pub const GHOST: Self = Self::splat(BoundaryClass::Ghost);
+    pub const ONE_SIDED: Self = Self::splat(BoundaryClass::OneSided);
+    pub const PERIODIC: Self = Self::splat(BoundaryClass::Periodic);
+
+    /// Constructs a `FaceArray<N>` by calling `f` for each `Face<N>`.
+    pub fn from_fn<F: FnMut(Face<N>) -> BoundaryClass>(mut f: F) -> Self {
+        Self(core::array::from_fn(|axis| {
+            [f(Face::negative(axis)), f(Face::positive(axis))]
+        }))
+    }
+
+    /// Retrieves the inner representation of `FaceArray`, i.e. an array of type
+    /// `[[T; 2]; N]` where the first index is axis and the second index is size.
+    pub const fn into_inner(self) -> [[BoundaryClass; 2]; N] {
+        self.0
+    }
+
+    /// Constructs a `FaceArray` by filling the whole array with `value`.
+    pub const fn splat(value: BoundaryClass) -> Self {
+        Self([[value; 2]; N])
+    }
+
+    pub fn from_sides(negative: [BoundaryClass; N], positive: [BoundaryClass; N]) -> Self {
+        Self::from_fn(|face| match face.side {
+            true => positive[face.axis].clone(),
+            false => negative[face.axis].clone(),
+        })
+    }
+
+    pub fn is_compatible<B: Boundary<N>>(&self, boundary: &B, num_channels: usize) -> bool {
+        (0..num_channels).all(|channel| {
+            Face::iterate().all(|face| boundary.kind(channel, face).class() == self[face])
+        })
+    }
+}
+
+impl<const N: usize> From<[[BoundaryClass; 2]; N]> for BoundaryClasses<N> {
+    fn from(value: [[BoundaryClass; 2]; N]) -> Self {
+        Self(value)
+    }
+}
+
+impl<const N: usize> From<[(BoundaryClass, BoundaryClass); N]> for BoundaryClasses<N> {
+    fn from(value: [(BoundaryClass, BoundaryClass); N]) -> Self {
+        Self(value.map(|(l, r)| [l, r]))
+    }
+}
+
+impl<const N: usize> serde::Serialize for BoundaryClasses<N> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        ArrayWrap(self.0.clone()).serialize(serializer)
+    }
+}
+
+impl<'de, const N: usize> serde::de::Deserialize<'de> for BoundaryClasses<N> {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        Ok(BoundaryClasses(ArrayWrap::deserialize(deserializer)?.0))
+    }
+}
+
+impl<const N: usize> Default for BoundaryClasses<N> {
+    fn default() -> Self {
+        Self::from_fn(|_| BoundaryClass::default())
+    }
+}
+
+impl<const N: usize> std::ops::Index<Face<N>> for BoundaryClasses<N> {
+    type Output = BoundaryClass;
+    fn index(&self, index: Face<N>) -> &Self::Output {
+        &self.0[index.axis][index.side as usize]
+    }
+}
+
+impl<const N: usize> std::ops::IndexMut<Face<N>> for BoundaryClasses<N> {
+    fn index_mut(&mut self, index: Face<N>) -> &mut Self::Output {
+        &mut self.0[index.axis][index.side as usize]
     }
 }
 
@@ -186,16 +276,6 @@ pub trait Boundary<const N: usize>: Clone {
             strength: 1.0,
         }
     }
-}
-
-pub fn is_boundary_compatible<const N: usize, B: Boundary<N>>(
-    boundary: &FaceArray<N, BoundaryClass>,
-    conditions: &B,
-    num_channels: usize,
-) -> bool {
-    (0..num_channels).all(|channel| {
-        Face::iterate().all(|face| conditions.kind(channel, face).class() == boundary[face])
-    })
 }
 
 // /// Transfers a set of `Conditions<N>` into a single `Condition<N>` by only applying the set of conditions

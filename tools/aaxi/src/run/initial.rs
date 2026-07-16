@@ -517,7 +517,7 @@ pub fn initial_data(config: &Config) -> eyre::Result<(Mesh<2>, Image, Option<Cac
         },
         config.domain.cell_size,
         config.domain.cell_ghost,
-        FaceArray::from_fn(|face| match face.side {
+        BoundaryClasses::from_fn(|face| match face.side {
             false => BoundaryClass::Ghost,
             true => BoundaryClass::OneSided,
         }),

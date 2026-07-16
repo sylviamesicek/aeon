@@ -49,7 +49,7 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
         domain,
         4,
         2,
-        FaceArray::from_fn(|face| match face.side {
+        BoundaryClasses::from_fn(|face| match face.side {
             false => BoundaryClass::Ghost,
             true => BoundaryClass::OneSided,
         }),

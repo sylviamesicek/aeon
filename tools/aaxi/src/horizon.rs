@@ -13,7 +13,7 @@ use thiserror::Error;
 
 // Build new horizon surface
 pub fn surface() -> Mesh<1> {
-    Mesh::new(HORIZON_DOMAIN, 4, 2, FaceArray::splat(BoundaryClass::Ghost))
+    Mesh::new(HORIZON_DOMAIN, 4, 2, BoundaryClasses::GHOST)
 }
 
 /// Transforms a radius on the 1d surface into a 2d embedded position.
@@ -131,10 +131,7 @@ impl ApparentHorizonFinder {
         assert_eq!(fields.num_nodes(), mesh.num_nodes());
         assert_eq!(radius.len(), surface.num_nodes());
         assert_eq!(surface.tree().domain(), HORIZON_DOMAIN);
-        assert_eq!(
-            surface.boundary_classes(),
-            FaceArray::splat(BoundaryClass::Ghost)
-        );
+        assert_eq!(surface.boundary_classes(), BoundaryClasses::GHOST);
 
         self.surface_to_cell.resize(surface.num_nodes(), CellId(0));
         self.surface_to_cell.fill(CellId(0));

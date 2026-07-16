@@ -31,7 +31,7 @@ pub fn initial_data(config: &Config) -> eyre::Result<(Mesh<1>, Image)> {
         },
         6,
         3,
-        FaceArray::from_sides([BoundaryClass::Ghost], [BoundaryClass::OneSided]),
+        BoundaryClasses::from_sides([BoundaryClass::Ghost], [BoundaryClass::OneSided]),
     );
     // Perform global refinements
     for _ in 0..config.regrid.global {

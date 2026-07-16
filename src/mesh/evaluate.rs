@@ -3,7 +3,7 @@ use std::{array, ops::Range};
 
 use crate::geometry::{BlockId, Face, FaceMask, IndexSpace};
 use crate::image::ImageShared;
-use crate::kernel::{is_boundary_compatible, Derivative, Dissipation, Kernel, SecondDerivative, Boundary};
+use crate::kernel::{Derivative, Dissipation, Kernel, SecondDerivative, Boundary};
 use crate::{
     kernel::{
         BoundaryKind, Hessian, NodeSpace, node_from_vertex, vertex_from_node,
@@ -277,7 +277,7 @@ impl<const N: usize> Mesh<N> {
         P::Error: Send,
     {
         assert_eq!(f.num_nodes(), self.num_nodes());
-        assert!(is_boundary_compatible(&self.boundary, &bcs, f.num_channels()), "Boundary Conditions incompatible with set boundary classes");
+        assert!(self.boundary.is_compatible(&bcs, f.num_channels()), "Boundary Conditions incompatible with set boundary classes");
 
         // Strong boundary condition
         self.fill_boundary(order, bcs.clone(), f.rb_mut());

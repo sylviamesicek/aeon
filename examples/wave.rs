@@ -92,7 +92,7 @@ pub fn main() -> eyre::Result<()> {
         HyperBox::from_aabb([-10., -10.], [10., 10.]),
         6,
         3,
-        FaceArray::splat(BoundaryClass::OneSided),
+        BoundaryClasses::splat(BoundaryClass::OneSided),
     );
     mesh.refine_global();
     // Allocate space for system

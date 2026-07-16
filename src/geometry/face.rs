@@ -1,10 +1,7 @@
 use std::{
     array::from_fn,
     fmt::{Display, Write},
-    ops::{Index, IndexMut},
 };
-
-use crate::array::ArrayWrap;
 
 use super::{Region, Side, Split, index::IndexWindow};
 
@@ -125,92 +122,6 @@ impl<const N: usize> Iterator for FaceIter<N> {
 impl<const N: usize> ExactSizeIterator for FaceIter<N> {
     fn len(&self) -> usize {
         2 * N
-    }
-}
-
-/// An array storing a value for each `Face<N>` in a N-dimensional space.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct FaceArray<const N: usize, T>([[T; 2]; N]);
-
-impl<const N: usize, T> FaceArray<N, T> {
-    /// Constructs a `FaceArray<N>` by calling `f` for each `Face<N>`.
-    pub fn from_fn<F: FnMut(Face<N>) -> T>(mut f: F) -> Self {
-        Self(core::array::from_fn(|axis| {
-            [f(Face::negative(axis)), f(Face::positive(axis))]
-        }))
-    }
-
-    /// Retrieves the inner representation of `FaceArray`, i.e. an array of type
-    /// `[[T; 2]; N]` where the first index is axis and the second index is size.
-    pub fn into_inner(self) -> [[T; 2]; N] {
-        self.0
-    }
-}
-
-impl<const N: usize, T: Clone> FaceArray<N, T> {
-    /// Constructs a `FaceArray` by filling the whole array with `value`.
-    pub fn splat(value: T) -> Self {
-        Self::from_fn(|_| value.clone())
-    }
-
-    pub fn from_sides(negative: [T; N], positive: [T; N]) -> Self {
-        Self::from_fn(|face| match face.side {
-            true => positive[face.axis].clone(),
-            false => negative[face.axis].clone(),
-        })
-    }
-}
-
-impl<const N: usize, T> From<[[T; 2]; N]> for FaceArray<N, T> {
-    fn from(value: [[T; 2]; N]) -> Self {
-        Self(value)
-    }
-}
-
-impl<const N: usize, T> From<[(T, T); N]> for FaceArray<N, T> {
-    fn from(value: [(T, T); N]) -> Self {
-        Self(value.map(|(l, r)| [l, r]))
-    }
-}
-
-impl<const N: usize, T: serde::Serialize + Clone> serde::Serialize for FaceArray<N, T> {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        ArrayWrap(self.0.clone()).serialize(serializer)
-    }
-}
-
-impl<'de, const N: usize, T: serde::de::Deserialize<'de>> serde::de::Deserialize<'de>
-    for FaceArray<N, T>
-where
-    T: serde::de::Deserialize<'de>,
-{
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        Ok(FaceArray(ArrayWrap::deserialize(deserializer)?.0))
-    }
-}
-
-impl<const N: usize, T: Default> Default for FaceArray<N, T> {
-    fn default() -> Self {
-        Self::from_fn(|_| T::default())
-    }
-}
-
-impl<const N: usize, T> Index<Face<N>> for FaceArray<N, T> {
-    type Output = T;
-    fn index(&self, index: Face<N>) -> &Self::Output {
-        &self.0[index.axis][index.side as usize]
-    }
-}
-
-impl<const N: usize, T> IndexMut<Face<N>> for FaceArray<N, T> {
-    fn index_mut(&mut self, index: Face<N>) -> &mut Self::Output {
-        &mut self.0[index.axis][index.side as usize]
     }
 }
 

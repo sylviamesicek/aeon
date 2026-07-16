@@ -13,7 +13,7 @@ mod tree;
 
 pub use axis::Split;
 pub use r#box::HyperBox;
-pub use face::{Face, FaceArray, FaceIter, FaceMask};
+pub use face::{Face, FaceIter, FaceMask};
 pub use index::{CartesianIter, CartesianWindowIter, IndexSpace, IndexWindow};
 pub use region::{Region, RegionIter, Side};
 pub use tree::{

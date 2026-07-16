@@ -27,10 +27,10 @@ impl Boundary<2> for MyBoundary {
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut mesh = Mesh::new(
-        HyperBox::<2>::UNIT,                          // domain
-        4,                                            // Width of each cell in nodes
-        2,                                            // Number of ghost nodes along each axis
-        FaceArray::from_fn(|_| BoundaryClass::Ghost), // Boundaries use centered stencils
+        HyperBox::<2>::UNIT,                                // domain
+        4,                                                  // Width of each cell in nodes
+        2,                                                  // Number of ghost nodes along each axis
+        BoundaryClasses::from_fn(|_| BoundaryClass::Ghost), // Boundaries use centered stencils
     );
     mesh.refine_global();
 

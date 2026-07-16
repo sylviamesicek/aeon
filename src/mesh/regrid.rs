@@ -1,10 +1,9 @@
 use std::array;
 
 use rand::Rng;
-use reborrow::{Reborrow, ReborrowMut};
+use reborrow::ReborrowMut;
 
 use crate::geometry::{Face, HyperBox, IndexSpace, LeafId, Region, Side};
-
 use crate::image::{ImageMut, ImageRef};
 use crate::kernel::NodeSpace;
 use crate::{mesh::Mesh, shared::SharedSlice};
@@ -521,8 +520,8 @@ impl<const N: usize> Mesh<N> {
 
 #[cfg(test)]
 mod tests {
-    use crate::geometry::{FaceArray, HyperBox, LeafId};
-    use crate::kernel::BoundaryClass;
+    use crate::geometry::{HyperBox, LeafId};
+    use crate::kernel::{BoundaryClass, BoundaryClasses};
     use crate::mesh::Mesh;
 
     #[test]
@@ -531,7 +530,7 @@ mod tests {
             HyperBox::UNIT,
             4,
             2,
-            FaceArray::from_sides([BoundaryClass::Ghost; 2], [BoundaryClass::OneSided; 2]),
+            BoundaryClasses::from_sides([BoundaryClass::Ghost; 2], [BoundaryClass::OneSided; 2]),
         );
         mesh.refine_global();
 
@@ -549,7 +548,7 @@ mod tests {
 
     #[test]
     fn global_coarsening_and_refinement() {
-        let mut mesh = Mesh::<2>::new(HyperBox::UNIT, 4, 2, FaceArray::splat(BoundaryClass::Ghost));
+        let mut mesh = Mesh::<2>::new(HyperBox::UNIT, 4, 2, BoundaryClasses::GHOST);
         mesh.coarsen_global();
         mesh.refine_global();
         mesh.coarsen_global();

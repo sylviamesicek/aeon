@@ -5,9 +5,8 @@ use super::{
     blocks::BlockId,
 };
 use crate::{
-    geometry::{IndexSpace, Side},
-    kernel::NodeSpace,
-    prelude::{FaceArray, HyperBox},
+    geometry::{HyperBox, IndexSpace, Side},
+    kernel::{BoundaryClasses, NodeSpace},
 };
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -139,7 +138,7 @@ impl<const N: usize> TreeInterfaces<N> {
                 size: array::from_fn(|axis| block_size[axis] * blocks.width()[axis]),
                 ghost: blocks.ghost(),
                 bounds: HyperBox::<N>::UNIT,
-                boundary: FaceArray::default(),
+                boundary: BoundaryClasses::default(),
             };
 
             buffer.resize(block_space.num_nodes(), usize::MAX);

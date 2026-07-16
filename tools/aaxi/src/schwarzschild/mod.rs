@@ -137,7 +137,7 @@ pub fn schwarzschild(matches: &ArgMatches) -> eyre::Result<()> {
         domain,
         6,
         3,
-        FaceArray::from_fn(|face| match face.side {
+        BoundaryClasses::from_fn(|face| match face.side {
             false => BoundaryClass::Ghost,
             true => BoundaryClass::OneSided,
         }),

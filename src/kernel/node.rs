@@ -3,11 +3,10 @@
 //! This module introduces the primary abstraction of `aeon_kernel`, namely
 //! the `NodeSpace`.
 
-use crate::geometry::{CartesianIter, Face, FaceArray, HyperBox, IndexSpace, Region, Side};
+use crate::geometry::{CartesianIter, Face, HyperBox, IndexSpace, Region, Side};
 use crate::image::ImageMut;
 use crate::kernel::{
-    Border, Boundary, BoundaryClass, BoundaryKind, Convolution, Interpolant, Kernel, Value,
-    boundary::is_boundary_compatible,
+    Border, Boundary, BoundaryClasses, BoundaryKind, Convolution, Interpolant, Kernel, Value,
 };
 use std::array::{self, from_fn};
 
@@ -38,7 +37,7 @@ pub struct NodeSpace<const N: usize> {
     /// Position of the node space.
     pub bounds: HyperBox<N>,
     /// What type of boundary condition is applied on each face.
-    pub boundary: FaceArray<N, BoundaryClass>,
+    pub boundary: BoundaryClasses<N>,
 }
 
 impl<const N: usize> NodeSpace<N> {
@@ -238,11 +237,7 @@ impl<const N: usize> NodeSpace<N> {
     /// Set strongly enforced boundary conditions. This enforces parity and dirichlet boundary
     /// conditions on this particular `NodeSpace`.
     pub fn fill_boundary(&self, extent: usize, boundary: impl Boundary<N>, mut dest: ImageMut) {
-        debug_assert!(is_boundary_compatible(
-            &self.boundary,
-            &boundary,
-            dest.num_channels()
-        ));
+        debug_assert!(self.boundary.is_compatible(&boundary, dest.num_channels()));
 
         for channel in dest.channels() {
             let dest = dest.channel_mut(channel);
@@ -664,13 +659,13 @@ impl<const N: usize> Iterator for NodePlaneIter<N> {
 mod tests {
     use crate::{
         geometry::HyperBox,
-        kernel::{Derivative, Interpolation},
+        kernel::{BoundaryClass, BoundaryClasses, Derivative, Interpolation},
     };
 
     use super::*;
 
-    fn boundary<const N: usize>() -> FaceArray<N, BoundaryClass> {
-        FaceArray::from_fn(|face| {
+    fn boundary<const N: usize>() -> BoundaryClasses<N> {
+        BoundaryClasses::from_fn(|face| {
             if face.side {
                 BoundaryClass::OneSided
             } else {
